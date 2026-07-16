@@ -59,7 +59,10 @@ export declare const GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION = 3;
 export declare const GROUP_POST_COMPACT_MESSAGE_ORDER_VERSION = 1;
 export declare const GROUP_COMPACT_LINEAGE_VERSION = 1;
 export declare const GROUP_COMPACTION_MODEL_USAGE_VERSION = 1;
-export declare const GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION = 1;
+export declare const GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION = 2;
+export declare const GROUP_SESSION_MEMORY_COMPACT_PROJECTION_VERSION = 1;
+export declare const GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_SECTION_TOKENS = 2000;
+export declare const GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_TOTAL_TOKENS = 12000;
 export declare const GROUP_SESSION_MEMORY_API_INVARIANT_CLOSURE_VERSION = 1;
 export declare const GROUP_POST_COMPACT_SESSION_STATE_RESET_VERSION = 1;
 export declare const GROUP_TRUE_POST_COMPACT_PAYLOAD_VERSION = 1;
@@ -191,6 +194,14 @@ export declare function adjustGroupSessionMemoryKeepIndexToPreserveApiInvariants
 export declare function calculateGroupMessagesToKeepIndex(messages: any[], options?: any): number;
 /** Calculate the CC session-memory retained window from an extraction cursor. */
 export declare function calculateGroupSessionMemoryMessagesToKeepIndex(messages: any[], lastSummarizedMessageId: string, options?: any): number;
+export declare function buildGroupSessionMemoryCompactProjection(input?: any): {
+    markdown: string;
+    receipt: any;
+};
+export declare function verifyGroupSessionMemoryCompactProjection(receipt: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+};
 export declare function buildGroupSessionMemoryCompactSelectionReceipt(input?: any): any;
 export declare function verifyGroupSessionMemoryCompactSelectionReceipt(receipt: any, expected?: any): {
     valid: boolean;

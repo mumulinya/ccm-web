@@ -1,0 +1,47 @@
+{
+  "schema": "ccm-compact-boundary-replay-repair-work-items-v1",
+  "version": 1,
+  "groupId": "phase311-repair-completion-maintenance-group",
+  "groupSessionId": "gcs_phase311_b",
+  "file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-replay-repair-work-items\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+  "items": [
+    {
+      "schema": "ccm-replay-repair-work-item-v1",
+      "id": "phase311-shared-work-item",
+      "work_item_id": "phase311-shared-work-item",
+      "group_id": "phase311-repair-completion-maintenance-group",
+      "groupSessionId": "gcs_phase311_b",
+      "group_session_id": "gcs_phase311_b",
+      "scopeId": "phase311-repair-completion-maintenance-group::gcs_phase311_b",
+      "typedScopeId": "phase311-repair-completion-maintenance-group--gcs_phase311_b",
+      "status": "pending",
+      "source": "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair",
+      "component": "post_compact_reinjection_repair_receipt_memory_usage_contract",
+      "target_project": "api",
+      "assignment_id": "phase311-shared-assignment",
+      "dispatch_key": "phase311-shared-dispatch",
+      "worker_context_packet_id": "phase311-shared-packet",
+      "original_worker_context_packet_id": "phase311-shared-packet",
+      "original_binding_id": "phase311-shared-original-binding",
+      "original_assignment_id": "phase311-shared-assignment",
+      "original_dispatch_key": "phase311-shared-dispatch",
+      "original_task_agent_session_id": "phase311-shared-original-task-session",
+      "original_native_session_id": "phase311-shared-original-native-session",
+      "post_compact_receipt_memory_required_doc_rel_paths": [
+        "post-compact-completion-memory-preservation-repair-closures.md"
+      ],
+      "evidence": [
+        "PHASE311_SESSION_B_SENTINEL exact-session repair evidence"
+      ],
+      "createdAt": "2026-07-15T20:00:00.000Z",
+      "updatedAt": "2026-07-15T20:00:00.000Z"
+    }
+  ],
+  "stats": {
+    "total": 1,
+    "openItemCount": 1,
+    "pendingCount": 1,
+    "completedCount": 0
+  },
+  "updatedAt": "2026-07-15T20:00:00.000Z"
+}

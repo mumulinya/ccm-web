@@ -1,4 +1,4 @@
-export declare const GROUP_SESSION_MEMORY_MODEL_TEMPLATE: string;
+export { GROUP_SESSION_MEMORY_MODEL_TEMPLATE, inspectGroupSessionMemoryTemplateState, parseGroupSessionMemoryTemplate, readGroupSessionMemoryCustomPromptProfile, readGroupSessionMemoryCustomTemplateProfile, saveGroupSessionMemoryCustomPrompt, saveGroupSessionMemoryCustomTemplate, validateGroupSessionMemoryCustomPrompt, } from "./group-session-memory-customization";
 type GroupSessionMemoryModelExecutor = (request: any) => Promise<any>;
 export declare function getGroupSessionMemoryModelExtractionHistoryFile(scopeId: string): string;
 export declare function getGroupSessionMemoryModelExtractionHistoryHeadFile(scopeId: string): string;
@@ -39,18 +39,51 @@ export declare function buildGroupSessionMemoryModelExtractionPrompt(input?: any
         sourceFirstMessageId: any;
         sourceLastMessageId: any;
         sourceTranscriptChecksum: string;
+        sourceContentMode: string;
+        sourceStructuredMessageCount: number;
+        sourceStructuredBlockCount: number;
+        sourceToolUseBlockCount: number;
+        sourceToolResultBlockCount: number;
+        sourceOrphanToolResultCount: number;
+        sourceOrphanToolResultIds: string[];
+        sourcePendingToolUseCount: number;
+        sourcePendingToolUseIds: string[];
+        sourceToolBoundaryStatus: string;
+        originalStructuredMessageCount: number;
+        originalStructuredBlockCount: number;
+        originalToolUseBlockCount: number;
+        originalToolResultBlockCount: number;
+        originalToolBoundaryStatus: string;
         currentNotesChecksum: string;
+        currentNotesRawChecksum: string;
+        currentNotesCanonicalization: string;
+        currentNotesRawChars: number;
+        currentNotesCanonicalChars: number;
+        currentNotesNormalized: boolean;
         existingMemoryManifestChecksum: string;
         existingMemoryManifestChars: number;
         existingMemoryManifestBounded: boolean;
+        customPromptConfigured: boolean;
+        customPromptSource: string;
+        customPromptChecksum: string;
+        customPromptChars: number;
+        customTemplateConfigured: boolean;
+        customTemplateSource: string;
+        customTemplateChecksum: string;
+        customTemplateChars: number;
+        customTemplateSectionCount: number;
         promptChecksum: string;
         estimatedInputTokens: number;
         maxInputTokens: number;
         maxOutputTokens: number;
         clipped: boolean;
         clippedMessageId: string;
+        clippedMessageIds: string[];
         omittedMessageCount: number;
         originalMessageCount: number;
+        apiRoundCount: number;
+        selectedApiRoundCount: number;
+        omittedApiRoundCount: number;
         originalTranscriptTokens: number;
         fixedInputTokens: number;
         inputBudgetStatus: string;
@@ -62,6 +95,8 @@ export declare function buildGroupSessionMemoryModelExtractionPrompt(input?: any
         currentNotes: string;
         existingMemoryManifest: string;
         transcript: string;
+        customInstructions: string;
+        requiredTemplate: string;
     };
 };
 export declare function getGroupSessionMemoryModelExtractionArtifactFile(scopeId: string, executionId: string, kind: "request" | "result"): string;
@@ -393,7 +428,7 @@ export declare function recoverPendingGroupSessionMemoryTypedMemoryRetries(optio
     pending: any[];
     results: any[];
 };
-export declare function validateGroupSessionMemoryModelOutput(output: string): {
+export declare function validateGroupSessionMemoryModelOutput(output: string, requiredTemplate?: string): {
     markdown: string;
     markdownChecksum: string;
     outputChecksum: string;
@@ -425,6 +460,8 @@ export declare function validateGroupSessionMemoryModelOutput(output: string): {
     };
     budgetEnforced: boolean;
     truncatedSections: string[];
+    templateChecksum: string;
+    templateSectionCount: number;
 };
 export declare function verifyGroupSessionMemoryFactSupersessionGraph(graph: any): any;
 export declare function analyzeGroupSessionMemoryModelMergeQuality(input?: any): {
@@ -436,6 +473,8 @@ export declare function analyzeGroupSessionMemoryModelMergeQuality(input?: any):
     currentNotesChecksum: string;
     outputMarkdownChecksum: string;
     sourceTranscriptChecksum: string;
+    templateChecksum: string;
+    templateSectionCount: number;
     correctionSignal: boolean;
     sectionCount: number;
     populatedSectionPercent: number;
@@ -479,6 +518,13 @@ export declare function replayGroupSessionMemoryModelExtraction(scopeId: string,
     status: string;
     pass: boolean;
     checks: any;
+    mergeQualityInput: {
+        mode: string;
+        checksum: string;
+        expectedChecksum: string;
+        checksumMatches: boolean;
+        legacyCompatible: boolean;
+    };
     history: {
         file: string;
         headFile: string;
@@ -511,6 +557,14 @@ export declare function replayGroupSessionMemoryModelExtraction(scopeId: string,
         replayedMergeQuality: any;
     };
 };
+export declare function resolveGroupSessionMemoryReplayCurrentNotes(currentNotes: string, expectedChecksum?: string): {
+    expectedChecksum: string;
+    checksumMatches: boolean;
+    legacyCompatible: boolean;
+    checksum: string;
+    mode: string;
+    currentNotes: string;
+};
 export declare function recoverPendingGroupSessionMemoryModelExtractions(options?: any): {
     configured: boolean;
     pendingCount: number;
@@ -539,4 +593,3 @@ export declare function ensureGroupSessionMemoryModelExtractionHook(): {
     registered: boolean;
     already: boolean;
 };
-export {};

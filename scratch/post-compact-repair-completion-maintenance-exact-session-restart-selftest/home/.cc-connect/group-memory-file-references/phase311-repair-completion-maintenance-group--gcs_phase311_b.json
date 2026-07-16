@@ -1,0 +1,501 @@
+{
+  "schema": "ccm-group-compact-file-reference-ledger-v1",
+  "version": 1,
+  "groupId": "phase311-repair-completion-maintenance-group--gcs_phase311_b",
+  "entries": [
+    {
+      "entry_id": "file-ref:afeac957da068c",
+      "generated_at": "2026-07-14T23:58:34.381Z",
+      "scope": "child:api",
+      "target_project": "api",
+      "task_id": "",
+      "trace_id": "",
+      "task_agent_session_id": "phase183-task-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+      "native_session_id": "phase183-native-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+      "session_binding": {
+        "schema": "ccm-child-agent-memory-session-binding-v1",
+        "binding_id": "csm:91f292a308d5db",
+        "group_id": "phase311-repair-completion-maintenance-group",
+        "target_project": "api",
+        "task_id": "",
+        "trace_id": "",
+        "execution_id": "phase183-execution-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+        "parent_run_id": "",
+        "task_agent_session_id": "phase183-task-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+        "native_session_id": "phase183-native-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+        "agent_type": "",
+        "turn": 0,
+        "binding_required": true,
+        "scope": "child:api"
+      },
+      "task_query_hash": "0874b8e8392e",
+      "reference_count": 14,
+      "missing_count": 6,
+      "read_plan_count": 10,
+      "reference_fingerprint": "2438aa152c9b5779",
+      "references": [
+        {
+          "reference_id": "compact-file:189c7961855b25",
+          "type": "group_session_memory",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-session-memory\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\summary.md",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:ff3b345e7bc911",
+          "type": "group_session_memory_snapshot",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-session-memory\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\snapshot.json",
+          "checksum": "",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:c46b49c2b42b11",
+          "type": "tool_continuity_summary",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-tool-continuity\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\summary.md",
+          "checksum": "9bcc9948b4fc2b8b6da9890c",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:55613c78337787",
+          "type": "tool_continuity_snapshot",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-tool-continuity\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\snapshot.json",
+          "checksum": "b28c94b2195c8ed259f0b415",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:6de2e67decaefa",
+          "type": "typed_memory_index",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\MEMORY.md",
+          "checksum": "2b222f4aa929bcd8eeddd0a1",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:2db2b58783f070",
+          "type": "typed_memory_dir",
+          "kind": "directory",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b",
+          "checksum": "a3e61e5734c0a40e2c0b08a7",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:44de1a4304df02",
+          "type": "group_memory_json",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-sessions\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+          "checksum": "281cd88ceda2474e3db4e0ec",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:52dcee76b3fcf5",
+          "type": "raw_group_messages_json",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-messages\\sessions\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:e69bc330b18e7f",
+          "type": "global_agent_memory_json",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\global-agent-memory\\memory.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:5e2b2cea69102e",
+          "type": "typed_memory_recall_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\.recall-ledger.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:e924a3ffaa4a26",
+          "type": "typed_memory_distillation_ledger",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\.distillation-ledger.json",
+          "checksum": "fef5be5403b7a8d84219988a",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:0062ac2da797eb",
+          "type": "post_compact_candidate_usage_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-post-compact-candidate-usage\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:af6adbdd9df295",
+          "type": "post_compact_dispatch_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-post-compact-dispatch\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:720ed4711edd8d",
+          "type": "replay_repair_work_items",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-replay-repair-work-items\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+          "checksum": "fafa6b3427777ebf525b05df",
+          "exists": true
+        }
+      ],
+      "read_plan_entries": [
+        {
+          "read_plan_id": "cfr-read:dfb3eee9c76f",
+          "reference_id": "compact-file:6de2e67decaefa",
+          "type": "typed_memory_index",
+          "action": "read_index_before_specific_memory_docs",
+          "priority": 30,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\MEMORY.md",
+          "exists": true,
+          "sourceChecksum": "2b222f4aa929bcd8eeddd0a1",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784073514278,
+          "sourceBytes": 856
+        },
+        {
+          "read_plan_id": "cfr-read:8c2f77cc0e88",
+          "reference_id": "compact-file:2db2b58783f070",
+          "type": "typed_memory_dir",
+          "action": "list_or_open_index_only",
+          "priority": 35,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b",
+          "exists": true,
+          "sourceChecksum": "a3e61e5734c0a40e2c0b08a7",
+          "sourceChecksumMode": "directory_listing",
+          "sourceMtimeMs": 1784073514440,
+          "sourceBytes": 0
+        },
+        {
+          "read_plan_id": "cfr-read:1acb4c5558c2",
+          "reference_id": "compact-file:44de1a4304df02",
+          "type": "group_memory_json",
+          "action": "read_for_structured_state",
+          "priority": 40,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-sessions\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+          "exists": true,
+          "sourceChecksum": "281cd88ceda2474e3db4e0ec",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784073514398,
+          "sourceBytes": 16149
+        },
+        {
+          "read_plan_id": "cfr-read:9ab9fe4c2aeb",
+          "reference_id": "compact-file:ff3b345e7bc911",
+          "type": "group_session_memory_snapshot",
+          "action": "read_to_verify_summary_checksum",
+          "priority": 45,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-session-memory\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\snapshot.json",
+          "exists": true,
+          "sourceChecksum": "8dea4db693ebc54f23eede01",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784073514386,
+          "sourceBytes": 1702
+        },
+        {
+          "read_plan_id": "cfr-read:523da527a649",
+          "reference_id": "compact-file:c46b49c2b42b11",
+          "type": "tool_continuity_summary",
+          "action": "read_if_tool_or_skill_context_matters",
+          "priority": 50,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-tool-continuity\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\summary.md",
+          "exists": true,
+          "sourceChecksum": "9bcc9948b4fc2b8b6da9890c",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784073514390,
+          "sourceBytes": 578
+        },
+        {
+          "read_plan_id": "cfr-read:14275917d87f",
+          "reference_id": "compact-file:55613c78337787",
+          "type": "tool_continuity_snapshot",
+          "action": "read_to_verify_tool_context_only",
+          "priority": 55,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-tool-continuity\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\snapshot.json",
+          "exists": true,
+          "sourceChecksum": "2926fa56f5131678cba69fb2",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784073514393,
+          "sourceBytes": 3029
+        },
+        {
+          "read_plan_id": "cfr-read:0f9b69eb53a3",
+          "reference_id": "compact-file:e924a3ffaa4a26",
+          "type": "typed_memory_distillation_ledger",
+          "action": "read_for_distillation_archive",
+          "priority": 75,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\.distillation-ledger.json",
+          "exists": true,
+          "sourceChecksum": "fef5be5403b7a8d84219988a",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784073513691,
+          "sourceBytes": 7824
+        },
+        {
+          "read_plan_id": "cfr-read:ffed784e64a4",
+          "reference_id": "compact-file:720ed4711edd8d",
+          "type": "replay_repair_work_items",
+          "action": "read_for_replay_repair_work",
+          "priority": 80,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-replay-repair-work-items\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+          "exists": true,
+          "sourceChecksum": "fafa6b3427777ebf525b05df",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784073512379,
+          "sourceBytes": 6883
+        },
+        {
+          "read_plan_id": "cfr-read:ecb2627e0709",
+          "reference_id": "compact-file:e69bc330b18e7f",
+          "type": "global_agent_memory_json",
+          "action": "skip_missing",
+          "priority": 900,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\global-agent-memory\\memory.json",
+          "exists": false,
+          "sourceChecksum": "",
+          "sourceChecksumMode": "",
+          "sourceMtimeMs": 0,
+          "sourceBytes": 0
+        },
+        {
+          "read_plan_id": "cfr-read:b85c177e616d",
+          "reference_id": "compact-file:189c7961855b25",
+          "type": "group_session_memory",
+          "action": "skip_missing",
+          "priority": 900,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-session-memory\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\summary.md",
+          "exists": false,
+          "sourceChecksum": "",
+          "sourceChecksumMode": "",
+          "sourceMtimeMs": 0,
+          "sourceBytes": 0
+        }
+      ],
+      "read_plan_revalidation_gate": {
+        "schema": "ccm-group-compact-file-reference-read-plan-revalidation-gate-v1",
+        "version": 1,
+        "revalidation_gate_id": "cfr-rvg:5bebfe3dbfd559",
+        "group_id": "phase311-repair-completion-maintenance-group--gcs_phase311_b",
+        "target_project": "api",
+        "scope": "child:api",
+        "generated_at": "2026-07-14T23:58:34.381Z",
+        "status": "required",
+        "action": "re_read_changed_sources_before_using_compact_memory",
+        "required_count": 5,
+        "verification_count": 0,
+        "checked_count": 8,
+        "required_read_plan_ids": [
+          "cfr-read:8c2f77cc0e88",
+          "cfr-read:1acb4c5558c2",
+          "cfr-read:9ab9fe4c2aeb",
+          "cfr-read:523da527a649",
+          "cfr-read:14275917d87f"
+        ],
+        "verification_read_plan_ids": [],
+        "required_entries": [
+          {
+            "read_plan_id": "cfr-read:8c2f77cc0e88",
+            "reference_id": "compact-file:2db2b58783f070",
+            "type": "typed_memory_dir",
+            "action": "list_or_open_index_only",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 35,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-md\\phase311-repair-completion-maintenance-group--gcs_phase311_b",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-repair-completion-maintenance-exact-session-restart-selftest/home/.cc-connect/group-memory-md/phase311-repair-completion-maintenance-group--gcs_phase311_b",
+            "freshness_status": "changed",
+            "changes": [
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "a3e61e5734c0a40e2c0b08a7",
+              "checksumMode": "directory_listing",
+              "mtimeMs": 1784073514279,
+              "bytes": 0
+            },
+            "current": {
+              "checksum": "a3e61e5734c0a40e2c0b08a7",
+              "checksumMode": "directory_listing",
+              "mtimeMs": 1784073514440,
+              "bytes": 0,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:1acb4c5558c2",
+            "reference_id": "compact-file:44de1a4304df02",
+            "type": "group_memory_json",
+            "action": "read_for_structured_state",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 40,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-memory-sessions\\phase311-repair-completion-maintenance-group\\gcs_phase311_b.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-repair-completion-maintenance-exact-session-restart-selftest/home/.cc-connect/group-memory-sessions/phase311-repair-completion-maintenance-group/gcs_phase311_b.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "8198b1ccc6b5c9be61fe5b87",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514219,
+              "bytes": 16149
+            },
+            "current": {
+              "checksum": "281cd88ceda2474e3db4e0ec",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514398,
+              "bytes": 16149,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:9ab9fe4c2aeb",
+            "reference_id": "compact-file:ff3b345e7bc911",
+            "type": "group_session_memory_snapshot",
+            "action": "read_to_verify_summary_checksum",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 45,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-session-memory\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\snapshot.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-repair-completion-maintenance-exact-session-restart-selftest/home/.cc-connect/group-session-memory/phase311-repair-completion-maintenance-group--gcs_phase311_b/snapshot.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "0eb41bd3b56c0a00d1dc088e",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514209,
+              "bytes": 1702
+            },
+            "current": {
+              "checksum": "8dea4db693ebc54f23eede01",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514386,
+              "bytes": 1702,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:523da527a649",
+            "reference_id": "compact-file:c46b49c2b42b11",
+            "type": "tool_continuity_summary",
+            "action": "read_if_tool_or_skill_context_matters",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 50,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-tool-continuity\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\summary.md",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-repair-completion-maintenance-exact-session-restart-selftest/home/.cc-connect/group-tool-continuity/phase311-repair-completion-maintenance-group--gcs_phase311_b/summary.md",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "e0dc03555261cbd69adc18fc",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514213,
+              "bytes": 578
+            },
+            "current": {
+              "checksum": "9bcc9948b4fc2b8b6da9890c",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514390,
+              "bytes": 578,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:14275917d87f",
+            "reference_id": "compact-file:55613c78337787",
+            "type": "tool_continuity_snapshot",
+            "action": "read_to_verify_tool_context_only",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 55,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-repair-completion-maintenance-exact-session-restart-selftest\\home\\.cc-connect\\group-tool-continuity\\phase311-repair-completion-maintenance-group--gcs_phase311_b\\snapshot.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/post-compact-repair-completion-maintenance-exact-session-restart-selftest/home/.cc-connect/group-tool-continuity/phase311-repair-completion-maintenance-group--gcs_phase311_b/snapshot.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "d4e6981d40ad667f06abe48f",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514216,
+              "bytes": 3029
+            },
+            "current": {
+              "checksum": "2926fa56f5131678cba69fb2",
+              "checksumMode": "full",
+              "mtimeMs": 1784073514393,
+              "bytes": 3029,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          }
+        ],
+        "verification_entries": [],
+        "receipt_contract": {
+          "required_receipt_fields": [
+            "memoryUsed",
+            "memoryIgnored"
+          ],
+          "required_reference": "cfr-rvg:5bebfe3dbfd559",
+          "required_read_plan_ids": [
+            "cfr-read:8c2f77cc0e88",
+            "cfr-read:1acb4c5558c2",
+            "cfr-read:9ab9fe4c2aeb",
+            "cfr-read:523da527a649",
+            "cfr-read:14275917d87f"
+          ],
+          "required_task_agent_session_id": "phase183-task-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+          "required_native_session_id": "phase183-native-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+          "memory_used_must_reference_gate": true,
+          "memory_ignored_must_reference_gate": true,
+          "receipt_should_match_session": true,
+          "require_current_source_verification": true,
+          "required_receipt_signal": "read_plan_id plus re-read/current source verified, or memoryIgnored explaining the read_plan_id was not used",
+          "note": "changed read plan entries must be re-read from the current source before applying compact memory; the receipt must mention the read_plan_id and gate id."
+        },
+        "session_binding": {
+          "schema": "ccm-child-agent-memory-session-binding-v1",
+          "binding_id": "csm:91f292a308d5db",
+          "group_id": "phase311-repair-completion-maintenance-group",
+          "target_project": "api",
+          "task_id": "",
+          "trace_id": "",
+          "execution_id": "phase183-execution-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+          "parent_run_id": "",
+          "task_agent_session_id": "phase183-task-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+          "native_session_id": "phase183-native-session-b-phase311-repair-completion-maintenance-group--gcs_phase311_b",
+          "agent_type": "",
+          "turn": 0,
+          "binding_required": true,
+          "scope": "child:api"
+        }
+      }
+    }
+  ],
+  "stats": {
+    "entryCount": 1,
+    "latestReferenceCount": 14,
+    "latestMissingCount": 6,
+    "latestReadPlanCount": 10,
+    "targetProjects": [
+      "api"
+    ]
+  },
+  "updatedAt": "2026-07-14T23:58:34.381Z"
+}

@@ -22,6 +22,8 @@ function buildTaskBoundInternalMcpServers(input) {
         workDir: input.workDir,
         baseWorkDir: input.baseWorkDir || input.workDir,
         projects: input.projects || [],
+        memoryReceiptChallenge: input.memoryReceiptChallenge || null,
+        memoryReceiptFile: input.memoryReceiptFile || "",
     };
     const servers = {
         [task_runtime_mcp_1.TASK_RUNTIME_MCP_SERVER_NAME]: (0, task_runtime_mcp_1.buildTaskRuntimeMcpServerConfig)(context),

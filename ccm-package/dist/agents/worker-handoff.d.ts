@@ -1,3 +1,4 @@
+export declare function renderMemoryContextForWorker(memory: any): string;
 export interface SelfContainedWorkerHandoffInput {
     group?: any;
     project: string;
@@ -10,6 +11,7 @@ export interface SelfContainedWorkerHandoffInput {
     model?: string;
     traceId?: string;
     taskId?: string;
+    taskAgentSessionId?: string;
     analysis?: any;
     workerContextPacket?: any;
     dependencies?: any[];

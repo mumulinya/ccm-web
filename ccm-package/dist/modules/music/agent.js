@@ -12,6 +12,7 @@ exports.runMusicAgentIntentSelfTest = runMusicAgentIntentSelfTest;
 const bilibili_1 = require("./bilibili");
 const netease_1 = require("./netease");
 const library_1 = require("./library");
+const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 exports.RANDOM_MUSIC_KEYWORD = "__random__";
 function extractMusicIntent(msg) {
     const lower = msg.toLowerCase();
@@ -90,23 +91,8 @@ function normalizeMusicAgentAction(value, message, mode, source = "agent") {
         reason: String(value?.reason || (source === "agent" ? "音乐 Agent 结构化决策" : "模型动作识别失败，使用后端兜底")).slice(0, 500),
     };
 }
-function normalizeOpenAiChatUrl(apiUrl) {
-    const base = String(apiUrl || "").replace(/\/$/, "");
-    if (base.includes("/chat/completions"))
-        return base;
-    if (base.endsWith("/v1"))
-        return `${base}/chat/completions`;
-    if (base.includes("/v1/"))
-        return base;
-    return `${base}/v1/chat/completions`;
-}
-function normalizeAnthropicMessagesUrl(apiUrl) {
-    const base = String(apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
-    if (base.endsWith("/v1/messages"))
-        return base;
-    if (base.endsWith("/v1"))
-        return `${base}/messages`;
-    return `${base}/v1/messages`;
+function shouldUseAnthropicMusicApi(config) {
+    return String(config?.format || "").trim().toLowerCase() === "anthropic" || (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config);
 }
 function musicMessageText(content) {
     if (typeof content === "string")
@@ -210,61 +196,25 @@ async function classifyMusicAgentAction(cfg, message, mode, history = []) {
 返回格式：{"action":"play_music|search_music|convert_music|none","keyword":"","confidence":0.0,"reason":"一句话依据"}`;
     const recent = (history || []).slice(-6).map((msg) => `${msg.role === "agent" ? "assistant" : "user"}: ${String(msg.content || "").slice(0, 400)}`).join("\n");
     const user = `当前音乐模式：${mode || "cloud"}\n最近对话：\n${recent || "无"}\n\n用户最新消息：${message}`;
-    const apiUrl = String(cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
-    const format = String(cfg.format || "auto");
-    const isAnthropicCompat = format === "anthropic"
-        || format === "anthropic-compatible"
-        || (format === "auto" && (apiUrl.includes("anthropic") || apiUrl.endsWith("/anthropic")));
     try {
-        if (isAnthropicCompat) {
-            const response = await fetch(normalizeAnthropicMessagesUrl(apiUrl), {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": cfg.apiKey,
-                    "anthropic-version": "2023-06-01",
-                },
-                body: JSON.stringify({
-                    model: cfg.model,
-                    max_tokens: 220,
-                    temperature: 0,
-                    system,
-                    messages: [{ role: "user", content: user }],
-                }),
-                signal: AbortSignal.timeout(8000),
-            });
-            const text = await response.text();
-            if (!response.ok)
-                throw new Error(`HTTP ${response.status}: ${text.slice(0, 160)}`);
-            const data = JSON.parse(text);
-            const content = (data?.content || []).map((part) => part?.type === "text" ? part.text : "").join("").trim();
-            const parsed = extractJsonObject(content);
-            if (!parsed)
-                throw new Error("模型未返回 JSON 动作");
-            return normalizeMusicAgentAction(parsed, message, mode, "agent");
-        }
-        const response = await fetch(normalizeOpenAiChatUrl(apiUrl), {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${cfg.apiKey}`,
-            },
-            body: JSON.stringify({
-                model: cfg.model,
+        const requestConfig = { ...cfg, timeoutMs: Math.min(8_000, Math.max(5_000, Number(cfg.timeoutMs) || 8_000)) };
+        const messages = [{ role: "system", content: system }, { role: "user", content: user }];
+        const content = shouldUseAnthropicMusicApi(requestConfig)
+            ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(requestConfig, {
+                system,
+                messages: [{ role: "user", content: user }],
+                maxTokens: 220,
                 temperature: 0,
-                max_tokens: 220,
-                messages: [
-                    { role: "system", content: system },
-                    { role: "user", content: user },
-                ],
-            }),
-            signal: AbortSignal.timeout(8000),
-        });
-        const text = await response.text();
-        if (!response.ok)
-            throw new Error(`HTTP ${response.status}: ${text.slice(0, 160)}`);
-        const data = JSON.parse(text);
-        const content = data?.choices?.[0]?.message?.content || "";
+                defaultTimeoutMs: 8_000,
+                httpErrorPrefix: "音乐动作识别失败",
+            })
+            : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(requestConfig, {
+                messages,
+                maxTokens: 220,
+                temperature: 0,
+                defaultTimeoutMs: 8_000,
+                httpErrorPrefix: "音乐动作识别失败",
+            });
         const parsed = extractJsonObject(content);
         if (!parsed)
             throw new Error("模型未返回 JSON 动作");
@@ -325,11 +275,7 @@ async function execToolCall(toolName, toolInput) {
     return "未知工具";
 }
 async function callClaudeAgent(cfg, system, messages, res, chatMode) {
-    const apiUrl = (cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
-    const format = String(cfg.format || "auto");
-    const isAnthropicCompat = format === "anthropic"
-        || format === "anthropic-compatible"
-        || (format === "auto" && (apiUrl.includes("anthropic") || apiUrl.endsWith("/anthropic")));
+    const isAnthropicCompat = shouldUseAnthropicMusicApi(cfg);
     const isOpenAICompat = !isAnthropicCompat;
     const tools = chatMode === "local"
         ? AGENT_TOOLS_LIST.filter((t) => t.name === "search_local")
@@ -344,17 +290,8 @@ async function callClaudeAgent(cfg, system, messages, res, chatMode) {
     }
 }
 async function callOpenAICompat(cfg, system, messages, tools, res) {
-    const apiUrl = (cfg.apiUrl || "").replace(/\/$/, "");
     const model = cfg.model || "claude-sonnet-4-20250514";
-    let fetchUrl;
-    if (apiUrl.includes("/chat/completions"))
-        fetchUrl = apiUrl;
-    else if (apiUrl.endsWith("/v1"))
-        fetchUrl = `${apiUrl}/chat/completions`;
-    else if (apiUrl.includes("/v1/"))
-        fetchUrl = apiUrl;
-    else
-        fetchUrl = `${apiUrl}/v1/chat/completions`;
+    const fetchUrl = (0, group_orchestrator_llm_client_1.normalizeChatCompletionsUrl)(cfg.apiUrl);
     const toolDesc = tools.map(t => `- ${t.name}: ${t.description}`).join("\n");
     const enhancedSystem = system + `\n\n可用工具：\n${toolDesc}\n\n当你需要搜索时，输出格式：\n<tool_call>\n{"name": "工具名", "arguments": {"keyword": "关键词"}}\n</tool_call>\n\n搜索结果会自动返回给你，然后你再回复用户。`;
     const headers = {
@@ -364,7 +301,7 @@ async function callOpenAICompat(cfg, system, messages, tools, res) {
     const openaiMessages = [{ role: "system", content: enhancedSystem }, ...normalizeMusicAgentMessages(messages, "", 20)];
     const body = JSON.stringify({ model, max_tokens: 1024, messages: openaiMessages, stream: true });
     try {
-        const apiRes = await fetch(fetchUrl, { method: "POST", headers, body });
+        const apiRes = await (0, group_orchestrator_llm_client_1.fetchWithNodeHttpFallback)(fetchUrl, { method: "POST", headers, body });
         if (!apiRes.ok) {
             const t = await apiRes.text();
             console.error(`[MusicAgent] OpenAI-compatible API ${apiRes.status}: ${t.substring(0, 500)}`);
@@ -434,13 +371,8 @@ async function callOpenAICompat(cfg, system, messages, tools, res) {
     }
 }
 async function callAnthropicNative(cfg, system, messages, tools, res) {
-    const apiUrl = (cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
     const model = cfg.model || "claude-sonnet-4-20250514";
-    const fetchUrl = apiUrl.endsWith("/v1/messages")
-        ? apiUrl
-        : apiUrl.endsWith("/v1")
-            ? `${apiUrl}/messages`
-            : `${apiUrl}/v1/messages`;
+    const fetchUrl = (0, group_orchestrator_llm_client_1.normalizeAnthropicMessagesUrl)(cfg.apiUrl || "https://api.anthropic.com");
     const headers = {
         "Content-Type": "application/json",
         "x-api-key": cfg.apiKey,
@@ -449,7 +381,7 @@ async function callAnthropicNative(cfg, system, messages, tools, res) {
     const toolDefs = tools.length > 0 ? { tools } : {};
     const body = JSON.stringify({ model, max_tokens: 1024, system, messages: normalizeAnthropicAgentMessages(messages), stream: true, ...toolDefs });
     try {
-        const apiRes = await fetch(fetchUrl, { method: "POST", headers, body });
+        const apiRes = await (0, group_orchestrator_llm_client_1.fetchWithNodeHttpFallback)(fetchUrl, { method: "POST", headers, body });
         if (!apiRes.ok) {
             const t = await apiRes.text();
             console.error(`[MusicAgent] Anthropic API ${apiRes.status}: ${t.substring(0, 500)}`);
@@ -548,6 +480,8 @@ function runMusicAgentIntentSelfTest() {
         currentMessageNotDuplicated: normalizedHistory.filter(item => item.content.includes("播放晴天")).length === 1,
         conversationStartsWithUser: normalizedHistory[0]?.role === "user",
         structuredTextContentSupported: structuredHistory.map(item => item.content).join("|") === "搜索轻音乐|找到一些结果|继续推荐",
+        openAiBaseUrlUsesUnifiedEndpoint: (0, group_orchestrator_llm_client_1.normalizeChatCompletionsUrl)("https://provider.example") === "https://provider.example/v1/chat/completions",
+        anthropicBaseUrlUsesUnifiedEndpoint: (0, group_orchestrator_llm_client_1.normalizeAnthropicMessagesUrl)("https://provider.example") === "https://provider.example/v1/messages",
     };
     return { pass: Object.values(checks).every(Boolean), checks, samples: { playSpecific, playRandom, searchOnly, questionOnly, normalizedHistory, structuredHistory } };
 }

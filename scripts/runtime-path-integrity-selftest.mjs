@@ -50,6 +50,7 @@ const runtimeEntries = [
   'ccm-package/dist/test-agent/cli.js',
   'ccm-package/dist/test-agent/self-test.js',
   'ccm-package/dist/agents/cli-prompt-runner.js',
+  'ccm-package/dist/agents/codex-prompt-runner.js',
 ]
 const missingRuntimeEntries = runtimeEntries.filter((entry) => !fs.existsSync(path.join(root, entry)))
 

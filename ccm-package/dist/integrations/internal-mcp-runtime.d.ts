@@ -18,6 +18,8 @@ export type InternalMcpTaskContext = {
     workDir: string;
     baseWorkDir: string;
     projects?: InternalMcpProjectBinding[];
+    memoryReceiptChallenge?: any;
+    memoryReceiptFile?: string;
     issuedAt: string;
     expiresAt: string;
 };
@@ -27,6 +29,8 @@ export type InternalMcpToolDefinition = {
     inputSchema: Record<string, any>;
     roles?: InternalMcpAgentRole[];
 };
+export declare function signInternalMcpEvidence(value: any): string;
+export declare function verifyInternalMcpEvidenceSignature(value: any, supplied: any): boolean;
 export declare function sealInternalMcpTaskContext(input: Omit<InternalMcpTaskContext, "schema" | "issuedAt" | "expiresAt"> & Partial<Pick<InternalMcpTaskContext, "issuedAt" | "expiresAt">>): string;
 export declare function openInternalMcpTaskContext(token?: string): InternalMcpTaskContext;
 export declare function buildInternalMcpServerConfig(entryFile: string, context: Omit<InternalMcpTaskContext, "schema" | "issuedAt" | "expiresAt">): {
@@ -34,6 +38,7 @@ export declare function buildInternalMcpServerConfig(entryFile: string, context:
     args: string[];
     env: {
         CCM_INTERNAL_MCP_CONTEXT: string;
+        CCM_INTERNAL_MCP_SECRET_FILE: string;
     };
 };
 export declare function assertInternalMcpRole(context: InternalMcpTaskContext, roles: InternalMcpAgentRole[], action: string): void;

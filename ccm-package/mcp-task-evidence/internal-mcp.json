@@ -1,0 +1,17 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "ccm__task_evidence",
+  "display_name": "任务证据 MCP",
+  "description": "读取任务时间线、逐行代码变更、TestAgent 证据和交付回执，支持主 Agent 验收与子 Agent 自查。",
+  "version": "1.0.0",
+  "entry": "../dist/integrations/task-evidence-mcp.js",
+  "lifecycle": "task_scoped",
+  "lifecycle_label": "按任务只读回放",
+  "scopes": ["全局 Agent", "群聊主 Agent", "项目子 Agent", "TestAgent"],
+  "tools": [
+    { "name": "get_task_timeline", "label": "读取任务时间线", "description": "查看任务从派发到验收的完整过程。" },
+    { "name": "get_code_changes", "label": "读取代码变更", "description": "查看已保存的文件统计和逐行 diff。" },
+    { "name": "list_test_evidence", "label": "列出测试证据", "description": "查看截图、报告、浏览器和命令证据。" },
+    { "name": "get_delivery_receipts", "label": "读取交付回执", "description": "汇总交付候选、验证、合并和 TestAgent 结论。" }
+  ]
+}

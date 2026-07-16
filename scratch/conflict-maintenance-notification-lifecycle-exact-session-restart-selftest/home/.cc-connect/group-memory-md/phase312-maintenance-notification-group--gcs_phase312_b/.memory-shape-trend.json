@@ -1,0 +1,60 @@
+{
+  "schema": "ccm-group-typed-memory-shape-trend-ledger-v1",
+  "version": 1,
+  "scopeId": "phase312-maintenance-notification-group--gcs_phase312_b",
+  "bodyFree": true,
+  "retentionDays": 180,
+  "mutableDays": 35,
+  "maxKeysPerBucket": 1200,
+  "generation": 1,
+  "headBucketChecksum": "032751161fe93b42df72377e44973940b17fbf8374930d514421783ec5e59647",
+  "buckets": [
+    {
+      "date": "2026-07-14",
+      "sealed": false,
+      "sealedAt": "",
+      "selector": {
+        "runCount": 0,
+        "candidateTotal": 0,
+        "selectedTotal": 0,
+        "emptyCount": 0,
+        "selectedAgeWeightedDays": 0,
+        "selectedAgeDocumentCount": 0,
+        "freshCount": 0,
+        "staleCount": 0,
+        "candidateCapacityRunCount": 0,
+        "selectionCapacityRunCount": 0
+      },
+      "write": {
+        "eventCount": 1,
+        "changedCount": 1,
+        "createCount": 1,
+        "updateCount": 0,
+        "noopCount": 0,
+        "growthBytes": 2191,
+        "afterBytesTotal": 2191,
+        "maxAfterBytes": 2191,
+        "nearBodyLimitCount": 0,
+        "truncatedBodyCount": 0
+      },
+      "consumption": {
+        "outcomeCount": 0,
+        "deliveredDocumentCount": 0,
+        "usedDocumentCount": 0,
+        "verifiedDocumentCount": 0,
+        "ignoredDocumentCount": 0,
+        "unreportedDocumentCount": 0,
+        "strongReceiptOutcomeCount": 0,
+        "unexpectedClaimCount": 0
+      },
+      "contributionKeys": [
+        "de2c004e1165c076e07585d8c82c5f06"
+      ],
+      "previousBucketChecksum": "",
+      "updatedAt": "2026-07-14T23:58:32.631Z",
+      "checksum": "032751161fe93b42df72377e44973940b17fbf8374930d514421783ec5e59647"
+    }
+  ],
+  "updatedAt": "2026-07-14T23:58:32.631Z",
+  "checksum": "98ce1b650056a11356346f7c0f68a554511d5a7d31a149294477b6e9c57330d0"
+}

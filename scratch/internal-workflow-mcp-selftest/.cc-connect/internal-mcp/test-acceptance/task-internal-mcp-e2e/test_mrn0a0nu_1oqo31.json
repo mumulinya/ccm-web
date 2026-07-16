@@ -1,0 +1,1298 @@
+{
+  "schema": "ccm-internal-mcp-test-run-v1",
+  "run_id": "test_mrn0a0nu_1oqo31",
+  "task_id": "task-internal-mcp-e2e",
+  "group_id": "group-internal-mcp-e2e",
+  "created_at": "2026-07-16T04:25:22.664Z",
+  "updated_at": "2026-07-16T04:25:23.968Z",
+  "status": "completed",
+  "context": {
+    "taskId": "task-internal-mcp-e2e",
+    "groupId": "group-internal-mcp-e2e",
+    "groupSessionId": "session-internal-mcp-e2e",
+    "project": "coordinator",
+    "role": "group-main-agent",
+    "agentType": "codex",
+    "taskAgentSessionId": "main-session",
+    "nativeSessionId": "",
+    "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+    "baseWorkDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+    "projects": [
+      {
+        "name": "demo-project",
+        "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+        "verificationCommands": [
+          "npm run check"
+        ]
+      }
+    ],
+    "memoryReceiptChallenge": null,
+    "memoryReceiptFile": "",
+    "schema": "ccm-internal-mcp-task-context-v1",
+    "issuedAt": "2026-07-16T04:25:15.863Z",
+    "expiresAt": "2026-07-30T04:25:15.863Z"
+  },
+  "handoff": {
+    "id": "test_mrn0a0nu_1oqo31",
+    "taskId": "task-internal-mcp-e2e",
+    "groupId": "group-internal-mcp-e2e",
+    "issuedBy": "group-main-agent",
+    "originalUserGoal": "验证任务、知识、TestAgent、交付工作区与证据 MCP 能被第三方 Agent 调用",
+    "acceptanceCriteria": [
+      "npm run check 成功"
+    ],
+    "completedTasks": [],
+    "requiredChecks": [
+      "commands"
+    ],
+    "projects": [
+      {
+        "name": "demo-project",
+        "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+        "targetUrl": "",
+        "verificationCommands": [
+          "npm run check"
+        ],
+        "changedFiles": [],
+        "completedTasks": [],
+        "agentSummary": "验证内部 MCP TestAgent 原生执行"
+      }
+    ],
+    "options": {
+      "verificationOnly": true,
+      "browserProvider": "none",
+      "autoDiscoverVerificationCommands": true,
+      "collectBrowserArtifacts": true,
+      "requireAdversarialProbe": false,
+      "adversarialProbeWaiver": "This isolated command-only fixture has no external input surface to probe."
+    },
+    "metadata": {
+      "source": "ccm-internal-test-acceptance-mcp",
+      "taskAgentSessionId": "main-session",
+      "requestedByProject": "coordinator",
+      "deliveryWorkspaces": []
+    },
+    "completedByProjectAgents": [
+      "demo-project"
+    ]
+  },
+  "work_order": {
+    "schema": "ccm-test-agent-work-order-v1",
+    "id": "test_mrn0a0nu_1oqo31",
+    "taskId": "task-internal-mcp-e2e",
+    "groupId": "group-internal-mcp-e2e",
+    "issuedBy": "group-main-agent",
+    "originalUserGoal": "验证任务、知识、TestAgent、交付工作区与证据 MCP 能被第三方 Agent 调用",
+    "acceptanceCriteria": [
+      "npm run check 成功"
+    ],
+    "requiredChecks": [
+      "commands"
+    ],
+    "projects": [
+      {
+        "name": "demo-project",
+        "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+        "runCommand": "",
+        "devServerCommand": "",
+        "targetUrl": "",
+        "startupUrl": "",
+        "changedFiles": [],
+        "verificationCommands": [
+          "npm run check"
+        ],
+        "httpChecks": [],
+        "adversarialHttpChecks": [],
+        "browserChecks": [],
+        "adversarialBrowserChecks": [],
+        "adversarialBrowserProbeTemplates": [],
+        "agentSummary": "验证内部 MCP TestAgent 原生执行",
+        "risks": []
+      }
+    ],
+    "options": {
+      "verificationOnly": true,
+      "browserProvider": "none",
+      "autoDiscoverVerificationCommands": true,
+      "collectBrowserArtifacts": true,
+      "requireAdversarialProbe": false,
+      "adversarialProbeWaiver": "This isolated command-only fixture has no external input surface to probe."
+    },
+    "metadata": {
+      "source": "ccm-internal-test-acceptance-mcp",
+      "taskAgentSessionId": "main-session",
+      "requestedByProject": "coordinator",
+      "deliveryWorkspaces": [],
+      "handoffSource": "test-agent-handoff-builder",
+      "completedByProjectAgents": [
+        "demo-project"
+      ]
+    }
+  },
+  "plan": {
+    "schema": "ccm-test-agent-execution-plan-v1",
+    "valid": true,
+    "workOrderId": "test_mrn0a0nu_1oqo31",
+    "taskId": "task-internal-mcp-e2e",
+    "groupId": "group-internal-mcp-e2e",
+    "issuedBy": "group-main-agent",
+    "artifactDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31",
+    "browserProvider": "none",
+    "requiredChecks": [
+      "commands"
+    ],
+    "acceptanceCriteria": [
+      "npm run check 成功"
+    ],
+    "summary": {
+      "projects": 1,
+      "commands": 1,
+      "autoDiscoveredCommands": 0,
+      "devServers": 0,
+      "httpChecks": 0,
+      "adversarialHttpChecks": 0,
+      "httpConcurrencyChecks": 0,
+      "httpConcurrentRequests": 0,
+      "adversarialProbeRequired": false,
+      "adversarialProbeWaived": true,
+      "adversarialProbeWaiverReason": "This isolated command-only fixture has no external input surface to probe.",
+      "adversarialProbeCount": 0,
+      "adversarialLinkedProbeCount": 0,
+      "adversarialUnlinkedProbeCount": 0,
+      "browserChecks": 0,
+      "autoBrowserChecks": 0,
+      "adversarialBrowserChecks": 0,
+      "browserPlannedPlaywrightChecks": 0,
+      "browserPlannedMcpChecks": 0,
+      "browserCapabilityRoutedChecks": 0,
+      "browserExistingSessionRoutedChecks": 0,
+      "browserSessions": 0,
+      "browserSessionSteps": 0,
+      "browserParallelGroups": 0,
+      "browserSessionComparisons": 0,
+      "browserStabilityChecks": 0,
+      "browserStabilityRuns": 0,
+      "browserAuthenticationChecks": 0,
+      "browserManagedAuthenticationChecks": 0,
+      "browserExistingSessionChecks": 0,
+      "browserExistingSessionMinimalEvidenceChecks": 0,
+      "browserExistingSessionFullEvidenceChecks": 0,
+      "browserSessionRecoveryChecks": 0,
+      "browserActionEffectChecks": 0,
+      "browserActionEffectActions": 0,
+      "browserCrossSessionActionEffectActions": 0,
+      "browserExistingSessionProviders": [],
+      "browserCredentialEnvBindings": 0,
+      "browserStorageStateFiles": 0,
+      "browserSensitiveArtifactSuppressions": 0,
+      "browserProviderWarnings": 0,
+      "expectedArtifactTypes": [
+        "artifact_manifest",
+        "report_json",
+        "report_markdown"
+      ]
+    },
+    "projects": [
+      {
+        "name": "demo-project",
+        "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+        "changedFiles": [],
+        "commands": [
+          {
+            "command": "npm run check",
+            "autoDiscovered": false
+          }
+        ],
+        "devServer": {
+          "needed": false,
+          "command": "",
+          "startupUrl": "",
+          "targetUrl": "",
+          "timeoutMs": 30000
+        },
+        "httpChecks": [],
+        "browserChecks": []
+      }
+    ],
+    "browserProviderWarnings": [],
+    "issues": [],
+    "metadata": {
+      "plannedCommands": [],
+      "normalizedWorkOrder": {
+        "schema": "ccm-test-agent-work-order-v1",
+        "id": "test_mrn0a0nu_1oqo31",
+        "taskId": "task-internal-mcp-e2e",
+        "groupId": "group-internal-mcp-e2e",
+        "issuedBy": "group-main-agent",
+        "originalUserGoal": "验证任务、知识、TestAgent、交付工作区与证据 MCP 能被第三方 Agent 调用",
+        "acceptanceCriteria": [
+          "npm run check 成功"
+        ],
+        "requiredChecks": [
+          "commands"
+        ],
+        "projects": [
+          {
+            "name": "demo-project",
+            "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+            "runCommand": "",
+            "devServerCommand": "",
+            "targetUrl": "",
+            "startupUrl": "",
+            "startupTimeoutMs": 30000,
+            "env": {},
+            "changedFiles": [],
+            "verificationCommands": [
+              "npm run check"
+            ],
+            "httpChecks": [],
+            "adversarialHttpChecks": [],
+            "adversarialBrowserChecks": [],
+            "browserChecks": [],
+            "agentSummary": "验证内部 MCP TestAgent 原生执行",
+            "risks": []
+          }
+        ],
+        "options": {
+          "artifactDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31",
+          "commandTimeoutMs": 120000,
+          "browserTimeoutMs": 60000,
+          "httpTimeoutMs": 15000,
+          "startupTimeoutMs": 30000,
+          "maxOutputChars": 16000,
+          "maxHttpResourceChecks": 12,
+          "failOnConsoleError": true,
+          "failOnHttpResourceError": true,
+          "verificationOnly": true,
+          "browserProvider": "none",
+          "autoDiscoverVerificationCommands": true,
+          "collectBrowserArtifacts": true,
+          "collectBrowserVideo": false,
+          "requireAdversarialProbe": false,
+          "adversarialProbeWaiver": "This isolated command-only fixture has no external input surface to probe."
+        },
+        "metadata": {
+          "source": "ccm-internal-test-acceptance-mcp",
+          "taskAgentSessionId": "main-session",
+          "requestedByProject": "coordinator",
+          "deliveryWorkspaces": [],
+          "handoffSource": "test-agent-handoff-builder",
+          "completedByProjectAgents": [
+            "demo-project"
+          ],
+          "autoDiscoveredVerificationCommands": []
+        }
+      }
+    }
+  },
+  "warnings": [],
+  "delivery_bindings": [],
+  "pid": 30996,
+  "invocation_result": {
+    "schema": "ccm-test-agent-invocation-result-v1",
+    "invocationId": "test-agent-invocation-mrn0a0zb-14bc7186",
+    "source": "handoff",
+    "status": "completed",
+    "startedAt": "2026-07-16T04:25:23.063Z",
+    "inputValidation": {
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    },
+    "outputValidation": {
+      "valid": true,
+      "errors": [],
+      "warnings": []
+    },
+    "outcome": "passed",
+    "recommendation": "accept",
+    "canAccept": true,
+    "report": {
+      "schema": "ccm-test-agent-report-v1",
+      "agent": "test-agent",
+      "id": "test-agent-report-mrn0a1nh-cd1e65b7",
+      "workOrderId": "test_mrn0a0nu_1oqo31",
+      "taskId": "task-internal-mcp-e2e",
+      "groupId": "group-internal-mcp-e2e",
+      "originalUserGoal": "验证任务、知识、TestAgent、交付工作区与证据 MCP 能被第三方 Agent 调用",
+      "acceptanceCriteria": [
+        "npm run check 成功"
+      ],
+      "status": "passed",
+      "recommendation": "accept",
+      "summary": "TestAgent verified 1 command checks, 0 HTTP probes (0 concurrent requests), 0 browser checks, 0 relevant adversarial probes, and 0 browser tool calls.",
+      "startedAt": "2026-07-16T04:25:23.072Z",
+      "finishedAt": "2026-07-16T04:25:23.928Z",
+      "durationMs": 856,
+      "artifactDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31",
+      "requiredChecks": [
+        "commands"
+      ],
+      "commandResults": [
+        {
+          "project": "demo-project",
+          "command": "npm run check",
+          "cwd": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "startedAt": "2026-07-16T04:25:23.150Z",
+          "finishedAt": "2026-07-16T04:25:23.927Z",
+          "durationMs": 777,
+          "stdout": "\n> check\n> node -e \"process.stdout.write('check-ok')\"\n\ncheck-ok",
+          "stderr": "",
+          "output": "\n> check\n> node -e \"process.stdout.write('check-ok')\"\n\ncheck-ok",
+          "error": ""
+        }
+      ],
+      "devServerResults": [],
+      "httpResults": [],
+      "browserResults": [],
+      "browserToolCalls": [],
+      "browserResourceLifecycleEvents": [],
+      "httpConcurrencySummary": {
+        "checks": 0,
+        "requests": 0,
+        "completed": 0,
+        "passed": 0,
+        "failed": 0,
+        "blocked": 0,
+        "maxInFlight": 0,
+        "items": []
+      },
+      "browserNetworkSummary": [],
+      "browserInteractionSummary": [],
+      "browserFlowSummary": {
+        "total": 0,
+        "statusCounts": {
+          "passed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "skipped": 0
+        },
+        "flowTypeCount": 0,
+        "criteriaCount": 0,
+        "actionCount": 0,
+        "assertionCount": 0,
+        "failedStepCount": 0,
+        "items": []
+      },
+      "browserMultiSessionSummary": {
+        "total": 0,
+        "statusCounts": {
+          "passed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "skipped": 0
+        },
+        "sessionCount": 0,
+        "uniqueSessionCount": 0,
+        "sessionNames": [],
+        "parallelGroupCount": 0,
+        "comparisonCount": 0,
+        "failedComparisonCount": 0,
+        "actionCount": 0,
+        "assertionCount": 0,
+        "failedStepCount": 0,
+        "screenshotCount": 0,
+        "consoleErrorCount": 0,
+        "pageErrorCount": 0,
+        "networkErrorCount": 0,
+        "items": []
+      },
+      "browserStabilitySummary": {
+        "total": 0,
+        "statusCounts": {
+          "stable_pass": 0,
+          "stable_fail": 0,
+          "flaky": 0,
+          "blocked": 0
+        },
+        "expectedRunCount": 0,
+        "runCount": 0,
+        "passedRunCount": 0,
+        "failedRunCount": 0,
+        "blockedRunCount": 0,
+        "skippedRunCount": 0,
+        "screenshotCount": 0,
+        "items": []
+      },
+      "browserEvidenceTemporalIntegrity": {
+        "status": "complete",
+        "toleranceMs": 100,
+        "reportDurationMs": 856,
+        "browserResultCount": 0,
+        "browserToolCallCount": 0,
+        "invalidItemCount": 0,
+        "invalidTimestampCount": 0,
+        "durationMismatchCount": 0,
+        "outsideReportWindowCount": 0,
+        "outsideResultWindowCount": 0,
+        "planMismatchCount": 0,
+        "items": [
+          {
+            "kind": "report",
+            "id": "report",
+            "startedAt": "2026-07-16T04:25:23.072Z",
+            "finishedAt": "2026-07-16T04:25:23.928Z",
+            "durationMs": 856,
+            "status": "complete",
+            "errors": []
+          }
+        ]
+      },
+      "browserResourceLifecycleSummary": {
+        "status": "complete",
+        "eventCount": 0,
+        "ownedResourceCount": 0,
+        "externalResourceCount": 0,
+        "releasedResourceCount": 0,
+        "retainedExternalResourceCount": 0,
+        "openResourceCount": 0,
+        "cleanupFailureCount": 0,
+        "planMismatchCount": 0,
+        "duplicateResourceCount": 0,
+        "invalidOwnershipCount": 0,
+        "invalidTimestampCount": 0,
+        "outsideReportWindowCount": 0,
+        "resourceTypeCounts": {
+          "browser": 0,
+          "browser_context": 0,
+          "external_browser_session": 0
+        },
+        "events": []
+      },
+      "browserToolEvidenceLineage": {
+        "status": "complete",
+        "mcpResultCount": 0,
+        "evidenceRequiredResultCount": 0,
+        "linkedResultCount": 0,
+        "toolCallCount": 0,
+        "scopedToolCallCount": 0,
+        "linkedToolCallCount": 0,
+        "failedToolCallCount": 0,
+        "unlinkedRequiredResultCount": 0,
+        "missingToolCallReferenceCount": 0,
+        "foreignToolCallReferenceCount": 0,
+        "duplicateToolCallReferenceCount": 0,
+        "duplicateToolCallRecordCount": 0,
+        "orphanScopedToolCallCount": 0,
+        "unscopedToolCallCount": 0,
+        "statusCounts": {
+          "complete": 0,
+          "incomplete": 0,
+          "invalid": 0
+        },
+        "items": []
+      },
+      "browserToolCallTimeoutSummary": {
+        "totalCalls": 0,
+        "passedCalls": 0,
+        "failedCalls": 0,
+        "timedOutCalls": 0,
+        "abortRequestedCalls": 0,
+        "timedOutByTool": {},
+        "items": []
+      },
+      "browserRecoverySummary": {
+        "checks": 0,
+        "attempted": 0,
+        "recovered": 0,
+        "failed": 0,
+        "notRetried": 0,
+        "items": []
+      },
+      "browserActionEffectSummary": {
+        "checks": 0,
+        "actions": 0,
+        "changed": 0,
+        "unchanged": 0,
+        "unavailable": 0,
+        "failed": 0,
+        "detailSuppressed": 0,
+        "crossSession": 0,
+        "actionTypes": {},
+        "changedSignals": {
+          "url": 0,
+          "title": 0,
+          "page_text": 0,
+          "dom": 0,
+          "network": 0,
+          "dialog": 0,
+          "popup": 0,
+          "download": 0
+        },
+        "items": []
+      },
+      "adversarialEvidenceSummary": {
+        "required": false,
+        "waived": true,
+        "waiverReason": "This isolated command-only fixture has no external input surface to probe.",
+        "status": "waived",
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "blocked": 0,
+        "skipped": 0,
+        "http": 0,
+        "browser": 0,
+        "relevant": 0,
+        "unlinked": 0,
+        "passedRelevant": 0,
+        "goalLinked": 0,
+        "criteriaCovered": [],
+        "probeTypes": [],
+        "items": []
+      },
+      "acceptanceEvidenceGateSummary": {
+        "status": "verified",
+        "canAccept": true,
+        "total": 1,
+        "verified": 1,
+        "notVerified": 0,
+        "unknown": 0,
+        "matchedEvidence": 1,
+        "fallbackEvidence": 0,
+        "missingEvidence": 0,
+        "direct": 0,
+        "token": 1,
+        "fallback": 0,
+        "none": 0,
+        "failedCriteria": [],
+        "incompleteCriteria": [],
+        "weakCriteria": []
+      },
+      "browserProviderSummary": {
+        "preferred": "none",
+        "status": "provider_none",
+        "availableProviders": [],
+        "attemptedProviders": [],
+        "fallbackUsed": false,
+        "items": []
+      },
+      "browserProviderGaps": [],
+      "failureSummary": [],
+      "requiredCheckCoverage": [
+        {
+          "check": "commands",
+          "status": "verified",
+          "evidence": [
+            "npm run check: passed - exit=0"
+          ]
+        }
+      ],
+      "acceptanceCoverage": [
+        {
+          "criterion": "npm run check 成功",
+          "status": "verified",
+          "evidence": [
+            "demo-project: command npm run check: exit=0; duration=777ms",
+            "demo-project: npm run check: exit=0; duration=777ms"
+          ],
+          "matchStrength": "token",
+          "matchScore": 0.75,
+          "evidenceSource": "matched_evidence"
+        }
+      ],
+      "evidence": [
+        {
+          "type": "command",
+          "project": "demo-project",
+          "title": "npm run check",
+          "status": "passed",
+          "detail": "exit=0; duration=777ms"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent JSON report",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent Markdown report",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.md"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent verdict JSON",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent artifact manifest",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json"
+        }
+      ],
+      "risks": [
+        "adversarial probe waived: This isolated command-only fixture has no external input surface to probe."
+      ],
+      "blockedReasons": [],
+      "issues": [],
+      "metadata": {
+        "source": "ccm-internal-test-acceptance-mcp",
+        "taskAgentSessionId": "main-session",
+        "requestedByProject": "coordinator",
+        "deliveryWorkspaces": [],
+        "handoffSource": "test-agent-handoff-builder",
+        "completedByProjectAgents": [
+          "demo-project"
+        ],
+        "autoDiscoveredVerificationCommands": [],
+        "roleSkills": {
+          "schema": "ccm-role-skill-selection-v1",
+          "role": "test-agent",
+          "phase": "verification",
+          "applied": true,
+          "appliedBy": "ccm-native-test-agent-engine",
+          "selected": [
+            {
+              "name": "ccm-test-acceptance-verifier",
+              "kind": "role",
+              "reason": "独立验收与保守结论"
+            },
+            {
+              "name": "ccm-acceptance-evidence",
+              "kind": "shared",
+              "reason": "验收项与真实证据绑定"
+            }
+          ]
+        },
+        "browserProviderPreflight": [],
+        "browserAuthenticationSummary": {
+          "configuredChecks": 0,
+          "managedChecks": 0,
+          "existingSessionChecks": 0,
+          "passedChecks": 0,
+          "failedChecks": 0,
+          "blockedChecks": 0,
+          "authenticatedSessions": 0,
+          "credentialEnvNames": [],
+          "storageStateCount": 0,
+          "sensitiveArtifactSuppressionCount": 0,
+          "existingSessionProviders": [],
+          "minimalEvidenceChecks": 0,
+          "fullEvidenceChecks": 0,
+          "tabContextCheckedChecks": 0,
+          "newTabChecks": 0
+        },
+        "artifactFiles": {
+          "reportJsonPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "reportMarkdownPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.md",
+          "verdictJsonPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json",
+          "manifestPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json"
+        }
+      }
+    },
+    "verdict": {
+      "schema": "ccm-test-agent-verdict-v1",
+      "agent": "test-agent",
+      "reportId": "test-agent-report-mrn0a1nh-cd1e65b7",
+      "workOrderId": "test_mrn0a0nu_1oqo31",
+      "taskId": "task-internal-mcp-e2e",
+      "groupId": "group-internal-mcp-e2e",
+      "status": "passed",
+      "recommendation": "accept",
+      "canAccept": true,
+      "needsRework": false,
+      "needsHuman": false,
+      "summary": "TestAgent verified 1 command checks, 0 HTTP probes (0 concurrent requests), 0 browser checks, 0 relevant adversarial probes, and 0 browser tool calls.",
+      "failedRequiredChecks": [],
+      "unknownRequiredChecks": [],
+      "failedAcceptanceCriteria": [],
+      "unknownAcceptanceCriteria": [],
+      "requiredCheckSummary": {
+        "total": 1,
+        "statusCounts": {
+          "verified": 1,
+          "not_verified": 0,
+          "unknown": 0
+        },
+        "verified": [
+          {
+            "check": "commands",
+            "status": "verified",
+            "evidence": [
+              "npm run check: passed - exit=0"
+            ]
+          }
+        ],
+        "notVerified": [],
+        "unknown": []
+      },
+      "acceptanceSummary": {
+        "total": 1,
+        "statusCounts": {
+          "verified": 1,
+          "not_verified": 0,
+          "unknown": 0
+        },
+        "matchStrengthCounts": {
+          "direct": 0,
+          "token": 1,
+          "fallback": 0,
+          "none": 0
+        },
+        "evidenceSourceCounts": {
+          "matched_evidence": 1,
+          "single_criterion_report_status": 0,
+          "none": 0
+        },
+        "verified": [
+          {
+            "criterion": "npm run check 成功",
+            "status": "verified",
+            "evidence": [
+              "demo-project: command npm run check: exit=0; duration=777ms",
+              "demo-project: npm run check: exit=0; duration=777ms"
+            ],
+            "matchStrength": "token",
+            "matchScore": 0.75,
+            "evidenceSource": "matched_evidence"
+          }
+        ],
+        "notVerified": [],
+        "unknown": []
+      },
+      "blockedReasons": [],
+      "risks": [
+        "adversarial probe waived: This isolated command-only fixture has no external input surface to probe."
+      ],
+      "nextActions": [
+        "Accept the delivery if it matches the user-facing goal.",
+        "Keep the TestAgent report and artifact manifest with the task record."
+      ],
+      "evidenceSummary": {
+        "commands": {
+          "passed": 1
+        },
+        "devServers": {},
+        "httpChecks": {},
+        "httpConcurrencyChecks": 0,
+        "httpConcurrentRequests": 0,
+        "httpConcurrentFailed": 0,
+        "httpConcurrentBlocked": 0,
+        "browserChecks": {},
+        "browserToolCalls": {},
+        "browserToolLinkedResults": 0,
+        "browserToolUnlinkedResults": 0,
+        "browserToolLinkedCalls": 0,
+        "browserToolOrphanCalls": 0,
+        "browserToolUnscopedCalls": 0,
+        "browserToolInvalidLinks": 0,
+        "browserToolTimedOutCalls": 0,
+        "browserToolAbortRequestedCalls": 0,
+        "browserNetworkErrors": 0,
+        "browserActions": 0,
+        "browserFailedActions": 0,
+        "browserAssertions": 0,
+        "browserFailedAssertions": 0,
+        "browserAcceptanceFlows": 0,
+        "browserFailedAcceptanceFlows": 0,
+        "browserMultiSessionScenarios": 0,
+        "browserMultiSessionSessions": 0,
+        "browserMultiSessionParallelGroups": 0,
+        "browserMultiSessionComparisons": 0,
+        "browserFailedSessionComparisons": 0,
+        "browserFailedMultiSessionScenarios": 0,
+        "browserStabilityGroups": 0,
+        "browserFlakyStabilityGroups": 0,
+        "browserStabilityRuns": 0,
+        "browserFailedStabilityRuns": 0,
+        "browserPlannedChecks": 0,
+        "browserExpectedRuns": 0,
+        "browserCoveredRuns": 0,
+        "browserMissingRuns": 0,
+        "browserDuplicateResults": 0,
+        "browserInvalidResults": 0,
+        "browserTemporalInvalidItems": 0,
+        "browserTemporalPlanMismatches": 0,
+        "browserTemporalWindowViolations": 0,
+        "browserOwnedResources": 0,
+        "browserReleasedResources": 0,
+        "browserOpenResources": 0,
+        "browserCleanupFailures": 0,
+        "browserRecoveryAttempts": 0,
+        "browserRecoveredOperations": 0,
+        "browserFailedRecoveries": 0,
+        "browserUnsafeRetriesPrevented": 0,
+        "browserActionEffectChecks": 0,
+        "browserActionEffects": 0,
+        "browserFailedActionEffects": 0,
+        "browserCrossSessionActionEffects": 0,
+        "adversarialProbes": 0,
+        "adversarialPassed": 0,
+        "adversarialFailed": 0,
+        "adversarialBlocked": 0,
+        "adversarialRelevant": 0,
+        "adversarialUnlinked": 0,
+        "adversarialPassedRelevant": 0,
+        "acceptanceMatchedEvidence": 1,
+        "acceptanceFallbackEvidence": 0,
+        "acceptanceMissingEvidence": 0,
+        "browserProviderGaps": 0,
+        "artifacts": 4
+      },
+      "browserNetworkSummary": [],
+      "httpConcurrencySummary": {
+        "checks": 0,
+        "requests": 0,
+        "completed": 0,
+        "passed": 0,
+        "failed": 0,
+        "blocked": 0,
+        "maxInFlight": 0,
+        "items": []
+      },
+      "browserInteractionSummary": [],
+      "browserFlowSummary": {
+        "total": 0,
+        "statusCounts": {
+          "passed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "skipped": 0
+        },
+        "flowTypeCount": 0,
+        "criteriaCount": 0,
+        "actionCount": 0,
+        "assertionCount": 0,
+        "failedStepCount": 0,
+        "items": []
+      },
+      "browserMultiSessionSummary": {
+        "total": 0,
+        "statusCounts": {
+          "passed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "skipped": 0
+        },
+        "sessionCount": 0,
+        "uniqueSessionCount": 0,
+        "sessionNames": [],
+        "parallelGroupCount": 0,
+        "comparisonCount": 0,
+        "failedComparisonCount": 0,
+        "actionCount": 0,
+        "assertionCount": 0,
+        "failedStepCount": 0,
+        "screenshotCount": 0,
+        "consoleErrorCount": 0,
+        "pageErrorCount": 0,
+        "networkErrorCount": 0,
+        "items": []
+      },
+      "browserStabilitySummary": {
+        "total": 0,
+        "statusCounts": {
+          "stable_pass": 0,
+          "stable_fail": 0,
+          "flaky": 0,
+          "blocked": 0
+        },
+        "expectedRunCount": 0,
+        "runCount": 0,
+        "passedRunCount": 0,
+        "failedRunCount": 0,
+        "blockedRunCount": 0,
+        "skippedRunCount": 0,
+        "screenshotCount": 0,
+        "items": []
+      },
+      "browserEvidenceTemporalIntegrity": {
+        "status": "complete",
+        "toleranceMs": 100,
+        "reportDurationMs": 856,
+        "browserResultCount": 0,
+        "browserToolCallCount": 0,
+        "invalidItemCount": 0,
+        "invalidTimestampCount": 0,
+        "durationMismatchCount": 0,
+        "outsideReportWindowCount": 0,
+        "outsideResultWindowCount": 0,
+        "planMismatchCount": 0,
+        "items": [
+          {
+            "kind": "report",
+            "id": "report",
+            "startedAt": "2026-07-16T04:25:23.072Z",
+            "finishedAt": "2026-07-16T04:25:23.928Z",
+            "durationMs": 856,
+            "status": "complete",
+            "errors": []
+          }
+        ]
+      },
+      "browserResourceLifecycleSummary": {
+        "status": "complete",
+        "eventCount": 0,
+        "ownedResourceCount": 0,
+        "externalResourceCount": 0,
+        "releasedResourceCount": 0,
+        "retainedExternalResourceCount": 0,
+        "openResourceCount": 0,
+        "cleanupFailureCount": 0,
+        "planMismatchCount": 0,
+        "duplicateResourceCount": 0,
+        "invalidOwnershipCount": 0,
+        "invalidTimestampCount": 0,
+        "outsideReportWindowCount": 0,
+        "resourceTypeCounts": {
+          "browser": 0,
+          "browser_context": 0,
+          "external_browser_session": 0
+        },
+        "events": []
+      },
+      "browserToolEvidenceLineage": {
+        "status": "complete",
+        "mcpResultCount": 0,
+        "evidenceRequiredResultCount": 0,
+        "linkedResultCount": 0,
+        "toolCallCount": 0,
+        "scopedToolCallCount": 0,
+        "linkedToolCallCount": 0,
+        "failedToolCallCount": 0,
+        "unlinkedRequiredResultCount": 0,
+        "missingToolCallReferenceCount": 0,
+        "foreignToolCallReferenceCount": 0,
+        "duplicateToolCallReferenceCount": 0,
+        "duplicateToolCallRecordCount": 0,
+        "orphanScopedToolCallCount": 0,
+        "unscopedToolCallCount": 0,
+        "statusCounts": {
+          "complete": 0,
+          "incomplete": 0,
+          "invalid": 0
+        },
+        "items": []
+      },
+      "browserToolCallTimeoutSummary": {
+        "totalCalls": 0,
+        "passedCalls": 0,
+        "failedCalls": 0,
+        "timedOutCalls": 0,
+        "abortRequestedCalls": 0,
+        "timedOutByTool": {},
+        "items": []
+      },
+      "browserRecoverySummary": {
+        "checks": 0,
+        "attempted": 0,
+        "recovered": 0,
+        "failed": 0,
+        "notRetried": 0,
+        "items": []
+      },
+      "browserActionEffectSummary": {
+        "checks": 0,
+        "actions": 0,
+        "changed": 0,
+        "unchanged": 0,
+        "unavailable": 0,
+        "failed": 0,
+        "detailSuppressed": 0,
+        "crossSession": 0,
+        "actionTypes": {},
+        "changedSignals": {
+          "url": 0,
+          "title": 0,
+          "page_text": 0,
+          "dom": 0,
+          "network": 0,
+          "dialog": 0,
+          "popup": 0,
+          "download": 0
+        },
+        "items": []
+      },
+      "adversarialEvidenceSummary": {
+        "required": false,
+        "waived": true,
+        "waiverReason": "This isolated command-only fixture has no external input surface to probe.",
+        "status": "waived",
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "blocked": 0,
+        "skipped": 0,
+        "http": 0,
+        "browser": 0,
+        "relevant": 0,
+        "unlinked": 0,
+        "passedRelevant": 0,
+        "goalLinked": 0,
+        "criteriaCovered": [],
+        "probeTypes": [],
+        "items": []
+      },
+      "acceptanceEvidenceGateSummary": {
+        "status": "verified",
+        "canAccept": true,
+        "total": 1,
+        "verified": 1,
+        "notVerified": 0,
+        "unknown": 0,
+        "matchedEvidence": 1,
+        "fallbackEvidence": 0,
+        "missingEvidence": 0,
+        "direct": 0,
+        "token": 1,
+        "fallback": 0,
+        "none": 0,
+        "failedCriteria": [],
+        "incompleteCriteria": [],
+        "weakCriteria": []
+      },
+      "browserProviderSummary": {
+        "preferred": "none",
+        "status": "provider_none",
+        "availableProviders": [],
+        "attemptedProviders": [],
+        "fallbackUsed": false,
+        "items": []
+      },
+      "browserProviderGaps": [],
+      "failureSummary": [],
+      "keyEvidence": [
+        {
+          "type": "artifact",
+          "title": "TestAgent JSON report",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent Markdown report",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.md"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent verdict JSON",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent artifact manifest",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json"
+        },
+        {
+          "type": "command",
+          "project": "demo-project",
+          "title": "npm run check",
+          "status": "passed",
+          "detail": "exit=0; duration=777ms"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent JSON report",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent Markdown report",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.md"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent verdict JSON",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json"
+        },
+        {
+          "type": "artifact",
+          "title": "TestAgent artifact manifest",
+          "status": "passed",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json"
+        }
+      ],
+      "artifacts": {
+        "artifactDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31",
+        "reportJsonPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+        "reportMarkdownPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.md",
+        "verdictJsonPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json",
+        "manifestPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json"
+      },
+      "metadata": {
+        "handoffSource": "test-agent-handoff-builder",
+        "completedByProjectAgents": [
+          "demo-project"
+        ],
+        "browserProviderPreflight": [],
+        "playwrightLaunch": null
+      }
+    },
+    "artifactVerification": {
+      "schema": "ccm-test-agent-artifact-verification-v1",
+      "manifestPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json",
+      "reportId": "test-agent-report-mrn0a1nh-cd1e65b7",
+      "workOrderId": "test_mrn0a0nu_1oqo31",
+      "checkedAt": "2026-07-16T04:25:23.968Z",
+      "status": "passed",
+      "summary": {
+        "total": 19,
+        "passed": 17,
+        "failed": 0,
+        "skipped": 2
+      },
+      "items": [
+        {
+          "type": "report_json",
+          "title": "TestAgent JSON report",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "expectedSizeBytes": 10983,
+          "expectedSha256": "f712fd72ab85b63a42b59d657a0a6318f3c65ad7c53eb5f75b7054f1341899aa",
+          "status": "passed",
+          "actualSizeBytes": 10983,
+          "actualSha256": "f712fd72ab85b63a42b59d657a0a6318f3c65ad7c53eb5f75b7054f1341899aa"
+        },
+        {
+          "type": "report_markdown",
+          "title": "TestAgent Markdown report",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.md",
+          "expectedSizeBytes": 5582,
+          "expectedSha256": "e8f6709dfa50e9262e84552fec48fe0198df97acef47ad6d60385fbcb1b317b4",
+          "status": "passed",
+          "actualSizeBytes": 5582,
+          "actualSha256": "e8f6709dfa50e9262e84552fec48fe0198df97acef47ad6d60385fbcb1b317b4"
+        },
+        {
+          "type": "verdict_json",
+          "title": "TestAgent verdict JSON",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json",
+          "expectedSizeBytes": 13014,
+          "expectedSha256": "24c2f3504c9bbde4e027a6d1db7dabf6d549e3608618168c16dad70009a6c02d",
+          "status": "passed",
+          "actualSizeBytes": 13014,
+          "actualSha256": "24c2f3504c9bbde4e027a6d1db7dabf6d549e3608618168c16dad70009a6c02d"
+        },
+        {
+          "type": "artifact_manifest",
+          "title": "TestAgent artifact manifest",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json",
+          "expectedSizeBytes": 5129,
+          "status": "skipped",
+          "actualSizeBytes": 4875,
+          "error": "sha256 omitted for self-referential artifact."
+        },
+        {
+          "type": "evidence_artifact",
+          "title": "TestAgent JSON report",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "expectedSizeBytes": 10983,
+          "expectedSha256": "f712fd72ab85b63a42b59d657a0a6318f3c65ad7c53eb5f75b7054f1341899aa",
+          "status": "passed",
+          "actualSizeBytes": 10983,
+          "actualSha256": "f712fd72ab85b63a42b59d657a0a6318f3c65ad7c53eb5f75b7054f1341899aa"
+        },
+        {
+          "type": "evidence_artifact",
+          "title": "TestAgent Markdown report",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.md",
+          "expectedSizeBytes": 5582,
+          "expectedSha256": "e8f6709dfa50e9262e84552fec48fe0198df97acef47ad6d60385fbcb1b317b4",
+          "status": "passed",
+          "actualSizeBytes": 5582,
+          "actualSha256": "e8f6709dfa50e9262e84552fec48fe0198df97acef47ad6d60385fbcb1b317b4"
+        },
+        {
+          "type": "evidence_artifact",
+          "title": "TestAgent verdict JSON",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json",
+          "expectedSizeBytes": 13014,
+          "expectedSha256": "24c2f3504c9bbde4e027a6d1db7dabf6d549e3608618168c16dad70009a6c02d",
+          "status": "passed",
+          "actualSizeBytes": 13014,
+          "actualSha256": "24c2f3504c9bbde4e027a6d1db7dabf6d549e3608618168c16dad70009a6c02d"
+        },
+        {
+          "type": "evidence_artifact",
+          "title": "TestAgent artifact manifest",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\artifact-manifest.json",
+          "expectedSizeBytes": 5129,
+          "status": "skipped",
+          "actualSizeBytes": 4875,
+          "error": "sha256 omitted for self-referential artifact."
+        },
+        {
+          "type": "browser_authentication_evidence",
+          "title": "Browser authentication evidence safety",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "browser_recovery_evidence",
+          "title": "Browser session recovery evidence safety",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "browser_action_effect_evidence",
+          "title": "Browser action-effect evidence integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "browser_execution_coverage_evidence",
+          "title": "Browser check execution coverage integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "browser_temporal_evidence",
+          "title": "Browser evidence run provenance and temporal integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "browser_resource_lifecycle_evidence",
+          "title": "Browser resource lifecycle and cleanup integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "browser_tool_lineage_evidence",
+          "title": "Browser tool-call evidence lineage integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "browser_tool_timeout_evidence",
+          "title": "Browser tool-call timeout evidence integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "adversarial_evidence",
+          "title": "Adversarial evidence gate integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "acceptance_evidence",
+          "title": "Required acceptance evidence gate integrity",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json",
+          "status": "passed"
+        },
+        {
+          "type": "verdict_consistency",
+          "title": "TestAgent report/verdict semantic consistency",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\report.json <> C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\.cc-connect\\test-agent-artifacts\\test_mrn0a0nu_1oqo31\\verdict.json",
+          "status": "passed"
+        }
+      ]
+    },
+    "finishedAt": "2026-07-16T04:25:23.968Z",
+    "durationMs": 905
+  },
+  "error": ""
+}

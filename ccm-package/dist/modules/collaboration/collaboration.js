@@ -33,11 +33,123 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.markDailyDevBacklogStatus = exports.importSharedDocsToDailyDevBacklog = exports.claimReadyDailyDevBacklog = exports.runGroupMemoryStorageRecoverySelfTest = exports.loadGroups = exports.sendFeishuReportMessage = exports.FEISHU_SCOPES = void 0;
+exports.COORDINATOR_REVIEW_MAX_ROUNDS = exports.PRIORITY_WEIGHT = exports.agentRecoveryProbeInFlight = exports.agentRecoveryMonitorTimer = exports.taskWatchdogTimer = exports.AGENT_PROBE_STATUS_FILE = exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = exports.AGENT_PROBE_FAILURE_BLOCK_MS = exports.AGENT_PROBE_SUCCESS_FRESH_MS = exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = exports.TASK_WATCHDOG_GAP_REWORK_MAX = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = exports.TASK_WATCHDOG_STALE_MS = exports.TASK_WATCHDOG_INTERVAL_MS = exports.runningTaskIds = exports.taskQueues = exports.markDailyDevBacklogStatus = exports.importSharedDocsToDailyDevBacklog = exports.claimReadyDailyDevBacklog = exports.runGroupMemoryStorageRecoverySelfTest = exports.loadGroups = exports.sendFeishuReportMessage = exports.FEISHU_SCOPES = void 0;
+exports.setTaskWatchdogTimer = setTaskWatchdogTimer;
+exports.setAgentRecoveryMonitorTimer = setAgentRecoveryMonitorTimer;
+exports.setAgentRecoveryProbeInFlight = setAgentRecoveryProbeInFlight;
+exports.runCronDailyDevProtocolSelfTestSafe = runCronDailyDevProtocolSelfTestSafe;
+exports.isTaskPaused = isTaskPaused;
+exports.getTaskFailureText = getTaskFailureText;
+exports.isRecoverableRuntimeFailure = isRecoverableRuntimeFailure;
+exports.isAgentExecutionBlockedPendingTask = isAgentExecutionBlockedPendingTask;
+exports.hasStrongTaskAcceptanceEvidence = hasStrongTaskAcceptanceEvidence;
 exports.deriveTaskLifecycle = deriveTaskLifecycle;
+exports.buildTaskPreflightReasoning = buildTaskPreflightReasoning;
+exports.userAgentRole = userAgentRole;
+exports.isVisibleChildAgentName = isVisibleChildAgentName;
+exports.getTaskWorkItems = getTaskWorkItems;
+exports.persistTaskWorkItems = persistTaskWorkItems;
+exports.claimTaskWorkItemForAgent = claimTaskWorkItemForAgent;
+exports.requeueTaskWorkItemsForWatchdog = requeueTaskWorkItemsForWatchdog;
+exports.buildTaskEntityChain = buildTaskEntityChain;
+exports.buildTaskCardView = buildTaskCardView;
+exports.normalizeContinuationKind = normalizeContinuationKind;
+exports.buildContinuationUserDecision = buildContinuationUserDecision;
+exports.splitUserAcceptanceText = splitUserAcceptanceText;
+exports.getTaskPlanMode = getTaskPlanMode;
+exports.buildUserCompletionReadinessSummary = buildUserCompletionReadinessSummary;
+exports.buildUserAcceptanceReview = buildUserAcceptanceReview;
+exports.normalizeMemoryGateAgent = normalizeMemoryGateAgent;
+exports.getTaskAgentMemoryContextSnapshotSources = getTaskAgentMemoryContextSnapshotSources;
+exports.summarizeTaskAgentMemoryContextSnapshot = summarizeTaskAgentMemoryContextSnapshot;
 exports.evaluateReceiptTaskAgentMemoryContextSnapshot = evaluateReceiptTaskAgentMemoryContextSnapshot;
+exports.collectTaskMemoryDispatchFreshnessGates = collectTaskMemoryDispatchFreshnessGates;
+exports.evaluateReceiptMemoryDispatchGate = evaluateReceiptMemoryDispatchGate;
+exports.collectTaskReadPlanRevalidationGates = collectTaskReadPlanRevalidationGates;
+exports.evaluateReceiptReadPlanRevalidationGate = evaluateReceiptReadPlanRevalidationGate;
+exports.collectTaskPostCompactReinjectionGates = collectTaskPostCompactReinjectionGates;
+exports.collectTaskPostCompactDispatchMarkers = collectTaskPostCompactDispatchMarkers;
+exports.evaluateReceiptPostCompactReinjectionGate = evaluateReceiptPostCompactReinjectionGate;
+exports.collectTaskApiMicrocompactEditPlans = collectTaskApiMicrocompactEditPlans;
+exports.evaluateReceiptApiMicrocompactEditPlan = evaluateReceiptApiMicrocompactEditPlan;
+exports.collectTaskGlobalMemoryReceiptGates = collectTaskGlobalMemoryReceiptGates;
+exports.collectTaskGlobalMemoryHealthGates = collectTaskGlobalMemoryHealthGates;
 exports.collectTaskTypedMemoryConsumptionRows = collectTaskTypedMemoryConsumptionRows;
+exports.collectTaskTypedMemoryPressureRecallUsageRows = collectTaskTypedMemoryPressureRecallUsageRows;
+exports.evaluateReceiptGlobalMemoryUsageGate = evaluateReceiptGlobalMemoryUsageGate;
+exports.evaluateReceiptGlobalMemoryHealthGate = evaluateReceiptGlobalMemoryHealthGate;
+exports.buildMemoryGateVisibleSummary = buildMemoryGateVisibleSummary;
+exports.buildGlobalMemoryReceiptVisibleSummary = buildGlobalMemoryReceiptVisibleSummary;
+exports.buildGlobalMemoryHealthGateVisibleSummary = buildGlobalMemoryHealthGateVisibleSummary;
+exports.buildReadPlanRevalidationGateVisibleSummary = buildReadPlanRevalidationGateVisibleSummary;
+exports.buildPostCompactReinjectionGateVisibleSummary = buildPostCompactReinjectionGateVisibleSummary;
+exports.buildApiMicrocompactReceiptVisibleSummary = buildApiMicrocompactReceiptVisibleSummary;
+exports.buildPostCompactDispatchMarkerVisibleSummary = buildPostCompactDispatchMarkerVisibleSummary;
+exports.evaluateChildAgentHandoffQuality = evaluateChildAgentHandoffQuality;
+exports.scoreChildAgentReceipt = scoreChildAgentReceipt;
+exports.runtimeToolSnapshotFromAudit = runtimeToolSnapshotFromAudit;
+exports.collectRuntimeToolingFromSources = collectRuntimeToolingFromSources;
+exports.buildRuntimeKernelSnapshot = buildRuntimeKernelSnapshot;
+exports.buildUserCoordinationAcknowledgement = buildUserCoordinationAcknowledgement;
+exports.sanitizeDispatchLaunchText = sanitizeDispatchLaunchText;
+exports.normalizeGroupDispatchLaunchRowStatus = normalizeGroupDispatchLaunchRowStatus;
+exports.buildDispatchLaunchSummary = buildDispatchLaunchSummary;
+exports.buildRevisedPlanModeDraft = buildRevisedPlanModeDraft;
+exports.buildAcceptedPlanModeDraft = buildAcceptedPlanModeDraft;
+exports.classifyGroupProjectTaskIntent = classifyGroupProjectTaskIntent;
+exports.normalizeGroupAgentGatewayTaskIntent = normalizeGroupAgentGatewayTaskIntent;
+exports.classifyGroupProjectTaskIntentWithAgent = classifyGroupProjectTaskIntentWithAgent;
+exports.shouldUseProjectAnalysisMode = shouldUseProjectAnalysisMode;
+exports.shouldCreatePersistentGroupTask = shouldCreatePersistentGroupTask;
+exports.classifyPlanModeRisk = classifyPlanModeRisk;
+exports.buildPlanModeClarificationQuestions = buildPlanModeClarificationQuestions;
+exports.buildGroupPlanModePreflight = buildGroupPlanModePreflight;
+exports.buildGroupProjectAnalysisContext = buildGroupProjectAnalysisContext;
+exports.buildProjectCodeReadOnlySnapshot = buildProjectCodeReadOnlySnapshot;
 exports.runCollaborationUxSelfTest = runCollaborationUxSelfTest;
+exports.buildInlineTaskRuntime = buildInlineTaskRuntime;
+exports.updateGroupTaskInlineStatus = updateGroupTaskInlineStatus;
+exports.buildChildAgentWorkerHandoff = buildChildAgentWorkerHandoff;
+exports.taskAgentInvocationMemoryOptions = taskAgentInvocationMemoryOptions;
+exports.taskAgentSessionLifecycleRunnerOptions = taskAgentSessionLifecycleRunnerOptions;
+exports.buildWorkerContinuationHandoff = buildWorkerContinuationHandoff;
+exports.buildChildAgentDevelopmentContract = buildChildAgentDevelopmentContract;
+exports.getTaskById = getTaskById;
+exports.buildChildAgentTaskText = buildChildAgentTaskText;
+exports.buildQueuedGroupTaskMessage = buildQueuedGroupTaskMessage;
+exports.normalizePlanAssignments = normalizePlanAssignments;
+exports.buildWorkflowMeta = buildWorkflowMeta;
+exports.getInitialWorkflowMeta = getInitialWorkflowMeta;
+exports.appendLegacyTaskExecutionGroupReport = appendLegacyTaskExecutionGroupReport;
+exports.appendLegacyCodeReviewGroupReport = appendLegacyCodeReviewGroupReport;
+exports.getTaskTargetKey = getTaskTargetKey;
+exports.extractActionableMentions = extractActionableMentions;
+exports.buildAgentQaProtocolInstructions = buildAgentQaProtocolInstructions;
+exports.getCoordinatorActionMentions = getCoordinatorActionMentions;
+exports.getAgentDependencyStateFromOutputs = getAgentDependencyStateFromOutputs;
+exports.buildTaskExecutionResult = buildTaskExecutionResult;
+exports.validateDailyDevGroupReady = validateDailyDevGroupReady;
+exports.uniqueStrings = uniqueStrings;
+exports.taskRequiresVerification = taskRequiresVerification;
+exports.isAdvisoryNeed = isAdvisoryNeed;
+exports.getVerificationEvidenceGate = getVerificationEvidenceGate;
+exports.getRequiredVerificationCoverage = getRequiredVerificationCoverage;
+exports.parseFormattedReceiptsFromText = parseFormattedReceiptsFromText;
+exports.collectTaskActualFileChanges = collectTaskActualFileChanges;
+exports.collectTaskCoordinationPlans = collectTaskCoordinationPlans;
+exports.collectTaskAssignmentEvidence = collectTaskAssignmentEvidence;
+exports.collectTaskReworkEvidence = collectTaskReworkEvidence;
+exports.buildTeamShutdownGate = buildTeamShutdownGate;
+exports.changeLooksHighRiskForIndependentReview = changeLooksHighRiskForIndependentReview;
+exports.taskChangeNeedsIndependentReview = taskChangeNeedsIndependentReview;
+exports.collectIndependentReviewEvidence = collectIndependentReviewEvidence;
+exports.buildIndependentReviewGate = buildIndependentReviewGate;
+exports.buildAcceptanceGate = buildAcceptanceGate;
+exports.taskRequiresCodeChanges = taskRequiresCodeChanges;
+exports.selectLatestDurableReceipts = selectLatestDurableReceipts;
+exports.buildDeliverySummary = buildDeliverySummary;
+exports.getTaskExecutionFromReceipt = getTaskExecutionFromReceipt;
+exports.getDailyDevCompletionGateSelfTest = getDailyDevCompletionGateSelfTest;
 exports.runMemoryDispatchGateReceiptValidationSelfTest = runMemoryDispatchGateReceiptValidationSelfTest;
 exports.runPressureMemoryProvenanceReceiptUsageSelfTest = runPressureMemoryProvenanceReceiptUsageSelfTest;
 exports.runTaskAgentMemoryContextSnapshotReceiptValidationSelfTest = runTaskAgentMemoryContextSnapshotReceiptValidationSelfTest;
@@ -47,31 +159,219 @@ exports.runReadPlanRevalidationGateReceiptValidationSelfTest = runReadPlanRevali
 exports.runApiMicrocompactReceiptValidationSelfTest = runApiMicrocompactReceiptValidationSelfTest;
 exports.runPostCompactReinjectionGateReceiptValidationSelfTest = runPostCompactReinjectionGateReceiptValidationSelfTest;
 exports.runPostCompactDispatchMarkerVisibleSelfTest = runPostCompactDispatchMarkerVisibleSelfTest;
+exports.buildDailyDevWorkflowRehearsal = buildDailyDevWorkflowRehearsal;
+exports.createDailyDevSmokeTask = createDailyDevSmokeTask;
+exports.getDailyDevSmokeStatus = getDailyDevSmokeStatus;
+exports.runAgentCliProbe = runAgentCliProbe;
+exports.taskRequiresAgentQa = taskRequiresAgentQa;
+exports.runRuntimeFallbackProbe = runRuntimeFallbackProbe;
+exports.normalizeStringArray = normalizeStringArray;
 exports.buildEvidenceGateFollowUps = buildEvidenceGateFollowUps;
+exports.isReviewLikeAgentName = isReviewLikeAgentName;
+exports.inferIndependentReviewSubject = inferIndependentReviewSubject;
+exports.getReceiptTestAgentHandoff = getReceiptTestAgentHandoff;
+exports.getReceiptIndependentReviewSubject = getReceiptIndependentReviewSubject;
+exports.findLatestTestAgentReviewReceipt = findLatestTestAgentReviewReceipt;
+exports.buildTestAgentReviewRecheckFollowUp = buildTestAgentReviewRecheckFollowUp;
+exports.buildIndependentReviewGateFollowUps = buildIndependentReviewGateFollowUps;
+exports.buildFailedIndependentReviewReworkFollowUps = buildFailedIndependentReviewReworkFollowUps;
+exports.writeSse = writeSse;
+exports.processCrossAgents = processCrossAgents;
+exports.resumeAgentQaFromStoredContinuation = resumeAgentQaFromStoredContinuation;
+exports.retryAgentQaItem = retryAgentQaItem;
+exports.handleAgentQaRequests = handleAgentQaRequests;
 exports.recoverGroupCoordinationDependencies = recoverGroupCoordinationDependencies;
 exports.runGroupCoordinationBusinessChainTestTurn = runGroupCoordinationBusinessChainTestTurn;
+exports.getCoordinatorVisibleMessageSelfTest = getCoordinatorVisibleMessageSelfTest;
+exports.buildCoordinatorReworkRoutingDecision = buildCoordinatorReworkRoutingDecision;
+exports.getMentionReworkRoute = getMentionReworkRoute;
+exports.coordinatorReworkRouteRequiresStop = coordinatorReworkRouteRequiresStop;
+exports.coordinatorReworkRouteNeedsFreshVerifier = coordinatorReworkRouteNeedsFreshVerifier;
+exports.coordinatorReworkRouteUsesVerifier = coordinatorReworkRouteUsesVerifier;
+exports.selectCoordinatorIndependentVerifier = selectCoordinatorIndependentVerifier;
+exports.isCoordinatorTestAgentName = isCoordinatorTestAgentName;
+exports.resolveProjectRuntimeForTestAgentHandoff = resolveProjectRuntimeForTestAgentHandoff;
+exports.collectCoordinatorChangedFiles = collectCoordinatorChangedFiles;
+exports.collectCoordinatorVerificationCommands = collectCoordinatorVerificationCommands;
+exports.isCoordinatorReviewInstruction = isCoordinatorReviewInstruction;
+exports.buildCoordinatorTestAgentAcceptanceCriteria = buildCoordinatorTestAgentAcceptanceCriteria;
+exports.buildTestAgentHandoffId = buildTestAgentHandoffId;
+exports.hasConfiguredTestAgentMultiSessionBrowserCheck = hasConfiguredTestAgentMultiSessionBrowserCheck;
+exports.collectConfiguredTestAgentReviewConfig = collectConfiguredTestAgentReviewConfig;
+exports.buildCoordinatorTestAgentHandoff = buildCoordinatorTestAgentHandoff;
+exports.testAgentStatusToReceiptStatus = testAgentStatusToReceiptStatus;
+exports.readTestAgentVerdictArtifact = readTestAgentVerdictArtifact;
+exports.resolveTestAgentDecisionVerdict = resolveTestAgentDecisionVerdict;
+exports.testAgentDecisionReceiptStatus = testAgentDecisionReceiptStatus;
+exports.testAgentDecisionReviewVerdict = testAgentDecisionReviewVerdict;
+exports.testAgentDecisionLabel = testAgentDecisionLabel;
+exports.collectTestAgentVerdictGapLines = collectTestAgentVerdictGapLines;
+exports.collectTestAgentVerdictNextActions = collectTestAgentVerdictNextActions;
+exports.collectTestAgentFailureSummaryLines = collectTestAgentFailureSummaryLines;
+exports.collectTestAgentFailureDiagnosticLines = collectTestAgentFailureDiagnosticLines;
+exports.compactTestAgentVerdict = compactTestAgentVerdict;
+exports.testAgentStatusLabel = testAgentStatusLabel;
+exports.testAgentRecommendationLabel = testAgentRecommendationLabel;
+exports.testAgentEvidenceTypeLabel = testAgentEvidenceTypeLabel;
+exports.testAgentVisibleReviewSummary = testAgentVisibleReviewSummary;
+exports.collectTestAgentBrowserInteractionLines = collectTestAgentBrowserInteractionLines;
+exports.collectTestAgentBrowserNetworkLines = collectTestAgentBrowserNetworkLines;
+exports.collectTestAgentBrowserFlowLines = collectTestAgentBrowserFlowLines;
+exports.collectTestAgentBrowserMultiSessionLines = collectTestAgentBrowserMultiSessionLines;
+exports.collectTestAgentBrowserAuthenticationLines = collectTestAgentBrowserAuthenticationLines;
+exports.collectTestAgentBrowserActionEffectLines = collectTestAgentBrowserActionEffectLines;
+exports.collectTestAgentBrowserRecoveryLines = collectTestAgentBrowserRecoveryLines;
+exports.collectTestAgentAdversarialEvidenceLines = collectTestAgentAdversarialEvidenceLines;
+exports.collectTestAgentBrowserTableLines = collectTestAgentBrowserTableLines;
+exports.collectTestAgentBrowserUploadLines = collectTestAgentBrowserUploadLines;
+exports.collectTestAgentBrowserDownloadLines = collectTestAgentBrowserDownloadLines;
+exports.collectTestAgentBrowserEvidenceSummaryLines = collectTestAgentBrowserEvidenceSummaryLines;
+exports.collectTestAgentVerificationLines = collectTestAgentVerificationLines;
+exports.collectTestAgentEvidenceLines = collectTestAgentEvidenceLines;
+exports.getTestAgentReviewedFiles = getTestAgentReviewedFiles;
+exports.buildNativeTestAgentReceipt = buildNativeTestAgentReceipt;
+exports.buildNativeTestAgentReviewSummary = buildNativeTestAgentReviewSummary;
+exports.formatNativeTestAgentOutput = formatNativeTestAgentOutput;
+exports.summarizeNativeTestAgentExecutionPlan = summarizeNativeTestAgentExecutionPlan;
+exports.buildNativeTestAgentPlanBlockedReceipt = buildNativeTestAgentPlanBlockedReceipt;
+exports.formatNativeTestAgentPlanBlockedOutput = formatNativeTestAgentPlanBlockedOutput;
+exports.buildNativeTestAgentRuntimeToolContext = buildNativeTestAgentRuntimeToolContext;
+exports.buildCoordinatorReworkContinuationFallback = buildCoordinatorReworkContinuationFallback;
+exports.buildCoordinatorReworkFollowUp = buildCoordinatorReworkFollowUp;
+exports.buildCoordinatorReworkTask = buildCoordinatorReworkTask;
 exports.runCoordinatorReworkProtocolSelfTest = runCoordinatorReworkProtocolSelfTest;
+exports.followUpTargetCompleted = followUpTargetCompleted;
+exports.scheduleTestAgentRecheckAfterFollowUps = scheduleTestAgentRecheckAfterFollowUps;
+exports.filterCoordinatorLlmFollowUpsAgainstHardRoutes = filterCoordinatorLlmFollowUpsAgainstHardRoutes;
+exports.runCoordinatorReviewLoop = runCoordinatorReviewLoop;
+exports.processTargetQueue = processTargetQueue;
 exports.enqueueTask = enqueueTask;
 exports.createAndQueueTask = createAndQueueTask;
+exports.backfillTaskTraceIds = backfillTaskTraceIds;
 exports.resumeTaskQueues = resumeTaskQueues;
+exports.getQueueStatus = getQueueStatus;
+exports.getTaskTargetKeyFromTask = getTaskTargetKeyFromTask;
+exports.isTaskQueuedInMemory = isTaskQueuedInMemory;
+exports.getTaskAgeMs = getTaskAgeMs;
+exports.isWatchdogGapReworkCandidate = isWatchdogGapReworkCandidate;
+exports.hasFreshSuccessfulAgentProbe = hasFreshSuccessfulAgentProbe;
+exports.getTaskWatchdogStatus = getTaskWatchdogStatus;
 exports.runTaskWatchdog = runTaskWatchdog;
+exports.cleanupRuntimeDebt = cleanupRuntimeDebt;
+exports.getAgentRecoveryWorkSummary = getAgentRecoveryWorkSummary;
+exports.getAgentRecoveryProbePayload = getAgentRecoveryProbePayload;
+exports.taskMatchesAgentProbeTarget = taskMatchesAgentProbeTarget;
+exports.buildAgentRecoveryProbeGroups = buildAgentRecoveryProbeGroups;
+exports.getAgentRecoveryProbeGroups = getAgentRecoveryProbeGroups;
+exports.aggregateBlockedRecovery = aggregateBlockedRecovery;
+exports.aggregateRuntimeRecovery = aggregateRuntimeRecovery;
+exports.recoverAgentExecutionBlockedTasks = recoverAgentExecutionBlockedTasks;
 exports.runAgentRecoveryMonitorOnce = runAgentRecoveryMonitorOnce;
 exports.startAgentRecoveryMonitor = startAgentRecoveryMonitor;
 exports.stopAgentRecoveryMonitor = stopAgentRecoveryMonitor;
 exports.startTaskWatchdog = startTaskWatchdog;
 exports.stopTaskWatchdog = stopTaskWatchdog;
+exports.applyRuntimeMonitorControl = applyRuntimeMonitorControl;
+exports.createDiagnosticCheck = createDiagnosticCheck;
+exports.getGroupMainAgentActionRegistry = getGroupMainAgentActionRegistry;
+exports.runGroupMainAgentActionRegistrySelfTest = runGroupMainAgentActionRegistrySelfTest;
+exports.appendMainAgentDecisionTrace = appendMainAgentDecisionTrace;
+exports.applyMainAgentDecisionPetState = applyMainAgentDecisionPetState;
+exports.runGroupMainAgentToolLoopSelfTest = runGroupMainAgentToolLoopSelfTest;
+exports.getWorkDirState = getWorkDirState;
+exports.getClaudeLocalGatewayReadiness = getClaudeLocalGatewayReadiness;
+exports.getChildProcessCapability = getChildProcessCapability;
+exports.normalizeAgentProbeTarget = normalizeAgentProbeTarget;
+exports.getAgentProbeTargetStatusKey = getAgentProbeTargetStatusKey;
+exports.getAgentProbeTargetStatusFile = getAgentProbeTargetStatusFile;
+exports.readAgentProbeStatusFile = readAgentProbeStatusFile;
+exports.doesProbeTargetMatchRequired = doesProbeTargetMatchRequired;
+exports.listAgentProbeTargetStatuses = listAgentProbeTargetStatuses;
+exports.readAgentProbeStatus = readAgentProbeStatus;
+exports.getAgentProbeHealth = getAgentProbeHealth;
+exports.buildAgentExecutionFixActions = buildAgentExecutionFixActions;
+exports.getAgentProbeOutputFailure = getAgentProbeOutputFailure;
+exports.getAgentExecutionReadiness = getAgentExecutionReadiness;
+exports.enforceAgentProbeExecutionReadiness = enforceAgentProbeExecutionReadiness;
+exports.taskRequiresFreshAgentProbe = taskRequiresFreshAgentProbe;
+exports.getTaskRequiredProbeTarget = getTaskRequiredProbeTarget;
+exports.getProbeTargetLabel = getProbeTargetLabel;
+exports.doesProbeMatchTaskTarget = doesProbeMatchTaskTarget;
+exports.taskNeedsGroupWideAgentProbe = taskNeedsGroupWideAgentProbe;
+exports.summarizeAgentProbeTargets = summarizeAgentProbeTargets;
+exports.getTaskGroupAgentProbeReadiness = getTaskGroupAgentProbeReadiness;
+exports.enforceTaskAgentProbeReadiness = enforceTaskAgentProbeReadiness;
+exports.getTaskAgentExecutionReadiness = getTaskAgentExecutionReadiness;
+exports.getExternalAgentRunnerStatus = getExternalAgentRunnerStatus;
+exports.buildAgentProbeMatrix = buildAgentProbeMatrix;
 exports.buildDailyDevAgentDiagnostics = buildDailyDevAgentDiagnostics;
+exports.runAgentCliProbeBatch = runAgentCliProbeBatch;
+exports.buildCoordinatorSharedFilesContext = buildCoordinatorSharedFilesContext;
+exports.buildTaskSourceDocumentsContext = buildTaskSourceDocumentsContext;
+exports.mergeCoordinatorDocumentContexts = mergeCoordinatorDocumentContexts;
 exports.runCollaborationProtocolSelfTest = runCollaborationProtocolSelfTest;
+exports.getProjectExtraConfig = getProjectExtraConfig;
+exports.getProjectAgentCapabilityProfile = getProjectAgentCapabilityProfile;
+exports.collectProjectPolicyViolations = collectProjectPolicyViolations;
+exports.buildAgentToolContext = buildAgentToolContext;
+exports.runtimeToolDispatchBlockedMessage = runtimeToolDispatchBlockedMessage;
+exports.runtimeToolDispatchBlockedReceipt = runtimeToolDispatchBlockedReceipt;
+exports.assertRuntimeToolDispatchReady = assertRuntimeToolDispatchReady;
+exports.prepareAgentRuntimeTools = prepareAgentRuntimeTools;
+exports.getAgentRuntimeConsistencyStatus = getAgentRuntimeConsistencyStatus;
+exports.getProjectVerificationHintDetail = getProjectVerificationHintDetail;
+exports.buildProjectVerificationHints = buildProjectVerificationHints;
+exports.compactFormText = compactFormText;
 exports.createTask = createTask;
+exports.classifyTaskContinuation = classifyTaskContinuation;
+exports.looksLikeTaskContinuation = looksLikeTaskContinuation;
+exports.getGlobalMissionChildDeliveryEvidence = getGlobalMissionChildDeliveryEvidence;
+exports.globalMissionChildGatePassed = globalMissionChildGatePassed;
+exports.refreshGlobalMissionParentInTaskList = refreshGlobalMissionParentInTaskList;
+exports.getGlobalDirectDispatchMeta = getGlobalDirectDispatchMeta;
+exports.getGlobalDirectDispatchContinuationKey = getGlobalDirectDispatchContinuationKey;
+exports.shouldNotifyGlobalDirectDispatchContinuation = shouldNotifyGlobalDirectDispatchContinuation;
+exports.buildGlobalDirectDispatchContinuationMessage = buildGlobalDirectDispatchContinuationMessage;
+exports.shouldNotifyGlobalDirectDispatchCompletion = shouldNotifyGlobalDirectDispatchCompletion;
+exports.buildGlobalDirectDispatchCompletionMessage = buildGlobalDirectDispatchCompletionMessage;
+exports.shouldNotifyGlobalDirectDispatchRollback = shouldNotifyGlobalDirectDispatchRollback;
+exports.buildGlobalDirectDispatchRollbackMessage = buildGlobalDirectDispatchRollbackMessage;
+exports.appendGlobalDirectDispatchContinuationToHistory = appendGlobalDirectDispatchContinuationToHistory;
+exports.appendGlobalDirectDispatchCompletionToHistory = appendGlobalDirectDispatchCompletionToHistory;
+exports.appendGlobalDirectDispatchRollbackToHistory = appendGlobalDirectDispatchRollbackToHistory;
 exports.updateTask = updateTask;
 exports.refreshGlobalDevelopmentMissions = refreshGlobalDevelopmentMissions;
 exports.getGlobalDevelopmentMission = getGlobalDevelopmentMission;
+exports.getMissionDependencyRefs = getMissionDependencyRefs;
+exports.missionChildMatchesRef = missionChildMatchesRef;
 exports.removeTaskFromQueues = removeTaskFromQueues;
+exports.appendGlobalMissionSupervisorTimeline = appendGlobalMissionSupervisorTimeline;
 exports.superviseGlobalDevelopmentMissionCycle = superviseGlobalDevelopmentMissionCycle;
 exports.controlGlobalDevelopmentMission = controlGlobalDevelopmentMission;
+exports.targetProjectForMissionTarget = targetProjectForMissionTarget;
+exports.buildGlobalMissionTargetHandoff = buildGlobalMissionTargetHandoff;
+exports.buildGlobalGroupTestAgentOwnership = buildGlobalGroupTestAgentOwnership;
+exports.normalizeGlobalMissionTargetRequirements = normalizeGlobalMissionTargetRequirements;
 exports.createGlobalDevelopmentMission = createGlobalDevelopmentMission;
+exports.canCompleteDailyDevFromDeliverySummary = canCompleteDailyDevFromDeliverySummary;
+exports.reconcileTaskDeliveryEvidence = reconcileTaskDeliveryEvidence;
+exports.validateTaskManualStatusUpdate = validateTaskManualStatusUpdate;
+exports.buildTaskGapContinuationDraft = buildTaskGapContinuationDraft;
+exports.buildTargetedReworkContinuationDraft = buildTargetedReworkContinuationDraft;
+exports.getTaskGapItems = getTaskGapItems;
+exports.getTaskGapFingerprint = getTaskGapFingerprint;
+exports.isAutomaticGapContinuationSource = isAutomaticGapContinuationSource;
+exports.canAutoContinueTaskGaps = canAutoContinueTaskGaps;
+exports.reconcileTaskCollaborationState = reconcileTaskCollaborationState;
+exports.hasDailyDevContinuationGaps = hasDailyDevContinuationGaps;
+exports.buildExecutionDashboard = buildExecutionDashboard;
 exports.continueDailyDevTasksFromGaps = continueDailyDevTasksFromGaps;
+exports.continueTaskWithMessage = continueTaskWithMessage;
 exports.retryTask = retryTask;
+exports.switchTaskExecutor = switchTaskExecutor;
+exports.retryRuntimeFailedTasks = retryRuntimeFailedTasks;
+exports.archiveTask = archiveTask;
+exports.restoreArchivedTask = restoreArchivedTask;
 exports.purgeArchivedTask = purgeArchivedTask;
 exports.handleCollaborationApi = handleCollaborationApi;
 const fs = __importStar(require("fs"));
@@ -80,39 +380,29 @@ const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const os = __importStar(require("os"));
 const utils_1 = require("../../core/utils");
-const source_ingestion_1 = require("../requirements/source-ingestion");
 const db_1 = require("../../core/db");
 const role_skills_1 = require("../../skills/role-skills");
 const group_orchestrator_1 = require("./group-orchestrator");
 const display_1 = require("./display");
 const project_analysis_1 = require("./project-analysis");
 const memory_1 = require("./memory");
-const group_session_memory_model_extraction_1 = require("./group-session-memory-model-extraction");
-const group_memory_index_1 = require("./group-memory-index");
 const feishu_1 = require("./feishu");
 const feishu_channel_1 = require("./feishu-channel");
-const feishu_routes_1 = require("./feishu-routes");
-const agent_qa_routes_1 = require("./agent-qa-routes");
 const group_coordination_mcp_1 = require("../../integrations/group-coordination-mcp");
 const agent_internal_mcp_1 = require("../../integrations/agent-internal-mcp");
+const memory_context_consumption_receipt_1 = require("../../integrations/memory-context-consumption-receipt");
 const group_coordination_store_1 = require("./group-coordination-store");
-const group_live_routes_1 = require("./group-live-routes");
 const agent_qa_service_1 = require("./agent-qa-service");
 const task_delivery_report_1 = require("./task-delivery-report");
 const verdict_1 = require("../../test-agent/verdict");
+const provider_tool_access_evidence_1 = require("../../agents/provider-tool-access-evidence");
 const test_agent_review_bridge_1 = require("../../agents/test-agent-review-bridge");
 const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
 const agent_receipts_1 = require("./agent-receipts");
 const agent_notifications_1 = require("./agent-notifications");
 const global_mission_1 = require("./global-mission");
 const logs_1 = require("./logs");
-const group_routes_1 = require("./group-routes");
-const orchestrator_routes_1 = require("./orchestrator-routes");
-const task_governance_routes_1 = require("./task-governance-routes");
-const startup_task_recovery_1 = require("./startup-task-recovery");
 const test_agent_runner_1 = require("./test-agent-runner");
-const artifact_retention_1 = require("../../test-agent/artifact-retention");
-const task_replay_1 = require("./task-replay");
 const storage_1 = require("./storage");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const runtime_1 = require("../../agents/runtime");
@@ -124,10 +414,6 @@ const agent_sessions_1 = require("../../tasks/agent-sessions");
 const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
 const collaboration_resilience_1 = require("./collaboration-resilience");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
-const reliability_drills_1 = require("../../system/reliability-drills");
-const soak_test_1 = require("../../system/soak-test");
-const process_lifecycle_1 = require("../../system/process-lifecycle");
-const task_replay_journal_1 = require("../../system/task-replay-journal");
 const reasoning_loop_1 = require("../../agents/reasoning-loop");
 const memory_2 = require("../../projects/memory");
 const memory_3 = require("../../agents/global/memory");
@@ -151,25 +437,34 @@ Object.defineProperty(exports, "claimReadyDailyDevBacklog", { enumerable: true, 
 Object.defineProperty(exports, "importSharedDocsToDailyDevBacklog", { enumerable: true, get: function () { return daily_dev_backlog_2.importSharedDocsToDailyDevBacklog; } });
 Object.defineProperty(exports, "markDailyDevBacklogStatus", { enumerable: true, get: function () { return daily_dev_backlog_2.markDailyDevBacklogStatus; } });
 // === 任务队列系统（支持并行执行）===
-const taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
+exports.taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
 const runningTasks = new Map(); // 正在运行的任务目标
-const runningTaskIds = new Set(); // 正在运行的任务 ID
+exports.runningTaskIds = new Set(); // 正在运行的任务 ID
 const coordinationSettlementInFlight = new Set();
-const TASK_WATCHDOG_INTERVAL_MS = 60 * 1000;
-const TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
-const TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = 60 * 1000;
-const TASK_WATCHDOG_GAP_REWORK_MAX = 3;
-const AGENT_RECOVERY_PROBE_INTERVAL_MS = 5 * 60 * 1000;
-const AGENT_RECOVERY_PROBE_TIMEOUT_MS = 45 * 1000;
-const AGENT_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
-const AGENT_PROBE_FAILURE_BLOCK_MS = 15 * 60 * 1000;
-const AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = 5 * 60 * 1000;
+exports.TASK_WATCHDOG_INTERVAL_MS = 60 * 1000;
+exports.TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
+exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = 60 * 1000;
+exports.TASK_WATCHDOG_GAP_REWORK_MAX = 3;
+exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = 5 * 60 * 1000;
+exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = 45 * 1000;
+exports.AGENT_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
+exports.AGENT_PROBE_FAILURE_BLOCK_MS = 15 * 60 * 1000;
+exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = 5 * 60 * 1000;
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
-const AGENT_PROBE_STATUS_FILE = path.join(AGENT_RUNNER_DIR, "probe-status.json");
+exports.AGENT_PROBE_STATUS_FILE = path.join(AGENT_RUNNER_DIR, "probe-status.json");
 const AGENT_PROBE_TARGET_STATUS_DIR = path.join(AGENT_RUNNER_DIR, "probe-targets");
-let taskWatchdogTimer = null;
-let agentRecoveryMonitorTimer = null;
-let agentRecoveryProbeInFlight = false;
+exports.taskWatchdogTimer = null;
+exports.agentRecoveryMonitorTimer = null;
+exports.agentRecoveryProbeInFlight = false;
+function setTaskWatchdogTimer(value) {
+    exports.taskWatchdogTimer = value;
+}
+function setAgentRecoveryMonitorTimer(value) {
+    exports.agentRecoveryMonitorTimer = value;
+}
+function setAgentRecoveryProbeInFlight(value) {
+    exports.agentRecoveryProbeInFlight = value;
+}
 function runCronDailyDevProtocolSelfTestSafe() {
     try {
         const cronModule = require("../scheduling/cron");
@@ -189,7 +484,7 @@ function runCronDailyDevProtocolSelfTestSafe() {
     }
 }
 // 优先级权重
-const PRIORITY_WEIGHT = { high: 3, normal: 2, low: 1 };
+exports.PRIORITY_WEIGHT = { high: 3, normal: 2, low: 1 };
 function isTaskPaused(task) {
     return !!(task?.is_paused || task?.paused);
 }
@@ -223,7 +518,7 @@ function isRecoverableRuntimeFailure(task) {
 function isAgentExecutionBlockedPendingTask(task) {
     if (!task?.auto_execute || isTaskPaused(task) || task.status !== "pending")
         return false;
-    if (runningTaskIds.has(task.id) || isTaskQueuedInMemory(task.id))
+    if (exports.runningTaskIds.has(task.id) || isTaskQueuedInMemory(task.id))
         return false;
     const readiness = task.execution_readiness || {};
     const text = [
@@ -1960,7 +2255,7 @@ function splitUserAcceptanceText(value) {
         .slice(0, 8);
 }
 function getTaskPlanMode(task) {
-    return task?.workflow_meta?.plan_mode || task?.workflow_meta?.intake?.plan_mode || task?.intake_draft || null;
+    return require("./collaboration-task-intake").getTaskPlanMode(task);
 }
 function buildUserWorkOrderPreview(task, summary = {}, planMode = null) {
     const plan = planMode || getTaskPlanMode(task);
@@ -2744,223 +3039,22 @@ function summarizeTaskAgentMemoryContextSnapshot(snapshot = {}) {
         delivery_receipt: deliveryReceipt,
         delivery_receipt_checksum_valid: deliveryReceiptChecksumValid,
         memory_context_delivered: deliveryReceipt?.delivered === true && deliveryReceipt?.status === "delivered",
+        memory_context_consumption_receipt_required: deliveryReceipt?.memoryContextConsumptionReceiptRequired === true,
+        memory_context_consumption_receipt_valid: deliveryReceipt?.memoryContextConsumptionReceiptValid === true,
+        memory_context_consumption_receipt_status: String(deliveryReceipt?.memoryContextConsumptionReceiptStatus || ""),
+        memory_context_consumption_challenge_id: String(deliveryReceipt?.memoryContextConsumptionChallengeId || context.memory_context_consumption_challenge?.challenge_id || ""),
+        memory_context_consumption_receipt_signature: String(deliveryReceipt?.memoryContextConsumptionReceiptSignature || ""),
+        memory_context_consumption_recovery_present: deliveryReceipt?.memoryContextConsumptionRecoveryPresent === true,
+        memory_context_consumption_recovery_valid: deliveryReceipt?.memoryContextConsumptionRecoveryValid === true,
+        memory_context_consumption_recovery_status: String(deliveryReceipt?.memoryContextConsumptionRecoveryStatus || "not_needed"),
+        memory_context_consumption_recovery_id: String(deliveryReceipt?.memoryContextConsumptionRecoveryId || ""),
         gate_ids: uniqueStrings(context.gate_ids || context.gateIds || snapshot.ref?.gateIds || snapshot.ref?.gate_ids || []).slice(0, 80),
         replay_repair_dispatch_brief_ids: replayRepairDispatchBriefs.map((brief) => brief.brief_id).filter(Boolean),
         replay_repair_dispatch_briefs: replayRepairDispatchBriefs.slice(0, 8),
     };
 }
 function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, context = {}) {
-    const snapshots = getTaskAgentMemoryContextSnapshotSources(context).map(summarizeTaskAgentMemoryContextSnapshot);
-    const agent = normalizeMemoryGateAgent(receipt.agent || receipt.project || task?.target_project);
-    const receiptTaskSessionId = String(receipt.task_agent_session_id || receipt.taskAgentSessionId || "").trim();
-    const receiptSnapshotId = String(receipt.memory_context_snapshot_id || receipt.memoryContextSnapshotId || "").trim();
-    const receiptSnapshotChecksum = String(receipt.memory_context_snapshot_checksum || receipt.memoryContextSnapshotChecksum || "").trim();
-    const declaredUsage = receipt.agentMemoryContextUsage
-        || receipt.agent_memory_context_usage
-        || receipt.memoryContextUsage
-        || receipt.memory_context_usage
-        || null;
-    const declaredBindingId = String(declaredUsage?.bindingId || declaredUsage?.binding_id || "").trim();
-    const declaredGroupSessionId = String(declaredUsage?.groupSessionId || declaredUsage?.group_session_id || "").trim();
-    const declaredSessionMemoryChecksum = String(declaredUsage?.sessionMemoryChecksum || declaredUsage?.session_memory_checksum || "").trim();
-    const declaredModelExtractionExecutionId = String(declaredUsage?.modelExtractionExecutionId || declaredUsage?.model_extraction_execution_id || "").trim();
-    const declaredModelExtractionReplayStatus = String(declaredUsage?.modelExtractionReplayStatus || declaredUsage?.model_extraction_replay_status || "").trim();
-    const declaredFactSupersessionGraphChecksum = String(declaredUsage?.factSupersessionGraphChecksum || declaredUsage?.fact_supersession_graph_checksum || "").trim();
-    const declaredUsageState = String(declaredUsage?.usageState || declaredUsage?.usage_state || "").trim().toLowerCase();
-    const declaredReason = String(declaredUsage?.reason || "").trim();
-    const declaredFactCitations = Array.isArray(receipt.memoryFactCitations || receipt.memory_fact_citations)
-        ? (receipt.memoryFactCitations || receipt.memory_fact_citations)
-        : [];
-    const matchingAgent = snapshots.filter((snapshot) => {
-        const target = normalizeMemoryGateAgent(snapshot.project);
-        return !target || !agent || target === agent;
-    });
-    const evaluated = matchingAgent.map((snapshot) => {
-        const sessionId = String(snapshot.task_agent_session_id || "").trim();
-        const binding = snapshot.group_session_memory_binding || {};
-        const delivery = snapshot.delivery_receipt || {};
-        const systemSessionBound = !!receiptTaskSessionId && sessionId === receiptTaskSessionId;
-        const systemSnapshotBound = !!receiptSnapshotId && snapshot.snapshot_id === receiptSnapshotId;
-        const systemChecksumBound = !!receiptSnapshotChecksum && snapshot.checksum === receiptSnapshotChecksum;
-        const deliveryBound = delivery?.delivered === true
-            && delivery?.status === "delivered"
-            && snapshot.delivery_receipt_checksum_valid === true
-            && String(delivery.taskAgentSessionId || "") === sessionId
-            && String(delivery.memoryContextSnapshotId || "") === String(snapshot.snapshot_id || "")
-            && String(delivery.memoryContextSnapshotChecksum || "") === String(snapshot.checksum || "")
-            && String(delivery.groupSessionMemoryBinding?.scopeId || "") === String(snapshot.group_session_scope_id || binding.scopeId || "")
-            && String(delivery.groupSessionMemoryBinding?.checksum || "") === String(binding.checksum || "")
-            && String(delivery.groupSessionMemoryBindingChecksum || "") === String(binding.checksum || "")
-            && delivery.modelExtractionEvidenceValid !== false;
-        const bindingIdMatches = !!declaredBindingId && declaredBindingId === String(snapshot.memory_binding_id || binding.memoryBindingId || "");
-        const groupSessionMatches = !!declaredGroupSessionId && declaredGroupSessionId === String(snapshot.group_session_id || binding.groupSessionId || "");
-        const expectedSessionMemoryChecksum = String(snapshot.session_memory_checksum || binding.sessionMemoryChecksum || "");
-        const sessionMemoryChecksumMatches = expectedSessionMemoryChecksum
-            ? declaredSessionMemoryChecksum === expectedSessionMemoryChecksum
-            : declaredSessionMemoryChecksum === "";
-        const expectedModelExtractionExecutionId = String(binding.modelExtractionExecutionId || binding.model_extraction_execution_id || "").trim();
-        const expectedModelExtractionReplayStatus = String(binding.modelExtractionReplayStatus || binding.model_extraction_replay_status || "").trim();
-        const expectedFactSupersessionGraphChecksum = String(binding.factSupersessionGraphChecksum || binding.fact_supersession_graph_checksum || "").trim();
-        const modelExtractionExecutionMatches = declaredModelExtractionExecutionId === expectedModelExtractionExecutionId;
-        const modelExtractionReplayStatusMatches = declaredModelExtractionReplayStatus === expectedModelExtractionReplayStatus;
-        const factSupersessionGraphChecksumMatches = declaredFactSupersessionGraphChecksum === expectedFactSupersessionGraphChecksum;
-        const modelExtractionEvidencePass = binding.modelExtractionEvidenceRequired !== true || (binding.modelExtractionEvidenceValid === true
-            && binding.deliveryReady !== false
-            && String(binding.modelExtractionReplayExecutionId || binding.model_extraction_replay_execution_id || "") === expectedModelExtractionExecutionId
-            && expectedModelExtractionReplayStatus === "verified"
-            && modelExtractionExecutionMatches
-            && modelExtractionReplayStatusMatches
-            && factSupersessionGraphChecksumMatches);
-        const usageStateValid = ["used", "verified", "ignored"].includes(declaredUsageState);
-        const declarationCoherent = declaredUsageState === "ignored"
-            ? Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) && (receipt.memoryIgnored || receipt.memory_ignored).length > 0
-            : Array.isArray(receipt.memoryUsed || receipt.memory_used) && (receipt.memoryUsed || receipt.memory_used).length > 0;
-        const expectedSectionEvidence = Array.isArray(binding.sessionMemorySectionEvidence || binding.session_memory_section_evidence)
-            ? (binding.sessionMemorySectionEvidence || binding.session_memory_section_evidence)
-            : [];
-        const expectedEvidenceById = new Map(expectedSectionEvidence.map((item) => [
-            String(item?.evidenceId || item?.evidence_id || "").trim(),
-            item,
-        ]).filter(([id]) => !!id));
-        const expectedActiveFacts = Array.isArray(binding.activeFacts || binding.active_facts)
-            ? (binding.activeFacts || binding.active_facts)
-            : [];
-        const expectedActiveFactById = new Map(expectedActiveFacts.map((fact) => [
-            String(fact?.factId || fact?.fact_id || "").trim(),
-            fact,
-        ]).filter(([id]) => !!id));
-        const activeFactMessageIds = new Set(uniqueStrings(expectedActiveFacts.map((fact) => fact?.sourceMessageId || fact?.source_message_id || "")));
-        const evaluatedFactCitations = declaredFactCitations.map((citation) => {
-            const evidenceId = String(citation?.evidenceId || citation?.evidence_id || "").trim();
-            const expected = expectedEvidenceById.get(evidenceId) || null;
-            const section = String(citation?.section || "").trim();
-            const sectionChecksum = String(citation?.sectionChecksum || citation?.section_checksum || "").trim();
-            const sourceTranscriptChecksum = String(citation?.sourceTranscriptChecksum || citation?.source_transcript_checksum || "").trim();
-            const sourceMessageIds = uniqueStrings(citation?.sourceMessageIds || citation?.source_message_ids || []).slice(0, 40);
-            const usage = String(citation?.usage || citation?.reason || "").trim();
-            const factId = String(citation?.factId || citation?.fact_id || "").trim();
-            const factChecksum = String(citation?.factChecksum || citation?.fact_checksum || "").trim();
-            const expectedActiveFact = expectedActiveFactById.get(factId) || null;
-            const sectionMatches = !!expected && section === String(expected.section || "").trim();
-            const sectionChecksumMatches = !!expected && sectionChecksum === String(expected.sectionChecksum || expected.section_checksum || "").trim();
-            const expectedSourceChecksum = String(expected?.sourceTranscriptChecksum || expected?.source_transcript_checksum || "").trim();
-            const sourceTranscriptChecksumMatches = !!expected && (!expectedSourceChecksum || sourceTranscriptChecksum === expectedSourceChecksum);
-            const expectedSourceMessageIds = new Set(uniqueStrings(expected?.sourceMessageIds || expected?.source_message_ids || []));
-            const sourceMessageIdsRequired = expectedSourceMessageIds.size > 0;
-            const sourceMessageIdsMatch = !sourceMessageIdsRequired
-                || (sourceMessageIds.length > 0 && sourceMessageIds.every((messageId) => expectedSourceMessageIds.has(messageId)));
-            const referencesActiveFactSource = sourceMessageIds.some((messageId) => activeFactMessageIds.has(messageId));
-            const activeFactBindingRequired = !!factId || !!factChecksum || referencesActiveFactSource;
-            const activeFactBindingMatches = !activeFactBindingRequired || (!!expectedActiveFact
-                && factId === String(expectedActiveFact.factId || expectedActiveFact.fact_id || "")
-                && factChecksum === String(expectedActiveFact.factChecksum || expectedActiveFact.fact_checksum || ""));
-            return {
-                evidence_id: evidenceId,
-                section,
-                section_checksum: sectionChecksum,
-                source_transcript_checksum: sourceTranscriptChecksum,
-                source_message_ids: sourceMessageIds,
-                usage,
-                fact_id: factId,
-                fact_checksum: factChecksum,
-                active_fact_binding_required: activeFactBindingRequired,
-                active_fact_binding_matches: activeFactBindingMatches,
-                known_evidence: !!expected,
-                section_matches: sectionMatches,
-                section_checksum_matches: sectionChecksumMatches,
-                source_transcript_checksum_matches: sourceTranscriptChecksumMatches,
-                source_message_ids_required: sourceMessageIdsRequired,
-                source_message_ids_match: sourceMessageIdsMatch,
-                pass: !!expected && sectionMatches && sectionChecksumMatches && sourceTranscriptChecksumMatches && sourceMessageIdsMatch && activeFactBindingMatches && !!usage,
-            };
-        });
-        const citationsRequired = expectedSectionEvidence.length > 0 && ["used", "verified"].includes(declaredUsageState);
-        const factCitationsPass = declaredUsageState === "ignored"
-            ? declaredFactCitations.length === 0
-            : !citationsRequired || (evaluatedFactCitations.length > 0 && evaluatedFactCitations.every((item) => item.pass));
-        const pass = systemSessionBound
-            && systemSnapshotBound
-            && systemChecksumBound
-            && deliveryBound
-            && bindingIdMatches
-            && groupSessionMatches
-            && sessionMemoryChecksumMatches
-            && modelExtractionExecutionMatches
-            && modelExtractionReplayStatusMatches
-            && factSupersessionGraphChecksumMatches
-            && modelExtractionEvidencePass
-            && usageStateValid
-            && declarationCoherent
-            && factCitationsPass
-            && !!declaredReason;
-        return {
-            ...snapshot,
-            pass,
-            system_session_bound: systemSessionBound,
-            system_snapshot_bound: systemSnapshotBound,
-            system_checksum_bound: systemChecksumBound,
-            delivery_bound: deliveryBound,
-            binding_id_matches: bindingIdMatches,
-            group_session_matches: groupSessionMatches,
-            session_memory_checksum_matches: sessionMemoryChecksumMatches,
-            model_extraction_execution_matches: modelExtractionExecutionMatches,
-            model_extraction_replay_status_matches: modelExtractionReplayStatusMatches,
-            fact_supersession_graph_checksum_matches: factSupersessionGraphChecksumMatches,
-            model_extraction_evidence_passed: modelExtractionEvidencePass,
-            usage_state_valid: usageStateValid,
-            declaration_coherent: declarationCoherent,
-            memory_fact_citations_required: citationsRequired,
-            memory_fact_citations_passed: factCitationsPass,
-            memory_fact_citations: evaluatedFactCitations,
-            available_memory_section_evidence_count: expectedSectionEvidence.length,
-        };
-    });
-    const bound = evaluated.filter((snapshot) => snapshot.pass === true);
-    const required = matchingAgent.length > 0;
-    const pass = !required || bound.length > 0;
-    return {
-        schema: "ccm-task-agent-memory-context-consumption-validation-v4",
-        required,
-        pass,
-        snapshot_ids: matchingAgent.map((snapshot) => snapshot.snapshot_id).filter(Boolean),
-        matched_snapshot_ids: bound.map((snapshot) => snapshot.snapshot_id).filter(Boolean),
-        missing_snapshot_ids: pass ? [] : matchingAgent.map((snapshot) => snapshot.snapshot_id).filter(Boolean),
-        task_agent_session_ids: matchingAgent.map((snapshot) => snapshot.task_agent_session_id).filter(Boolean),
-        receipt_task_agent_session_id: receiptTaskSessionId,
-        receipt_memory_context_snapshot_id: receiptSnapshotId,
-        receipt_memory_context_snapshot_checksum: receiptSnapshotChecksum,
-        declared_usage: declaredUsage,
-        declared_binding_id: declaredBindingId,
-        declared_group_session_id: declaredGroupSessionId,
-        declared_session_memory_checksum: declaredSessionMemoryChecksum,
-        declared_model_extraction_execution_id: declaredModelExtractionExecutionId,
-        declared_model_extraction_replay_status: declaredModelExtractionReplayStatus,
-        declared_fact_supersession_graph_checksum: declaredFactSupersessionGraphChecksum,
-        declared_usage_state: declaredUsageState,
-        declared_memory_fact_citations: declaredFactCitations,
-        memory_fact_citations_required: evaluated.some((snapshot) => snapshot.memory_fact_citations_required === true),
-        memory_fact_citations_passed: !required || evaluated.some((snapshot) => snapshot.pass === true && snapshot.memory_fact_citations_passed === true),
-        system_delivery_required: required,
-        system_delivery_passed: evaluated.some((snapshot) => snapshot.delivery_bound === true
-            && snapshot.system_session_bound === true
-            && snapshot.system_snapshot_bound === true
-            && snapshot.system_checksum_bound === true),
-        agent_declaration_required: required,
-        agent_declaration_passed: evaluated.some((snapshot) => snapshot.binding_id_matches === true
-            && snapshot.group_session_matches === true
-            && snapshot.session_memory_checksum_matches === true
-            && snapshot.model_extraction_execution_matches === true
-            && snapshot.model_extraction_replay_status_matches === true
-            && snapshot.fact_supersession_graph_checksum_matches === true
-            && snapshot.model_extraction_evidence_passed === true
-            && snapshot.usage_state_valid === true
-            && snapshot.declaration_coherent === true
-            && snapshot.memory_fact_citations_passed === true
-            && !!declaredReason),
-        gate_ids: uniqueStrings(...matchingAgent.map((snapshot) => snapshot.gate_ids || [])).slice(0, 80),
-        matched_gate_ids: uniqueStrings(...bound.map((snapshot) => snapshot.gate_ids || [])).slice(0, 80),
-        rows: evaluated,
-    };
+    return require("./collaboration-acceptance").evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt, context);
 }
 function collectTaskMemoryDispatchFreshnessGates(task = {}, context = {}) {
     const gates = new Map();
@@ -3105,117 +3199,7 @@ function collectTaskReadPlanRevalidationGates(task = {}, context = {}) {
     return [...gates.values()];
 }
 function evaluateReceiptReadPlanRevalidationGate(task, receipt = {}, context = {}) {
-    const allGates = Array.isArray(context.readPlanRevalidationGates || context.read_plan_revalidation_gates)
-        ? (context.readPlanRevalidationGates || context.read_plan_revalidation_gates)
-        : collectTaskReadPlanRevalidationGates(task, context);
-    const agent = normalizeMemoryGateAgent(receipt.agent || receipt.project || task?.target_project);
-    const matchingCandidates = allGates.filter((gate) => {
-        const target = normalizeMemoryGateAgent(gate.target_project);
-        return (!target || !agent || target === agent) && (Number(gate.required_count || 0) > 0 || Number(gate.verification_count || 0) > 0);
-    });
-    const used = Array.isArray(receipt.memoryUsed || receipt.memory_used) ? (receipt.memoryUsed || receipt.memory_used) : [];
-    const ignored = Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) ? (receipt.memoryIgnored || receipt.memory_ignored) : [];
-    const structuredUsageRows = Array.isArray(receipt.readPlanRevalidationUsage || receipt.read_plan_revalidation_usage)
-        ? (receipt.readPlanRevalidationUsage || receipt.read_plan_revalidation_usage)
-        : [];
-    const structuredUsageText = structuredUsageRows.map((row) => [
-        row.gateId || row.gate_id || row.revalidationGateId || row.revalidation_gate_id ? `revalidation_gate_id=${row.gateId || row.gate_id || row.revalidationGateId || row.revalidation_gate_id}` : "",
-        row.readPlanId || row.read_plan_id ? `read_plan_id=${row.readPlanId || row.read_plan_id}` : "",
-        row.referenceId || row.reference_id ? `reference_id=${row.referenceId || row.reference_id}` : "",
-        row.currentSourceVerified === true || row.current_source_verified === true ? "current source verified" : "",
-        row.ignored === true || row.ignored_with_reason === true || row.usageState === "ignored" || row.usage_state === "ignored" ? `ignored ${row.reason || ""}` : "",
-    ].filter(Boolean).join("; ")).join("\n");
-    const usedText = used.map((item) => String(item || "")).join("\n");
-    const ignoredText = ignored.map((item) => String(item || "")).join("\n");
-    const receiptActions = Array.isArray(receipt.actions) ? receipt.actions.map((item) => String(item || "")) : [];
-    const actionText = receiptActions.join("\n");
-    const declarationText = [usedText, ignoredText, structuredUsageText, receipt.summary, actionText, ...(Array.isArray(receipt.verification) ? receipt.verification : [])].map((item) => String(item || "")).join("\n");
-    const receiptTaskSessionId = String(receipt.task_agent_session_id || receipt.taskAgentSessionId || structuredUsageRows.find((row) => row.task_agent_session_id || row.taskAgentSessionId)?.task_agent_session_id || structuredUsageRows.find((row) => row.task_agent_session_id || row.taskAgentSessionId)?.taskAgentSessionId || "").trim();
-    const receiptNativeSessionId = String(receipt.native_session_id || receipt.nativeSessionId || structuredUsageRows.find((row) => row.native_session_id || row.nativeSessionId)?.native_session_id || structuredUsageRows.find((row) => row.native_session_id || row.nativeSessionId)?.nativeSessionId || "").trim();
-    const boundSessionCandidates = receiptTaskSessionId
-        ? matchingCandidates.filter((gate) => !gate.task_agent_session_id || String(gate.task_agent_session_id) === receiptTaskSessionId)
-        : [];
-    const sessionCandidates = receiptTaskSessionId && boundSessionCandidates.length
-        ? boundSessionCandidates
-        : matchingCandidates;
-    const latestTurn = Math.max(0, ...sessionCandidates.map((gate) => Number(gate.turn || 0)));
-    const matching = latestTurn > 0
-        ? sessionCandidates.filter((gate) => Number(gate.turn || 0) === latestTurn)
-        : sessionCandidates;
-    const hasVerifiedSignal = /(re[\s_-]?read|reread|current source verified|verified current source|current source|source verified|latest source|current file|current checksum|重新读取|重读|当前源|当前文件|最新源|重新核验|重新核对|已核验|已验证|校验当前)/i.test(declarationText);
-    const hasIgnoredSignal = /(memoryignored|memory ignored|ignored|ignore|skip|not used|not needed|unused|不使用|未使用|忽略|跳过|无需使用|缺失|不存在|missing)/i.test(ignoredText || declarationText);
-    const hasBoundRevalidationShorthand = /(?:readPlanRevalidation|read_plan_revalidation|读取计划重读|读取计划复核)\s*[:=：]/i.test(declarationText);
-    const hasConcreteCurrentSourceReadAction = receiptActions.some((action) => /(?:re[\s_-]?read|reread|重新读取|重读|读取)/i.test(action)
-        && /(?:确认|核验|核对|验证|当前|最终|current|latest|verify|confirm)/i.test(action)
-        && /(?:[\w@./\\-]+\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|vue|json|yaml|yml|md|py|java|go|rs|cs|sql|prisma)|当前(?:源|文件)|source|file)/i.test(action));
-    const changedFiles = Array.isArray(receipt.filesChanged || receipt.files_changed || receipt.files)
-        ? (receipt.filesChanged || receipt.files_changed || receipt.files).map((item) => String(typeof item === "string" ? item : item?.path || item?.file || "")).filter(Boolean)
-        : [];
-    const hasConcreteCurrentSourceDiffEvidence = changedFiles.length > 0
-        && receiptActions.some((action) => /git\s+diff/i.test(action) && /(?:确认|核验|核对|检查|verify|confirm|check)/i.test(action));
-    const rows = matching.map((gate) => {
-        const gateId = String(gate.gate_id || "").trim();
-        const requiredIds = Array.isArray(gate.required_read_plan_ids) ? gate.required_read_plan_ids.filter(Boolean) : [];
-        const expectedTaskSessionId = String(gate.task_agent_session_id || "").trim();
-        const expectedNativeSessionId = String(gate.native_session_id || "").trim();
-        const sessionRequired = !!(expectedTaskSessionId || expectedNativeSessionId);
-        const taskSessionMatched = !expectedTaskSessionId || receiptTaskSessionId === expectedTaskSessionId;
-        const nativeSessionMatched = !expectedNativeSessionId || receiptNativeSessionId === expectedNativeSessionId || !receiptNativeSessionId;
-        const sessionMatched = taskSessionMatched && nativeSessionMatched;
-        const boundShorthand = matching.length === 1 && structuredUsageRows.length === 0 && sessionMatched && hasBoundRevalidationShorthand;
-        const boundActionEvidence = matching.length === 1
-            && structuredUsageRows.length === 0
-            && sessionMatched
-            && (hasConcreteCurrentSourceReadAction || hasConcreteCurrentSourceDiffEvidence);
-        const boundEvidence = boundShorthand || boundActionEvidence;
-        const gateMentioned = (!!gateId && declarationText.includes(gateId)) || boundEvidence;
-        const missingReadPlanIds = boundEvidence ? [] : requiredIds.filter((id) => !declarationText.includes(String(id || "")));
-        const currentSourceVerified = gateMentioned
-            && missingReadPlanIds.length === 0
-            && (hasVerifiedSignal || boundActionEvidence);
-        const ignoredWithReason = gateMentioned && missingReadPlanIds.length === 0 && hasIgnoredSignal;
-        const pass = gateMentioned && missingReadPlanIds.length === 0 && sessionMatched && (currentSourceVerified || ignoredWithReason);
-        return {
-            gate_id: gateId,
-            status: gate.status || "",
-            required_read_plan_ids: requiredIds,
-            missing_read_plan_ids: missingReadPlanIds,
-            gate_mentioned: gateMentioned,
-            current_source_verified: currentSourceVerified,
-            ignored_with_reason: ignoredWithReason,
-            session_required: sessionRequired,
-            session_matched: sessionMatched,
-            expected_task_agent_session_id: expectedTaskSessionId,
-            receipt_task_agent_session_id: receiptTaskSessionId,
-            expected_native_session_id: expectedNativeSessionId,
-            receipt_native_session_id: receiptNativeSessionId,
-            declaration_binding: boundShorthand
-                ? "unique_gate_session_bound_shorthand"
-                : boundActionEvidence
-                    ? "unique_gate_session_bound_current_source_action"
-                    : "explicit_ids",
-            pass,
-        };
-    });
-    const missing = rows.filter((row) => !row.pass);
-    return {
-        schema: "ccm-child-agent-read-plan-revalidation-gate-receipt-validation-v1",
-        required: matching.length > 0,
-        pass: matching.length === 0 || missing.length === 0,
-        gate_ids: matching.map((gate) => gate.gate_id),
-        missing_gate_ids: rows.filter((row) => !row.gate_mentioned).map((row) => row.gate_id),
-        missing_read_plan_ids: uniqueStrings(...rows.map((row) => row.missing_read_plan_ids || [])).slice(0, 40),
-        session_required: rows.some((row) => row.session_required),
-        session_matched: rows.every((row) => !row.session_required || row.session_matched),
-        session_mismatch_gate_ids: rows.filter((row) => row.session_required && !row.session_matched).map((row) => row.gate_id),
-        current_source_verified: rows.some((row) => row.current_source_verified),
-        ignored_with_reason: rows.some((row) => row.ignored_with_reason),
-        rows,
-        declared: used.length > 0 || ignored.length > 0,
-        structured_usage_rows: structuredUsageRows.slice(0, 24),
-        used,
-        ignored,
-    };
+    return require("./collaboration-acceptance").evaluateReceiptReadPlanRevalidationGate(task, receipt, context);
 }
 function extractPostCompactReinjectionGateFromValue(value) {
     if (!value || typeof value !== "object")
@@ -4373,9 +4357,36 @@ function typedMemoryUsageStateFromReceipt(doc, receipt = {}, context = {}) {
 }
 function collectTaskTypedMemoryConsumptionRows(task = {}, receipts = [], context = {}) {
     const docs = collectTaskTypedMemoryRecallDocs(task, context);
-    if (!docs.length || !Array.isArray(receipts) || !receipts.length)
+    if (!docs.length)
         return [];
-    return receipts.flatMap((receipt) => {
+    const providerEvidenceRows = Array.isArray(context.providerToolAccessEvidence || context.provider_tool_access_evidence)
+        ? (context.providerToolAccessEvidence || context.provider_tool_access_evidence)
+        : [];
+    const receiptCandidates = Array.isArray(receipts) ? receipts : [];
+    const accessFor = (doc, snapshot, currentSourceProof = {}) => {
+        const expected = {
+            groupId: doc.group_id || task?.group_id || task?.groupId || "",
+            groupSessionId: doc.group_session_id || task?.group_session_id || task?.groupSessionId || "",
+            taskId: task?.id || "",
+            executionId: snapshot.execution_id || snapshot.executionId || "",
+            taskAgentSessionId: snapshot.task_agent_session_id || snapshot.taskAgentSessionId || "",
+        };
+        const evidence = providerEvidenceRows.find((candidate) => (0, provider_tool_access_evidence_1.verifyProviderToolAccessEvidence)(candidate, expected).valid === true) || null;
+        const match = evidence ? (0, provider_tool_access_evidence_1.matchProviderToolAccessEvidence)(evidence, [
+            doc.rel_path,
+            doc.name,
+            currentSourceProof.relative_path,
+        ].filter(Boolean)) : { matched: false, eventCount: 0, events: [] };
+        return {
+            access_state: match.matched ? "read_observed" : evidence?.captureStatus === "observed" ? "no_matching_read_observed" : String(evidence?.captureStatus || "capture_missing"),
+            access_event_count: Number(match.eventCount || 0),
+            access_evidence_checksum: String(evidence?.checksum || ""),
+            access_event_checksums: (Array.isArray(match.events) ? match.events : []).map((event) => String(event.eventChecksum || "")).filter(Boolean).slice(0, 20),
+            access_capture_status: String(evidence?.captureStatus || "capture_missing"),
+            access_evidence_valid: !!evidence,
+        };
+    };
+    const claimedRows = receiptCandidates.flatMap((receipt) => {
         const validation = evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt, context);
         const validSnapshot = Array.isArray(validation.rows) ? validation.rows.find((row) => row.pass === true) : null;
         if (validation.required !== true || validation.pass !== true || !validSnapshot)
@@ -4399,6 +4410,10 @@ function collectTaskTypedMemoryConsumptionRows(task = {}, receipts = [], context
         return matchingDocs.map((doc) => {
             const usage = typedMemoryUsageStateFromReceipt(doc, receipt, context);
             const currentSourceProof = usage.current_source_proof || {};
+            const access = accessFor(doc, {
+                ...validSnapshot,
+                execution_id: receipt.execution_id || receipt.executionId || context.execution?.id || context.execution?.execution_id || "",
+            }, currentSourceProof);
             return {
                 ...doc,
                 agent: receipt.agent || receipt.project || doc.target_project || "",
@@ -4409,6 +4424,9 @@ function collectTaskTypedMemoryConsumptionRows(task = {}, receipts = [], context
                 memory_context_snapshot_id: validSnapshot.snapshot_id || "",
                 memory_context_snapshot_checksum: validSnapshot.checksum || "",
                 delivery_receipt_checksum: validSnapshot.delivery_receipt?.checksum || "",
+                model_context_loaded: validSnapshot.memory_context_consumption_receipt_valid === true,
+                model_context_consumption_challenge_id: validSnapshot.memory_context_consumption_challenge_id || "",
+                model_context_consumption_receipt_signature: validSnapshot.memory_context_consumption_receipt_signature || "",
                 usage_state: usage.usage_state,
                 claimed_usage_state: usage.claimed_usage_state,
                 current_source_verified: usage.current_source_verified === true,
@@ -4430,12 +4448,87 @@ function collectTaskTypedMemoryConsumptionRows(task = {}, receipts = [], context
                 replacement_memory: usage.replacement_memory || "",
                 evidence_valid: true,
                 receipt_evidence_checksum: receiptEvidenceChecksum,
+                lifecycle_state: usage.usage_state === "ignored" ? "ignored" : usage.usage_state === "verified" ? "verified" : usage.usage_state === "used" ? "used" : "delivered_unreported",
+                delivery_state: "delivered",
+                ...access,
                 memory_used: receipt.memoryUsed || receipt.memory_used || [],
                 memory_ignored: receipt.memoryIgnored || receipt.memory_ignored || [],
                 typed_memory_usage: receipt.typedMemoryUsage || receipt.typed_memory_usage || [],
             };
         });
     }).slice(0, 320);
+    const claimedObservationKeys = new Set(claimedRows.map((row) => [
+        row.task_agent_session_id,
+        row.memory_context_snapshot_id,
+        String(row.rel_path || "").toLowerCase(),
+        row.document_checksum,
+    ].join("|")));
+    const deliveryRows = getTaskAgentMemoryContextSnapshotSources(context)
+        .map(summarizeTaskAgentMemoryContextSnapshot)
+        .filter((snapshot) => snapshot.memory_context_delivered === true && snapshot.delivery_receipt_checksum_valid === true)
+        .flatMap((snapshot) => {
+        const expectedGroupId = String(task?.group_id || task?.groupId || "").trim();
+        const expectedGroupSessionId = String(task?.group_session_id || task?.groupSessionId || "default").trim();
+        if (String(snapshot.group_id || "").trim() !== expectedGroupId
+            || String(snapshot.group_session_id || "default").trim() !== expectedGroupSessionId)
+            return [];
+        const target = normalizeMemoryGateAgent(snapshot.project || task?.target_project);
+        const hasMatchingReceiptCandidate = receiptCandidates.some((receipt) => {
+            const receiptTarget = normalizeMemoryGateAgent(receipt.agent || receipt.project || task?.target_project);
+            return !target || !receiptTarget || target === receiptTarget;
+        });
+        if (hasMatchingReceiptCandidate)
+            return [];
+        return docs.filter((doc) => {
+            const docTarget = normalizeMemoryGateAgent(doc.target_project);
+            return !docTarget || !target || docTarget === target;
+        }).flatMap((doc) => {
+            const key = [snapshot.task_agent_session_id, snapshot.snapshot_id, String(doc.rel_path || "").toLowerCase(), doc.document_checksum].join("|");
+            if (claimedObservationKeys.has(key))
+                return [];
+            const deliveryReceipt = snapshot.delivery_receipt || {};
+            const access = accessFor(doc, {
+                ...snapshot,
+                execution_id: deliveryReceipt.executionId || deliveryReceipt.execution_id || "",
+            });
+            const modelContextLoaded = snapshot.memory_context_consumption_receipt_valid === true;
+            return [{
+                    ...doc,
+                    agent: snapshot.project || doc.target_project || "",
+                    agent_type: snapshot.agent_type || "",
+                    task_id: task?.id || "",
+                    execution_id: deliveryReceipt.executionId || deliveryReceipt.execution_id || "",
+                    task_agent_session_id: snapshot.task_agent_session_id || "",
+                    memory_context_snapshot_id: snapshot.snapshot_id || "",
+                    memory_context_snapshot_checksum: snapshot.checksum || "",
+                    delivery_receipt_checksum: deliveryReceipt.checksum || "",
+                    usage_state: "mentioned",
+                    claimed_usage_state: "mentioned",
+                    lifecycle_state: modelContextLoaded ? "loaded_unreported" : "delivered_unreported",
+                    delivery_state: modelContextLoaded ? "model_loaded" : "delivered",
+                    current_source_verified: false,
+                    current_source_proof_valid: false,
+                    verification_status: "not_reported",
+                    evidence_tier: modelContextLoaded ? "model_mcp_load_receipt" : "system_delivery_receipt",
+                    evidence_confidence: modelContextLoaded ? 0.55 : 0.35,
+                    anomaly_codes: [modelContextLoaded ? "typed_memory_loaded_usage_unreported" : "typed_memory_usage_unreported"],
+                    direct_reference: false,
+                    reason: modelContextLoaded
+                        ? "the Provider model acknowledged loading the exact trusted memory context, but no per-document semantic usage receipt was recorded"
+                        : "typed memory was delivered to the exact task session but no valid bound usage receipt was recorded",
+                    evidence_valid: true,
+                    receipt_evidence_checksum: crypto.createHash("sha256").update(JSON.stringify([deliveryReceipt.checksum || "", "delivered_unreported"])).digest("hex"),
+                    ...access,
+                    model_context_loaded: modelContextLoaded,
+                    model_context_consumption_challenge_id: snapshot.memory_context_consumption_challenge_id || "",
+                    model_context_consumption_receipt_signature: snapshot.memory_context_consumption_receipt_signature || "",
+                    memory_used: [],
+                    memory_ignored: [],
+                    typed_memory_usage: [],
+                }];
+        });
+    });
+    return [...claimedRows, ...deliveryRows].slice(0, 320);
 }
 function typedMemoryPressureRecallDocRefs(doc = {}) {
     return uniqueStrings([
@@ -5495,92 +5588,7 @@ function evaluateChildAgentHandoffQuality(task, receipt = {}) {
     };
 }
 function scoreChildAgentReceipt(task, receipt = {}, context = {}) {
-    const receiptText = [
-        receipt.summary,
-        ...(Array.isArray(receipt.actions) ? receipt.actions : []),
-        ...(Array.isArray(receipt.filesChanged || receipt.files_changed || receipt.files) ? (receipt.filesChanged || receipt.files_changed || receipt.files) : []),
-    ].filter(Boolean).join("\n");
-    const contractLikely = /接口|API|api|schema|DTO|类型|字段|契约|路由|endpoint|request|response/i.test(receiptText);
-    const ack = receipt.ack || null;
-    const contractChanges = Array.isArray(receipt.contractChanges || receipt.contract_changes) ? (receipt.contractChanges || receipt.contract_changes) : [];
-    const memoryGate = evaluateReceiptMemoryDispatchGate(task, receipt, context);
-    const globalMemoryGate = evaluateReceiptGlobalMemoryUsageGate(task, receipt, context);
-    const globalMemoryHealthGate = evaluateReceiptGlobalMemoryHealthGate(task, receipt, context);
-    const readPlanRevalidationGate = evaluateReceiptReadPlanRevalidationGate(task, receipt, context);
-    const postCompactReinjectionGate = evaluateReceiptPostCompactReinjectionGate(task, receipt, context);
-    const apiMicrocompactPlan = evaluateReceiptApiMicrocompactEditPlan(task, receipt, context);
-    const taskAgentMemorySnapshot = evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt, context);
-    const snapshotMatchedGateIds = new Set(taskAgentMemorySnapshot.matched_gate_ids || []);
-    const memoryGateProvenBySnapshot = memoryGate.required
-        && memoryGate.declared
-        && taskAgentMemorySnapshot.pass === true
-        && (memoryGate.missing_gate_ids || []).every((gateId) => snapshotMatchedGateIds.has(gateId));
-    const effectiveMemoryGate = memoryGateProvenBySnapshot
-        ? { ...memoryGate, pass: true, missing_gate_ids: [], proven_by_memory_context_snapshot: true }
-        : memoryGate;
-    const globalMemoryHealthProvenBySnapshot = globalMemoryHealthGate.required
-        && globalMemoryHealthGate.declared
-        && taskAgentMemorySnapshot.pass === true
-        && (globalMemoryHealthGate.missing_gate_ids || []).every((gateId) => snapshotMatchedGateIds.has(gateId))
-        && (globalMemoryHealthGate.rows || []).every((row) => row.status === "ok" && row.blocked_global_memory_used !== true);
-    const effectiveGlobalMemoryHealthGate = globalMemoryHealthProvenBySnapshot
-        ? {
-            ...globalMemoryHealthGate,
-            pass: true,
-            missing_gate_ids: [],
-            proven_by_memory_context_snapshot: true,
-            rows: (globalMemoryHealthGate.rows || []).map((row) => ({ ...row, pass: true, proven_by_memory_context_snapshot: true })),
-        }
-        : globalMemoryHealthGate;
-    const handoffQuality = evaluateChildAgentHandoffQuality(task, receipt);
-    const checks = [
-        { id: "status_done", label: "状态明确", ok: String(receipt.status || "") === "done" },
-        { id: "structured_ack", label: "结构化 ACK", ok: !!ack && (!!ack.understoodGoal || !!ack.goal || (Array.isArray(ack.plannedScope) && ack.plannedScope.length > 0)) },
-        { id: "summary", label: "说明完成内容", ok: String(receipt.summary || "").trim().length >= 8 },
-        { id: "actions", label: "列出执行动作", ok: Array.isArray(receipt.actions) && receipt.actions.length > 0 },
-        { id: "files", label: "列出文件变更", ok: !taskRequiresCodeChanges(task) || (Array.isArray(receipt.filesChanged || receipt.files_changed || receipt.files) && (receipt.filesChanged || receipt.files_changed || receipt.files).length > 0) },
-        { id: "verification", label: "列出已执行验证", ok: !taskRequiresVerification(task) || (Array.isArray(receipt.verification || receipt.tests) && (receipt.verification || receipt.tests).length > 0) },
-        { id: "not_handoff_only", label: "完成执行而非仅建议", ok: handoffQuality.pass, detail: handoffQuality.reason },
-        { id: "contract_changes", label: "结构化契约变化", ok: !contractLikely || contractChanges.length > 0 },
-        { id: "no_open_blockers", label: "无开放阻塞", ok: !(Array.isArray(receipt.blockers) && receipt.blockers.length) && !(Array.isArray(receipt.needs) && receipt.needs.some((item) => !isAdvisoryNeed(item, task))) },
-        { id: "memory_declared", label: "声明记忆使用", ok: Array.isArray(receipt.memoryUsed || receipt.memory_used) || Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) },
-        { id: "task_agent_memory_snapshot", label: "匹配本轮记忆快照", ok: !taskAgentMemorySnapshot.required || taskAgentMemorySnapshot.pass, detail: taskAgentMemorySnapshot.required ? `snapshot=${taskAgentMemorySnapshot.matched_snapshot_ids.join(",") || "missing"} session=${taskAgentMemorySnapshot.receipt_task_agent_session_id || "missing"}` : "not_required" },
-        { id: "memory_gate", label: "引用记忆派发 gate", ok: !effectiveMemoryGate.required || effectiveMemoryGate.pass, detail: effectiveMemoryGate.required ? `gate=${effectiveMemoryGate.gate_ids.join(",") || "unknown"}` : "not_required" },
-        { id: "global_memory_usage", label: "声明全局记忆使用状态", ok: !globalMemoryGate.required || globalMemoryGate.pass, detail: globalMemoryGate.required ? `global_memory=${globalMemoryGate.global_memory_ids.join(",") || "unknown"}` : "not_required" },
-        { id: "global_memory_health_gate", label: "声明全局记忆健康门禁", ok: !effectiveGlobalMemoryHealthGate.required || effectiveGlobalMemoryHealthGate.pass, detail: effectiveGlobalMemoryHealthGate.required ? `gate=${effectiveGlobalMemoryHealthGate.gate_ids.join(",") || "unknown"}` : "not_required" },
-        { id: "read_plan_revalidation_gate", label: "重读 stale read plan", ok: !readPlanRevalidationGate.required || readPlanRevalidationGate.pass, detail: readPlanRevalidationGate.required ? `gate=${readPlanRevalidationGate.gate_ids.join(",") || "unknown"} session=${readPlanRevalidationGate.session_matched !== false}` : "not_required" },
-        { id: "post_compact_reinjection_gate", label: "引用压缩后重注入 gate", ok: !postCompactReinjectionGate.required || !(postCompactReinjectionGate.missing_gate_ids || []).length, detail: postCompactReinjectionGate.required ? `gate=${postCompactReinjectionGate.gate_ids.join(",") || "unknown"}` : "not_required" },
-        { id: "post_compact_reinjection_candidate", label: "声明压缩重注入候选", ok: !postCompactReinjectionGate.candidate_reference_required || postCompactReinjectionGate.candidate_reference_passed, detail: postCompactReinjectionGate.candidate_reference_required ? `candidate=${postCompactReinjectionGate.referenced_candidate_ids?.join(",") || (postCompactReinjectionGate.all_candidates_declared ? "all" : "missing")}` : "not_required" },
-        { id: "post_compact_reinjection_candidate_usage", label: "声明候选使用状态", ok: !postCompactReinjectionGate.candidate_usage_required || postCompactReinjectionGate.candidate_usage_declared_passed, detail: postCompactReinjectionGate.candidate_usage_required ? `used=${postCompactReinjectionGate.used_candidate_ids?.join(",") || "0"} ignored=${postCompactReinjectionGate.ignored_candidate_ids?.join(",") || "0"} verified=${postCompactReinjectionGate.verified_candidate_ids?.join(",") || "0"}` : "not_required" },
-        { id: "api_microcompact_receipt", label: "声明 API microcompact 使用状态", ok: !apiMicrocompactPlan.required || apiMicrocompactPlan.pass, detail: apiMicrocompactPlan.required ? `plans=${apiMicrocompactPlan.plan_checksums.join(",") || "unknown"}` : "not_required" },
-    ];
-    const passed = checks.filter(item => item.ok).length;
-    const rawScore = Math.round((passed / checks.length) * 100);
-    const hardFail = (effectiveMemoryGate.required && !effectiveMemoryGate.pass)
-        || (taskAgentMemorySnapshot.required && !taskAgentMemorySnapshot.pass)
-        || (globalMemoryGate.required && !globalMemoryGate.pass)
-        || (effectiveGlobalMemoryHealthGate.required && !effectiveGlobalMemoryHealthGate.pass)
-        || (readPlanRevalidationGate.required && !readPlanRevalidationGate.pass)
-        || (postCompactReinjectionGate.required && !postCompactReinjectionGate.pass)
-        || (postCompactReinjectionGate.candidate_usage_required && !postCompactReinjectionGate.candidate_usage_declared_passed)
-        || (apiMicrocompactPlan.required && !apiMicrocompactPlan.pass)
-        || !handoffQuality.pass;
-    const score = hardFail ? Math.min(rawScore, 70) : rawScore;
-    return {
-        score,
-        grade: hardFail ? "partial" : score >= 85 ? "good" : score >= 60 ? "partial" : "weak",
-        pass: !hardFail && score >= 85,
-        checks,
-        task_agent_memory_snapshot: taskAgentMemorySnapshot,
-        memory_gate: effectiveMemoryGate,
-        global_memory_gate: globalMemoryGate,
-        global_memory_health_gate: effectiveGlobalMemoryHealthGate,
-        read_plan_revalidation_gate: readPlanRevalidationGate,
-        post_compact_reinjection_gate: postCompactReinjectionGate,
-        api_microcompact: apiMicrocompactPlan,
-        handoff_quality: handoffQuality,
-        missing: checks.filter(item => !item.ok).map(item => item.label),
-    };
+    return require("./collaboration-acceptance").scoreChildAgentReceipt(task, receipt, context);
 }
 function buildCoordinationEventStream(task, summary = {}, executions = [], ackReview = null, contractTransfer = null, receiptRows = [], targetedRework = []) {
     const timeline = Array.isArray(summary.timeline) ? summary.timeline : [];
@@ -6647,410 +6655,37 @@ function normalizeGroupDispatchLaunchRowStatus(rawValue = "dispatched") {
     return { status: raw || "dispatched", label: "已派发" };
 }
 function buildDispatchLaunchSummary(input) {
-    const assignments = Array.isArray(input.assignments) ? input.assignments : [];
-    const visibleRows = assignments
-        .map((item, index) => {
-        const agent = (0, memory_1.compactMemoryText)(item?.project || item?.agent || item?.target_project || item?.targetName || "", 90);
-        if (!isVisibleChildAgentName(agent))
-            return null;
-        const taskText = sanitizeDispatchLaunchText(item?.task || item?.message || item?.summary || input.goal || input.task?.business_goal || input.task?.title, "已生成自包含工作单，技术协议已放入技术详情。", 240);
-        const reason = sanitizeDispatchLaunchText(item?.reason || input.dispatchPolicy?.reason || "我根据目标和影响范围分派。", "我根据目标和影响范围分派。", 180);
-        const dependsOn = Array.isArray(item?.dependsOn || item?.depends_on)
-            ? (item.dependsOn || item.depends_on)
-            : (item?.dependsOn || item?.depends_on ? [item.dependsOn || item.depends_on] : []);
-        const rowStatus = normalizeGroupDispatchLaunchRowStatus(item?.status);
-        return {
-            id: item?.assignment_id || item?.id || `dispatch_launch_${index + 1}`,
-            agent,
-            role: userAgentRole(agent),
-            task: taskText,
-            reason,
-            depends_on: dependsOn.map((value) => (0, memory_1.compactMemoryText)(value, 80)).filter(Boolean).slice(0, 4),
-            status: rowStatus.status,
-            status_label: rowStatus.label,
-        };
-    })
-        .filter(Boolean)
-        .slice(0, 8);
-    if (!visibleRows.length)
-        return null;
-    const goal = sanitizeDispatchLaunchText(input.goal || input.task?.business_goal || input.task?.title || "这项需求", "这项需求", 180).replace(/[。！？!?；;，,]+$/u, "");
-    const agents = visibleRows.map((row) => row.agent).join("、");
-    return {
-        schema: "ccm-main-agent-dispatch-launch-summary-v1",
-        title: "已派发的工作",
-        mode: input.mode || "",
-        task_id: input.taskId || input.task?.id || "",
-        headline: `我已把「${goal}」拆给 ${visibleRows.length} 个执行成员：${agents}。`,
-        rows: visibleRows,
-        acceptance: [
-            "每个执行成员都需要提交结构化结果说明。",
-            "我会统一核对文件、验证和阻塞情况。",
-            "通过验收后再给你最终交付总结。",
-        ],
-        next_action: "等待执行成员返回结果说明；有缺口时我会定向补充或请你确认。",
-        technical_hint: "执行成员的完整工作单、Trace 和底层执行记录默认收在技术详情里。",
-        display_policy: {
-            user_visible: true,
-            hide_for_ordinary_conversation: true,
-            technical_default_collapsed: true,
-            hide_internal_protocols: true,
-        },
-    };
+    return require("./collaboration-task-intake").buildDispatchLaunchSummary(input);
 }
 function buildRevisedPlanModeDraft(planMode = {}, feedback = "") {
-    const now = new Date().toISOString();
-    const text = (0, memory_1.compactMemoryText)(feedback || "请调整执行前计划。", 520);
-    const revisionCount = Number(planMode.revision_count || planMode.revisionCount || 0) + 1;
-    const revision = { count: revisionCount, feedback: text, at: now, status: "revision_requested" };
-    const answeredQuestions = (Array.isArray(planMode.clarification_questions) ? planMode.clarification_questions : [])
-        .map((item) => ({
-        ...item,
-        status: "answered_by_revision",
-        answer: text,
-        answered_at: now,
-    }));
-    return {
-        ...planMode,
-        title: planMode.title || "执行前计划",
-        requires_confirmation: true,
-        auto_continue: false,
-        revision_status: "revision_requested",
-        revision_count: revisionCount,
-        last_revision_feedback: text,
-        revised_at: now,
-        plan_revisions: [
-            ...(Array.isArray(planMode.plan_revisions) ? planMode.plan_revisions : []),
-            revision,
-        ].slice(-10),
-        clarification_questions: answeredQuestions,
-        needs_clarification: false,
-        acceptance: uniqueStrings([
-            ...(Array.isArray(planMode.acceptance) ? planMode.acceptance : []),
-            `已纳入用户调整意见：${text}`,
-        ]).slice(0, 8),
-        permission_boundaries: uniqueStrings([
-            ...(Array.isArray(planMode.permission_boundaries) ? planMode.permission_boundaries : []),
-            "调整后的计划重新确认前不得派发执行成员或修改文件",
-        ]).slice(0, 8),
-        next_step: "请重新确认调整后的执行前计划；确认后才会派发执行成员。",
-    };
+    return require("./collaboration-task-intake").buildRevisedPlanModeDraft(planMode, feedback);
 }
 function buildAcceptedPlanModeDraft(planMode = {}, feedback = "", acceptedAt = new Date().toISOString()) {
-    const text = (0, memory_1.compactMemoryText)(feedback || "", 720);
-    const acceptance = Array.isArray(planMode.acceptance) ? planMode.acceptance : [];
-    const acceptedFeedbackHistory = [
-        ...(Array.isArray(planMode.accepted_feedback_history) ? planMode.accepted_feedback_history : []),
-        ...(text ? [{ feedback: text, at: acceptedAt, status: "accepted" }] : []),
-    ].slice(-10);
-    return {
-        ...planMode,
-        title: planMode.title || "执行前计划",
-        requires_confirmation: false,
-        auto_continue: true,
-        confirmation_status: "confirmed",
-        accepted_at: acceptedAt,
-        confirmed_at: acceptedAt,
-        accepted_feedback: text,
-        last_accept_feedback: text,
-        accepted_feedback_history: acceptedFeedbackHistory,
-        revision_status: planMode.revision_status === "revision_requested" ? "confirmed_after_revision" : (planMode.revision_status || "confirmed"),
-        needs_clarification: false,
-        acceptance: text
-            ? uniqueStrings([...acceptance, `执行时纳入用户补充要求：${text}`]).slice(0, 8)
-            : acceptance.slice(0, 8),
-        plan_execution_followup: {
-            schema: "ccm-main-agent-plan-execution-followup-v1",
-            status: "confirmed_tracking",
-            title: "计划已确认，正在按计划执行",
-            headline: text
-                ? "我会带着你的补充要求推进执行，并在最终总结前逐项核对验收标准。"
-                : "我会按这份计划推进执行，并在最终总结前逐项核对验收标准。",
-            accepted_at: acceptedAt,
-            accepted_feedback: text,
-            next_action: "等待执行成员结果说明、文件改动和验证证据；如有偏离，我会先返工再总结。",
-            display_policy: {
-                user_text_first: true,
-                technical_default_collapsed: true,
-                hide_internal_protocols: true,
-                show_for_ordinary_conversation: false,
-            },
-        },
-        next_step: text
-            ? "已确认执行，我会带着补充要求派发执行成员。"
-            : "已确认执行，我会派发执行成员。",
-    };
+    return require("./collaboration-task-intake").buildAcceptedPlanModeDraft(planMode, feedback, acceptedAt);
 }
 function classifyGroupProjectTaskIntent(message, uploadedFiles = []) {
-    const text = String(message || "").trim();
-    const compact = text.replace(/\s+/g, "");
-    const hasAttachment = Array.isArray(uploadedFiles) && uploadedFiles.length > 0;
-    const greetingOnly = /^(你好|您好|hi|hello|hey|在吗|在不在|早上好|下午好|晚上好|谢谢|感谢|ok|好的|嗯|哦|哈喽)[。.!！?？\s]*$/i.test(compact);
-    const questionOnly = /^(这个|那个|你|我|项目|知识库|群聊|全局Agent|主Agent|子Agent).{0,40}(是什么|是啥|什么意思|怎么用|能用吗|可以用吗|怎么样|有问题吗|需要吗)[。.!！?？\s]*$/i.test(compact);
-    const projectAnalysisSignals = /项目|代码|仓库|架构|技术栈|目录|文件|模块|接口|页面|组件|数据库|配置|依赖|知识库|主\s*Agent|子\s*Agent|agent|Agent|这个.*项目|什么项目/i.test(text);
-    const actionSignals = [
-        /(?:帮我|给我|请|麻烦|需要|开始|继续).{0,24}(?:实现|新增|添加|修改|修复|删除|优化|重构|接入|配置|部署|测试|检查|创建|开发|完成|生成|编写|补充|对接|支持|运行|跑|改|加|做|写)/i,
-        /(?:实现|新增|添加|修改|修复|删除|优化|重构|接入|配置|部署|测试|检查|创建|开发|完成|生成|编写|补充|对接|支持|运行|跑).{0,40}(?:功能|接口|页面|组件|代码|项目|文件|数据库|服务|测试|配置|bug|Bug|API|api)/i,
-        /(?:把|将).{1,80}(?:改成|修改为|接入|迁移|重构|删掉|删除|加上|加入|换成|拆成|合并)/i,
-        /(?:报错|错误|bug|Bug|失败|不能用|崩溃|异常).{0,40}(?:修|修复|看一下|排查|解决|处理)/i,
-        /(?:PR|提交|发布|上线|构建|编译|单测|测试|接口|页面|组件|schema|数据库|路由|权限|登录|支付|订单|表单|样式|前端|后端).{0,40}(?:实现|新增|修改|修复|优化|检查|补充|接入|部署)/i,
-    ];
-    const executable = hasAttachment || (!greetingOnly && !questionOnly && actionSignals.some(pattern => pattern.test(text)));
-    const analysisEligible = !executable && !greetingOnly && projectAnalysisSignals;
-    return {
-        executable,
-        analysisEligible,
-        kind: executable ? "task" : analysisEligible ? "project_analysis" : greetingOnly ? "greeting" : questionOnly ? "question" : "conversation",
-        reason: executable
-            ? (hasAttachment ? "包含附件，按项目任务处理" : "包含明确开发/修改/执行意图")
-            : greetingOnly
-                ? "普通问候，不创建任务卡"
-                : analysisEligible
-                    ? "项目/知识库相关只读询问，进入项目分析但不创建任务卡"
-                    : questionOnly
-                        ? "普通询问，不创建任务卡"
-                        : "未发现明确项目执行动作",
-    };
+    return require("./collaboration-task-intake").classifyGroupProjectTaskIntent(message, uploadedFiles);
 }
 function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messageMode = "conversation") {
-    const runtime = String(coordinatorResult?.runtime || "");
-    const dispatchPolicy = coordinatorResult?.dispatchPolicy || {};
-    const action = String(dispatchPolicy.action || "").trim();
-    const assignments = Array.isArray(coordinatorResult?.assignments) ? coordinatorResult.assignments : [];
-    const llmBacked = runtime === "llm-api";
-    if (!llmBacked) {
-        return {
-            ...fallback,
-            executable: false,
-            analysisEligible: fallback.analysisEligible === true,
-            kind: fallback.analysisEligible ? "project_analysis" : fallback.kind === "greeting" ? "greeting" : fallback.kind === "question" ? "question" : "conversation",
-            reason: `Agent intent gateway 未获得大模型决策（${runtime || "unknown"}），规则兜底不创建任务卡`,
-            agent_gateway: { runtime, dispatchPolicy, llm_backed: false, fallback_kind: fallback.kind },
-        };
-    }
-    const delegates = action === "delegate" && dispatchPolicy.requiresConfirmation !== true && assignments.length > 0;
-    const analysisEligible = !delegates && (fallback.analysisEligible === true || action === "direct_answer" || action === "ask_user");
-    return {
-        executable: delegates,
-        analysisEligible,
-        kind: delegates ? "task" : analysisEligible ? "project_analysis" : fallback.kind,
-        reason: delegates
-            ? `Agent intent gateway 允许创建任务卡：${dispatchPolicy.reason || "主 Agent 判定需要派发"}`
-            : `Agent intent gateway 不创建任务卡：${dispatchPolicy.reason || "主 Agent 判定无需派发"}`,
-        agent_gateway: { runtime, dispatchPolicy, llm_backed: true, assignments: assignments.map((item) => item.project).filter(Boolean) },
-    };
+    return require("./collaboration-task-intake").normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messageMode);
 }
 async function classifyGroupProjectTaskIntentWithAgent(input) {
-    const fallback = classifyGroupProjectTaskIntent(input.message, input.uploadedFiles || []);
-    const mode = String(input.messageMode || "conversation").trim().toLowerCase();
-    if (!input.isOrchestrated || input.forceProjectTask || !["project_task", "daily_dev", "mission", "project_analysis"].includes(mode)) {
-        return { ...fallback, agent_gateway: { runtime: "not-required", llm_backed: false, fallback_kind: fallback.kind } };
-    }
-    try {
-        const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
-            group: input.group,
-            message: input.message,
-            source: "intent-gateway",
-            sharedFilesContext: input.sharedFilesContext || "",
-            groupSessionId: input.groupSessionId || input.group_session_id || "",
-        });
-        return normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
-    }
-    catch (error) {
-        return {
-            ...fallback,
-            executable: false,
-            analysisEligible: fallback.analysisEligible === true,
-            kind: fallback.analysisEligible ? "project_analysis" : fallback.kind === "greeting" ? "greeting" : fallback.kind === "question" ? "question" : "conversation",
-            reason: `Agent intent gateway 调用失败，规则兜底不创建任务卡：${error?.message || error}`,
-            agent_gateway: { runtime: "error", llm_backed: false, error: error?.message || String(error), fallback_kind: fallback.kind },
-        };
-    }
+    return require("./collaboration-task-intake").classifyGroupProjectTaskIntentWithAgent(input);
 }
 function shouldUseProjectAnalysisMode(input) {
-    const mode = String(input.messageMode || "conversation").trim().toLowerCase();
-    if (!input.isOrchestrated)
-        return false;
-    if (mode === "project_analysis")
-        return input.taskIntent?.kind !== "greeting";
-    if (["project_task", "daily_dev", "mission"].includes(mode) && input.taskIntent?.analysisEligible === true)
-        return true;
-    return false;
+    return require("./collaboration-task-intake").shouldUseProjectAnalysisMode(input);
 }
 function shouldCreatePersistentGroupTask(input) {
-    const mode = String(input.messageMode || "conversation").trim().toLowerCase();
-    return !!input.isOrchestrated
-        && ["project_task", "daily_dev", "mission"].includes(mode)
-        && (!!input.forceProjectTask || input.taskIntent?.executable === true);
+    return require("./collaboration-task-intake").shouldCreatePersistentGroupTask(input);
 }
 function classifyPlanModeRisk(message, group, taskIntent = {}, attachmentCount = 0) {
-    const text = String(message || "");
-    const routableCount = (0, group_orchestrator_1.getRoutableMembers)(group || {}).length;
-    const lower = text.toLowerCase();
-    const signals = {
-        destructive: /删除|清空|清理|移除|drop\s+table|truncate|purge|永久|销毁|撤销|覆盖/i.test(text),
-        migration: /迁移|重构|拆分|合并|数据库|schema|权限|登录|支付|订单|部署|上线|生产|线上|配置|环境变量/i.test(text),
-        crossProject: /跨项目|多项目|所有项目|全部项目|前后端|全栈|多个 Agent|多个项目/i.test(text) || routableCount > 1 && /前端|后端|接口|页面|数据库|全栈/i.test(text),
-        vague: taskIntent?.executable === true && text.replace(/\s+/g, "").length < 18 && /优化|修复|改一下|处理|看一下|做一下/i.test(text),
-        attachment: attachmentCount > 0,
-    };
-    const reasons = [
-        signals.destructive ? "包含删除、清理、覆盖或不可逆操作" : "",
-        signals.migration ? "涉及迁移、重构、数据库、权限、支付、部署或配置边界" : "",
-        signals.crossProject ? "可能涉及多个项目或前后端契约" : "",
-        signals.vague ? "需求较短或范围模糊，需要先确认影响范围" : "",
-        signals.attachment ? "包含附件，需要先只读解析需求文档" : "",
-    ].filter(Boolean);
-    const requiresConfirmation = signals.destructive || signals.migration || signals.crossProject || signals.vague || signals.attachment;
-    const level = signals.destructive || signals.migration ? "high" : requiresConfirmation ? "medium" : "low";
-    return {
-        level,
-        requiresConfirmation,
-        reasons,
-        signals,
-        summary: reasons.length ? reasons.join("；") : "低风险明确开发需求，可自动进入执行队列",
-        lower,
-    };
+    return require("./collaboration-task-intake").classifyPlanModeRisk(message, group, taskIntent, attachmentCount);
 }
 function buildPlanModeClarificationQuestions(message, risk = {}, selectedProjects = []) {
-    const text = String(message || "");
-    const signals = risk?.signals || {};
-    const questions = [];
-    const add = (id, question, reason, examples = []) => {
-        if (questions.some(item => item.id === id))
-            return;
-        questions.push({ id, question, reason, examples: examples.slice(0, 3), status: "open" });
-    };
-    if (signals.vague) {
-        add("scope_priority", "你希望主 Agent 优先处理哪个页面、接口或模块？", "需求比较短或范围不够具体，先确认重点可以减少返工。", ["只改登录页", "优先后端接口", "先修最影响用户的路径"]);
-    }
-    if (signals.crossProject || selectedProjects.length > 1) {
-        add("project_boundary", "这些项目都需要一起修改吗？如果有主次顺序，请告诉我。", "多项目协作需要先确认边界和依赖顺序。", selectedProjects.length ? selectedProjects : ["先后端契约，再前端接入"]);
-    }
-    if (signals.migration) {
-        add("compatibility_boundary", "是否需要兼容旧数据、旧接口或现有配置？", "迁移、权限、支付、订单、部署等改动需要明确兼容策略。", ["必须兼容旧接口", "可以只做新逻辑", "上线前保留回滚路径"]);
-    }
-    if (signals.destructive) {
-        add("destructive_permission", "是否允许删除、清理、覆盖或执行不可逆操作？", "破坏性操作必须由用户明确授权。", ["不允许删除，只标记废弃", "允许删除测试数据", "需要先备份"]);
-    }
-    if (/支付|权限|登录|订单|生产|线上|部署/i.test(text)) {
-        add("acceptance_focus", "你最关心的验收结果是什么？", "关键业务流程需要明确成功标准，避免只改代码但没覆盖真实目标。", ["登录刷新后保持状态", "支付退款完整闭环", "订单状态可回滚"]);
-    }
-    return questions.slice(0, 5);
+    return require("./collaboration-task-intake").buildPlanModeClarificationQuestions(message, risk, selectedProjects);
 }
 function buildGroupPlanModePreflight(input) {
-    const group = (0, group_orchestrator_1.normalizeGroupOrchestrator)(input.group);
-    const configs = input.configs || (0, db_1.getConfigs)();
-    const message = String(input.message || "");
-    const risk = classifyPlanModeRisk(message, group, input.taskIntent, input.attachmentCount || 0);
-    const members = (0, group_orchestrator_1.getRoutableMembers)(group);
-    const coordinatorProject = input.coordinatorProject || (0, group_orchestrator_1.getCoordinatorMember)(group).project;
-    const projectNames = members.map((member) => member.project).filter(Boolean);
-    const relevantProjects = projectNames.filter((name) => message.toLowerCase().includes(String(name).toLowerCase())).slice(0, 6);
-    const selectedProjects = relevantProjects.length ? relevantProjects : projectNames.slice(0, Math.min(3, projectNames.length));
-    const areas = [
-        /页面|前端|ui|组件|样式/i.test(message) ? "前端页面与交互" : "",
-        /接口|后端|服务|数据库|api/i.test(message) ? "后端接口与数据契约" : "",
-        /权限|登录|支付|订单/i.test(message) ? "业务权限与关键流程" : "",
-        /测试|验证|bug|报错|修复/i.test(message) ? "测试、回归与缺陷修复" : "",
-    ].filter(Boolean);
-    if (!areas.length)
-        areas.push("由主 Agent 只读探索后收敛影响范围");
-    let readOnlyContext = "";
-    try {
-        readOnlyContext = (0, memory_1.compactMemoryText)(buildGroupProjectAnalysisContext(group, message, input.ctx, configs), 2600);
-    }
-    catch (error) {
-        readOnlyContext = `只读探索失败：${(0, memory_1.compactMemoryText)(error?.message || error, 240)}`;
-    }
-    const acceptance = [
-        "必须有主 Agent 计划、派发证据和子 Agent 结构化结果说明",
-        "涉及代码时必须有系统实际捕获的文件变更",
-        "必须有已执行验证记录，不能只写建议验证",
-        "最终报告必须列出完成内容、变更文件、验证结果、风险和待确认事项",
-    ];
-    const permissionBoundaries = [
-        "执行前只读探索不得修改文件、不得运行破坏性命令",
-        "删除、清理、迁移、部署、跨项目契约变更必须等待用户确认",
-        "子 Agent 只能在对应项目工作区和工作单范围内修改",
-        "任务完成前必须保留 native session / scratchpad 续跑上下文",
-    ];
-    const clarificationQuestions = buildPlanModeClarificationQuestions(message, risk, selectedProjects);
-    const steps = [
-        {
-            id: "understand_goal",
-            label: "理解需求与验收目标",
-            detail: selectedProjects.length ? `已锁定相关项目：${selectedProjects.join("、")}` : "从群聊消息和项目上下文中整理目标。",
-            status: "completed",
-        },
-        {
-            id: "read_only_explore",
-            label: "只读探索影响范围",
-            detail: (0, memory_1.compactMemoryText)(readOnlyContext || "已完成只读探索。", 220),
-            status: "completed",
-        },
-        {
-            id: "confirm_boundary",
-            label: "确认执行边界",
-            detail: clarificationQuestions.length
-                ? "需要先补充关键问题，再进入派发。"
-                : risk.requiresConfirmation ? "涉及高风险或写入边界，等待你确认后执行。" : "当前边界清晰，可自动继续。",
-            status: clarificationQuestions.length || risk.requiresConfirmation ? "needs_confirmation" : "completed",
-        },
-        {
-            id: "dispatch_sub_agents",
-            label: "派发子 Agent 工作单",
-            detail: "每个子 Agent 会收到目标、允许范围、禁止事项和验收标准。",
-            status: clarificationQuestions.length || risk.requiresConfirmation ? "pending" : "in_progress",
-        },
-        {
-            id: "verify_and_summarize",
-            label: "验收结果并总结给用户",
-            detail: "完成后主 Agent 必须核对文件变更、验证结果、风险和下一步。",
-            status: "pending",
-        },
-    ];
-    return {
-        title: "执行前计划",
-        mode: "cc-style-plan-mode",
-        source: "group-main-agent-plan-mode-4.0",
-        coordinator: coordinatorProject,
-        group_id: group?.id || "",
-        requirement: compactFormText(message, ""),
-        read_only_exploration: {
-            summary: readOnlyContext,
-            projects: selectedProjects,
-            knowledge_used: readOnlyContext.includes("本地知识库召回"),
-            code_snapshot_used: readOnlyContext.includes("只读代码快照"),
-        },
-        steps,
-        impact_scope: {
-            areas,
-            projects: selectedProjects,
-            multi_agent: selectedProjects.length > 1 || risk.signals.crossProject,
-        },
-        risk,
-        acceptance,
-        clarification_questions: clarificationQuestions,
-        needs_clarification: clarificationQuestions.length > 0,
-        permission_boundaries: permissionBoundaries,
-        sub_agent_work_order_requirements: [
-            "每个工作单必须包含目标、背景、允许修改范围、禁止事项、验收标准和回执格式",
-            "子 Agent 必须返回修改文件、执行动作、验证命令/结果、阻塞点和是否需要主 Agent 返工",
-            "返工必须复用原任务上下文和原生会话，不能重新开一个失忆任务",
-        ],
-        session_strategy: {
-            native_resume_first: true,
-            keep_task_session_until_final_review: true,
-            fallback: "native 不可用时使用 scratchpad 续跑，并注入上轮回执、未完成 Todo 和验收缺口",
-        },
-        requires_confirmation: risk.requiresConfirmation,
-        auto_continue: !risk.requiresConfirmation,
-        next_step: clarificationQuestions.length
-            ? "请先确认或补充上面的问题；确认后才会派发子 Agent"
-            : risk.requiresConfirmation ? "等待用户确认后创建执行队列并派发子 Agent" : "低风险明确任务，自动进入执行队列",
-        generated_at: new Date().toISOString(),
-    };
+    return require("./collaboration-task-intake").buildGroupPlanModePreflight(input);
 }
 function buildGroupProjectAnalysisContext(group, message, ctx, configs = (0, db_1.getConfigs)()) {
     return (0, project_analysis_1.buildGroupProjectAnalysisContext)(group, message, ctx, configs, {
@@ -7061,1333 +6696,10 @@ function buildGroupProjectAnalysisContext(group, message, ctx, configs = (0, db_
     });
 }
 function buildProjectCodeReadOnlySnapshot(project, workDir, message) {
-    return (0, project_analysis_1.buildProjectCodeReadOnlySnapshot)(project, workDir, message, { compactMemoryText: memory_1.compactMemoryText });
+    return require("./collaboration-task-intake").buildProjectCodeReadOnlySnapshot(project, workDir, message);
 }
 function runCollaborationUxSelfTest() {
-    const task = {
-        id: "ux-task",
-        title: "增加负责人筛选",
-        business_goal: "给工单页面增加负责人筛选",
-        workflow_type: "daily_dev",
-        assign_type: "group",
-        requires_code_changes: true,
-        requires_verification: true,
-        status: "done",
-        trace_id: "trace-ux",
-        workflow_meta: {
-            plan_mode: {
-                title: "执行前计划",
-                mode: "cc-style-plan-mode",
-                requires_confirmation: false,
-                auto_continue: true,
-                risk: { level: "low", summary: "只改负责人筛选相关页面和接口", reasons: ["范围清晰"] },
-                impact_scope: { projects: ["collab-web"], areas: ["负责人筛选"], file_hints: ["frontend/app.js", "backend/server.js"], multi_agent: false },
-                read_only_exploration: { summary: "已确认筛选入口和后端接口位置", projects: ["collab-web"], knowledge_used: true, code_snapshot_used: true },
-                steps: [
-                    { id: "understand_goal", label: "理解需求与验收目标", detail: "确认负责人筛选的页面入口和接口契约。", status: "completed" },
-                    { id: "dispatch_sub_agents", label: "派发子 Agent 工作单", detail: "交给 collab-web 修改页面和接口。", status: "completed" },
-                    { id: "verify_and_summarize", label: "验收结果并总结给用户", detail: "核对文件变更和 npm test 结果。", status: "completed" },
-                ],
-                acceptance: ["负责人筛选文件改动可查看", "npm test 必须通过", "子 Agent 必须提交结构化结果说明"],
-                permission_boundaries: ["不要修改无关页面", "不要编造未执行的验证结果"],
-            },
-        },
-        delivery_summary: {
-            headline: "负责人筛选已完成",
-            actual_file_change_count: 2,
-            actual_file_changes: [{ path: "frontend/app.js" }, { path: "backend/server.js" }],
-            verification_executed: ["npm test passed by external runner (exit 0)"],
-            external_runner_verification_count: 1,
-            verification_source_gate_passed: true,
-            coordination_plan_count: 1,
-            assignment_count: 1,
-            worker_notification_count: 1,
-            assignment_evidence: [{ project: "collab-web", task: "给工单页面增加负责人筛选", reason: "前端页面变更" }],
-            worker_notifications: [{ task_id: "collab-web", status: "completed", summary: "已修改负责人筛选并运行 npm test" }],
-            has_final_review: true,
-            review_status: "complete",
-            acceptance_gate_passed: true,
-            receipt_statuses: [{ agent: "collab-web", status: "done", summary: "raw receipt should stay technical" }],
-            ack_gate_passed: true,
-            ack_review: { status: "approved", rejected: [], rows: [{ agent: "collab-web", status: "approved", reason: "ACK 目标和范围清晰" }] },
-            receipts: [{
-                    agent: "collab-web",
-                    status: "done",
-                    summary: "已完成负责人筛选并同步接口字段 GET /api/users?role=owner",
-                    actions: ["修改筛选组件", "同步接口字段 GET /api/users?role=owner"],
-                    filesChanged: ["frontend/app.js", "backend/server.js"],
-                    verification: ["npm test passed by external runner (exit 0)"],
-                    ack: {
-                        understoodGoal: "给工单页面增加负责人筛选",
-                        plannedScope: ["frontend/app.js", "backend/server.js"],
-                        forbiddenScope: ["不改无关页面"],
-                        verificationPlan: ["npm test"],
-                        unclear: [],
-                    },
-                    contractChanges: [{
-                            type: "api",
-                            endpoint: "GET /api/users?role=owner",
-                            response: "返回可筛选负责人列表",
-                            consumers: ["collab-web"],
-                            note: "负责人筛选使用该接口字段",
-                        }],
-                    blockers: [],
-                    needs: [],
-                    memoryUsed: ["项目记忆：筛选页面结构"],
-                }],
-            timeline: [
-                { id: "tl-plan", type: "coordinator_plan", title: "主 Agent 生成计划", status: "ok", phase: "planning", agent: "coordinator" },
-                { id: "tl-conflict", type: "conflict_plan", title: "跨 Agent 冲突保护", detail: "检测到前后端可能同时修改 shared/types.ts", status: "warn", phase: "planning", data: { conflicts: [{ projects: ["frontend", "backend"], reason: "可能同时修改共享类型", scopes: ["shared/types.ts"] }] } },
-                { id: "tl-handoff", type: "worker_handoff_ready", title: "collab-web 工作单已补齐", detail: "目标、范围、边界、验收、ACK 和回执要求已打包给子 Agent", status: "ok", phase: "dispatching", agent: "collab-web" },
-                { id: "tl-qa", type: "agent_qa_question", title: "frontend 向 backend 提问", detail: "确认筛选字段", status: "active", phase: "executing", agent: "frontend" },
-                { id: "tl-review", type: "coordinator_review", title: "主 Agent 验收", status: "ok", phase: "reviewing", agent: "coordinator" },
-            ],
-            agent_qa: [{
-                    id: "qa-ux",
-                    from_agent: "frontend",
-                    to_agent: "backend",
-                    question: "负责人字段叫什么？",
-                    answer: "ownerId",
-                    status: "resumed",
-                    execution_id: "exec-qa-ux",
-                    routing: { strategy: "capability_and_load" },
-                    answer_evidence: ["trace_id=qa-visible-should-stay-technical"],
-                    acceptance: { accepted: true, score: 92, status: "accepted" },
-                }],
-        },
-    };
-    const card = buildTaskCardView(task, [{ id: "exec-ux", project: "collab-web", state: "succeeded", checkpointIds: ["checkpoint-ux"] }], []);
-    const failedCard = buildTaskCardView({ ...task, status: "failed", delivery_summary: { ...task.delivery_summary, acceptance_gate_passed: false } }, [], []);
-    const missingEvidenceCard = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: { headline: "等待证据", assignment_count: 1, assignment_evidence: [{ project: "collab-web", task: "给工单页面增加负责人筛选" }], receipt_statuses: [] } }, [], []);
-    const weakAcceptanceOnlyTask = {
-        ...task,
-        status: "done",
-        status_detail: "旧摘要声称任务完成",
-        delivery_summary: {
-            headline: "旧摘要声称已完成",
-            acceptance_gate_passed: true,
-            acceptance: ["验收结论：已通过"],
-            delivery_report: {
-                schema: "ccm-main-agent-delivery-report-v1",
-                status: "done",
-                headline: "旧摘要声称已完成",
-                acceptance: ["验收结论：已通过"],
-                verification_evidence: { status: "ready", items: [] },
-            },
-        },
-    };
-    const weakAcceptanceOnlyLifecycle = deriveTaskLifecycle(weakAcceptanceOnlyTask, []);
-    const weakAcceptanceOnlyCard = buildTaskCardView(weakAcceptanceOnlyTask, [], []);
-    const sessionProgressCard = buildTaskCardView({
-        ...task,
-        status: "in_progress",
-        delivery_summary: {
-            headline: "等待执行成员执行中",
-            assignment_count: 1,
-            assignment_evidence: [{ project: "collab-web", task: "给工单页面增加负责人筛选" }],
-            receipt_statuses: [],
-        },
-    }, [], [{
-            id: "tas-visible-should-stay-technical",
-            taskId: "ux-task",
-            groupId: "ux-group",
-            project: "collab-web",
-            agentType: "cursor",
-            nativeSessionId: "cursor-session-should-not-show",
-            resumeMode: "native",
-            status: "open",
-            turnCount: 2,
-            lastTurnSucceeded: true,
-            createdAt: "2026-07-07T00:00:00.000Z",
-            lastUsedAt: "2026-07-07T00:02:00.000Z",
-        }]);
-    const memoryGateGapDelivery = {
-        ...task.delivery_summary,
-        acceptance_gate_passed: false,
-        memory_dispatch_gates: [{
-                gate_id: "gmd_ux_gate",
-                schema: "ccm-child-agent-memory-dispatch-freshness-gate-v1",
-                group_id: "ux-group",
-                target_project: "collab-web",
-                status: "fresh",
-                action: "use_or_ignore",
-            }],
-        memory_dispatch_gate_count: 1,
-        memory_gate_receipt_passed: false,
-        memory_gate_receipt_rows: [{
-                agent: "collab-web",
-                status: "done",
-                score: 70,
-                grade: "partial",
-                pass: false,
-                missing: ["引用记忆派发 gate"],
-                memory_gate: {
-                    required: true,
-                    pass: false,
-                    gate_ids: ["gmd_ux_gate"],
-                    missing_gate_ids: ["gmd_ux_gate"],
-                    declared: false,
-                    used: [],
-                    ignored: [],
-                },
-            }],
-        receipts: [{
-                ...task.delivery_summary.receipts[0],
-                memoryUsed: ["项目记忆：筛选页面结构"],
-                memoryIgnored: [],
-            }],
-    };
-    const memoryGateGapCard = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: memoryGateGapDelivery }, [], []);
-    const reinjectionGateGapDelivery = {
-        ...task.delivery_summary,
-        acceptance_gate_passed: false,
-        post_compact_reinjection_gates: [{
-                gate_id: "pcrg_ux_gate",
-                schema: "ccm-child-agent-post-compact-reinjection-gate-v1",
-                group_id: "ux-group",
-                target_project: "collab-web",
-                status: "required",
-                action: "review_reinjection_candidates_before_execution",
-                candidate_count: 2,
-                candidates: [
-                    { kind: "file", value: "frontend/legacy-filter.js", sourceMessageId: "ux-old-1" },
-                    { kind: "verification", value: "npm test", sourceMessageId: "ux-old-2" },
-                ],
-            }],
-        post_compact_reinjection_gate_count: 1,
-        post_compact_reinjection_gate_receipt_passed: false,
-        post_compact_reinjection_gate_receipt_rows: [{
-                agent: "collab-web",
-                status: "done",
-                score: 70,
-                grade: "partial",
-                pass: false,
-                missing: ["引用压缩后重注入 gate"],
-                post_compact_reinjection_gate: {
-                    required: true,
-                    pass: false,
-                    gate_ids: ["pcrg_ux_gate"],
-                    missing_gate_ids: ["pcrg_ux_gate"],
-                    candidate_count: 2,
-                    declared: false,
-                    used: [],
-                    ignored: [],
-                },
-            }],
-        receipts: [{
-                ...task.delivery_summary.receipts[0],
-                memoryUsed: ["使用压缩前线索 frontend/legacy-filter.js"],
-                memoryIgnored: [],
-            }],
-    };
-    const reinjectionGateGapCard = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: reinjectionGateGapDelivery }, [], []);
-    const reinjectionUsageGapDelivery = {
-        ...task.delivery_summary,
-        acceptance_gate_passed: false,
-        post_compact_reinjection_gates: [{
-                gate_id: "pcrg_ux_usage_gate",
-                schema: "ccm-child-agent-post-compact-reinjection-gate-v1",
-                group_id: "ux-group",
-                target_project: "collab-web",
-                status: "required",
-                action: "review_reinjection_candidates_before_execution",
-                candidate_count: 2,
-                candidates: [
-                    { candidate_id: "pcrc_ux_file", kind: "file", value: "frontend/legacy-filter.js", sourceMessageId: "ux-old-1" },
-                    { candidate_id: "pcrc_ux_test", kind: "verification", value: "npm test", sourceMessageId: "ux-old-2" },
-                ],
-            }],
-        post_compact_reinjection_gate_count: 1,
-        post_compact_reinjection_gate_receipt_passed: false,
-        post_compact_reinjection_gate_receipt_rows: [{
-                agent: "collab-web",
-                status: "done",
-                score: 70,
-                grade: "partial",
-                pass: false,
-                missing: ["声明候选使用状态"],
-                post_compact_reinjection_gate: {
-                    required: true,
-                    pass: false,
-                    gate_ids: ["pcrg_ux_usage_gate"],
-                    missing_gate_ids: [],
-                    candidate_count: 2,
-                    candidate_reference_required: true,
-                    candidate_reference_passed: true,
-                    candidate_usage_required: true,
-                    candidate_usage_declared_passed: false,
-                    referenced_candidate_ids: ["pcrc_ux_file"],
-                    missing_candidate_reference_gate_ids: [],
-                    missing_candidate_usage_gate_ids: ["pcrg_ux_usage_gate"],
-                    missing_candidate_usage_candidate_ids: ["pcrc_ux_file", "pcrc_ux_test"],
-                    candidate_usage_counts: { used: 0, ignored: 0, verified: 0, mentioned: 1, unreferenced: 1 },
-                    mentioned_only_candidate_ids: ["pcrc_ux_file"],
-                    unreferenced_candidate_ids: ["pcrc_ux_test"],
-                    declared: true,
-                    used: ["压缩前重注入候选 candidate_id=pcrc_ux_file；frontend/legacy-filter.js；reinjection_gate_id=pcrg_ux_usage_gate"],
-                    ignored: [],
-                },
-            }],
-        receipts: [{
-                ...task.delivery_summary.receipts[0],
-                memoryUsed: ["压缩前重注入候选 candidate_id=pcrc_ux_file；frontend/legacy-filter.js；reinjection_gate_id=pcrg_ux_usage_gate"],
-                memoryIgnored: [],
-            }],
-    };
-    const reinjectionUsageGapCard = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: reinjectionUsageGapDelivery }, [], []);
-    const handoffOnlyDelivery = {
-        ...task.delivery_summary,
-        headline: "子 Agent 只提交了建议",
-        acceptance_gate_passed: false,
-        actual_file_change_count: 0,
-        actual_file_changes: [],
-        verification_executed: [],
-        external_runner_verification_count: 0,
-        verification_source_gate_passed: false,
-        worker_notifications: [{ task_id: "collab-web", status: "completed", summary: "建议主 Agent 修改 LoginStore.vue，未实际修改文件" }],
-        receipt_statuses: [{ agent: "collab-web", status: "done", summary: "建议主 Agent 修改 LoginStore.vue，未实际修改文件，也未执行验证。" }],
-        receipts: [{
-                agent: "collab-web",
-                status: "done",
-                summary: "建议主 Agent 修改 LoginStore.vue，未实际修改文件，也未执行验证。",
-                actions: ["只整理实现方案，建议主 Agent 修改 LoginStore.vue"],
-                filesChanged: ["未实际修改文件"],
-                verification: ["建议运行 npm test，未执行"],
-                ack: {
-                    understoodGoal: "给工单页面增加负责人筛选",
-                    plannedScope: ["frontend/app.js"],
-                    forbiddenScope: ["不改无关页面"],
-                    verificationPlan: ["npm test"],
-                    unclear: [],
-                },
-                blockers: [],
-                needs: ["需要主 Agent 实际修改并验证"],
-                memoryUsed: ["项目记忆：筛选页面结构"],
-            }],
-    };
-    const handoffOnlyCard = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: handoffOnlyDelivery }, [], []);
-    const activeCard = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: { ...task.delivery_summary, acceptance_gate_passed: false } }, [], []);
-    const reviewingCard = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: { ...task.delivery_summary, acceptance_gate_passed: false } }, [{ id: "exec-review", project: "collab-web", state: "reviewing" }], []);
-    const reworkingCard = buildTaskCardView({ ...task, status: "in_progress", collaboration_state: { phase: "reworking" }, delivery_summary: { ...task.delivery_summary, acceptance_gate_passed: false } }, [], []);
-    const receiptResolvedCard = buildTaskCardView({
-        ...task,
-        status: "in_progress",
-        collaboration_state: {
-            phase: "reviewing",
-            last_continuation: {
-                source: "user_targeted_rework",
-                at: new Date().toISOString(),
-                rework_kind: "weak_receipt",
-                target: "collab-web",
-                reason: "缺少已执行验证，要求补充高质量结果说明",
-                status: "accepted",
-            },
-        },
-        delivery_summary: { ...task.delivery_summary, acceptance_gate_passed: false },
-    }, [], []);
-    const continuationCard = buildTaskCardView({
-        ...task,
-        status: "pending",
-        collaboration_state: {
-            phase: "reworking",
-            last_continuation: {
-                source: "user_next_work_item",
-                at: new Date().toISOString(),
-                rework_kind: "next_claimable_work_item",
-                target: "collab-web",
-                reason: "补齐负责人筛选验证",
-                status: "accepted",
-            },
-        },
-        delivery_summary: {
-            ...task.delivery_summary,
-            acceptance_gate_passed: false,
-            timeline: [
-                ...(Array.isArray(task.delivery_summary.timeline) ? task.delivery_summary.timeline : []),
-                { id: "tl-next-work-item", type: "next_work_item_dispatch", title: "下一步派发已接上", detail: "补齐负责人筛选验证", status: "active", phase: "rework", agent: "collab-web" },
-            ],
-        },
-    }, [], []);
-    const goalRevisionContinuationCard = buildTaskCardView({
-        ...task,
-        status: "in_progress",
-        collaboration_state: {
-            phase: "reworking",
-            last_continuation: {
-                source: "group_chat_followup",
-                at: new Date().toISOString(),
-                kind: "revise_goal",
-                reason: "先保留旧支付表，只新增兼容字段。",
-                status: "interrupting",
-                replan_required: true,
-                interrupt_current_run: true,
-            },
-            goal_revision_interruption: {
-                requested: true,
-                requested_at: new Date().toISOString(),
-                reason: "先保留旧支付表，只新增兼容字段。",
-                source: "group_chat_followup",
-                followup_revision: 1,
-            },
-        },
-        delivery_summary: {
-            ...task.delivery_summary,
-            acceptance_gate_passed: false,
-            timeline: [
-                ...(Array.isArray(task.delivery_summary.timeline) ? task.delivery_summary.timeline : []),
-                { id: "tl-goal-revision", type: "task_goal_revision", title: "目标调整已接收", detail: "先保留旧支付表，只新增兼容字段。", status: "active", phase: "rework", agent: "coordinator" },
-            ],
-        },
-    }, [], []);
-    const revertedCard = buildTaskCardView({ ...task, status: "cancelled", rolled_back_at: new Date().toISOString() }, [], []);
-    const recoveryBaseTask = {
-        ...task,
-        id: "recovery-task",
-        status: "pending",
-        acceptance_criteria: "负责人筛选完成后必须有文件变更、npm test 和主 Agent 验收",
-        recovery: {
-            revalidated_at: new Date().toISOString(),
-            previous_status: "in_progress",
-            mode: "startup_auto_recovery",
-            lease_recovery_count: 1,
-            decision_code: "authorized_incomplete_task",
-            decision_reason: "已确认并入队的未完成任务",
-            authorization_preserved: true,
-            authorization_evidence: ["intake_confirmed", "queued_at", "started_at"],
-            requires_user: false,
-            user_headline: "服务重启后，我已自动接上这轮任务，并重新核对目标、当前状态和验收条件。",
-            user_next_action: "我会沿用原计划和执行上下文继续推进，完成后再给你最终总结。",
-        },
-        execution_lease: { recovery_count: 1 },
-        delivery_summary: {
-            ...task.delivery_summary,
-            acceptance_gate_passed: false,
-            acceptance_gate: { failed_checks: [{ id: "verification", label: "已执行验证" }] },
-        },
-        work_items: [{
-                id: "wi-recovery-web",
-                target: "collab-web",
-                owner: "collab-web",
-                subject: "恢复后继续补齐负责人筛选验证",
-                status: "pending",
-                attempt: 2,
-            }],
-    };
-    const recoveryReasoning = buildTaskPreflightReasoning(recoveryBaseTask, "服务启动恢复：重新核对原始目标、当前代码状态、剩余缺口与验收条件", true);
-    const recoveryCard = buildTaskCardView({ ...recoveryBaseTask, reasoning_loop: recoveryReasoning }, [], []);
-    const liveCheckpointStageCard = buildTaskCardView({
-        ...task,
-        status: "in_progress",
-        delivery_summary: {
-            ...task.delivery_summary,
-            acceptance_gate_passed: false,
-            timeline: [
-                { id: "tl-live-revision", type: "plan_mode_revision_requested", title: "用户要求调整执行前计划", detail: "先保留旧接口兼容", status: "warn", phase: "planning", agent: "coordinator" },
-                { id: "tl-live-recovery", type: "reasoning_recovery_check", title: "恢复前已重新核对任务", detail: "目标、状态与验收条件已重新核对", status: "ok", phase: "planning", agent: "coordinator" },
-                { id: "tl-live-receipt", type: "child_agent_receipt", title: "collab-web 提交结果说明", detail: "已完成页面改动并运行验证", status: "ok", phase: "executing", agent: "collab-web" },
-                { id: "tl-live-rework", type: "targeted_rework", title: "精准返工已接上", detail: "补齐 npm test 证据", status: "active", phase: "rework", agent: "collab-web" },
-                { id: "tl-live-gate", type: "acceptance_gate", title: "代码变更验收门禁", detail: "1 项未通过，等待补齐验证", status: "warn", phase: "reviewing", agent: "coordinator" },
-                { id: "tl-live-supervisor", type: "global_supervisor_rework", title: "我已安排子任务返工", detail: "已按交付缺口重派 collab-web", status: "active", phase: "rework", agent: "global-agent" },
-            ],
-        },
-    }, [], []);
-    const liveCheckpointCompletedCard = buildTaskCardView({
-        ...task,
-        status: "in_progress",
-        workflow_type: "global_mission",
-        delivery_summary: {
-            ...task.delivery_summary,
-            acceptance_gate_passed: false,
-            timeline: [
-                { id: "tl-live-supervisor-cycle", type: "global_supervisor_cycle", title: "我已检查子任务进展", detail: "已检查 2 个子任务", status: "active", phase: "supervising", agent: "global-agent" },
-                { id: "tl-live-supervisor-done", type: "global_supervisor_completed", title: "我已确认全部子任务通过", detail: "所有子任务交付验收已通过", status: "ok", phase: "completed", agent: "global-agent" },
-            ],
-        },
-    }, [], []);
-    const greetingCard = buildTaskCardView({ id: "hello-task", title: "你好", business_goal: "你好", status: "pending", workflow_meta: { intake: { task_intent: { executable: false } } } }, [], []);
-    const highRiskPlan = classifyPlanModeRisk("删除旧订单表并上线新的支付权限", { members: [{ role: "coordinator", project: "api" }, { role: "member", project: "web" }] }, { executable: true }, 0);
-    const lowRiskPlan = classifyPlanModeRisk("给设置页按钮文案改成保存", { members: [{ role: "coordinator", project: "web" }] }, { executable: true }, 0);
-    const planClarificationQuestions = buildPlanModeClarificationQuestions("调整支付流程", highRiskPlan, ["api", "web"]);
-    const awaitingPlanCard = buildTaskCardView({
-        id: "plan-task",
-        title: "调整支付流程",
-        business_goal: "调整支付流程",
-        status: "pending",
-        intake_state: "awaiting_confirmation",
-        intake_draft: {
-            title: "执行前计划",
-            mode: "cc-style-plan-mode",
-            requires_confirmation: true,
-            risk: highRiskPlan,
-            impact_scope: { projects: ["api", "web"], areas: ["后端接口与数据契约", "前端页面与交互"], multi_agent: true },
-            read_only_exploration: { summary: "只读代码快照和本地知识库召回已用于评估。", projects: ["api", "web"], knowledge_used: true, code_snapshot_used: true },
-            steps: [
-                { id: "understand_goal", label: "理解需求与验收目标", detail: "支付流程调整需要先明确兼容边界。", status: "completed" },
-                { id: "read_only_explore", label: "只读探索影响范围", detail: "已使用只读代码快照和本地知识库。", status: "completed" },
-                { id: "confirm_boundary", label: "确认执行边界", detail: "等待用户确认后再派发子 Agent。", status: "needs_confirmation" },
-                { id: "dispatch_sub_agents", label: "派发子 Agent 工作单", detail: "确认后拆给 api 和 web。", status: "pending" },
-                { id: "verify_and_summarize", label: "验收结果并总结给用户", detail: "完成后核对变更、验证和风险。", status: "pending" },
-            ],
-            clarification_questions: planClarificationQuestions,
-            needs_clarification: true,
-            acceptance: ["必须有结构化结果说明", "必须有文件变更和验证证据"],
-            permission_boundaries: ["确认前不得修改文件", "删除和部署必须等待用户确认"],
-        },
-        workflow_meta: { intake: { task_intent: { executable: true } } },
-    }, [], []);
-    const revisedPlanDraft = buildRevisedPlanModeDraft(awaitingPlanCard.plan_mode, "先保留旧支付表，只新增兼容字段。");
-    const acceptedPlanDraft = buildAcceptedPlanModeDraft(awaitingPlanCard.plan_mode, "同时更新 README 中的支付兼容说明。", "2026-07-07T00:00:00.000Z");
-    const revisedPlanCard = buildTaskCardView({
-        id: "plan-task-revised",
-        title: "调整支付流程",
-        business_goal: "调整支付流程",
-        status: "pending",
-        intake_state: "awaiting_confirmation",
-        intake_draft: revisedPlanDraft,
-        workflow_meta: { plan_mode: revisedPlanDraft, intake: { task_intent: { executable: true }, plan_mode: revisedPlanDraft } },
-    }, [], []);
-    const acceptedPlanCard = buildTaskCardView({
-        id: "plan-task-accepted",
-        title: "调整支付流程",
-        business_goal: "调整支付流程",
-        status: "pending",
-        intake_state: "confirmed",
-        intake_draft: acceptedPlanDraft,
-        acceptance_criteria: acceptedPlanDraft.acceptance.join("\n"),
-        source_documents: `用户确认执行前计划时补充要求：${acceptedPlanDraft.accepted_feedback}`,
-        workflow_meta: { plan_mode: acceptedPlanDraft, intake: { task_intent: { executable: true }, plan_mode: acceptedPlanDraft, accepted_feedback: acceptedPlanDraft.accepted_feedback } },
-    }, [], []);
-    const report = (0, task_delivery_report_1.buildUserDeliveryReport)(task, task.delivery_summary, "done", "负责人筛选已完成");
-    const groupReport = (0, task_delivery_report_1.buildTaskGroupReportMessage)(task, "done", "负责人筛选已完成");
-    const acknowledgement = buildUserCoordinationAcknowledgement({ ...task, business_goal: "增加负责人筛选。" }, [{ project: "collab-web" }]);
-    const dispatchLaunchSummary = buildDispatchLaunchSummary({
-        goal: "增加负责人筛选。",
-        assignments: [{
-                project: "collab-web",
-                task: "实现负责人筛选 UI，并返回 CCM_AGENT_RECEIPT。",
-                reason: "前端负责筛选入口和交互。",
-                status: "dispatched",
-            }],
-        dispatchPolicy: { action: "delegate", reason: "用户明确要求开发任务" },
-        mode: "project_task",
-        taskId: "dispatch-launch-selftest",
-    });
-    const completedTargetDispatchLaunchSummary = buildDispatchLaunchSummary({
-        goal: "增加负责人筛选。",
-        assignments: [{
-                project: "collab-web",
-                task: "负责人筛选实现已回传，等待主 Agent 验收。",
-                reason: "执行成员已经返回结果，但还没有通过主 Agent 验收。",
-                status: "done",
-            }],
-        dispatchPolicy: { action: "delegate", reason: "用户明确要求开发任务" },
-        mode: "project_task",
-        taskId: "dispatch-launch-completed-target-selftest",
-    });
-    const ackGapTask = {
-        ...task,
-        status: "in_progress",
-        delivery_summary: {
-            ...task.delivery_summary,
-            ack_gate_passed: false,
-            ack_review: {
-                status: "needs_review",
-                rejected: [{ agent: "collab-web", status: "weak", reason: "ACK 缺少目标或计划范围" }],
-                rows: [{ agent: "collab-web", status: "weak", reason: "ACK 缺少目标或计划范围", planned_scope: [], unclear: [] }],
-            },
-            acceptance_gate_passed: false,
-        },
-    };
-    const ackGapCard = buildTaskCardView(ackGapTask, [], []);
-    const ackGapDraft = buildTaskGapContinuationDraft(ackGapTask);
-    const contractGapTask = {
-        ...task,
-        status: "in_progress",
-        delivery_summary: {
-            ...task.delivery_summary,
-            assignment_evidence: [{ project: "collab-api", task: "修改负责人 API", reason: "后端契约提供方" }],
-            receipts: [{
-                    agent: "collab-api",
-                    status: "done",
-                    summary: "新增 GET /api/users?role=owner",
-                    actions: ["更新接口"],
-                    filesChanged: ["backend/server.ts"],
-                    verification: ["npm test passed by external runner (exit 0)"],
-                    ack: { understoodGoal: "修改负责人 API", plannedScope: ["backend/server.ts"], verificationPlan: ["npm test"], unclear: [] },
-                    contractChanges: [{ type: "api", endpoint: "GET /api/users?role=owner", summary: "返回负责人列表", consumers: ["collab-web"] }],
-                    blockers: [],
-                    needs: [],
-                    memoryUsed: [],
-                    memoryIgnored: ["自测样例"],
-                }],
-            contract_injection_gate_passed: false,
-        },
-    };
-    const contractGapDraft = buildTaskGapContinuationDraft(contractGapTask);
-    const recoveredTestAgentNotificationTask = {
-        delivery_summary: {
-            needs: ["等待主 Agent 重新运行 TestAgent 复核本轮返工修复"],
-            blocking_needs: [],
-            worker_notifications: [
-                { task_id: "test-agent", status: "failed", receipt_status: "failed", summary: "首次复核要求返工" },
-                { task_id: "test-agent", status: "completed", receipt_status: "done", summary: "返工后复测通过" },
-            ],
-        },
-    };
-    const sameSessionReworkReceipts = selectLatestDurableReceipts([
-        { agent: "runtime-e2e-project", status: "done", task_agent_session_id: "tas-rework", summary: "返工完成" },
-        { agent: "runtime-e2e-project", status: "done", task_agent_session_id: "tas-rework", ack: { understoodGoal: "完成目标", plannedScope: ["src/feature.js"], unclear: [] } },
-    ]);
-    const differentSessionReworkReceipts = selectLatestDurableReceipts([
-        { agent: "runtime-e2e-project", status: "done", task_agent_session_id: "tas-new", summary: "新会话返工" },
-        { agent: "runtime-e2e-project", status: "done", task_agent_session_id: "tas-old", ack: { understoodGoal: "旧目标", plannedScope: ["src/old.js"], unclear: [] } },
-    ]);
-    const workItemReworkDraft = buildTargetedReworkContinuationDraft({
-        ...task,
-        delivery_summary: {},
-        work_items: [{
-                id: "wi-collab-web",
-                target: "collab-web",
-                owner: "collab-web",
-                subject: "补齐负责人筛选验证",
-                status: "failed",
-                attempt: 2,
-                evidence: ["上一轮修改了 frontend/app.js"],
-                blockers: ["缺少 npm test 执行结果"],
-                updatedAt: "2020-01-01T00:00:00.000Z",
-            }],
-    }, { target: "collab-web", rework_kind: "missing_verification", reason: "缺少已执行验证" });
-    const workItemWatchdogStatus = getTaskWatchdogStatus(1000, TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, TASK_WATCHDOG_GAP_REWORK_MAX, [{
-            id: "work-item-stall-task",
-            title: "工作项卡住自测",
-            status: "in_progress",
-            auto_execute: true,
-            updated_at: "2020-01-01T00:00:00.000Z",
-            work_items: [{
-                    id: "wi-stalled",
-                    target: "collab-web",
-                    owner: "collab-web",
-                    subject: "执行队列卡住项",
-                    status: "in_progress",
-                    updatedAt: "2020-01-01T00:00:00.000Z",
-                }],
-        }]);
-    const contractRows = (0, protocol_gates_1.getTaskContractInjectionRows)(contractGapTask).rows;
-    const contractInjectionId = contractRows[0]?.injection_id || "";
-    const contractDispatchedUnconsumedGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractRows, [{ project: "collab-web", task: "注入 contractChanges：GET /api/users?role=owner，请续跑适配消费者", continuationStrategy: "contract_inject", message_id: "m-contract" }]);
-    const contractConsumedGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractRows, [{ project: "collab-web", task: "注入 contractChanges：GET /api/users?role=owner，请续跑适配消费者", continuationStrategy: "contract_inject", message_id: "m-contract" }], [{ agent: "collab-web", status: "done", consumedInjectionIds: [contractInjectionId], contractConsumption: [{ injection_id: contractInjectionId, status: "adapted", evidence: ["frontend/app.js", "npm test"] }], filesChanged: ["frontend/app.js"], verification: ["npm test passed by external runner (exit 0)"] }]);
-    const contractWeakConsumptionGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractRows, [{ project: "collab-web", task: "注入 contractChanges：GET /api/users?role=owner，请续跑适配消费者", continuationStrategy: "contract_inject", message_id: "m-contract" }], [{ agent: "collab-web", status: "done", consumedInjectionIds: [contractInjectionId] }]);
-    const contractGenericApiGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractRows, [{ project: "collab-web", task: "改前端 API 调用", message_id: "m-original" }]);
-    const runtimeKernelCard = buildTaskCardView({
-        ...task,
-        delivery_summary: {
-            ...task.delivery_summary,
-            runtime_kernel: {
-                trace_id: "trace-ux",
-                lifecycle_count: 2,
-                latest_lifecycle: [],
-                blocked_count: 0,
-                ack_only: { active: true, count: 1, latest: { action: "ack_preflight_dispatch", status: "blocked" } },
-                dispatch_worker_count: 1,
-                worker_context_packet_ids: ["wcp_selftest"],
-                contract_injections: [],
-                injection_ids: ["ci_selftest"],
-                context_budget: { max_pressure: 18.5, compact_recommended: false },
-            },
-        },
-    }, [], []);
-    const codeSnapshotSelfTest = (() => {
-        const tempRoot = fs.mkdtempSync(path.join(process.env.TEMP || utils_1.CCM_DIR, "ccm-project-analysis-"));
-        try {
-            fs.mkdirSync(path.join(tempRoot, "src"), { recursive: true });
-            fs.mkdirSync(path.join(tempRoot, "node_modules"), { recursive: true });
-            fs.writeFileSync(path.join(tempRoot, "package.json"), JSON.stringify({ scripts: { dev: "vite" }, dependencies: { vue: "^3.0.0" } }), "utf-8");
-            fs.writeFileSync(path.join(tempRoot, "src", "payment.ts"), "export function createPayment() { return 'ok' }\n", "utf-8");
-            fs.writeFileSync(path.join(tempRoot, ".env"), "SECRET_SHOULD_NOT_APPEAR=1\n", "utf-8");
-            fs.writeFileSync(path.join(tempRoot, "node_modules", "ignored.js"), "SHOULD_NOT_APPEAR\n", "utf-8");
-            const snapshot = buildProjectCodeReadOnlySnapshot("demo", tempRoot, "支付功能在哪里");
-            return {
-                pass: snapshot.includes("src/payment.ts") && snapshot.includes("createPayment") && !snapshot.includes("SECRET_SHOULD_NOT_APPEAR") && !snapshot.includes("SHOULD_NOT_APPEAR"),
-                hasSourceFile: snapshot.includes("src/payment.ts"),
-                hidesSecret: !snapshot.includes("SECRET_SHOULD_NOT_APPEAR"),
-                hidesDependencies: !snapshot.includes("SHOULD_NOT_APPEAR"),
-            };
-        }
-        catch (error) {
-            return { pass: false, error: (0, memory_1.compactMemoryText)(error?.message || error, 240) };
-        }
-        finally {
-            try {
-                fs.rmSync(tempRoot, { recursive: true, force: true });
-            }
-            catch { }
-        }
-    })();
-    const gatewayFallbackBlocked = normalizeGroupAgentGatewayTaskIntent(classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面"), { runtime: "coded-fallback", dispatchPolicy: { action: "delegate", reason: "规则猜测需要派发" }, assignments: [{ project: "collab-web" }] }, "project_task");
-    const gatewayLlmDelegates = normalizeGroupAgentGatewayTaskIntent(classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面"), { runtime: "llm-api", dispatchPolicy: { action: "delegate", reason: "用户要求开发任务" }, assignments: [{ project: "collab-web" }] }, "project_task");
-    const gatewayLlmDirectAnswer = normalizeGroupAgentGatewayTaskIntent(classifyGroupProjectTaskIntent("这个项目架构是什么"), { runtime: "llm-api", dispatchPolicy: { action: "direct_answer", reason: "只读项目分析即可" }, assignments: [] }, "project_task");
-    const globalMissionHandoff = buildGlobalMissionTargetHandoff({
-        parent: { id: "gm-selftest" },
-        target: { type: "group", group_id: "g-selftest", name: "开发群", coordinator: "coordinator", reason: "全局任务需要群聊协作", dependsOn: ["backend-api"] },
-        group: { id: "g-selftest", name: "开发群", members: [{ project: "coordinator" }, { project: "collab-web" }] },
-        businessGoal: "完成跨项目负责人筛选",
-        childGoal: "群聊负责前端联调和验收",
-        acceptance: "必须有文件变更、已执行验证和主 Agent 总结",
-        sourceDocuments: "接口：GET /api/users?role=owner",
-        traceId: "trace-global-handoff",
-    });
-    const globalQueuedMessage = buildQueuedGroupTaskMessage({
-        ...task,
-        global_mission_id: "gm-selftest",
-        mission_handoff: globalMissionHandoff,
-    });
-    const globalDirectCompletionTask = {
-        ...task,
-        workflow_meta: {
-            global_direct_dispatch: {
-                schema: "ccm-global-direct-dispatch-v1",
-                session_id: "web-global-session",
-                global_run_id: "gar-selftest",
-                trace_id: "trace-should-stay-technical",
-            },
-        },
-    };
-    const globalDirectCompletionMessage = buildGlobalDirectDispatchCompletionMessage(globalDirectCompletionTask);
-    const globalDirectWeakCompletionTask = {
-        ...globalDirectCompletionTask,
-        delivery_summary: weakAcceptanceOnlyTask.delivery_summary,
-    };
-    const globalDirectBlockedTask = {
-        ...globalDirectCompletionTask,
-        status: "in_progress",
-        delivery_summary: { ...task.delivery_summary, acceptance_gate_passed: false },
-    };
-    const globalDirectContinuationTask = {
-        ...globalDirectCompletionTask,
-        status: "in_progress",
-        followup_revision: 3,
-        plan_revision_required: true,
-        collaboration_state: {
-            phase: "reworking",
-            last_continuation: {
-                source: "group_chat_followup",
-                at: "2026-07-07T00:00:00.000Z",
-                kind: "revise_goal",
-                reason: "先保留旧支付表，只新增兼容字段。",
-                status: "interrupting",
-                replan_required: true,
-                interrupt_current_run: true,
-            },
-            goal_revision_interruption: {
-                requested: true,
-                requested_at: "2026-07-07T00:00:00.000Z",
-                reason: "先保留旧支付表，只新增兼容字段。",
-            },
-        },
-        delivery_summary: { ...task.delivery_summary, acceptance_gate_passed: false },
-    };
-    const globalDirectContinuationMessage = buildGlobalDirectDispatchContinuationMessage(globalDirectContinuationTask);
-    const globalDirectContinuationAlreadyNotifiedTask = {
-        ...globalDirectContinuationTask,
-        workflow_meta: {
-            global_direct_dispatch: {
-                ...globalDirectContinuationTask.workflow_meta.global_direct_dispatch,
-                continuation_notified_key: getGlobalDirectDispatchContinuationKey(globalDirectContinuationTask),
-            },
-        },
-    };
-    const globalDirectRollbackTask = {
-        ...globalDirectCompletionTask,
-        status: "cancelled",
-        rolled_back_at: new Date().toISOString(),
-        rollback_reason: "用户检查后撤销最近一轮改动",
-        rollback_results: [{ checkpointId: "checkpoint-ux" }],
-        delivery_summary: { ...task.delivery_summary, headline: "最近一轮改动已安全撤销", acceptance_gate_passed: false, reverted: true },
-    };
-    const globalDirectRollbackAlreadyNotifiedTask = {
-        ...globalDirectRollbackTask,
-        workflow_meta: {
-            global_direct_dispatch: {
-                ...globalDirectRollbackTask.workflow_meta.global_direct_dispatch,
-                rollback_notified_at: new Date().toISOString(),
-            },
-        },
-    };
-    const globalDirectRollbackMessage = buildGlobalDirectDispatchRollbackMessage(globalDirectRollbackTask);
-    const teamShutdownTaskId = `team-shutdown-selftest-${process.pid}-${Date.now().toString(36)}`;
-    const teamShutdownTask = {
-        ...task,
-        id: teamShutdownTaskId,
-        status: "in_progress",
-        group_id: "team-shutdown-group",
-        delivery_summary: task.delivery_summary,
-    };
-    const teamShutdownExecution = {
-        status: "done",
-        detail: "团队收尾门禁自测",
-        report: "负责人筛选已完成",
-        receipt: task.delivery_summary.receipts[0],
-        review: { status: "complete", summary: "已完成最终验收" },
-    };
-    (0, agent_sessions_1.openTaskAgentSession)({
-        scopeId: teamShutdownTaskId,
-        taskId: teamShutdownTaskId,
-        groupId: "team-shutdown-group",
-        project: "collab-web",
-        agentType: "claudecode",
-    });
-    const openTeamSummary = buildDeliverySummary(teamShutdownTask, teamShutdownExecution, "done");
-    (0, agent_sessions_1.closeTaskAgentSessions)({ taskId: teamShutdownTaskId, groupId: "team-shutdown-group" }, "团队收尾门禁自测关闭会话");
-    const closedTeamSummary = buildDeliverySummary(teamShutdownTask, teamShutdownExecution, "done");
-    (0, agent_sessions_1.purgeTaskAgentSessions)(teamShutdownTaskId);
-    const independentReviewTask = {
-        id: `independent-review-selftest-${process.pid}`,
-        title: "调整后端订单 API",
-        business_goal: "修改订单 API 并同步验证",
-        workflow_type: "daily_dev",
-        assign_type: "group",
-        target_project: "api-service",
-        group_id: "independent-review-group",
-        requires_code_changes: true,
-        requires_verification: true,
-        status: "in_progress",
-        file_changes: {
-            count: 3,
-            files: [
-                { path: "backend/server.ts", statusText: "修改", statusKind: "modified", diff: { additions: 12, deletions: 2 } },
-                { path: "backend/routes/orders.ts", statusText: "修改", statusKind: "modified", diff: { additions: 16, deletions: 1 } },
-                { path: "package.json", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 1 } },
-            ],
-        },
-    };
-    const independentReviewReceipt = {
-        agent: "api-service",
-        status: "done",
-        summary: "已调整订单 API",
-        actions: ["修改订单 API", "更新路由校验"],
-        filesChanged: ["backend/server.ts", "backend/routes/orders.ts", "package.json"],
-        verification: ["npm run check passed by external runner (exit 0)"],
-        ack: {
-            understoodGoal: "修改订单 API",
-            plannedScope: ["backend/server.ts", "backend/routes/orders.ts"],
-            forbiddenScope: ["不改无关模块"],
-            verificationPlan: ["npm run check"],
-            unclear: [],
-        },
-        blockers: [],
-        needs: [],
-    };
-    const independentReviewExecution = {
-        status: "done",
-        detail: "复杂变更独立复核自测",
-        coordinationPlan: { strategy: "research_synthesis_implementation_verification", phases: ["实现", "验证", "复核"], targets: ["api-service"] },
-        assignments: [{ project: "api-service", task: "修改订单 API 并提交结果说明", status: "done" }],
-        report: (0, agent_notifications_1.formatCollectedAgentOutput)("api-service", "已调整订单 API", independentReviewReceipt),
-        receipt: independentReviewReceipt,
-        review: { status: "complete", summary: "已完成最终验收" },
-    };
-    const missingIndependentReviewSummary = buildDeliverySummary(independentReviewTask, independentReviewExecution, "done");
-    const reviewedReceipt = {
-        ...independentReviewReceipt,
-        independentReview: [{
-                reviewer: "qa-agent",
-                verdict: "passed",
-                summary: "已复核后端 API 改动、路由校验和验证记录，未发现阻塞风险。",
-                evidence: ["backend/server.ts", "backend/routes/orders.ts", "npm run check passed by external runner (exit 0)"],
-            }],
-    };
-    const reviewedIndependentSummary = buildDeliverySummary(independentReviewTask, {
-        ...independentReviewExecution,
-        report: (0, agent_notifications_1.formatCollectedAgentOutput)("api-service", "已调整订单 API，并由 qa-agent 复核通过", reviewedReceipt),
-        receipt: reviewedReceipt,
-    }, "done");
-    const failedReviewedReceipt = {
-        ...independentReviewReceipt,
-        independentReview: [{
-                reviewer: "test-agent",
-                verdict: "failed",
-                summary: "订单 API 变更复核未通过，npm run check 仍有失败。",
-                evidence: ["npm run check failed", "backend/routes/orders.ts 仍需修复"],
-                reviewSubject: "api-service",
-            }],
-    };
-    const failedReviewedIndependentSummary = buildDeliverySummary(independentReviewTask, {
-        ...independentReviewExecution,
-        report: (0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", "订单 API 复核未通过，需要返工", failedReviewedReceipt),
-        receipt: failedReviewedReceipt,
-    }, "done");
-    const independentReviewGapDraft = buildTaskGapContinuationDraft({
-        ...independentReviewTask,
-        delivery_summary: missingIndependentReviewSummary,
-    });
-    const failedIndependentReviewGapDraft = buildTaskGapContinuationDraft({
-        ...independentReviewTask,
-        delivery_summary: failedReviewedIndependentSummary,
-    });
-    const workItemSelfTest = (0, work_items_1.runMainAgentWorkItemSelfTest)();
-    const workerHandoffSelfTest = (0, worker_handoff_1.runWorkerHandoffSelfTest)();
-    const globalMemoryHealthGateReceiptSelfTest = runGlobalMemoryHealthGateReceiptValidationSelfTest();
-    const taskAgentMemoryContextSnapshotReceiptSelfTest = runTaskAgentMemoryContextSnapshotReceiptValidationSelfTest();
-    const workerContinuationRuntimeTask = {
-        ...task,
-        title: "旧目标：重构支付流程",
-        business_goal: "新目标：保留旧支付表，只新增兼容字段",
-        status: "in_progress",
-        followup_revision: 2,
-        consumed_followup_revision: 1,
-        pending_followups: [{
-                kind: "revise_goal",
-                message: "先保留旧支付表，只新增兼容字段。",
-                continuation: { route_label: "先停止当前轮再重核计划", replan_required: true },
-            }],
-        collaboration_state: {
-            phase: "reworking",
-            last_continuation: {
-                source: "group_chat_followup",
-                at: "2026-07-07T00:00:00.000Z",
-                kind: "revise_goal",
-                reason: "先保留旧支付表，只新增兼容字段。",
-                status: "accepted",
-                replan_required: true,
-                interrupt_current_run: true,
-            },
-            goal_revision_interruption: {
-                requested: true,
-                requested_at: "2026-07-07T00:00:00.000Z",
-                resolved_at: "2026-07-07T00:01:00.000Z",
-                reason: "先保留旧支付表，只新增兼容字段。",
-                source: "group_chat_followup",
-            },
-        },
-        delivery_summary: {
-            ...task.delivery_summary,
-            headline: "上一轮已按旧支付方案改动，等待按新目标重核",
-            actual_file_changes: [{ path: "backend/payment.ts" }],
-            verification_executed: ["npm run check passed by external runner (exit 0)"],
-        },
-    };
-    const workerContinuationRuntime = buildWorkerContinuationHandoff(workerContinuationRuntimeTask, "api-service", { previous_goal: "旧目标：重构支付流程" });
-    const workerContinuationRuntimeHandoff = buildChildAgentWorkerHandoff("api-service", "按最新目标处理支付兼容字段", {
-        task: workerContinuationRuntimeTask,
-        source: "群聊主 Agent 目标调整续跑",
-        reason: "用户中途调整了支付改造范围",
-        continuation: workerContinuationRuntime,
-        acceptance: "保留旧支付表\n新增兼容字段\n必须真实验证",
-        verification_hints: ["npm run check"],
-        allowed_scope: ["支付兼容字段"],
-        forbidden_scope: ["删除旧支付表"],
-    });
-    const workerContinuationRuntimeRendered = (0, worker_handoff_1.renderSelfContainedWorkerHandoff)(workerContinuationRuntimeHandoff);
-    const blockedCompletionReadiness = buildUserCompletionReadinessSummary({ ...task, status: "in_progress" }, {
-        ...task.delivery_summary,
-        team_shutdown: {
-            required: true,
-            pass: false,
-            open_session_count: 1,
-            open_sessions: [{ id: "session-hidden", project: "collab-web" }],
-            unresolved_work_item_count: 1,
-        },
-    }, [
-        { id: "wi-api", target: "api", subject: "接口完成", status: "completed" },
-        { id: "wi-web", target: "web", subject: "接入筛选 UI", status: "in_progress" },
-    ], "reviewing");
-    const blockedCompletionAcceptance = buildUserAcceptanceReview({ ...task, status: "in_progress" }, {
-        ...task.delivery_summary,
-        acceptance_gate_passed: false,
-        work_item_summary: { total: 2, all_completed: false },
-        team_shutdown: { required: true, pass: false, open_session_count: 1, unresolved_work_item_count: 1 },
-        acceptance_gate: {
-            pass: false,
-            checks: [
-                { id: "work_items", ok: false, detail: "raw work item detail" },
-                { id: "team_shutdown", ok: false, detail: "raw team shutdown detail" },
-            ],
-        },
-    }, [], "reviewing");
-    const blockedCompletionVisibleText = JSON.stringify({
-        title: blockedCompletionReadiness?.title,
-        status_label: blockedCompletionReadiness?.status_label,
-        headline: blockedCompletionReadiness?.headline,
-        rows: blockedCompletionReadiness?.rows,
-        next_action: blockedCompletionReadiness?.next_action,
-    });
-    const blockedCompletionAcceptanceVisibleText = JSON.stringify({
-        title: blockedCompletionAcceptance.title,
-        headline: blockedCompletionAcceptance.headline,
-        missing: blockedCompletionAcceptance.missing,
-        checks: blockedCompletionAcceptance.checks.map((item) => ({ label: item.label, detail: item.detail })),
-        next_action: blockedCompletionAcceptance.next_action,
-    });
-    const jargonAcceptance = buildUserAcceptanceReview({ ...task, status: "in_progress" }, {
-        ...task.delivery_summary,
-        acceptance_gate_passed: false,
-        ack_gate_passed: false,
-        ack_review: { rejected: [{ agent: "web", reason: "ACK raw reason" }] },
-        receipt_quality_gate_passed: false,
-        weak_receipt_quality: [{ agent: "web", reason: "weak receipt raw reason" }],
-        memory_dispatch_gates: [{ gate_id: "memory-gate-hidden" }],
-        memory_gate_receipt_rows: [{ agent: "web", memory_gate: { required: true, pass: false, missing_gate_ids: ["memory-gate-hidden"] } }],
-        api_microcompact_edit_plans: [{ plan_checksum: "api-microcompact-hidden" }],
-        api_microcompact_receipt_rows: [{ agent: "web", api_microcompact: { required: true, pass: false, missing_plan_checksums: ["api-microcompact-hidden"] } }],
-        acceptance_gate: {
-            pass: false,
-            checks: [
-                { id: "ack_gate", ok: false, detail: "ACK raw detail" },
-                { id: "memory_gate_receipt", ok: false, detail: "记忆 gate raw detail" },
-                { id: "api_microcompact_receipt", ok: false, detail: "API microcompact edit plan raw detail" },
-            ],
-        },
-    }, [], "reviewing");
-    const jargonAcceptanceVisibleText = JSON.stringify({
-        title: jargonAcceptance.title,
-        headline: jargonAcceptance.headline,
-        missing: jargonAcceptance.missing,
-        checks: jargonAcceptance.checks.map((item) => ({ label: item.label, detail: item.detail })),
-        next_action: jargonAcceptance.next_action,
-    });
-    const collectVisibleTextValues = (value, blockedKeys = new Set(["schema", "id", "kind", "type", "source", "status", "tone", "rework_kind", "reworkKind"])) => {
-        if (Array.isArray(value))
-            return value.flatMap(item => collectVisibleTextValues(item, blockedKeys));
-        if (!value || typeof value !== "object")
-            return typeof value === "string" ? [value] : [];
-        return Object.entries(value).flatMap(([key, item]) => blockedKeys.has(key) ? [] : collectVisibleTextValues(item, blockedKeys));
-    };
-    const visibleInternalTermPattern = /CCM_AGENT_RECEIPT|WorkerContextPacket|trace_id|session_id|raw receipt|raw payload|原始回执|回执/i;
-    const receiptReworkVisibleText = collectVisibleTextValues({
-        title: missingEvidenceCard.receipt_rework_summary?.title,
-        status_label: missingEvidenceCard.receipt_rework_summary?.status_label,
-        headline: missingEvidenceCard.receipt_rework_summary?.headline,
-        next_action: missingEvidenceCard.receipt_rework_summary?.next_action,
-        gaps: missingEvidenceCard.receipt_rework_summary?.gaps?.map((item) => ({
-            title: item.title,
-            reason: item.reason,
-            missing: item.missing,
-            action: { title: item.action?.title, label: item.action?.label, reason: item.action?.reason },
-        })),
-        active_rework: missingEvidenceCard.receipt_rework_summary?.active_rework,
-        resolved: receiptResolvedCard.receipt_rework_summary?.resolved,
-    }).join("\n");
-    const coordinationVisibleText = collectVisibleTextValues({
-        events: missingEvidenceCard.agent_coordination?.coordination_events?.map((item) => ({ label: item.label, detail: item.detail })),
-        targeted_rework: missingEvidenceCard.agent_coordination?.targeted_rework?.map((item) => ({ title: item.title, reason: item.reason, label: item.label })),
-        next_action: missingEvidenceCard.agent_coordination?.next_action,
-    }).join("\n");
-    const continuationVisibleText = collectVisibleTextValues({
-        title: goalRevisionContinuationCard.continuation_status?.title,
-        status_label: goalRevisionContinuationCard.continuation_status?.status_label,
-        headline: goalRevisionContinuationCard.continuation_status?.headline,
-        kind_label: goalRevisionContinuationCard.continuation_status?.kind_label,
-        route_label: goalRevisionContinuationCard.continuation_status?.route_label,
-        reason: goalRevisionContinuationCard.continuation_status?.reason,
-        next_action: goalRevisionContinuationCard.continuation_status?.next_action,
-        handoff_steps: goalRevisionContinuationCard.continuation_status?.handoff_steps?.map((item) => ({ label: item.label, detail: item.detail })),
-    }).join("\n");
-    const checks = {
-        completionReadinessShowsFriendlyBlockers: blockedCompletionReadiness?.schema === "ccm-main-agent-completion-readiness-v1"
-            && blockedCompletionReadiness.status === "blocked"
-            && blockedCompletionReadiness.headline.includes("还有 1 个工作项未完成")
-            && blockedCompletionReadiness.rows.some((item) => item.target === "web" && item.status_label === "执行中"),
-        completionReadinessHidesTechnicalIds: !blockedCompletionVisibleText.includes("wi-web")
-            && !blockedCompletionVisibleText.includes("session-hidden")
-            && blockedCompletionReadiness?.technical?.unresolved_work_item_ids?.includes("wi-web")
-            && blockedCompletionReadiness?.technical?.open_session_ids?.includes("session-hidden"),
-        completionAcceptanceNamesQueueAndSessionBlockers: blockedCompletionAcceptance.checks.some((item) => item.id === "work_items" && item.label === "执行队列收尾" && item.detail === "还有 1 个工作项未完成")
-            && blockedCompletionAcceptance.checks.some((item) => item.id === "team_shutdown" && item.label === "执行成员会话收尾" && item.detail === "还有 1 个执行成员会话未结束")
-            && !blockedCompletionAcceptanceVisibleText.includes("raw work item detail")
-            && !blockedCompletionAcceptanceVisibleText.includes("raw team shutdown detail")
-            && JSON.stringify(blockedCompletionAcceptance.technical || {}).includes("raw work item detail")
-            && JSON.stringify(blockedCompletionAcceptance.technical || {}).includes("raw team shutdown detail"),
-        acceptanceReviewVisibleTextHidesProtocolTerms: jargonAcceptance.checks.some((item) => item.id === "ack_gate" && item.label === "接单说明完整" && item.detail.includes("接单说明"))
-            && jargonAcceptance.checks.some((item) => item.id === "memory_gate_receipt" && item.label === "记忆使用声明" && item.detail.includes("记忆使用声明"))
-            && jargonAcceptance.checks.some((item) => item.id === "api_microcompact_receipt" && item.label === "上下文压缩计划使用说明" && item.detail.includes("上下文压缩计划"))
-            && !/ACK|microcompact|\bgate\b|门禁|回执/.test(jargonAcceptanceVisibleText),
-        acceptanceReviewKeepsRawGateDetailsTechnical: /ACK raw detail/.test(JSON.stringify(jargonAcceptance.technical || {}))
-            && /记忆 gate raw detail/.test(JSON.stringify(jargonAcceptance.technical || {}))
-            && /API microcompact edit plan raw detail/.test(JSON.stringify(jargonAcceptance.technical || {})),
-        simplePhaseLanguage: card.phase_label === "已完成",
-        conciseAgentLanguage: card.agents.every((item) => !/receipt|回执|门禁|session|trace/i.test(item.summary)),
-        simpleActions: card.actions.some((item) => item.label === "查看改动")
-            && card.actions.some((item) => item.label === "继续修改")
-            && card.actions.some((item) => item.label === "安全撤销")
-            && failedCard.actions.some((item) => item.label === "重新执行")
-            && activeCard.actions.some((item) => item.label === "停止"),
-        revertedPhase: revertedCard.phase === "reverted" && revertedCard.phase_label === "已安全撤销",
-        technicalIdsStayCollapsed: !!card.technical.trace_id,
-        userWorkflowTimelineVisible: card.workflow_timeline.length >= 4 && card.workflow_timeline.some((item) => item.label.includes("预判潜在修改冲突")),
-        workerHandoffTimelineVisible: card.workflow_timeline.some((item) => item.label.includes("工作单已补齐")) && !JSON.stringify(card.workflow_timeline).includes("CCM_AGENT_RECEIPT"),
-        progressCheckpointsVisible: card.progress_checkpoints?.schema === "ccm-main-agent-progress-checkpoints-v1"
-            && card.progress_checkpoints.items?.some((item) => item.label.includes("协作计划") || item.label.includes("工作单")),
-        progressCheckpointsHideProtocol: !/CCM_AGENT_RECEIPT|trace_id|session_ids|WorkerContextPacket/.test(JSON.stringify(card.progress_checkpoints || {})),
-        liveCheckpointStageEventsVisible: liveCheckpointStageCard.progress_checkpoints?.items?.some((item) => item.label.includes("执行前计划已按反馈调整"))
-            && liveCheckpointStageCard.progress_checkpoints?.items?.some((item) => item.label.includes("我已接上恢复任务"))
-            && liveCheckpointStageCard.progress_checkpoints?.items?.some((item) => item.label.includes("提交结果"))
-            && liveCheckpointStageCard.progress_checkpoints?.items?.some((item) => item.label.includes("定向补充"))
-            && liveCheckpointStageCard.progress_checkpoints?.items?.some((item) => item.label.includes("我已安排子任务返工")),
-        liveCheckpointSupervisorCompletionVisible: liveCheckpointCompletedCard.progress_checkpoints?.items?.some((item) => item.label.includes("我已检查子任务进展"))
-            && liveCheckpointCompletedCard.progress_checkpoints?.items?.some((item) => item.label.includes("全局任务已通过交付验收")),
-        liveCheckpointStageEventsHideProtocol: !/CCM_AGENT_RECEIPT|trace_id|session_ids|WorkerContextPacket/.test(JSON.stringify([liveCheckpointStageCard.progress_checkpoints, liveCheckpointCompletedCard.progress_checkpoints])),
-        globalMissionHandoffComplete: globalMissionHandoff.schema === "ccm-self-contained-worker-handoff-v1" && globalMissionHandoff.global_mission?.mission_id === "gm-selftest" && globalMissionHandoff.worker_context_packet?.packet_id && globalMissionHandoff.done_criteria?.some((item) => item.includes("全局汇总")),
-        globalMissionQueuedMessageHasContext: globalQueuedMessage.includes("全局任务交接") && globalQueuedMessage.includes("给全局 Agent 的交付要求") && !/WorkerContextPacket|trace_id/.test(globalQueuedMessage),
-        globalDirectDispatchCompletionSyncReady: shouldNotifyGlobalDirectDispatchCompletion(globalDirectCompletionTask, "in_progress") === true && shouldNotifyGlobalDirectDispatchCompletion(globalDirectBlockedTask, "in_progress") === false,
-        globalDirectDispatchWeakAcceptanceNotSynced: shouldNotifyGlobalDirectDispatchCompletion(globalDirectWeakCompletionTask, "in_progress") === false,
-        globalDirectDispatchCompletionMessageFriendly: globalDirectCompletionMessage.includes("通过验收") && globalDirectCompletionMessage.includes("最终总结") && !/CCM_AGENT_RECEIPT|trace_id|global_run_id|WorkerContextPacket|Trace|内部回执/.test(globalDirectCompletionMessage),
-        globalDirectDispatchContinuationSyncReady: shouldNotifyGlobalDirectDispatchContinuation(globalDirectContinuationTask, "in_progress") === true && shouldNotifyGlobalDirectDispatchContinuation(globalDirectContinuationAlreadyNotifiedTask, "in_progress") === false && shouldNotifyGlobalDirectDispatchContinuation(globalDirectCompletionTask, "in_progress") === false,
-        globalDirectDispatchContinuationMessageFriendly: globalDirectContinuationMessage.includes("补充要求")
-            && globalDirectContinuationMessage.includes("保留旧支付表")
-            && globalDirectContinuationMessage.includes("停止当前执行轮")
-            && globalDirectContinuationMessage.includes("这还不是完成结果")
-            && !/CCM_AGENT_RECEIPT|trace_id|global_run_id|WorkerContextPacket|Trace|内部回执/.test(globalDirectContinuationMessage),
-        globalDirectDispatchRollbackSyncReady: shouldNotifyGlobalDirectDispatchRollback(globalDirectRollbackTask, "done") === true && shouldNotifyGlobalDirectDispatchRollback(globalDirectRollbackAlreadyNotifiedTask, "done") === false,
-        globalDirectDispatchRollbackMessageFriendly: globalDirectRollbackMessage.includes("已安全撤销") && globalDirectRollbackMessage.includes("不再视为已交付") && globalDirectRollbackMessage.includes("重新读取当前代码状态") && !/CCM_AGENT_RECEIPT|trace_id|global_run_id|WorkerContextPacket/.test(globalDirectRollbackMessage),
-        teamShutdownGateBlocksOpenSession: openTeamSummary.acceptance_gate_passed === false && openTeamSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "team_shutdown") && openTeamSummary.team_shutdown?.open_session_count === 1,
-        teamShutdownGatePassesAfterClose: closedTeamSummary.team_shutdown?.open_session_count === 0
-            && closedTeamSummary.team_shutdown?.pass === true
-            && !closedTeamSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "team_shutdown"),
-        independentReviewGateBlocksComplexChange: missingIndependentReviewSummary.independent_review_required === true
-            && missingIndependentReviewSummary.independent_review_gate_passed === false
-            && missingIndependentReviewSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "independent_review"),
-        independentReviewGatePassesWithEvidence: reviewedIndependentSummary.independent_review_required === true
-            && reviewedIndependentSummary.independent_review_gate_passed === true
-            && !reviewedIndependentSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "independent_review"),
-        independentReviewGapDraftGuidesReviewer: independentReviewGapDraft.includes("复杂变更独立复核")
-            && independentReviewGapDraft.includes("request_review")
-            && independentReviewGapDraft.includes("independentReview"),
-        independentReviewFailedGapDraftRoutesRework: failedIndependentReviewGapDraft.includes("复核未通过")
-            && failedIndependentReviewGapDraft.includes("原实现成员返工")
-            && failedIndependentReviewGapDraft.includes("重新运行 TestAgent"),
-        liveTodoPlanVisible: card.live_todo_plan?.source === "ccm-live-task-todo" && Array.isArray(card.mainAgentDecision?.user_plan_steps) && card.mainAgentDecision.user_plan_steps.some((step) => step.id === "final_delivery_report" && step.status === "completed"),
-        groupWeakAcceptanceOnlyStaysInReview: weakAcceptanceOnlyLifecycle.state === "acceptance"
-            && weakAcceptanceOnlyLifecycle.terminal === false
-            && weakAcceptanceOnlyCard.phase === "reviewing"
-            && weakAcceptanceOnlyCard.delivery?.acceptance_passed === false
-            && weakAcceptanceOnlyCard.acceptance_review?.pass === false
-            && weakAcceptanceOnlyCard.acceptance_review?.missing?.includes("目标覆盖")
-            && weakAcceptanceOnlyCard.blockers?.includes("最终验收缺少真实验证或复核证据")
-            && !weakAcceptanceOnlyCard.mainAgentDecision?.verify?.passed
-            && weakAcceptanceOnlyCard.mainAgentDecision?.user_plan_steps?.some((step) => step.id === "coordinator_review" && step.status === "reviewing")
-            && !weakAcceptanceOnlyCard.mainAgentDecision?.user_plan_steps?.some((step) => step.id === "final_delivery_report" && step.status === "completed")
-            && !weakAcceptanceOnlyCard.actions?.some((action) => action.kind === "rollback"),
-        workItemsVisible: card.work_items?.some((item) => item.target === "collab-web" && item.status === "completed") && card.work_item_summary?.all_completed === true,
-        workItemSelfTestPasses: workItemSelfTest.pass === true,
-        workerHandoffSelfTestPasses: workerHandoffSelfTest.pass === true,
-        globalMemoryHealthGateReceiptSelfTestPasses: globalMemoryHealthGateReceiptSelfTest.pass === true,
-        taskAgentMemoryContextSnapshotReceiptSelfTestPasses: taskAgentMemoryContextSnapshotReceiptSelfTest.pass === true,
-        workerContinuationHandoffBuildsRuntime: workerContinuationRuntime?.schema === "ccm-worker-continuation-handoff-v1"
-            && workerContinuationRuntime?.replan_required === true
-            && workerContinuationRuntime?.interrupt_current_run === true
-            && workerContinuationRuntime?.latest_user_change?.includes("保留旧支付表")
-            && workerContinuationRuntime?.previous_goal?.includes("重构支付流程")
-            && workerContinuationRuntime?.instructions?.some((item) => item.includes("不要继续已停止执行轮中的旧方向")),
-        workerContinuationHandoffRenderedForDispatch: workerContinuationRuntimeHandoff?.scope?.continuation?.schema === "ccm-worker-continuation-handoff-v1"
-            && workerContinuationRuntimeRendered.includes("接续/目标调整说明")
-            && workerContinuationRuntimeRendered.includes("最新用户要求")
-            && workerContinuationRuntimeRendered.includes("保留旧支付表")
-            && workerContinuationRuntimeRendered.includes("旧目标仅作背景")
-            && workerContinuationRuntimeRendered.includes("不要继续已停止执行轮中的旧方向")
-            && workerContinuationRuntimeRendered.includes("已有验证证据")
-            && !/基于你的发现|based on your findings/i.test(workerContinuationRuntimeRendered),
-        liveTodoReviewing: reviewingCard.mainAgentDecision?.user_plan_steps?.some((step) => step.id === "coordinator_review" && step.status === "reviewing"),
-        liveTodoReworking: reworkingCard.mainAgentDecision?.user_plan_steps?.some((step) => step.status === "reworking"),
-        continuationStatusVisible: continuationCard.continuation_status?.schema === "ccm-main-agent-continuation-status-v1"
-            && continuationCard.continuation_status?.target === "collab-web"
-            && continuationCard.workflow_timeline?.some((item) => item.label.includes("下一步派发")),
-        goalRevisionContinuationStatusVisible: goalRevisionContinuationCard.continuation_status?.schema === "ccm-main-agent-continuation-status-v1"
-            && goalRevisionContinuationCard.continuation_status?.replan_required === true
-            && goalRevisionContinuationCard.continuation_status?.interrupt_current_run === true
-            && goalRevisionContinuationCard.continuation_status?.kind_label === "目标调整"
-            && goalRevisionContinuationCard.continuation_status?.status === "interrupting"
-            && goalRevisionContinuationCard.continuation_status?.route_label === "先停止当前轮再重核计划"
-            && goalRevisionContinuationCard.continuation_status?.handoff_steps?.some((item) => item.label === "停止当前轮并重核计划")
-            && goalRevisionContinuationCard.workflow_timeline?.some((item) => item.label.includes("目标调整")),
-        continuationStatusHidesProtocol: !!continuationVisibleText
-            && !visibleInternalTermPattern.test(continuationVisibleText),
-        liveTodoFailedNeedsConfirmation: failedCard.mainAgentDecision?.user_plan_steps?.some((step) => ["needs_confirmation", "failed"].includes(step.status)),
-        liveTodoCancelled: revertedCard.mainAgentDecision?.user_plan_steps?.some((step) => step.status === "cancelled"),
-        liveTodoRestoresRecoveryContext: recoveryCard.recovery_summary?.schema === "ccm-main-agent-recovery-summary-v1"
-            && recoveryCard.recovery_summary?.revalidated?.goal === true
-            && recoveryCard.recovery_summary?.status_label === "已自动接上"
-            && recoveryCard.recovery_summary?.preserved?.includes("已保留你之前确认的执行授权")
-            && recoveryCard.recovery_summary?.headline?.includes("服务重启后，我已自动接上这轮任务")
-            && recoveryCard.recovery_summary?.technical?.decision_code === "authorized_incomplete_task"
-            && recoveryCard.mainAgentDecision?.user_plan_steps?.some((step) => step.id === "restore_task_context" && step.status === "completed"),
-        liveTodoEvidenceTraceable: card.mainAgentDecision?.user_plan_steps?.every((step) => Array.isArray(step.evidence) && step.evidence.length > 0),
-        liveTodoFailureHasActions: failedCard.mainAgentDecision?.user_plan_steps?.some((step) => ["needs_confirmation", "failed"].includes(step.status) && Array.isArray(step.actions) && step.actions.some((action) => ["retry", "gap_continue", "switch_executor", "cancel"].includes(action.kind))),
-        agentQaVisible: card.agent_questions[0]?.label === "已采纳并继续",
-        agentQaUserPreviewVisible: card.agent_questions[0]?.schema === "ccm-agent-qa-user-preview-v1"
-            && card.agent_questions[0]?.summary?.includes("backend 的回答已被我采纳")
-            && card.agent_questions[0]?.next_action?.includes("继续原任务执行"),
-        agentQaUserPreviewHidesProtocol: !visibleInternalTermPattern.test(collectVisibleTextValues(card.agent_questions).join("\n")),
-        conflictWarningsVisible: card.conflict_warnings[0]?.title.includes("frontend"),
-        greetingDoesNotCreateTaskCard: classifyGroupProjectTaskIntent("你好").executable === false,
-        ordinaryQuestionDoesNotCreateTaskCard: classifyGroupProjectTaskIntent("这个知识库怎么用？").executable === false,
-        explicitDevelopmentCreatesTaskCard: classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面").executable === true,
-        groupIntentGatewayBlocksRuleFallbackWrite: gatewayFallbackBlocked.executable === false && gatewayFallbackBlocked.agent_gateway?.llm_backed === false,
-        groupIntentGatewayAllowsLlmDelegate: gatewayLlmDelegates.executable === true && gatewayLlmDelegates.agent_gateway?.llm_backed === true,
-        groupIntentGatewayKeepsLlmDirectAnswerReadOnly: gatewayLlmDirectAnswer.executable === false && gatewayLlmDirectAnswer.analysisEligible === true,
-        projectTaskModeQuestionDoesNotCreatePersistentTask: shouldCreatePersistentGroupTask({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好，这是一个什么项目") }) === false,
-        projectTaskQuestionUsesReadOnlyAnalysis: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好，这是一个什么项目") }) === true,
-        explicitAnalysisGreetingDoesNotReadProjects: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_analysis", taskIntent: classifyGroupProjectTaskIntent("你好") }) === false,
-        explicitAnalysisModeReadsProjectContext: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_analysis", taskIntent: classifyGroupProjectTaskIntent("这个项目架构是什么") }) === true,
-        projectAnalysisReadsSafeCodeSnapshot: codeSnapshotSelfTest.pass === true,
-        forceTaskCanBypassIntentGate: shouldCreatePersistentGroupTask({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好"), forceProjectTask: true }) === true,
-        nonTaskCardIsHidden: greetingCard.visible === false,
-        planModeHighRiskRequiresConfirmation: highRiskPlan.requiresConfirmation === true && highRiskPlan.level === "high",
-        planModeLowRiskAutoContinues: lowRiskPlan.requiresConfirmation === false && lowRiskPlan.level === "low",
-        awaitingPlanCardNeedsUser: awaitingPlanCard.phase === "needs_user" && awaitingPlanCard.actions.some((item) => item.kind === "confirm_plan"),
-        awaitingPlanCardShowsPlan: awaitingPlanCard.plan_mode?.requires_confirmation === true && awaitingPlanCard.plan_mode?.read_only_exploration?.code_snapshot_used === true,
-        planModeStepsVisible: card.plan_mode?.steps?.some((item) => item.id === "dispatch_sub_agents" && item.label?.includes("派发子 Agent")),
-        awaitingPlanCardShowsSteps: awaitingPlanCard.plan_mode?.steps?.some((item) => item.id === "confirm_boundary" && item.status === "needs_confirmation")
-            && awaitingPlanCard.plan_mode?.steps?.some((item) => item.id === "verify_and_summarize" && item.label?.includes("总结")),
-        awaitingPlanCardShowsClarificationQuestions: awaitingPlanCard.plan_mode?.needs_clarification === true
-            && awaitingPlanCard.plan_mode?.clarification_questions?.some((item) => item.id === "compatibility_boundary")
-            && awaitingPlanCard.plan_mode?.clarification_questions?.some((item) => item.question?.includes("验收结果")),
-        awaitingPlanCardCanRevise: awaitingPlanCard.actions.some((item) => item.kind === "revise_plan") && awaitingPlanCard.actions.some((item) => item.kind === "cancel"),
-        revisedPlanCardStaysInPlanMode: revisedPlanCard.phase === "needs_user" && revisedPlanCard.actions.some((item) => item.kind === "confirm_plan") && revisedPlanCard.actions.some((item) => item.kind === "revise_plan"),
-        revisedPlanFeedbackVisible: revisedPlanCard.plan_mode?.revision?.feedback?.includes("保留旧支付表") && revisedPlanCard.plan_mode?.revision?.next_step?.includes("重新确认"),
-        revisedPlanAnswersClarificationQuestions: revisedPlanCard.plan_mode?.needs_clarification === false
-            && revisedPlanCard.plan_mode?.clarification_questions?.every((item) => item.status === "answered_by_revision" && item.answer?.includes("保留旧支付表")),
-        confirmedPlanFeedbackCarried: acceptedPlanDraft.requires_confirmation === false
-            && acceptedPlanDraft.auto_continue === true
-            && acceptedPlanDraft.accepted_feedback.includes("README")
-            && acceptedPlanDraft.acceptance.some((item) => item.includes("README")),
-        confirmedPlanExecutionFollowupVisible: acceptedPlanDraft.plan_execution_followup?.schema === "ccm-main-agent-plan-execution-followup-v1"
-            && acceptedPlanDraft.plan_execution_followup?.headline?.includes("最终总结前逐项核对验收标准"),
-        confirmedPlanFeedbackVisible: acceptedPlanCard.plan_mode?.accepted_feedback?.includes("README")
-            && acceptedPlanCard.plan_mode?.requires_confirmation === false
-            && !acceptedPlanCard.actions.some((item) => item.kind === "confirm_plan"),
-        workOrderPreviewVisible: card.work_order_preview?.orders?.some((item) => item.project === "collab-web" && item.allowed_scope?.length && item.acceptance?.length),
-        executionStoryShowsCodingFlow: ["read_context", "prepare_work_orders", "dispatch_agents", "edit_files", "run_checks", "final_review"].every(id => card.execution_story?.steps?.some((item) => item.id === id)),
-        acceptanceReviewHardGateVisible: card.acceptance_review?.checks?.some((item) => item.id === "actual_diff" && item.ok) && card.acceptance_review?.checks?.some((item) => item.id === "verification" && item.ok),
-        missingEvidenceAcceptanceReviewBlocksCompletion: missingEvidenceCard.acceptance_review?.pass === false && missingEvidenceCard.acceptance_review?.missing?.includes("真实文件改动") && missingEvidenceCard.acceptance_review?.missing?.includes("已执行验证"),
-        memoryGateAcceptanceReviewVisible: memoryGateGapCard.acceptance_review?.checks?.some((item) => item.id === "memory_gate_receipt" && item.ok === false && /记忆使用声明/.test(item.detail || "")),
-        reinjectionGateAcceptanceReviewVisible: reinjectionGateGapCard.acceptance_review?.checks?.some((item) => item.id === "post_compact_reinjection_gate_receipt" && item.ok === false && /压缩后上下文恢复/.test(item.detail || "")),
-        planAlignmentVisible: card.plan_alignment?.schema === "ccm-main-agent-plan-alignment-v1"
-            && card.plan_alignment?.status === "aligned"
-            && card.plan_alignment?.checks?.some((item) => item.label.includes("npm test") && item.ok),
-        missingEvidencePlanAlignmentShowsDeviation: missingEvidenceCard.plan_alignment?.status === "needs_evidence"
-            && missingEvidenceCard.plan_alignment?.deviations?.some((item) => item.label.includes("负责人筛选文件改动")),
-        userHandoffVisible: card.user_handoff?.schema === "ccm-main-agent-user-handoff-v1"
-            && ["view_changes", "gap_continue"].includes(card.user_handoff?.primary_action?.kind)
-            && [card.user_handoff?.primary_action, ...(card.user_handoff?.secondary_actions || [])].some((item) => item?.kind === "view_changes")
-            && card.user_handoff?.evidence?.some((item) => item.includes("计划核对")),
-        userHandoffSummaryCardsVisible: card.user_handoff?.summary_cards?.some((item) => item.id === "verification" && item.label === "验证状态")
-            && card.user_handoff?.summary_cards?.some((item) => item.id === "next" && item.label === "下一步"),
-        ordinaryQuestionHasNoUserHandoff: greetingCard.user_handoff === null || greetingCard.user_handoff === undefined,
-        userHandoffHidesProtocol: !/CCM_AGENT_RECEIPT|trace_id|session_id|WorkerContextPacket|raw receipt|raw payload|原始回执/i.test(JSON.stringify(card.user_handoff || {})),
-        agentCoordinationProtocolVisible: card.agent_coordination?.source === "main-child-agent-coordination-6.0" && card.agent_coordination?.handoff?.some((item) => item.agent === "collab-web" && item.status === "accepted"),
-        agentCoordinationHeartbeatVisible: card.agent_coordination?.heartbeat?.some((item) => /collab-web/.test(item.text)),
-        agentCoordinationContractSyncVisible: card.agent_coordination?.contract_sync?.required === true && card.agent_coordination?.contract_sync?.status === "structured",
-        agentCoordinationReceiptQualityScores: card.agent_coordination?.receipt_quality?.some((item) => item.agent === "collab-web" && item.quality?.grade === "good"),
-        childAgentPlanReviewVisible: card.agent_coordination?.child_plan_review?.schema === "ccm-child-agent-plan-review-v1"
-            && card.agent_coordination?.child_plan_review?.status === "approved"
-            && card.agent_coordination?.child_plan_review?.rows?.some((item) => item.agent === "collab-web" && item.verification_plan?.includes("npm test")),
-        childAgentPlanReviewNeedsRevisionVisible: ackGapCard.agent_coordination?.child_plan_review?.status === "needs_revision"
-            && ackGapCard.agent_coordination?.child_plan_review?.rows?.some((item) => item.agent === "collab-web" && item.status === "needs_revision"),
-        agentCoordinationMemoryGateVisible: memoryGateGapCard.agent_coordination?.memory_gate_summary?.status === "missing_receipt_reference"
-            && memoryGateGapCard.agent_coordination?.receipt_quality?.some((item) => item.agent === "collab-web" && item.quality?.memory_gate?.missing_gate_ids?.includes("gmd_ux_gate")),
-        agentCoordinationReinjectionGateVisible: reinjectionGateGapCard.agent_coordination?.post_compact_reinjection_gate_summary?.required === true
-            && reinjectionGateGapCard.agent_coordination?.post_compact_reinjection_gate_summary?.pass === false,
-        agentCoordinationReinjectionUsageGateVisible: reinjectionUsageGapCard.agent_coordination?.post_compact_reinjection_gate_summary?.status === "missing_candidate_usage"
-            && reinjectionUsageGapCard.agent_coordination?.post_compact_reinjection_gate_summary?.missing_candidate_usage_gate_ids?.includes("pcrg_ux_usage_gate")
-            && reinjectionUsageGapCard.agent_coordination?.post_compact_reinjection_gate_summary?.missing_candidate_usage_candidate_ids?.includes("pcrc_ux_test")
-            && reinjectionUsageGapCard.agent_coordination?.post_compact_reinjection_gate_summary?.candidate_usage_counts?.mentioned >= 1,
-        childAgentHandoffQualityGateBlocksAdvisoryResult: handoffOnlyCard.agent_coordination?.receipt_quality?.some((item) => item.agent === "collab-web"
-            && item.quality?.handoff_quality?.pass === false
-            && item.quality?.missing?.includes("完成执行而非仅建议")),
-        childAgentHandoffQualityCreatesTargetedRework: handoffOnlyCard.agent_coordination?.targeted_rework?.some((item) => item.id === "handoff_only_receipt"
-            && item.target === "collab-web"
-            && item.title === "要求补齐真实执行证据"),
-        childAgentHandoffQualityVisibleTextFriendly: !visibleInternalTermPattern.test(collectVisibleTextValues({
-            targeted_rework: handoffOnlyCard.agent_coordination?.targeted_rework?.map((item) => ({ title: item.title, reason: item.reason, label: item.label })),
-            events: handoffOnlyCard.agent_coordination?.coordination_events?.map((item) => ({ label: item.label, detail: item.detail })),
-            next_action: handoffOnlyCard.agent_coordination?.next_action,
-        }).join("\n")),
-        agentCoordinationTargetedReworkForMissingEvidence: missingEvidenceCard.agent_coordination?.targeted_rework?.some((item) => item.id === "missing_diff") && missingEvidenceCard.agent_coordination?.targeted_rework?.some((item) => item.id === "missing_verification"),
-        agentProgressSummaryVisible: card.agent_progress_summary?.schema === "ccm-child-agent-progress-summary-v1"
-            && card.agent_progress_summary?.rows?.some((item) => item.agent === "collab-web" && item.status === "completed" && item.status_label === "已回传结果" && item.files_changed_count >= 1)
-            && card.agent_progress_summary?.rows?.some((item) => item.agent === "collab-web" && item.evidence?.some((evidence) => evidence.value === "已回传结果" || evidence.id === "files")),
-        agentProgressSummaryHidesProtocol: !/CCM_AGENT_RECEIPT|trace_id|session_id|WorkerContextPacket|raw receipt|raw payload|原始回执/i.test(JSON.stringify(card.agent_progress_summary || {})),
-        agentProgressSummaryTracksWaitingAgent: missingEvidenceCard.agent_progress_summary?.rows?.some((item) => item.agent === "collab-web" && item.current_focus?.includes("负责人筛选") && ["running", "pending"].includes(item.status)),
-        agentProgressSummaryUsesSessionProgress: sessionProgressCard.agent_progress_summary?.rows?.some((item) => item.agent === "collab-web"
-            && item.status === "running"
-            && item.summary?.includes("已连续推进 2 轮")
-            && item.evidence?.some((evidence) => evidence.id === "session_progress" && evidence.detail?.includes("上下文已保留"))),
-        agentProgressSummarySessionProgressHidesProtocol: !/session_id|nativeSessionId|native_session|cursor-session|task_agent_session/i.test(JSON.stringify(sessionProgressCard.agent_progress_summary || {})),
-        changeSummaryVisible: card.change_summary?.schema === "ccm-main-agent-change-summary-v1"
-            && card.change_summary?.files?.some((item) => item.path === "frontend/app.js" && item.project === "collab-web")
-            && card.change_summary?.file_count >= 2,
-        changeSummaryActionDataReady: card.change_summary?.next_action?.includes("查看具体文件 diff") && card.actions.some((item) => item.kind === "view_changes"),
-        receiptReworkSummaryVisible: missingEvidenceCard.receipt_rework_summary?.schema === "ccm-main-agent-receipt-rework-summary-v1"
-            && missingEvidenceCard.receipt_rework_summary?.gaps?.some((item) => item.id === "missing_receipt" && item.target === "collab-web")
-            && missingEvidenceCard.receipt_rework_summary?.gaps?.every((item) => item.action?.kind === "targeted_rework"),
-        receiptReworkMemoryGateGapVisible: memoryGateGapCard.receipt_rework_summary?.gaps?.some((item) => item.id === "memory_gate_receipt" && item.target === "collab-web" && /gmd_ux_gate/.test(item.reason || "")),
-        receiptReworkReinjectionGateGapVisible: reinjectionGateGapCard.receipt_rework_summary?.gaps?.some((item) => item.id === "post_compact_reinjection_gate_receipt" && item.target === "collab-web" && /pcrg_ux_gate/.test(item.reason || "")),
-        receiptReworkReinjectionUsageGapVisible: reinjectionUsageGapCard.receipt_rework_summary?.gaps?.some((item) => item.id === "post_compact_reinjection_gate_receipt" && item.target === "collab-web" && /使用状态|used\/ignored\/verified|pcrg_ux_usage_gate/.test(item.reason || "")),
-        receiptReworkResolvedVisible: receiptResolvedCard.receipt_rework_summary?.status === "passed"
-            && receiptResolvedCard.receipt_rework_summary?.resolved?.some((item) => item.target === "collab-web" && item.status === "passed")
-            && !receiptResolvedCard.receipt_rework_summary?.gaps?.length,
-        receiptReworkVisibleTextHidesProtocol: !!receiptReworkVisibleText
-            && !visibleInternalTermPattern.test(receiptReworkVisibleText)
-            && receiptReworkVisibleText.includes("结果说明"),
-        agentCoordinationVisibleTextHidesProtocol: !!coordinationVisibleText
-            && !visibleInternalTermPattern.test(coordinationVisibleText)
-            && coordinationVisibleText.includes("结果说明"),
-        agentCoordinationAckReviewApproved: card.agent_coordination?.ack_review?.rows?.some((item) => item.agent === "collab-web" && item.status === "approved"),
-        agentCoordinationContractTransferReady: card.agent_coordination?.contract_transfer?.rows?.some((item) => item.target === "collab-web" && item.status === "ready_to_inject"),
-        ackGapBlocksCompletion: canCompleteDailyDevFromDeliverySummary(ackGapTask, { status: "done" }, ackGapTask.delivery_summary) === false,
-        ackGapCreatesRewriteDraft: getTaskGapItems(ackGapTask).some((item) => item.startsWith("ack_rewrite:collab-web")) && ackGapDraft.includes("需要先返工的 ACK 前置审核"),
-        contractGapCreatesInjectionDraft: getTaskGapItems(contractGapTask).some((item) => item.startsWith("contract_inject:collab-web")) && contractGapDraft.includes("需要注入依赖 Agent 的 contractChanges") && contractGapDraft.includes("collab-web"),
-        recoveredTestAgentFailureDoesNotRemainGap: !getTaskGapItems(recoveredTestAgentNotificationTask).some((item) => item.startsWith("notification:test-agent:")),
-        coordinatorOwnedReviewNeedDoesNotRemainGap: !getTaskGapItems(recoveredTestAgentNotificationTask).some((item) => item.startsWith("need:")),
-        coordinatorOwnedReviewNeedIsAdvisory: isAdvisoryNeed("等待主 Agent 重新运行 TestAgent 复核本轮返工修复") === true,
-        coordinatorOwnedDirectReviewNeedIsAdvisory: isAdvisoryNeed("主 Agent 调用 TestAgent 重新执行独立复核，确认 CCM_TEST_AGENT_REVIEW=1 路径通过") === true,
-        genericCoordinatorNeedsUserStateIsNotAConcreteBlocker: isAdvisoryNeed("主 Agent 需要用户补充") === true,
-        sameSessionReworkInheritsApprovedAck: sameSessionReworkReceipts[0]?.ack?.understoodGoal === "完成目标",
-        differentSessionReworkDoesNotInheritAck: !differentSessionReworkReceipts[0]?.ack,
-        targetedReworkIncludesWorkItemContext: workItemReworkDraft.includes("相关执行队列工作项") && workItemReworkDraft.includes("状态=failed") && workItemReworkDraft.includes("缺少 npm test 执行结果"),
-        watchdogSeesStalledWorkItem: workItemWatchdogStatus.work_item_stalled?.some((item) => item.work_item_id === "wi-stalled" && item.target === "collab-web"),
-        contractInjectionGateRequiresConsumerReceipt: contractDispatchedUnconsumedGate.pass === false && contractDispatchedUnconsumedGate.status === "needs_consumption" && contractDispatchedUnconsumedGate.unconsumed[0]?.injection_id === contractInjectionId,
-        contractInjectionGateRecognizesConsumerRerun: contractConsumedGate.pass === true && contractConsumedGate.rows[0]?.assignment_message_id === "m-contract" && contractConsumedGate.rows[0]?.consumed === true,
-        contractInjectionGateRequiresConsumptionQuality: contractWeakConsumptionGate.pass === false && contractWeakConsumptionGate.rows[0]?.missing_reason === "needs_consumption_evidence",
-        contractInjectionGateRejectsGenericApiAssignment: contractGenericApiGate.pass === false && contractGenericApiGate.rows[0]?.assignment_message_id === "",
-        taskCardShowsRuntimeKernel: runtimeKernelCard.runtime_kernel?.ack_only?.active === true && runtimeKernelCard.runtime_kernel?.injection_ids?.includes("ci_selftest") && runtimeKernelCard.technical?.runtime_kernel?.worker_context_packet_ids?.includes("wcp_selftest"),
-        runtimeKernelShowsMemoryGate: memoryGateGapCard.runtime_kernel?.memory_gate?.status === "missing_receipt_reference" && memoryGateGapCard.runtime_kernel?.memory_gate?.gate_ids?.includes("gmd_ux_gate"),
-        runtimeKernelShowsReinjectionGate: reinjectionGateGapCard.runtime_kernel?.post_compact_reinjection_gate?.status === "missing_receipt_reference" && reinjectionGateGapCard.runtime_kernel?.post_compact_reinjection_gate?.gate_ids?.includes("pcrg_ux_gate"),
-        runtimeKernelShowsReinjectionUsageGate: reinjectionUsageGapCard.runtime_kernel?.post_compact_reinjection_gate?.status === "missing_candidate_usage" && reinjectionUsageGapCard.runtime_kernel?.post_compact_reinjection_gate?.missing_candidate_usage_gate_ids?.includes("pcrg_ux_usage_gate"),
-        agentCoordinationEventStreamVisible: ["work_order_sent", "ack_received", "contract_changed", "receipt_scored"].every(type => card.agent_coordination?.coordination_events?.some((item) => item.type === type)),
-        agentCoordinationMemoryGateEventVisible: memoryGateGapCard.agent_coordination?.coordination_events?.some((item) => item.type === "memory_gate_receipt" && item.status === "warn"),
-        agentCoordinationReinjectionGateEventVisible: reinjectionGateGapCard.agent_coordination?.coordination_events?.some((item) => item.type === "post_compact_reinjection_gate_receipt" && item.status === "warn"),
-        acceptanceReviewIncludesAckGate: card.acceptance_review?.checks?.some((item) => item.id === "ack_gate" && item.ok),
-        agentCoordinationContractInjectAction: card.agent_coordination?.targeted_rework?.some((item) => item.id === "contract_inject" && item.target === "collab-web"),
-        reportHasFourUserSections: ["完成内容", "涉及范围", "验证结果", "风险与待确认", "下一步"].every(label => report.includes(label)),
-        reportHidesProtocol: !/CCM_AGENT_RECEIPT|Trace|session|scratchpad|门禁|派发证据/i.test(report),
-        groupReportFormatsObjects: groupReport.includes("frontend/app.js") && !groupReport.includes("[object Object]"),
-        acknowledgementHasCleanPunctuation: !acknowledgement.includes("。。"),
-        dispatchLaunchSummaryVisible: dispatchLaunchSummary?.schema === "ccm-main-agent-dispatch-launch-summary-v1"
-            && dispatchLaunchSummary?.rows?.[0]?.agent === "collab-web"
-            && dispatchLaunchSummary?.headline?.includes("1 个执行成员")
-            && dispatchLaunchSummary?.rows?.[0]?.task?.includes("结构化结果说明"),
-        dispatchLaunchSummaryHidesProtocol: !/CCM_AGENT_RECEIPT|task-notification|receipt-status|raw payload|trace_id|session_id/i.test(JSON.stringify(dispatchLaunchSummary || {})),
-        dispatchLaunchSummaryDoneTargetStaysReviewing: completedTargetDispatchLaunchSummary?.rows?.[0]?.status === "reviewing"
-            && completedTargetDispatchLaunchSummary?.rows?.[0]?.status_label === "已回传结果，待验收"
-            && !JSON.stringify(completedTargetDispatchLaunchSummary || {}).includes("已完成"),
-        followupClassification: classifyTaskContinuation("再加一个负责人筛选") === "supplement" && classifyTaskContinuation("目标调整为只改前端") === "revise_goal" && classifyTaskContinuation("这是一个新任务：部署测试环境") === "new_task",
-        qualityFollowupContinuationDecision: (() => {
-            const decision = buildContinuationUserDecision({
-                source: "quality_followup",
-                kind: "supplement",
-                meta: { reason: "补齐交付证据、验证结果和验收结论" },
-            });
-            return decision.strategy === "complete_quality_followup"
-                && decision.title === "交付总结补齐已接上"
-                && decision.route_label === "补齐交付总结"
-                && decision.headline.includes("验证结果")
-                && decision.next_action.includes("可验收总结")
-                && decision.timeline_type === "quality_followup_continuation";
-        })(),
-        followupDetection: looksLikeTaskContinuation("再加一个状态筛选"),
-    };
-    return { pass: Object.values(checks).every(Boolean), checks, card, report };
+    return require("./collaboration-ux-self-tests").runCollaborationUxSelfTest();
 }
 function buildInlineTaskRuntime(task) {
     const executions = (0, execution_kernel_1.listExecutions)({ taskId: task.id });
@@ -8452,49 +6764,7 @@ function updateGroupTaskInlineStatus(task, status, detail = "") {
     return runtime;
 }
 function buildChildAgentWorkerHandoff(targetProject, taskText = "", options = {}) {
-    const requiresCodeChanges = options.requires_code_changes !== false && options.requiresCodeChanges !== false;
-    const acceptance = options.acceptance || options.acceptance_criteria || options.acceptanceCriteria || "";
-    const verificationHints = Array.isArray(options.verification_hints || options.verificationHints)
-        ? (options.verification_hints || options.verificationHints).map((item) => String(item || "").trim()).filter(Boolean)
-        : [];
-    const dependencies = [
-        ...(Array.isArray(options.dependencies) ? options.dependencies : []),
-        ...(options.dependsOn || options.depends_on ? [{ project: options.dependsOn || options.depends_on, reason: "前置依赖" }] : []),
-    ];
-    const sourceTask = options.task || options.source_task || options.sourceTask || null;
-    const analysis = {
-        ...(options.analysis || {}),
-        summary: options.user_goal || options.userGoal || options.business_goal || options.businessGoal || sourceTask?.business_goal || sourceTask?.businessGoal || sourceTask?.title || taskText,
-        documentFindings: options.document_findings || options.documentFindings || splitUserAcceptanceText(sourceTask?.source_documents || sourceTask?.sourceDocuments || ""),
-        constraints: options.constraints || [],
-    };
-    return (0, worker_handoff_1.buildSelfContainedWorkerHandoff)({
-        group: options.group || null,
-        project: targetProject,
-        task: taskText,
-        userGoal: analysis.summary,
-        source: options.source || "主 Agent 派发",
-        reason: options.reason || "主 Agent 根据项目职责分派",
-        workDir: options.work_dir || options.workDir || "",
-        agentType: options.agent_type || options.agentType || "",
-        model: options.model || options.model_id || options.modelId || "",
-        traceId: options.trace_id || options.traceId || sourceTask?.trace_id || sourceTask?.traceId || "",
-        taskId: options.task_id || options.taskId || sourceTask?.id || "",
-        analysis,
-        workerContextPacket: options.worker_context_packet || options.workerContextPacket || options.handoff?.worker_context_packet || null,
-        dependencies,
-        contractInjections: options.contract_injections || options.contractInjections || options.handoff?.worker_context_packet?.contract_injections || [],
-        memory: options.memory || options.memory_packet || options.memoryPacket || null,
-        verificationHints,
-        acceptance: splitUserAcceptanceText(acceptance),
-        requiresCodeChanges,
-        advisoryOnly: options.advisoryOnly === true || options.advisory_only === true,
-        continuation: options.continuation || null,
-        allowedScope: options.allowed_scope || options.allowedScope || [],
-        forbiddenScope: options.forbidden_scope || options.forbiddenScope || [],
-        expectedFiles: options.expected_files || options.expectedFiles || [],
-        doneCriteria: options.done_criteria || options.doneCriteria || [],
-    });
+    return require("./collaboration-task-intake").buildChildAgentWorkerHandoff(targetProject, taskText, options);
 }
 function taskAgentInvocationMemoryOptions(edge) {
     if (!edge?.invocation_edge_id)
@@ -8670,57 +6940,7 @@ function buildChildAgentTaskText(childTaskText, task = null) {
     ].filter(line => line !== "").join("\n");
 }
 function buildQueuedGroupTaskMessage(task) {
-    const base = [
-        `📋 执行任务：${task.title}`,
-        task.description || "",
-    ].filter(Boolean).join("\n");
-    if (task?.workflow_type !== "daily_dev") {
-        return `${base}\n\n请完成此任务并回复 "✅ 任务完成"。`;
-    }
-    const requiresCodeChanges = taskRequiresCodeChanges(task);
-    const requiresVerification = taskRequiresVerification(task);
-    const missionHandoff = task.mission_handoff || task.missionHandoff || null;
-    const missionContext = missionHandoff ? [
-        "全局任务交接：",
-        task.global_mission_id ? `- 全局任务 ID：${task.global_mission_id}` : "",
-        missionHandoff.user_goal ? `- 全局目标：${(0, memory_1.compactMemoryText)(missionHandoff.user_goal, 500)}` : "",
-        missionHandoff.reason ? `- 派发原因：${(0, memory_1.compactMemoryText)(missionHandoff.reason, 300)}` : "",
-        Array.isArray(missionHandoff.global_mission?.depends_on) && missionHandoff.global_mission.depends_on.length
-            ? `- 前置依赖：${missionHandoff.global_mission.depends_on.join("、")}`
-            : "",
-        Array.isArray(missionHandoff.done_criteria) && missionHandoff.done_criteria.length
-            ? `- 给全局 Agent 的交付要求：${missionHandoff.done_criteria.slice(0, 4).join("；")}`
-            : "- 给全局 Agent 的交付要求：完成内容、涉及范围、验证结果、风险和仍需确认事项必须可追踪。",
-        "",
-    ].filter(Boolean) : [];
-    return [
-        "【主 Agent 业务开发工作单】",
-        `任务标题：${task.title || "未命名任务"}`,
-        `业务目标：${(0, memory_1.compactMemoryText)(task.business_goal || task.businessGoal || task.title || "", 900)}`,
-        task.acceptance_criteria || task.acceptanceCriteria
-            ? `验收标准：${(0, memory_1.compactMemoryText)(task.acceptance_criteria || task.acceptanceCriteria, 900)}`
-            : "",
-        task.source_documents || task.sourceDocuments
-            ? `关联文档：${(0, memory_1.compactMemoryText)(task.source_documents || task.sourceDocuments, 1200)}`
-            : "",
-        ...missionContext,
-        "",
-        "完整任务说明：",
-        task.description || "无",
-        "",
-        "执行要求：",
-        "- 先根据业务目标、文档和验收标准判断影响范围，再派发给对应项目子 Agent。",
-        "- 每个被派发的子 Agent 必须拿到明确的实现范围、文件/模块方向、验收标准和风险提示。",
-        "- 子 Agent 必须返回 CCM_AGENT_RECEIPT；缺回执、缺证据或状态不是 done 时不能判定完成。",
-        requiresCodeChanges
-            ? "- 完成门禁：必须有系统实际捕获的代码/配置/文档文件变更。"
-            : "- 本任务允许无代码变更，但最终报告必须说明可验收产出和依据。",
-        requiresVerification
-            ? "- 验证门禁：必须有可采信的已执行验证记录；只写建议运行、未运行或失败验证不能完成。"
-            : "- 本任务不强制验证门禁，但仍建议记录实际检查依据。",
-        "- 主 Agent 必须等待子 Agent 完成并复盘；发现缺口时继续返工或向用户明确索要信息。",
-        "- 最终报告必须说明完成内容、涉及项目/文件、已执行验证、风险、阻塞和仍需用户确认的事项。",
-    ].filter(line => line !== "").join("\n");
+    return require("./collaboration-task-intake").buildQueuedGroupTaskMessage(task);
 }
 function normalizePlanAssignments(assignments) {
     return (assignments || []).map((item) => ({
@@ -10180,97 +8400,10 @@ function collectIndependentReviewEvidence(receipts = [], agentQa = []) {
     return latestEvidence.reverse().slice(0, 20);
 }
 function buildIndependentReviewGate(task, actualFileChanges = [], receipts = [], agentQa = []) {
-    const highRiskFiles = (actualFileChanges || []).filter(changeLooksHighRiskForIndependentReview);
-    const reasons = [
-        task?.requires_independent_review === true || task?.requiresIndependentReview === true ? "任务显式要求独立复核" : "",
-        actualFileChanges.length >= 3 ? `涉及 ${actualFileChanges.length} 个文件` : "",
-        highRiskFiles.length ? `包含 ${highRiskFiles.length} 个后端/API/配置等高风险文件` : "",
-    ].filter(Boolean);
-    const required = taskChangeNeedsIndependentReview(task, actualFileChanges);
-    const evidence = collectIndependentReviewEvidence(receipts, agentQa);
-    const failedEvidence = evidence.filter((item) => item.status === "failed");
-    const passedEvidence = evidence.filter((item) => item.status === "passed");
-    const recheckEvidence = evidence.filter((item) => item.status === "needs_recheck");
-    const environmentEvidence = evidence.filter((item) => item.status === "needs_environment");
-    const needsUserEvidence = evidence.filter((item) => item.status === "needs_user");
-    const hasPendingEvidence = recheckEvidence.length > 0 || environmentEvidence.length > 0 || needsUserEvidence.length > 0;
-    return {
-        required,
-        pass: !required || (passedEvidence.length > 0 && failedEvidence.length === 0 && !hasPendingEvidence),
-        status: !required
-            ? "not_required"
-            : failedEvidence.length
-                ? "failed"
-                : recheckEvidence.length
-                    ? "needs_recheck"
-                    : environmentEvidence.length
-                        ? "needs_environment"
-                        : needsUserEvidence.length
-                            ? "needs_user"
-                            : passedEvidence.length
-                                ? "passed"
-                                : "missing",
-        reason: reasons.join("；") || (required ? "复杂代码变更需要另一个 Agent 复核" : "本次变更不强制独立复核"),
-        file_change_count: actualFileChanges.length,
-        high_risk_files: highRiskFiles.map((item) => ({ project: item.project || item.agent || "", path: item.path || "" })).slice(0, 12),
-        evidence_count: evidence.length,
-        passed_count: passedEvidence.length,
-        failed_count: failedEvidence.length,
-        needs_recheck_count: recheckEvidence.length,
-        needs_environment_count: environmentEvidence.length,
-        needs_user_count: needsUserEvidence.length,
-        evidence,
-        failed_evidence: failedEvidence,
-        recheck_evidence: recheckEvidence,
-        environment_evidence: environmentEvidence,
-        needs_user_evidence: needsUserEvidence,
-    };
+    return require("./collaboration-acceptance").buildIndependentReviewGate(task, actualFileChanges, receipts, agentQa);
 }
 function buildAcceptanceGate(task, execution, summary, finalStatus) {
-    const memoryGateSummary = buildMemoryGateVisibleSummary(summary);
-    const globalMemoryReceiptSummary = buildGlobalMemoryReceiptVisibleSummary(summary);
-    const globalMemoryHealthGateSummary = buildGlobalMemoryHealthGateVisibleSummary(summary);
-    const readPlanRevalidationGateSummary = buildReadPlanRevalidationGateVisibleSummary(summary);
-    const reinjectionGateSummary = buildPostCompactReinjectionGateVisibleSummary(summary);
-    const apiMicrocompactSummary = buildApiMicrocompactReceiptVisibleSummary(summary);
-    const taskAgentMemorySnapshotRequired = Number(summary.task_agent_memory_context_snapshot_count || summary.taskAgentMemoryContextSnapshotCount || 0) > 0;
-    const checks = [
-        { id: "coordinator_plan", label: "主 Agent 计划", ok: Number(summary.coordination_plan_count || 0) > 0, detail: `计划 ${summary.coordination_plan_count || 0} 条` },
-        { id: "assignment", label: "子 Agent 派发", ok: Number(summary.assignment_count || 0) > 0 || task?.assign_type !== "group", detail: `派发 ${summary.assignment_count || 0} 条` },
-        { id: "worker_receipt", label: "子 Agent 结果说明", ok: (summary.receipt_statuses || []).some((item) => item.status === "done") || task?.assign_type !== "group", detail: `结果说明 ${(summary.receipt_statuses || []).length} 条` },
-        { id: "work_items", label: "执行队列收敛", ok: !summary.work_item_summary?.total || summary.work_item_summary?.all_completed === true, detail: summary.work_item_summary?.total ? `未完成 ${summary.team_shutdown?.unresolved_work_item_count || 0}/${summary.work_item_summary.total}` : "无独立工作项" },
-        { id: "ack_gate", label: "ACK 前置审核", ok: !(taskRequiresCodeChanges(task) || taskRequiresVerification(task)) || summary.ack_gate_passed === true, detail: summary.ack_review?.rejected?.length ? `需重写 ACK ${summary.ack_review.rejected.length} 条` : "通过" },
-        { id: "receipt_quality", label: "结果说明质量", ok: !taskRequiresCodeChanges(task) && !taskRequiresVerification(task) || summary.receipt_quality_gate_passed === true, detail: summary.weak_receipt_quality?.length ? `待补结果说明 ${summary.weak_receipt_quality.length} 条` : "通过" },
-        { id: "task_agent_memory_snapshot_receipt", label: "子 Agent 记忆快照匹配", ok: !taskAgentMemorySnapshotRequired || summary.task_agent_memory_snapshot_receipt_passed === true, detail: taskAgentMemorySnapshotRequired ? `快照 ${summary.task_agent_memory_context_snapshot_count || 0} 个` : "未触发" },
-        { id: "memory_gate_receipt", label: "记忆使用声明", ok: !memoryGateSummary.required || memoryGateSummary.pass === true, detail: memoryGateSummary.summary },
-        { id: "global_memory_receipt", label: "全局记忆使用声明", ok: !globalMemoryReceiptSummary.required || globalMemoryReceiptSummary.pass === true, detail: globalMemoryReceiptSummary.summary },
-        { id: "global_memory_health_gate_receipt", label: "全局记忆健康门禁声明", ok: !globalMemoryHealthGateSummary.required || globalMemoryHealthGateSummary.pass === true, detail: globalMemoryHealthGateSummary.summary },
-        { id: "read_plan_revalidation_gate_receipt", label: "读取计划重读声明", ok: !readPlanRevalidationGateSummary.required || readPlanRevalidationGateSummary.pass === true, detail: readPlanRevalidationGateSummary.summary },
-        { id: "post_compact_reinjection_gate_receipt", label: "压缩重注入声明", ok: !reinjectionGateSummary.required || reinjectionGateSummary.pass === true, detail: reinjectionGateSummary.summary },
-        { id: "api_microcompact_receipt", label: "API microcompact 使用声明", ok: !apiMicrocompactSummary.required || apiMicrocompactSummary.pass === true, detail: apiMicrocompactSummary.summary },
-        { id: "contract_injection", label: "契约注入依赖 Agent", ok: summary.contract_injection_gate_passed !== false, detail: summary.contract_injection_gate?.missing?.length ? `待注入 ${summary.contract_injection_gate.missing.length} 个 Agent` : summary.contract_injection_gate?.unconsumed?.length ? `待消费结果说明 ${summary.contract_injection_gate.unconsumed.length} 个 Agent` : "通过" },
-        { id: "final_review", label: "主 Agent 验收", ok: !!summary.has_final_review || finalStatus === "failed" || task?.assign_type !== "group", detail: summary.review_status || "" },
-        { id: "actual_changes", label: "真实文件变更", ok: !taskRequiresCodeChanges(task) || Number(summary.actual_file_change_count || 0) > 0, detail: `变更 ${summary.actual_file_change_count || 0} 个文件` },
-        { id: "verification", label: "已执行验证", ok: !taskRequiresVerification(task) || Number(summary.verification_executed?.length || 0) > 0, detail: `已执行 ${summary.verification_executed?.length || 0} 条` },
-        { id: "required_verification", label: "项目验证命令覆盖", ok: !taskRequiresVerification(task) || summary.verification_required_gate_passed !== false, detail: summary.verification_required_missing?.length ? `缺 ${summary.verification_required_missing.length} 项` : "已覆盖" },
-        { id: "verification_source", label: "独立验证来源", ok: !taskRequiresVerification(task) || summary.verification_source_gate_passed === true, detail: (summary.verification_sources || []).includes("test_agent_and_main_agent_spot_check") ? "TestAgent 与主 Agent 抽查已交叉验证" : `外部 Runner ${summary.external_runner_verification_count || 0} 条` },
-        { id: "independent_review", label: "复杂变更独立复核", ok: summary.independent_review_required !== true || summary.independent_review_gate_passed === true, detail: summary.independent_review_required ? `${summary.independent_review_gate?.status || "missing"}；证据 ${summary.independent_review_gate?.evidence_count || 0} 条` : "未触发" },
-        { id: "post_review_spot_check", label: "TestAgent 通过后抽查", ok: summary.post_review_spot_check_required !== true || summary.post_review_spot_check_gate_passed === true, detail: summary.post_review_spot_check_required ? `${summary.post_review_spot_check_gate?.status || "missing"}；抽查 ${summary.post_review_spot_check?.executed_count || 0} 项` : "未触发" },
-        { id: "agent_qa", label: "Agent 协作问答", ok: !taskRequiresAgentQa(task) || summary.agent_qa_gate_passed === true, detail: taskRequiresAgentQa(task) ? `问答 ${summary.agent_qa_count || 0}，采纳 ${summary.agent_qa_accepted_count || 0}，续跑 ${summary.agent_qa_resumed_count || 0}` : "未要求" },
-        { id: "team_shutdown", label: "团队收尾", ok: finalStatus !== "done" || summary.team_shutdown?.pass === true, detail: finalStatus === "done" ? `开放会话 ${summary.team_shutdown?.open_session_count || 0}，未完成工作项 ${summary.team_shutdown?.unresolved_work_item_count || 0}` : "最终交付前检查" },
-        { id: "goal_coverage", label: "目标覆盖", ok: finalStatus === "failed" || task?.assign_type !== "group" || (!!summary.has_final_review && !(summary.blockers || []).length && !(summary.blocking_needs || []).length), detail: summary.has_final_review ? "已完成主 Agent 最终复盘" : "等待主 Agent 最终复盘确认目标覆盖" },
-        { id: "no_blockers", label: "无开放阻塞", ok: !(summary.blockers || []).length && !(summary.blocking_needs || []).length && !(summary.agent_qa_has_open_items), detail: `阻塞 ${(summary.blockers || []).length}，待补 ${(summary.blocking_needs || []).length}` },
-        { id: "policy", label: "项目边界", ok: summary.project_policy_gate_passed !== false, detail: summary.project_policy_violations?.length ? `违规 ${summary.project_policy_violations.length} 项` : "通过" },
-    ];
-    const failed = checks.filter(item => !item.ok);
-    return {
-        pass: failed.length === 0,
-        status: failed.length === 0 ? "passed" : finalStatus === "failed" ? "failed" : "blocked",
-        failed_count: failed.length,
-        checks,
-        failed_checks: failed,
-        generated_at: new Date().toISOString(),
-    };
+    return require("./collaboration-acceptance").buildAcceptanceGate(task, execution, summary, finalStatus);
 }
 function taskRequiresCodeChanges(task) {
     if (task?.requires_code_changes === false || task?.requiresCodeChanges === false)
@@ -10278,642 +8411,13 @@ function taskRequiresCodeChanges(task) {
     return task?.workflow_type === "daily_dev";
 }
 function selectLatestDurableReceipts(receiptCandidates = []) {
-    const receiptAgents = new Set();
-    return receiptCandidates.filter(Boolean).flatMap((receipt, index) => {
-        const agent = String(receipt?.agent || "").trim().toLowerCase();
-        if (!agent)
-            return [receipt];
-        if (receiptAgents.has(agent))
-            return [];
-        receiptAgents.add(agent);
-        if (receipt.ack)
-            return [receipt];
-        const taskSessionId = String(receipt.task_agent_session_id || receipt.taskAgentSessionId || "").trim();
-        const nativeSessionId = String(receipt.native_session_id || receipt.nativeSessionId || "").trim();
-        const priorWithBoundAck = receiptCandidates.slice(index + 1).find((candidate) => {
-            if (String(candidate?.agent || "").trim().toLowerCase() !== agent || !candidate?.ack)
-                return false;
-            const candidateTaskSessionId = String(candidate.task_agent_session_id || candidate.taskAgentSessionId || "").trim();
-            const candidateNativeSessionId = String(candidate.native_session_id || candidate.nativeSessionId || "").trim();
-            return (!!taskSessionId && !!candidateTaskSessionId && taskSessionId === candidateTaskSessionId)
-                || (!!nativeSessionId && !!candidateNativeSessionId && nativeSessionId === candidateNativeSessionId);
-        });
-        return priorWithBoundAck
-            ? [{ ...receipt, ack: priorWithBoundAck.ack }]
-            : [receipt];
-    });
+    return require("./collaboration-acceptance").selectLatestDurableReceipts(receiptCandidates);
 }
 function buildDeliverySummary(task, execution, finalStatus) {
-    const latestTask = task?.id ? (0, db_1.loadTasks)().find((item) => item.id === task.id) : null;
-    task = latestTask ? { ...task, ...latestTask } : task;
-    const executionText = execution?.report || execution?.result || "";
-    const kernelExecutions = task?.id ? (0, execution_kernel_1.listExecutions)({ taskId: task.id }) : [];
-    const receiptCandidates = [
-        ...kernelExecutions.map((record) => record.receipt).filter(Boolean),
-        ...(execution?.reviewReceipt ? [execution.reviewReceipt] : []),
-        ...(execution?.review_receipt ? [execution.review_receipt] : []),
-        ...(execution?.independentReviewReceipt ? [execution.independentReviewReceipt] : []),
-        ...(execution?.independent_review_receipt ? [execution.independent_review_receipt] : []),
-        ...(execution?.receipt ? [execution.receipt] : []),
-        ...parseFormattedReceiptsFromText(executionText),
-    ].filter(Boolean);
-    // Execution entities contain the newest durable receipt for each Worker.
-    // Historical blocked/missing receipts must not override a later done receipt,
-    // while a same-session rework receipt may reuse its already-approved ACK.
-    const receipts = selectLatestDurableReceipts(receiptCandidates);
-    const actualFileChanges = collectTaskActualFileChanges(task, execution);
-    const coordinationPlans = collectTaskCoordinationPlans(task, execution);
-    const latestCoordinationPlan = coordinationPlans[coordinationPlans.length - 1] || null;
-    const assignmentEvidence = collectTaskAssignmentEvidence(task, execution);
-    const dependencyEvidence = assignmentEvidence.filter((item) => item.dependsOn);
-    const continuationEvidence = assignmentEvidence.filter((item) => item.rework || item.continuationStrategy);
-    const reworkEvidence = collectTaskReworkEvidence(task, execution);
-    const workerNotifications = (0, agent_notifications_1.parseTaskNotificationsFromText)(executionText);
-    const agents = uniqueStrings(receipts.map((receipt) => receipt.agent), workerNotifications.map((item) => item.task_id), assignmentEvidence.map((item) => item.project));
-    const actualFilePaths = uniqueStrings(actualFileChanges.map((file) => file.path));
-    const filesChanged = uniqueStrings(...receipts.map((receipt) => receipt.filesChanged), actualFilePaths);
-    const verification = uniqueStrings(...receipts.map((receipt) => receipt.verification));
-    const verificationGate = getVerificationEvidenceGate(receipts);
-    const requiredVerificationCoverage = getRequiredVerificationCoverage(receipts);
-    const externalRunnerVerification = uniqueStrings(...receipts.map((receipt) => (receipt.verification || []).filter((item) => /passed by external runner\s*\(exit 0\)/i.test(String(item)))));
-    const projectAgentProfiles = agents
-        .map((agent) => getProjectAgentCapabilityProfile(agent))
-        .filter((profile) => profile.configured);
-    const policyEvidenceExclusions = uniqueStrings(Array.isArray(task?.policy_evidence_exclusions) ? task.policy_evidence_exclusions : [], task?.workflow_meta?.smoke_test && task?.workflow_meta?.smoke_file ? [task.workflow_meta.smoke_file] : []);
-    const projectPolicyViolations = collectProjectPolicyViolations(actualFileChanges, policyEvidenceExclusions);
-    const blockers = uniqueStrings(...receipts.map((receipt) => receipt.blockers));
-    if (projectPolicyViolations.length)
-        blockers.push(...projectPolicyViolations.map((item) => item.message));
-    const needs = uniqueStrings(...receipts.map((receipt) => receipt.needs));
-    const executionDetail = String(execution?.detail || "").trim();
-    const executionDetailConfirmsCompletion = /(?:主\s*Agent|协调(?:者|Agent)|任务|最终)?\s*(?:复盘|验收|检查)?\s*(?:判定|确认)?\s*(?:已)?完成|(?:复盘|验收).{0,12}(?:通过|完成)/i.test(executionDetail);
-    if (finalStatus !== "done" && executionDetail && !executionDetailConfirmsCompletion && !needs.length && !blockers.length) {
-        needs.push(executionDetail);
-    }
-    const actions = uniqueStrings(...receipts.map((receipt) => receipt.actions));
-    const advisoryNeeds = needs.filter((item) => isAdvisoryNeed(item, task));
-    const blockingNeeds = needs.filter((item) => !advisoryNeeds.includes(item));
-    const receiptStatuses = receipts.map((receipt) => ({
-        agent: receipt.agent,
-        status: receipt.status,
-        summary: receipt.summary || "",
-        taskAgentSessionId: receipt.taskAgentSessionId || receipt.task_agent_session_id || "",
-        task_agent_session_id: receipt.task_agent_session_id || receipt.taskAgentSessionId || "",
-        nativeSessionId: receipt.nativeSessionId || receipt.native_session_id || "",
-        native_session_id: receipt.native_session_id || receipt.nativeSessionId || "",
-        memoryContextSnapshotId: receipt.memoryContextSnapshotId || receipt.memory_context_snapshot_id || "",
-        memory_context_snapshot_id: receipt.memory_context_snapshot_id || receipt.memoryContextSnapshotId || "",
-        memoryContextSnapshotChecksum: receipt.memoryContextSnapshotChecksum || receipt.memory_context_snapshot_checksum || "",
-        memory_context_snapshot_checksum: receipt.memory_context_snapshot_checksum || receipt.memoryContextSnapshotChecksum || "",
-        workerContextPacketId: receipt.workerContextPacketId || receipt.worker_context_packet_id || "",
-        worker_context_packet_id: receipt.worker_context_packet_id || receipt.workerContextPacketId || "",
-        agentType: receipt.agentType || receipt.agent_type || "",
-        agent_type: receipt.agent_type || receipt.agentType || "",
-        executionId: receipt.executionId || receipt.execution_id || "",
-        execution_id: receipt.execution_id || receipt.executionId || "",
-        memoryUsed: Array.isArray(receipt.memoryUsed) ? receipt.memoryUsed.slice(0, 12) : [],
-        memoryIgnored: Array.isArray(receipt.memoryIgnored) ? receipt.memoryIgnored.slice(0, 12) : [],
-        typedMemoryUsage: Array.isArray(receipt.typedMemoryUsage || receipt.typed_memory_usage)
-            ? (receipt.typedMemoryUsage || receipt.typed_memory_usage).slice(0, 40)
-            : [],
-        globalMemoryUsage: Array.isArray(receipt.globalMemoryUsage || receipt.global_memory_usage)
-            ? (receipt.globalMemoryUsage || receipt.global_memory_usage).slice(0, 20)
-            : [],
-        apiMicrocompactUsage: Array.isArray(receipt.apiMicrocompactUsage || receipt.api_microcompact_usage || receipt.apiMicroCompactUsage)
-            ? (receipt.apiMicrocompactUsage || receipt.api_microcompact_usage || receipt.apiMicroCompactUsage).slice(0, 20)
-            : [],
-        apiMicrocompactNativeApplyRequestTelemetry: Array.isArray(receipt.apiMicrocompactNativeApplyRequestTelemetry || receipt.api_microcompact_native_apply_request_telemetry || receipt.apiMicrocompactNativeApplyTelemetry || receipt.api_microcompact_native_apply_telemetry)
-            ? (receipt.apiMicrocompactNativeApplyRequestTelemetry || receipt.api_microcompact_native_apply_request_telemetry || receipt.apiMicrocompactNativeApplyTelemetry || receipt.api_microcompact_native_apply_telemetry).slice(0, 20)
-            : [],
-        postCompactCandidateUsage: Array.isArray(receipt.postCompactCandidateUsage || receipt.post_compact_candidate_usage) ? (receipt.postCompactCandidateUsage || receipt.post_compact_candidate_usage).slice(0, 20) : [],
-    }));
-    const receiptEvidence = receipts.map((receipt) => ({
-        agent: receipt.agent || "",
-        status: receipt.status || "",
-        summary: String(receipt.summary || "").slice(0, 800),
-        taskAgentSessionId: receipt.taskAgentSessionId || receipt.task_agent_session_id || "",
-        task_agent_session_id: receipt.task_agent_session_id || receipt.taskAgentSessionId || "",
-        nativeSessionId: receipt.nativeSessionId || receipt.native_session_id || "",
-        native_session_id: receipt.native_session_id || receipt.nativeSessionId || "",
-        memoryContextSnapshotId: receipt.memoryContextSnapshotId || receipt.memory_context_snapshot_id || "",
-        memory_context_snapshot_id: receipt.memory_context_snapshot_id || receipt.memoryContextSnapshotId || "",
-        memoryContextSnapshotChecksum: receipt.memoryContextSnapshotChecksum || receipt.memory_context_snapshot_checksum || "",
-        memory_context_snapshot_checksum: receipt.memory_context_snapshot_checksum || receipt.memoryContextSnapshotChecksum || "",
-        workerContextPacketId: receipt.workerContextPacketId || receipt.worker_context_packet_id || "",
-        worker_context_packet_id: receipt.worker_context_packet_id || receipt.workerContextPacketId || "",
-        agentType: receipt.agentType || receipt.agent_type || "",
-        agent_type: receipt.agent_type || receipt.agentType || "",
-        executionId: receipt.executionId || receipt.execution_id || "",
-        execution_id: receipt.execution_id || receipt.executionId || "",
-        traceId: receipt.traceId || receipt.trace_id || "",
-        trace_id: receipt.trace_id || receipt.traceId || "",
-        actions: Array.isArray(receipt.actions) ? receipt.actions.slice(0, 20) : [],
-        filesChanged: Array.isArray(receipt.filesChanged) ? receipt.filesChanged.slice(0, 50) : [],
-        verification: Array.isArray(receipt.verification) ? receipt.verification.slice(0, 30) : [],
-        ack: receipt.ack || null,
-        contractChanges: Array.isArray(receipt.contractChanges || receipt.contract_changes) ? (receipt.contractChanges || receipt.contract_changes).slice(0, 12) : [],
-        independentReview: Array.isArray(receipt.independentReview || receipt.independent_review || receipt.codeReview || receipt.code_review)
-            ? (receipt.independentReview || receipt.independent_review || receipt.codeReview || receipt.code_review).slice(0, 8)
-            : [],
-        reviewer: receipt.reviewer || "",
-        role: receipt.role || "",
-        consumedInjectionIds: normalizeStringArray(receipt.consumedInjectionIds || receipt.consumed_injection_ids || receipt.contractInjectionConsumed || receipt.contract_injection_consumed).slice(0, 20),
-        contractConsumption: Array.isArray(receipt.contractConsumption || receipt.contract_consumption) ? (receipt.contractConsumption || receipt.contract_consumption).slice(0, 20) : [],
-        invokedSkills: Array.isArray(receipt.invokedSkills || receipt.invoked_skills) ? (receipt.invokedSkills || receipt.invoked_skills).slice(0, 20) : [],
-        runtimeToolSnapshot: receipt.runtimeToolSnapshot || receipt.runtime_tool_snapshot || null,
-        memoryUsed: Array.isArray(receipt.memoryUsed || receipt.memory_used) ? (receipt.memoryUsed || receipt.memory_used).slice(0, 20) : [],
-        memoryIgnored: Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) ? (receipt.memoryIgnored || receipt.memory_ignored).slice(0, 20) : [],
-        typedMemoryUsage: Array.isArray(receipt.typedMemoryUsage || receipt.typed_memory_usage)
-            ? (receipt.typedMemoryUsage || receipt.typed_memory_usage).slice(0, 80)
-            : [],
-        memoryContextUsage: receipt.agentMemoryContextUsage || receipt.agent_memory_context_usage || receipt.memoryContextUsage || receipt.memory_context_usage || null,
-        agentMemoryContextUsage: receipt.agentMemoryContextUsage || receipt.agent_memory_context_usage || receipt.memoryContextUsage || receipt.memory_context_usage || null,
-        memoryFactCitations: Array.isArray(receipt.memoryFactCitations || receipt.memory_fact_citations)
-            ? (receipt.memoryFactCitations || receipt.memory_fact_citations).slice(0, 20)
-            : [],
-        globalMemoryUsage: Array.isArray(receipt.globalMemoryUsage || receipt.global_memory_usage)
-            ? (receipt.globalMemoryUsage || receipt.global_memory_usage).slice(0, 40)
-            : [],
-        apiMicrocompactUsage: Array.isArray(receipt.apiMicrocompactUsage || receipt.api_microcompact_usage || receipt.apiMicroCompactUsage)
-            ? (receipt.apiMicrocompactUsage || receipt.api_microcompact_usage || receipt.apiMicroCompactUsage).slice(0, 40)
-            : [],
-        apiMicrocompactNativeApplyRequestTelemetry: Array.isArray(receipt.apiMicrocompactNativeApplyRequestTelemetry || receipt.api_microcompact_native_apply_request_telemetry || receipt.apiMicrocompactNativeApplyTelemetry || receipt.api_microcompact_native_apply_telemetry)
-            ? (receipt.apiMicrocompactNativeApplyRequestTelemetry || receipt.api_microcompact_native_apply_request_telemetry || receipt.apiMicrocompactNativeApplyTelemetry || receipt.api_microcompact_native_apply_telemetry).slice(0, 40)
-            : [],
-        postCompactCandidateUsage: Array.isArray(receipt.postCompactCandidateUsage || receipt.post_compact_candidate_usage) ? (receipt.postCompactCandidateUsage || receipt.post_compact_candidate_usage).slice(0, 40) : [],
-        postReviewSpotCheck: receipt.postReviewSpotCheck || receipt.post_review_spot_check || null,
-        post_review_spot_check: receipt.post_review_spot_check || receipt.postReviewSpotCheck || null,
-        postReviewSpotCheckSummary: receipt.postReviewSpotCheckSummary || receipt.post_review_spot_check_summary || null,
-        post_review_spot_check_summary: receipt.post_review_spot_check_summary || receipt.postReviewSpotCheckSummary || null,
-        testAgentReport: receipt.testAgentReport || receipt.test_agent_report || null,
-        test_agent_report: receipt.test_agent_report || receipt.testAgentReport || null,
-        blockers: Array.isArray(receipt.blockers) ? receipt.blockers.slice(0, 20) : [],
-        needs: Array.isArray(receipt.needs) ? receipt.needs.slice(0, 20) : [],
-    }));
-    const implementationReceiptEvidence = receiptEvidence.filter((receipt) => !isCoordinatorTestAgentName(receipt.agent)
-        && String(receipt.role || "").toLowerCase() !== "independent_verifier");
-    const memoryUsageEvidence = receiptEvidence
-        .filter((receipt) => receipt.memoryUsed?.length || receipt.memoryIgnored?.length)
-        .map((receipt) => ({
-        agent: receipt.agent,
-        used: receipt.memoryUsed || [],
-        ignored: receipt.memoryIgnored || [],
-    }));
-    const taskSessions = task?.id ? (0, agent_sessions_1.listTaskAgentSessions)({ taskId: task.id }) : [];
-    const taskAgentMemoryContextSnapshots = task?.id ? (0, agent_sessions_1.listTaskAgentMemoryContextSnapshots)({ taskId: task.id }) : [];
-    const taskAgentMemoryContextSnapshotRows = taskAgentMemoryContextSnapshots.map(summarizeTaskAgentMemoryContextSnapshot);
-    const memoryGateCollectionContext = {
-        assignmentEvidence,
-        execution,
-        assignments: execution?.assignments || [],
-        taskAgentMemoryContextSnapshots,
-        task_agent_memory_context_snapshots: taskAgentMemoryContextSnapshots,
-    };
-    const belongsToImplementationAgent = (item) => !isCoordinatorTestAgentName(item?.target_project || item?.targetProject || item?.project || "");
-    const memoryDispatchGates = collectTaskMemoryDispatchFreshnessGates(task, memoryGateCollectionContext).filter(belongsToImplementationAgent);
-    const globalMemoryReceiptGates = collectTaskGlobalMemoryReceiptGates(task, memoryGateCollectionContext).filter(belongsToImplementationAgent);
-    const globalMemoryHealthGates = collectTaskGlobalMemoryHealthGates(task, memoryGateCollectionContext).filter(belongsToImplementationAgent);
-    const readPlanRevalidationGates = collectTaskReadPlanRevalidationGates(task, memoryGateCollectionContext).filter(belongsToImplementationAgent);
-    const postCompactReinjectionGates = collectTaskPostCompactReinjectionGates(task, memoryGateCollectionContext).filter(belongsToImplementationAgent);
-    const apiMicrocompactEditPlans = collectTaskApiMicrocompactEditPlans(task, memoryGateCollectionContext).filter(belongsToImplementationAgent);
-    const postCompactDispatchMarkers = collectTaskPostCompactDispatchMarkers(task, memoryGateCollectionContext);
-    const receiptQuality = implementationReceiptEvidence.map((receipt) => ({
-        agent: receipt.agent || "",
-        status: receipt.status || "",
-        ...(() => {
-            const quality = scoreChildAgentReceipt(task, receipt, { memoryDispatchGates, globalMemoryReceiptGates, globalMemoryHealthGates, readPlanRevalidationGates, postCompactReinjectionGates, apiMicrocompactEditPlans, taskAgentMemoryContextSnapshots, assignmentEvidence, execution });
-            return {
-                score: quality.score,
-                grade: quality.grade,
-                pass: quality.pass,
-                missing: quality.missing,
-                checks: quality.checks,
-                task_agent_memory_snapshot: quality.task_agent_memory_snapshot,
-                memory_gate: quality.memory_gate,
-                global_memory_gate: quality.global_memory_gate,
-                global_memory_health_gate: quality.global_memory_health_gate,
-                read_plan_revalidation_gate: quality.read_plan_revalidation_gate,
-                post_compact_reinjection_gate: quality.post_compact_reinjection_gate,
-                api_microcompact: quality.api_microcompact,
-            };
-        })(),
-    }));
-    const doneReceiptQuality = receiptQuality.filter((item) => item.status === "done");
-    const receiptQualityGatePassed = !taskRequiresCodeChanges(task) && !taskRequiresVerification(task)
-        ? true
-        : doneReceiptQuality.length > 0 && doneReceiptQuality.every((item) => item.grade === "good");
-    const taskAgentMemorySnapshotReceiptRows = receiptQuality.filter((item) => item.task_agent_memory_snapshot?.required);
-    const taskAgentMemorySnapshotReceiptPassed = taskAgentMemoryContextSnapshots.length === 0 || (taskAgentMemorySnapshotReceiptRows.length > 0 && taskAgentMemorySnapshotReceiptRows.every((item) => item.task_agent_memory_snapshot?.pass === true));
-    const memoryGateReceiptRows = receiptQuality.filter((item) => item.memory_gate?.required);
-    const memoryGateReceiptPassed = memoryDispatchGates.length === 0 || (memoryGateReceiptRows.length > 0 && memoryGateReceiptRows.every((item) => item.memory_gate?.pass === true));
-    const globalMemoryReceiptRows = receiptQuality.filter((item) => item.global_memory_gate?.required);
-    const globalMemoryReceiptPassed = globalMemoryReceiptGates.length === 0 || (globalMemoryReceiptRows.length > 0 && globalMemoryReceiptRows.every((item) => item.global_memory_gate?.pass === true));
-    const globalMemoryHealthGateReceiptRows = receiptQuality.filter((item) => item.global_memory_health_gate?.required);
-    const globalMemoryHealthGateReceiptPassed = globalMemoryHealthGates.length === 0 || (globalMemoryHealthGateReceiptRows.length > 0 && globalMemoryHealthGateReceiptRows.every((item) => item.global_memory_health_gate?.pass === true));
-    const readPlanRevalidationGateReceiptRows = receiptQuality.filter((item) => item.read_plan_revalidation_gate?.required);
-    const requiredReadPlanRevalidationGates = readPlanRevalidationGates.filter((gate) => gate.status === "required"
-        || Number(gate.required_count || 0) > 0
-        || (gate.required_read_plan_ids || []).length > 0);
-    const readPlanRevalidationGateReceiptPassed = requiredReadPlanRevalidationGates.length === 0
-        || (readPlanRevalidationGateReceiptRows.length > 0 && readPlanRevalidationGateReceiptRows.every((item) => item.read_plan_revalidation_gate?.pass === true));
-    const postCompactReinjectionGateReceiptRows = receiptQuality.filter((item) => item.post_compact_reinjection_gate?.required);
-    const postCompactReinjectionGateReceiptPassed = postCompactReinjectionGates.length === 0 || (postCompactReinjectionGateReceiptRows.length > 0 && postCompactReinjectionGateReceiptRows.every((item) => item.post_compact_reinjection_gate?.pass === true));
-    const apiMicrocompactReceiptRows = receiptQuality.filter((item) => item.api_microcompact?.required);
-    const requiredApiMicrocompactEditPlans = apiMicrocompactEditPlans.filter((plan) => Number(plan.edit_count || 0) > 0 || plan.recommended === true);
-    const apiMicrocompactReceiptPassed = requiredApiMicrocompactEditPlans.length === 0
-        || (apiMicrocompactReceiptRows.length > 0 && apiMicrocompactReceiptRows.every((item) => item.api_microcompact?.pass === true));
-    const memoryGateSummary = buildMemoryGateVisibleSummary({
-        memory_dispatch_gates: memoryDispatchGates,
-        memory_dispatch_gate_count: memoryDispatchGates.length,
-        memory_gate_receipt_passed: memoryGateReceiptPassed,
-        memory_gate_receipt_rows: memoryGateReceiptRows,
-    });
-    const globalMemoryReceiptSummary = buildGlobalMemoryReceiptVisibleSummary({
-        global_memory_receipt_gates: globalMemoryReceiptGates,
-        global_memory_receipt_gate_count: globalMemoryReceiptGates.length,
-        global_memory_receipt_passed: globalMemoryReceiptPassed,
-        global_memory_receipt_rows: globalMemoryReceiptRows,
-    });
-    const globalMemoryHealthGateSummary = buildGlobalMemoryHealthGateVisibleSummary({
-        global_memory_health_gates: globalMemoryHealthGates,
-        global_memory_health_gate_count: globalMemoryHealthGates.length,
-        global_memory_health_gate_receipt_passed: globalMemoryHealthGateReceiptPassed,
-        global_memory_health_gate_receipt_rows: globalMemoryHealthGateReceiptRows,
-    });
-    const readPlanRevalidationGateSummary = buildReadPlanRevalidationGateVisibleSummary({
-        read_plan_revalidation_gates: readPlanRevalidationGates,
-        read_plan_revalidation_gate_count: readPlanRevalidationGates.length,
-        read_plan_revalidation_gate_receipt_passed: readPlanRevalidationGateReceiptPassed,
-        read_plan_revalidation_gate_receipt_rows: readPlanRevalidationGateReceiptRows,
-    });
-    const postCompactReinjectionGateSummary = buildPostCompactReinjectionGateVisibleSummary({
-        post_compact_reinjection_gates: postCompactReinjectionGates,
-        post_compact_reinjection_gate_count: postCompactReinjectionGates.length,
-        post_compact_reinjection_gate_receipt_passed: postCompactReinjectionGateReceiptPassed,
-        post_compact_reinjection_gate_receipt_rows: postCompactReinjectionGateReceiptRows,
-    });
-    const apiMicrocompactReceiptSummary = buildApiMicrocompactReceiptVisibleSummary({
-        api_microcompact_edit_plans: apiMicrocompactEditPlans,
-        api_microcompact_edit_plan_count: apiMicrocompactEditPlans.length,
-        api_microcompact_receipt_passed: apiMicrocompactReceiptPassed,
-        api_microcompact_receipt_rows: apiMicrocompactReceiptRows,
-    });
-    const apiMicrocompactNativeApplyRequestTelemetryLedger = (0, memory_1.recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger)(task?.group_id || task?.groupId || "", {
-        groupSessionId: task?.group_session_id || task?.groupSessionId || "default",
-        targetProject: task?.target_project || task?.targetProject || "",
-        taskId: task?.id || "",
-        executionId: execution?.id || execution?.execution_id || "",
-        receipts: receiptEvidence,
-        generatedAt: new Date().toISOString(),
-    });
-    const apiMicrocompactNativeApplyProofLedger = (0, memory_1.recordGroupApiMicrocompactNativeApplyProofLedger)(task?.group_id || task?.groupId || "", {
-        groupSessionId: task?.group_session_id || task?.groupSessionId || "default",
-        targetProject: task?.target_project || task?.targetProject || "",
-        taskId: task?.id || "",
-        executionId: execution?.id || execution?.execution_id || "",
-        finalStatus,
-        receiptRows: apiMicrocompactReceiptRows,
-        generatedAt: new Date().toISOString(),
-    });
-    const postCompactCandidateUsageLedger = (0, memory_1.recordGroupPostCompactCandidateUsageLedger)(task?.group_id || task?.groupId || "", {
-        groupSessionId: task?.group_session_id || task?.groupSessionId || "default",
-        targetProject: task?.target_project || task?.targetProject || "",
-        taskId: task?.id || "",
-        executionId: execution?.id || execution?.execution_id || "",
-        receiptRows: postCompactReinjectionGateReceiptRows,
-        generatedAt: new Date().toISOString(),
-    });
-    const typedMemoryConsumptionRows = collectTaskTypedMemoryConsumptionRows(task, receiptEvidence, memoryGateCollectionContext);
-    const typedMemoryConsumptionLedger = (0, group_memory_index_1.recordGroupTypedMemoryConsumptionLedger)((0, memory_1.getGroupSessionMemoryScopeId)(task?.group_id || task?.groupId || "", task?.group_session_id || task?.groupSessionId || "default"), {
-        targetProject: task?.target_project || task?.targetProject || "",
-        taskId: task?.id || "",
-        executionId: execution?.id || execution?.execution_id || "",
-        rows: typedMemoryConsumptionRows,
-        generatedAt: new Date().toISOString(),
-    });
-    const typedMemorySelectorConsumption = (0, group_memory_index_1.recordGroupTypedMemoryManifestSelectorConsumptionOutcomes)((0, memory_1.getGroupSessionMemoryScopeId)(task?.group_id || task?.groupId || "", task?.group_session_id || task?.groupSessionId || ""), {
-        targetProject: task?.target_project || task?.targetProject || "",
-        taskId: task?.id || "",
-        executionId: execution?.id || execution?.execution_id || "",
-        rows: typedMemoryConsumptionRows,
-        receipts: receiptEvidence,
-        generatedAt: new Date().toISOString(),
-    });
-    const typedMemoryStaleCandidateLedger = (0, group_memory_index_1.recordGroupTypedMemoryStaleCandidates)((0, memory_1.getGroupSessionMemoryScopeId)(task?.group_id || task?.groupId || "", task?.group_session_id || task?.groupSessionId || "default"), {
-        targetProject: task?.target_project || task?.targetProject || "",
-        taskId: task?.id || "",
-        executionId: execution?.id || execution?.execution_id || "",
-        rows: typedMemoryConsumptionRows,
-        generatedAt: new Date().toISOString(),
-    });
-    const typedMemoryPressureRecallUsageRows = collectTaskTypedMemoryPressureRecallUsageRows(task, receiptEvidence, memoryGateCollectionContext);
-    const typedMemoryPressureRecallUsageLedger = (0, group_memory_index_1.recordGroupTypedMemoryPressureRecallUsageLedger)((0, memory_1.getGroupSessionMemoryScopeId)(task?.group_id || task?.groupId || "", task?.group_session_id || task?.groupSessionId || "default"), {
-        targetProject: task?.target_project || task?.targetProject || "",
-        taskId: task?.id || "",
-        executionId: execution?.id || execution?.execution_id || "",
-        rows: typedMemoryPressureRecallUsageRows,
-        generatedAt: new Date().toISOString(),
-    });
-    const postCompactDispatchMarkerSummary = buildPostCompactDispatchMarkerVisibleSummary({
-        post_compact_dispatch_markers: postCompactDispatchMarkers,
-        post_compact_dispatch_marker_count: postCompactDispatchMarkers.length,
-    });
-    const ackReviewForGate = (0, protocol_gates_1.buildAckPreflightReview)(task, implementationReceiptEvidence, assignmentEvidence
-        .filter((item) => !isCoordinatorTestAgentName(item.project))
-        .map((item) => ({ project: item.project, objective: item.task })));
-    const ackGatePassed = !(taskRequiresCodeChanges(task) || taskRequiresVerification(task))
-        || (ackReviewForGate.status === "approved" && !ackReviewForGate.rejected?.length);
-    const contractSyncForGate = (0, protocol_gates_1.extractContractSyncHints)(task, {
-        receipts: receiptEvidence,
-        assignment_evidence: assignmentEvidence,
-    });
-    const contractTransferForGate = (0, protocol_gates_1.buildContractTransferPlan)(contractSyncForGate, assignmentEvidence.map((item) => ({ project: item.project, objective: item.task })));
-    const contractInjectionGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractTransferForGate.rows || [], assignmentEvidence, receiptEvidence);
-    const review = execution?.review || null;
-    const reviewStatus = review?.status || "";
-    const taskAgentQa = (0, agent_qa_service_1.getAgentQaItemsForGroup)(String(task?.group_id || task?.groupId || ""), 120)
-        .filter((item) => !task?.id || !item.task_id || item.task_id === task.id)
-        .map((item) => ({
-        id: item.id,
-        from_agent: item.from_agent,
-        to_agent: item.to_agent,
-        type: item.type,
-        status: item.status,
-        question: item.question,
-        answer: item.answer,
-        blocking: item.blocking !== false,
-        execution_id: item.execution_id || "",
-        deadline_at: item.deadline_at || item.timeout_at || "",
-        evidence: item.evidence || [],
-        answer_evidence: item.answer_evidence || [],
-        routing: item.routing || null,
-        admission: item.admission || null,
-        acceptance: item.acceptance || null,
-        permission_contract: item.permission_contract || null,
-        permission_boundary: item.permission_boundary || null,
-        arbitration: item.arbitration || null,
-        timeout_at: item.timeout_at || "",
-        injected_at: item.injected_at || "",
-        resumed_at: item.resumed_at || "",
-        retry_count: Number(item.retry_count || 0),
-        manual_takeover: !!item.manual_takeover,
-    }));
-    const openAgentQa = taskAgentQa.filter((item) => ["waiting", "asking", "queued", "needs_user", "timeout", "manual", "rejected"].includes(String(item.status || "")));
-    const resolvedAgentQa = taskAgentQa.filter((item) => ["answered", "injected", "resumed"].includes(String(item.status || "")));
-    const acceptedAgentQa = taskAgentQa.filter((item) => item.acceptance?.accepted === true);
-    const resumedAgentQa = taskAgentQa.filter((item) => item.status === "resumed" || item.resumed_at);
-    const agentQaRequired = taskRequiresAgentQa(task);
-    const independentReviewGate = buildIndependentReviewGate(task, actualFileChanges, receiptEvidence, taskAgentQa);
-    const postReviewSpotCheckGate = (0, post_review_spot_check_1.buildPostReviewSpotCheckGate)({
-        required: independentReviewGate.required && independentReviewGate.pass,
-        receipts: receiptEvidence,
-    });
-    const independentVerificationSourcePassed = independentReviewGate.pass === true
-        && postReviewSpotCheckGate.pass === true;
-    const headline = finalStatus === "done"
-        ? "已完成最终验收"
-        : finalStatus === "failed"
-            ? "任务执行失败"
-            : "任务仍需继续推进";
-    const sessionContinuity = taskSessions.map((session) => ({
-        id: session.id,
-        project: session.project,
-        executor: session.agentType,
-        native_session_id: session.nativeSessionId || "",
-        resume_mode: session.resumeMode,
-        status: session.status,
-        turn_count: Number(session.turnCount || 0),
-        last_turn_succeeded: session.lastTurnSucceeded,
-        degraded: session.resumeMode === "scratchpad" && (0, agent_sessions_1.getTaskAgentSessionContinuity)(session).degraded,
-        reason: session.lastError || session.closeReason || "",
-        memory_context_snapshot_id: session.memoryContextSnapshotId || "",
-        memory_context_snapshot_checksum: session.memoryContextSnapshotChecksum || "",
-        memory_context_packet_id: session.memoryContextPacketId || "",
-    }));
-    const workItemTask = {
-        ...task,
-        status: finalStatus === "done" ? "done" : task?.status,
-        delivery_summary: {
-            ...(task?.delivery_summary || {}),
-            assignment_evidence: assignmentEvidence,
-            receipts: receiptEvidence,
-            receipt_statuses: receiptStatuses,
-        },
-    };
-    const deliveryWorkItems = (0, work_items_1.buildMainAgentWorkItems)(workItemTask, { executions: kernelExecutions });
-    const deliveryWorkItemSummary = (0, work_items_1.buildMainAgentWorkItemSummary)(deliveryWorkItems);
-    const teamShutdown = buildTeamShutdownGate(finalStatus, sessionContinuity, deliveryWorkItems, deliveryWorkItemSummary);
-    const lifecycleState = task?.status === "cancelled" ? "cancelled"
-        : finalStatus === "done" ? "completed"
-            : finalStatus === "failed" ? "failed"
-                : openAgentQa.length ? "waiting_dependency"
-                    : reworkEvidence.length ? "rework"
-                        : task?.status === "pending" || task?.status === "queued" ? "queued"
-                            : review ? "reviewing" : "executing";
-    const summary = {
-        headline,
-        status: finalStatus,
-        detail: execution?.detail || "",
-        workflow_type: task?.workflow_type || "general",
-        business_goal: task?.business_goal || task?.title || "",
-        coordination_plans: coordinationPlans,
-        latest_coordination_plan: latestCoordinationPlan,
-        coordination_plan_count: coordinationPlans.length,
-        assignment_evidence: assignmentEvidence,
-        assignment_count: assignmentEvidence.length,
-        dependency_evidence: dependencyEvidence,
-        dependency_count: dependencyEvidence.length,
-        continuation_evidence: continuationEvidence,
-        continuation_count: continuationEvidence.length,
-        rework_evidence: reworkEvidence,
-        rework_count: reworkEvidence.length,
-        has_rework_evidence: reworkEvidence.length > 0,
-        requires_code_changes: taskRequiresCodeChanges(task),
-        requires_verification: taskRequiresVerification(task),
-        agents,
-        project_agent_profiles: projectAgentProfiles,
-        policy_evidence_exclusions: policyEvidenceExclusions,
-        project_policy_violations: projectPolicyViolations,
-        project_policy_gate_passed: projectPolicyViolations.length === 0,
-        worker_notifications: workerNotifications,
-        worker_notification_count: workerNotifications.length,
-        worker_notification_statuses: workerNotifications.map((item) => ({
-            task_id: item.task_id,
-            status: item.status,
-            receipt_status: item.receipt_status,
-            summary: item.summary,
-        })),
-        agent_qa: taskAgentQa,
-        agent_qa_count: taskAgentQa.length,
-        agent_qa_open_count: openAgentQa.length,
-        agent_qa_resolved_count: resolvedAgentQa.length,
-        agent_qa_has_open_items: openAgentQa.length > 0,
-        agent_qa_required: agentQaRequired,
-        agent_qa_accepted_count: acceptedAgentQa.length,
-        agent_qa_resumed_count: resumedAgentQa.length,
-        agent_qa_gate_passed: !agentQaRequired || (acceptedAgentQa.length > 0 && resumedAgentQa.length > 0),
-        sandbox_rehearsal: task?.workflow_meta?.sandbox_rehearsal || task?.sandbox_rehearsal || execution?.sandbox_rehearsal || null,
-        timeline: (0, logs_1.getTaskTimeline)(task, execution),
-        receipt_statuses: receiptStatuses,
-        receipts: receiptEvidence,
-        receipt_quality: receiptQuality,
-        receipt_quality_gate_passed: receiptQualityGatePassed,
-        weak_receipt_quality: receiptQuality.filter((item) => item.grade !== "good"),
-        ack_review: ackReviewForGate,
-        ack_gate_passed: ackGatePassed,
-        contract_sync: contractSyncForGate,
-        contract_transfer: contractTransferForGate,
-        contract_injection_required: contractTransferForGate.required === true,
-        contract_injection_status: contractInjectionGate.status,
-        contract_injection_rows: contractInjectionGate.rows,
-        contract_injection_gate: contractInjectionGate,
-        contract_injection_gate_passed: contractInjectionGate.pass,
-        memory_usage: memoryUsageEvidence,
-        memory_usage_count: memoryUsageEvidence.length,
-        memory_usage_declared: memoryUsageEvidence.some((item) => item.used?.length),
-        task_agent_memory_context_snapshots: taskAgentMemoryContextSnapshotRows,
-        task_agent_memory_context_snapshot_count: taskAgentMemoryContextSnapshotRows.length,
-        task_agent_memory_snapshot_receipt_passed: taskAgentMemorySnapshotReceiptPassed,
-        task_agent_memory_snapshot_receipt_rows: taskAgentMemorySnapshotReceiptRows,
-        memory_dispatch_gates: memoryDispatchGates,
-        memory_dispatch_gate_count: memoryDispatchGates.length,
-        memory_gate_receipt_passed: memoryGateReceiptPassed,
-        memory_gate_receipt_rows: memoryGateReceiptRows,
-        memory_gate_summary: memoryGateSummary,
-        global_memory_receipt_gates: globalMemoryReceiptGates,
-        global_memory_receipt_gate_count: globalMemoryReceiptGates.length,
-        global_memory_receipt_passed: globalMemoryReceiptPassed,
-        global_memory_receipt_rows: globalMemoryReceiptRows,
-        global_memory_receipt_summary: globalMemoryReceiptSummary,
-        global_memory_health_gates: globalMemoryHealthGates,
-        global_memory_health_gate_count: globalMemoryHealthGates.length,
-        global_memory_health_gate_receipt_passed: globalMemoryHealthGateReceiptPassed,
-        global_memory_health_gate_receipt_rows: globalMemoryHealthGateReceiptRows,
-        global_memory_health_gate_summary: globalMemoryHealthGateSummary,
-        read_plan_revalidation_gates: readPlanRevalidationGates,
-        read_plan_revalidation_gate_count: readPlanRevalidationGates.length,
-        read_plan_revalidation_gate_receipt_passed: readPlanRevalidationGateReceiptPassed,
-        read_plan_revalidation_gate_receipt_rows: readPlanRevalidationGateReceiptRows,
-        read_plan_revalidation_gate_summary: readPlanRevalidationGateSummary,
-        post_compact_reinjection_gates: postCompactReinjectionGates,
-        post_compact_reinjection_gate_count: postCompactReinjectionGates.length,
-        post_compact_reinjection_gate_receipt_passed: postCompactReinjectionGateReceiptPassed,
-        post_compact_reinjection_gate_receipt_rows: postCompactReinjectionGateReceiptRows,
-        post_compact_reinjection_gate_summary: postCompactReinjectionGateSummary,
-        api_microcompact_edit_plans: apiMicrocompactEditPlans,
-        api_microcompact_edit_plan_count: apiMicrocompactEditPlans.length,
-        api_microcompact_receipt_passed: apiMicrocompactReceiptPassed,
-        api_microcompact_receipt_rows: apiMicrocompactReceiptRows,
-        api_microcompact_receipt_summary: apiMicrocompactReceiptSummary,
-        api_microcompact_native_apply_request_telemetry_ledger: apiMicrocompactNativeApplyRequestTelemetryLedger,
-        api_microcompact_native_apply_request_telemetry_ledger_file: apiMicrocompactNativeApplyRequestTelemetryLedger?.file || "",
-        api_microcompact_native_apply_proof_ledger: apiMicrocompactNativeApplyProofLedger,
-        api_microcompact_native_apply_proof_ledger_file: apiMicrocompactNativeApplyProofLedger?.file || "",
-        post_compact_candidate_usage_ledger: postCompactCandidateUsageLedger,
-        post_compact_candidate_usage_ledger_file: postCompactCandidateUsageLedger?.file || "",
-        typed_memory_pressure_recall_usage_rows: typedMemoryPressureRecallUsageRows,
-        typed_memory_pressure_recall_usage_count: typedMemoryPressureRecallUsageRows.length,
-        typed_memory_pressure_recall_usage_ledger: typedMemoryPressureRecallUsageLedger,
-        typed_memory_pressure_recall_usage_ledger_file: typedMemoryPressureRecallUsageLedger?.file || "",
-        typed_memory_consumption_rows: typedMemoryConsumptionRows,
-        typed_memory_consumption_count: typedMemoryConsumptionRows.length,
-        typed_memory_consumption_ledger: typedMemoryConsumptionLedger,
-        typed_memory_consumption_ledger_file: typedMemoryConsumptionLedger?.file || "",
-        typed_memory_selector_consumption: typedMemorySelectorConsumption,
-        typed_memory_selector_consumption_recorded_count: Number(typedMemorySelectorConsumption?.recordedCount || 0),
-        typed_memory_selector_consumption_idempotent_count: Number(typedMemorySelectorConsumption?.idempotentCount || 0),
-        typed_memory_selector_consumption_skipped_count: Number(typedMemorySelectorConsumption?.skippedCount || 0),
-        typed_memory_stale_candidate_ledger: typedMemoryStaleCandidateLedger,
-        typed_memory_stale_candidate_ledger_file: typedMemoryStaleCandidateLedger?.file || "",
-        post_compact_dispatch_markers: postCompactDispatchMarkers,
-        post_compact_dispatch_marker_count: postCompactDispatchMarkers.length,
-        post_compact_dispatch_marker_summary: postCompactDispatchMarkerSummary,
-        actions,
-        files_changed: filesChanged,
-        actual_file_changes: actualFileChanges,
-        actual_file_change_count: actualFileChanges.length,
-        has_actual_file_changes: actualFileChanges.length > 0,
-        verification,
-        verification_executed: verificationGate.executed,
-        verification_suggested: verificationGate.suggested,
-        verification_failed: verificationGate.failed,
-        verification_required: requiredVerificationCoverage.required,
-        verification_required_missing: requiredVerificationCoverage.missing,
-        verification_required_covered: requiredVerificationCoverage.covered,
-        external_runner_verification: externalRunnerVerification,
-        external_runner_verification_count: externalRunnerVerification.length,
-        verification_sources: [
-            ...(externalRunnerVerification.length ? ["external_runner"] : []),
-            ...(independentVerificationSourcePassed ? ["test_agent_and_main_agent_spot_check"] : []),
-            ...(verificationGate.executed.length > externalRunnerVerification.length ? ["agent_receipt"] : []),
-        ],
-        verification_source_gate_passed: !taskRequiresVerification(task)
-            || externalRunnerVerification.length > 0
-            || independentVerificationSourcePassed,
-        has_executed_verification: verificationGate.executed.length > 0,
-        verification_required_gate_passed: requiredVerificationCoverage.pass,
-        verification_gate_passed: verificationGate.pass && requiredVerificationCoverage.pass,
-        independent_review_required: independentReviewGate.required,
-        independent_review_gate: independentReviewGate,
-        independent_review_gate_passed: independentReviewGate.pass,
-        independent_review_evidence: independentReviewGate.evidence,
-        post_review_spot_check_required: postReviewSpotCheckGate.required,
-        post_review_spot_check_gate: postReviewSpotCheckGate,
-        post_review_spot_check_gate_passed: postReviewSpotCheckGate.pass,
-        post_review_spot_check: postReviewSpotCheckGate.latest,
-        post_review_spot_check_summary: postReviewSpotCheckGate.summary,
-        blockers,
-        needs,
-        blocking_needs: blockingNeeds,
-        advisory_needs: advisoryNeeds,
-        review_status: reviewStatus,
-        has_final_review: !!review,
-        lifecycle: {
-            state: lifecycleState,
-            terminal: ["completed", "cancelled"].includes(lifecycleState),
-            final_acceptance_required: true,
-            session_close_rule: "only_after_final_acceptance_or_explicit_cancel",
-        },
-        session_continuity: sessionContinuity,
-        session_count: sessionContinuity.length,
-        native_session_count: sessionContinuity.filter((item) => item.resume_mode === "native" && item.native_session_id).length,
-        degraded_session_count: sessionContinuity.filter((item) => item.degraded).length,
-        work_items: deliveryWorkItems,
-        work_item_summary: deliveryWorkItemSummary,
-        team_shutdown: teamShutdown,
-        team_shutdown_gate_passed: teamShutdown.pass,
-        runtime_tooling: collectRuntimeToolingFromSources(task, execution, [], receiptEvidence),
-        generated_at: new Date().toISOString(),
-    };
-    summary.runtime_kernel = buildRuntimeKernelSnapshot(task, summary);
-    summary.acceptance_gate = buildAcceptanceGate(task, execution, summary, finalStatus);
-    summary.acceptance_gate_passed = summary.acceptance_gate.pass;
-    summary.reasoning_loop = (0, reasoning_loop_1.buildTaskReasoningState)(task, summary);
-    summary.plan_version = summary.reasoning_loop.plan_version;
-    summary.reasoning_deviation_count = summary.reasoning_loop.deviations.length;
-    summary.reasoning_open_assertions = summary.reasoning_loop.assertions.filter((item) => item.status !== "passed").length;
-    summary.timeline_count = Array.isArray(summary.timeline) ? summary.timeline.length : 0;
-    summary.delivery_report = (0, task_delivery_report_1.buildTaskDeliveryReport)(task, summary, finalStatus, execution?.report || execution?.result || execution?.detail || "");
-    summary.user_report = summary.delivery_report.markdown || (0, task_delivery_report_1.buildUserDeliveryReport)(task, summary, finalStatus, execution?.report || execution?.result || execution?.detail || "");
-    return summary;
+    return require("./collaboration-acceptance").buildDeliverySummary(task, execution, finalStatus);
 }
 function getTaskExecutionFromReceipt(response, receipt, details = {}) {
-    if (!receipt) {
-        if ((0, agent_receipts_1.checkTaskFailure)(response)) {
-            return buildTaskExecutionResult("failed", response, { ...details, detail: details.detail || "Agent 输出包含失败标记" });
-        }
-        if ((0, agent_receipts_1.checkTaskCompletion)(response)) {
-            return buildTaskExecutionResult("done", response, { ...details, detail: details.detail || "兼容旧 Agent：检测到完成标记但缺少结构化结果说明" });
-        }
-        return buildTaskExecutionResult("waiting", response, { ...details, detail: details.detail || "缺少结构化结果说明，无法可靠验收" });
-    }
-    if (receipt.status === "done") {
-        return buildTaskExecutionResult("done", response, { ...details, receipt, detail: receipt.summary || details.detail || "子 Agent 结果说明确认完成" });
-    }
-    if (receipt.status === "failed") {
-        return buildTaskExecutionResult("failed", response, { ...details, receipt, detail: receipt.summary || receipt.blockers?.join("；") || details.detail || "子 Agent 结果说明失败" });
-    }
-    return buildTaskExecutionResult("waiting", response, { ...details, receipt, detail: receipt.summary || receipt.blockers?.join("；") || details.detail || `子 Agent 结果说明状态为 ${receipt.status}` });
+    return require("./collaboration-acceptance").getTaskExecutionFromReceipt(response, receipt, details);
 }
 function getGroupTaskExecutionStatus(review, coordinatorResult, outputText, task = null) {
     const dispatchPolicy = coordinatorResult?.dispatchPolicy || {};
@@ -11301,1621 +8805,31 @@ function getDailyDevCompletionGateSelfTest() {
     };
 }
 function runMemoryDispatchGateReceiptValidationSelfTest() {
-    const gate = {
-        schema: "ccm-child-agent-memory-dispatch-freshness-gate-v1",
-        dispatch_gate_id: "gmd_receipt_gate_selftest",
-        group_id: "group-receipt-gate-selftest",
-        target_project: "frontend",
-        scope: "child:frontend",
-        status: "fresh_reloaded",
-        action: "use_reloaded_context",
-        source_manifest: { checksum: "receipt-gate-source" },
-        reload_audit: { reason: "memory_source_changed" },
-    };
-    const task = {
-        title: "记忆 gate 回执自测",
-        workflow_type: "daily_dev",
-        target_project: "frontend",
-        requires_code_changes: true,
-        requires_verification: true,
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "frontend",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_receipt_gate_selftest",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            dispatch_freshness_gate: gate,
-                        },
-                    },
-                },
-            }],
-    };
-    const baseReceipt = {
-        agent: "frontend",
-        status: "done",
-        summary: "完成记忆 gate 回执验证改动",
-        actions: ["修改前端页面"],
-        filesChanged: ["src/App.vue"],
-        verification: ["npm test passed by external runner (exit 0)"],
-        ack: {
-            understoodGoal: "验证记忆 gate 回执",
-            plannedScope: ["src/App.vue"],
-            forbiddenScope: ["无关模块"],
-            verificationPlan: ["npm test"],
-            unclear: [],
-        },
-        contractChanges: [],
-        blockers: [],
-        needs: [],
-    };
-    const goodReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["使用平台群聊记忆，dispatch_gate_id=gmd_receipt_gate_selftest"],
-        memoryIgnored: [],
-    };
-    const missingGateReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["使用平台群聊记忆，但未引用 gate id"],
-        memoryIgnored: [],
-    };
-    const ignoredGateReceipt = {
-        ...baseReceipt,
-        memoryUsed: [],
-        memoryIgnored: ["未使用平台记忆，dispatch_gate_id=gmd_receipt_gate_selftest；原因：本轮只核验当前文件"],
-    };
-    const goodQuality = scoreChildAgentReceipt(task, goodReceipt);
-    const missingGateQuality = scoreChildAgentReceipt(task, missingGateReceipt);
-    const ignoredQuality = scoreChildAgentReceipt(task, ignoredGateReceipt);
-    const missingGateSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: missingGateReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const goodSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: goodReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const checks = {
-        goodReceiptPassesGate: goodQuality.pass === true
-            && goodQuality.memory_gate?.pass === true
-            && goodQuality.grade === "good",
-        ignoredReceiptCanSatisfyGate: ignoredQuality.pass === true
-            && ignoredQuality.memory_gate?.pass === true
-            && ignoredQuality.grade === "good",
-        missingGateHardFailsQuality: missingGateQuality.pass === false
-            && missingGateQuality.grade !== "good"
-            && missingGateQuality.memory_gate?.missing_gate_ids?.includes("gmd_receipt_gate_selftest")
-            && missingGateQuality.missing.includes("引用记忆派发 gate"),
-        deliverySummaryRecordsGate: missingGateSummary.memory_dispatch_gate_count === 1
-            && missingGateSummary.memory_gate_receipt_passed === false
-            && missingGateSummary.memory_gate_receipt_rows?.[0]?.memory_gate?.missing_gate_ids?.includes("gmd_receipt_gate_selftest"),
-        acceptanceGateBlocksMissingGate: missingGateSummary.acceptance_gate_passed === false
-            && missingGateSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "memory_gate_receipt"),
-        goodDeliverySummaryPassesGate: goodSummary.memory_gate_receipt_passed === true
-            && goodSummary.receipt_quality_gate_passed === true,
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        good: { score: goodQuality.score, grade: goodQuality.grade, memoryGate: goodQuality.memory_gate },
-        missing: { score: missingGateQuality.score, grade: missingGateQuality.grade, memoryGate: missingGateQuality.memory_gate },
-    };
+    return require("./collaboration-receipt-self-tests").runMemoryDispatchGateReceiptValidationSelfTest();
 }
 function runPressureMemoryProvenanceReceiptUsageSelfTest() {
-    const groupId = `pressure-memory-provenance-receipt-${process.pid}-${Date.now().toString(36)}`;
-    const targetProject = "phase132-pressure-project";
-    const typedDir = path.join(utils_1.CCM_DIR, "group-memory-md", String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown");
-    try {
-        const relPath = "worker-context-usage-pressure-discipline.md";
-        const repairWorkItemId = "cgpru-phase132-repair-selftest";
-        const task = {
-            id: "phase132-pressure-provenance-task",
-            group_id: groupId,
-            target_project: targetProject,
-            worker_context_packet: {
-                packet_id: "wcp-phase132-pressure-provenance",
-                project: targetProject,
-                memory: {
-                    schema: "ccm-group-memory-context-v1",
-                    group_id: groupId,
-                    target_project: targetProject,
-                    group_state: {
-                        typedMemory: {
-                            recall: {
-                                schema: "ccm-group-typed-memory-recall-v1",
-                                ignored: false,
-                                workerContextPressureScoring: {
-                                    schema: "ccm-group-typed-memory-worker-context-pressure-scoring-v1",
-                                    active: true,
-                                    pressure_status: "over_budget",
-                                },
-                                recalled: [{
-                                        relPath,
-                                        name: "WorkerContextPacket context usage pressure discipline",
-                                        type: "feedback",
-                                        source: "selftest:phase132",
-                                        score: 18,
-                                        workerContextPressureRecall: {
-                                            adjustment: 7,
-                                            pressure_status: "over_budget",
-                                            kinds: ["context_usage_pressure"],
-                                        },
-                                        workerContextPressureUsage: {
-                                            adjustment: -9,
-                                            matched: [{
-                                                    rel_path: relPath,
-                                                    recommendation: "deprioritize_pressure_recall",
-                                                    provenance_status: "disputed_under_repair",
-                                                    repair_open: true,
-                                                    repair_work_item_id: repairWorkItemId,
-                                                    repair_status: "pending",
-                                                    repair_gap_type: "recommendation_conflict",
-                                                }],
-                                        },
-                                    }],
-                            },
-                        },
-                    },
-                },
-            },
-        };
-        const receipt = (0, agent_receipts_1.extractAgentReceipt)([
-            "CCM_AGENT_RECEIPT",
-            "```json",
-            JSON.stringify({
-                ccm_receipt: true,
-                status: "done",
-                summary: "使用 disputed pressure memory 前重读当前源并完成修复。",
-                actions: ["核验 WorkerContextPacket pressure memory provenance"],
-                filesChanged: [],
-                verification: ["current source re-read before applying disputed memory"],
-                blockers: [],
-                needs: [],
-                ack: {
-                    understoodGoal: "验证 pressure memory provenance receipt",
-                    plannedScope: ["memory provenance"],
-                    forbiddenScope: [],
-                    verificationPlan: ["current source re-read"],
-                    unclear: [],
-                },
-                contractChanges: [],
-                consumedInjectionIds: [],
-                memoryUsed: [`${relPath}; provenance=disputed_under_repair; work_item=${repairWorkItemId}; current source verified`],
-                memoryIgnored: [],
-                memoryProvenanceUsage: [{
-                        relPath,
-                        name: "WorkerContextPacket context usage pressure discipline",
-                        usageState: "used",
-                        provenanceStatus: "disputed_under_repair",
-                        repairWorkItemId,
-                        repairStatus: "pending",
-                        repairGapType: "recommendation_conflict",
-                        currentSourceVerified: true,
-                        reason: "disputed pressure memory was used only after current source verification",
-                    }],
-            }),
-            "```",
-        ].join("\n"), targetProject);
-        const rows = collectTaskTypedMemoryPressureRecallUsageRows(task, [receipt], {});
-        const record = (0, group_memory_index_1.recordGroupTypedMemoryPressureRecallUsageLedger)(groupId, {
-            targetProject,
-            taskId: task.id,
-            executionId: "phase132-pressure-provenance-execution",
-            rows,
-            generatedAt: "2026-07-09T23:59:30.000Z",
-        });
-        const ledger = (0, group_memory_index_1.readGroupTypedMemoryPressureRecallUsageLedger)(groupId);
-        const entry = (ledger.entries || []).find((item) => item.rel_path === relPath) || {};
-        const statKey = Object.keys(ledger.stats || {}).find(key => key.includes(relPath.toLowerCase())) || "";
-        const stat = statKey ? ledger.stats[statKey] || {} : {};
-        const checks = {
-            receiptParserKeepsStructuredProvenance: receipt?.memoryProvenanceUsage?.[0]?.repairWorkItemId === repairWorkItemId
-                && receipt.memoryProvenanceUsage[0].provenanceStatus === "disputed_under_repair",
-            collectionPrefersStructuredProvenance: rows.length === 1
-                && rows[0].usage_state === "verified"
-                && rows[0].provenance_status === "disputed_under_repair"
-                && rows[0].repair_work_item_id === repairWorkItemId
-                && rows[0].current_source_verified === true,
-            ledgerPersistsProvenance: record?.recorded_count === 1
-                && entry.usage_state === "verified"
-                && entry.provenance_status === "disputed_under_repair"
-                && entry.repair_work_item_id === repairWorkItemId
-                && entry.current_source_verified === true,
-            statsAggregateProvenance: Array.isArray(stat.provenance_statuses)
-                && stat.provenance_statuses.includes("disputed_under_repair")
-                && Array.isArray(stat.repair_work_item_ids)
-                && stat.repair_work_item_ids.includes(repairWorkItemId)
-                && Number(stat.current_source_verified_count || 0) === 1,
-        };
-        return {
-            pass: Object.values(checks).every(Boolean),
-            checks,
-            receipt: {
-                memoryProvenanceUsage: receipt?.memoryProvenanceUsage || [],
-            },
-            rows,
-            ledger: {
-                entry,
-                stat,
-            },
-        };
-    }
-    finally {
-        try {
-            fs.rmSync(typedDir, { recursive: true, force: true });
-        }
-        catch { }
-    }
+    return require("./collaboration-receipt-self-tests").runPressureMemoryProvenanceReceiptUsageSelfTest();
 }
 function runTaskAgentMemoryContextSnapshotReceiptValidationSelfTest() {
-    const taskId = `task-memory-context-snapshot-receipt-selftest-${process.pid}-${Date.now().toString(36)}`;
-    const groupId = "group-memory-context-snapshot-receipt-selftest";
-    const groupSessionId = `gcs_${Date.now().toString(36)}_snapshot_receipt`;
-    try {
-        const session = (0, agent_sessions_1.openTaskAgentSession)({
-            scopeId: taskId,
-            taskId,
-            groupId,
-            project: "frontend",
-            agentType: "codex",
-        });
-        const dispatchGate = {
-            schema: "ccm-child-agent-memory-dispatch-freshness-gate-v1",
-            dispatch_gate_id: "gmd_task_agent_snapshot_receipt_selftest",
-            group_id: groupId,
-            target_project: "frontend",
-            scope: "child:frontend",
-            status: "fresh_reloaded",
-            action: "use_reloaded_context",
-            source_manifest: { checksum: "task-agent-snapshot-source" },
-            reload_audit: { reason: "session_bound_snapshot_selftest" },
-        };
-        const memoryContext = {
-            schema: "ccm-group-memory-context-v1",
-            group_id: groupId,
-            group_session_id: groupSessionId,
-            target_project: "frontend",
-            session_binding: {
-                schema: "ccm-child-agent-memory-session-binding-v1",
-                binding_id: "csm:snapshot-receipt-selftest",
-                task_agent_session_id: session.id,
-            },
-            memory_policy: { use: "must_consider" },
-            compaction: {
-                sessionMemory: {
-                    schema: "ccm-group-session-memory-snapshot-v1",
-                    snapshotFile: "group-session-memory/snapshot-receipt-selftest/snapshot.json",
-                    summaryFile: "group-session-memory/snapshot-receipt-selftest/summary.md",
-                    markdownChecksum: "session-memory-checksum-snapshot-receipt-selftest",
-                    hasSummary: true,
-                    sectionEvidence: {
-                        schema: "ccm-group-session-memory-section-evidence-v1",
-                        checksum: "section-evidence-bundle-snapshot-receipt-selftest",
-                        sections: [{
-                                evidenceId: "gsmse_snapshot_receipt_current_state",
-                                section: "Current State",
-                                sectionIndex: 2,
-                                sectionChecksum: "section-checksum-snapshot-receipt-selftest",
-                                sourceTranscriptChecksum: "transcript-checksum-snapshot-receipt-selftest",
-                                sourceFirstMessageId: "msg-first-snapshot-receipt-selftest",
-                                sourceLastMessageId: "msg-last-snapshot-receipt-selftest",
-                                sourceMessageIds: ["msg-first-snapshot-receipt-selftest", "msg-last-snapshot-receipt-selftest"],
-                            }],
-                    },
-                },
-            },
-            group_state: { goal: "TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SENTINEL" },
-            dispatch_freshness_gate: dispatchGate,
-        };
-        const renderedPrompt = "prompt with session-bound memory snapshot";
-        const bound = (0, agent_sessions_1.bindTaskAgentMemoryContextSnapshot)(session.id, {
-            taskId,
-            groupId,
-            project: "frontend",
-            agentType: "codex",
-            nativeSessionId: "codex-native-snapshot-receipt-selftest",
-            turn: 1,
-            executionId: `${taskId}--frontend`,
-            traceId: "trace-task-agent-snapshot-receipt-selftest",
-            workerContextPacket: {
-                packet_id: "wcp_task_agent_snapshot_receipt_selftest",
-                memory: memoryContext,
-            },
-            memoryContext,
-            workerHandoffSummary: {
-                handoff_id: "wh_task_agent_snapshot_receipt_selftest",
-                packet_id: "wcp_task_agent_snapshot_receipt_selftest",
-            },
-            renderedPrompt,
-        });
-        (0, agent_sessions_1.recordTaskAgentMemoryContextDelivery)(session.id, {
-            snapshotId: bound?.snapshot?.snapshot_id || "",
-            renderedPrompt,
-            snapshotRenderedPrompt: renderedPrompt,
-            executionId: `${taskId}--frontend`,
-            traceId: "trace-task-agent-snapshot-receipt-selftest",
-            runtime: "codex",
-            nativeSessionId: "codex-native-snapshot-receipt-selftest",
-            dispatched: true,
-            executionSucceeded: true,
-            output: "snapshot receipt selftest output",
-        });
-        const task = {
-            id: taskId,
-            title: "任务级 Agent 记忆快照回执自测",
-            workflow_type: "daily_dev",
-            assign_type: "group",
-            target_project: "frontend",
-            group_id: groupId,
-            requires_code_changes: true,
-            requires_verification: true,
-            trace_id: "trace-task-agent-snapshot-receipt-selftest",
-        };
-        const baseReceipt = {
-            agent: "frontend",
-            status: "done",
-            summary: "完成任务级记忆快照回执校验改动",
-            actions: ["修改前端页面"],
-            filesChanged: ["src/App.vue"],
-            verification: ["npm test passed by external runner (exit 0)"],
-            ack: {
-                understoodGoal: "验证任务级记忆快照回执",
-                plannedScope: ["src/App.vue"],
-                forbiddenScope: ["无关模块"],
-                verificationPlan: ["npm test"],
-                unclear: [],
-            },
-            contractChanges: [],
-            blockers: [],
-            needs: [],
-            memoryUsed: ["使用 session-bound memory dispatch_gate_id=gmd_task_agent_snapshot_receipt_selftest"],
-            memoryIgnored: [],
-            memoryContextUsage: {
-                bindingId: "csm:snapshot-receipt-selftest",
-                groupSessionId,
-                sessionMemoryChecksum: "session-memory-checksum-snapshot-receipt-selftest",
-                usageState: "used",
-                reason: "使用了当前群聊会话 Session Memory。",
-            },
-            memoryFactCitations: [{
-                    evidenceId: "gsmse_snapshot_receipt_current_state",
-                    section: "Current State",
-                    sectionChecksum: "section-checksum-snapshot-receipt-selftest",
-                    sourceTranscriptChecksum: "transcript-checksum-snapshot-receipt-selftest",
-                    sourceMessageIds: ["msg-last-snapshot-receipt-selftest"],
-                    usage: "用当前状态章节确定本轮修改范围。",
-                }],
-        };
-        const goodReceipt = {
-            ...baseReceipt,
-            task_agent_session_id: session.id,
-            native_session_id: "codex-native-snapshot-receipt-selftest",
-            memory_context_snapshot_id: bound?.snapshot?.snapshot_id || "",
-            memory_context_snapshot_checksum: bound?.snapshot?.checksum || "",
-            worker_context_packet_id: "wcp_task_agent_snapshot_receipt_selftest",
-        };
-        const wrongSessionReceipt = {
-            ...baseReceipt,
-            task_agent_session_id: "tas-wrong-session",
-            native_session_id: "codex-native-snapshot-receipt-selftest",
-        };
-        const wrongCitationReceipt = {
-            ...goodReceipt,
-            memoryFactCitations: [{
-                    ...goodReceipt.memoryFactCitations[0],
-                    sectionChecksum: "forged-section-checksum",
-                }],
-        };
-        const wrongSourceMessageReceipt = {
-            ...goodReceipt,
-            memoryFactCitations: [{
-                    ...goodReceipt.memoryFactCitations[0],
-                    sourceMessageIds: ["msg-from-another-session"],
-                }],
-        };
-        const goodSummary = buildDeliverySummary(task, {
-            status: "done",
-            receipt: goodReceipt,
-            review: { status: "complete", content: "主 Agent 复盘完成" },
-            fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-        }, "waiting");
-        const wrongSummary = buildDeliverySummary(task, {
-            status: "done",
-            receipt: wrongSessionReceipt,
-            review: { status: "complete", content: "主 Agent 复盘完成" },
-            fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-        }, "waiting");
-        const wrongCitationSummary = buildDeliverySummary(task, {
-            status: "done",
-            receipt: wrongCitationReceipt,
-            review: { status: "complete", content: "主 Agent 复盘完成" },
-            fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-        }, "waiting");
-        const wrongSourceMessageSummary = buildDeliverySummary(task, {
-            status: "done",
-            receipt: wrongSourceMessageReceipt,
-            review: { status: "complete", content: "主 Agent 复盘完成" },
-            fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-        }, "waiting");
-        const listed = (0, agent_sessions_1.listTaskAgentMemoryContextSnapshots)({ taskId });
-        const goodSnapshotGate = goodSummary.receipt_quality?.[0]?.task_agent_memory_snapshot || {};
-        const wrongSnapshotGate = wrongSummary.receipt_quality?.[0]?.task_agent_memory_snapshot || {};
-        const wrongCitationGate = wrongCitationSummary.receipt_quality?.[0]?.task_agent_memory_snapshot || {};
-        const wrongSourceMessageGate = wrongSourceMessageSummary.receipt_quality?.[0]?.task_agent_memory_snapshot || {};
-        const checks = {
-            snapshotPersistedOnSession: listed.length === 1
-                && listed[0]?.context?.worker_context_packet_id === "wcp_task_agent_snapshot_receipt_selftest"
-                && listed[0]?.context?.gate_ids?.includes("gmd_task_agent_snapshot_receipt_selftest"),
-            deliverySummaryCollectsGateFromSessionSnapshot: goodSummary.memory_dispatch_gate_count === 1
-                && goodSummary.memory_dispatch_gates?.[0]?.gate_id === "gmd_task_agent_snapshot_receipt_selftest",
-            goodReceiptMatchesExactSnapshot: goodSnapshotGate.pass === true
-                && goodSnapshotGate.matched_snapshot_ids?.includes(bound?.snapshot?.snapshot_id)
-                && goodSummary.task_agent_memory_snapshot_receipt_passed === true
-                && goodSnapshotGate.memory_fact_citations_required === true
-                && goodSnapshotGate.memory_fact_citations_passed === true,
-            goodDeliveryPassesMemoryGate: goodSummary.memory_gate_receipt_passed === true
-                && goodSummary.receipt_quality_gate_passed === true,
-            wrongSessionFailsSnapshotGate: wrongSnapshotGate.pass === false
-                && wrongSnapshotGate.missing_snapshot_ids?.includes(bound?.snapshot?.snapshot_id)
-                && wrongSummary.task_agent_memory_snapshot_receipt_passed === false,
-            wrongSessionBlocksAcceptance: wrongSummary.acceptance_gate_passed === false
-                && wrongSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "task_agent_memory_snapshot_receipt"),
-            forgedFactCitationBlocksAcceptance: wrongCitationGate.pass === false
-                && wrongCitationGate.memory_fact_citations_required === true
-                && wrongCitationGate.memory_fact_citations_passed === false
-                && wrongCitationSummary.acceptance_gate_passed === false,
-            foreignSourceMessageCitationBlocksAcceptance: wrongSourceMessageGate.pass === false
-                && wrongSourceMessageGate.rows?.[0]?.memory_fact_citations?.[0]?.source_message_ids_required === true
-                && wrongSourceMessageGate.rows?.[0]?.memory_fact_citations?.[0]?.source_message_ids_match === false
-                && wrongSourceMessageSummary.acceptance_gate_passed === false,
-            runtimeKernelShowsSnapshotMismatch: wrongSummary.runtime_kernel?.task_agent_memory_context_snapshot?.status === "session_snapshot_mismatch",
-        };
-        return {
-            pass: Object.values(checks).every(Boolean),
-            checks,
-            snapshot: summarizeTaskAgentMemoryContextSnapshot(bound?.snapshot),
-            good: goodSnapshotGate,
-            wrong: wrongSnapshotGate,
-            wrongCitation: wrongCitationGate,
-            wrongSourceMessage: wrongSourceMessageGate,
-        };
-    }
-    finally {
-        (0, agent_sessions_1.purgeTaskAgentSessions)(taskId);
-    }
+    return require("./collaboration-receipt-self-tests").runTaskAgentMemoryContextSnapshotReceiptValidationSelfTest();
 }
 function runGlobalMemoryUsageReceiptValidationSelfTest() {
-    const globalMemoryRecall = {
-        schema: "ccm-child-global-agent-memory-recall-v1",
-        itemCount: 2,
-        items: [{
-                id: "gmi_receipt_semantic_selftest",
-                type: "decision",
-                text: "GLOBAL_MEMORY_RECEIPT_SENTINEL: src/global-receipt.ts 旧规则存在语义风险。",
-                arbitration: {
-                    status: "possible_conflict_with_newer_group_memory",
-                    action: "do_not_apply_directly_treat_as_background",
-                    demoted: true,
-                    conflict: true,
-                    semanticRiskScore: 92,
-                    semanticRisk: { score: 92, level: "high", reasons: ["different_named_rule"] },
-                    semanticReasons: ["different_named_rule"],
-                },
-            }, {
-                id: "gmi_receipt_background_selftest",
-                type: "fact",
-                text: "GLOBAL_MEMORY_RECEIPT_BACKGROUND_SENTINEL: src/global-receipt.ts 跨群聊旧结论。",
-                arbitration: {
-                    status: "suppressed_by_cross_group_arbitration",
-                    action: "do_not_apply_directly_treat_as_background_verify_current_group_and_sources",
-                    demoted: true,
-                    conflict: false,
-                    crossGroupSuppressed: true,
-                },
-                crossGroupSuppression: {
-                    suppressed: true,
-                    advisory: false,
-                    action: "treat_as_background_only_verify_current_group_before_use",
-                    reason: "global_memory_conflicted_or_demoted_in_other_groups",
-                },
-            }],
-    };
-    const task = {
-        id: "task-global-memory-receipt-selftest",
-        title: "全局记忆使用回执自测",
-        workflow_type: "daily_dev",
-        assign_type: "group",
-        target_project: "frontend",
-        requires_code_changes: true,
-        requires_verification: true,
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "frontend",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_global_memory_receipt_selftest",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            target_project: "frontend",
-                            global_agent_memory: globalMemoryRecall,
-                        },
-                    },
-                },
-            }],
-    };
-    const baseReceipt = {
-        agent: "frontend",
-        status: "done",
-        summary: "完成全局记忆使用回执校验改动",
-        actions: ["修改前端页面"],
-        filesChanged: ["src/App.vue"],
-        verification: ["npm test passed by external runner (exit 0)"],
-        ack: {
-            understoodGoal: "验证全局记忆使用回执",
-            plannedScope: ["src/App.vue"],
-            forbiddenScope: ["无关模块"],
-            verificationPlan: ["npm test"],
-            unclear: [],
-        },
-        contractChanges: [],
-        blockers: [],
-        needs: [],
-        memoryUsed: ["使用全局记忆 gmi_receipt_semantic_selftest 前已核验当前源"],
-        memoryIgnored: [],
-    };
-    const goodReceipt = {
-        ...baseReceipt,
-        globalMemoryUsage: [
-            {
-                globalMemoryId: "gmi_receipt_semantic_selftest",
-                usageState: "verified",
-                currentSourceVerified: true,
-                semanticRiskAcknowledged: true,
-                reason: "已识别 semantic_risk，只在核验当前源后作为背景核对。",
-            },
-            {
-                globalMemoryId: "gmi_receipt_background_selftest",
-                usageState: "background",
-                currentSourceVerified: true,
-                crossGroupSuppression: "background_only",
-                reason: "跨群聊 suppression 仅作背景，不直接应用。",
-            },
-        ],
-    };
-    const missingGlobalReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["使用了平台全局记忆，但未列出 global_memory_id"],
-        globalMemoryUsage: [],
-    };
-    const unsafeBackgroundReceipt = {
-        ...baseReceipt,
-        globalMemoryUsage: [
-            {
-                globalMemoryId: "gmi_receipt_semantic_selftest",
-                usageState: "verified",
-                currentSourceVerified: true,
-                semanticRiskAcknowledged: true,
-                reason: "已核验当前源。",
-            },
-            {
-                globalMemoryId: "gmi_receipt_background_selftest",
-                usageState: "used",
-                currentSourceVerified: false,
-                crossGroupSuppression: "background_only",
-                reason: "直接用了旧跨群聊记忆。",
-            },
-        ],
-    };
-    const goodQuality = scoreChildAgentReceipt(task, goodReceipt);
-    const missingQuality = scoreChildAgentReceipt(task, missingGlobalReceipt);
-    const unsafeQuality = scoreChildAgentReceipt(task, unsafeBackgroundReceipt);
-    const missingSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: missingGlobalReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const unsafeSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: unsafeBackgroundReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const goodSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: goodReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const checks = {
-        goodReceiptPassesGlobalMemoryGate: goodQuality.pass === true
-            && goodQuality.global_memory_gate?.pass === true
-            && goodQuality.global_memory_gate?.verified_global_memory_ids?.includes("gmi_receipt_semantic_selftest")
-            && goodQuality.global_memory_gate?.background_global_memory_ids?.includes("gmi_receipt_background_selftest"),
-        missingGlobalMemoryHardFailsQuality: missingQuality.pass === false
-            && missingQuality.global_memory_gate?.missing_global_memory_ids?.includes("gmi_receipt_semantic_selftest")
-            && missingQuality.global_memory_gate?.missing_global_memory_ids?.includes("gmi_receipt_background_selftest")
-            && missingQuality.missing.includes("声明全局记忆使用状态"),
-        unsafeBackgroundUseHardFailsQuality: unsafeQuality.pass === false
-            && unsafeQuality.global_memory_gate?.unsafe_used_global_memory_ids?.includes("gmi_receipt_background_selftest"),
-        deliverySummaryRecordsMissingGlobalMemory: missingSummary.global_memory_receipt_gate_count === 1
-            && missingSummary.global_memory_receipt_passed === false
-            && missingSummary.global_memory_receipt_summary?.status === "missing_global_memory_reference",
-        acceptanceGateBlocksMissingGlobalMemory: missingSummary.acceptance_gate_passed === false
-            && missingSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "global_memory_receipt"),
-        runtimeKernelShowsGlobalMemoryGap: missingSummary.runtime_kernel?.global_memory_receipt_gate?.status === "missing_global_memory_reference",
-        unsafeSummaryShowsUnsafeUse: unsafeSummary.global_memory_receipt_summary?.status === "unsafe_global_memory_use"
-            && unsafeSummary.runtime_kernel?.global_memory_receipt_gate?.unsafe_used_global_memory_ids?.includes("gmi_receipt_background_selftest"),
-        goodDeliverySummaryPassesGate: goodSummary.global_memory_receipt_passed === true
-            && goodSummary.global_memory_receipt_summary?.status === "passed"
-            && goodSummary.receipt_quality_gate_passed === true,
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        good: { score: goodQuality.score, grade: goodQuality.grade, globalMemoryGate: goodQuality.global_memory_gate },
-        missing: { score: missingQuality.score, grade: missingQuality.grade, globalMemoryGate: missingQuality.global_memory_gate },
-        unsafe: { score: unsafeQuality.score, grade: unsafeQuality.grade, globalMemoryGate: unsafeQuality.global_memory_gate },
-    };
+    return require("./collaboration-receipt-self-tests").runGlobalMemoryUsageReceiptValidationSelfTest();
 }
 function runGlobalMemoryHealthGateReceiptValidationSelfTest() {
-    const failHealthGate = {
-        schema: "ccm-child-global-agent-memory-health-gate-v1",
-        gate_id: "ggmh_receipt_health_fail_selftest",
-        group_id: "group-global-memory-health-receipt-selftest",
-        target_project: "frontend",
-        status: "fail",
-        pass: false,
-        action: "block_global_agent_memory_recall",
-        active_contamination_count: 1,
-        residue_contamination_count: 0,
-        policy: {
-            fail_blocks_global_memory_recall: true,
-            no_contaminated_preview_in_context: true,
-        },
-    };
-    const warnHealthGate = {
-        schema: "ccm-child-global-agent-memory-health-gate-v1",
-        gate_id: "ggmh_receipt_health_warn_selftest",
-        group_id: "group-global-memory-health-receipt-selftest",
-        target_project: "frontend",
-        status: "warn",
-        pass: true,
-        action: "use_active_global_memory_with_residue_warning",
-        active_contamination_count: 0,
-        residue_contamination_count: 2,
-    };
-    const task = {
-        id: "task-global-memory-health-gate-receipt-selftest",
-        title: "全局记忆健康门禁回执自测",
-        workflow_type: "daily_dev",
-        assign_type: "group",
-        target_project: "frontend",
-        requires_code_changes: true,
-        requires_verification: true,
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "frontend",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_global_memory_health_receipt_selftest",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            target_project: "frontend",
-                            global_memory_health_gate: failHealthGate,
-                            global_agent_memory: {
-                                schema: "ccm-child-global-agent-memory-recall-v1",
-                                included: false,
-                                healthBlocked: true,
-                                reason: "global_agent_memory_health_gate_failed",
-                                memory_health_gate: failHealthGate,
-                                items: [],
-                                itemCount: 0,
-                            },
-                        },
-                    },
-                },
-            }],
-    };
-    const baseReceipt = {
-        agent: "frontend",
-        status: "done",
-        summary: "完成全局记忆健康门禁回执校验改动",
-        actions: ["修改前端页面"],
-        filesChanged: ["src/App.vue"],
-        verification: ["npm test passed by external runner (exit 0)"],
-        ack: {
-            understoodGoal: "验证全局记忆健康门禁回执",
-            plannedScope: ["src/App.vue"],
-            forbiddenScope: ["无关模块"],
-            verificationPlan: ["npm test"],
-            unclear: [],
-        },
-        contractChanges: [],
-        blockers: [],
-        needs: [],
-        memoryUsed: [],
-        memoryIgnored: [],
-        globalMemoryUsage: [],
-    };
-    const goodReceipt = {
-        ...baseReceipt,
-        memoryIgnored: ["Global Agent memory health gate ggmh_receipt_health_fail_selftest 阻断，本轮未使用任何全局记忆。"],
-    };
-    const missingGateReceipt = {
-        ...baseReceipt,
-        memoryIgnored: ["未使用平台记忆，但没有引用健康门禁。"],
-    };
-    const unsafeUseReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["错误使用了 Global Agent memory，即使 gate=ggmh_receipt_health_fail_selftest 已阻断。"],
-        memoryIgnored: ["知道 ggmh_receipt_health_fail_selftest 存在。"],
-        globalMemoryUsage: [{
-                globalMemoryId: "gmi_blocked_health_selftest",
-                usageState: "used",
-                currentSourceVerified: false,
-                reason: "错误声明用了被阻断的全局记忆。",
-            }],
-    };
-    const warnReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["Global Agent memory health gate ggmh_receipt_health_warn_selftest active memory clean；residue warning 已确认；current source verified。"],
-    };
-    const goodQuality = scoreChildAgentReceipt(task, goodReceipt);
-    const missingQuality = scoreChildAgentReceipt(task, missingGateReceipt);
-    const unsafeQuality = scoreChildAgentReceipt(task, unsafeUseReceipt);
-    const warnQuality = scoreChildAgentReceipt(task, warnReceipt, { globalMemoryHealthGates: [{
-                schema: "ccm-child-agent-global-memory-health-gate-receipt-gate-v1",
-                gate_id: warnHealthGate.gate_id,
-                target_project: "frontend",
-                status: warnHealthGate.status,
-                action: warnHealthGate.action,
-                active_contamination_count: 0,
-                residue_contamination_count: 2,
-                required_action: "must_ack_residue_warning_before_global_memory_use",
-                raw: warnHealthGate,
-            }] });
-    const missingSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: missingGateReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const unsafeSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: unsafeUseReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const goodSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: goodReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const checks = {
-        goodReceiptPassesHealthGate: goodQuality.pass === true
-            && goodQuality.global_memory_health_gate?.pass === true
-            && goodQuality.global_memory_health_gate?.fail_gate_ids?.includes("ggmh_receipt_health_fail_selftest"),
-        missingHealthGateHardFailsQuality: missingQuality.pass === false
-            && missingQuality.global_memory_health_gate?.missing_gate_ids?.includes("ggmh_receipt_health_fail_selftest")
-            && missingQuality.global_memory_health_gate?.missing_ignore_gate_ids?.includes("ggmh_receipt_health_fail_selftest")
-            && missingQuality.missing.includes("声明全局记忆健康门禁"),
-        unsafeBlockedGlobalMemoryUseHardFails: unsafeQuality.pass === false
-            && unsafeQuality.global_memory_health_gate?.blocked_global_memory_used_gate_ids?.includes("ggmh_receipt_health_fail_selftest"),
-        warnGateRequiresAcknowledgement: warnQuality.pass === true
-            && warnQuality.global_memory_health_gate?.warn_gate_ids?.includes("ggmh_receipt_health_warn_selftest"),
-        deliverySummaryRecordsMissingHealthGate: missingSummary.global_memory_health_gate_count === 1
-            && missingSummary.global_memory_health_gate_receipt_passed === false
-            && missingSummary.global_memory_health_gate_summary?.status === "missing_blocked_memory_ignored",
-        acceptanceGateBlocksMissingHealthGate: missingSummary.acceptance_gate_passed === false
-            && missingSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "global_memory_health_gate_receipt"),
-        runtimeKernelShowsHealthGateGap: missingSummary.runtime_kernel?.global_memory_health_gate?.status === "missing_blocked_memory_ignored",
-        unsafeSummaryShowsBlockedMemoryUse: unsafeSummary.global_memory_health_gate_summary?.status === "blocked_global_memory_used"
-            && unsafeSummary.runtime_kernel?.global_memory_health_gate?.blocked_global_memory_used_gate_ids?.includes("ggmh_receipt_health_fail_selftest"),
-        goodDeliverySummaryPassesHealthGate: goodSummary.global_memory_health_gate_receipt_passed === true
-            && goodSummary.global_memory_health_gate_summary?.status === "passed"
-            && goodSummary.receipt_quality_gate_passed === true,
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        good: { score: goodQuality.score, grade: goodQuality.grade, healthGate: goodQuality.global_memory_health_gate },
-        missing: { score: missingQuality.score, grade: missingQuality.grade, healthGate: missingQuality.global_memory_health_gate },
-        unsafe: { score: unsafeQuality.score, grade: unsafeQuality.grade, healthGate: unsafeQuality.global_memory_health_gate },
-        warn: { score: warnQuality.score, grade: warnQuality.grade, healthGate: warnQuality.global_memory_health_gate },
-    };
+    return require("./collaboration-receipt-self-tests").runGlobalMemoryHealthGateReceiptValidationSelfTest();
 }
 function runReadPlanRevalidationGateReceiptValidationSelfTest() {
-    const gate = {
-        schema: "ccm-group-compact-file-reference-read-plan-revalidation-gate-v1",
-        revalidation_gate_id: "rprg_receipt_session_selftest",
-        group_id: "group-read-plan-revalidation-receipt-selftest",
-        target_project: "frontend",
-        scope: "child:frontend",
-        status: "required",
-        action: "must_re_read_current_source_before_using_stale_compact_read_plan",
-        required_count: 1,
-        verification_count: 0,
-        required_read_plan_ids: ["rprp_receipt_session_selftest"],
-        required_entries: [{
-                read_plan_id: "rprp_receipt_session_selftest",
-                reference_id: "cfr_receipt_session_selftest",
-                type: "raw_group_messages_json",
-                action: "read_current_source_before_use",
-                revalidation_action: "must_re_read_current_source",
-                path: "groups/messages/group-read-plan-revalidation-receipt-selftest.json",
-                freshness_status: "changed",
-                changes: ["checksum"],
-            }],
-        receipt_contract: {
-            required: true,
-            must_reference_gate_id: true,
-            must_reference_read_plan_ids: true,
-            must_declare_current_source_verified: true,
-            must_match_session_binding: true,
-        },
-        session_binding: {
-            schema: "ccm-child-agent-memory-session-binding-v1",
-            binding_id: "casb_receipt_session_selftest",
-            group_id: "group-read-plan-revalidation-receipt-selftest",
-            target_project: "frontend",
-            task_id: "task-read-plan-revalidation-receipt",
-            trace_id: "trace-read-plan-revalidation-receipt",
-            execution_id: "exec-read-plan-revalidation-receipt",
-            task_agent_session_id: "tas-read-plan-revalidation-good",
-            native_session_id: "native-read-plan-revalidation-good",
-            agent_type: "codex",
-            turn: 2,
-            binding_required: true,
-        },
-    };
-    const task = {
-        id: "task-read-plan-revalidation-receipt",
-        title: "读取计划重读 gate 回执自测",
-        workflow_type: "daily_dev",
-        assign_type: "group",
-        target_project: "frontend",
-        requires_code_changes: true,
-        requires_verification: true,
-        trace_id: "trace-read-plan-revalidation-receipt",
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "frontend",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_read_plan_revalidation_receipt",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            compact_file_reference_read_plan_revalidation_gate: gate,
-                        },
-                    },
-                },
-            }],
-    };
-    const baseReceipt = {
-        agent: "frontend",
-        status: "done",
-        summary: "完成读取计划重读 gate 回执验证改动",
-        actions: ["修改前端页面"],
-        filesChanged: ["src/App.vue"],
-        verification: ["npm test passed by external runner (exit 0)"],
-        task_agent_session_id: "tas-read-plan-revalidation-good",
-        native_session_id: "native-read-plan-revalidation-good",
-        ack: {
-            understoodGoal: "验证读取计划重读 gate 回执",
-            plannedScope: ["src/App.vue"],
-            forbiddenScope: ["无关模块"],
-            verificationPlan: ["npm test"],
-            unclear: [],
-        },
-        contractChanges: [],
-        blockers: [],
-        needs: [],
-    };
-    const goodReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["revalidation_gate_id=rprg_receipt_session_selftest；read_plan_id=rprp_receipt_session_selftest；re-read current source verified；path=groups/messages/group-read-plan-revalidation-receipt-selftest.json"],
-        memoryIgnored: [],
-    };
-    const wrongSessionReceipt = {
-        ...goodReceipt,
-        task_agent_session_id: "tas-read-plan-revalidation-wrong",
-        native_session_id: "native-read-plan-revalidation-good",
-    };
-    const missingCurrentSourceReceipt = {
-        ...baseReceipt,
-        summary: "完成 gate 回执验证改动",
-        memoryUsed: ["revalidation_gate_id=rprg_receipt_session_selftest；read_plan_id=rprp_receipt_session_selftest"],
-        memoryIgnored: [],
-    };
-    const boundShorthandReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["readPlanRevalidation: 重新读取 src/App.vue 并确认当前源状态"],
-        memoryIgnored: [],
-    };
-    const wrongSessionShorthandReceipt = {
-        ...boundShorthandReceipt,
-        task_agent_session_id: "tas-read-plan-revalidation-wrong",
-    };
-    const boundActionReceipt = {
-        ...baseReceipt,
-        summary: "返工修复完成，测试与构建均已通过",
-        actions: ["读取 scripts/test.mjs 第 8 行确认 reviewRepairMarker 精确要求", "修改前端页面"],
-        memoryUsed: [],
-        memoryIgnored: [],
-    };
-    const wrongSessionActionReceipt = {
-        ...boundActionReceipt,
-        task_agent_session_id: "tas-read-plan-revalidation-wrong",
-    };
-    const boundDiffReceipt = {
-        ...baseReceipt,
-        summary: "目标文件修改完成，已检查最终差异",
-        actions: ["修改 src/App.vue", "检查 git diff 确认目标变更精确"],
-        memoryUsed: [],
-        memoryIgnored: [],
-    };
-    const wrongSessionDiffReceipt = {
-        ...boundDiffReceipt,
-        task_agent_session_id: "tas-read-plan-revalidation-wrong",
-    };
-    const goodQuality = scoreChildAgentReceipt(task, goodReceipt);
-    const wrongSessionQuality = scoreChildAgentReceipt(task, wrongSessionReceipt);
-    const missingCurrentQuality = scoreChildAgentReceipt(task, missingCurrentSourceReceipt);
-    const boundShorthandQuality = scoreChildAgentReceipt(task, boundShorthandReceipt);
-    const wrongSessionShorthandQuality = scoreChildAgentReceipt(task, wrongSessionShorthandReceipt);
-    const boundActionQuality = scoreChildAgentReceipt(task, boundActionReceipt);
-    const wrongSessionActionQuality = scoreChildAgentReceipt(task, wrongSessionActionReceipt);
-    const boundDiffQuality = scoreChildAgentReceipt(task, boundDiffReceipt);
-    const wrongSessionDiffQuality = scoreChildAgentReceipt(task, wrongSessionDiffReceipt);
-    const latestTurnGate = {
-        ...gate,
-        revalidation_gate_id: "rprg_receipt_session_latest_selftest",
-        session_binding: { ...gate.session_binding, turn: 3 },
-    };
-    const latestTurnGateQuality = evaluateReceiptReadPlanRevalidationGate(task, boundActionReceipt, {
-        readPlanRevalidationGates: [
-            { ...gate, gate_id: gate.revalidation_gate_id, task_agent_session_id: gate.session_binding.task_agent_session_id, native_session_id: gate.session_binding.native_session_id, turn: 2 },
-            { ...latestTurnGate, gate_id: latestTurnGate.revalidation_gate_id, task_agent_session_id: latestTurnGate.session_binding.task_agent_session_id, native_session_id: latestTurnGate.session_binding.native_session_id, turn: 3 },
-        ],
-    });
-    const wrongSessionSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: wrongSessionReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const goodSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: goodReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const checks = {
-        goodReceiptPassesGate: goodQuality.pass === true
-            && goodQuality.read_plan_revalidation_gate?.pass === true
-            && goodQuality.read_plan_revalidation_gate?.session_matched === true
-            && goodQuality.grade === "good",
-        wrongSessionHardFailsQuality: wrongSessionQuality.pass === false
-            && wrongSessionQuality.read_plan_revalidation_gate?.session_matched === false
-            && wrongSessionQuality.read_plan_revalidation_gate?.session_mismatch_gate_ids?.includes("rprg_receipt_session_selftest")
-            && wrongSessionQuality.missing.includes("重读 stale read plan"),
-        missingCurrentSourceHardFailsQuality: missingCurrentQuality.pass === false
-            && missingCurrentQuality.read_plan_revalidation_gate?.current_source_verified === false,
-        uniqueGateSessionBoundShorthandPasses: boundShorthandQuality.pass === true
-            && boundShorthandQuality.read_plan_revalidation_gate?.pass === true
-            && boundShorthandQuality.read_plan_revalidation_gate?.rows?.[0]?.declaration_binding === "unique_gate_session_bound_shorthand",
-        shorthandStillFailsWrongSession: wrongSessionShorthandQuality.pass === false
-            && wrongSessionShorthandQuality.read_plan_revalidation_gate?.session_matched === false,
-        uniqueGateSessionBoundCurrentSourceActionPasses: boundActionQuality.pass === true
-            && boundActionQuality.read_plan_revalidation_gate?.pass === true
-            && boundActionQuality.read_plan_revalidation_gate?.rows?.[0]?.declaration_binding === "unique_gate_session_bound_current_source_action",
-        currentSourceActionStillFailsWrongSession: wrongSessionActionQuality.pass === false
-            && wrongSessionActionQuality.read_plan_revalidation_gate?.session_matched === false,
-        boundCurrentDiffEvidencePasses: boundDiffQuality.pass === true
-            && boundDiffQuality.read_plan_revalidation_gate?.pass === true,
-        currentDiffEvidenceStillFailsWrongSession: wrongSessionDiffQuality.pass === false
-            && wrongSessionDiffQuality.read_plan_revalidation_gate?.session_matched === false,
-        latestSessionTurnSupersedesOlderReadPlanGate: latestTurnGateQuality.pass === true
-            && latestTurnGateQuality.gate_ids?.length === 1
-            && latestTurnGateQuality.gate_ids?.[0] === "rprg_receipt_session_latest_selftest",
-        deliverySummaryRecordsGate: wrongSessionSummary.read_plan_revalidation_gate_count === 1
-            && wrongSessionSummary.read_plan_revalidation_gate_receipt_passed === false
-            && wrongSessionSummary.read_plan_revalidation_gate_summary?.status === "session_mismatch",
-        acceptanceGateBlocksWrongSession: wrongSessionSummary.acceptance_gate_passed === false
-            && wrongSessionSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "read_plan_revalidation_gate_receipt"),
-        runtimeKernelShowsWrongSession: wrongSessionSummary.runtime_kernel?.read_plan_revalidation_gate?.status === "session_mismatch",
-        goodDeliverySummaryPassesGate: goodSummary.read_plan_revalidation_gate_receipt_passed === true
-            && goodSummary.read_plan_revalidation_gate_summary?.status === "passed"
-            && goodSummary.receipt_quality_gate_passed === true,
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        good: { score: goodQuality.score, grade: goodQuality.grade, readPlanRevalidationGate: goodQuality.read_plan_revalidation_gate },
-        wrongSession: { score: wrongSessionQuality.score, grade: wrongSessionQuality.grade, readPlanRevalidationGate: wrongSessionQuality.read_plan_revalidation_gate },
-        missingCurrentSource: { score: missingCurrentQuality.score, grade: missingCurrentQuality.grade, readPlanRevalidationGate: missingCurrentQuality.read_plan_revalidation_gate },
-        boundShorthand: { score: boundShorthandQuality.score, grade: boundShorthandQuality.grade, readPlanRevalidationGate: boundShorthandQuality.read_plan_revalidation_gate },
-    };
+    return require("./collaboration-receipt-self-tests").runReadPlanRevalidationGateReceiptValidationSelfTest();
 }
 function runApiMicrocompactReceiptValidationSelfTest() {
-    const plan = {
-        schema: "ccm-api-microcompact-edit-plan-v1",
-        planChecksum: "api_microcompact_receipt_selftest_plan",
-        groupId: "group-api-microcompact-receipt-selftest",
-        targetProject: "frontend",
-        editCount: 2,
-        recommended: true,
-        advisoryOnly: true,
-        canApplyNatively: false,
-        activeTokens: 220000,
-        trigger: { type: "input_tokens", value: 180000 },
-        contextManagement: { edits: [{ type: "clear_thinking_20251015" }, { type: "clear_tool_uses_20250919" }] },
-    };
-    const advisoryNativeApplyPlan = {
-        schema: "ccm-api-microcompact-native-apply-plan-v1",
-        applyPlanChecksum: "api_microcompact_receipt_selftest_advisory_apply",
-        requestPatchChecksum: "",
-        apiEditPlanChecksum: plan.planChecksum,
-        mode: "advisory_only",
-        nativeApplyReady: false,
-        advisoryOnly: true,
-        executor: { agentType: "claudecode", transport: "cli", provider: "anthropic", cli: true },
-        capability: { requiredBetaHeader: "context-management-2025-06-27" },
-        requestPatch: null,
-    };
-    const task = {
-        title: "API microcompact 回执自测",
-        workflow_type: "daily_dev",
-        assign_type: "group",
-        target_project: "frontend",
-        requires_code_changes: true,
-        requires_verification: true,
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "frontend",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_api_microcompact_receipt_selftest",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            compaction: {
-                                apiMicroCompactEditPlan: plan,
-                                apiMicrocompactNativeApplyPlan: advisoryNativeApplyPlan,
-                            },
-                        },
-                    },
-                },
-            }],
-    };
-    const baseReceipt = {
-        agent: "frontend",
-        status: "done",
-        summary: "完成 API microcompact 回执验证改动",
-        actions: ["修改前端页面"],
-        filesChanged: ["src/App.vue"],
-        verification: ["npm test passed by external runner (exit 0)"],
-        ack: {
-            understoodGoal: "验证 API microcompact 回执",
-            plannedScope: ["src/App.vue"],
-            forbiddenScope: ["无关模块"],
-            verificationPlan: ["npm test"],
-            unclear: [],
-        },
-        contractChanges: [],
-        blockers: [],
-        needs: [],
-    };
-    const goodReceipt = {
-        ...baseReceipt,
-        memoryUsed: [`API microcompact edit plan planChecksum=${plan.planChecksum} advisory context pressure only`],
-        memoryIgnored: [],
-        apiMicrocompactUsage: [{
-                planChecksum: plan.planChecksum,
-                usageState: "advisory",
-                nativeApplied: false,
-                advisoryOnly: true,
-                reason: "third-party CLI does not expose native API context-management",
-            }],
-    };
-    const missingReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["使用平台群聊记忆，但未声明 API microcompact plan"],
-        memoryIgnored: [],
-    };
-    const unsafeReceipt = {
-        ...baseReceipt,
-        memoryUsed: [`API microcompact edit plan planChecksum=${plan.planChecksum} native applied`],
-        memoryIgnored: [],
-        apiMicrocompactUsage: [{
-                planChecksum: plan.planChecksum,
-                usageState: "native_applied",
-                nativeApplied: true,
-                advisoryOnly: false,
-                reason: "incorrectly claims native apply for third-party CLI",
-            }],
-    };
-    const ignoredReceipt = {
-        ...baseReceipt,
-        memoryUsed: [],
-        memoryIgnored: [`api_microcompact_edit_plan planChecksum=${plan.planChecksum} not_supported by this CLI`],
-        apiMicrocompactUsage: [{
-                planChecksum: plan.planChecksum,
-                usageState: "not_supported",
-                nativeApplied: false,
-                advisoryOnly: true,
-                reason: "executor does not support native context-management",
-            }],
-    };
-    const nativePlan = {
-        ...plan,
-        planChecksum: "api_microcompact_receipt_selftest_native_plan",
-        targetProject: "api",
-        advisoryOnly: false,
-        canApplyNatively: true,
-    };
-    const nativeApplyPlan = {
-        schema: "ccm-api-microcompact-native-apply-plan-v1",
-        applyPlanChecksum: "api_microcompact_receipt_selftest_native_apply",
-        requestPatchChecksum: "api_microcompact_receipt_selftest_request_patch",
-        apiEditPlanChecksum: nativePlan.planChecksum,
-        mode: "native_api_context_management",
-        nativeApplyReady: true,
-        advisoryOnly: false,
-        executor: { agentType: "anthropic-api", transport: "anthropic_api", provider: "anthropic", cli: false },
-        capability: { requiredBetaHeader: "context-management-2025-06-27" },
-        requestPatch: {
-            body: { context_management: nativePlan.contextManagement },
-            beta_headers: ["context-management-2025-06-27"],
-        },
-    };
-    const nativeTask = {
-        ...task,
-        target_project: "api",
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "api",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_api_microcompact_native_receipt_selftest",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            compaction: {
-                                apiMicroCompactEditPlan: nativePlan,
-                                apiMicrocompactNativeApplyPlan: nativeApplyPlan,
-                            },
-                        },
-                    },
-                },
-            }],
-    };
-    const nativeReceipt = {
-        ...baseReceipt,
-        agent: "api",
-        memoryUsed: [`API microcompact planChecksum=${nativePlan.planChecksum} native applied`],
-        memoryIgnored: [],
-        apiMicrocompactUsage: [{
-                planChecksum: nativePlan.planChecksum,
-                applyPlanChecksum: nativeApplyPlan.applyPlanChecksum,
-                requestPatchChecksum: nativeApplyPlan.requestPatchChecksum,
-                usageState: "native_applied",
-                nativeApplied: true,
-                reason: "provider request included context_management and required beta header",
-            }],
-    };
-    const nativeMissingChecksumReceipt = {
-        ...nativeReceipt,
-        apiMicrocompactUsage: [{
-                planChecksum: nativePlan.planChecksum,
-                usageState: "native_applied",
-                nativeApplied: true,
-                reason: "native claim omits apply and request patch checksums",
-            }],
-    };
-    const sessionBoundPlan = {
-        ...plan,
-        planChecksum: "api_microcompact_receipt_selftest_session_bound_plan",
-        targetProject: "worker",
-    };
-    const sessionBoundApplyPlan = {
-        ...advisoryNativeApplyPlan,
-        apiEditPlanChecksum: sessionBoundPlan.planChecksum,
-        applyPlanChecksum: "api_microcompact_receipt_selftest_session_bound_apply",
-        task_agent_session_id: "tas-api-microcompact-bound",
-        native_session_id: "native-api-microcompact-bound",
-        memory_context_snapshot_id: "snapshot-api-microcompact-bound",
-        memory_context_snapshot_checksum: "checksum-api-microcompact-bound",
-        sessionBinding: {
-            schema: "ccm-child-agent-memory-session-binding-v1",
-            binding_id: "csm-api-microcompact-bound",
-            task_agent_session_id: "tas-api-microcompact-bound",
-            native_session_id: "native-api-microcompact-bound",
-        },
-    };
-    const sessionBoundTask = {
-        ...task,
-        target_project: "worker",
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "worker",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_api_microcompact_session_bound_selftest",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            session_binding: sessionBoundApplyPlan.sessionBinding,
-                            compaction: {
-                                apiMicroCompactEditPlan: sessionBoundPlan,
-                                apiMicrocompactNativeApplyPlan: sessionBoundApplyPlan,
-                            },
-                        },
-                    },
-                },
-            }],
-    };
-    const sessionBoundReceipt = {
-        ...baseReceipt,
-        agent: "worker",
-        task_agent_session_id: "tas-api-microcompact-bound",
-        native_session_id: "native-api-microcompact-bound",
-        memory_context_snapshot_id: "snapshot-api-microcompact-bound",
-        memory_context_snapshot_checksum: "checksum-api-microcompact-bound",
-        memoryUsed: [`api_microcompact_edit_plan planChecksum=${sessionBoundPlan.planChecksum} advisory session bound`],
-        apiMicrocompactUsage: [{
-                planChecksum: sessionBoundPlan.planChecksum,
-                usageState: "advisory",
-                nativeApplied: false,
-                taskAgentSessionId: "tas-api-microcompact-bound",
-                nativeSessionId: "native-api-microcompact-bound",
-                memoryContextSnapshotId: "snapshot-api-microcompact-bound",
-                memoryContextSnapshotChecksum: "checksum-api-microcompact-bound",
-                reason: "advisory use bound to this child-agent session",
-            }],
-    };
-    const wrongSessionReceipt = {
-        ...sessionBoundReceipt,
-        task_agent_session_id: "tas-api-microcompact-wrong",
-        apiMicrocompactUsage: [{
-                ...sessionBoundReceipt.apiMicrocompactUsage[0],
-                taskAgentSessionId: "tas-api-microcompact-wrong",
-                reason: "declares the plan from a different child-agent session",
-            }],
-    };
-    const goodQuality = scoreChildAgentReceipt(task, goodReceipt);
-    const missingQuality = scoreChildAgentReceipt(task, missingReceipt);
-    const unsafeQuality = scoreChildAgentReceipt(task, unsafeReceipt);
-    const ignoredQuality = scoreChildAgentReceipt(task, ignoredReceipt);
-    const nativeQuality = scoreChildAgentReceipt(nativeTask, nativeReceipt);
-    const nativeMissingChecksumQuality = scoreChildAgentReceipt(nativeTask, nativeMissingChecksumReceipt);
-    const sessionBoundQuality = scoreChildAgentReceipt(sessionBoundTask, sessionBoundReceipt);
-    const wrongSessionQuality = scoreChildAgentReceipt(sessionBoundTask, wrongSessionReceipt);
-    const missingSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: missingReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const goodSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: goodReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const checks = {
-        goodReceiptPassesApiMicrocompactGate: goodQuality.pass === true
-            && goodQuality.api_microcompact?.pass === true
-            && goodQuality.api_microcompact?.advisory_count === 1
-            && goodQuality.grade === "good",
-        ignoredReceiptPassesAsDeclaredNotSupported: ignoredQuality.pass === true
-            && ignoredQuality.api_microcompact?.ignored_count === 1,
-        missingReceiptHardFailsQuality: missingQuality.pass === false
-            && missingQuality.api_microcompact?.missing_plan_checksums?.includes(plan.planChecksum)
-            && missingQuality.missing.includes("声明 API microcompact 使用状态"),
-        unsafeNativeApplyHardFailsQuality: unsafeQuality.pass === false
-            && unsafeQuality.api_microcompact?.unsafe_native_applied_plan_checksums?.includes(plan.planChecksum),
-        nativeApplyPassesWithBoundChecksums: nativeQuality.pass === true
-            && nativeQuality.api_microcompact?.native_applied_count === 1
-            && nativeQuality.api_microcompact?.rows?.[0]?.apply_plan_checksum_matched === true
-            && nativeQuality.api_microcompact?.rows?.[0]?.request_patch_checksum_matched === true,
-        nativeApplyMissingChecksumsHardFails: nativeMissingChecksumQuality.pass === false
-            && nativeMissingChecksumQuality.api_microcompact?.unsafe_native_applied_plan_checksums?.includes(nativePlan.planChecksum),
-        sessionBoundApiMicrocompactReceiptPasses: sessionBoundQuality.pass === true
-            && sessionBoundQuality.api_microcompact?.rows?.[0]?.session_matched === true,
-        wrongSessionApiMicrocompactReceiptFails: wrongSessionQuality.pass === false
-            && wrongSessionQuality.api_microcompact?.session_mismatch_plan_checksums?.includes(sessionBoundPlan.planChecksum),
-        deliverySummaryRecordsMissingApiMicrocompact: missingSummary.api_microcompact_edit_plan_count === 1
-            && missingSummary.api_microcompact_receipt_passed === false
-            && missingSummary.api_microcompact_receipt_summary?.status === "missing_usage_declaration",
-        acceptanceGateBlocksMissingApiMicrocompact: missingSummary.acceptance_gate_passed === false
-            && missingSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "api_microcompact_receipt"),
-        runtimeKernelShowsApiMicrocompactGap: missingSummary.runtime_kernel?.api_microcompact_receipt?.status === "missing_usage_declaration",
-        goodDeliverySummaryPassesApiMicrocompact: goodSummary.api_microcompact_receipt_passed === true
-            && goodSummary.api_microcompact_receipt_summary?.status === "passed"
-            && goodSummary.receipt_quality_gate_passed === true,
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        good: { score: goodQuality.score, grade: goodQuality.grade, apiMicrocompact: goodQuality.api_microcompact },
-        missing: { score: missingQuality.score, grade: missingQuality.grade, apiMicrocompact: missingQuality.api_microcompact },
-        unsafe: { score: unsafeQuality.score, grade: unsafeQuality.grade, apiMicrocompact: unsafeQuality.api_microcompact },
-        native: { score: nativeQuality.score, grade: nativeQuality.grade, apiMicrocompact: nativeQuality.api_microcompact },
-        nativeMissingChecksum: { score: nativeMissingChecksumQuality.score, grade: nativeMissingChecksumQuality.grade, apiMicrocompact: nativeMissingChecksumQuality.api_microcompact },
-        sessionBound: { score: sessionBoundQuality.score, grade: sessionBoundQuality.grade, apiMicrocompact: sessionBoundQuality.api_microcompact },
-        wrongSession: { score: wrongSessionQuality.score, grade: wrongSessionQuality.grade, apiMicrocompact: wrongSessionQuality.api_microcompact },
-        ignored: { score: ignoredQuality.score, grade: ignoredQuality.grade, apiMicrocompact: ignoredQuality.api_microcompact },
-    };
+    return require("./collaboration-receipt-self-tests").runApiMicrocompactReceiptValidationSelfTest();
 }
 function runPostCompactReinjectionGateReceiptValidationSelfTest() {
-    const gate = {
-        schema: "ccm-child-agent-post-compact-reinjection-gate-v1",
-        reinjection_gate_id: "pcrg_receipt_gate_selftest",
-        group_id: "group-reinjection-gate-selftest",
-        target_project: "frontend",
-        scope: "child:frontend",
-        status: "required",
-        action: "review_reinjection_candidates_before_execution",
-        candidate_count: 2,
-        candidates: [
-            { candidate_id: "pcrc_receipt_file", kind: "file", value: "src/payment/callback.ts", sourceMessageId: "old-1" },
-            { candidate_id: "pcrc_receipt_check", kind: "verification", value: "npm run check", sourceMessageId: "old-2" },
-        ],
-        post_compact_recovery_audit: {
-            status: "pass",
-            pass: true,
-            action: "safe_to_inject_child_agent_memory_packet",
-            summary_checksum: "receipt-reinjection-summary",
-            transcript_path: "reinjection-raw.json",
-        },
-    };
-    const task = {
-        title: "压缩后重注入 gate 回执自测",
-        workflow_type: "daily_dev",
-        target_project: "frontend",
-        requires_code_changes: true,
-        requires_verification: true,
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "frontend",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_reinjection_gate_selftest",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            post_compact_reinjection_gate: gate,
-                        },
-                    },
-                },
-            }],
-    };
-    const baseReceipt = {
-        agent: "frontend",
-        status: "done",
-        summary: "完成压缩重注入 gate 回执验证改动",
-        actions: ["修改前端页面"],
-        filesChanged: ["src/App.vue"],
-        verification: ["npm test passed by external runner (exit 0)"],
-        ack: {
-            understoodGoal: "验证压缩后重注入 gate 回执",
-            plannedScope: ["src/App.vue"],
-            forbiddenScope: ["无关模块"],
-            verificationPlan: ["npm test"],
-            unclear: [],
-        },
-        contractChanges: [],
-        blockers: [],
-        needs: [],
-    };
-    const goodReceipt = {
-        ...baseReceipt,
-        memoryUsed: [
-            "使用 used candidate_id=pcrc_receipt_file；src/payment/callback.ts；reinjection_gate_id=pcrg_receipt_gate_selftest",
-            "已验证 verified candidate_id=pcrc_receipt_check；npm run check；reinjection_gate_id=pcrg_receipt_gate_selftest",
-        ],
-        memoryIgnored: [],
-    };
-    const structuredGoodReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["已读取压缩后重注入门禁 reinjection_gate_id=pcrg_receipt_gate_selftest"],
-        memoryIgnored: [],
-        postCompactCandidateUsage: [
-            { gateId: "pcrg_receipt_gate_selftest", candidateId: "pcrc_receipt_file", usageState: "used", reason: "用于定位回调文件" },
-            { gateId: "pcrg_receipt_gate_selftest", candidateId: "pcrc_receipt_check", usageState: "verified", reason: "已核验验证命令适用性" },
-        ],
-    };
-    const missingGateReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["使用压缩前重注入候选 src/payment/callback.ts，但未引用 gate id"],
-        memoryIgnored: [],
-    };
-    const missingCandidateReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["使用压缩前重注入候选；reinjection_gate_id=pcrg_receipt_gate_selftest"],
-        memoryIgnored: [],
-    };
-    const missingUsageReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["压缩前重注入候选 candidate_id=pcrc_receipt_file；src/payment/callback.ts；reinjection_gate_id=pcrg_receipt_gate_selftest"],
-        memoryIgnored: [],
-    };
-    const partialUsageReceipt = {
-        ...baseReceipt,
-        memoryUsed: ["使用 used candidate_id=pcrc_receipt_file；src/payment/callback.ts；reinjection_gate_id=pcrg_receipt_gate_selftest"],
-        memoryIgnored: [],
-    };
-    const ignoredGateReceipt = {
-        ...baseReceipt,
-        memoryUsed: [],
-        memoryIgnored: ["未使用全部候选，reinjection_gate_id=pcrg_receipt_gate_selftest；原因：本轮只改当前 UI"],
-    };
-    const goodQuality = scoreChildAgentReceipt(task, goodReceipt);
-    const structuredGoodQuality = scoreChildAgentReceipt(task, structuredGoodReceipt);
-    const missingGateQuality = scoreChildAgentReceipt(task, missingGateReceipt);
-    const missingCandidateQuality = scoreChildAgentReceipt(task, missingCandidateReceipt);
-    const missingUsageQuality = scoreChildAgentReceipt(task, missingUsageReceipt);
-    const partialUsageQuality = scoreChildAgentReceipt(task, partialUsageReceipt);
-    const ignoredQuality = scoreChildAgentReceipt(task, ignoredGateReceipt);
-    const missingGateSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: missingGateReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const goodSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: goodReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const missingUsageSummary = buildDeliverySummary(task, {
-        status: "done",
-        receipt: missingUsageReceipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const checks = {
-        goodReceiptPassesGate: goodQuality.pass === true
-            && goodQuality.post_compact_reinjection_gate?.pass === true
-            && goodQuality.post_compact_reinjection_gate?.referenced_candidate_ids?.includes("pcrc_receipt_file")
-            && goodQuality.post_compact_reinjection_gate?.used_candidate_ids?.includes("pcrc_receipt_file")
-            && goodQuality.post_compact_reinjection_gate?.verified_candidate_ids?.includes("pcrc_receipt_check")
-            && goodQuality.grade === "good",
-        ignoredReceiptCanSatisfyGate: ignoredQuality.pass === true
-            && ignoredQuality.post_compact_reinjection_gate?.pass === true
-            && ignoredQuality.post_compact_reinjection_gate?.all_candidates_declared === true
-            && ignoredQuality.post_compact_reinjection_gate?.ignored_candidate_ids?.includes("pcrc_receipt_file")
-            && ignoredQuality.grade === "good",
-        structuredCandidateUsagePassesGate: structuredGoodQuality.pass === true
-            && structuredGoodQuality.post_compact_reinjection_gate?.pass === true
-            && structuredGoodQuality.post_compact_reinjection_gate?.used_candidate_ids?.includes("pcrc_receipt_file")
-            && structuredGoodQuality.post_compact_reinjection_gate?.verified_candidate_ids?.includes("pcrc_receipt_check"),
-        partialCandidateUsageHardFailsStrictGate: partialUsageQuality.pass === false
-            && partialUsageQuality.post_compact_reinjection_gate?.candidate_usage_strict_passed === false
-            && partialUsageQuality.post_compact_reinjection_gate?.missing_candidate_usage_candidate_ids?.includes("pcrc_receipt_check"),
-        missingGateHardFailsQuality: missingGateQuality.pass === false
-            && missingGateQuality.grade !== "good"
-            && missingGateQuality.post_compact_reinjection_gate?.missing_gate_ids?.includes("pcrg_receipt_gate_selftest")
-            && missingGateQuality.missing.includes("引用压缩后重注入 gate"),
-        missingCandidateHardFailsQuality: missingCandidateQuality.pass === false
-            && missingCandidateQuality.grade !== "good"
-            && missingCandidateQuality.post_compact_reinjection_gate?.missing_candidate_reference_gate_ids?.includes("pcrg_receipt_gate_selftest")
-            && missingCandidateQuality.missing.includes("声明压缩重注入候选"),
-        missingUsageHardFailsQuality: missingUsageQuality.pass === false
-            && missingUsageQuality.grade !== "good"
-            && missingUsageQuality.post_compact_reinjection_gate?.missing_candidate_usage_gate_ids?.includes("pcrg_receipt_gate_selftest")
-            && missingUsageQuality.post_compact_reinjection_gate?.mentioned_only_candidate_ids?.includes("pcrc_receipt_file")
-            && missingUsageQuality.missing.includes("声明候选使用状态"),
-        deliverySummaryRecordsGate: missingGateSummary.post_compact_reinjection_gate_count === 1
-            && missingGateSummary.post_compact_reinjection_gate_receipt_passed === false
-            && missingGateSummary.post_compact_reinjection_gate_receipt_rows?.[0]?.post_compact_reinjection_gate?.missing_gate_ids?.includes("pcrg_receipt_gate_selftest"),
-        acceptanceGateBlocksMissingGate: missingGateSummary.acceptance_gate_passed === false
-            && missingGateSummary.acceptance_gate?.failed_checks?.some((item) => item.id === "post_compact_reinjection_gate_receipt"),
-        visibleSummaryRecordsCandidateCount: missingGateSummary.post_compact_reinjection_gate_summary?.candidate_count === 2
-            && missingGateSummary.runtime_kernel?.post_compact_reinjection_gate?.status === "missing_receipt_reference",
-        visibleSummaryRecordsMissingUsage: missingUsageSummary.post_compact_reinjection_gate_summary?.status === "missing_candidate_usage"
-            && missingUsageSummary.post_compact_reinjection_gate_summary?.missing_candidate_usage_gate_ids?.includes("pcrg_receipt_gate_selftest")
-            && missingUsageSummary.runtime_kernel?.post_compact_reinjection_gate?.status === "missing_candidate_usage",
-        goodDeliverySummaryPassesGate: goodSummary.post_compact_reinjection_gate_receipt_passed === true
-            && goodSummary.receipt_quality_gate_passed === true,
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        good: { score: goodQuality.score, grade: goodQuality.grade, reinjectionGate: goodQuality.post_compact_reinjection_gate },
-        structuredGood: { score: structuredGoodQuality.score, grade: structuredGoodQuality.grade, reinjectionGate: structuredGoodQuality.post_compact_reinjection_gate },
-        missing: { score: missingGateQuality.score, grade: missingGateQuality.grade, reinjectionGate: missingGateQuality.post_compact_reinjection_gate },
-        missingCandidate: { score: missingCandidateQuality.score, grade: missingCandidateQuality.grade, reinjectionGate: missingCandidateQuality.post_compact_reinjection_gate },
-        missingUsage: { score: missingUsageQuality.score, grade: missingUsageQuality.grade, reinjectionGate: missingUsageQuality.post_compact_reinjection_gate },
-        partialUsage: { score: partialUsageQuality.score, grade: partialUsageQuality.grade, reinjectionGate: partialUsageQuality.post_compact_reinjection_gate },
-    };
+    return require("./collaboration-receipt-self-tests").runPostCompactReinjectionGateReceiptValidationSelfTest();
 }
 function runPostCompactDispatchMarkerVisibleSelfTest() {
-    const marker = {
-        schema: "ccm-post-compact-first-dispatch-marker-v1",
-        marker_id: "pcfd_visible_selftest",
-        group_id: "group-post-compact-dispatch-visible-selftest",
-        target_project: "frontend",
-        scope: "child:frontend",
-        boundary_id: "pcb_visible_selftest",
-        raw_boundary_id: "compact-sync-visible",
-        summarized_through_message_id: "old-7",
-        summary_checksum: "visible-post-compact-summary",
-        first_dispatch_after_compact: true,
-        dispatch_sequence: 1,
-        status: "first_dispatch_after_compact",
-        action: "treat_reinjected_memory_as_fresh_recovered_context",
-        reinjection_gate_id: "pcrg_visible_selftest",
-        candidate_count: 2,
-    };
-    const task = {
-        title: "压缩后派发 marker 可见性自测",
-        workflow_type: "daily_dev",
-        target_project: "frontend",
-        requires_code_changes: true,
-        requires_verification: true,
-        workflow_timeline: [{
-                type: "worker_handoff_ready",
-                agent: "frontend",
-                data: {
-                    worker_context_packet: {
-                        packet_id: "wcp_post_compact_dispatch_visible",
-                        memory: {
-                            schema: "ccm-group-memory-context-v1",
-                            post_compact_dispatch_marker: marker,
-                        },
-                    },
-                },
-            }],
-    };
-    const receipt = {
-        agent: "frontend",
-        status: "done",
-        summary: "完成压缩后派发 marker 可见性验证改动",
-        actions: ["修改前端任务卡"],
-        filesChanged: ["src/App.vue"],
-        verification: ["npm test passed by external runner (exit 0)"],
-        ack: {
-            understoodGoal: "验证压缩后派发 marker 可见性",
-            plannedScope: ["src/App.vue"],
-            forbiddenScope: ["无关模块"],
-            verificationPlan: ["npm test"],
-            unclear: [],
-        },
-        contractChanges: [],
-        memoryUsed: ["使用压缩恢复后首跳 marker=pcfd_visible_selftest"],
-        memoryIgnored: [],
-        blockers: [],
-        needs: [],
-    };
-    const summary = buildDeliverySummary(task, {
-        status: "done",
-        receipt,
-        review: { status: "complete", content: "主 Agent 复盘完成" },
-        fileChanges: { files: [{ path: "src/App.vue", statusText: "修改", statusKind: "modified", diff: { additions: 1, deletions: 0 } }], count: 1 },
-    }, "waiting");
-    const card = buildTaskCardView({ ...task, status: "in_progress", delivery_summary: summary }, [], []);
-    const checks = {
-        summaryRecordsMarker: summary.post_compact_dispatch_marker_count === 1
-            && summary.post_compact_dispatch_marker_summary?.status === "first_dispatch_after_compact"
-            && summary.post_compact_dispatch_marker_summary?.first_dispatch_count === 1,
-        runtimeKernelRecordsMarker: summary.runtime_kernel?.post_compact_dispatch_marker?.marker_ids?.includes("pcfd_visible_selftest")
-            && summary.runtime_kernel?.post_compact_dispatch_marker?.status === "first_dispatch_after_compact",
-        agentCoordinationRecordsMarker: card.agent_coordination?.post_compact_dispatch_marker_summary?.rows?.some((row) => row.marker_id === "pcfd_visible_selftest")
-            && card.agent_coordination?.coordination_events?.some((event) => event.type === "post_compact_dispatch_marker"),
-        taskCardRuntimeRecordsMarker: card.runtime_kernel?.post_compact_dispatch_marker?.marker_ids?.includes("pcfd_visible_selftest")
-            && card.technical?.runtime_kernel?.post_compact_dispatch_marker?.first_dispatch_count === 1,
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        markerSummary: summary.post_compact_dispatch_marker_summary,
-    };
+    return require("./collaboration-receipt-self-tests").runPostCompactDispatchMarkerVisibleSelfTest();
 }
 function buildDailyDevWorkflowRehearsal(payload = {}) {
     const groups = (0, storage_1.loadGroups)();
@@ -13690,89 +9604,7 @@ function normalizeStringArray(value) {
     return value.map((item) => String(item || "").trim()).filter(Boolean);
 }
 function buildEvidenceGateFollowUps(group, outputs) {
-    const routable = new Set((0, group_orchestrator_1.getRoutableMembers)(group).map((m) => m.project));
-    const seen = new Set();
-    const followUps = [];
-    const followUpSummary = (value, fallback = "补齐结果说明和验证证据") => (0, display_1.sanitizeMainAgentUserText)((0, memory_1.compactMemoryText)(value || fallback, 56), fallback, 56);
-    for (const output of [...(outputs || [])].reverse()) {
-        const text = String(output || "");
-        const agent = (0, agent_notifications_1.getCollectedOutputAgent)(text);
-        if (!agent || !routable.has(agent) || seen.has(agent))
-            continue;
-        const notificationStatus = (0, agent_notifications_1.extractTaskNotificationTag)(text, "status");
-        const status = (0, agent_notifications_1.getCollectedOutputReceiptStatus)(text);
-        const receipt = parseFormattedReceiptsFromText(text)[0];
-        const structuredTestAgentReview = isCoordinatorTestAgentName(agent)
-            && !!(receipt?.testAgentReport
-                || receipt?.test_agent_report
-                || receipt?.testAgentHandoff
-                || receipt?.test_agent_handoff
-                || receipt?.independentReview
-                || receipt?.independent_review);
-        if (structuredTestAgentReview) {
-            seen.add(agent);
-            continue;
-        }
-        if (notificationStatus === "missing_receipt" || text.includes("结构化回执：缺失")) {
-            seen.add(agent);
-            followUps.push({
-                mention: `@${agent}`,
-                targetName: agent,
-                project: agent,
-                summary: "补齐可验收结果说明",
-                message: "主 Agent 验收未收到你的 CCM_AGENT_RECEIPT。请补充结构化回执，并明确：实际完成事项、是否修改文件、验证方式、阻塞点；不能把建议当作已完成。",
-                reason: "缺少结构化结果说明，主 Agent 无法验收完成状态",
-            });
-            continue;
-        }
-        if (status && status !== "done") {
-            seen.add(agent);
-            followUps.push({
-                mention: `@${agent}`,
-                targetName: agent,
-                project: agent,
-                summary: followUpSummary(`处理结果说明状态 ${status}`),
-                message: `主 Agent 验收发现你的回执状态为 ${status}。请继续处理到可验收状态，或明确说明仍需用户/其他 Agent 提供什么；完成后必须再次提交 CCM_AGENT_RECEIPT，status 只能在确有证据时写 done。`,
-                reason: `结构化结果说明状态不是 done：${status}`,
-            });
-            continue;
-        }
-        const verificationGate = getVerificationEvidenceGate(receipt ? [receipt] : []);
-        if (status === "done" && !verificationGate.pass) {
-            seen.add(agent);
-            const reason = verificationGate.failed.length
-                ? `验证未通过：${verificationGate.failed.join("；")}`
-                : verificationGate.suggested.length
-                    ? `验证记录只是建议或未执行：${verificationGate.suggested.join("；")}`
-                    : "缺少已执行验证记录";
-            followUps.push({
-                mention: `@${agent}`,
-                targetName: agent,
-                project: agent,
-                summary: "补齐已执行验证证据",
-                message: `主 Agent 验收发现你的 done 回执缺少可采信的已执行验证证据。请实际运行必要检查或说明人工核验结果；如果验证失败，先修复后再提交 CCM_AGENT_RECEIPT。当前缺口：${reason}`,
-                reason,
-            });
-            continue;
-        }
-        const requiredVerificationCoverage = getRequiredVerificationCoverage(receipt ? [receipt] : []);
-        if (status === "done" && !requiredVerificationCoverage.pass) {
-            seen.add(agent);
-            const missing = requiredVerificationCoverage.missing
-                .map((item) => item.required.join(" / "))
-                .join("；");
-            const reason = `缺少项目配置验证命令执行证据：${missing}`;
-            followUps.push({
-                mention: `@${agent}`,
-                targetName: agent,
-                project: agent,
-                summary: "补跑项目验证命令",
-                message: `主 Agent 验收发现你的 done 回执没有覆盖项目配置的验证命令。请实际运行以下命令之一并把命令与结果写入 CCM_AGENT_RECEIPT.verification；如果无法运行，请写明人工核验结果和原因。需要覆盖：${missing}`,
-                reason,
-            });
-        }
-    }
-    return followUps;
+    return require("./collaboration-acceptance").buildEvidenceGateFollowUps(group, outputs);
 }
 function isReviewLikeAgentName(value) {
     return /test[-_\s]*agent|qa|test|tester|verify|verification|review|reviewer|audit|checker|quality|测试|验证|复核|审查|检查/i.test(String(value || ""));
@@ -13879,162 +9711,10 @@ function buildTestAgentReviewRecheckFollowUp(input) {
     };
 }
 function buildIndependentReviewGateFollowUps(input) {
-    const task = input.task || getTaskById(input.taskId || "");
-    if (!task || task.assign_type !== "group")
-        return [];
-    const outputText = (input.outputs || []).filter(Boolean).join("\n\n---\n\n");
-    const receipts = [
-        ...(Array.isArray(input.execution?.receipt) ? input.execution.receipt : input.execution?.receipt ? [input.execution.receipt] : []),
-        ...parseFormattedReceiptsFromText(outputText),
-    ].filter(Boolean);
-    const actualFileChanges = collectTaskActualFileChanges(task, input.execution || {});
-    const agentQa = task.group_id ? (0, agent_qa_service_1.getAgentQaItemsForGroup)(task.group_id).filter((item) => !task.id || item.task_id === task.id) : [];
-    const gate = buildIndependentReviewGate(task, actualFileChanges, receipts, agentQa);
-    if (!gate.required || gate.pass || gate.status === "failed")
-        return [];
-    const existingText = (input.existingFollowUps || [])
-        .map((item) => [item?.summary, item?.reason, item?.message, item?.task, item?.rework_kind, item?.kind].filter(Boolean).join("\n"))
-        .join("\n");
-    const assignmentEvidence = collectTaskAssignmentEvidence(task, input.execution || {});
-    const subject = inferIndependentReviewSubject({ task, actualFileChanges, receipts, assignmentEvidence });
-    if (!subject)
-        return [];
-    if (gate.status === "needs_recheck") {
-        if (/test_agent_review_recheck|重新运行\s*TestAgent|重新复验/i.test(existingText))
-            return [];
-        const sourceReceipt = findLatestTestAgentReviewReceipt(receipts, "needs_recheck");
-        const recheck = buildTestAgentReviewRecheckFollowUp({
-            subject: getReceiptIndependentReviewSubject(sourceReceipt, subject),
-            reason: gate.recheck_evidence?.[0]?.summary || gate.reason || "TestAgent 复核证据尚未闭环",
-            handoff: getReceiptTestAgentHandoff(sourceReceipt),
-            source: "independent_review_needs_recheck",
-        });
-        return recheck ? [recheck] : [];
-    }
-    if (gate.status === "needs_environment") {
-        if (/test_agent_environment_prepare|补齐.{0,12}(?:环境|登录|运行条件)/i.test(existingText))
-            return [];
-        const sourceReceipt = findLatestTestAgentReviewReceipt(receipts, "needs_environment");
-        const carriedHandoff = getReceiptTestAgentHandoff(sourceReceipt);
-        const reviewSubject = getReceiptIndependentReviewSubject(sourceReceipt, subject);
-        return [{
-                mention: `@${reviewSubject}`,
-                targetName: reviewSubject,
-                project: reviewSubject,
-                summary: "补齐 TestAgent 复核条件",
-                message: [
-                    `TestAgent 暂时无法完成 ${reviewSubject} 的独立复核，当前缺少环境、登录或运行条件。`,
-                    "请只补齐复核所需条件并确认服务可运行、测试账号可用或必要配置已生效；不要把环境准备误写成业务代码已经通过。",
-                    "完成后提交 CCM_AGENT_RECEIPT，明确补齐了什么条件、如何确认可用、是否仍需用户提供信息。",
-                    "主 Agent 收到可用结果后会自动沿用原复核工作单重新运行 TestAgent。",
-                ].join("\n"),
-                reason: gate.environment_evidence?.[0]?.summary || gate.reason || "TestAgent 复核受环境、登录或运行条件阻塞",
-                rework_kind: "test_agent_environment_prepare",
-                testAgentEnvironmentPreparation: true,
-                test_agent_environment_preparation: true,
-                rerunTestAgentAfterCompletion: true,
-                rerun_test_agent_after_completion: true,
-                reviewSubject,
-                originalTarget: reviewSubject,
-                testAgentRecheckHandoff: carriedHandoff,
-                test_agent_recheck_handoff: carriedHandoff,
-                userTaskPreview: `补齐 ${reviewSubject} 的复核环境，完成后自动重新运行 TestAgent`,
-            }];
-    }
-    if (/独立.{0,12}(?:验证|复核|检查)|(?:非|不是)原实现者|request_review|fresh\s+verifier|independent\s+(?:verification|review)|code\s+review/i.test(existingText)) {
-        return [];
-    }
-    const highRiskFiles = (gate.high_risk_files || []).map((item) => item.path || "").filter(Boolean).slice(0, 5);
-    const reason = gate.reason || "复杂代码变更需要另一个 Agent 复核";
-    return [{
-            mention: `@${subject}`,
-            targetName: subject,
-            project: subject,
-            summary: "补齐复杂变更独立复核证据",
-            message: [
-                `主 Agent 验收发现 ${subject} 的交付需要独立复核。请让非原实现者只读检查本次目标覆盖、关键风险、文件变化和已执行验证证据。`,
-                highRiskFiles.length ? `重点复核文件：${highRiskFiles.join("、")}` : "",
-                "请给出明确结论：通过、需要返工或仍需用户确认；不要只复述原实现者的结论。",
-            ].filter(Boolean).join("\n"),
-            reason,
-            rework_kind: "independent_review_gate",
-            independentReviewGate: gate,
-            userTaskPreview: `补齐独立复核：复核 ${subject} 的交付证据`,
-        }];
+    return require("./collaboration-acceptance").buildIndependentReviewGateFollowUps(input);
 }
 function buildFailedIndependentReviewReworkFollowUps(input) {
-    const task = input.task || getTaskById(input.taskId || "");
-    if (!task || task.assign_type !== "group")
-        return [];
-    const outputText = (input.outputs || []).filter(Boolean).join("\n\n---\n\n");
-    const receipts = [
-        ...(Array.isArray(input.execution?.receipt) ? input.execution.receipt : input.execution?.receipt ? [input.execution.receipt] : []),
-        ...parseFormattedReceiptsFromText(outputText),
-    ].filter(Boolean);
-    const actualFileChanges = collectTaskActualFileChanges(task, input.execution || {});
-    const agentQa = task.group_id ? (0, agent_qa_service_1.getAgentQaItemsForGroup)(task.group_id).filter((item) => !task.id || item.task_id === task.id) : [];
-    const gate = buildIndependentReviewGate(task, actualFileChanges, receipts, agentQa);
-    if (!gate.required || gate.status !== "failed" || !Array.isArray(gate.failed_evidence) || gate.failed_evidence.length === 0)
-        return [];
-    const assignmentEvidence = collectTaskAssignmentEvidence(task, input.execution || {});
-    const fallbackSubject = inferIndependentReviewSubject({ task, actualFileChanges, receipts, assignmentEvidence });
-    const sourceReviewReceipt = findLatestTestAgentReviewReceipt(receipts, "failed");
-    const sourceTestAgentHandoff = getReceiptTestAgentHandoff(sourceReviewReceipt);
-    const routable = new Set((0, group_orchestrator_1.getRoutableMembers)(input.group).map((member) => String(member?.project || "").trim()).filter(Boolean));
-    const existingFollowUps = Array.isArray(input.existingFollowUps) ? input.existingFollowUps : [];
-    const targetFromEvidence = (item) => {
-        const candidates = uniqueStrings(item?.reviewSubject, item?.review_subject, item?.subject, item?.requester, fallbackSubject, task?.target_project, task?.targetProject).filter((value) => value && !isReviewLikeAgentName(value));
-        return candidates.find((value) => routable.size === 0 || routable.has(value)) || "";
-    };
-    const grouped = new Map();
-    for (const failed of gate.failed_evidence || []) {
-        const target = targetFromEvidence(failed);
-        if (!target)
-            continue;
-        const current = grouped.get(target) || [];
-        current.push(failed);
-        grouped.set(target, current);
-    }
-    const followUps = [];
-    for (const [target, failures] of grouped.entries()) {
-        const existingSameTargetText = existingFollowUps
-            .filter((item) => String(item?.targetName || item?.project || item?.agent || "").trim() === target)
-            .map((item) => [item?.summary, item?.reason, item?.message, item?.task, item?.rework_kind, item?.kind].filter(Boolean).join("\n"))
-            .join("\n");
-        if (/(?:TestAgent|复核|验证).{0,30}(?:未通过|不通过|返工|失败)|failed_review|test_agent_failed/i.test(existingSameTargetText)) {
-            continue;
-        }
-        const reviewers = uniqueStrings(failures.map((item) => item?.reviewer).filter(Boolean)).slice(0, 3);
-        const findingLines = uniqueStrings(failures.map((item) => item?.summary).filter(Boolean), failures.flatMap((item) => Array.isArray(item?.evidence) ? item.evidence : [])).map((item) => (0, memory_1.compactMemoryText)(item, 260)).filter(Boolean).slice(0, 8);
-        const reviewerLabel = reviewers.length ? reviewers.join("、") : "TestAgent";
-        const reason = `${reviewerLabel} 复核未通过，需要原实现成员修复后重新复核`;
-        followUps.push({
-            mention: `@${target}`,
-            targetName: target,
-            project: target,
-            summary: "复核未通过，交回原实现成员返工",
-            message: [
-                `${reviewerLabel} 已判定 ${target} 的交付还不能验收。请回到原实现上下文修复失败点，修复后重新提交 CCM_AGENT_RECEIPT；主 Agent 会再次运行 TestAgent 复核。`,
-                findingLines.length ? "复核发现：" : "",
-                ...findingLines.map((line) => `- ${line}`),
-                "返工要求：修复根因，不只改表面现象；补跑与失败点相关的最小必要验证；在结果说明里写清楚修复内容、验证结果和剩余风险。",
-                "下一步：返工完成后，主 Agent 会自动沿用原工作单重新运行 TestAgent 复核；只有复核通过后才能给用户做完成总结。",
-            ].filter(Boolean).join("\n"),
-            reason,
-            rework_kind: "test_agent_failed_review_rework",
-            reviewFailed: true,
-            reviewSubject: target,
-            originalTarget: target,
-            rerunTestAgentAfterCompletion: true,
-            rerun_test_agent_after_completion: true,
-            testAgentRecheckHandoff: sourceTestAgentHandoff,
-            test_agent_recheck_handoff: sourceTestAgentHandoff,
-            failedReviewGate: gate,
-            failedReviewEvidence: failures,
-            userTaskPreview: `返工 ${target}：复核未通过，修复后重新复核`,
-        });
-    }
-    return (0, memory_1.uniqueByKey)(followUps, (item) => `${String(item?.targetName || item?.project || "").trim()}|test_agent_failed_review_rework`, 12);
+    return require("./collaboration-acceptance").buildFailedIndependentReviewReworkFollowUps(input);
 }
 function buildPostReviewSpotCheckFollowUps(input) {
     const task = input.task || getTaskById(input.taskId || "");
@@ -14855,6 +10535,19 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             ? (0, group_orchestrator_1.buildCoordinatorCollaborationInstructions)((0, group_orchestrator_1.getRoutableMembers)(group).map((m) => m.project).join(", "))
             : (0, group_orchestrator_1.buildMemberCollaborationInstructions)(targetName, memberList);
         const advisoryOnly = !!mention.advisoryOnly;
+        let memoryConsumptionChallenge = activeTaskSession && workerMemoryContext && !advisoryOnly && !nativeTestAgentDispatch
+            ? (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
+                groupId,
+                groupSessionId: activeGroupSessionId,
+                taskId,
+                executionId: laneExecutionId,
+                project: targetName,
+                taskAgentSessionId: activeTaskSession.id,
+                attempt: memoryDeliveryAttemptSequence,
+            })
+            : null;
+        if (memoryConsumptionChallenge)
+            workerMemoryContext = (0, memory_context_consumption_receipt_1.attachMemoryContextConsumptionChallenge)(workerMemoryContext, memoryConsumptionChallenge);
         const projectResourcesConfig = getProjectExtraConfig(targetName);
         const toolContext = nativeTestAgentDispatch
             ? { prompt: "\n[TestAgent 原生复核]\n- 当前请求由 CCM TestAgent 原生 runner 执行，只读取工作单并运行验证，不注入第三方 Agent 工具。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
@@ -14873,6 +10566,8 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
                 groupSessionId: sourceTask?.group_session_id || sourceTask?.groupSessionId || "",
                 taskAgentSessionId: activeTaskSession?.id || "",
                 nativeSessionId: activeTaskSession?.nativeSessionId || "",
+                memoryReceiptChallenge: memoryConsumptionChallenge,
+                memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(memoryConsumptionChallenge?.challenge_id),
             });
         if (runtimeToolContext.dispatchBlocked) {
             const blockedReceipt = runtimeToolDispatchBlockedReceipt(targetName, runtimeToolContext);
@@ -14908,6 +10603,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             agent_type: tAgentType,
             model: activeTaskSession?.modelId || "",
             task_id: taskId,
+            task_agent_session_id: activeTaskSession?.id || "",
             trace_id: sourceTask?.trace_id || "",
             task: sourceTask,
             group,
@@ -14921,6 +10617,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             advisoryOnly,
             continuation: workerContinuation,
         });
+        workerMemoryPacket = (0, worker_handoff_1.renderMemoryContextForWorker)(workerHandoff?.worker_context_packet?.memory || workerMemoryContext);
         const pendingCapacityDowngradeGate = activeTaskSession?.capacityDowngradeGate || null;
         const capacityRevalidationPreparation = activeTaskSession
             ? (0, agent_sessions_1.prepareTaskAgentSessionCapacityRevalidation)(activeTaskSession.id, workerHandoff.worker_context_packet)
@@ -15114,6 +10811,12 @@ ${childTaskText}
                 memoryContext: workerMemoryContext,
                 renderedHandoff: developmentContract,
                 renderedPrompt: tPrompt,
+                renderedMemoryContext: String(groupMemoryBundle?.rendered_text || ""),
+                requireMemoryPromptInjectionProof: true,
+                requireTrustedMemoryPromptEnvelope: true,
+                requireProviderMemoryChannelAcknowledgement: true,
+                requireMemoryContextConsumptionReceipt: !!memoryConsumptionChallenge,
+                memoryContextConsumptionChallenge: memoryConsumptionChallenge,
                 runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
                 invocationLineage: activeInvocationEdge,
             });
@@ -15191,6 +10894,11 @@ ${childTaskText}
             let targetNativeModelCapabilityReceipt = null;
             let targetNativeModelCapabilityRecord = null;
             let targetModelCapabilityRefreshOutcome = null;
+            let targetProviderToolAccessEvidence = null;
+            let targetProviderMemoryChannelEvidence = null;
+            let targetMemoryContextConsumptionReceipt = null;
+            let targetMemoryContextConsumptionRecovery = null;
+            let lastTypedMemoryDispatchAdmission = { required: false };
             let targetSessionSucceeded = true;
             let targetSessionError = "";
             const laneChangeSnapshot = tWorkDir ? ctx.createFileChangeSnapshot(tWorkDir) : null;
@@ -15458,6 +11166,7 @@ ${childTaskText}
                             type: "post_review_spot_check_ready",
                             taskId,
                             task_id: taskId,
+                            task_agent_session_id: activeTaskSession?.id || "",
                             agent: "main-agent",
                             detail: postReviewSpotCheckSummary?.headline || postReviewSpotCheck.headline,
                             status: postReviewSpotCheck.pass ? "ok" : "warn",
@@ -15565,15 +11274,36 @@ ${childTaskText}
                         const previousRuntime = runtimeCandidates[attemptIndex - 1];
                         const sameRuntimeResume = activeRuntime === previousRuntime;
                         if (!sameRuntimeResume) {
-                            runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, activeRuntime, toolContext.allowedTools, streamRes, { taskId, task: sourceTask, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
-                            if (runtimeToolContext.dispatchBlocked) {
-                                tOutput = runtimeToolDispatchBlockedMessage(targetName, runtimeToolContext);
-                                previousOutput = tOutput;
-                                break;
-                            }
                             activeTaskSession = taskId ? (0, agent_sessions_1.openTaskAgentSession)({ scopeId: taskId, taskId, groupId, project: targetName, agentType: activeRuntime }) : null;
                         }
                         const retryAttemptSequence = activeTaskSession ? activeTaskSession.turnCount + 1 : memoryDeliveryAttemptSequence;
+                        memoryConsumptionChallenge = activeTaskSession && !advisoryOnly
+                            ? (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
+                                groupId,
+                                groupSessionId: activeGroupSessionId,
+                                taskId,
+                                executionId: laneExecutionId,
+                                project: targetName,
+                                taskAgentSessionId: activeTaskSession.id,
+                                attempt: retryAttemptSequence,
+                            })
+                            : null;
+                        runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, activeRuntime, toolContext.allowedTools, streamRes, {
+                            taskId,
+                            task: sourceTask,
+                            toolAudit: toolContext.toolAudit,
+                            authorizationReadiness: toolContext.authorizationReadiness,
+                            groupSessionId: activeGroupSessionId,
+                            taskAgentSessionId: activeTaskSession?.id || "",
+                            nativeSessionId: activeTaskSession?.nativeSessionId || "",
+                            memoryReceiptChallenge: memoryConsumptionChallenge,
+                            memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(memoryConsumptionChallenge?.challenge_id),
+                        });
+                        if (runtimeToolContext.dispatchBlocked) {
+                            tOutput = runtimeToolDispatchBlockedMessage(targetName, runtimeToolContext);
+                            previousOutput = tOutput;
+                            break;
+                        }
                         const previousInvocationEdge = activeInvocationEdge;
                         activeInvocationEdge = activeTaskSession && activeGroupSessionId.startsWith("gcs_") ? (0, task_agent_invocation_lineage_1.prepareTaskAgentInvocationEdge)({
                             groupId,
@@ -15623,6 +11353,8 @@ ${childTaskText}
                         workerMemoryContext = globalMissionMemory
                             ? { schema: "ccm-worker-memory-context-v1", group_memory: groupMemoryBundle, global_mission_memory: globalMissionMemory }
                             : groupMemoryBundle;
+                        if (memoryConsumptionChallenge)
+                            workerMemoryContext = (0, memory_context_consumption_receipt_1.attachMemoryContextConsumptionChallenge)(workerMemoryContext, memoryConsumptionChallenge);
                         workerHandoff = buildChildAgentWorkerHandoff(targetName, childTaskText, {
                             source: `${sourceProject} @ 协作`,
                             reason: typeof mention === "string" ? "" : String(mention.reason || "").trim(),
@@ -15633,6 +11365,7 @@ ${childTaskText}
                             agent_type: activeRuntime,
                             model: activeTaskSession?.modelId || "",
                             task_id: taskId,
+                            task_agent_session_id: activeTaskSession?.id || "",
                             trace_id: sourceTask?.trace_id || "",
                             task: sourceTask,
                             group,
@@ -15646,6 +11379,7 @@ ${childTaskText}
                             advisoryOnly,
                             continuation: workerContinuation,
                         });
+                        workerMemoryPacket = (0, worker_handoff_1.renderMemoryContextForWorker)(workerHandoff?.worker_context_packet?.memory || workerMemoryContext);
                         workerHandoffSummary = (0, worker_handoff_1.summarizeWorkerHandoffForUser)(workerHandoff);
                         developmentContract = buildChildAgentDevelopmentContract(targetName, childTaskText, {
                             source: `${sourceProject} @ 协作`,
@@ -15685,6 +11419,12 @@ ${childTaskText}
                                 memoryContext: workerMemoryContext,
                                 renderedHandoff: developmentContract,
                                 renderedPrompt: tPrompt,
+                                renderedMemoryContext: String(groupMemoryBundle?.rendered_text || ""),
+                                requireMemoryPromptInjectionProof: true,
+                                requireTrustedMemoryPromptEnvelope: true,
+                                requireProviderMemoryChannelAcknowledgement: true,
+                                requireMemoryContextConsumptionReceipt: !!memoryConsumptionChallenge,
+                                memoryContextConsumptionChallenge: memoryConsumptionChallenge,
                                 runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
                                 invocationLineage: activeInvocationEdge,
                             });
@@ -15810,6 +11550,7 @@ ${childTaskText}
                     targetNativeModelCapabilityReceipt = null;
                     targetSessionSucceeded = true;
                     targetSessionError = "";
+                    targetMemoryContextConsumptionRecovery = null;
                     let targetRunnerStarted = false;
                     let finalDispatchPayloadGate = (0, final_dispatch_payload_gate_1.buildFinalWorkerDispatchPayloadGate)({
                         renderedPrompt: attemptPrompt,
@@ -15944,6 +11685,7 @@ ${childTaskText}
                         renderedPrompt: attemptPrompt,
                         attemptSequence: currentMemoryAttemptSequence,
                     });
+                    lastTypedMemoryDispatchAdmission = typedMemoryDispatchAdmission;
                     if (typedMemoryDispatchAdmission.admitted !== true) {
                         throw new Error(`类型化记忆 dispatch-time consume 门禁未通过：${typedMemoryDispatchAdmission.reason || "unknown"}`);
                     }
@@ -16022,9 +11764,17 @@ ${childTaskText}
                         executionId: laneExecutionId,
                         model: activeTaskSession?.modelId || "",
                         taskAgentSessionId: activeTaskSession?.id || "",
+                        trustedMemoryProviderChannelRequired: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
+                        trustedMemoryProviderAcknowledgementRequired: activeMemoryContextSnapshot?.context?.provider_memory_channel_acknowledgement_required === true,
+                        memoryContextConsumptionReceiptRequired: activeMemoryContextSnapshot?.context?.memory_context_consumption_receipt_required === true,
+                        memoryContextConsumptionChallenge: activeMemoryContextSnapshot?.context?.memory_context_consumption_challenge || null,
+                        trustedMemoryEnvelopeChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
+                        trustedMemoryEnvelopeSourceChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
                         ...taskAgentSessionLifecycleRunnerOptions(activeMemoryContextSnapshot),
                         agentSession: activeTaskSession ? (0, agent_sessions_1.getTaskAgentSessionOptions)(activeTaskSession) : null,
-                        durableDispatch: typedMemoryDispatchAdmission.required === true || capacityRevalidationPreparation?.required === true,
+                        durableDispatch: typedMemoryDispatchAdmission.required === true
+                            || capacityRevalidationPreparation?.required === true
+                            || activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
                         initialWorkEvents: [runtimeToolContext.workEvent],
                         onRunnerRequestCreated: (requestId) => {
                             targetRunnerRequestId = String(requestId || "");
@@ -16050,6 +11800,13 @@ ${childTaskText}
                             targetNativeModelCapabilityReceipt = opts.nativeModelCapabilityReceipt || null;
                             targetNativeModelCapabilityRecord = opts.nativeModelCapabilityRecord || targetNativeModelCapabilityRecord;
                             targetModelCapabilityRefreshOutcome = opts.modelCapabilityRefreshOutcome || targetModelCapabilityRefreshOutcome;
+                            targetProviderToolAccessEvidence = opts.providerToolAccessEvidence || targetProviderToolAccessEvidence;
+                            if (opts.providerMemoryChannelEvidence?.required === true)
+                                targetProviderMemoryChannelEvidence = opts.providerMemoryChannelEvidence;
+                            if (opts.memoryContextConsumptionReceipt)
+                                targetMemoryContextConsumptionReceipt = opts.memoryContextConsumptionReceipt;
+                            if (opts.memoryContextConsumptionRecovery)
+                                targetMemoryContextConsumptionRecovery = opts.memoryContextConsumptionRecovery;
                             targetSessionSucceeded = opts.isError !== true;
                             targetSessionError = String(opts.error || opts.message || "");
                             targetRunnerRequestId = String(opts.runnerRequestId || targetRunnerRequestId || "");
@@ -16122,6 +11879,9 @@ ${childTaskText}
                             output: attemptOutput,
                             fileChanges: targetFileChanges,
                             nativeContinuationEvidence: targetNativeContinuationEvidence,
+                            providerMemoryChannelEvidence: targetProviderMemoryChannelEvidence,
+                            memoryContextConsumptionReceipt: targetMemoryContextConsumptionReceipt,
+                            memoryContextConsumptionRecovery: targetMemoryContextConsumptionRecovery,
                             runnerStarted: targetRunnerStarted,
                             invocationEdgeId: activeInvocationEdge?.invocation_edge_id || "",
                             recoveryOutcome: attemptIndex > 0
@@ -16153,6 +11913,7 @@ ${childTaskText}
                                     data: {
                                         task_agent_memory_context_snapshot: activeMemoryContextSnapshot,
                                         memory_context_delivery_receipt: activeMemoryContextDelivery,
+                                        provider_tool_access_evidence: targetProviderToolAccessEvidence,
                                     },
                                 });
                             }
@@ -16211,6 +11972,23 @@ ${childTaskText}
                                 attemptId: `${finalDispatchReactiveCompactReceipt?.receipt_id || finalDispatchPayloadGate.gate_id}:provider_accepted`,
                                 outcome: "success",
                                 reason: "provider_accepted_final_prompt",
+                            });
+                        }
+                        tOutput = attemptOutput;
+                        break;
+                    }
+                    if (targetMemoryContextConsumptionRecovery?.suppress_task_replay === true) {
+                        if (taskId) {
+                            const detail = `${targetName} 已完成 Provider 工作，但模型加载回执补救未通过；为避免重复改码，已禁止自动整任务重放`;
+                            (0, logs_1.addTaskLog)(taskId, "warning", detail);
+                            (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                                type: "memory_context_consumption_recovery_blocked",
+                                title: `${targetName} 记忆加载回执补救失败`,
+                                detail,
+                                status: "fail",
+                                phase: "blocked",
+                                agent: targetName,
+                                data: { memory_context_consumption_recovery: targetMemoryContextConsumptionRecovery },
                             });
                         }
                         tOutput = attemptOutput;
@@ -16351,6 +12129,7 @@ ${childTaskText}
                             taskAgentSessionId: activeTaskSession?.id || "",
                             ...taskAgentSessionLifecycleRunnerOptions(activeMemoryContextSnapshot),
                             agentSession: activeTaskSession ? (0, agent_sessions_1.getTaskAgentSessionOptions)(activeTaskSession) : null,
+                            durableDispatch: lastTypedMemoryDispatchAdmission.required === true || capacityRevalidationPreparation?.required === true,
                             initialWorkEvents: [runtimeToolContext.workEvent],
                             onDone: (opts) => {
                                 targetFileChanges = opts.fileChanges;
@@ -16358,6 +12137,13 @@ ${childTaskText}
                                 targetNativeSessionId = String(opts.nativeSessionId || "");
                                 targetNativeModelCapabilityRecord = opts.nativeModelCapabilityRecord || targetNativeModelCapabilityRecord;
                                 targetModelCapabilityRefreshOutcome = opts.modelCapabilityRefreshOutcome || targetModelCapabilityRefreshOutcome;
+                                targetProviderToolAccessEvidence = opts.providerToolAccessEvidence || targetProviderToolAccessEvidence;
+                                if (opts.providerMemoryChannelEvidence?.required === true)
+                                    targetProviderMemoryChannelEvidence = opts.providerMemoryChannelEvidence;
+                                if (opts.memoryContextConsumptionReceipt)
+                                    targetMemoryContextConsumptionReceipt = opts.memoryContextConsumptionReceipt;
+                                if (opts.memoryContextConsumptionRecovery)
+                                    targetMemoryContextConsumptionRecovery = opts.memoryContextConsumptionRecovery;
                                 targetSessionSucceeded = opts.isError !== true;
                                 targetSessionError = String(opts.error || opts.message || "");
                             },
@@ -16720,6 +12506,8 @@ ${childTaskText}
                 fileChanges: targetFileChanges,
                 workEvents: targetWorkEvents,
                 runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit),
+                providerToolAccessEvidence: targetProviderToolAccessEvidence || undefined,
+                provider_tool_access_evidence: targetProviderToolAccessEvidence || undefined,
                 invokedSkills: targetInvokedSkills,
                 testAgentHandoff: testAgentHandoffPayload || undefined,
                 test_agent_handoff: testAgentHandoffPayload || undefined,
@@ -17725,7 +13513,7 @@ async function settleGroupCoordinationDependency(task, ctx, streamRes = null) {
         const execution = (0, execution_kernel_1.loadExecution)(task.id);
         const receipt = task.receipt || execution?.receipt || null;
         const hasReturned = ["done", "failed", "cancelled"].includes(String(task.status || ""))
-            || (!!receipt && !runningTaskIds.has(task.id) && !isTaskQueuedInMemory(task.id));
+            || (!!receipt && !exports.runningTaskIds.has(task.id) && !isTaskQueuedInMemory(task.id));
         if (!hasReturned)
             return { handled: true, pending: true, status: task.status };
         let acceptance = evaluateCoordinationTaskEvidence(task, request, receipt, execution);
@@ -17864,7 +13652,7 @@ async function recoverGroupCoordinationDependencies(ctx) {
             results.push({ request_id: request.id, recovered: false, reason: "work_item_missing" });
             continue;
         }
-        if (["pending", "queued"].includes(task.status) && task.auto_execute !== false && !isTaskQueuedInMemory(task.id) && !runningTaskIds.has(task.id)) {
+        if (["pending", "queued"].includes(task.status) && task.auto_execute !== false && !isTaskQueuedInMemory(task.id) && !exports.runningTaskIds.has(task.id)) {
             results.push({ request_id: request.id, task_id: task.id, ...enqueueTask(task.id, ctx) });
             continue;
         }
@@ -17948,78 +13736,7 @@ async function appendCoordinatorMessage(groupId, agent, content, streamRes = nul
     return messageId;
 }
 function buildCoordinatorReworkRoutingDecision(item, input = {}) {
-    const project = String(item?.targetName || item?.project || item?.agent || "").trim();
-    const previous = input.previousLedger || item?.previousLedger || null;
-    const text = [
-        item?.message,
-        item?.task,
-        item?.reason,
-        item?.summary,
-        item?.kind,
-        item?.rework_kind,
-        previous?.status,
-        previous?.receiptStatus,
-        ...(Array.isArray(previous?.blockers) ? previous.blockers : []),
-        ...(Array.isArray(previous?.needs) ? previous.needs : []),
-        ...(Array.isArray(previous?.verification) ? previous.verification : []),
-    ].map((value) => String(value || "")).join("\n");
-    const route = (strategy, continuationStrategy, userLabel, reason, signals = [], extra = {}) => ({
-        schema: "ccm-coordinator-rework-route-v1",
-        project,
-        strategy,
-        continuationStrategy,
-        continuation_strategy: continuationStrategy,
-        user_label: userLabel,
-        reason,
-        context_overlap: extra.context_overlap || (previous ? "high" : "medium"),
-        requires_stop: !!extra.requires_stop,
-        requires_fresh_verifier: !!extra.requires_fresh_verifier,
-        signals: uniqueStrings(signals.filter(Boolean)).slice(0, 8),
-    });
-    const wrongDirection = /(?:方向|方案|目标|需求).{0,16}(?:错|不对|调整|改变|变更|改成)|用户.{0,12}(?:改|调整|变更)|不要.{0,40}(?:而是|改为|改成)|停止.{0,24}(?:旧|当前|原|错误)|wrong\s+(?:direction|approach)|user\s+changed|stop\s+worker/i.test(text);
-    if (wrongDirection) {
-        return route("stop_wrong_direction_then_continue", "stop_wrong_direction_then_continue", "停止旧方向并按新要求继续", "检测到目标或方案方向发生变化，先避免子 Agent 继续旧方向，再交代修正后的执行口径。", ["goal_revision_or_wrong_direction"], { requires_stop: true, context_overlap: previous ? "medium" : "low" });
-    }
-    const explicitTestAgentReviewRecheck = item?.testAgentReviewRecheck === true
-        || item?.test_agent_review_recheck === true;
-    const failedReviewRework = !explicitTestAgentReviewRecheck && (item?.reviewFailed === true
-        || /test_agent_failed_review_rework|failed_review_rework|review_failed_rework/i.test(text)
-        || /(?:TestAgent|复核|验证).{0,40}(?:未通过|不通过|需要返工).{0,40}(?:原实现成员|同一子\s*Agent|修复后重新复核)/i.test(text));
-    if (failedReviewRework) {
-        return route("continue_same_worker", "same_worker_scratchpad", "继续同一子 Agent 修复", "独立复核已经给出失败结论，下一步应回到原实现成员修复，再重新复核。", ["failed_review_rework", previous ? "has_previous_ledger" : ""]);
-    }
-    const testAgentEnvironmentPreparation = item?.testAgentEnvironmentPreparation === true
-        || item?.test_agent_environment_preparation === true
-        || /test_agent_environment_prepare|补齐.{0,16}(?:复核环境|登录条件|运行条件)/i.test(text);
-    if (testAgentEnvironmentPreparation) {
-        return route("prepare_verification_environment", "same_worker_context", "补齐复核条件后自动复验", "当前缺口属于环境、登录或运行条件，先由原项目补齐可验证条件，再让 TestAgent 重新执行，不把它误判为业务实现返工。", ["test_agent_environment_preparation", previous ? "has_previous_ledger" : ""]);
-    }
-    const testAgentReviewRecheck = explicitTestAgentReviewRecheck
-        || /test_agent_review_recheck|test_agent_recheck|重新运行\s*TestAgent|重新复验.{0,24}TestAgent/i.test(text);
-    if (testAgentReviewRecheck) {
-        const hasCarriedHandoff = !!(item?.testAgentHandoff || item?.test_agent_handoff || item?.testAgentWorkOrder || item?.test_agent_work_order);
-        return route("resume_verifier", hasCarriedHandoff ? "same_verifier_context" : "fresh_verification_worker", hasCarriedHandoff ? "沿用原工作单重新复验" : "重新派独立验证 Agent 复验", hasCarriedHandoff
-            ? "上一轮复核证据尚未闭环，沿用同一 TestAgent 工作单并基于最新状态重新执行最能保留验收边界。"
-            : "上一轮没有可复用的 TestAgent 工作单，需要重新生成独立复核交接并基于最新状态验证。", ["test_agent_review_recheck", hasCarriedHandoff ? "carried_test_agent_handoff" : "fresh_test_agent_handoff"], { requires_fresh_verifier: !hasCarriedHandoff, context_overlap: hasCarriedHandoff ? "high" : "low" });
-    }
-    const postReviewSpotCheckReverify = item?.postReviewSpotCheckReverify === true
-        || /post_review_spot_check_reverify|spot_check_reverify|完成前抽查.{0,30}(?:不一致|需复验|重新复验)/i.test(text);
-    if (postReviewSpotCheckReverify) {
-        return route("resume_verifier", "same_verifier_context", "让 TestAgent 重新复验", "TestAgent 已给出通过结论，但主 Agent 的完成前抽查尚未一致，应先让同一个验证器重新执行并重新判断。", ["post_review_spot_check_reverify", previous ? "has_previous_ledger" : ""]);
-    }
-    const independentVerification = /独立.{0,12}(?:验证|复核|检查)|(?:非|不是)原实现者|另(?:一个|外).{0,12}(?:验证|复核|检查)|交叉复核|只读复核|request_review|fresh\s+verifier|independent\s+(?:verification|review)|code\s+review/i.test(text);
-    const failureOrCorrection = /(?:测试|验证|构建|编译|lint|typecheck|npm|pnpm|yarn|pytest|jest|vitest).{0,18}(?:失败|报错|未通过)|(?:失败|报错|错误|异常|blocked|failed|error|file not found|not found|missing_receipt|needs_info|partial)|缺少(?:结果说明|验证|证据|文件|回执)|补(?:齐|跑|充)|修复|继续处理/i.test(text);
-    const independentReviewGate = item?.independentReviewGate?.required === true || /independent_review_gate|independent_review_required/i.test(text);
-    if ((independentVerification || independentReviewGate) && (!failureOrCorrection || independentReviewGate)) {
-        return route("fresh_verification_worker", "fresh_verification_worker", "派独立验证 Agent 复核", "缺口属于独立验证或只读复核，应使用新的验证视角，避免原实现者自证。", [independentReviewGate ? "independent_review_gate" : "independent_verification"], { requires_fresh_verifier: true, context_overlap: "low" });
-    }
-    const spawnFresh = /重新派发|换(?:一个|给)|新的?子\s*Agent|另(?:一个|外).{0,10}(?:Agent|worker)|fresh\s+worker|spawn\s+fresh|从零(?:实现|处理)|研究.{0,18}(?:后|完).{0,18}(?:实现|修复)/i.test(text);
-    if (spawnFresh && !failureOrCorrection) {
-        return route("spawn_fresh_worker", "spawn_fresh_worker", "重新派发给新的子 Agent", "缺口更像新的执行分支，使用新的执行上下文更稳。", ["fresh_worker_requested"], { context_overlap: "low" });
-    }
-    return route("continue_same_worker", "same_worker_scratchpad", "继续同一子 Agent 修复", failureOrCorrection
-        ? "失败、阻塞或证据缺口通常要回到同一个子 Agent，它保留了上一轮错误和修改上下文。"
-        : "返工内容与上一轮工作高度重叠，优先复用原子 Agent 上下文。", [failureOrCorrection ? "failure_or_evidence_gap" : "same_context_rework", previous ? "has_previous_ledger" : ""]);
+    return require("./collaboration-test-agent-runtime").buildCoordinatorReworkRoutingDecision(item, input);
 }
 function getMentionReworkRoute(mention) {
     if (!mention || typeof mention === "string")
@@ -18045,39 +13762,7 @@ function coordinatorReworkRouteUsesVerifier(route) {
         || /resume_verifier|same_verifier|test_agent_recheck/i.test(String(route.strategy || route.continuationStrategy || route.continuation_strategy || ""));
 }
 function selectCoordinatorIndependentVerifier(group, originalTarget = "") {
-    const original = String(originalTarget || "").trim();
-    const originalKey = original.toLowerCase();
-    const candidates = (0, group_orchestrator_1.getRoutableMembers)(group)
-        .filter((member) => String(member?.project || "").trim())
-        .filter((member) => String(member.project || "").trim().toLowerCase() !== originalKey)
-        .map((member) => {
-        const profile = [member.project, member.role, member.agent, member.type, member.description, member.tags].map((value) => String(value || "")).join(" ");
-        const score = /test[-_\s]*agent|测试\s*agent/i.test(profile)
-            ? 120
-            : /qa|test|tester|verify|verification|review|reviewer|audit|checker|quality|验|测|审|复核|检查/i.test(profile)
-                ? 100
-                : 10;
-        return { member, score, profile };
-    })
-        .sort((a, b) => b.score - a.score || String(a.member.project).localeCompare(String(b.member.project)));
-    const configuredVerifier = candidates.find((item) => item.score >= 100)?.member || null;
-    const originalRuntime = resolveProjectRuntimeForTestAgentHandoff(group, original);
-    const nativeTestAgentAvailable = !!originalRuntime.workDir;
-    const selected = configuredVerifier || (nativeTestAgentAvailable ? { project: "test-agent" } : null);
-    return {
-        schema: "ccm-independent-verifier-selection-v1",
-        available: !!selected,
-        originalTarget: original,
-        targetName: selected?.project || "",
-        reason: selected
-            ? `${selected.project} 将以独立视角复核 ${original || "原实现 Agent"} 的交付证据`
-            : "当前群聊没有可用的非原实现者 Agent，无法完成独立复核",
-        nativeTestAgent: nativeTestAgentAvailable ? { available: true, project: original, workDir: originalRuntime.workDir } : { available: false },
-        candidates: [
-            ...(nativeTestAgentAvailable ? [{ project: "test-agent", score: 110, native: true }] : []),
-            ...candidates.map((item) => ({ project: item.member.project, score: item.score })),
-        ].slice(0, 8),
-    };
+    return require("./collaboration-test-agent-runtime").selectCoordinatorIndependentVerifier(group, originalTarget);
 }
 function isCoordinatorTestAgentName(value) {
     return /^(?:test[-_\s]*agent|测试\s*agent)$/i.test(String(value || "").trim());
@@ -18346,15 +14031,7 @@ function firstConfigNumber(sources, keys) {
     return Number.isFinite(num) && num > 0 ? num : undefined;
 }
 function hasConfiguredTestAgentMultiSessionBrowserCheck(...lists) {
-    return lists.flat().some((check) => {
-        const sessions = Array.isArray(check?.sessions) ? check.sessions : [];
-        const sessionSteps = Array.isArray(check?.sessionSteps)
-            ? check.sessionSteps
-            : Array.isArray(check?.session_steps)
-                ? check.session_steps
-                : [];
-        return sessions.length >= 2 && sessionSteps.length > 0;
-    });
+    return require("./collaboration-test-agent-runtime").hasConfiguredTestAgentMultiSessionBrowserCheck(...lists);
 }
 function getNestedTestAgentReviewConfig(config = {}) {
     return configRecord(config.test_agent
@@ -18410,96 +14087,7 @@ function collectConfiguredTestAgentReviewConfig(projectName) {
     return { project, requiredChecks, options, hasExecutableSurface };
 }
 function buildCoordinatorTestAgentHandoff(item, input) {
-    const targetName = String(item?.targetName || item?.project || "").trim();
-    const originalTarget = String(item?.reviewSubject || item?.originalTarget || item?.continuationOf || input.previousLedger?.project || "").trim();
-    if (!isCoordinatorTestAgentName(targetName) || !originalTarget)
-        return null;
-    const runtime = resolveProjectRuntimeForTestAgentHandoff(input.group, originalTarget);
-    const task = input.sourceTask || {};
-    const previous = input.previousLedger || {};
-    const changedFiles = collectCoordinatorChangedFiles([
-        ...(Array.isArray(previous.filesChanged) ? previous.filesChanged : []),
-        task.file_changes?.files || [],
-        task.delivery_summary?.actual_file_changes || [],
-        task.deliverySummary?.actualFileChanges || [],
-        task.delivery_summary?.files_changed || [],
-        task.deliverySummary?.filesChanged || [],
-    ].flat(), originalTarget);
-    const verificationCommands = collectCoordinatorVerificationCommands(originalTarget, runtime.workDir, previous);
-    const acceptanceCriteria = buildCoordinatorTestAgentAcceptanceCriteria(task, verificationCommands);
-    const testAgentReviewConfig = collectConfiguredTestAgentReviewConfig(originalTarget);
-    const completedTasks = uniqueStrings([
-        previous.summary ? `${originalTarget} 上一轮结果：${previous.summary}` : "",
-        ...(Array.isArray(previous.actions) ? previous.actions : []),
-        item?.message || item?.task || "",
-    ].filter((value) => !isCoordinatorReviewInstruction(value))).slice(0, 10);
-    const requiredChecks = uniqueStrings(verificationCommands.length || !testAgentReviewConfig.hasExecutableSurface ? ["commands"] : [], testAgentReviewConfig.requiredChecks).slice(0, 20);
-    const requiresConfiguredAdversarialProbe = requiredChecks.includes("adversarial")
-        || testAgentReviewConfig.options.requireAdversarialProbe === true;
-    const commandOnlyAdversarialPolicy = !testAgentReviewConfig.hasExecutableSurface && !requiresConfiguredAdversarialProbe
-        ? {
-            requireAdversarialProbe: false,
-            adversarialProbeWaiver: "该变更仅提供静态文件与命令验证，没有已配置的 HTTP、浏览器或用户输入攻击面。",
-        }
-        : {};
-    const warnings = uniqueStrings([
-        runtime.workDir ? "" : `Project "${originalTarget}" is missing workDir; TestAgent plan preflight will block execution until the project path is configured.`,
-        acceptanceCriteria.length ? "" : "No acceptance criteria were supplied; coverage will be weaker.",
-    ]);
-    return {
-        schema: "ccm-test-agent-handoff-v1",
-        id: buildTestAgentHandoffId(input.taskId || task.id || "", originalTarget),
-        taskId: input.taskId || task.id || "",
-        groupId: task.group_id || task.groupId || "",
-        issuedBy: "group-main-agent",
-        originalUserGoal: input.userMessage || task.business_goal || task.businessGoal || task.title || "",
-        acceptanceCriteria,
-        completedTasks,
-        completedByProjectAgents: [originalTarget],
-        requiredChecks,
-        projects: [{
-                name: originalTarget,
-                workDir: runtime.workDir,
-                ...testAgentReviewConfig.project,
-                changedFiles,
-                completedTasks,
-                acceptanceCriteria,
-                verificationCommands,
-                agentSummary: previous.summary || item?.summary || item?.reason || "",
-                risks: Array.isArray(previous.blockers) ? previous.blockers : [],
-            }],
-        options: {
-            verificationOnly: true,
-            browserProvider: "auto",
-            autoDiscoverVerificationCommands: true,
-            collectBrowserArtifacts: true,
-            ...commandOnlyAdversarialPolicy,
-            ...testAgentReviewConfig.options,
-        },
-        metadata: {
-            handoffSource: "group-main-agent-independent-review-gate",
-            route: input.reworkRoute || item?.reworkRoute || null,
-            reviewSubject: originalTarget,
-            verifier: targetName,
-            previousLedger: previous,
-            coordinatorOutputPreview: (0, memory_1.compactMemoryText)(input.coordinatorOutput || "", 1000),
-            projectRuntimeSource: runtime.source,
-            reviewInstructions: [
-                `独立复核 ${originalTarget} 的交付证据，不得只复述原实现者结论。`,
-                changedFiles.length ? "核对改动文件是否覆盖用户目标和验收标准。" : "核对原实现 Agent 的完成声明是否有真实证据。",
-                "如果验证无法执行，明确写 blocked/needs，不能写成已通过。",
-            ],
-            ...(warnings.length ? { handoffWarnings: warnings } : {}),
-        },
-        target: targetName,
-        review_subject: originalTarget,
-        warnings,
-        display_policy: {
-            user_text_first: false,
-            technical_default_collapsed: true,
-            hide_internal_protocols: true,
-        },
-    };
+    return require("./collaboration-test-agent-runtime").buildCoordinatorTestAgentHandoff(item, input);
 }
 function testAgentStatusToReceiptStatus(status) {
     const value = String(status || "").trim().toLowerCase();
@@ -18872,15 +14460,7 @@ function resolveTestAgentDecisionVerdict(report, artifactVerdict = readTestAgent
     return strengthenTestAgentVerdictWithReportCoverage(report, verdict);
 }
 function testAgentDecisionReceiptStatus(report, verdict) {
-    if (verdict?.canAccept === true)
-        return "done";
-    if (verdict?.needsRework === true)
-        return "failed";
-    if (verdict?.needsRecheck === true || verdict?.needsEnvironment === true)
-        return "blocked";
-    if (verdict?.needsHuman === true)
-        return "blocked";
-    return testAgentStatusToReceiptStatus(verdict?.status || report.status);
+    return require("./collaboration-acceptance").testAgentDecisionReceiptStatus(report, verdict);
 }
 function testAgentDecisionReviewVerdict(report, verdict) {
     if (verdict?.canAccept === true)
@@ -19388,19 +14968,7 @@ function collectTestAgentBrowserDownloadLines(report) {
     return uniqueStrings([headline, ...failures]).slice(0, 3);
 }
 function collectTestAgentBrowserEvidenceSummaryLines(report, verdict = null) {
-    return uniqueStrings([
-        ...collectTestAgentBrowserAuthenticationLines(report, verdict),
-        ...collectTestAgentBrowserActionEffectLines(report, verdict),
-        ...collectTestAgentBrowserRecoveryLines(report, verdict),
-        ...collectTestAgentAdversarialEvidenceLines(report, verdict),
-        ...collectTestAgentBrowserMultiSessionLines(report, verdict),
-        ...collectTestAgentBrowserFlowLines(report, verdict),
-        ...collectTestAgentBrowserUploadLines(report, verdict),
-        ...collectTestAgentBrowserDownloadLines(report),
-        ...collectTestAgentBrowserTableLines(report, verdict),
-        ...collectTestAgentBrowserInteractionLines(report, verdict),
-        ...collectTestAgentBrowserNetworkLines(report, verdict),
-    ]).slice(0, 16);
+    return require("./collaboration-test-agent-runtime").collectTestAgentBrowserEvidenceSummaryLines(report, verdict);
 }
 function collectTestAgentVerificationLines(report, verdict = resolveTestAgentDecisionVerdict(report)) {
     return uniqueStrings([
@@ -19430,427 +14998,28 @@ function getTestAgentReviewedFiles(workOrder, report) {
     ]).slice(0, 40);
 }
 function buildNativeTestAgentReceipt(targetName, report, handoff = null, workOrder = null, invocationResult = null) {
-    const artifactVerdict = invocationResult?.verdict || readTestAgentVerdictArtifact(report);
-    const verdict = resolveTestAgentDecisionVerdict(report, artifactVerdict);
-    const reviewSubject = String(handoff?.review_subject || report.metadata?.reviewSubject || report.metadata?.review_subject || "").trim();
-    const verification = collectTestAgentVerificationLines(report, verdict);
-    const evidence = collectTestAgentEvidenceLines(report);
-    const verdictGaps = collectTestAgentVerdictGapLines(verdict);
-    const verdictNextActions = collectTestAgentVerdictNextActions(verdict);
-    const failureSummaryLines = collectTestAgentFailureSummaryLines(report, verdict);
-    const failureDiagnosticLines = collectTestAgentFailureDiagnosticLines(report, verdict);
-    const multiSessionBrowser = (0, test_agent_review_bridge_1.summarizeTestAgentMultiSessionBrowser)(report, verdict);
-    const browserAuthentication = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserAuthentication)(report, verdict);
-    const browserActionEffects = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserActionEffects)(report, verdict);
-    const browserRecovery = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserRecovery)(report, verdict);
-    const adversarialEvidence = (0, test_agent_review_bridge_1.summarizeTestAgentAdversarialEvidence)(report, verdict);
-    const reviewedFiles = getTestAgentReviewedFiles(workOrder || handoff?.work_order, report);
-    const status = testAgentDecisionReceiptStatus(report, verdict);
-    const decisionSummary = `TestAgent 独立复核裁决：${testAgentDecisionLabel(report, verdict)}。`;
-    const blockers = uniqueStrings([
-        ...failureSummaryLines,
-        ...(browserAuthentication?.failedLines || []),
-        ...(browserAuthentication?.incompleteLines || []),
-        ...(browserActionEffects?.failedLines || []),
-        ...(browserActionEffects?.recheckLines || []),
-        ...(browserRecovery?.recheckLines || []),
-        ...(adversarialEvidence?.failedLines || []),
-        ...(adversarialEvidence?.recheckLines || []),
-        ...(adversarialEvidence?.blockedLines || []),
-        ...(multiSessionBrowser?.failedLines || []),
-        ...(multiSessionBrowser?.incompleteLines || []),
-        ...verdictGaps,
-        ...(Array.isArray(verdict?.blockedReasons) ? verdict.blockedReasons : []),
-        ...(Array.isArray(report.blockedReasons) ? report.blockedReasons : []),
-        ...((status === "failed" || verdict?.needsRework === true) ? (Array.isArray(verdict?.risks) ? verdict.risks : []) : []),
-        ...((status === "failed" || verdict?.needsRework === true) ? (Array.isArray(report.risks) ? report.risks : []) : []),
-    ]).slice(0, 12);
-    const needs = status === "done"
-        ? []
-        : uniqueStrings([
-            verdict?.needsRecheck
-                ? "我会先补齐复核工作单或可观察证据，并安排 TestAgent 重新复验"
-                : verdict?.needsEnvironment
-                    ? "我会先补齐环境、登录或运行条件，再继续 TestAgent 复核"
-                    : "我会根据 TestAgent 复核结果决定是否返工原实现成员",
-            ...failureDiagnosticLines,
-            ...verdictNextActions,
-            ...(verdict?.needsRecheck ? ["需要补齐复核证据并重新运行 TestAgent，不会直接要求原实现成员返工"] : []),
-            ...(verdict?.needsEnvironment ? ["需要先补齐环境、登录或运行条件，再继续 TestAgent 复核"] : []),
-            ...(verdict?.needsHuman && !verdict?.needsRecheck && !verdict?.needsEnvironment
-                ? ["需要用户或人工确认 TestAgent 标记的问题"]
-                : []),
-            ...(Array.isArray(report.risks) ? report.risks : []),
-        ]).slice(0, 12);
-    return {
-        ccm_receipt: true,
-        agent: targetName || "test-agent",
-        status,
-        summary: decisionSummary,
-        actions: uniqueStrings([
-            `按 TestAgent 原生工作单复核${reviewSubject ? ` ${reviewSubject}` : "原实现成员"} 的交付证据`,
-            verification.length ? `执行/核对 ${verification.length} 项验证证据` : "",
-            verdict ? `${artifactVerdict ? "读取" : "根据报告形成"} TestAgent 裁决：${testAgentDecisionLabel(report, verdict)}` : "",
-            ...verdictNextActions,
-            reviewedFiles.length ? `核对 ${reviewedFiles.length} 个改动文件` : "",
-        ]),
-        filesChanged: [],
-        verification,
-        blockers,
-        needs,
-        independentReview: [{
-                reviewer: targetName || "test-agent",
-                verdict: testAgentDecisionReviewVerdict(report, verdict),
-                summary: decisionSummary,
-                evidence: uniqueStrings([
-                    ...(browserAuthentication?.evidenceLines || []),
-                    ...(browserActionEffects?.evidenceLines || []),
-                    ...(browserRecovery?.evidenceLines || []),
-                    ...(adversarialEvidence?.evidenceLines || []),
-                    ...(multiSessionBrowser?.evidenceLines || []),
-                    ...failureSummaryLines,
-                    ...failureDiagnosticLines,
-                    ...verdictGaps,
-                    ...evidence,
-                    ...verification,
-                    ...reviewedFiles,
-                ]).slice(0, 30),
-                reviewSubject,
-                workOrderId: report.workOrderId,
-                reportId: report.id,
-                artifactDir: report.artifactDir,
-            }],
-        reviewer: targetName || "test-agent",
-        role: "independent_verifier",
-        testAgentReport: {
-            schema: report.schema,
-            id: report.id,
-            workOrderId: report.workOrderId,
-            status: report.status,
-            recommendation: report.recommendation,
-            artifactDir: report.artifactDir,
-            artifactFiles: report.metadata?.artifactFiles || null,
-            verdict: compactTestAgentVerdict(verdict),
-            failureSummary: report.failureSummary || [],
-            requiredChecks: report.requiredChecks,
-            requiredCheckSummary: verdict?.requiredCheckSummary || null,
-            acceptanceSummary: verdict?.acceptanceSummary || null,
-            browserFlowSummary: verdict?.browserFlowSummary || report.browserFlowSummary || null,
-            browserMultiSessionSummary: verdict?.browserMultiSessionSummary || report.browserMultiSessionSummary || null,
-            browserAuthenticationSummary: verdict?.browserAuthenticationSummary
-                || (0, test_agent_review_bridge_1.compactTestAgentBrowserAuthenticationSummary)(browserAuthentication),
-            browserActionEffectSummary: verdict?.browserActionEffectSummary || report.browserActionEffectSummary || null,
-            browserRecoverySummary: verdict?.browserRecoverySummary || report.browserRecoverySummary || null,
-            adversarialEvidenceSummary: verdict?.adversarialEvidenceSummary || report.adversarialEvidenceSummary || null,
-            acceptanceCoverage: report.acceptanceCoverage,
-            requiredCheckCoverage: report.requiredCheckCoverage,
-        },
-    };
+    return require("./collaboration-acceptance").buildNativeTestAgentReceipt(targetName, report, handoff, workOrder, invocationResult);
 }
 function buildNativeTestAgentReviewSummary(targetName, report, receipt) {
-    const verdict = receipt?.testAgentReport?.verdict || resolveTestAgentDecisionVerdict(report);
-    const postReviewSpotCheck = receipt?.post_review_spot_check || receipt?.postReviewSpotCheck || null;
-    const postReviewSpotCheckSummary = receipt?.post_review_spot_check_summary
-        || receipt?.postReviewSpotCheckSummary
-        || (0, post_review_spot_check_1.buildPostReviewSpotCheckSummary)(postReviewSpotCheck);
-    const spotCheckNeedsRecheck = postReviewSpotCheck?.required === true && postReviewSpotCheck?.pass !== true;
-    const reviewer = isCoordinatorTestAgentName(targetName) ? "TestAgent" : (0, display_1.sanitizeMainAgentUserText)(targetName, "TestAgent", 60);
-    const browserFlows = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserFlows)(report, verdict);
-    const multiSessionBrowser = (0, test_agent_review_bridge_1.summarizeTestAgentMultiSessionBrowser)(report, verdict);
-    const browserAuthentication = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserAuthentication)(report, verdict);
-    const browserActionEffects = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserActionEffects)(report, verdict);
-    const browserRecovery = (0, test_agent_review_bridge_1.summarizeTestAgentBrowserRecovery)(report, verdict);
-    const adversarialEvidence = (0, test_agent_review_bridge_1.summarizeTestAgentAdversarialEvidence)(report, verdict);
-    const implementationRework = receipt?.status === "failed"
-        || verdict?.needsRework === true
-        || !!browserActionEffects?.failedLines.length
-        || !!adversarialEvidence?.failedLines.length;
-    const evidenceRecheck = !implementationRework && (spotCheckNeedsRecheck
-        || verdict?.needsRecheck === true
-        || !!browserActionEffects?.recheckLines.length
-        || !!browserRecovery?.recheckLines.length
-        || !!adversarialEvidence?.recheckLines.length);
-    const environmentBlocked = !implementationRework && !evidenceRecheck && (verdict?.needsEnvironment === true
-        || !!adversarialEvidence?.blockedLines.length);
-    const status = receipt?.status === "done" && !spotCheckNeedsRecheck
-        ? "passed"
-        : implementationRework
-            ? "needs_rework"
-            : evidenceRecheck
-                ? "needs_recheck"
-                : "needs_user";
-    const failureLines = collectTestAgentFailureSummaryLines(report, verdict);
-    const diagnosticLines = collectTestAgentFailureDiagnosticLines(report, verdict);
-    const gapLines = collectTestAgentVerdictGapLines(verdict);
-    const statusLabel = status === "passed"
-        ? "已通过"
-        : status === "needs_recheck"
-            ? "需复验"
-            : status === "needs_rework"
-                ? "需返工"
-                : environmentBlocked
-                    ? "补条件"
-                    : "等你确认";
-    const gapPrefix = status === "needs_rework" ? "待返工" : status === "needs_recheck" ? "待复验" : environmentBlocked ? "待补条件" : "待确认";
-    const rows = uniqueStrings([
-        `${reviewer}：${statusLabel}`,
-        ...(Array.isArray(postReviewSpotCheckSummary?.rows) ? postReviewSpotCheckSummary.rows : []),
-        ...(browserAuthentication?.evidenceLines || []),
-        ...(browserActionEffects?.evidenceLines || []),
-        ...(browserRecovery?.evidenceLines || []),
-        ...(adversarialEvidence?.evidenceLines || []),
-        ...(multiSessionBrowser?.evidenceLines || []),
-        ...(browserFlows?.evidenceLines || []),
-        ...failureLines.map(item => `返工重点：${item}`),
-        ...diagnosticLines.map(item => `排查建议：${item}`),
-        ...gapLines.map(item => `${gapPrefix}：${item}`),
-    ])
-        .map(item => (0, display_1.sanitizeMainAgentUserText)(item, "复核结论已整理。", 220))
-        .slice(0, 16);
-    return {
-        schema: "ccm-main-agent-independent-review-summary-v1",
-        title: "独立复核",
-        status,
-        status_label: statusLabel,
-        headline: status === "passed"
-            ? postReviewSpotCheck?.pass === true
-                ? "TestAgent 已完成独立复核，我的关键验证抽查也已通过。"
-                : "TestAgent 已完成独立复核，我会继续核对整体交付并给出最终总结。"
-            : status === "needs_rework"
-                ? "TestAgent 发现未通过项，我会先安排原实现成员返工，再重新验收。"
-                : status === "needs_recheck"
-                    ? spotCheckNeedsRecheck
-                        ? "TestAgent 已通过，但我的完成前抽查尚未一致，我会先重新复验。"
-                        : "TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验，不会误走代码返工路线。"
-                    : environmentBlocked
-                        ? "TestAgent 的复核受环境或登录条件阻塞，我会先补齐条件再继续验收。"
-                        : "TestAgent 还有无法确认的验收项，我会先暂停最终验收。",
-        rows,
-        next_action: status === "passed"
-            ? "继续核对改动、验证证据和验收条件。"
-            : status === "needs_rework"
-                ? "先让原实现成员修复失败点；返工完成后，我会自动沿用原工作单重新运行 TestAgent 复核。"
-                : status === "needs_recheck"
-                    ? spotCheckNeedsRecheck
-                        ? "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。"
-                        : "补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。"
-                    : environmentBlocked
-                        ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核和最终验收。"
-                        : "先补齐受阻或待确认的验证条件，再继续最终验收。",
-        display_policy: {
-            user_text_first: true,
-            technical_default_collapsed: true,
-            hide_internal_protocols: true,
-            show_for_ordinary_conversation: false,
-        },
-    };
+    return require("./collaboration-test-agent-runtime").buildNativeTestAgentReviewSummary(targetName, report, receipt);
 }
 function formatNativeTestAgentOutput(targetName, report, receipt, handoff = null) {
-    const reviewSubject = String(handoff?.review_subject || report.metadata?.reviewSubject || "").trim();
-    const verification = Array.isArray(receipt.verification) ? receipt.verification : [];
-    const blockers = Array.isArray(receipt.blockers) ? receipt.blockers : [];
-    const needs = Array.isArray(receipt.needs) ? receipt.needs : [];
-    const verdict = receipt?.testAgentReport?.verdict || null;
-    const verdictGaps = collectTestAgentVerdictGapLines(verdict);
-    const browserEvidence = collectTestAgentBrowserEvidenceSummaryLines(report, verdict);
-    const failureSummaryLines = collectTestAgentFailureSummaryLines(report, verdict);
-    const failureDiagnosticLines = collectTestAgentFailureDiagnosticLines(report, verdict);
-    const postReviewSpotCheckSummary = receipt?.post_review_spot_check_summary
-        || receipt?.postReviewSpotCheckSummary
-        || (0, post_review_spot_check_1.buildPostReviewSpotCheckSummary)(receipt?.post_review_spot_check || receipt?.postReviewSpotCheck);
-    const artifactFiles = report.metadata?.artifactFiles || {};
-    const artifactLabels = uniqueStrings([
-        report.artifactDir ? "报告目录" : "",
-        artifactFiles.reportJsonPath ? "JSON 报告" : "",
-        artifactFiles.reportMarkdownPath ? "Markdown 报告" : "",
-        artifactFiles.verdictJsonPath ? "复核结论" : "",
-        artifactFiles.manifestPath ? "证据清单" : "",
-    ]);
-    const visibleRecommendation = verdict?.needsRecheck
-        ? "重新复验"
-        : verdict?.needsEnvironment
-            ? "补齐环境条件"
-            : testAgentRecommendationLabel(verdict?.recommendation || report.recommendation);
-    const lines = [
-        `TestAgent 独立复核完成：${testAgentVisibleReviewSummary(report, verdict)}`,
-        reviewSubject ? `- 复核对象：${reviewSubject}` : "",
-        `- 结论：${testAgentStatusLabel(verdict?.status || report.status)}；建议：${visibleRecommendation}`,
-        `- 复核裁决：${testAgentDecisionLabel(report, verdict)}`,
-        postReviewSpotCheckSummary?.headline ? `- 完成前抽查：${postReviewSpotCheckSummary.headline}` : "",
-        verification.length ? `- 验证证据：${verification.slice(0, 6).join("；")}` : "- 验证证据：没有可执行验证，已标记为待补齐。",
-        browserEvidence.length ? `- 浏览器证据：${browserEvidence.slice(0, 16).join("；")}` : "",
-        failureSummaryLines.length ? `- 返工重点：${failureSummaryLines.slice(0, 4).join("；")}` : "",
-        failureDiagnosticLines.length ? `- 排查建议：${failureDiagnosticLines.slice(0, 3).join("；")}` : "",
-        verdictGaps.length ? `- 待补齐项：${verdictGaps.slice(0, 4).join("；")}` : "",
-        blockers.length ? `- 阻塞/风险：${blockers.slice(0, 5).join("；")}` : "- 阻塞/风险：未发现阻塞项。",
-        needs.length ? `- 下一步：${needs.slice(0, 5).join("；")}` : "",
-        artifactLabels.length ? `- 证据归档：${artifactLabels.join("、")}已放入技术详情。` : "- 证据归档：复核证据已放入技术详情。",
-        "",
-        "CCM_AGENT_RECEIPT",
-        "```json",
-        JSON.stringify(receipt, null, 2),
-        "```",
-    ];
-    return lines.filter(Boolean).join("\n");
+    return require("./collaboration-test-agent-runtime").formatNativeTestAgentOutput(targetName, report, receipt, handoff);
 }
 function summarizeNativeTestAgentExecutionPlan(plan) {
-    const summary = plan?.summary || {};
-    const parts = [
-        `${Number(summary.projects || 0)} 个项目`,
-        `${Number(summary.commands || 0)} 个命令`,
-        `${Number(summary.httpChecks || 0) + Number(summary.adversarialHttpChecks || 0)} 个 HTTP 检查`,
-        `${Number(summary.browserChecks || 0)} 个浏览器检查`,
-        Number(summary.browserSessionSteps || 0) ? `${Number(summary.browserSessionSteps)} 个跨会话步骤` : "",
-        Number(summary.browserParallelGroups || 0) ? `${Number(summary.browserParallelGroups)} 组并行动作` : "",
-    ].filter(Boolean);
-    const artifacts = Array.isArray(summary.expectedArtifactTypes) ? summary.expectedArtifactTypes : [];
-    return [
-        `TestAgent 复核计划：${parts.join("，")}`,
-        artifacts.length ? `预期证据：${artifacts.slice(0, 8).map(testAgentEvidenceTypeLabel).join("、")}` : "",
-    ].filter(Boolean).join("；");
+    return require("./collaboration-test-agent-runtime").summarizeNativeTestAgentExecutionPlan(plan);
 }
 function buildNativeTestAgentPlanBlockedReceipt(targetName, plan, dispatch = null, handoff = null) {
-    const issues = Array.isArray(plan?.issues) ? plan.issues : [];
-    const errors = issues.filter((item) => item?.severity === "error");
-    const reviewSubject = String(handoff?.review_subject || plan?.metadata?.normalizedWorkOrder?.metadata?.reviewSubject || "").trim();
-    const blockers = uniqueStrings([
-        ...(errors.length ? errors : issues).map((item) => `${item.code || "plan_issue"}${item.project ? ` (${item.project})` : ""}: ${item.message || "TestAgent 工作单预检未通过"}`),
-        dispatch?.stderr ? (0, memory_1.compactMemoryText)(dispatch.stderr, 500) : "",
-        dispatch?.error ? String(dispatch.error) : "",
-    ]).slice(0, 12);
-    return {
-        ccm_receipt: true,
-        agent: targetName || "test-agent",
-        status: "blocked",
-        summary: "TestAgent 复核计划预检未通过，需要主 Agent 修复交接工作单后再执行。",
-        actions: ["调用 TestAgent CLI --plan-only 预检工作单", "阻止启动真实复核，避免无效或昂贵验证"],
-        filesChanged: [],
-        verification: [],
-        blockers: blockers.length ? blockers : ["TestAgent 工作单预检未通过"],
-        needs: ["修复 TestAgent handoff/work order 后重新派发独立复核"],
-        independentReview: [{
-                reviewer: targetName || "test-agent",
-                verdict: "blocked",
-                summary: "TestAgent 尚未执行复核；工作单预检未通过。",
-                evidence: blockers.slice(0, 10),
-                reviewSubject,
-                workOrderId: plan?.workOrderId || "",
-                artifactDir: plan?.artifactDir || "",
-            }],
-        reviewer: targetName || "test-agent",
-        role: "independent_verifier",
-    };
+    return require("./collaboration-acceptance").buildNativeTestAgentPlanBlockedReceipt(targetName, plan, dispatch, handoff);
 }
 function formatNativeTestAgentPlanBlockedOutput(targetName, plan, receipt, handoff = null) {
-    const reviewSubject = String(handoff?.review_subject || "").trim();
-    const blockers = Array.isArray(receipt.blockers) ? receipt.blockers : [];
-    return [
-        `TestAgent 复核计划未通过：${receipt.summary}`,
-        reviewSubject ? `- 复核对象：${reviewSubject}` : "",
-        plan?.schema ? `- 计划状态：${plan.valid ? "可执行" : "需要修复后再执行"}` : "",
-        blockers.length ? `- 需要修复：${blockers.slice(0, 5).join("；")}` : "",
-        "",
-        "CCM_AGENT_RECEIPT",
-        "```json",
-        JSON.stringify(receipt, null, 2),
-        "```",
-    ].filter(Boolean).join("\n");
+    return require("./collaboration-test-agent-runtime").formatNativeTestAgentPlanBlockedOutput(targetName, plan, receipt, handoff);
 }
 function buildNativeTestAgentRuntimeToolContext(targetName, workDir) {
-    const audit = {
-        runtime: "test-agent-native",
-        mode: "native-test-agent-runner",
-        isolation: "verification-only",
-        snapshotId: "",
-        snapshotPath: "",
-        mcpConfigPath: "",
-        skillRoot: "",
-        requested: { mcp: [], skill: [] },
-        synced: { mcp: [], skill: [] },
-        missing: { mcp: [], skill: [] },
-        mcp_statuses: [],
-        skill_statuses: [],
-        permission_rules: [],
-        invoked_skills: [],
-        authorization_readiness: { dispatchReady: true, mode: "native_test_agent" },
-        dispatch_gate: { dispatchReady: true, reason: "TestAgent CLI 边界不需要第三方 Agent 工具注入" },
-        catalogRevision: "",
-        warnings: [],
-        errors: [],
-        reusedSnapshot: false,
-        timestamp: new Date().toISOString(),
-        workDir,
-    };
-    return {
-        audit,
-        dispatchGate: audit.dispatch_gate,
-        dispatchBlocked: false,
-        prompt: "",
-        workEvent: {
-            id: "we" + Date.now().toString(36) + crypto.randomBytes(2).toString("hex"),
-            time: new Date().toISOString(),
-            agent: targetName,
-            kind: "tool",
-            text: `${targetName} 使用 TestAgent CLI 执行独立复核`,
-            runtimeToolSync: audit,
-        },
-    };
+    return require("./collaboration-test-agent-runtime").buildNativeTestAgentRuntimeToolContext(targetName, workDir);
 }
 function buildCoordinatorReworkContinuationFallback(input) {
-    const route = input.reworkRoute || getMentionReworkRoute(input.mention);
-    if (!route)
-        return null;
-    const mention = input.mention || {};
-    const sourceTask = input.sourceTask || {};
-    const requiresStop = coordinatorReworkRouteRequiresStop(route);
-    const requiresFreshVerifier = coordinatorReworkRouteNeedsFreshVerifier(route);
-    const usesVerifier = coordinatorReworkRouteUsesVerifier(route);
-    const reviewSubject = String(mention.reviewSubject || mention.review_subject || mention.originalTarget || mention.original_target || mention.continuationOf || mention.continuation_of || "").trim();
-    const reason = (0, memory_1.compactMemoryText)(mention.reason || route.reason || mention.summary || mention.message || mention.task || "", 900);
-    const previous = mention.previousLedger || {};
-    const preserved = uniqueStrings([
-        previous.summary ? `上一轮结果：${(0, memory_1.compactMemoryText)(previous.summary, 220)}` : "",
-        ...(Array.isArray(previous.filesChanged) ? previous.filesChanged.slice(0, 5).map((item) => `已有文件证据：${(0, memory_1.compactMemoryText)(item, 180)}`) : []),
-        ...(Array.isArray(previous.verification) ? previous.verification.slice(0, 4).map((item) => `已有验证证据：${(0, memory_1.compactMemoryText)(item, 180)}`) : []),
-        input.stopResult?.matched !== undefined ? `旧方向停止结果：匹配 ${input.stopResult.matched || 0} 个运行，终止 ${input.stopResult.killed || 0} 个进程` : "",
-    ]);
-    const instructions = uniqueStrings([
-        requiresStop ? "先确认旧方向已经停止或不再采用；本轮只按修正后的目标执行。" : "",
-        usesVerifier ? `本轮使用独立验证视角，重新核对${reviewSubject ? ` ${reviewSubject} 的` : ""}目标覆盖、关键风险和最新证据，不要替原实现者补写结论。` : "",
-        !requiresStop && !usesVerifier ? "承接上一轮上下文，只处理主 Agent 点名的返工缺口。" : "",
-        reason ? `本轮返工原因：${reason}` : "",
-        "完成后说明本轮覆盖了哪些缺口、实际动作、文件变化、验证结果和剩余风险。",
-    ]);
-    const avoid = uniqueStrings([
-        requiresStop ? "继续旧方向或旧方案中的已废弃实现" : "",
-        usesVerifier ? "复用上一轮结论而不重新执行、观察和核对最新证据" : "",
-        "把未运行的验证写成已通过",
-    ]);
-    return {
-        schema: "ccm-worker-continuation-handoff-v1",
-        kind: requiresStop ? "revise_goal" : usesVerifier ? "independent_review" : "rework",
-        kind_label: requiresStop ? "方向修正" : usesVerifier ? "独立复验" : "返工补证据",
-        route_label: route.user_label || route.userLabel || "继续处理缺口",
-        target: input.targetName,
-        latest_user_change: reason,
-        current_goal: (0, memory_1.compactMemoryText)(sourceTask.business_goal || sourceTask.businessGoal || sourceTask.title || mention.message || mention.task || "", 1000),
-        previous_goal: requiresStop ? (0, memory_1.compactMemoryText)(previous.summary || sourceTask.title || "", 700) : "",
-        replan_required: requiresStop,
-        interrupt_current_run: requiresStop,
-        interruption_status: requiresStop ? "stopped_and_ready_to_replan" : "",
-        instructions,
-        preserved_context: preserved,
-        avoid,
-        technical: {
-            route_schema: route.schema || "",
-            route_strategy: route.strategy || "",
-            continuation_strategy: route.continuationStrategy || route.continuation_strategy || "",
-            review_subject: reviewSubject,
-            verifier_selection: mention.verifierSelection || mention.verifier_selection || null,
-            stop_matched: Number(input.stopResult?.matched || 0),
-            stop_killed: Number(input.stopResult?.killed || 0),
-        },
-    };
+    return require("./collaboration-test-agent-runtime").buildCoordinatorReworkContinuationFallback(input);
 }
 function stopWrongDirectionWorkerForCoordinatorRoute(input) {
     if (!input.taskId || !coordinatorReworkRouteRequiresStop(input.route))
@@ -19900,1827 +15069,17 @@ function stopWrongDirectionWorkerForCoordinatorRoute(input) {
     return result;
 }
 function buildCoordinatorReworkFollowUp(item, input) {
-    const originalTarget = String(item?.targetName || item?.project || "").trim();
-    const previousLedger = (0, memory_1.findLatestWorkerLedger)(input.memorySnapshot, originalTarget);
-    const reworkRoute = buildCoordinatorReworkRoutingDecision(item, {
-        previousLedger,
-        userMessage: input.userMessage,
-        coordinatorOutput: input.coordinatorOutput,
-    });
-    const needsFreshVerifier = coordinatorReworkRouteNeedsFreshVerifier(reworkRoute);
-    const verifierSelection = needsFreshVerifier
-        ? selectCoordinatorIndependentVerifier(input.group, originalTarget)
-        : null;
-    const dispatchBlocked = needsFreshVerifier && !verifierSelection?.available;
-    const dispatchTarget = needsFreshVerifier && verifierSelection?.available
-        ? String(verifierSelection.targetName || "").trim()
-        : originalTarget;
-    const reviewSubject = needsFreshVerifier
-        ? originalTarget
-        : String(item?.reviewSubject || item?.originalTarget || item?.continuationOf || "").trim();
-    const sourceTask = input.sourceTask || (input.taskId ? (0, db_1.loadTasks)().find((task) => String(task.id || "") === String(input.taskId)) : null);
-    const effectiveItem = {
-        ...item,
-        mention: dispatchTarget ? `@${dispatchTarget}` : item?.mention,
-        targetName: dispatchTarget,
-        project: dispatchTarget,
-        originalTarget,
-        reviewSubject,
-        verifierSelection,
-    };
-    const carriedTestAgentHandoff = item?.testAgentHandoff || item?.test_agent_handoff || null;
-    const testAgentHandoff = carriedTestAgentHandoff || (needsFreshVerifier
-        ? buildCoordinatorTestAgentHandoff(effectiveItem, {
-            group: input.group,
-            sourceTask,
-            taskId: input.taskId,
-            previousLedger,
-            reworkRoute,
-            userMessage: input.userMessage,
-            coordinatorOutput: input.coordinatorOutput,
-        })
-        : null);
-    if (testAgentHandoff) {
-        effectiveItem.testAgentHandoff = testAgentHandoff;
-        effectiveItem.test_agent_handoff = testAgentHandoff;
-        effectiveItem.testAgentHandoffWarnings = testAgentHandoff.warnings || [];
-        effectiveItem.test_agent_handoff_warnings = testAgentHandoff.warnings || [];
-    }
-    const explicitUserTaskPreview = (0, display_1.sanitizeMainAgentUserText)(item?.userTaskPreview || item?.user_task_preview || "", "", 120);
-    const userTaskPreview = dispatchBlocked
-        ? [
-            "缺少独立验证 Agent，需要配置 test agent/QA Agent",
-            (0, display_1.sanitizeMainAgentUserText)(item?.summary || item?.reason || item?.message || item?.task || "", "需要独立复核交付证据", 90),
-        ].filter(Boolean).join("：")
-        : needsFreshVerifier
-            ? `派独立验证 Agent 复核：复核 ${originalTarget || "原实现 Agent"} 的交付证据`
-            : explicitUserTaskPreview || [
-                reworkRoute.user_label || "继续补齐缺口",
-                (0, display_1.sanitizeMainAgentUserText)(item?.summary || item?.reason || item?.message || item?.task || "", "补齐结果说明和验证证据", 90),
-            ].filter(Boolean).join("：");
-    const message = dispatchBlocked ? "" : buildCoordinatorReworkTask(effectiveItem, {
-        userMessage: input.userMessage,
-        coordinatorOutput: input.coordinatorOutput,
-        round: input.round,
-        maxRounds: input.maxRounds,
-        previousLedger,
-        reworkRoute,
-    });
-    return {
-        ...effectiveItem,
-        continuationOf: reviewSubject || originalTarget || dispatchTarget,
-        continuationStrategy: reworkRoute.continuationStrategy || "same_worker_scratchpad",
-        reworkRoute,
-        routing: reworkRoute,
-        previousLedger,
-        dispatchBlocked,
-        verifierSelection,
-        userTaskPreview,
-        message,
-        testAgentHandoff,
-        test_agent_handoff: testAgentHandoff,
-        testAgentHandoffWarnings: testAgentHandoff?.warnings || [],
-        test_agent_handoff_warnings: testAgentHandoff?.warnings || [],
-    };
+    return require("./collaboration-test-agent-runtime").buildCoordinatorReworkFollowUp(item, input);
 }
 function buildCoordinatorReworkTask(item, input) {
-    const project = String(item?.targetName || item?.project || "").trim();
-    const rawTask = String(item?.message || item?.task || "").trim();
-    const reason = String(item?.reason || "主 Agent 复盘发现仍缺少可验收证据").trim();
-    const visibleSummary = (0, display_1.sanitizeMainAgentUserText)(item?.summary || reason || rawTask, "补齐结果说明和验证证据", 80);
-    if (/主 Agent 返工工作单|返工轮次|必须再次提交 CCM_AGENT_RECEIPT/i.test(rawTask))
-        return rawTask;
-    const previous = input.previousLedger || item?.previousLedger || null;
-    const previousSummary = previous ? [
-        previous.summary ? `摘要：${(0, memory_1.compactMemoryText)(previous.summary, 260)}` : "",
-        previous.filesChanged?.length ? `文件：${previous.filesChanged.slice(0, 8).join("、")}` : "",
-        previous.verification?.length ? `验证：${previous.verification.slice(0, 8).join("、")}` : "",
-        previous.blockers?.length ? `阻塞：${previous.blockers.slice(0, 8).join("、")}` : "",
-        previous.needs?.length ? `需要：${previous.needs.slice(0, 8).join("、")}` : "",
-    ].filter(Boolean).join("；") : "";
-    const reworkRoute = input.reworkRoute || item?.reworkRoute || buildCoordinatorReworkRoutingDecision(item, { previousLedger: previous });
-    const usesVerifier = coordinatorReworkRouteUsesVerifier(reworkRoute);
-    const reviewSubject = String(item?.reviewSubject || item?.originalTarget || item?.continuationOf || "").trim();
-    const hasTestAgentHandoff = !!(item?.testAgentHandoff || item?.test_agent_handoff || item?.testAgentWorkOrder || item?.test_agent_work_order);
-    return [
-        `主 Agent 返工工作单：${project}`,
-        `- 用户可见返工摘要：${visibleSummary}`,
-        `- 返工轮次：第 ${input.round + 1}/${input.maxRounds} 轮执行；这是主 Agent 验收后派发的补充任务。`,
-        `- 返工路由：${reworkRoute.user_label || "继续同一子 Agent 修复"}；${reworkRoute.reason || "按主 Agent 验收缺口继续处理"}`,
-        reviewSubject && usesVerifier ? `- 独立复核对象：${reviewSubject}；需要重新核对目标覆盖、关键风险和最新实际证据。` : "",
-        usesVerifier
-            ? reworkRoute.requires_fresh_verifier
-                ? "- 续跑语义：本轮用于独立验证/复核，请用新的验证视角检查目标覆盖、关键风险和实际证据，不要只复述原实现者结论。"
-                : "- 续跑语义：沿用原 TestAgent 工作单和验收边界，但必须重新执行验证并根据最新真实输出重新判断，不能复用上一轮结论。"
-            : reworkRoute.requires_stop
-                ? "- 续跑语义：先停止沿用旧方向的动作，再按本工作单修正后的目标继续；不要把已废弃方案当作完成内容。"
-                : "- 续跑语义：优先继续同一个子 Agent 的上下文；系统会把该子 Agent 的上一轮完成通知和上下文摘要注入给你。不要从零开始猜测，也不要重复已完成且已验证的工作。",
-        previousSummary ? `- 上一轮执行结果摘要：${previousSummary}` : "- 上一轮执行结果摘要：暂无可用记录；请按本工作单和群聊记忆继续补齐缺口。",
-        `- 原始需求：${(0, memory_1.compactMemoryText)(input.userMessage, 500)}`,
-        `- 初始协调计划摘要：${(0, memory_1.compactMemoryText)(input.coordinatorOutput, 900)}`,
-        `- 返工原因：${reason}`,
-        `- 本次返工任务：${rawTask}`,
-        "- 你的职责：只处理本项目范围内的代码、配置、验证或说明；如果依赖其他 Agent/用户，写清 blockers/needs。",
-        "- 交付要求：补齐主 Agent 点名的缺口，明确实际动作、文件变更、验证结果和剩余风险。",
-        "- 验证要求：实际运行与你补充内容相关的最小必要验证；未运行的只能写成建议，不能伪造成已执行。",
-        hasTestAgentHandoff ? "- TestAgent 原生复核交接单：已生成并随本次派发进入技术上下文；TestAgent 会按该交接单执行独立验证。" : "",
-        "- 回执要求：最后必须再次提交 CCM_AGENT_RECEIPT，status 只有在有证据时才能写 done。",
-    ].filter(Boolean).join("\n");
+    return require("./collaboration-test-agent-runtime").buildCoordinatorReworkTask(item, input);
 }
 function runCoordinatorReworkProtocolSelfTest() {
-    const failedRoute = buildCoordinatorReworkRoutingDecision({
-        project: "web-app",
-        message: "npm test 在 validate.test.ts:58 失败，请修复失败点后重新验证。",
-        reason: "验证失败，需要原子 Agent 带着错误上下文继续处理",
-    }, {
-        previousLedger: { project: "web-app", status: "failed", blockers: ["npm test failed"], verification: ["npm test failed"] },
-    });
-    const independentRoute = buildCoordinatorReworkRoutingDecision({
-        project: "reviewer",
-        message: "请让非原实现者做独立复核，只读检查 OrderDetail.vue 的验收覆盖和风险。",
-        reason: "复杂变更需要独立验证",
-    });
-    const wrongDirectionRoute = buildCoordinatorReworkRoutingDecision({
-        project: "backend-service",
-        message: "用户改成保持 session，不要继续 JWT refactor；请停止旧方向，改为修复 src/auth/validate.ts:42 空指针。",
-        reason: "用户调整目标，旧方案不再适用",
-    }, {
-        previousLedger: { project: "backend-service", status: "running" },
-    });
-    const wrongDirectionContinuation = buildCoordinatorReworkContinuationFallback({
-        reworkRoute: wrongDirectionRoute,
-        mention: {
-            project: "backend-service",
-            message: "停止 JWT refactor，改为修复 src/auth/validate.ts:42 空指针。",
-            reason: "用户调整目标，旧方案不再适用",
-            previousLedger: { summary: "上一轮准备把认证改成 JWT", verification: ["尚未验证"] },
-        },
-        sourceTask: { title: "修复 auth 空指针", business_goal: "保持 session，只修空指针" },
-        targetName: "backend-service",
-        stopResult: { success: true, matched: 1, killed: 1 },
-    });
-    const verifierGroup = {
-        members: [
-            { project: "coordinator", role: "coordinator" },
-            { project: "web-app", role: "frontend" },
-            { project: "test-agent", role: "测试 agent", description: "负责只读复核、测试和验收检查" },
-        ],
-    };
-    const verifierSelection = selectCoordinatorIndependentVerifier(verifierGroup, "web-app");
-    const noVerifierSelection = selectCoordinatorIndependentVerifier({
-        members: [
-            { project: "coordinator", role: "coordinator" },
-            { project: "web-app", role: "frontend" },
-        ],
-    }, "web-app");
-    const nativeVerifierSelection = selectCoordinatorIndependentVerifier({
-        members: [
-            { project: "coordinator", role: "coordinator" },
-            { project: "runtime-project", role: "implementation", workDir: os.tmpdir(), agent: "claudecode" },
-        ],
-    }, "runtime-project");
-    const independentFollowUp = buildCoordinatorReworkFollowUp({
-        project: "web-app",
-        targetName: "web-app",
-        message: "请让非原实现者做独立复核，只读检查 OrderDetail.vue 的验收覆盖和风险。",
-        reason: "复杂变更需要独立验证",
-        summary: "复核订单详情变更",
-    }, {
-        group: verifierGroup,
-        memorySnapshot: {
-            workerLedger: [{
-                    project: "web-app",
-                    status: "done",
-                    receiptStatus: "done",
-                    summary: "已修改 OrderDetail.vue",
-                    filesChanged: ["src/views/OrderDetail.vue"],
-                    verification: ["npm run test:unit passed"],
-                }],
-        },
-        userMessage: "完善订单详情页。",
-        coordinatorOutput: "主 Agent 计划：web-app 修改页面，test-agent 独立复核。",
-        round: 1,
-        maxRounds: 2,
-        taskId: "test-agent-work-order-selftest",
-        sourceTask: {
-            id: "test-agent-work-order-selftest",
-            group_id: "test-agent-work-order-group",
-            title: "完善订单详情页",
-            business_goal: "完善订单详情页并确保复杂变更经过独立复核",
-            acceptance_criteria: "订单详情变更覆盖用户目标；复杂变更必须有独立复核结论",
-            file_changes: {
-                files: [{ project: "web-app", path: "src/views/OrderDetail.vue" }],
-            },
-        },
-    });
-    const independentHandoff = independentFollowUp.test_agent_handoff || independentFollowUp.testAgentHandoff || null;
-    const independentHandoffProject = independentHandoff?.projects?.[0] || null;
-    const independentHandoffAcceptance = Array.isArray(independentHandoff?.acceptanceCriteria)
-        ? independentHandoff.acceptanceCriteria.join("\n")
-        : "";
-    const independentHandoffReviewInstructions = Array.isArray(independentHandoff?.metadata?.reviewInstructions)
-        ? independentHandoff.metadata.reviewInstructions.join("\n")
-        : "";
-    const commandOnlyHandoff = buildCoordinatorTestAgentHandoff({
-        targetName: "test-agent",
-        originalTarget: "runtime-command-only-selftest",
-        reviewSubject: "runtime-command-only-selftest",
-        reason: "主 Agent 必须协调 TestAgent 并在完成后给用户最终总结",
-        message: "基于最新项目状态核对用户目标、改动文件、验证结果和边界风险。",
-    }, {
-        group: {
-            id: "runtime-command-only-group",
-            members: [{ project: "runtime-command-only-selftest", role: "implementation", workDir: os.tmpdir() }],
-        },
-        taskId: "runtime-command-only-task",
-        sourceTask: {
-            id: "runtime-command-only-task",
-            group_id: "runtime-command-only-group",
-            business_goal: "新增静态常量并验证构建结果",
-            acceptance_criteria: "导出的静态常量值符合需求；涉及代码的任务必须提供实际文件变更和已执行的构建或测试证据；完成后必须经过 TestAgent 独立复核；群聊主 Agent 必须验收项目子 Agent 的实际变更和验证证据；主 Agent 必须完成最终总结；项目执行成员必须说明实际动作、文件变化、已执行验证和剩余风险；复核失败先返工再复验",
-        },
-        previousLedger: {
-            project: "runtime-command-only-selftest",
-            verification: [
-                "npm test: node scripts/test.mjs → verified:feature-ok",
-                "npm run build: node scripts/build.mjs → built:feature-output",
-                "主 Agent 已完成协调和总结",
-            ],
-        },
-    });
-    const commandOnlyProject = commandOnlyHandoff?.projects?.[0] || null;
-    const commandOnlyVerificationCommands = Array.isArray(commandOnlyProject?.verificationCommands)
-        ? commandOnlyProject.verificationCommands
-        : [];
-    const commandOnlyAcceptanceCriteria = Array.isArray(commandOnlyHandoff?.acceptanceCriteria)
-        ? commandOnlyHandoff.acceptanceCriteria
-        : [];
-    const commandOnlyCompletedTasks = Array.isArray(commandOnlyHandoff?.completedTasks)
-        ? commandOnlyHandoff.completedTasks
-        : [];
-    const fakeVerdictDir = path.join(os.tmpdir(), `ccm-main-agent-test-agent-verdict-selftest-${process.pid}`);
-    const fakeVerdictPath = path.join(fakeVerdictDir, "verdict.json");
-    const fakeFailedVerdictDir = path.join(os.tmpdir(), `ccm-main-agent-test-agent-failed-verdict-selftest-${process.pid}`);
-    const fakeFailedVerdictPath = path.join(fakeFailedVerdictDir, "verdict.json");
-    const fakeUnknownCoverageDir = path.join(os.tmpdir(), `ccm-main-agent-test-agent-unknown-coverage-selftest-${process.pid}`);
-    const fakeNotVerifiedCoverageDir = path.join(os.tmpdir(), `ccm-main-agent-test-agent-not-verified-coverage-selftest-${process.pid}`);
-    try {
-        fs.mkdirSync(fakeVerdictDir, { recursive: true });
-        fs.writeFileSync(fakeVerdictPath, `${JSON.stringify({
-            schema: "ccm-test-agent-verdict-v1",
-            agent: "test-agent",
-            reportId: "test-agent-report-selftest",
-            workOrderId: independentHandoff?.id || "work-order-selftest",
-            taskId: "test-agent-work-order-selftest",
-            groupId: "test-agent-work-order-group",
-            status: "passed",
-            recommendation: "accept",
-            canAccept: true,
-            needsRework: false,
-            needsHuman: false,
-            summary: "TestAgent verdict accepts the delivery.",
-            failedRequiredChecks: [],
-            unknownRequiredChecks: [],
-            failedAcceptanceCriteria: [],
-            unknownAcceptanceCriteria: [],
-            blockedReasons: [],
-            risks: [],
-            nextActions: [
-                "Accept the delivery if it matches the user-facing goal.",
-                "Keep the TestAgent report and artifact manifest with the task record.",
-            ],
-            evidenceSummary: {
-                commands: { passed: 1 },
-                devServers: {},
-                httpChecks: {},
-                browserChecks: {},
-                browserToolCalls: {},
-                browserNetworkErrors: 0,
-                browserActions: 3,
-                browserFailedActions: 0,
-                browserAssertions: 7,
-                browserFailedAssertions: 0,
-                artifacts: 5,
-            },
-            browserNetworkSummary: [{
-                    project: "web-app",
-                    name: "登录恢复浏览器复核",
-                    provider: "playwright",
-                    status: "passed",
-                    url: "http://127.0.0.1:5173/login",
-                    requestCount: 4,
-                    responseCount: 4,
-                    failedRequestCount: 0,
-                    failedResponseCount: 0,
-                    errorCount: 0,
-                    statusCodes: { "200": 4 },
-                    resourceTypes: { document: 1, fetch: 1, script: 2 },
-                    failureKinds: {},
-                    failedUrls: [],
-                    errors: [],
-                    networkLogPath: "C:/tmp/test-agent-artifacts/selftest/network.log",
-                }],
-            browserInteractionSummary: [{
-                    project: "web-app",
-                    name: "登录恢复浏览器复核",
-                    provider: "playwright",
-                    status: "passed",
-                    url: "http://127.0.0.1:5173/login",
-                    actionCount: 3,
-                    assertionCount: 7,
-                    passedActions: 3,
-                    failedActions: 0,
-                    passedAssertions: 7,
-                    failedAssertions: 0,
-                    actionTypes: { goto: 1, uploadFile: 1, reload: 1 },
-                    assertionTypes: {
-                        pageNotBlank: 1,
-                        downloadedFile: 1,
-                        consoleNoErrors: 1,
-                        networkNoErrors: 1,
-                        tableRowIncludes: 1,
-                        tableCellTextEquals: 1,
-                        tableCellTextIncludes: 1,
-                    },
-                    actionSteps: [{ kind: "action", name: "action:uploadFile", status: "passed", detail: "label=附件; file=notes.txt, meta.json" }],
-                    failedSteps: [],
-                }],
-            keyEvidence: [{ type: "command", project: "web-app", title: "npm test", status: "passed", detail: "exit=0" }],
-            artifacts: {
-                artifactDir: "C:/tmp/test-agent-artifacts/selftest",
-                reportJsonPath: "C:/tmp/test-agent-artifacts/selftest/report.json",
-                reportMarkdownPath: "C:/tmp/test-agent-artifacts/selftest/report.md",
-                verdictJsonPath: fakeVerdictPath,
-                manifestPath: "C:/tmp/test-agent-artifacts/selftest/artifact-manifest.json",
-            },
-            metadata: {},
-        }, null, 2)}\n`, "utf-8");
-        fs.mkdirSync(fakeFailedVerdictDir, { recursive: true });
-        fs.writeFileSync(fakeFailedVerdictPath, `${JSON.stringify({
-            schema: "ccm-test-agent-verdict-v1",
-            agent: "test-agent",
-            reportId: "test-agent-report-failed-selftest",
-            workOrderId: independentHandoff?.id || "work-order-selftest",
-            taskId: "test-agent-work-order-selftest",
-            groupId: "test-agent-work-order-group",
-            status: "failed",
-            recommendation: "rework",
-            canAccept: false,
-            needsRework: true,
-            needsHuman: false,
-            summary: "TestAgent verdict requires rework.",
-            failedRequiredChecks: [{ check: "commands", status: "failed", missingReason: "npm test 未通过" }],
-            unknownRequiredChecks: [],
-            failedAcceptanceCriteria: [{ criterion: "登录恢复验证必须通过", status: "failed", evidence: ["npm test 未通过"] }],
-            unknownAcceptanceCriteria: [],
-            blockedReasons: [],
-            risks: ["命令验证未通过，不能进入最终验收"],
-            nextActions: [
-                "Route the task back to the implementation agent with failed evidence.",
-                "Use failed command, HTTP, browser, and acceptance evidence to guide the fix.",
-                "Run TestAgent again after rework.",
-            ],
-            evidenceSummary: {
-                commands: { failed: 1 },
-                devServers: {},
-                httpChecks: {},
-                browserChecks: { failed: 1 },
-                browserToolCalls: {},
-                browserNetworkErrors: 1,
-                browserActions: 2,
-                browserFailedActions: 0,
-                browserAssertions: 3,
-                browserFailedAssertions: 1,
-                artifacts: 4,
-            },
-            browserNetworkSummary: [{
-                    project: "web-app",
-                    name: "登录恢复浏览器复核",
-                    provider: "playwright",
-                    status: "failed",
-                    url: "http://127.0.0.1:5173/login",
-                    requestCount: 4,
-                    responseCount: 3,
-                    failedRequestCount: 1,
-                    failedResponseCount: 0,
-                    errorCount: 0,
-                    statusCodes: { "200": 3 },
-                    resourceTypes: { document: 1, fetch: 1, script: 2 },
-                    failureKinds: { requestfailed: 1 },
-                    failedUrls: ["http://127.0.0.1:5173/api/session"],
-                    errors: [],
-                    networkLogPath: "C:/tmp/test-agent-artifacts/failed-selftest/network.log",
-                }],
-            browserInteractionSummary: [{
-                    project: "web-app",
-                    name: "登录恢复浏览器复核",
-                    provider: "playwright",
-                    status: "failed",
-                    url: "http://127.0.0.1:5173/login",
-                    actionCount: 2,
-                    assertionCount: 3,
-                    passedActions: 2,
-                    failedActions: 0,
-                    passedAssertions: 2,
-                    failedAssertions: 1,
-                    actionTypes: { goto: 1, reload: 1 },
-                    assertionTypes: { pageNotBlank: 1, networkNoErrors: 1, tableCellTextEquals: 1 },
-                    actionSteps: [],
-                    failedSteps: [{ kind: "assertion", name: "assert:tableCellTextEquals", status: "failed", detail: "table=#orders; row=B-200; column=Status", error: "登录状态未恢复" }],
-                }],
-            failureSummary: [{
-                    type: "browser",
-                    project: "web-app",
-                    title: "登录恢复浏览器复核",
-                    status: "failed",
-                    reason: "会话请求没有恢复登录态；失败截图在 C:/tmp/test-agent-artifacts/failed-selftest/screenshots/login.failure.png。",
-                    evidence: ["C:/tmp/test-agent-artifacts/failed-selftest/screenshots/login.failure.png"],
-                    nextAction: "先修复会话恢复请求，再重新运行浏览器复核。",
-                    diagnostics: [
-                        "打开失败截图核对页面是否仍停留在登录态。",
-                        "检查浏览器网络日志中的 /api/session 请求。",
-                    ],
-                }],
-            keyEvidence: [{ type: "command", project: "web-app", title: "npm test", status: "failed", detail: "exit=1" }],
-            artifacts: {
-                artifactDir: "C:/tmp/test-agent-artifacts/failed-selftest",
-                reportJsonPath: "C:/tmp/test-agent-artifacts/failed-selftest/report.json",
-                reportMarkdownPath: "C:/tmp/test-agent-artifacts/failed-selftest/report.md",
-                verdictJsonPath: fakeFailedVerdictPath,
-                manifestPath: "C:/tmp/test-agent-artifacts/failed-selftest/artifact-manifest.json",
-            },
-            metadata: {},
-        }, null, 2)}\n`, "utf-8");
-    }
-    catch { }
-    const fakeNativeReport = {
-        schema: "ccm-test-agent-report-v1",
-        agent: "test-agent",
-        id: "test-agent-report-selftest",
-        workOrderId: independentHandoff?.id || "work-order-selftest",
-        taskId: "test-agent-work-order-selftest",
-        groupId: "test-agent-work-order-group",
-        status: "passed",
-        recommendation: "accept",
-        summary: "TestAgent verified command checks and reviewed evidence.",
-        startedAt: "2026-07-08T00:00:00.000Z",
-        finishedAt: "2026-07-08T00:00:01.000Z",
-        durationMs: 1000,
-        artifactDir: "C:/tmp/test-agent-artifacts/selftest",
-        requiredChecks: ["commands"],
-        commandResults: [{
-                project: "web-app",
-                command: "npm test",
-                cwd: "C:/repo/web-app",
-                status: "passed",
-                exitCode: 0,
-                startedAt: "2026-07-08T00:00:00.000Z",
-                finishedAt: "2026-07-08T00:00:01.000Z",
-                durationMs: 1000,
-                stdout: "",
-                stderr: "",
-                output: "",
-            }],
-        devServerResults: [],
-        httpResults: [],
-        browserResults: [{
-                provider: "playwright",
-                project: "web-app",
-                name: "登录恢复浏览器复核",
-                url: "http://127.0.0.1:5173/login",
-                finalUrl: "http://127.0.0.1:5173/dashboard",
-                status: "passed",
-                startedAt: "2026-07-08T00:00:00.000Z",
-                finishedAt: "2026-07-08T00:00:01.000Z",
-                durationMs: 1000,
-                steps: [
-                    { kind: "action", name: "action:goto", status: "passed", detail: "url=/login" },
-                    { kind: "action", name: "action:uploadFile", status: "passed", detail: "label=附件; file=notes.txt, meta.json" },
-                    { kind: "action", name: "action:reload", status: "passed", detail: "url=/dashboard" },
-                    { kind: "assertion", name: "assert:pageNotBlank", status: "passed", detail: "page has visible content" },
-                    { kind: "assertion", name: "assert:downloadedFile", status: "passed", detail: "filename=tasks.csv; contentIncludes=Ship TestAgent; minBytes=20" },
-                    { kind: "assertion", name: "assert:consoleNoErrors", status: "passed", detail: "console clean" },
-                    { kind: "assertion", name: "assert:networkNoErrors", status: "passed", detail: "network clean" },
-                    { kind: "assertion", name: "assert:tableRowIncludes", status: "passed", detail: "table=#orders; row=A-100; expected text count=2" },
-                    { kind: "assertion", name: "assert:tableCellTextEquals", status: "passed", detail: "table=#orders; row=B-200; column=Status" },
-                    { kind: "assertion", name: "assert:tableCellTextIncludes", status: "passed", detail: "table=#orders; row=B-200; column=Total" },
-                ],
-                screenshots: [],
-                consoleErrors: [],
-                pageErrors: [],
-                networkRequests: [],
-                networkErrors: [],
-                browserArtifacts: [{
-                        type: "download",
-                        title: "Download: tasks.csv",
-                        path: "C:/tmp/test-agent-artifacts/selftest/browser-artifacts/downloads/tasks.csv",
-                        source: "playwright:download",
-                        mediaType: "text/csv",
-                    }],
-            }],
-        browserToolCalls: [],
-        browserNetworkSummary: [{
-                project: "web-app",
-                name: "登录恢复浏览器复核",
-                provider: "playwright",
-                status: "passed",
-                url: "http://127.0.0.1:5173/login",
-                finalUrl: "http://127.0.0.1:5173/dashboard",
-                requestCount: 4,
-                responseCount: 4,
-                failedRequestCount: 0,
-                failedResponseCount: 0,
-                errorCount: 0,
-                statusCodes: { "200": 4 },
-                resourceTypes: { document: 1, fetch: 1, script: 2 },
-                failureKinds: {},
-                failedUrls: [],
-                errors: [],
-                networkLogPath: "C:/tmp/test-agent-artifacts/selftest/network.log",
-            }],
-        browserInteractionSummary: [{
-                project: "web-app",
-                name: "登录恢复浏览器复核",
-                provider: "playwright",
-                status: "passed",
-                url: "http://127.0.0.1:5173/login",
-                finalUrl: "http://127.0.0.1:5173/dashboard",
-                actionCount: 3,
-                assertionCount: 7,
-                passedActions: 3,
-                failedActions: 0,
-                passedAssertions: 7,
-                failedAssertions: 0,
-                actionTypes: { goto: 1, uploadFile: 1, reload: 1 },
-                assertionTypes: {
-                    pageNotBlank: 1,
-                    downloadedFile: 1,
-                    consoleNoErrors: 1,
-                    networkNoErrors: 1,
-                    tableRowIncludes: 1,
-                    tableCellTextEquals: 1,
-                    tableCellTextIncludes: 1,
-                },
-                actionSteps: [{ kind: "action", name: "action:uploadFile", status: "passed", detail: "label=附件; file=notes.txt, meta.json" }],
-                failedSteps: [],
-            }],
-        browserFlowSummary: {
-            total: 1,
-            statusCounts: { passed: 1, failed: 0, blocked: 0, skipped: 0 },
-            flowTypeCount: 1,
-            criteriaCount: 1,
-            actionCount: 3,
-            assertionCount: 7,
-            failedStepCount: 0,
-            items: [{
-                    flowType: "acceptance_form_flow",
-                    total: 1,
-                    statusCounts: { passed: 1, failed: 0, blocked: 0, skipped: 0 },
-                    criteriaCount: 1,
-                    criteria: ["登录恢复后进入工作台"],
-                    projects: ["web-app"],
-                    providers: ["playwright"],
-                    actionCount: 3,
-                    assertionCount: 7,
-                    failedStepCount: 0,
-                    failures: [],
-                }],
-        },
-        browserMultiSessionSummary: {
-            total: 2,
-            statusCounts: { passed: 2, failed: 0, blocked: 0, skipped: 0 },
-            sessionCount: 4,
-            uniqueSessionCount: 4,
-            sessionNames: ["sender", "receiver", "author", "observer"],
-            parallelGroupCount: 2,
-            comparisonCount: 2,
-            failedComparisonCount: 0,
-            actionCount: 7,
-            assertionCount: 8,
-            failedStepCount: 0,
-            items: [{
-                    check: "发送消息后接收方实时看到",
-                    status: "passed",
-                    sessionNames: ["sender", "receiver"],
-                    failedSessionNames: [],
-                    failedSteps: [],
-                }, {
-                    check: "作者更新后观察方同步刷新",
-                    status: "passed",
-                    sessionNames: ["author", "observer"],
-                    failedSessionNames: [],
-                    failedSteps: [],
-                }],
-        },
-        browserActionEffectSummary: {
-            checks: 1,
-            actions: 1,
-            changed: 1,
-            unchanged: 0,
-            unavailable: 0,
-            failed: 0,
-            detailSuppressed: 0,
-            crossSession: 0,
-            actionTypes: { click: 1 },
-            changedSignals: { url: 0, title: 0, page_text: 1, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
-            items: [{
-                    project: "web-app",
-                    name: "保存登录设置",
-                    provider: "playwright",
-                    status: "passed",
-                    actions: 1,
-                    changed: 1,
-                    unchanged: 0,
-                    unavailable: 0,
-                    failed: 0,
-                    detailSuppressed: 0,
-                    crossSession: 0,
-                    actionTypes: { click: 1 },
-                    changedSignals: { url: 0, title: 0, page_text: 1, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
-                }],
-        },
-        browserRecoverySummary: {
-            checks: 1,
-            attempted: 1,
-            recovered: 1,
-            failed: 0,
-            notRetried: 0,
-            items: [{
-                    project: "web-app",
-                    name: "登录恢复浏览器复核",
-                    provider: "playwright",
-                    status: "passed",
-                    attempted: 1,
-                    recovered: 1,
-                    failed: 0,
-                    notRetried: 0,
-                    events: [],
-                }],
-        },
-        adversarialEvidenceSummary: {
-            required: true,
-            waived: false,
-            status: "verified",
-            total: 1,
-            passed: 1,
-            failed: 0,
-            blocked: 0,
-            skipped: 0,
-            http: 0,
-            browser: 1,
-            relevant: 1,
-            unlinked: 0,
-            passedRelevant: 1,
-            goalLinked: 1,
-            criteriaCovered: ["登录恢复后重复提交不会产生重复副作用"],
-            probeTypes: ["duplicate_submit"],
-            items: [{
-                    project: "web-app",
-                    surface: "browser",
-                    name: "重复提交保护",
-                    target: "http://127.0.0.1:5173/login",
-                    status: "passed",
-                    probeType: "duplicate_submit",
-                    provider: "playwright",
-                    relevance: "explicit",
-                    linkedCriteria: ["登录恢复后重复提交不会产生重复副作用"],
-                    goalLinked: true,
-                    matchScore: 100,
-                }],
-        },
-        requiredCheckCoverage: [{ check: "commands", status: "verified", evidence: ["npm test"] }],
-        acceptanceCoverage: [{ criterion: "独立复核 web-app 的交付证据", status: "verified", evidence: ["npm test"] }],
-        evidence: [{ type: "command", project: "web-app", title: "npm test", status: "passed", detail: "exit=0" }],
-        risks: [],
-        blockedReasons: [],
-        issues: [],
-        metadata: {
-            reviewSubject: "web-app",
-            browserAuthenticationSummary: {
-                configuredChecks: 2,
-                passedChecks: 2,
-                failedChecks: 0,
-                blockedChecks: 0,
-                authenticatedSessions: 2,
-                credentialEnvNames: ["TEST_EMAIL", "TEST_PASSWORD"],
-                storageStateCount: 2,
-                sensitiveArtifactSuppressionCount: 2,
-            },
-            artifactFiles: {
-                reportJsonPath: "C:/tmp/test-agent-artifacts/selftest/report.json",
-                reportMarkdownPath: "C:/tmp/test-agent-artifacts/selftest/report.md",
-                verdictJsonPath: fakeVerdictPath,
-                manifestPath: "C:/tmp/test-agent-artifacts/selftest/artifact-manifest.json",
-            },
-            previousLedger: { filesChanged: ["src/views/OrderDetail.vue"] },
-        },
-    };
-    const nativeTestAgentReceipt = buildNativeTestAgentReceipt("test-agent", fakeNativeReport, independentHandoff, independentHandoff);
-    const nativeTestAgentReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeNativeReport, nativeTestAgentReceipt);
-    const nativeTestAgentOutput = formatNativeTestAgentOutput("test-agent", fakeNativeReport, nativeTestAgentReceipt, independentHandoff);
-    const nativeTestAgentVisibleOutput = nativeTestAgentOutput.split("CCM_AGENT_RECEIPT")[0] || "";
-    const fakeFailedNativeReport = {
-        ...fakeNativeReport,
-        id: "test-agent-report-failed-selftest",
-        status: "failed",
-        recommendation: "rework",
-        summary: "TestAgent found failed checks and requires rework.",
-        artifactDir: "C:/tmp/test-agent-artifacts/failed-selftest",
-        commandResults: [{
-                ...(fakeNativeReport.commandResults?.[0] || {}),
-                status: "failed",
-                exitCode: 1,
-                stderr: "登录恢复测试未通过",
-                output: "登录恢复测试未通过",
-            }],
-        browserResults: [{
-                ...(fakeNativeReport.browserResults?.[0] || {}),
-                status: "failed",
-                steps: [
-                    { kind: "action", name: "action:goto", status: "passed", detail: "url=/login" },
-                    { kind: "action", name: "action:reload", status: "passed", detail: "url=/dashboard" },
-                    { kind: "assertion", name: "assert:pageNotBlank", status: "passed", detail: "page has visible content" },
-                    { kind: "assertion", name: "assert:networkNoErrors", status: "failed", detail: "发现网络请求异常", error: "会话请求未成功" },
-                    { kind: "assertion", name: "assert:tableCellTextEquals", status: "failed", detail: "table=#orders; row=B-200; column=Status", error: "登录状态未恢复" },
-                ],
-                browserArtifacts: [],
-            }],
-        browserNetworkSummary: [{
-                ...(fakeNativeReport.browserNetworkSummary?.[0] || {}),
-                status: "failed",
-                failedRequestCount: 1,
-                errorCount: 0,
-                networkLogPath: "C:/tmp/test-agent-artifacts/failed-selftest/network.log",
-            }],
-        browserInteractionSummary: [{
-                ...(fakeNativeReport.browserInteractionSummary?.[0] || {}),
-                status: "failed",
-                actionCount: 2,
-                assertionCount: 3,
-                passedActions: 2,
-                failedActions: 0,
-                passedAssertions: 1,
-                failedAssertions: 2,
-                actionTypes: { goto: 1, reload: 1 },
-                assertionTypes: { pageNotBlank: 1, networkNoErrors: 1, tableCellTextEquals: 1 },
-                actionSteps: [],
-                failedSteps: [
-                    { kind: "assertion", name: "assert:networkNoErrors", status: "failed", detail: "发现网络请求异常", error: "会话请求未成功" },
-                    { kind: "assertion", name: "assert:tableCellTextEquals", status: "failed", detail: "table=#orders; row=B-200; column=Status", error: "登录状态未恢复" },
-                ],
-            }],
-        browserFlowSummary: {
-            total: 1,
-            statusCounts: { passed: 0, failed: 1, blocked: 0, skipped: 0 },
-            flowTypeCount: 1,
-            criteriaCount: 1,
-            actionCount: 2,
-            assertionCount: 3,
-            failedStepCount: 2,
-            items: [{
-                    flowType: "acceptance_form_flow",
-                    total: 1,
-                    statusCounts: { passed: 0, failed: 1, blocked: 0, skipped: 0 },
-                    criteriaCount: 1,
-                    criteria: ["登录恢复后进入工作台"],
-                    projects: ["web-app"],
-                    providers: ["playwright"],
-                    actionCount: 2,
-                    assertionCount: 3,
-                    failedStepCount: 2,
-                    failures: [{
-                            project: "web-app",
-                            name: "登录恢复浏览器复核",
-                            status: "failed",
-                            error: "会话请求未成功",
-                            failedSteps: ["assert:networkNoErrors: 会话请求未成功"],
-                        }],
-                }],
-        },
-        browserMultiSessionSummary: {
-            total: 2,
-            statusCounts: { passed: 1, failed: 1, blocked: 0, skipped: 0 },
-            sessionCount: 4,
-            uniqueSessionCount: 4,
-            sessionNames: ["sender", "receiver", "author", "observer"],
-            parallelGroupCount: 2,
-            comparisonCount: 2,
-            failedComparisonCount: 1,
-            actionCount: 7,
-            assertionCount: 8,
-            failedStepCount: 1,
-            items: [{
-                    check: "发送消息后接收方实时看到",
-                    status: "passed",
-                    sessionNames: ["sender", "receiver"],
-                    failedSessionNames: [],
-                    failedSteps: [],
-                }, {
-                    check: "作者更新后观察方同步刷新",
-                    status: "failed",
-                    sessionNames: ["author", "observer"],
-                    failedSessionNames: ["observer"],
-                    failedComparisonCount: 1,
-                    failedSteps: [{ name: "session:observer:assert:visible", error: "locator=#raw-observer" }],
-                }],
-        },
-        browserActionEffectSummary: {
-            checks: 1,
-            actions: 1,
-            changed: 0,
-            unchanged: 1,
-            unavailable: 0,
-            failed: 1,
-            detailSuppressed: 0,
-            crossSession: 0,
-            actionTypes: { click: 1 },
-            changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
-            items: [{
-                    project: "web-app",
-                    name: "保存登录设置",
-                    provider: "playwright",
-                    status: "failed",
-                    actions: 1,
-                    changed: 0,
-                    unchanged: 1,
-                    unavailable: 0,
-                    failed: 1,
-                    detailSuppressed: 0,
-                    crossSession: 0,
-                    actionTypes: { click: 1 },
-                    changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
-                }],
-        },
-        adversarialEvidenceSummary: {
-            required: true,
-            waived: false,
-            status: "failed",
-            total: 1,
-            passed: 0,
-            failed: 1,
-            blocked: 0,
-            skipped: 0,
-            http: 0,
-            browser: 1,
-            relevant: 1,
-            unlinked: 0,
-            passedRelevant: 0,
-            goalLinked: 1,
-            criteriaCovered: ["重复提交不能创建重复会话"],
-            probeTypes: ["duplicate_submit"],
-            items: [{
-                    project: "web-app",
-                    surface: "browser",
-                    name: "重复提交登录",
-                    target: "http://127.0.0.1:5173/login?token=hidden",
-                    status: "failed",
-                    probeType: "duplicate_submit",
-                    provider: "playwright",
-                    relevance: "explicit",
-                    linkedCriteria: ["重复提交不能创建重复会话"],
-                    goalLinked: true,
-                    matchScore: 100,
-                }],
-        },
-        requiredCheckCoverage: [{ check: "commands", status: "not_verified", missingReason: "npm test 未通过" }],
-        acceptanceCoverage: [{ criterion: "登录恢复验证必须通过", status: "not_verified", evidence: ["npm test 未通过"] }],
-        failureSummary: [{
-                type: "browser",
-                project: "web-app",
-                title: "登录恢复浏览器复核",
-                status: "failed",
-                reason: "会话请求没有恢复登录态；失败截图在 C:/tmp/test-agent-artifacts/failed-selftest/screenshots/login.failure.png。",
-                evidence: ["C:/tmp/test-agent-artifacts/failed-selftest/screenshots/login.failure.png"],
-                nextAction: "先修复会话恢复请求，再重新运行浏览器复核。",
-                diagnostics: [
-                    "打开失败截图核对页面是否仍停留在登录态。",
-                    "检查浏览器网络日志中的 /api/session 请求。",
-                ],
-            }],
-        evidence: [{ type: "command", project: "web-app", title: "npm test", status: "failed", detail: "exit=1" }],
-        risks: ["命令验证未通过，不能进入最终验收"],
-        metadata: {
-            reviewSubject: "web-app",
-            browserAuthenticationSummary: {
-                configuredChecks: 2,
-                passedChecks: 1,
-                failedChecks: 1,
-                blockedChecks: 0,
-                authenticatedSessions: 2,
-                credentialEnvNames: ["TEST_EMAIL", "TEST_PASSWORD"],
-                storageStateCount: 2,
-                sensitiveArtifactSuppressionCount: 2,
-            },
-            artifactFiles: {
-                reportJsonPath: "C:/tmp/test-agent-artifacts/failed-selftest/report.json",
-                reportMarkdownPath: "C:/tmp/test-agent-artifacts/failed-selftest/report.md",
-                verdictJsonPath: fakeFailedVerdictPath,
-                manifestPath: "C:/tmp/test-agent-artifacts/failed-selftest/artifact-manifest.json",
-            },
-            previousLedger: { filesChanged: ["src/views/OrderDetail.vue"] },
-        },
-    };
-    const failedNativeTestAgentReceipt = buildNativeTestAgentReceipt("test-agent", fakeFailedNativeReport, independentHandoff, independentHandoff);
-    const failedNativeTestAgentReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeFailedNativeReport, failedNativeTestAgentReceipt);
-    const failedNativeTestAgentOutput = formatNativeTestAgentOutput("test-agent", fakeFailedNativeReport, failedNativeTestAgentReceipt, independentHandoff);
-    const failedNativeTestAgentReceiptWithHandoff = {
-        ...failedNativeTestAgentReceipt,
-        testAgentHandoff: independentHandoff,
-        test_agent_handoff: independentHandoff,
-    };
-    const failedNativeTestAgentOutputWithHandoff = formatNativeTestAgentOutput("test-agent", fakeFailedNativeReport, failedNativeTestAgentReceiptWithHandoff, independentHandoff);
-    const failedNativeTestAgentVisibleOutput = failedNativeTestAgentOutput.split("CCM_AGENT_RECEIPT")[0] || "";
-    const fakeNeedsRecheckReport = {
-        ...fakeNativeReport,
-        id: "test-agent-report-needs-recheck-selftest",
-        status: "passed",
-        recommendation: "accept",
-        summary: "Legacy result says pass, but browser recovery and adversarial evidence are incomplete.",
-        browserActionEffectSummary: {
-            checks: 1,
-            actions: 1,
-            changed: 0,
-            unchanged: 0,
-            unavailable: 1,
-            failed: 1,
-            detailSuppressed: 1,
-            crossSession: 0,
-            actionTypes: { click: 1 },
-            changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
-            items: [{
-                    project: "web-app",
-                    name: "提交登录表单",
-                    provider: "playwright",
-                    status: "blocked",
-                    actions: 1,
-                    changed: 0,
-                    unchanged: 0,
-                    unavailable: 1,
-                    failed: 1,
-                    detailSuppressed: 1,
-                    crossSession: 0,
-                    actionTypes: { click: 1 },
-                    changedSignals: { url: 0, title: 0, page_text: 0, dom: 0, network: 0, dialog: 0, popup: 0, download: 0 },
-                }],
-        },
-        browserRecoverySummary: {
-            checks: 1,
-            attempted: 1,
-            recovered: 0,
-            failed: 0,
-            notRetried: 1,
-            items: [{
-                    project: "web-app",
-                    name: "提交登录表单",
-                    provider: "playwright",
-                    status: "blocked",
-                    attempted: 1,
-                    recovered: 0,
-                    failed: 0,
-                    notRetried: 1,
-                    events: [{ operation: "click", reason: "unsafe duplicate side effect", rawSessionId: "hidden-session" }],
-                }],
-        },
-        adversarialEvidenceSummary: {
-            required: true,
-            waived: false,
-            status: "missing",
-            total: 0,
-            passed: 0,
-            failed: 0,
-            blocked: 0,
-            skipped: 0,
-            http: 0,
-            browser: 0,
-            relevant: 0,
-            unlinked: 0,
-            passedRelevant: 0,
-            goalLinked: 0,
-            criteriaCovered: [],
-            probeTypes: [],
-            items: [],
-        },
-    };
-    const needsRecheckReceipt = buildNativeTestAgentReceipt("test-agent", fakeNeedsRecheckReport, independentHandoff, independentHandoff);
-    const needsRecheckReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeNeedsRecheckReport, needsRecheckReceipt);
-    const needsRecheckOutput = formatNativeTestAgentOutput("test-agent", fakeNeedsRecheckReport, needsRecheckReceipt, independentHandoff);
-    const needsRecheckReceiptWithHandoff = {
-        ...needsRecheckReceipt,
-        testAgentHandoff: independentHandoff,
-        test_agent_handoff: independentHandoff,
-    };
-    const needsRecheckOutputWithHandoff = formatNativeTestAgentOutput("test-agent", fakeNeedsRecheckReport, needsRecheckReceiptWithHandoff, independentHandoff);
-    const needsRecheckVisibleOutput = needsRecheckOutput.split("CCM_AGENT_RECEIPT")[0] || "";
-    const fakeBlockedAuthenticationReport = {
-        ...fakeNativeReport,
-        id: "test-agent-report-authentication-blocked-selftest",
-        status: "passed",
-        recommendation: "accept",
-        summary: "Legacy report says pass, but authenticated browser verification is blocked.",
-        metadata: {
-            ...fakeNativeReport.metadata,
-            browserAuthenticationSummary: {
-                configuredChecks: 1,
-                passedChecks: 0,
-                failedChecks: 0,
-                blockedChecks: 1,
-                authenticatedSessions: 0,
-                credentialEnvNames: ["PRIVATE_TEST_LOGIN", "PRIVATE_TEST_PASSWORD"],
-                storageStateCount: 1,
-                sensitiveArtifactSuppressionCount: 1,
-            },
-        },
-    };
-    const blockedAuthenticationReceipt = buildNativeTestAgentReceipt("test-agent", fakeBlockedAuthenticationReport, independentHandoff, independentHandoff);
-    const blockedAuthenticationReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeBlockedAuthenticationReport, blockedAuthenticationReceipt);
-    const fakeFailedAuthenticationReport = {
-        ...fakeNativeReport,
-        id: "test-agent-report-authentication-failed-selftest",
-        status: "passed",
-        recommendation: "accept",
-        summary: "Legacy report says pass, but authenticated browser verification failed.",
-        metadata: {
-            ...fakeNativeReport.metadata,
-            browserAuthenticationSummary: {
-                configuredChecks: 2,
-                passedChecks: 1,
-                failedChecks: 1,
-                blockedChecks: 0,
-                authenticatedSessions: 2,
-                credentialEnvNames: ["PRIVATE_TEST_LOGIN", "PRIVATE_TEST_PASSWORD"],
-                storageStateCount: 2,
-                sensitiveArtifactSuppressionCount: 2,
-            },
-        },
-    };
-    const failedAuthenticationReceipt = buildNativeTestAgentReceipt("test-agent", fakeFailedAuthenticationReport, independentHandoff, independentHandoff);
-    const failedAuthenticationReviewSummary = buildNativeTestAgentReviewSummary("test-agent", fakeFailedAuthenticationReport, failedAuthenticationReceipt);
-    const fakeUnknownCoverageReport = {
-        ...fakeNativeReport,
-        id: "test-agent-report-unknown-coverage-selftest",
-        status: "passed",
-        recommendation: "accept",
-        summary: "TestAgent command checks passed, but one acceptance criterion has no direct evidence.",
-        artifactDir: fakeUnknownCoverageDir,
-        requiredCheckCoverage: [{ check: "commands", status: "verified", evidence: ["npm test"] }],
-        acceptanceCoverage: [{ criterion: "登录恢复验收需要真实浏览器证据", status: "unknown", evidence: [] }],
-        risks: [],
-        blockedReasons: [],
-        metadata: {
-            reviewSubject: "web-app",
-            artifactFiles: {
-                reportJsonPath: path.join(fakeUnknownCoverageDir, "report.json"),
-                reportMarkdownPath: path.join(fakeUnknownCoverageDir, "report.md"),
-                manifestPath: path.join(fakeUnknownCoverageDir, "artifact-manifest.json"),
-            },
-            previousLedger: { filesChanged: ["src/views/OrderDetail.vue"] },
-        },
-    };
-    const unknownCoverageTestAgentReceipt = buildNativeTestAgentReceipt("test-agent", fakeUnknownCoverageReport, independentHandoff, independentHandoff);
-    const unknownCoverageTestAgentOutput = formatNativeTestAgentOutput("test-agent", fakeUnknownCoverageReport, unknownCoverageTestAgentReceipt, independentHandoff);
-    const unknownCoverageTestAgentVisibleOutput = unknownCoverageTestAgentOutput.split("CCM_AGENT_RECEIPT")[0] || "";
-    const fakeNotVerifiedCoverageReport = {
-        ...fakeNativeReport,
-        id: "test-agent-report-not-verified-coverage-selftest",
-        status: "passed",
-        recommendation: "accept",
-        summary: "TestAgent report claims pass, but required and acceptance coverage include not_verified gaps.",
-        artifactDir: fakeNotVerifiedCoverageDir,
-        requiredCheckCoverage: [{ check: "browser_e2e", status: "not_verified", evidence: [], missingReason: "浏览器流程没有实际执行证据" }],
-        acceptanceCoverage: [{ criterion: "登录恢复验证必须通过", status: "not_verified", evidence: [] }],
-        risks: [],
-        blockedReasons: [],
-        metadata: {
-            reviewSubject: "web-app",
-            artifactFiles: {
-                reportJsonPath: path.join(fakeNotVerifiedCoverageDir, "report.json"),
-                reportMarkdownPath: path.join(fakeNotVerifiedCoverageDir, "report.md"),
-                manifestPath: path.join(fakeNotVerifiedCoverageDir, "artifact-manifest.json"),
-            },
-            previousLedger: { filesChanged: ["src/views/OrderDetail.vue"] },
-        },
-    };
-    const notVerifiedCoverageTestAgentReceipt = buildNativeTestAgentReceipt("test-agent", fakeNotVerifiedCoverageReport, independentHandoff, independentHandoff);
-    const notVerifiedCoverageTestAgentOutput = formatNativeTestAgentOutput("test-agent", fakeNotVerifiedCoverageReport, notVerifiedCoverageTestAgentReceipt, independentHandoff);
-    const notVerifiedCoverageTestAgentVisibleOutput = notVerifiedCoverageTestAgentOutput.split("CCM_AGENT_RECEIPT")[0] || "";
-    const failedTableStep = {
-        kind: "assertion",
-        name: "assert:tableCellTextEquals",
-        status: "failed",
-        detail: "table=#orders; row=B-200; column=Status",
-        error: "table=#orders; row=B-200; column=Status; actual=Draft",
-    };
-    const failedTableEvidenceSummary = collectTestAgentBrowserEvidenceSummaryLines({
-        ...fakeNativeReport,
-        browserResults: [{
-                ...(fakeNativeReport.browserResults?.[0] || {}),
-                status: "failed",
-                steps: [failedTableStep],
-            }],
-        browserInteractionSummary: [{
-                ...(fakeNativeReport.browserInteractionSummary?.[0] || {}),
-                status: "failed",
-                actionCount: 0,
-                assertionCount: 1,
-                passedActions: 0,
-                failedActions: 0,
-                passedAssertions: 0,
-                failedAssertions: 1,
-                actionTypes: {},
-                assertionTypes: { tableCellTextEquals: 1 },
-                actionSteps: [],
-                failedSteps: [failedTableStep],
-            }],
-    }, null).join("；");
-    const fakeExecutionPlan = {
-        schema: "ccm-test-agent-execution-plan-v1",
-        valid: true,
-        workOrderId: independentHandoff?.id || "work-order-selftest",
-        taskId: "test-agent-work-order-selftest",
-        groupId: "test-agent-work-order-group",
-        issuedBy: "group-main-agent",
-        artifactDir: "C:/tmp/test-agent-artifacts/selftest",
-        browserProvider: "none",
-        requiredChecks: ["commands"],
-        acceptanceCriteria: ["独立复核 web-app 的交付证据"],
-        summary: {
-            projects: 1,
-            commands: 1,
-            autoDiscoveredCommands: 0,
-            devServers: 0,
-            httpChecks: 0,
-            adversarialHttpChecks: 0,
-            browserChecks: 0,
-            autoBrowserChecks: 0,
-            adversarialBrowserChecks: 0,
-            browserSessionSteps: 6,
-            browserParallelGroups: 2,
-            expectedArtifactTypes: ["report_json", "report_markdown", "artifact_manifest", "browser_har"],
-        },
-        projects: [],
-        issues: [],
-        metadata: { normalizedWorkOrder: independentHandoff },
-    };
-    const fakeInvalidExecutionPlan = {
-        ...fakeExecutionPlan,
-        valid: false,
-        issues: [{ severity: "error", code: "missing_work_dir", message: "Project workDir is required.", project: "web-app" }],
-    };
-    const nativePlanSummary = summarizeNativeTestAgentExecutionPlan(fakeExecutionPlan);
-    const nativePlanBlockedReceipt = buildNativeTestAgentPlanBlockedReceipt("test-agent", fakeInvalidExecutionPlan, { stderr: "", error: "" }, independentHandoff);
-    const nativePlanBlockedOutput = formatNativeTestAgentPlanBlockedOutput("test-agent", fakeInvalidExecutionPlan, nativePlanBlockedReceipt, independentHandoff);
-    const nativeTestAgentRuntimeContext = buildNativeTestAgentRuntimeToolContext("test-agent", "C:/repo/web-app");
-    const independentGateFollowUps = buildIndependentReviewGateFollowUps({
-        group: verifierGroup,
-        task: {
-            id: "independent-review-gate-selftest",
-            group_id: "independent-review-gate-group",
-            assign_type: "group",
-            workflow_type: "daily_dev",
-            title: "完善订单详情接口与页面",
-            business_goal: "订单详情改动需要真实验证和独立复核",
-            file_changes: {
-                files: [{
-                        project: "web-app",
-                        path: "backend/routes/order-detail.ts",
-                        statusKind: "modified",
-                        statusText: "修改",
-                        diff: { additions: 8, deletions: 2 },
-                    }],
-            },
-        },
-        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("web-app", "已修改订单详情接口并运行验证。", {
-                agent: "web-app",
-                status: "done",
-                summary: "完成订单详情改动",
-                actions: ["修改 backend/routes/order-detail.ts"],
-                filesChanged: ["backend/routes/order-detail.ts"],
-                verification: ["npm test passed"],
-                blockers: [],
-                needs: [],
-            })],
-        existingFollowUps: [],
-    });
-    const independentGateRoutedFollowUp = independentGateFollowUps[0]
-        ? buildCoordinatorReworkFollowUp(independentGateFollowUps[0], {
-            group: verifierGroup,
-            memorySnapshot: { workerLedger: [{ project: "web-app", status: "done", receiptStatus: "done", summary: "完成订单详情改动" }] },
-            userMessage: "完善订单详情接口与页面。",
-            coordinatorOutput: "主 Agent 计划：web-app 修改，test-agent 独立复核。",
-            round: 1,
-            maxRounds: 2,
-        })
-        : null;
-    const failedReviewReworkFollowUps = buildFailedIndependentReviewReworkFollowUps({
-        group: verifierGroup,
-        task: {
-            id: "failed-independent-review-rework-selftest",
-            group_id: "failed-independent-review-rework-group",
-            assign_type: "group",
-            workflow_type: "daily_dev",
-            target_project: "web-app",
-            title: "修复登录恢复体验",
-            business_goal: "登录恢复修复必须通过 TestAgent 复核",
-            requires_independent_review: true,
-            file_changes: {
-                files: [{
-                        project: "web-app",
-                        path: "backend/routes/session.ts",
-                        statusKind: "modified",
-                        statusText: "修改",
-                        diff: { additions: 12, deletions: 3 },
-                    }],
-            },
-        },
-        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", failedNativeTestAgentOutputWithHandoff, failedNativeTestAgentReceiptWithHandoff)],
-        existingFollowUps: [],
-    });
-    const failedReviewRoutedFollowUp = failedReviewReworkFollowUps[0]
-        ? buildCoordinatorReworkFollowUp(failedReviewReworkFollowUps[0], {
-            group: verifierGroup,
-            memorySnapshot: {
-                workerLedger: [{
-                        project: "web-app",
-                        status: "done",
-                        receiptStatus: "done",
-                        summary: "已修复登录恢复流程",
-                        filesChanged: ["backend/routes/session.ts"],
-                        verification: ["npm test failed"],
-                    }],
-            },
-            userMessage: "修复登录恢复体验。",
-            coordinatorOutput: "主 Agent 计划：web-app 实现修复，test-agent 独立复核。",
-            round: 1,
-            maxRounds: 2,
-        })
-        : null;
-    const needsRecheckReviewFollowUps = buildIndependentReviewGateFollowUps({
-        group: verifierGroup,
-        task: {
-            id: "needs-recheck-independent-review-selftest",
-            group_id: "needs-recheck-independent-review-group",
-            assign_type: "group",
-            workflow_type: "daily_dev",
-            target_project: "web-app",
-            title: "重新核对登录恢复体验",
-            business_goal: "登录恢复必须完成 TestAgent 复验",
-            requires_independent_review: true,
-            file_changes: {
-                files: [{
-                        project: "web-app",
-                        path: "backend/routes/session.ts",
-                        statusKind: "modified",
-                        statusText: "修改",
-                        diff: { additions: 12, deletions: 3 },
-                    }],
-            },
-        },
-        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", needsRecheckOutputWithHandoff, needsRecheckReceiptWithHandoff)],
-        existingFollowUps: [],
-    });
-    const needsRecheckRoutedFollowUp = needsRecheckReviewFollowUps[0]
-        ? buildCoordinatorReworkFollowUp(needsRecheckReviewFollowUps[0], {
-            group: verifierGroup,
-            memorySnapshot: { workerLedger: [{ project: "test-agent", status: "blocked", receiptStatus: "blocked", summary: "上一轮复核证据未闭环" }] },
-            userMessage: "重新核对登录恢复体验。",
-            coordinatorOutput: "TestAgent 需要重新复验。",
-            round: 1,
-            maxRounds: COORDINATOR_REVIEW_MAX_ROUNDS,
-        })
-        : null;
-    const environmentReviewReceipt = {
-        agent: "test-agent",
-        reviewer: "test-agent",
-        role: "independent_verifier",
-        status: "blocked",
-        summary: "独立复核受环境或登录条件阻塞，需要先补齐条件。",
-        actions: [],
-        filesChanged: [],
-        verification: [],
-        blockers: ["测试登录账号不可用"],
-        needs: ["补齐登录或运行条件"],
-        testAgentHandoff: independentHandoff,
-        test_agent_handoff: independentHandoff,
-        testAgentReport: {
-            verdict: {
-                status: "partial",
-                recommendation: "need_human",
-                canAccept: false,
-                needsRework: false,
-                needsHuman: true,
-                needsRecheck: false,
-                needsEnvironment: true,
-                reviewRoute: "environment",
-            },
-        },
-        independentReview: [{
-                reviewer: "test-agent",
-                reviewSubject: "web-app",
-                verdict: "needs_environment",
-                summary: "登录条件不足，当前无法完成真实浏览器验收。",
-                evidence: ["需要补齐测试登录账号"],
-            }],
-    };
-    const environmentReviewOutput = [
-        "TestAgent 复核受环境条件阻塞。",
-        "",
-        "CCM_AGENT_RECEIPT",
-        "```json",
-        JSON.stringify(environmentReviewReceipt, null, 2),
-        "```",
-    ].join("\n");
-    const environmentReviewFollowUps = buildIndependentReviewGateFollowUps({
-        group: verifierGroup,
-        task: {
-            id: "needs-environment-independent-review-selftest",
-            group_id: "needs-environment-independent-review-group",
-            assign_type: "group",
-            workflow_type: "daily_dev",
-            target_project: "web-app",
-            title: "补齐登录恢复复核条件",
-            business_goal: "登录恢复必须在可用登录条件下完成验收",
-            requires_independent_review: true,
-            file_changes: {
-                files: [{
-                        project: "web-app",
-                        path: "backend/routes/session.ts",
-                        statusKind: "modified",
-                        statusText: "修改",
-                        diff: { additions: 12, deletions: 3 },
-                    }],
-            },
-        },
-        outputs: [(0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", environmentReviewOutput, environmentReviewReceipt)],
-        existingFollowUps: [],
-    });
-    const environmentRoutedFollowUp = environmentReviewFollowUps[0]
-        ? buildCoordinatorReworkFollowUp(environmentReviewFollowUps[0], {
-            group: verifierGroup,
-            memorySnapshot: { workerLedger: [{ project: "web-app", status: "done", receiptStatus: "done", summary: "登录恢复实现已完成" }] },
-            userMessage: "补齐登录恢复复核条件。",
-            coordinatorOutput: "TestAgent 等待登录条件。",
-            round: 1,
-            maxRounds: COORDINATOR_REVIEW_MAX_ROUNDS,
-        })
-        : null;
-    const scheduledRechecks = scheduleTestAgentRecheckAfterFollowUps(failedReviewRoutedFollowUp ? [failedReviewRoutedFollowUp] : [], [(0, agent_notifications_1.formatCollectedAgentOutput)("web-app", "已修复复核失败点并重新运行最小验证。", {
-            agent: "web-app",
-            status: "done",
-            summary: "已修复登录恢复复核失败点",
-            actions: ["修复登录恢复交互"],
-            filesChanged: ["backend/routes/session.ts"],
-            verification: ["npm test passed"],
-            blockers: [],
-            needs: [],
-        })]);
-    const scheduledRecheckRoutedFollowUp = scheduledRechecks[0]
-        ? buildCoordinatorReworkFollowUp(scheduledRechecks[0], {
-            group: verifierGroup,
-            memorySnapshot: { workerLedger: [{ project: "test-agent", status: "failed", receiptStatus: "failed", summary: "上一轮复核未通过" }] },
-            userMessage: "修复登录恢复体验。",
-            coordinatorOutput: "web-app 已返工，准备重新运行 TestAgent。",
-            round: 2,
-            maxRounds: COORDINATOR_REVIEW_MAX_ROUNDS,
-        })
-        : null;
-    const latestReviewWinsGate = buildIndependentReviewGate({
-        requires_independent_review: true,
-        workflow_type: "daily_dev",
-    }, [{
-            project: "web-app",
-            path: "backend/routes/session.ts",
-            statusKind: "modified",
-        }], [
-        {
-            ...failedNativeTestAgentReceipt,
-            independentReview: [{
-                    reviewer: "test-agent",
-                    reviewSubject: "web-app",
-                    verdict: "failed",
-                    summary: "上一轮复核未通过。",
-                    evidence: ["旧失败证据"],
-                }],
-        },
-        {
-            ...nativeTestAgentReceipt,
-            independentReview: [{
-                    reviewer: "test-agent",
-                    reviewSubject: "web-app",
-                    verdict: "passed",
-                    summary: "返工后的最新复核已通过。",
-                    evidence: ["最新通过证据"],
-                }],
-        },
-    ], []);
-    const structuredTestAgentEvidenceFollowUps = buildEvidenceGateFollowUps(verifierGroup, [
-        (0, agent_notifications_1.formatCollectedAgentOutput)("test-agent", needsRecheckOutputWithHandoff, needsRecheckReceiptWithHandoff),
-    ]);
-    const hardRouteFilteredLlmFollowUps = filterCoordinatorLlmFollowUpsAgainstHardRoutes([
-        { targetName: "web-app", project: "web-app", summary: "再让原实现成员泛化返工" },
-        { targetName: "test-agent", project: "test-agent", reviewSubject: "web-app", summary: "另起一份泛化复核" },
-        { targetName: "docs-agent", project: "docs-agent", summary: "补充独立文档" },
-    ], scheduledRechecks, true);
-    const postReviewSpotCheckContract = (0, post_review_spot_check_1.runPostReviewSpotCheckContractSelfTest)();
-    const postReviewSpotCheckRoutedFollowUp = buildCoordinatorReworkFollowUp({
-        mention: "@test-agent",
-        targetName: "test-agent",
-        project: "test-agent",
-        summary: "完成前抽查需要 TestAgent 重新复验",
-        message: "完成前抽查发现结果不一致，请沿用原工作单重新执行并重新判断。",
-        reason: "主 Agent 抽查 2 项验证，其中 1 项不一致",
-        rework_kind: "post_review_spot_check_reverify",
-        postReviewSpotCheckReverify: true,
-        reviewSubject: "web-app",
-        originalTarget: "web-app",
-        testAgentHandoff: independentHandoff,
-    }, {
-        group: verifierGroup,
-        memorySnapshot: { workerLedger: [{ project: "test-agent", status: "done", receiptStatus: "done", summary: "上一轮复核通过" }] },
-        userMessage: "完善订单详情页。",
-        coordinatorOutput: "TestAgent 已通过，主 Agent 正在完成前抽查。",
-        round: 1,
-        maxRounds: 2,
-    });
-    const blockedIndependentFollowUp = buildCoordinatorReworkFollowUp({
-        project: "web-app",
-        targetName: "web-app",
-        message: "请让非原实现者做独立复核，只读检查 OrderDetail.vue 的验收覆盖和风险。",
-        reason: "复杂变更需要独立验证",
-    }, {
-        group: { members: [{ project: "coordinator", role: "coordinator" }, { project: "web-app", role: "frontend" }] },
-        memorySnapshot: { workerLedger: [] },
-        userMessage: "完善订单详情页。",
-        coordinatorOutput: "主 Agent 计划：web-app 修改页面。",
-        round: 1,
-        maxRounds: 2,
-    });
-    const task = buildCoordinatorReworkTask({
-        project: "web-app",
-        message: "补充订单退款审核入口的实际验证记录，并说明修改文件。",
-        reason: "done 回执缺少可采信的已执行验证证据",
-        summary: "补齐前端验证证据",
-    }, {
-        userMessage: "按接口文档实现订单退款审核功能。",
-        coordinatorOutput: "主 Agent 计划：先后端接口，再前端对接，最后验收回执。",
-        round: 1,
-        maxRounds: 3,
-        reworkRoute: failedRoute,
-    });
-    const checks = {
-        hasReworkPacket: task.includes("主 Agent 返工工作单"),
-        hasVisibleSummary: task.includes("用户可见返工摘要") && task.includes("补齐前端验证证据"),
-        hasRound: task.includes("第 2/3 轮执行"),
-        hasRoutePacket: task.includes("返工路由") && task.includes("继续同一子 Agent 修复"),
-        hasContinuationSemantics: task.includes("续跑语义") && task.includes("同一个子 Agent"),
-        hasScratchpadContext: task.includes("上一轮完成通知") && task.includes("上下文摘要"),
-        hasOriginalRequirement: task.includes("原始需求"),
-        hasCoordinatorPlan: task.includes("初始协调计划摘要"),
-        hasReason: task.includes("返工原因"),
-        hasVerification: task.includes("验证要求"),
-        hasReceipt: task.includes("CCM_AGENT_RECEIPT"),
-        failedRouteKeepsSameWorker: failedRoute.strategy === "continue_same_worker" && failedRoute.continuationStrategy === "same_worker_scratchpad",
-        independentRouteUsesFreshVerifier: independentRoute.strategy === "fresh_verification_worker" && independentRoute.requires_fresh_verifier === true,
-        independentVerifierSelectsTestAgent: verifierSelection.available === true && verifierSelection.targetName === "test-agent" && verifierSelection.originalTarget === "web-app",
-        independentVerifierExcludesOriginalTarget: verifierSelection.candidates.every((item) => item.project !== "web-app"),
-        independentVerifierReportsMissingCandidate: noVerifierSelection.available === false && noVerifierSelection.targetName === "",
-        nativeTestAgentDoesNotRequireGroupMembership: nativeVerifierSelection.available === true
-            && nativeVerifierSelection.targetName === "test-agent"
-            && nativeVerifierSelection.nativeTestAgent?.available === true,
-        postReviewSpotCheckContractPasses: postReviewSpotCheckContract.pass === true,
-        postReviewSpotCheckReusesSameVerifierAndHandoff: postReviewSpotCheckRoutedFollowUp.targetName === "test-agent"
-            && postReviewSpotCheckRoutedFollowUp.reworkRoute?.strategy === "resume_verifier"
-            && postReviewSpotCheckRoutedFollowUp.continuationStrategy === "same_verifier_context"
-            && postReviewSpotCheckRoutedFollowUp.testAgentHandoff?.id === independentHandoff?.id
-            && postReviewSpotCheckRoutedFollowUp.reviewSubject === "web-app",
-        coordinatorReviewLoopAllowsRepairRecheckAndFinalAcceptance: COORDINATOR_REVIEW_MAX_ROUNDS === 5,
-        structuredTestAgentReceiptSkipsGenericWorkerFollowUp: structuredTestAgentEvidenceFollowUps.length === 0,
-        hardReviewRouteSuppressesConflictingLlmFollowUps: hardRouteFilteredLlmFollowUps.length === 1
-            && hardRouteFilteredLlmFollowUps[0].targetName === "docs-agent",
-        needsRecheckCreatesSameTestAgentWorkOrderContinuation: needsRecheckReviewFollowUps.length === 1
-            && needsRecheckReviewFollowUps[0].targetName === "test-agent"
-            && needsRecheckReviewFollowUps[0].rework_kind === "test_agent_review_recheck"
-            && needsRecheckRoutedFollowUp?.targetName === "test-agent"
-            && needsRecheckRoutedFollowUp?.reworkRoute?.strategy === "resume_verifier"
-            && needsRecheckRoutedFollowUp?.continuationStrategy === "same_verifier_context"
-            && needsRecheckRoutedFollowUp?.testAgentHandoff?.id === independentHandoff?.id
-            && needsRecheckRoutedFollowUp?.message.includes("不能复用上一轮结论"),
-        needsEnvironmentPreparesConditionsBeforeRecheck: environmentReviewFollowUps.length === 1
-            && environmentReviewFollowUps[0].targetName === "web-app"
-            && environmentReviewFollowUps[0].rework_kind === "test_agent_environment_prepare"
-            && environmentReviewFollowUps[0].rerunTestAgentAfterCompletion === true
-            && environmentRoutedFollowUp?.reworkRoute?.strategy === "prepare_verification_environment"
-            && environmentRoutedFollowUp?.reworkRoute?.user_label === "补齐复核条件后自动复验"
-            && environmentRoutedFollowUp?.message.includes("主 Agent 收到可用结果后会自动沿用原复核工作单重新运行 TestAgent"),
-        implementationReworkSchedulesTestAgentRecheck: failedReviewReworkFollowUps[0]?.rerunTestAgentAfterCompletion === true
-            && failedReviewReworkFollowUps[0]?.testAgentRecheckHandoff?.id === independentHandoff?.id
-            && scheduledRechecks.length === 1
-            && scheduledRechecks[0].targetName === "test-agent"
-            && scheduledRecheckRoutedFollowUp?.reworkRoute?.strategy === "resume_verifier"
-            && scheduledRecheckRoutedFollowUp?.continuationStrategy === "same_verifier_context"
-            && scheduledRecheckRoutedFollowUp?.testAgentHandoff?.id === independentHandoff?.id,
-        coordinatorReviewBudgetCoversRepairRecheckAndAcceptance: COORDINATOR_REVIEW_MAX_ROUNDS >= 4,
-        latestTestAgentReviewSupersedesStaleFailure: latestReviewWinsGate.pass === true
-            && latestReviewWinsGate.status === "passed"
-            && latestReviewWinsGate.evidence_count === 1
-            && latestReviewWinsGate.passed_count === 1
-            && latestReviewWinsGate.failed_count === 0
-            && latestReviewWinsGate.evidence?.[0]?.summary.includes("最新复核已通过"),
-        independentReworkDispatchesToVerifier: independentFollowUp.targetName === "test-agent"
-            && independentFollowUp.project === "test-agent"
-            && independentFollowUp.continuationOf === "web-app"
-            && independentFollowUp.reviewSubject === "web-app"
-            && independentFollowUp.verifierSelection?.targetName === "test-agent",
-        independentReworkTaskNamesReviewSubject: independentFollowUp.message.includes("主 Agent 返工工作单：test-agent")
-            && independentFollowUp.message.includes("独立复核对象：web-app")
-            && independentFollowUp.userTaskPreview.includes("复核 web-app"),
-        independentReworkBuildsNativeTestAgentHandoff: independentHandoff?.schema === "ccm-test-agent-handoff-v1"
-            && independentHandoffProject?.name === "web-app"
-            && independentHandoff?.metadata?.reviewSubject === "web-app"
-            && independentHandoff?.metadata?.verifier === "test-agent"
-            && independentHandoffReviewInstructions.includes("独立复核")
-            && independentHandoffReviewInstructions.includes("不得只复述原实现者结论")
-            && independentHandoff?.originalUserGoal.includes("完善订单详情页")
-            && independentHandoff?.review_subject === "web-app"
-            && !independentHandoff?.work_order,
-        descriptiveVerificationEvidenceIsNotExecutedAsShell: commandOnlyVerificationCommands.length === 2
-            && commandOnlyVerificationCommands[0] === "npm run test"
-            && commandOnlyVerificationCommands[1] === "npm run build"
-            && commandOnlyVerificationCommands.every((command) => !command.includes("node scripts/") && !command.includes("→")),
-        commandOnlyHandoffCarriesAdversarialWaiver: commandOnlyHandoff?.options?.requireAdversarialProbe === false
-            && String(commandOnlyHandoff?.options?.adversarialProbeWaiver || "").includes("没有已配置的 HTTP、浏览器或用户输入攻击面"),
-        testAgentAcceptanceExcludesCoordinatorResponsibilities: independentHandoffAcceptance.includes("订单详情变更覆盖用户目标")
-            && commandOnlyAcceptanceCriteria.some((criterion) => criterion.includes("导出的静态常量值符合需求"))
-            && commandOnlyAcceptanceCriteria.some((criterion) => criterion.includes("命令 npm run test 必须成功执行"))
-            && commandOnlyAcceptanceCriteria.every((criterion) => !criterion.includes("主 Agent")
-                && !criterion.includes("最终总结")
-                && !criterion.includes("实际文件变更")
-                && !criterion.includes("验收项目子 Agent")
-                && !criterion.includes("TestAgent")
-                && !criterion.includes("项目执行成员必须说明")
-                && !criterion.includes("返工再复验"))
-            && commandOnlyCompletedTasks.every((item) => !item.includes("基于最新项目状态核对")),
-        independentReworkKeepsNativeHandoffOutOfVisibleText: independentFollowUp.message.includes("TestAgent 原生复核交接单")
-            && !independentFollowUp.message.includes("```json")
-            && !independentFollowUp.message.includes("ccm-test-agent-handoff-v1"),
-        nativeTestAgentReportBecomesIndependentReviewReceipt: nativeTestAgentReceipt.status === "done"
-            && nativeTestAgentReceipt.filesChanged.length === 0
-            && nativeTestAgentReceipt.independentReview?.[0]?.reviewSubject === "web-app"
-            && nativeTestAgentReceipt.independentReview?.[0]?.verdict === "passed"
-            && nativeTestAgentReceipt.verification.some((item) => item.includes("npm test")),
-        nativeTestAgentReceiptConsumesVerdictArtifact: nativeTestAgentReceipt.testAgentReport?.verdict?.schema === "ccm-test-agent-verdict-v1"
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.canAccept === true
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.needsRework === false
-            && nativeTestAgentReceipt.summary.includes("可以接受")
-            && nativeTestAgentReceipt.actions.some((item) => item.includes("保留 TestAgent 报告和证据清单")),
-        nativeFailedTestAgentReceiptRequestsRework: failedNativeTestAgentReceipt.status === "failed"
-            && failedNativeTestAgentReceipt.independentReview?.[0]?.verdict === "failed"
-            && failedNativeTestAgentReceipt.summary.includes("需要返工")
-            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("浏览器检查") && item.includes("登录恢复浏览器复核"))
-            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("必检项 命令验证未覆盖"))
-            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("验收条件未通过"))
-            && failedNativeTestAgentReceipt.needs.some((item) => item.includes("打开失败截图核对页面"))
-            && failedNativeTestAgentReceipt.needs.some((item) => item.includes("把失败检查项带回给原实现成员返工"))
-            && failedNativeTestAgentReceipt.needs.some((item) => item.includes("自动重新运行 TestAgent 复核"))
-            && failedNativeTestAgentReceipt.actions.some((item) => item.includes("读取 TestAgent 裁决：需要返工")),
-        nativeTestAgentUnknownCoverageReportBlocksWithoutVerdictArtifact: unknownCoverageTestAgentReceipt.status === "blocked"
-            && unknownCoverageTestAgentReceipt.independentReview?.[0]?.verdict === "blocked"
-            && unknownCoverageTestAgentReceipt.summary.includes("需要人工确认")
-            && unknownCoverageTestAgentReceipt.testAgentReport?.verdict?.schema === "ccm-test-agent-verdict-v1"
-            && unknownCoverageTestAgentReceipt.testAgentReport?.verdict?.canAccept === false
-            && unknownCoverageTestAgentReceipt.testAgentReport?.verdict?.needsHuman === true
-            && unknownCoverageTestAgentReceipt.testAgentReport?.verdict?.unknownAcceptanceCriteria?.length === 1
-            && unknownCoverageTestAgentReceipt.blockers.some((item) => item.includes("验收条件待确认"))
-            && unknownCoverageTestAgentReceipt.needs.some((item) => item.includes("补齐未覆盖的验证证据"))
-            && unknownCoverageTestAgentReceipt.needs.every((item) => !item.includes("可以接受"))
-            && unknownCoverageTestAgentReceipt.actions.some((item) => item.includes("根据报告形成 TestAgent 裁决：需要人工确认")),
-        nativeTestAgentUnknownCoverageVisibleOutputDoesNotAccept: unknownCoverageTestAgentVisibleOutput.includes("独立复核需要人工确认")
-            && unknownCoverageTestAgentVisibleOutput.includes("结论：部分通过；建议：需要人工确认")
-            && unknownCoverageTestAgentVisibleOutput.includes("复核裁决：需要人工确认")
-            && unknownCoverageTestAgentVisibleOutput.includes("验收条件待确认")
-            && !unknownCoverageTestAgentVisibleOutput.includes("独立复核通过")
-            && !unknownCoverageTestAgentVisibleOutput.includes("复核裁决：可以接受")
-            && !/verdict\.json|C:\/tmp|ccm-test-agent-verdict-v1/i.test(unknownCoverageTestAgentVisibleOutput),
-        nativeTestAgentNotVerifiedCoverageReportRequestsReworkWithoutVerdictArtifact: notVerifiedCoverageTestAgentReceipt.status === "failed"
-            && notVerifiedCoverageTestAgentReceipt.independentReview?.[0]?.verdict === "failed"
-            && notVerifiedCoverageTestAgentReceipt.summary.includes("需要返工")
-            && notVerifiedCoverageTestAgentReceipt.testAgentReport?.verdict?.schema === "ccm-test-agent-verdict-v1"
-            && notVerifiedCoverageTestAgentReceipt.testAgentReport?.verdict?.canAccept === false
-            && notVerifiedCoverageTestAgentReceipt.testAgentReport?.verdict?.needsRework === true
-            && notVerifiedCoverageTestAgentReceipt.testAgentReport?.verdict?.failedRequiredChecks?.length === 1
-            && notVerifiedCoverageTestAgentReceipt.testAgentReport?.verdict?.failedAcceptanceCriteria?.length === 1
-            && notVerifiedCoverageTestAgentReceipt.blockers.some((item) => item.includes("必检项 浏览器流程未覆盖"))
-            && notVerifiedCoverageTestAgentReceipt.blockers.some((item) => item.includes("验收条件未通过"))
-            && notVerifiedCoverageTestAgentReceipt.needs.some((item) => item.includes("自动重新运行 TestAgent 复核"))
-            && notVerifiedCoverageTestAgentReceipt.actions.some((item) => item.includes("根据报告形成 TestAgent 裁决：需要返工")),
-        nativeTestAgentNotVerifiedCoverageVisibleOutputShowsRework: notVerifiedCoverageTestAgentVisibleOutput.includes("独立复核要求返工")
-            && notVerifiedCoverageTestAgentVisibleOutput.includes("结论：未通过；建议：需要返工")
-            && notVerifiedCoverageTestAgentVisibleOutput.includes("复核裁决：需要返工")
-            && notVerifiedCoverageTestAgentVisibleOutput.includes("必检项 浏览器流程未覆盖")
-            && notVerifiedCoverageTestAgentVisibleOutput.includes("验收条件未通过")
-            && !notVerifiedCoverageTestAgentVisibleOutput.includes("复核裁决：可以接受")
-            && !/verdict\.json|C:\/tmp|ccm-test-agent-verdict-v1/i.test(notVerifiedCoverageTestAgentVisibleOutput),
-        nativeFailedTestAgentVisibleOutputShowsReworkPath: failedNativeTestAgentVisibleOutput.includes("独立复核要求返工")
-            && failedNativeTestAgentVisibleOutput.includes("结论：未通过；建议：需要返工")
-            && failedNativeTestAgentVisibleOutput.includes("复核裁决：需要返工")
-            && failedNativeTestAgentVisibleOutput.includes("返工重点")
-            && failedNativeTestAgentVisibleOutput.includes("浏览器检查")
-            && failedNativeTestAgentVisibleOutput.includes("排查建议")
-            && failedNativeTestAgentVisibleOutput.includes("打开失败截图核对页面")
-            && failedNativeTestAgentVisibleOutput.includes("待补齐项")
-            && failedNativeTestAgentVisibleOutput.includes("必检项 命令验证未覆盖")
-            && failedNativeTestAgentVisibleOutput.includes("验收条件未通过")
-            && failedNativeTestAgentVisibleOutput.includes("把失败检查项带回给原实现成员返工")
-            && failedNativeTestAgentVisibleOutput.includes("自动重新运行 TestAgent 复核"),
-        nativeFailedTestAgentVisibleOutputHidesRawVerdict: failedNativeTestAgentOutput.includes("CCM_AGENT_RECEIPT")
-            && !/needsRework|failedRequiredChecks|report_json|verdict\.json|artifact-manifest\.json|browser-artifacts|C:\/tmp|\bfailed\b|\brework\b|networkLogPath/i.test(failedNativeTestAgentVisibleOutput),
-        nativeTestAgentOutputCarriesReceiptAndArtifacts: nativeTestAgentOutput.includes("CCM_AGENT_RECEIPT")
-            && nativeTestAgentReceipt.testAgentReport?.artifactFiles?.reportMarkdownPath?.includes("report.md")
-            && nativeTestAgentReceipt.testAgentReport?.artifactFiles?.manifestPath?.includes("artifact-manifest.json")
-            && nativeTestAgentVisibleOutput.includes("证据归档")
-            && nativeTestAgentVisibleOutput.includes("技术详情")
-            && nativeTestAgentVisibleOutput.includes("TestAgent 独立复核完成")
-            && !/C:\/tmp|artifact-manifest\.json|report\.md|verdict\.json/i.test(nativeTestAgentVisibleOutput),
-        nativeTestAgentVisibleOutputUsesFriendlyLabels: nativeTestAgentVisibleOutput.includes("独立复核通过")
-            && nativeTestAgentVisibleOutput.includes("结论：通过；建议：可以接受")
-            && nativeTestAgentVisibleOutput.includes("复核裁决：可以接受")
-            && nativeTestAgentVisibleOutput.includes("命令 npm test 通过")
-            && !/\bpassed\b|\baccept\b|verified command|blocked\/needs|exit=0/i.test(nativeTestAgentVisibleOutput),
-        nativeTestAgentReceiptIncludesBrowserEvidenceSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("浏览器交互"))
-            && nativeTestAgentReceipt.verification.some((item) => item.includes("浏览器网络"))
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserInteractionSummary?.length === 1
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserNetworkSummary?.length === 1,
-        nativeTestAgentReceiptIncludesBrowserFlowSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("真实浏览器验收") && item.includes("1 个通过"))
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserFlowSummary?.total === 1
-            && nativeTestAgentReceipt.testAgentReport?.browserFlowSummary?.criteriaCount === 1
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.requiredCheckSummary
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.acceptanceSummary,
-        nativeTestAgentReceiptIncludesSafeAuthenticationSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("登录态浏览器验收") && item.includes("2 项通过") && item.includes("2 个已登录会话"))
-            && nativeTestAgentReceipt.testAgentReport?.browserAuthenticationSummary?.configuredChecks === 2
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserAuthenticationSummary?.passedChecks === 2
-            && !/credentialEnvNames|TEST_EMAIL|TEST_PASSWORD|storageState|cookie|token|sha/i.test(JSON.stringify({
-                report: nativeTestAgentReceipt.testAgentReport?.browserAuthenticationSummary,
-                verdict: nativeTestAgentReceipt.testAgentReport?.verdict?.browserAuthenticationSummary,
-                summary: nativeTestAgentReviewSummary,
-                visible: nativeTestAgentVisibleOutput,
-            })),
-        nativeTestAgentReceiptIncludesActionEffectAndAdversarialEvidence: nativeTestAgentReceipt.verification.some((item) => item.includes("操作结果验证") && item.includes("产生预期变化"))
-            && nativeTestAgentReceipt.verification.some((item) => item.includes("边界与异常验证") && item.includes("与当前目标相关并通过"))
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserActionEffectSummary?.changed === 1
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.adversarialEvidenceSummary?.status === "verified",
-        failedActionEffectAndAdversarialEvidenceOverridePass: failedNativeTestAgentReceipt.status === "failed"
-            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.canAccept === false
-            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.needsRework === true
-            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("没有产生可见效果"))
-            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("边界检查") && item.includes("未通过"))
-            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("操作结果验证"))
-            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("边界与异常验证"))
-            && !/token=hidden|duplicate_submit|playwright|changedSignals/i.test(JSON.stringify(failedNativeTestAgentReviewSummary)),
-        incompleteActionRecoveryAndAdversarialEvidenceRequireRecheck: needsRecheckReceipt.status === "blocked"
-            && needsRecheckReceipt.independentReview?.[0]?.verdict === "needs_recheck"
-            && needsRecheckReceipt.testAgentReport?.verdict?.canAccept === false
-            && needsRecheckReceipt.testAgentReport?.verdict?.needsRework === false
-            && needsRecheckReceipt.testAgentReport?.verdict?.needsRecheck === true
-            && needsRecheckReviewSummary.status === "needs_recheck"
-            && needsRecheckReviewSummary.status_label === "需复验"
-            && needsRecheckReviewSummary.rows.some((item) => item.includes("暂时无法确认页面效果"))
-            && needsRecheckReviewSummary.rows.some((item) => item.includes("不代表实现失败"))
-            && needsRecheckReviewSummary.rows.some((item) => item.includes("TestAgent 工作单"))
-            && needsRecheckReviewSummary.next_action.includes("重新运行 TestAgent")
-            && !needsRecheckReviewSummary.headline.includes("原实现成员返工")
-            && needsRecheckReceipt.needs.every((item) => !item.includes("决定是否返工原实现成员")),
-        needsRecheckVisibleOutputAvoidsImplementationRework: needsRecheckVisibleOutput.includes("独立复核还没有闭环")
-            && needsRecheckVisibleOutput.includes("建议：重新复验")
-            && needsRecheckVisibleOutput.includes("不代表实现失败")
-            && needsRecheckVisibleOutput.includes("TestAgent 工作单")
-            && !needsRecheckVisibleOutput.includes("复核裁决：需要返工")
-            && !/hidden-session|unsafe duplicate side effect|rawSessionId|token=|duplicate_submit|playwright/i.test(needsRecheckVisibleOutput),
-        failedAuthenticationOverridesLegacyPass: failedAuthenticationReceipt.status === "failed"
-            && failedAuthenticationReceipt.testAgentReport?.verdict?.canAccept === false
-            && failedAuthenticationReceipt.testAgentReport?.verdict?.needsRework === true
-            && failedAuthenticationReviewSummary.status === "needs_rework"
-            && failedAuthenticationReviewSummary.rows.some((item) => item.includes("登录态浏览器验收") && item.includes("1 项未通过"))
-            && !/PRIVATE_TEST_LOGIN|PRIVATE_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify(failedAuthenticationReviewSummary)),
-        blockedAuthenticationNeedsUserWithoutLeakingCredentials: blockedAuthenticationReceipt.status === "blocked"
-            && blockedAuthenticationReceipt.testAgentReport?.verdict?.canAccept === false
-            && blockedAuthenticationReceipt.testAgentReport?.verdict?.needsHuman === true
-            && blockedAuthenticationReviewSummary.status === "needs_user"
-            && blockedAuthenticationReviewSummary.rows.some((item) => item.includes("测试账号或登录条件"))
-            && !/PRIVATE_TEST_LOGIN|PRIVATE_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify(blockedAuthenticationReviewSummary)),
-        nativeTestAgentReceiptIncludesMultiSessionBrowserSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("多人协作浏览器验收") && item.includes("2 个通过"))
-            && nativeTestAgentReceipt.testAgentReport?.verdict?.browserMultiSessionSummary?.total === 2
-            && nativeTestAgentReceipt.testAgentReport?.browserMultiSessionSummary?.parallelGroupCount === 2
-            && failedNativeTestAgentReceipt.status === "failed"
-            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.canAccept === false
-            && failedNativeTestAgentReceipt.testAgentReport?.verdict?.needsRework === true
-            && failedNativeTestAgentReceipt.blockers.some((item) => item.includes("观察方") && item.includes("未通过")),
-        nativeTestAgentReviewSummaryReadyForGroupCard: nativeTestAgentReviewSummary.status === "passed"
-            && nativeTestAgentReviewSummary.rows.some((item) => item.includes("登录态浏览器验收"))
-            && nativeTestAgentReviewSummary.rows.some((item) => item.includes("真实浏览器验收"))
-            && nativeTestAgentReviewSummary.rows.some((item) => item.includes("多人协作浏览器验收"))
-            && failedNativeTestAgentReviewSummary.status === "needs_rework"
-            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("表单流程") && item.includes("未通过"))
-            && failedNativeTestAgentReviewSummary.rows.some((item) => item.includes("观察方") && item.includes("未通过"))
-            && !/acceptance_form_flow|assert:networkNoErrors|session:observer|#raw-observer|locator|browserMultiSessionSummary|ccm-test-agent/i.test(JSON.stringify(failedNativeTestAgentReviewSummary.rows)),
-        configuredMultiSessionBrowserCheckAddsRequiredCoverage: hasConfiguredTestAgentMultiSessionBrowserCheck([{
-                sessions: [{ name: "sender" }, { name: "receiver" }],
-                sessionSteps: [{ session: "sender", action: "click" }],
-            }]) && !hasConfiguredTestAgentMultiSessionBrowserCheck([{
-                sessions: [{ name: "single" }],
-                sessionSteps: [{ session: "single", action: "click" }],
-            }]),
-        nativeTestAgentPlanSummaryShowsMultiSessionWork: nativePlanSummary.includes("6 个跨会话步骤")
-            && nativePlanSummary.includes("2 组并行动作"),
-        nativeTestAgentReceiptIncludesUploadDownloadEvidenceSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("文件上传") && item.includes("notes.txt") && item.includes("meta.json"))
-            && nativeTestAgentReceipt.verification.some((item) => item.includes("文件下载") && item.includes("tasks.csv")),
-        nativeTestAgentReceiptIncludesTableEvidenceSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("表格验证") && item.includes("3 项表格")),
-        nativeTestAgentVisibleOutputIncludesBrowserEvidenceSummary: nativeTestAgentVisibleOutput.includes("浏览器证据")
-            && nativeTestAgentVisibleOutput.includes("多人协作浏览器验收")
-            && nativeTestAgentVisibleOutput.includes("浏览器交互")
-            && nativeTestAgentVisibleOutput.includes("浏览器网络")
-            && !/session:observer|#raw-observer|locator|browserMultiSessionSummary|networkLogPath|network\.log|127\.0\.0\.1:5173|C:\/tmp/i.test(nativeTestAgentVisibleOutput),
-        nativeTestAgentVisibleOutputIncludesUploadDownloadEvidenceSummary: nativeTestAgentVisibleOutput.includes("文件上传")
-            && nativeTestAgentVisibleOutput.includes("notes.txt")
-            && nativeTestAgentVisibleOutput.includes("meta.json")
-            && nativeTestAgentVisibleOutput.includes("文件下载")
-            && nativeTestAgentVisibleOutput.includes("tasks.csv")
-            && !/browser-artifacts|downloads|C:\/tmp/i.test(nativeTestAgentVisibleOutput),
-        nativeTestAgentVisibleOutputIncludesTableEvidenceSummary: nativeTestAgentVisibleOutput.includes("表格验证")
-            && nativeTestAgentVisibleOutput.includes("3 项表格")
-            && !/#orders|A-100|B-200|column=Status|column=Total/i.test(nativeTestAgentVisibleOutput),
-        nativeTestAgentTableFailureSummaryHidesLocatorDetails: failedTableEvidenceSummary.includes("表格验证")
-            && failedTableEvidenceSummary.includes("表格断言未通过")
-            && failedTableEvidenceSummary.includes("技术详情")
-            && !/#orders|B-200|column=Status|actual=Draft/i.test(failedTableEvidenceSummary),
-        nativeTestAgentPlanSummaryIsUserReadable: nativePlanSummary.includes("TestAgent 复核计划")
-            && nativePlanSummary.includes("1 个命令")
-            && !/ccm-test-agent-execution-plan-v1|raw payload|trace_id/i.test(nativePlanSummary),
-        nativeTestAgentPlanSummaryUsesFriendlyArtifactLabels: nativePlanSummary.includes("结构化报告")
-            && nativePlanSummary.includes("报告文档")
-            && nativePlanSummary.includes("证据清单")
-            && nativePlanSummary.includes("网络记录")
-            && !/report_json|report_markdown|artifact_manifest|browser_har/i.test(nativePlanSummary),
-        nativeTestAgentInvalidPlanBlocksBeforeExecution: nativePlanBlockedReceipt.status === "blocked"
-            && nativePlanBlockedReceipt.filesChanged.length === 0
-            && nativePlanBlockedReceipt.blockers.some((item) => item.includes("missing_work_dir"))
-            && nativePlanBlockedOutput.includes("CCM_AGENT_RECEIPT")
-            && nativePlanBlockedOutput.includes("复核计划未通过"),
-        nativeTestAgentRunnerBypassesThirdPartyToolSync: nativeTestAgentRuntimeContext.dispatchBlocked === false
-            && nativeTestAgentRuntimeContext.audit.runtime === "test-agent-native"
-            && nativeTestAgentRuntimeContext.audit.mode === "native-test-agent-runner",
-        independentReviewGateCreatesFollowUp: independentGateFollowUps.length === 1
-            && independentGateFollowUps[0].targetName === "web-app"
-            && independentGateFollowUps[0].rework_kind === "independent_review_gate"
-            && independentGateFollowUps[0].message.includes("非原实现者")
-            && independentGateFollowUps[0].independentReviewGate?.required === true,
-        independentReviewGateRoutesToTestAgent: independentGateRoutedFollowUp?.targetName === "test-agent"
-            && independentGateRoutedFollowUp?.reviewSubject === "web-app"
-            && independentGateRoutedFollowUp?.message.includes("独立复核对象：web-app"),
-        failedIndependentReviewCreatesImplementationRework: failedReviewReworkFollowUps.length === 1
-            && failedReviewReworkFollowUps[0].targetName === "web-app"
-            && failedReviewReworkFollowUps[0].rework_kind === "test_agent_failed_review_rework"
-            && failedReviewReworkFollowUps[0].reviewFailed === true
-            && failedReviewReworkFollowUps[0].message.includes("修复后重新提交")
-            && failedReviewReworkFollowUps[0].message.includes("重新运行 TestAgent 复核"),
-        failedIndependentReviewRoutesBackToImplementationWorker: failedReviewRoutedFollowUp?.targetName === "web-app"
-            && failedReviewRoutedFollowUp?.project === "web-app"
-            && failedReviewRoutedFollowUp?.continuationOf === "web-app"
-            && failedReviewRoutedFollowUp?.reworkRoute?.strategy === "continue_same_worker"
-            && failedReviewRoutedFollowUp?.continuationStrategy === "same_worker_scratchpad",
-        failedIndependentReviewDoesNotSpawnVerifierAgain: failedReviewRoutedFollowUp?.targetName !== "test-agent"
-            && !failedReviewRoutedFollowUp?.testAgentHandoff
-            && !failedReviewRoutedFollowUp?.test_agent_handoff
-            && failedReviewRoutedFollowUp?.userTaskPreview.includes("返工 web-app"),
-        independentReworkBlocksWithoutVerifier: blockedIndependentFollowUp.dispatchBlocked === true
-            && blockedIndependentFollowUp.verifierSelection?.available === false
-            && !blockedIndependentFollowUp.message
-            && blockedIndependentFollowUp.userTaskPreview.includes("缺少独立验证 Agent"),
-        wrongDirectionRequestsStop: wrongDirectionRoute.strategy === "stop_wrong_direction_then_continue" && wrongDirectionRoute.requires_stop === true,
-        wrongDirectionContinuationInterruptsOldRun: wrongDirectionContinuation?.interrupt_current_run === true
-            && wrongDirectionContinuation.replan_required === true
-            && wrongDirectionContinuation.instructions?.some((item) => item.includes("旧方向"))
-            && wrongDirectionContinuation.avoid?.some((item) => item.includes("旧方向"))
-            && wrongDirectionContinuation.preserved_context?.some((item) => item.includes("终止 1 个进程")),
-        routeLabelsAreUserFriendly: [failedRoute, independentRoute, wrongDirectionRoute].every((route) => /子 Agent|验证|方向|继续|复核/.test(String(route.user_label || "")) && !/scratchpad|trace_id|session_id|CCM_AGENT_RECEIPT/i.test(String(route.user_label || ""))),
-    };
-    return {
-        pass: Object.values(checks).every(Boolean),
-        checks,
-        routes: { failedRoute, independentRoute, wrongDirectionRoute },
-        independent_verifier: { verifierSelection, noVerifierSelection, independentFollowUp, independentGateFollowUps, independentGateRoutedFollowUp, failedReviewReworkFollowUps, failedReviewRoutedFollowUp, blockedIndependentFollowUp },
-        staged_review: {
-            needsRecheckReviewFollowUps,
-            needsRecheckRoutedFollowUp,
-            environmentReviewFollowUps,
-            environmentRoutedFollowUp,
-            scheduledRechecks,
-            scheduledRecheckRoutedFollowUp,
-            latestReviewWinsGate,
-        },
-    };
+    return require("./collaboration-coordination-self-tests").runCoordinatorReworkProtocolSelfTest();
 }
 // Initial independent review, implementation repair, TestAgent recheck,
 // optional spot-check repair, and final acceptance each need their own turn.
-const COORDINATOR_REVIEW_MAX_ROUNDS = 5;
+exports.COORDINATOR_REVIEW_MAX_ROUNDS = 5;
 function followUpTargetCompleted(outputs = [], targetName = "") {
     const target = String(targetName || "").trim().toLowerCase();
     if (!target)
@@ -21729,29 +15088,7 @@ function followUpTargetCompleted(outputs = [], targetName = "") {
     return !!latest && (0, agent_notifications_1.getCollectedOutputReceiptStatus)(latest) === "done";
 }
 function scheduleTestAgentRecheckAfterFollowUps(followUps = [], outputs = []) {
-    const scheduled = [];
-    for (const followUp of followUps || []) {
-        if (followUp?.rerunTestAgentAfterCompletion !== true && followUp?.rerun_test_agent_after_completion !== true)
-            continue;
-        const targetName = String(followUp?.targetName || followUp?.project || "").trim();
-        if (!followUpTargetCompleted(outputs, targetName))
-            continue;
-        const subject = String(followUp?.reviewSubject || followUp?.originalTarget || followUp?.continuationOf || targetName).trim();
-        const handoff = followUp?.testAgentRecheckHandoff
-            || followUp?.test_agent_recheck_handoff
-            || followUp?.testAgentHandoff
-            || followUp?.test_agent_handoff
-            || null;
-        const recheck = buildTestAgentReviewRecheckFollowUp({
-            subject,
-            handoff,
-            reason: `${followUp?.summary || "上一轮缺口已处理"}；需要基于最新状态重新运行 TestAgent`,
-            source: followUp?.rework_kind || "coordinator_rework_completed",
-        });
-        if (recheck)
-            scheduled.push(recheck);
-    }
-    return (0, memory_1.uniqueByKey)(scheduled, (item) => `${String(item?.reviewSubject || "").trim()}|test_agent_review_recheck`, 8);
+    return require("./collaboration-test-agent-runtime").scheduleTestAgentRecheckAfterFollowUps(followUps, outputs);
 }
 function filterCoordinatorLlmFollowUpsAgainstHardRoutes(proposed = [], hardReviewFollowUps = [], hasScheduledTestAgentRecheck = false) {
     const hardReviewSubjects = new Set(hardReviewFollowUps.flatMap((item) => [
@@ -21775,7 +15112,7 @@ async function runCoordinatorReviewLoop(input) {
     const pendingTestAgentRechecks = [];
     // A bounded five-stage loop supports initial review -> repair/preparation ->
     // TestAgent recheck -> optional spot-check repair -> final acceptance.
-    const maxReviewRounds = COORDINATOR_REVIEW_MAX_ROUNDS;
+    const maxReviewRounds = exports.COORDINATOR_REVIEW_MAX_ROUNDS;
     if (allOutputs.length === 0)
         return null;
     let lastReview = null;
@@ -22235,7 +15572,7 @@ async function executeTask(task, ctx) {
             }
         }
         const worktreeNotice = (0, worktree_1.buildChildAgentWorktreeNotice)(preparedWorkDir);
-        const runtimeToolContext = prepareAgentRuntimeTools(task.group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools, null, { taskId: task.id, task, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
+        let runtimeToolContext = prepareAgentRuntimeTools(task.group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools, null, { taskId: task.id, task, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
         if (runtimeToolContext.dispatchBlocked) {
             const blockedReceipt = runtimeToolDispatchBlockedReceipt(task.target_project, runtimeToolContext);
             (0, logs_1.addTaskLog)(task.id, "warning", blockedReceipt.summary);
@@ -22301,7 +15638,7 @@ async function executeTask(task, ctx) {
             invocationKind: directMemoryDeliveryAttemptSequence > 1 ? "resume" : "spawn",
             branchKind: "main",
         }) : null;
-        const directGroupMemoryContext = task.group_id && task.workflow_type !== "agent_coordination_dependency"
+        let directGroupMemoryContext = task.group_id && task.workflow_type !== "agent_coordination_dependency"
             ? await (0, memory_1.buildAgentMemoryContextBundleWithManifestSelection)(task.group_id, task.target_project, directTaskText, {
                 taskId: task.id,
                 traceId: task.trace_id || "",
@@ -22316,6 +15653,36 @@ async function executeTask(task, ctx) {
                 ...taskAgentInvocationMemoryOptions(directInvocationEdge),
             })
             : null;
+        const directMemoryReceiptGroup = task.group_id ? (0, storage_1.loadGroups)().find((item) => item.id === task.group_id) || null : null;
+        const directMemoryReceiptCoordinatorProject = directMemoryReceiptGroup ? String((0, group_orchestrator_1.getCoordinatorMember)(directMemoryReceiptGroup)?.project || "") : "";
+        const directMemoryConsumptionChallenge = directGroupMemoryContext
+            && directTaskSession
+            && task.target_project !== directMemoryReceiptCoordinatorProject
+            ? (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
+                groupId: task.group_id || "",
+                groupSessionId: directGroupSessionId,
+                taskId: task.id,
+                executionId: task.id,
+                project: task.target_project,
+                taskAgentSessionId: directTaskSession.id,
+                attempt: directMemoryDeliveryAttemptSequence,
+            })
+            : null;
+        if (directMemoryConsumptionChallenge) {
+            directGroupMemoryContext = (0, memory_context_consumption_receipt_1.attachMemoryContextConsumptionChallenge)(directGroupMemoryContext, directMemoryConsumptionChallenge);
+            runtimeToolContext = prepareAgentRuntimeTools(task.group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools, null, {
+                taskId: task.id,
+                task,
+                toolAudit: toolContext.toolAudit,
+                authorizationReadiness: toolContext.authorizationReadiness,
+                groupSessionId: directGroupSessionId,
+                taskAgentSessionId: directTaskSession.id,
+                nativeSessionId: directTaskSession.nativeSessionId || "",
+                memoryReceiptChallenge: directMemoryConsumptionChallenge,
+                memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(directMemoryConsumptionChallenge.challenge_id),
+            });
+            assertRuntimeToolDispatchReady(task.target_project, runtimeToolContext);
+        }
         const directContinuation = buildWorkerContinuationHandoff(task, task.target_project);
         const directWorkerHandoff = buildChildAgentWorkerHandoff(task.target_project, directTaskText, {
             source: task.global_mission_id ? "全局主 Agent 子任务" : "任务队列",
@@ -22327,6 +15694,7 @@ async function executeTask(task, ctx) {
             agent_type: agentType,
             model: directTaskSession?.modelId || "",
             task_id: task.id,
+            task_agent_session_id: directTaskSession?.id || "",
             trace_id: task.trace_id || "",
             task,
             group: task.group_id ? (0, storage_1.loadGroups)().find((item) => item.id === task.group_id) || null : null,
@@ -22427,6 +15795,12 @@ async function executeTask(task, ctx) {
                 memoryContext: directGroupMemoryContext,
                 renderedHandoff: developmentContract,
                 renderedPrompt: message,
+                renderedMemoryContext: String(directGroupMemoryContext?.rendered_text || ""),
+                requireMemoryPromptInjectionProof: true,
+                requireTrustedMemoryPromptEnvelope: true,
+                requireProviderMemoryChannelAcknowledgement: true,
+                requireMemoryContextConsumptionReceipt: !!directMemoryConsumptionChallenge,
+                memoryContextConsumptionChallenge: directMemoryConsumptionChallenge,
                 runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
                 invocationLineage: directInvocationEdge,
             });
@@ -22451,6 +15825,9 @@ async function executeTask(task, ctx) {
         let directNativeModelCapabilityReceipt = null;
         let directNativeModelCapabilityRecord = null;
         let directModelCapabilityRefreshOutcome = null;
+        let directProviderMemoryChannelEvidence = null;
+        let directMemoryContextConsumptionReceipt = null;
+        let directMemoryContextConsumptionRecovery = null;
         let directSessionSucceeded = true;
         let directSessionError = "";
         if (directTaskSession?.turnCount > 0) {
@@ -22547,9 +15924,17 @@ async function executeTask(task, ctx) {
             executionId: task.id,
             model: directTaskSession?.modelId || "",
             taskAgentSessionId: directTaskSession?.id || "",
+            trustedMemoryProviderChannelRequired: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
+            trustedMemoryProviderAcknowledgementRequired: directMemoryContextSnapshot?.context?.provider_memory_channel_acknowledgement_required === true,
+            memoryContextConsumptionReceiptRequired: directMemoryContextSnapshot?.context?.memory_context_consumption_receipt_required === true,
+            memoryContextConsumptionChallenge: directMemoryContextSnapshot?.context?.memory_context_consumption_challenge || null,
+            trustedMemoryEnvelopeChecksum: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
+            trustedMemoryEnvelopeSourceChecksum: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
             ...taskAgentSessionLifecycleRunnerOptions(directMemoryContextSnapshot),
             agentSession: directTaskSession ? (0, agent_sessions_1.getTaskAgentSessionOptions)(directTaskSession) : null,
-            durableDispatch: directTypedMemoryDispatchAdmission.required === true || directCapacityRevalidationPreparation?.required === true,
+            durableDispatch: directTypedMemoryDispatchAdmission.required === true
+                || directCapacityRevalidationPreparation?.required === true
+                || directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
             onRunnerRequestCreated: (requestId) => {
                 directRunnerRequestId = String(requestId || "");
                 if (directTypedMemoryDispatchWalRecord && directRunnerRequestId) {
@@ -22572,6 +15957,12 @@ async function executeTask(task, ctx) {
                 directNativeModelCapabilityReceipt = opts?.nativeModelCapabilityReceipt || null;
                 directNativeModelCapabilityRecord = opts?.nativeModelCapabilityRecord || null;
                 directModelCapabilityRefreshOutcome = opts?.modelCapabilityRefreshOutcome || null;
+                if (opts?.providerMemoryChannelEvidence?.required === true)
+                    directProviderMemoryChannelEvidence = opts.providerMemoryChannelEvidence;
+                if (opts?.memoryContextConsumptionReceipt)
+                    directMemoryContextConsumptionReceipt = opts.memoryContextConsumptionReceipt;
+                if (opts?.memoryContextConsumptionRecovery)
+                    directMemoryContextConsumptionRecovery = opts.memoryContextConsumptionRecovery;
                 directSessionSucceeded = opts?.isError !== true;
                 directSessionError = String(opts?.error || opts?.message || "");
                 directRunnerRequestId = String(opts?.runnerRequestId || directRunnerRequestId || "");
@@ -22645,6 +16036,9 @@ async function executeTask(task, ctx) {
                 output,
                 fileChanges,
                 nativeContinuationEvidence: directNativeContinuationEvidence,
+                providerMemoryChannelEvidence: directProviderMemoryChannelEvidence,
+                memoryContextConsumptionReceipt: directMemoryContextConsumptionReceipt,
+                memoryContextConsumptionRecovery: directMemoryContextConsumptionRecovery,
                 runnerStarted: directRunnerStarted,
                 invocationEdgeId: directInvocationEdge?.invocation_edge_id || "",
             });
@@ -22823,7 +16217,7 @@ async function processTargetQueue(targetKey, ctx) {
         console.log(`[任务队列] [${targetKey}] 正在执行任务，等待中...`);
         return;
     }
-    const queue = taskQueues.get(targetKey);
+    const queue = exports.taskQueues.get(targetKey);
     if (!queue || queue.length === 0)
         return;
     runningTasks.set(targetKey, true);
@@ -22854,7 +16248,7 @@ async function processTargetQueue(targetKey, ctx) {
         const executionFollowupRevision = Number(task.followup_revision || 0);
         (0, logs_1.addTaskLog)(taskId, "info", `开始执行任务: ${task.title}`);
         try {
-            runningTaskIds.add(taskId);
+            exports.runningTaskIds.add(taskId);
             leaseHeartbeat = setInterval(() => (0, reliability_ledger_1.renewTaskLease)(taskId, 45_000), 10_000);
             ensureTaskKernelExecution(task);
             (0, execution_kernel_1.transitionExecution)(taskId, "spawning", "任务队列正在启动开发执行内核");
@@ -23178,7 +16572,7 @@ async function processTargetQueue(targetKey, ctx) {
         finally {
             if (leaseHeartbeat)
                 clearInterval(leaseHeartbeat);
-            runningTaskIds.delete(taskId);
+            exports.runningTaskIds.delete(taskId);
             const finalTask = (0, db_1.loadTasks)().find((item) => item.id === taskId);
             if (finalTask?.workflow_type === "agent_coordination_dependency") {
                 try {
@@ -23198,71 +16592,10 @@ async function processTargetQueue(targetKey, ctx) {
     console.log(`[任务队列] [${targetKey}] 队列处理完成`);
 }
 function enqueueTask(taskId, ctx) {
-    const tasks = (0, db_1.loadTasks)();
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) {
-        console.log(`[任务队列] 任务 ${taskId} 不存在`);
-        return { queued: false, message: "任务不存在" };
-    }
-    if (task.status === "done") {
-        (0, logs_1.addTaskLog)(taskId, "info", "任务已完成，跳过入队");
-        return { queued: false, message: "任务已完成，跳过入队" };
-    }
-    if (isTaskPaused(task)) {
-        (0, logs_1.addTaskLog)(taskId, "info", "任务已暂停，跳过入队");
-        return { queued: false, message: "任务已暂停，跳过入队" };
-    }
-    const readiness = getTaskAgentExecutionReadiness(task);
-    if (!readiness.ready) {
-        const message = readiness.message || "Agent CLI 执行通道不可用，任务暂不入队";
-        const fixActions = Array.isArray(readiness.fix_actions) ? readiness.fix_actions : [];
-        const firstFixAction = fixActions[0] ? `；建议：${fixActions[0]}` : "";
-        const lastBlockedAt = Date.parse(task.last_queue_blocked_at || 0);
-        const sameReason = String(task.status_detail || "") === message.slice(0, 500);
-        const recentlyRecorded = Number.isFinite(lastBlockedAt) && Date.now() - lastBlockedAt < AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS;
-        if (!sameReason || !recentlyRecorded) {
-            updateTask(taskId, {
-                status: "pending",
-                status_detail: message.slice(0, 500),
-                last_queue_blocked_at: new Date().toISOString(),
-                execution_readiness: readiness,
-            });
-            (0, logs_1.addTaskLog)(taskId, "warning", `任务暂不入队：${message}${firstFixAction}`);
-        }
-        return { queued: false, blocked: true, duplicate_block_suppressed: sameReason && recentlyRecorded, reason: "agent_process", message, readiness };
-    }
-    const targetKey = getTaskTargetKey(task);
-    if (!taskQueues.has(targetKey)) {
-        taskQueues.set(targetKey, []);
-    }
-    const queue = taskQueues.get(targetKey);
-    if (queue.includes(taskId) || runningTaskIds.has(taskId)) {
-        (0, logs_1.addTaskLog)(taskId, "info", "任务已在队列中或正在执行，跳过重复入队");
-        return { queued: false, message: "任务已在队列中或正在执行" };
-    }
-    const newPriority = PRIORITY_WEIGHT[task.priority] || 2;
-    let insertIndex = queue.length;
-    for (let i = 0; i < queue.length; i++) {
-        const queuedTask = tasks.find(t => t.id === queue[i]);
-        if (!queuedTask)
-            continue;
-        const queuedPriority = PRIORITY_WEIGHT[queuedTask.priority] || 2;
-        if (newPriority > queuedPriority) {
-            insertIndex = i;
-            break;
-        }
-    }
-    queue.splice(insertIndex, 0, taskId);
-    console.log(`[任务队列] 任务 ${taskId} (${task.priority}) 已加入队列 [${targetKey}]，位置: ${insertIndex + 1}/${queue.length}`);
-    updateTask(taskId, { queued_at: new Date().toISOString() });
-    (0, logs_1.addTaskLog)(taskId, "info", `任务已加入队列 [${targetKey}]，位置 ${insertIndex + 1}/${queue.length}`);
-    processTargetQueue(targetKey, ctx);
-    return { queued: true, message: "任务已加入队列", targetKey, position: insertIndex + 1 };
+    return require("./collaboration-task-runtime").enqueueTask(taskId, ctx);
 }
 function createAndQueueTask(task, ctx) {
-    const newTask = createTask({ ...task, auto_execute: true });
-    const queueResult = enqueueTask(newTask.id, ctx);
-    return { task: newTask, queueResult };
+    return require("./collaboration-task-runtime").createAndQueueTask(task, ctx);
 }
 function backfillTaskTraceIds() {
     const tasks = (0, db_1.loadTasks)();
@@ -23280,192 +16613,12 @@ function backfillTaskTraceIds() {
     return changed;
 }
 function resumeTaskQueues(ctx, options = {}) {
-    const testAgentRunnerRecovery = (0, test_agent_runner_1.reconcileTestAgentRunnerRecords)();
-    const traceBackfilled = backfillTaskTraceIds();
-    const tasks = (0, db_1.loadTasks)();
-    const forceAuto = options.force === true
-        || options.manual === true
-        || /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_STARTUP_TASK_RECOVERY || ""));
-    const recoveryPlan = (0, startup_task_recovery_1.buildStartupTaskRecoveryPlan)(tasks, forceAuto);
-    const candidates = recoveryPlan.entries.filter((entry) => entry.decision.candidate);
-    const results = [];
-    for (const entry of candidates) {
-        const task = entry.task;
-        const recoveryDecision = entry.decision;
-        if (recoveryDecision.mode === "skip") {
-            results.push({
-                task_id: task.id,
-                queued: false,
-                skipped: true,
-                reason_code: recoveryDecision.reason_code,
-                message: recoveryDecision.reason,
-            });
-            continue;
-        }
-        if (recoveryDecision.mode === "manual") {
-            const alreadyHeld = task?.recovery_pending === true
-                || isTaskPaused(task)
-                || task?.status === "needs_user"
-                || task?.intake_state === "awaiting_confirmation";
-            if (!alreadyHeld) {
-                const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
-                const recoveryReasoning = buildTaskPreflightReasoning(task, `服务启动恢复需等待确认：${recoveryDecision.reason}`, true);
-                const now = new Date().toISOString();
-                const patch = {
-                    trace_id: traceId,
-                    status: task.status === "in_progress" ? "needs_user" : task.status,
-                    is_paused: true,
-                    paused: true,
-                    recovery_pending: true,
-                    recovery: {
-                        ...(task.recovery || {}),
-                        pending_since: now,
-                        previous_status: task.status,
-                        mode: "manual_startup_recovery",
-                        decision_code: recoveryDecision.reason_code,
-                        decision_reason: recoveryDecision.reason,
-                        authorization_preserved: false,
-                        authorization_evidence: recoveryDecision.authorization_evidence,
-                        requires_user: true,
-                        user_headline: recoveryDecision.user_headline,
-                        user_next_action: recoveryDecision.user_next_action,
-                    },
-                    reasoning_loop: recoveryReasoning,
-                    collaboration_state: {
-                        ...(task.collaboration_state || {}),
-                        phase: "needs_user",
-                        needs_user: true,
-                        updated_at: now,
-                    },
-                    status_detail: recoveryDecision.user_headline,
-                };
-                updateTask(task.id, patch);
-                (0, logs_1.addTaskLog)(task.id, "warning", recoveryDecision.reason);
-                (0, logs_1.appendTaskTimelineEvent)(task.id, {
-                    type: "startup_manual_recovery",
-                    title: "服务重启后仍在等待确认",
-                    detail: recoveryDecision.user_headline,
-                    status: "warn",
-                    phase: "needs_user",
-                    data: { previous_status: task.status, decision: recoveryDecision },
-                });
-            }
-            results.push({
-                task_id: task.id,
-                queued: false,
-                manual_recovery_required: true,
-                reason_code: recoveryDecision.reason_code,
-                message: recoveryDecision.user_headline || recoveryDecision.reason,
-            });
-            continue;
-        }
-        const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
-        const recoveryLease = (0, reliability_ledger_1.acquireTaskLease)(task.id, traceId, 45_000);
-        if (!recoveryLease.acquired) {
-            (0, logs_1.addTaskLog)(task.id, "info", `启动恢复跳过：另一个存活实例仍持有任务租约（owner=${recoveryLease.lease?.owner_id || "unknown"}）`);
-            results.push({ task_id: task.id, queued: false, active_elsewhere: true, message: "另一个实例仍在执行" });
-            continue;
-        }
-        const recoveryReasoning = buildTaskPreflightReasoning(task, "服务启动恢复：重新核对原始目标、当前代码状态、剩余缺口与验收条件", true);
-        const recoveredAt = new Date().toISOString();
-        const recoveryRecord = {
-            ...(task.recovery || {}),
-            recovered_at: recoveredAt,
-            revalidated_at: recoveredAt,
-            lease_recovery_count: recoveryLease.lease.recovery_count,
-            previous_status: task.status,
-            mode: "startup_auto_recovery",
-            decision_code: recoveryDecision.reason_code,
-            decision_reason: recoveryDecision.reason,
-            authorization_preserved: recoveryDecision.authorization_preserved,
-            authorization_evidence: recoveryDecision.authorization_evidence,
-            requires_user: false,
-            user_headline: recoveryDecision.user_headline,
-            user_next_action: recoveryDecision.user_next_action,
-        };
-        if (task.status === "in_progress") {
-            updateTask(task.id, {
-                status: "pending",
-                trace_id: traceId,
-                is_paused: false,
-                paused: false,
-                recovery_pending: false,
-                result: "服务重启后已自动接上未完成执行",
-                status_detail: "服务重启后已自动接上，正在重新进入执行队列",
-                recovery: recoveryRecord,
-                reasoning_loop: recoveryReasoning,
-                collaboration_state: {
-                    ...(task.collaboration_state || {}),
-                    phase: "planning",
-                    needs_user: false,
-                    updated_at: recoveredAt,
-                },
-            });
-            (0, logs_1.addTaskLog)(task.id, "warning", "服务重启后已接上未完成任务，重新核对后恢复排队");
-        }
-        else {
-            updateTask(task.id, {
-                status: task.status === "needs_user" ? "pending" : task.status,
-                is_paused: false,
-                paused: false,
-                recovery_pending: false,
-                reasoning_loop: recoveryReasoning,
-                recovery: recoveryRecord,
-                status_detail: "服务重启后已自动接上，正在重新进入执行队列",
-                collaboration_state: {
-                    ...(task.collaboration_state || {}),
-                    phase: "planning",
-                    needs_user: false,
-                    updated_at: recoveredAt,
-                },
-            });
-            (0, logs_1.addTaskLog)(task.id, "info", "服务重启后自动接上已授权任务，重新加入队列");
-        }
-        (0, logs_1.appendTaskTimelineEvent)(task.id, {
-            type: "startup_auto_recovery",
-            title: "服务重启后已自动接上",
-            detail: "已保留原任务授权，并重新核对目标、当前状态和验收条件。",
-            status: "active",
-            phase: "planning",
-            data: { decision: recoveryDecision, recovery_check: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1] || {} },
-        });
-        (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "reasoning_recovery_check", title: "恢复前已重新核对任务", detail: `原始目标、当前状态与验收条件已复核；剩余 ${recoveryReasoning.assertions.filter(item => item.status !== "passed").length} 项待证明`, status: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1]?.acceptance_revalidated ? "ok" : "warn", phase: "planning", data: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1] || {} });
-        const queued = enqueueTask(task.id, ctx);
-        if (!queued.queued)
-            (0, reliability_ledger_1.releaseTaskLease)(task.id, "recovery_not_queued");
-        results.push({
-            task_id: task.id,
-            ...queued,
-            auto_recovered: true,
-            authorization_preserved: true,
-            reason_code: recoveryDecision.reason_code,
-        });
-    }
-    const resumed = results.filter(item => item.queued).length;
-    const manualPending = results.filter(item => item.manual_recovery_required).length;
-    const skipped = results.filter(item => item.skipped || item.active_elsewhere).length;
-    void recoverGroupCoordinationDependencies(ctx).catch((error) => {
-        console.error("[群聊协作恢复]", error?.message || error);
-    });
-    return {
-        resumed,
-        auto_resumed: resumed,
-        manual_pending: manualPending,
-        skipped,
-        total: candidates.length,
-        trace_backfilled: traceBackfilled,
-        manual_recovery: resumed === 0 && manualPending > 0,
-        mixed_recovery: resumed > 0 && manualPending > 0,
-        recovery_policy: "risk_tiered_authorization_preserving",
-        test_agent_runner_recovery: testAgentRunnerRecovery,
-        results,
-        queue_status: getQueueStatus(),
-    };
+    return require("./collaboration-task-runtime").resumeTaskQueues(ctx, options);
 }
 function getQueueStatus(taskSnapshot) {
     let totalQueued = 0;
     const targetStatus = {};
-    for (const [targetKey, queue] of taskQueues.entries()) {
+    for (const [targetKey, queue] of exports.taskQueues.entries()) {
         totalQueued += queue.length;
         targetStatus[targetKey] = {
             queued: queue.length,
@@ -23480,7 +16633,7 @@ function getQueueStatus(taskSnapshot) {
         pending_tasks: tasks.filter(t => t.status === "pending").length,
         in_progress_tasks: tasks.filter(t => t.status === "in_progress").length,
         failed_tasks: tasks.filter(t => t.status === "failed").length,
-        running_task_ids: Array.from(runningTaskIds)
+        running_task_ids: Array.from(exports.runningTaskIds)
     };
 }
 function getTaskTargetKeyFromTask(task) {
@@ -23491,7 +16644,7 @@ function getTaskTargetKeyFromTask(task) {
     return `project:${task?.target_project || "unknown"}`;
 }
 function isTaskQueuedInMemory(taskId) {
-    for (const queue of taskQueues.values()) {
+    for (const queue of exports.taskQueues.values()) {
         if (queue.includes(taskId))
             return true;
     }
@@ -23501,8 +16654,8 @@ function getTaskAgeMs(task, now = Date.now()) {
     const time = Date.parse(task?.updated_at || task?.started_at || task?.queued_at || task?.created_at || "");
     return Number.isFinite(time) ? Math.max(0, now - time) : 0;
 }
-function isWatchdogGapReworkCandidate(task, now = Date.now(), cooldownMs = TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, maxCount = TASK_WATCHDOG_GAP_REWORK_MAX) {
-    if (!task?.auto_execute || task.status === "done" || isTaskPaused(task) || runningTaskIds.has(task.id) || isTaskQueuedInMemory(task.id))
+function isWatchdogGapReworkCandidate(task, now = Date.now(), cooldownMs = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, maxCount = exports.TASK_WATCHDOG_GAP_REWORK_MAX) {
+    if (!task?.auto_execute || task.status === "done" || isTaskPaused(task) || exports.runningTaskIds.has(task.id) || isTaskQueuedInMemory(task.id))
         return false;
     if (!hasDailyDevContinuationGaps(task))
         return false;
@@ -23513,217 +16666,19 @@ function isWatchdogGapReworkCandidate(task, now = Date.now(), cooldownMs = TASK_
     return getTaskAgeMs(task, now) >= cooldownMs;
 }
 function hasFreshSuccessfulAgentProbe(readiness) {
-    return readiness?.probe?.success === true
-        && Number(readiness?.probe?.age_ms || Infinity) < AGENT_PROBE_SUCCESS_FRESH_MS;
+    return require("./collaboration-agent-probes").hasFreshSuccessfulAgentProbe(readiness);
 }
-function getTaskWatchdogStatus(staleMs = TASK_WATCHDOG_STALE_MS, gapCooldownMs = TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot) {
-    const now = Date.now();
-    const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : (0, db_1.loadTasks)();
-    const stalePending = [];
-    const stalledInProgress = [];
-    const runningLong = [];
-    const runtimeFailed = [];
-    const gapRework = [];
-    const workItemStalled = [];
-    for (const task of tasks) {
-        if (!task?.auto_execute || task.status === "done" || isTaskPaused(task))
-            continue;
-        const ageMs = getTaskAgeMs(task, now);
-        const base = {
-            id: task.id,
-            title: task.title,
-            status: task.status,
-            target_key: getTaskTargetKeyFromTask(task),
-            age_ms: ageMs,
-            updated_at: task.updated_at || null,
-            started_at: task.started_at || null,
-            queued_at: task.queued_at || null,
-        };
-        const workItems = (0, work_items_1.buildMainAgentWorkItems)(task, { executions: (0, execution_kernel_1.listExecutions)({ taskId: task.id }) });
-        for (const item of workItems) {
-            if (item.status !== "in_progress")
-                continue;
-            const itemAgeMs = Math.max(0, now - Date.parse(item.updatedAt || item.startedAt || item.createdAt || task.updated_at || ""));
-            if (Number.isFinite(itemAgeMs) && itemAgeMs >= staleMs) {
-                workItemStalled.push({
-                    ...base,
-                    work_item_id: item.id,
-                    target: item.target || item.owner,
-                    owner: item.owner || "",
-                    subject: item.subject,
-                    item_age_ms: itemAgeMs,
-                    item_updated_at: item.updatedAt || null,
-                    reason: item.requeueReason || "子 Agent 工作项长时间无进展",
-                });
-            }
-        }
-        if (isRecoverableRuntimeFailure(task)) {
-            runtimeFailed.push({
-                ...base,
-                reason: getTaskFailureText(task).slice(0, 500),
-                retry_count: Number(task.retry_count || 0),
-            });
-        }
-        else if (isWatchdogGapReworkCandidate(task, now, gapCooldownMs, gapMaxCount)) {
-            const summary = task.delivery_summary || {};
-            gapRework.push({
-                ...base,
-                reason: [
-                    Number(summary.coordination_plan_count || 0) <= 0 ? "缺少主 Agent 协调计划证据" : "",
-                    Number(summary.assignment_count || 0) <= 0 ? "缺少主 Agent 派发证据" : "",
-                    Number(summary.worker_notification_count || 0) <= 0 ? "缺少子 Agent 执行结果" : "",
-                    ...(Array.isArray(summary.blockers) ? summary.blockers : []),
-                    ...(Array.isArray(summary.needs) ? summary.needs : []),
-                    ...(Array.isArray(summary.verification_required_missing) ? summary.verification_required_missing.map((item) => `${item?.agent || "Agent"} 缺少验证命令证据`) : []),
-                    ...(Array.isArray(summary.verification_failed) ? summary.verification_failed : []),
-                    ...(Array.isArray(summary.verification_suggested) ? summary.verification_suggested : []),
-                ].filter(Boolean).join("；").slice(0, 500) || task.status_detail || "存在交付缺口",
-                auto_gap_continue_count: Number(task.auto_gap_continue_count || 0),
-            });
-        }
-        else if (task.status === "pending" && !isTaskQueuedInMemory(task.id) && ageMs >= staleMs) {
-            stalePending.push(base);
-        }
-        else if (task.status === "in_progress" && !runningTaskIds.has(task.id) && ageMs >= staleMs) {
-            stalledInProgress.push(base);
-        }
-        else if (task.status === "in_progress" && runningTaskIds.has(task.id) && ageMs >= staleMs) {
-            runningLong.push(base);
-        }
-    }
-    return {
-        stale_ms: staleMs,
-        checked_at: new Date().toISOString(),
-        stale_pending: stalePending,
-        stalled_in_progress: stalledInProgress,
-        running_long: runningLong,
-        runtime_failed: runtimeFailed,
-        gap_rework: gapRework,
-        work_item_stalled: workItemStalled,
-        queue_status: getQueueStatus(tasks),
-    };
+function getTaskWatchdogStatus(staleMs = exports.TASK_WATCHDOG_STALE_MS, gapCooldownMs = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = exports.TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot) {
+    return require("./collaboration-task-runtime").getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount, taskSnapshot);
 }
 function runTaskWatchdog(ctx, options = {}) {
-    const staleMs = Number(options.staleMs || options.stale_ms || TASK_WATCHDOG_STALE_MS);
-    const gapCooldownMs = Number(options.gapCooldownMs || options.gap_cooldown_ms || TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS);
-    const gapMaxCount = Math.max(1, Math.min(20, Number(options.gapMaxCount || options.gap_max_count || TASK_WATCHDOG_GAP_REWORK_MAX)));
-    const taskSnapshot = (0, db_1.loadTasks)();
-    const status = getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount, taskSnapshot);
-    const recoverable = [...status.stale_pending, ...status.stalled_in_progress];
-    const results = [];
-    const gapResults = [];
-    const workItemResults = [];
-    const executionReadiness = getAgentExecutionReadiness();
-    const freshRecoveryProbeGroups = getAgentRecoveryProbeGroups(taskSnapshot)
-        .filter((group) => getAgentProbeHealth(readAgentProbeStatus(group.probe_target)).successFresh);
-    const dailyDevExecutionReadiness = executionReadiness;
-    const canAutoRetryRuntimeFailures = executionReadiness.ready && freshRecoveryProbeGroups.length > 0;
-    const canAutoContinueGaps = executionReadiness.ready === true;
-    let blockedRecovery = null;
-    let runtimeRetry = null;
-    for (const item of recoverable) {
-        const task = taskSnapshot.find(t => t.id === item.id);
-        if (!task || task.status === "done" || isTaskPaused(task) || runningTaskIds.has(task.id))
-            continue;
-        const patch = {
-            status: "pending",
-            status_detail: task.status === "in_progress"
-                ? "任务看门狗检测到执行中断，已恢复排队"
-                : "任务看门狗检测到待处理任务未入队，已恢复排队",
-            watchdog_recovered_at: new Date().toISOString(),
-            watchdog_recoveries: Number(task.watchdog_recoveries || 0) + 1,
-        };
-        if (task.status === "in_progress") {
-            patch.result = "任务看门狗检测到执行中断，已恢复为待执行并重新入队";
-        }
-        updateTask(task.id, patch);
-        (0, logs_1.addTaskLog)(task.id, "warning", patch.status_detail);
-        results.push({ task_id: task.id, ...enqueueTask(task.id, ctx) });
-    }
-    const stalledByTask = new Map();
-    for (const item of status.work_item_stalled || []) {
-        stalledByTask.set(item.id, [...(stalledByTask.get(item.id) || []), item]);
-    }
-    for (const [taskId, items] of stalledByTask.entries()) {
-        const task = (0, db_1.loadTasks)().find((entry) => entry.id === taskId);
-        if (!task || task.status === "done" || isTaskPaused(task))
-            continue;
-        const reason = `任务看门狗检测到 ${items.length} 个子 Agent 工作项长时间无进展`;
-        const requeue = requeueTaskWorkItemsForWatchdog(task, staleMs, reason);
-        if (!requeue.requeued.length)
-            continue;
-        const shouldQueue = !runningTaskIds.has(task.id) && !isTaskQueuedInMemory(task.id);
-        const queueResult = shouldQueue
-            ? enqueueTask(task.id, ctx)
-            : { queued: false, message: runningTaskIds.has(task.id) ? "任务仍在运行，工作项已释放，等待本轮调度接管" : "任务已在队列中" };
-        workItemResults.push({
-            task_id: task.id,
-            requeued: requeue.requeued.length,
-            work_item_ids: requeue.requeued.map((entry) => entry.id),
-            queue_result: queueResult,
-        });
-    }
-    if (options.recover_agent_blocked !== false && options.recoverAgentBlocked !== false && freshRecoveryProbeGroups.length > 0) {
-        blockedRecovery = aggregateBlockedRecovery(freshRecoveryProbeGroups.map((group) => recoverAgentExecutionBlockedTasks(ctx, "目标项目 Agent CLI 探针通过后立即恢复任务", { probeTarget: group.probe_target, taskSnapshot })));
-    }
-    if (options.continue_gaps !== false && options.continueGaps !== false && canAutoContinueGaps) {
-        for (const item of status.gap_rework) {
-            const task = taskSnapshot.find(t => t.id === item.id);
-            if (!task || !isWatchdogGapReworkCandidate(task, Date.now(), gapCooldownMs, gapMaxCount))
-                continue;
-            const message = buildTaskGapContinuationDraft(task);
-            const result = continueTaskWithMessage(task.id, message, ctx, {
-                source: "watchdog_gap_rework",
-                auto_execute: true,
-                status_detail: "任务看门狗已按交付缺口生成返工说明，等待主 Agent 继续执行",
-            });
-            (0, logs_1.addTaskLog)(task.id, result.success ? "info" : "warning", result.success
-                ? "任务看门狗已按交付缺口自动续跑"
-                : `任务看门狗续跑缺口失败：${result.error || "未知错误"}`);
-            gapResults.push({ task_id: task.id, ...result, task: undefined });
-        }
-    }
-    if (options.retry_runtime_failures !== false && canAutoRetryRuntimeFailures && status.runtime_failed.length > 0) {
-        runtimeRetry = aggregateRuntimeRecovery(freshRecoveryProbeGroups.map((group) => retryRuntimeFailedTasks(ctx, {
-            reason: "目标执行通道恢复后看门狗自动重试",
-            limit: status.runtime_failed.length,
-            probeTarget: group.probe_target,
-        })));
-    }
-    const stateChanged = results.length > 0 || workItemResults.length > 0 || gapResults.length > 0 || Number(blockedRecovery?.recovered || 0) > 0 || Number(runtimeRetry?.queued || 0) > 0;
-    return {
-        success: true,
-        recovered: results.filter(item => item.queued).length + Number(blockedRecovery?.recovered || 0),
-        total_recoverable: recoverable.length + Number(blockedRecovery?.total_blocked || 0),
-        stale_recovered: results.filter(item => item.queued).length,
-        stale_recoverable: recoverable.length,
-        work_item_stalled_total: status.work_item_stalled.length,
-        work_item_requeued: workItemResults.reduce((sum, item) => sum + Number(item.requeued || 0), 0),
-        work_item_results: workItemResults,
-        blocked_recovery: blockedRecovery,
-        runtime_failed_total: status.runtime_failed.length,
-        runtime_retried: runtimeRetry?.retried || 0,
-        runtime_queued: runtimeRetry?.queued || 0,
-        gap_rework_total: status.gap_rework.length,
-        gap_continued: gapResults.filter(item => item.success).length,
-        gap_queued: gapResults.filter(item => item.queued).length,
-        gap_results: gapResults,
-        gap_continue_skipped_reason: status.gap_rework.length > 0 && !canAutoContinueGaps ? dailyDevExecutionReadiness.message : "",
-        runtime_retry: runtimeRetry,
-        runtime_retry_skipped_reason: status.runtime_failed.length > 0 && !canAutoRetryRuntimeFailures
-            ? (executionReadiness.ready ? "等待目标项目 Agent CLI 探针通过后再自动重试" : executionReadiness.message)
-            : "",
-        execution_readiness: executionReadiness,
-        daily_dev_execution_readiness: dailyDevExecutionReadiness,
-        results,
-        status: stateChanged ? getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount) : status,
-    };
+    return require("./collaboration-task-runtime").runTaskWatchdog(ctx, options);
 }
 function cleanupRuntimeDebt(options = {}) {
     const dryRun = options.dry_run === true || options.dryRun === true;
     const includePending = options.include_pending !== false && options.includePending !== false;
     const includeInProgress = options.include_in_progress !== false && options.includeInProgress !== false;
-    const status = getTaskWatchdogStatus(Number(options.stale_ms || options.staleMs || TASK_WATCHDOG_STALE_MS));
+    const status = getTaskWatchdogStatus(Number(options.stale_ms || options.staleMs || exports.TASK_WATCHDOG_STALE_MS));
     const candidates = [
         ...(includePending ? status.stale_pending.map((item) => ({ ...item, debt_type: "stale_pending" })) : []),
         ...(includeInProgress ? status.stalled_in_progress.map((item) => ({ ...item, debt_type: "stalled_in_progress" })) : []),
@@ -23809,37 +16764,10 @@ function getAgentRecoveryProbePayload(target = {}) {
     return payload;
 }
 function taskMatchesAgentProbeTarget(task, target = null) {
-    if (!target)
-        return true;
-    const required = getTaskRequiredProbeTarget(task);
-    const hasRequired = !!(required.groupId || required.project || required.agentType);
-    if (!hasRequired)
-        return false;
-    return doesProbeTargetMatchRequired(target, required);
+    return require("./collaboration-agent-probes").taskMatchesAgentProbeTarget(task, target);
 }
 function buildAgentRecoveryProbeGroups(tasks) {
-    const groups = new Map();
-    for (const task of tasks) {
-        const probeTarget = getTaskRequiredProbeTarget(task);
-        const key = getAgentProbeTargetStatusKey(probeTarget) || "default";
-        if (!groups.has(key)) {
-            groups.set(key, {
-                key,
-                probe_target: key === "default" ? null : probeTarget,
-                probe_payload: key === "default" ? {} : getAgentRecoveryProbePayload(probeTarget),
-                task_ids: [],
-                blocked_pending: 0,
-                runtime_failed: 0,
-            });
-        }
-        const group = groups.get(key);
-        group.task_ids.push(task.id);
-        if (isAgentExecutionBlockedPendingTask(task))
-            group.blocked_pending += 1;
-        if (isRecoverableRuntimeFailure(task))
-            group.runtime_failed += 1;
-    }
-    return Array.from(groups.values());
+    return require("./collaboration-task-runtime").buildAgentRecoveryProbeGroups(tasks);
 }
 function getAgentRecoveryProbeGroups(taskSnapshot) {
     const tasks = (Array.isArray(taskSnapshot) ? taskSnapshot : (0, db_1.loadTasks)()).filter((task) => isAgentExecutionBlockedPendingTask(task) || isRecoverableRuntimeFailure(task));
@@ -23893,135 +16821,25 @@ function recoverAgentExecutionBlockedTasks(ctx, reason = "执行通道恢复后�
     };
 }
 function runAgentRecoveryMonitorOnce(ctx, options = {}) {
-    const work = getAgentRecoveryWorkSummary();
-    if (work.total === 0) {
-        return Promise.resolve({ success: true, skipped: true, reason: "没有等待执行通道恢复的自动任务", work });
-    }
-    if (agentRecoveryProbeInFlight) {
-        return Promise.resolve({ success: true, skipped: true, reason: "执行通道探针正在运行", work });
-    }
-    agentRecoveryProbeInFlight = true;
-    const timeoutMs = Number(options.timeout_ms || options.timeoutMs || AGENT_RECOVERY_PROBE_TIMEOUT_MS);
-    const probeGroups = getAgentRecoveryProbeGroups();
-    return Promise.all(probeGroups.map(async (group) => {
-        const probe = await runAgentCliProbe({
-            ...options,
-            ...group.probe_payload,
-            timeout_ms: timeoutMs,
-            source: "agent-recovery-monitor",
-        }, ctx);
-        if (!probe?.success) {
-            return {
-                success: false,
-                group,
-                probe,
-                message: probe?.message || "执行通道探针未通过",
-            };
-        }
-        const blockedRecovery = recoverAgentExecutionBlockedTasks(ctx, "执行通道自动探针通过后恢复目标任务", { probeTarget: group.probe_target });
-        const runtimeRecovery = retryRuntimeFailedTasks(ctx, {
-            reason: "执行通道自动探针通过后重试",
-            limit: group.runtime_failed || 100,
-            probeTarget: group.probe_target,
-        });
-        return {
-            success: true,
-            group,
-            probe,
-            blocked_recovery: blockedRecovery,
-            runtime_recovery: runtimeRecovery,
-        };
-    }))
-        .then((target_results) => {
-        const successes = target_results.filter((item) => item.success);
-        const failures = target_results.filter((item) => !item.success);
-        const blockedRecoveries = successes.map((item) => item.blocked_recovery);
-        const runtimeRecoveries = successes.map((item) => item.runtime_recovery);
-        const blockedRecovery = aggregateBlockedRecovery(blockedRecoveries);
-        const runtimeRecovery = aggregateRuntimeRecovery(runtimeRecoveries);
-        return {
-            success: successes.length > 0,
-            skipped: false,
-            work,
-            probe_groups: probeGroups,
-            target_results,
-            failures,
-            message: successes.length > 0 ? "目标执行通道探针通过，已按项目 Agent 恢复任务" : (failures[0]?.message || "执行通道探针未通过"),
-            probe: target_results[0]?.probe || null,
-            blocked_recovery: blockedRecovery,
-            runtime_recovery: runtimeRecovery,
-        };
-    })
-        .finally(() => {
-        agentRecoveryProbeInFlight = false;
-    });
+    return require("./collaboration-task-runtime").runAgentRecoveryMonitorOnce(ctx, options);
 }
 function startAgentRecoveryMonitor(ctx) {
-    if (agentRecoveryMonitorTimer)
-        clearInterval(agentRecoveryMonitorTimer);
-    const tick = () => {
-        runAgentRecoveryMonitorOnce(ctx)
-            .then((result) => {
-            if (result?.skipped)
-                return;
-            if (result?.success) {
-                const recovered = Number(result.blocked_recovery?.recovered || 0);
-                const retried = Number(result.runtime_recovery?.queued || 0);
-                console.log(`[执行通道恢复监控] 探针通过，自动恢复 ${recovered} 个阻塞任务，重试 ${retried} 个执行失败任务`);
-            }
-            else {
-                console.log(`[执行通道恢复监控] 探针未通过：${result?.message || "未知原因"}`);
-            }
-        })
-            .catch((e) => console.error("[执行通道恢复监控]", e.message));
-    };
-    agentRecoveryMonitorTimer = setInterval(tick, AGENT_RECOVERY_PROBE_INTERVAL_MS);
-    setTimeout(tick, 10 * 1000);
-    console.log("[执行通道恢复监控] 已启动");
+    return require("./collaboration-task-runtime").startAgentRecoveryMonitor(ctx);
 }
 function stopAgentRecoveryMonitor() {
-    if (agentRecoveryMonitorTimer)
-        clearInterval(agentRecoveryMonitorTimer);
-    agentRecoveryMonitorTimer = null;
+    return require("./collaboration-task-runtime").stopAgentRecoveryMonitor();
 }
 function startTaskWatchdog(ctx) {
-    if (taskWatchdogTimer)
-        clearInterval(taskWatchdogTimer);
-    const autoRecover = /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_TASK_WATCHDOG_RECOVERY || ""));
-    const tick = () => {
-        try {
-            const expiredQa = (0, agent_qa_service_1.markExpiredAgentQaItems)();
-            if (expiredQa.length)
-                console.log(`[Agent 问答看门狗] ${expiredQa.length} 个问答已超时`);
-            const status = getTaskWatchdogStatus();
-            const recoverable = status.stale_pending.length + status.stalled_in_progress.length + status.runtime_failed.length + status.gap_rework.length;
-            if (!autoRecover) {
-                if (recoverable > 0)
-                    console.log(`[任务看门狗] 手动恢复模式：发现 ${recoverable} 个需要处理的任务，等待用户点击恢复`);
-                return;
-            }
-            const result = runTaskWatchdog(ctx);
-            if (result.total_recoverable > 0 || result.runtime_failed_total > 0 || result.gap_rework_total > 0) {
-                console.log(`[任务看门狗] 自动恢复 ${result.recovered}/${result.total_recoverable} 个任务，运行时重试 ${result.runtime_queued || 0}，缺口续跑 ${result.gap_queued || 0}`);
-            }
-        }
-        catch (e) {
-            console.error("[任务看门狗]", e.message);
-        }
-    };
-    taskWatchdogTimer = setInterval(tick, TASK_WATCHDOG_INTERVAL_MS);
-    console.log(`[任务看门狗] 已启动（${autoRecover ? "自动恢复模式" : "手动恢复模式"}）`);
+    return require("./collaboration-task-runtime").startTaskWatchdog(ctx);
 }
 function stopTaskWatchdog() {
-    if (taskWatchdogTimer)
-        clearInterval(taskWatchdogTimer);
-    taskWatchdogTimer = null;
+    return require("./collaboration-task-runtime").stopTaskWatchdog();
 }
 function getRuntimeMonitorControlStatus() {
     return {
-        task_watchdog_active: !!taskWatchdogTimer,
-        agent_recovery_monitor_active: !!agentRecoveryMonitorTimer,
-        agent_recovery_probe_in_flight: agentRecoveryProbeInFlight,
+        task_watchdog_active: !!exports.taskWatchdogTimer,
+        agent_recovery_monitor_active: !!exports.agentRecoveryMonitorTimer,
+        agent_recovery_probe_in_flight: exports.agentRecoveryProbeInFlight,
     };
 }
 function applyRuntimeMonitorControl(action, ctx) {
@@ -25251,19 +18069,7 @@ function normalizeAgentProbeTarget(target = {}) {
     };
 }
 function getAgentProbeTargetStatusKey(target) {
-    const normalized = normalizeAgentProbeTarget(target);
-    if (!normalized.groupId && !normalized.project && !normalized.agentType)
-        return "";
-    const clean = (value, fallback) => String(value || fallback)
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9._-]+/gi, "_")
-        .replace(/^_+|_+$/g, "") || fallback;
-    return [
-        clean(normalized.groupId, "any-group"),
-        clean(normalized.project, "any-project"),
-        clean(normalized.agentType, "any-agent"),
-    ].join("__");
+    return require("./collaboration-agent-probes").getAgentProbeTargetStatusKey(target);
 }
 function getAgentProbeTargetStatusFile(target) {
     const key = getAgentProbeTargetStatusKey(target);
@@ -25313,54 +18119,10 @@ function listAgentProbeTargetStatuses(requiredTarget = null) {
     }
 }
 function readAgentProbeStatus(requiredTarget = null) {
-    const required = normalizeAgentProbeTarget(requiredTarget || {});
-    const hasRequired = !!(required.groupId || required.project || required.agentType);
-    if (hasRequired) {
-        const exactFile = getAgentProbeTargetStatusFile(required);
-        const exact = readAgentProbeStatusFile(exactFile);
-        if (exact)
-            return exact;
-        const matched = listAgentProbeTargetStatuses(required)[0];
-        if (matched)
-            return matched;
-    }
-    const latest = readAgentProbeStatusFile(AGENT_PROBE_STATUS_FILE);
-    if (!hasRequired)
-        return latest;
-    return latest && doesProbeTargetMatchRequired(latest?.target, required) ? latest : null;
+    return require("./collaboration-agent-probes").readAgentProbeStatus(requiredTarget);
 }
 function getAgentProbeHealth(probe) {
-    if (!probe) {
-        return {
-            status: "missing",
-            successFresh: false,
-            failureRecent: false,
-            message: "尚未运行 Agent CLI 探针",
-        };
-    }
-    const age = Number(probe.age_ms ?? Infinity);
-    if (probe.success === true && age < AGENT_PROBE_SUCCESS_FRESH_MS) {
-        return {
-            status: "ok",
-            successFresh: true,
-            failureRecent: false,
-            message: "Agent CLI 探针最近通过",
-        };
-    }
-    if (probe.success === false && age < AGENT_PROBE_FAILURE_BLOCK_MS) {
-        return {
-            status: "failed",
-            successFresh: false,
-            failureRecent: true,
-            message: probe.message || probe.error || "Agent CLI 探针最近失败",
-        };
-    }
-    return {
-        status: probe.success === true ? "stale_ok" : "stale_failed",
-        successFresh: false,
-        failureRecent: false,
-        message: probe.success === true ? "Agent CLI 探针已过期，建议复检" : "Agent CLI 失败探针已过期，建议复检",
-    };
+    return require("./collaboration-agent-probes").getAgentProbeHealth(probe);
 }
 function writeAgentProbeStatus(data) {
     try {
@@ -25404,7 +18166,7 @@ function writeAgentProbeStatus(data) {
             fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
             fs.renameSync(tmp, file);
         };
-        writeJsonAtomic(AGENT_PROBE_STATUS_FILE);
+        writeJsonAtomic(exports.AGENT_PROBE_STATUS_FILE);
         const targetFile = getAgentProbeTargetStatusFile(target);
         if (targetFile)
             writeJsonAtomic(targetFile);
@@ -25454,152 +18216,13 @@ function buildAgentExecutionFixActions(input = {}) {
     return uniqueStrings(actions).slice(0, 6);
 }
 function getAgentProbeOutputFailure(output) {
-    const text = String(output || "").trim();
-    if (!text) {
-        return {
-            message: "Agent CLI 已返回空输出，未包含预期探针标记",
-            error: "empty_output",
-        };
-    }
-    if ((0, agent_receipts_1.checkTaskFailure)(text) || /Agent Runner 错误|Agent 错误|响应超时|ConnectionRefused|Unable to connect to API|ECONNREFUSED/i.test(text)) {
-        return {
-            message: `Agent CLI 探针失败：${(0, memory_1.compactMemoryText)(text, 500)}`,
-            error: (0, memory_1.compactMemoryText)(text, 1000),
-        };
-    }
-    return {
-        message: "Agent CLI 已返回，但未包含预期探针标记",
-        error: (0, memory_1.compactMemoryText)(text, 1000),
-    };
+    return require("./collaboration-agent-probes").getAgentProbeOutputFailure(output);
 }
 function getAgentExecutionReadiness(probeTarget = null) {
-    const childProcess = getChildProcessCapability();
-    const probe = readAgentProbeStatus(probeTarget);
-    const probeHealth = getAgentProbeHealth(probe);
-    if (probeHealth.failureRecent) {
-        const externalRunner = getExternalAgentRunnerStatus();
-        const message = `Agent CLI 探针最近失败：${probeHealth.message}`;
-        return {
-            ready: false,
-            mode: "agent-cli-probe-failed",
-            message,
-            fix_actions: buildAgentExecutionFixActions({
-                error: message,
-                childProcess,
-                externalRunner,
-                probe,
-            }),
-            childProcess,
-            externalRunner,
-            probe,
-            probeHealth,
-        };
-    }
-    if (childProcess.ok) {
-        return {
-            ready: true,
-            mode: "node-child-process",
-            message: probeHealth.successFresh
-                ? `Node 可启动子进程，且 Agent CLI 探针最近通过：${childProcess.stdout || "ok"}`
-                : `Node 可启动子进程，Agent CLI 调用底座可用但模型 CLI 连通性未复检：${childProcess.stdout || "ok"}`,
-            fix_actions: [],
-            childProcess,
-            probe,
-            probeHealth,
-        };
-    }
-    const externalRunner = getExternalAgentRunnerStatus();
-    const lastResult = externalRunner.last_result || null;
-    const lastFailure = lastResult?.success === false;
-    const recentFailure = lastFailure && Number(lastResult?.age_ms || 0) < 15 * 60 * 1000;
-    if (externalRunner.active && (!recentFailure || probeHealth.successFresh)) {
-        return {
-            ready: true,
-            mode: "external-runner",
-            message: recentFailure && probeHealth.successFresh
-                ? "Node 直接启动子进程受限，外部 Agent Runner 最近有失败记录，但 Agent CLI 探针已新鲜通过，允许继续通过 Runner 执行"
-                : "Node 直接启动子进程受限，但外部 Agent Runner 在线，子 Agent CLI 将通过 Runner 执行",
-            fix_actions: [],
-            childProcess,
-            externalRunner,
-            probe,
-            probeHealth,
-        };
-    }
-    const message = lastFailure
-        ? `外部 Agent Runner 最近执行 ${lastResult.command || "Agent CLI"} 失败：${lastResult.error || lastResult.output || "未知错误"}；${lastResult.hint || "请检查子 Agent CLI"}`
-        : `Node 无法启动子进程，项目 Agent 无法调用 CLI：${childProcess.error || childProcess.stderr || "未知错误"}；可运行 npm run agent-runner:ps 启用外部执行通道`;
-    return {
-        ready: false,
-        mode: externalRunner.active ? "external-runner-blocked" : "blocked",
-        message,
-        fix_actions: buildAgentExecutionFixActions({
-            error: message,
-            childProcess,
-            externalRunner,
-            probe,
-        }),
-        childProcess,
-        externalRunner,
-        probe,
-        probeHealth,
-    };
+    return require("./collaboration-agent-probes").getAgentExecutionReadiness(probeTarget);
 }
 function enforceAgentProbeExecutionReadiness(capability = {}) {
-    const childProcess = capability.childProcess || { ok: false };
-    const externalRunner = capability.externalRunner || { active: false };
-    const probe = capability.probe || null;
-    const probeHealth = capability.probeHealth || getAgentProbeHealth(probe);
-    const claudeGateway = getClaudeLocalGatewayReadiness(capability.probeTarget || probe?.target || null);
-    if (claudeGateway) {
-        return {
-            ...claudeGateway,
-            childProcess,
-            externalRunner,
-            probe,
-            probeHealth,
-        };
-    }
-    if (childProcess.ok) {
-        return {
-            ready: true,
-            mode: "node-child-process-probe",
-            message: `Node 可启动子进程，可重新运行 Agent CLI 探针：${childProcess.stdout || "ok"}`,
-            fix_actions: [],
-            childProcess,
-            externalRunner,
-            probe,
-            probeHealth,
-        };
-    }
-    if (externalRunner.active) {
-        return {
-            ready: true,
-            mode: "external-runner-probe",
-            message: "Node 直接启动子进程受限，但外部 Agent Runner 在线，可重新运行 Agent CLI 探针",
-            fix_actions: [],
-            childProcess,
-            externalRunner,
-            probe,
-            probeHealth,
-        };
-    }
-    const message = `无法运行 Agent CLI 探针：Node 无法启动子进程，且外部 Agent Runner 未在线；${childProcess.error || childProcess.stderr || "请启用执行通道"}`;
-    return {
-        ready: false,
-        mode: "probe-runner-blocked",
-        message,
-        fix_actions: buildAgentExecutionFixActions({
-            error: message,
-            childProcess,
-            externalRunner,
-            probe,
-        }),
-        childProcess,
-        externalRunner,
-        probe,
-        probeHealth,
-    };
+    return require("./collaboration-agent-probes").enforceAgentProbeExecutionReadiness(capability);
 }
 function getAgentProbeExecutionReadiness(probeTarget = null) {
     return enforceAgentProbeExecutionReadiness({
@@ -25638,11 +18261,7 @@ function doesProbeMatchTaskTarget(probe, task) {
     return doesProbeTargetMatchRequired(probe?.target, required);
 }
 function taskNeedsGroupWideAgentProbe(task) {
-    if (!taskRequiresFreshAgentProbe(task))
-        return false;
-    const required = getTaskRequiredProbeTarget(task);
-    const assignType = String(task?.assign_type || task?.assignType || "").trim();
-    return !!required.groupId && !required.project && (!assignType || assignType === "group");
+    return require("./collaboration-agent-probes").taskNeedsGroupWideAgentProbe(task);
 }
 function getExecutableProbeTargetsFromDevGroup(group) {
     return (group?.members || [])
@@ -25694,43 +18313,7 @@ function getExecutableProbeTargetsForTaskGroup(task) {
     });
 }
 function summarizeAgentProbeTargets(targets, probeResolver = readAgentProbeStatus) {
-    const rows = (targets || []).map((target) => {
-        const runtimeCandidates = (0, collaboration_resilience_1.buildRuntimeRecoveryCandidates)(target.agent_type || "claudecode");
-        const candidates = runtimeCandidates.map((agentType) => {
-            const candidateTarget = { ...target, agent_type: agentType };
-            const candidateProbe = probeResolver(candidateTarget);
-            const candidateHealth = getAgentProbeHealth(candidateProbe);
-            const candidateWriteReady = target.requires_write === false || candidateProbe?.capabilities?.write?.pass === true;
-            return { agentType, probe: candidateProbe, probeHealth: candidateHealth, writeReady: candidateWriteReady, ready: candidateHealth.successFresh === true && doesProbeTargetMatchRequired(candidateProbe?.target, candidateTarget) && candidateWriteReady };
-        });
-        const selected = candidates.find((item) => item.ready) || candidates[0];
-        const probe = selected?.probe;
-        const probeHealth = selected?.probeHealth || getAgentProbeHealth(probe);
-        const writeReady = selected?.writeReady === true;
-        return {
-            ...target,
-            effective_agent_type: selected?.agentType || target.agent_type,
-            fallback_active: !!selected?.ready && selected?.agentType !== target.agent_type,
-            runtime_candidates: candidates.map((item) => ({ agent_type: item.agentType, ready: item.ready, probe_status: item.probeHealth?.status || "missing" })),
-            probe,
-            probeHealth,
-            writeReady,
-            ready: selected?.ready === true,
-        };
-    });
-    const readyRows = rows.filter((row) => row.ready);
-    const missingRows = rows.filter((row) => row.probeHealth?.status === "missing");
-    const staleRows = rows.filter((row) => row.probeHealth?.status === "stale_ok" || row.probeHealth?.status === "stale_failed");
-    const failedRows = rows.filter((row) => row.probeHealth?.failureRecent);
-    return {
-        total: rows.length,
-        ready: readyRows.length,
-        missing: missingRows.length,
-        stale: staleRows.length,
-        failed_recent: failedRows.length,
-        allReady: rows.length > 0 && readyRows.length === rows.length,
-        rows,
-    };
+    return require("./collaboration-agent-probes").summarizeAgentProbeTargets(targets, probeResolver);
 }
 function getTaskGroupAgentProbeReadiness(task) {
     const rawTargets = getExecutableProbeTargetsForTaskGroup(task);
@@ -25758,49 +18341,10 @@ function getTaskGroupAgentProbeReadiness(task) {
     };
 }
 function enforceTaskAgentProbeReadiness(task, readiness) {
-    if (!taskRequiresFreshAgentProbe(task))
-        return readiness;
-    const groupReadiness = getTaskGroupAgentProbeReadiness(task);
-    if (groupReadiness) {
-        return {
-            ...readiness,
-            ready: groupReadiness.ready,
-            mode: groupReadiness.ready ? readiness.mode : "agent-cli-probe-required",
-            message: groupReadiness.message,
-            fix_actions: groupReadiness.ready ? [] : uniqueStrings([
-                ...groupReadiness.fix_actions,
-                ...(Array.isArray(readiness.fix_actions) ? readiness.fix_actions : []),
-            ]).slice(0, 6),
-            groupProbeReadiness: groupReadiness,
-        };
-    }
-    if (!readiness.ready)
-        return readiness;
-    const probeHealth = readiness.probeHealth || getAgentProbeHealth(readiness.probe);
-    const probeMatchesTarget = doesProbeMatchTaskTarget(readiness.probe, task);
-    if (probeHealth?.successFresh && probeMatchesTarget)
-        return readiness;
-    const requiredTarget = getTaskRequiredProbeTarget(task);
-    const targetHint = requiredTarget.groupId || requiredTarget.project || requiredTarget.agentType
-        ? `目标：${[requiredTarget.groupId, requiredTarget.project, requiredTarget.agentType].filter(Boolean).join(" / ")}；当前探针：${getProbeTargetLabel(readiness.probe)}；`
-        : "";
-    const mismatchHint = probeHealth?.successFresh && !probeMatchesTarget ? "已有新鲜探针但目标不匹配；" : "";
-    const message = `daily_dev 任务需要先通过目标项目 Agent CLI 真实探针：${targetHint}${mismatchHint}${probeHealth?.message || "尚未复检模型 CLI/API 连通性"}`;
-    return {
-        ...readiness,
-        ready: false,
-        mode: "agent-cli-probe-required",
-        message,
-        fix_actions: uniqueStrings([
-            "在设置页点击“复检执行通道”，让系统实际调用目标子 Agent CLI 并确认模型 API 可用",
-            ...(Array.isArray(readiness.fix_actions) ? readiness.fix_actions : []),
-            "探针通过后再创建真实试运行任务或恢复 daily_dev 队列",
-        ]).slice(0, 6),
-        probeHealth,
-    };
+    return require("./collaboration-agent-probes").enforceTaskAgentProbeReadiness(task, readiness);
 }
 function getTaskAgentExecutionReadiness(task) {
-    return enforceTaskAgentProbeReadiness(task, getAgentExecutionReadiness(getTaskRequiredProbeTarget(task)));
+    return require("./collaboration-agent-probes").getTaskAgentExecutionReadiness(task);
 }
 function getExternalAgentRunnerStatus() {
     const runnerDir = path.join(utils_1.CCM_DIR, "agent-runner");
@@ -25994,412 +18538,7 @@ function buildAgentProbeMatrix(devGroups) {
     };
 }
 function buildDailyDevAgentDiagnostics() {
-    const checks = [];
-    const config = (0, group_orchestrator_1.loadOrchestratorConfig)();
-    const publicConfig = (0, group_orchestrator_1.publicOrchestratorConfig)(config);
-    const groups = (0, storage_1.loadGroups)();
-    const configs = (0, db_1.getConfigs)();
-    const tasks = (0, db_1.loadTasks)();
-    const cronJobs = (0, db_1.loadCronJobs)();
-    const enabledCronJobs = cronJobs.filter((job) => job?.enabled !== false);
-    const autoTasks = tasks.filter((task) => task?.auto_execute);
-    const devGroups = groups.map((group) => {
-        const normalized = (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
-        const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(normalized);
-        const routableMembers = (0, group_orchestrator_1.getRoutableMembers)(normalized);
-        const backlogFiles = Array.isArray(normalized.shared_files)
-            ? normalized.shared_files.filter((file) => (0, daily_dev_backlog_1.isDailyDevBacklogFile)(file))
-            : [];
-        const backlogCounts = backlogFiles.reduce((acc, file) => {
-            const status = (0, daily_dev_backlog_1.readDailyDevBacklogStatus)(file) || "unknown";
-            acc[status] = Number(acc[status] || 0) + 1;
-            return acc;
-        }, {});
-        const members = routableMembers.map((member) => {
-            const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(member.project, normalized, configs);
-            const workDirState = runtime?.workDir ? getWorkDirState(runtime.workDir) : null;
-            const verification = getProjectVerificationHintDetail(member.project, workDirState?.path || runtime?.workDir || "");
-            return {
-                project: member.project,
-                role: member.role || "member",
-                configured: !!runtime,
-                agentType: runtime?.agentType || member.agent || "",
-                workDir: runtime?.workDir || "",
-                workDirExists: !!workDirState?.exists,
-                workDirWritable: !!workDirState?.writable,
-                verification,
-            };
-        });
-        const readyMembers = members.filter((member) => member.configured && member.workDirExists && member.workDirWritable);
-        return {
-            id: normalized.id,
-            name: normalized.name || normalized.id,
-            orchestratorEnabled: normalized.orchestrator?.enabled !== false,
-            coordinator: coordinator.project,
-            sharedFiles: Array.isArray(normalized.shared_files) ? normalized.shared_files.length : 0,
-            backlogFiles: backlogFiles.length,
-            readyBacklogs: Number(backlogCounts.ready || 0),
-            backlogCounts,
-            memberCount: members.length,
-            readyMemberCount: readyMembers.length,
-            members,
-        };
-    });
-    const groupsWithReadyMembers = devGroups.filter((group) => group.orchestratorEnabled && group.readyMemberCount > 0);
-    const agentProbeMatrix = buildAgentProbeMatrix(devGroups);
-    const dailyDevCronJobs = enabledCronJobs.filter((job) => job?.workflow_type === "daily_dev" || job?.workflowType === "daily_dev" || job?.daily_dev || job?.dailyDev);
-    const llmConfigured = !!(config.enabled && String(config.apiUrl || "").trim() && String(config.apiKey || "").trim() && String(config.model || "").trim());
-    checks.push(createDiagnosticCheck("orchestrator-config", "主 Agent 大模型", llmConfigured ? "ok" : (config.fallbackToRules ? "warn" : "fail"), llmConfigured
-        ? `已配置 ${publicConfig.model}，可由 LLM 主 Agent 理解业务描述并拆分任务`
-        : (config.fallbackToRules ? "LLM 配置不完整，会降级到规则主 Agent；可工作但理解复杂业务会变弱" : "LLM 配置不完整，主 Agent 不会自动分派子 Agent"), { enabled: publicConfig.enabled, apiUrl: publicConfig.apiUrl, model: publicConfig.model, hasKey: publicConfig.hasKey, fallbackToRules: publicConfig.fallbackToRules }));
-    const coordinatorProtocol = (0, group_orchestrator_1.runCoordinatorProtocolSelfTest)();
-    checks.push(createDiagnosticCheck("coordinator-protocol", "主 Agent 协调协议", coordinatorProtocol.pass ? "ok" : "fail", coordinatorProtocol.pass
-        ? `规则主 Agent 可生成 ${coordinatorProtocol.coordinationPlan?.phases?.length || 0} 阶段计划，按 ${coordinatorProtocol.executionOrder || "parallel"} 派发 ${coordinatorProtocol.assignmentCount} 个自包含子 Agent 工作单；策略：${coordinatorProtocol.coordinationStrategy || coordinatorProtocol.coordinationPlan?.strategy || "未声明"}`
-        : "规则主 Agent 未能稳定生成计划、派发和自包含子 Agent 工作单", coordinatorProtocol));
-    const runtimeKernel = (0, runtime_kernel_1.runAgentRuntimeKernelSelfTest)();
-    checks.push(createDiagnosticCheck("agent-runtime-kernel", "Agent 运行时内核", runtimeKernel.pass ? "ok" : "fail", runtimeKernel.pass
-        ? "统一 lifecycle、权限规则、上下文预算、WorkerContextPacket、contract injection 和 Trace Replay 自测通过"
-        : "Agent 运行时内核自测未通过，需检查 lifecycle/packet/replay 输出", runtimeKernel));
-    const workerHandoff = (0, worker_handoff_1.runWorkerHandoffSelfTest)();
-    checks.push(createDiagnosticCheck("worker-handoff-packet", "子 Agent 自包含工作单", workerHandoff.pass ? "ok" : "fail", workerHandoff.pass
-        ? "子 Agent 工作单会包含用户目标、允许/禁止范围、依赖、验证、ACK 和结构化回执要求"
-        : "子 Agent 自包含工作单缺少目标、范围、验证、ACK 或回执要求", workerHandoff));
-    const reworkProtocol = runCoordinatorReworkProtocolSelfTest();
-    checks.push(createDiagnosticCheck("coordinator-rework-protocol", "主 Agent 返工协议", reworkProtocol.pass ? "ok" : "fail", reworkProtocol.pass
-        ? "主 Agent 验收发现缺口时，会生成自包含返工工作单并要求子 Agent 再次回执"
-        : "主 Agent 返工工作单缺少轮次、原始需求、初始计划、验证或回执要求", reworkProtocol));
-    const collaborationProtocol = runCollaborationProtocolSelfTest();
-    const workerProtocolPass = !!(collaborationProtocol.pass
-        && Object.values(collaborationProtocol.taskNotificationChecks || {}).every(Boolean)
-        && Object.values(collaborationProtocol.scratchpadChecks || {}).every(Boolean));
-    checks.push(createDiagnosticCheck("worker-notification-scratchpad", "Worker 通知与协作 scratchpad", workerProtocolPass ? "ok" : "fail", workerProtocolPass
-        ? "子 Agent 输出会封装为 task-notification，缺回执可触发返工，并写入协作 scratchpad 供后续 Worker 复用"
-        : "Worker 通知、缺回执门禁或协作 scratchpad 自测未通过", {
-        taskNotificationChecks: collaborationProtocol.taskNotificationChecks || {},
-        scratchpadChecks: collaborationProtocol.scratchpadChecks || {},
-        structuredAssignmentChecks: collaborationProtocol.structuredAssignmentChecks || {},
-    }));
-    checks.push(createDiagnosticCheck("project-configs", "项目 Agent 配置", configs.length > 0 ? "ok" : "fail", configs.length > 0 ? `已发现 ${configs.length} 个项目配置` : "未发现项目配置，子 Agent 没有可执行仓库", configs.map((configItem) => ({ name: configItem.name, file: configItem.file }))));
-    checks.push(createDiagnosticCheck("groups", "开发群聊", groupsWithReadyMembers.length > 0 ? "ok" : "fail", groupsWithReadyMembers.length > 0
-        ? `已有 ${groupsWithReadyMembers.length} 个群聊可由主 Agent 派发给子 Agent`
-        : "没有可用的开发群聊；需要创建群聊并加入至少一个已配置项目 Agent", devGroups));
-    const invalidMembers = devGroups.flatMap((group) => group.members
-        .filter((member) => !member.configured || !member.workDirExists || !member.workDirWritable)
-        .map((member) => ({ group: group.name, ...member })));
-    checks.push(createDiagnosticCheck("member-runtime", "子 Agent 可执行目录", invalidMembers.length === 0 && groupsWithReadyMembers.length > 0 ? "ok" : (groupsWithReadyMembers.length > 0 ? "warn" : "fail"), invalidMembers.length === 0 && groupsWithReadyMembers.length > 0
-        ? "所有群聊子 Agent 都能解析到可读写工作目录"
-        : (groupsWithReadyMembers.length > 0 ? `${invalidMembers.length} 个子 Agent 的项目配置或工作目录需要检查` : "还没有可验证的子 Agent 工作目录"), invalidMembers));
-    const readyMembersForVerification = devGroups.flatMap((group) => group.members
-        .filter((member) => member.configured && member.workDirExists && member.workDirWritable)
-        .map((member) => ({ group: group.name, ...member })));
-    const projectAgentProfiles = readyMembersForVerification.map((member) => ({
-        group: member.group,
-        project: member.project,
-        profile: getProjectAgentCapabilityProfile(member.project, member.workDir || ""),
-    }));
-    const incompleteProjectAgentProfiles = projectAgentProfiles.filter((item) => {
-        const profile = item.profile || {};
-        return !profile.responsibility || !profile.capabilities?.length || !profile.delivery_contract;
-    });
-    checks.push(createDiagnosticCheck("project-agent-capabilities", "项目 Agent 能力边界", incompleteProjectAgentProfiles.length === 0 && projectAgentProfiles.length > 0 ? "ok" : (projectAgentProfiles.length > 0 ? "warn" : "fail"), projectAgentProfiles.length === 0
-        ? "还没有可检查能力边界的可执行子 Agent"
-        : incompleteProjectAgentProfiles.length === 0
-            ? "可执行子 Agent 均配置了职责、能力标签和交付规范；路径门禁按项目配置启用"
-            : `${incompleteProjectAgentProfiles.length} 个可执行子 Agent 缺少职责、能力标签或交付规范；可在项目管理 -> 项目工具配置中填写`, {
-        total: projectAgentProfiles.length,
-        incomplete: incompleteProjectAgentProfiles.length,
-        members: projectAgentProfiles.map((item) => ({
-            group: item.group,
-            project: item.project,
-            responsibility: item.profile.responsibility,
-            capabilities: item.profile.capabilities,
-            writable_paths: item.profile.writable_paths,
-            forbidden_paths: item.profile.forbidden_paths,
-            has_delivery_contract: !!item.profile.delivery_contract,
-        })),
-    }));
-    const missingVerificationMembers = readyMembersForVerification.filter((member) => member.verification?.source === "missing");
-    const configuredVerificationMembers = readyMembersForVerification.filter((member) => member.verification?.source === "configured");
-    const inferredVerificationMembers = readyMembersForVerification.filter((member) => member.verification?.source === "inferred");
-    checks.push(createDiagnosticCheck("project-verification", "项目验证命令", missingVerificationMembers.length === 0 && readyMembersForVerification.length > 0 ? "ok" : (readyMembersForVerification.length > 0 ? "warn" : "fail"), readyMembersForVerification.length === 0
-        ? "还没有可检查验证命令的可执行子 Agent"
-        : missingVerificationMembers.length === 0
-            ? `可执行子 Agent 均有验证命令：${configuredVerificationMembers.length} 个手动配置，${inferredVerificationMembers.length} 个自动推断`
-            : `${missingVerificationMembers.length} 个可执行子 Agent 缺少验证命令；可在项目管理 -> 项目工具配置中填写`, {
-        total: readyMembersForVerification.length,
-        configured: configuredVerificationMembers.length,
-        inferred: inferredVerificationMembers.length,
-        missing: missingVerificationMembers.length,
-        members: readyMembersForVerification.map((member) => ({
-            group: member.group,
-            project: member.project,
-            source: member.verification?.source || "missing",
-            commands: member.verification?.commands || [],
-        })),
-    }));
-    const runtimeConsistency = getAgentRuntimeConsistencyStatus();
-    checks.push(createDiagnosticCheck("agent-runtime-consistency", "项目 Agent 执行器映射", runtimeConsistency.pass ? "ok" : "fail", runtimeConsistency.pass
-        ? `所有可配置项目 Agent 都有对应执行器：${runtimeConsistency.agents.map((agent) => agent.type).join("、")}`
-        : `存在可配置但不可执行的项目 Agent：${runtimeConsistency.missing.map((agent) => agent.type).join("、")}`, runtimeConsistency));
-    const childProcessCapability = getChildProcessCapability();
-    const externalRunnerStatus = getExternalAgentRunnerStatus();
-    const probeStatus = readAgentProbeStatus();
-    const probeHealth = getAgentProbeHealth(probeStatus);
-    const executionReadiness = getAgentExecutionReadiness();
-    const runnerLastFailure = externalRunnerStatus.last_result?.success === false;
-    const runnerRecentFailure = runnerLastFailure
-        && Number(externalRunnerStatus.last_result?.age_ms || 0) < 15 * 60 * 1000;
-    const runnerFailureBlocks = runnerLastFailure && (!externalRunnerStatus.active || runnerRecentFailure);
-    const agentProcessReady = executionReadiness.ready === true;
-    const dailyDevExecutionReady = Number(agentProbeMatrix.group_ready || 0) > 0;
-    const matrixReadinessMessage = agentProbeMatrix.executable > 0
-        ? `daily_dev 群聊接单需要至少一个开发群聊的所有可执行项目 Agent 通过真实 CLI 探针：当前全员通过 ${agentProbeMatrix.group_ready}/${agentProbeMatrix.group_total} 个群聊，项目探针通过 ${agentProbeMatrix.ready}/${agentProbeMatrix.executable}，未复检 ${agentProbeMatrix.missing}，过期 ${agentProbeMatrix.stale}，最近失败 ${agentProbeMatrix.failed_recent}`
-        : "daily_dev 需要先配置至少一个具备可写工作目录的项目 Agent";
-    const baseDailyDevReadiness = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, executionReadiness);
-    const dailyDevExecutionReadiness = dailyDevExecutionReady
-        ? {
-            ready: true,
-            mode: "group-target-agent-cli-probe",
-            message: `已有 ${agentProbeMatrix.group_ready}/${agentProbeMatrix.group_total} 个开发群聊的可执行项目 Agent 全员通过真实 CLI 探针`,
-            probe_matrix: agentProbeMatrix,
-        }
-        : {
-            ...baseDailyDevReadiness,
-            message: matrixReadinessMessage,
-            probe_matrix: agentProbeMatrix,
-        };
-    const executionFixActions = agentProcessReady ? [] : (executionReadiness.fix_actions || buildAgentExecutionFixActions({
-        error: externalRunnerStatus.last_result?.error || externalRunnerStatus.last_result?.output || probeStatus?.message || childProcessCapability.error || childProcessCapability.stderr || "",
-        childProcess: childProcessCapability,
-        externalRunner: externalRunnerStatus,
-        probe: probeStatus,
-    }));
-    checks.push(createDiagnosticCheck("agent-process", "Agent CLI 进程能力", agentProcessReady ? "ok" : "fail", executionReadiness.mode === "agent-cli-probe-failed"
-        ? executionReadiness.message
-        : childProcessCapability.ok
-            ? executionReadiness.message
-            : (runnerFailureBlocks
-                ? `外部 Agent Runner 最近执行 ${externalRunnerStatus.last_result?.command || "Agent CLI"} 失败：${externalRunnerStatus.last_result?.error || "未知错误"}；${externalRunnerStatus.last_result?.hint || "请检查子 Agent CLI"}`
-                : (externalRunnerStatus.active
-                    ? `Node 直接启动子进程受限，但外部 Agent Runner 在线，子 Agent CLI 将通过 Runner 执行`
-                    : `Node 无法启动子进程，项目 Agent 无法调用 CLI：${childProcessCapability.error || childProcessCapability.stderr || "未知错误"}；可运行 npm run agent-runner:ps 启用外部执行通道`)), { childProcess: childProcessCapability, externalRunner: externalRunnerStatus, probe: probeStatus, probeHealth, readiness: executionReadiness, fix_actions: executionFixActions, runtimes: (0, runtime_1.getPublicAgentRuntimes)() }));
-    checks.push(createDiagnosticCheck("agent-cli-probe", "Agent CLI 连通探针", agentProbeMatrix.ready > 0 ? "ok" : (agentProbeMatrix.executable > 0 ? "warn" : "fail"), agentProbeMatrix.ready > 0
-        ? `已有 ${agentProbeMatrix.ready}/${agentProbeMatrix.executable} 个项目 Agent 探针新鲜通过`
-        : (agentProbeMatrix.executable > 0 ? `尚无项目 Agent 探针新鲜通过：${probeHealth.message}` : "没有可执行的项目 Agent 可运行探针"), {
-        probe: probeStatus,
-        probeHealth,
-        probeMatrix: agentProbeMatrix,
-        fresh_success_ms: AGENT_PROBE_SUCCESS_FRESH_MS,
-        failure_block_ms: AGENT_PROBE_FAILURE_BLOCK_MS,
-        fix_actions: probeHealth.failureRecent ? executionFixActions : [],
-    }));
-    checks.push(createDiagnosticCheck("daily-dev-execution-readiness", "daily_dev 执行准入", dailyDevExecutionReady ? "ok" : "fail", dailyDevExecutionReady
-        ? "daily_dev 任务已具备真实执行准入：至少一个开发群聊的可执行项目 Agent 已全员通过真实 CLI 探针"
-        : matrixReadinessMessage, {
-        readiness: dailyDevExecutionReadiness,
-        required: ["fresh_target_agent_cli_probe"],
-        probeMatrix: agentProbeMatrix,
-        fix_actions: dailyDevExecutionReadiness.fix_actions || [],
-    }));
-    const queueStatus = getQueueStatus();
-    checks.push(createDiagnosticCheck("task-queue", "任务队列", "ok", `队列接口可用：${queueStatus.total_queued} 个排队，${queueStatus.running_targets} 个目标执行中`, queueStatus));
-    const watchdogStatus = getTaskWatchdogStatus();
-    const watchdogRecoverable = watchdogStatus.stale_pending.length + watchdogStatus.stalled_in_progress.length;
-    const runtimeRecoverable = watchdogStatus.runtime_failed.length;
-    const gapReworkRecoverable = watchdogStatus.gap_rework.length;
-    checks.push(createDiagnosticCheck("task-watchdog", "任务看门狗", watchdogRecoverable > 0 || runtimeRecoverable > 0 || gapReworkRecoverable > 0 ? "warn" : "ok", watchdogRecoverable > 0 || runtimeRecoverable > 0 || gapReworkRecoverable > 0
-        ? `发现 ${watchdogRecoverable} 个卡住自动任务、${runtimeRecoverable} 个执行通道失败任务、${gapReworkRecoverable} 个可按缺口续跑任务；当前为手动恢复模式`
-        : "自动任务看门狗可用，当前没有检测到卡住的可恢复任务", { ...watchdogStatus, auto_recovery: /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_TASK_WATCHDOG_RECOVERY || "")) }));
-    const recoveryWork = getAgentRecoveryWorkSummary();
-    checks.push(createDiagnosticCheck("agent-recovery-monitor", "执行通道恢复监控", recoveryWork.total > 0 ? "warn" : "ok", recoveryWork.total > 0
-        ? `${agentRecoveryMonitorTimer ? "自动恢复监控已启动" : "手动复检模式"}：发现 ${recoveryWork.blocked_pending.length} 个等待执行通道的任务、${recoveryWork.runtime_failed.length} 个可重试失败任务`
-        : `${agentRecoveryMonitorTimer ? "自动恢复监控已启动" : "手动复检模式"}，当前没有等待执行通道恢复的自动任务`, {
-        active: !!agentRecoveryMonitorTimer,
-        probe_in_flight: agentRecoveryProbeInFlight,
-        interval_ms: AGENT_RECOVERY_PROBE_INTERVAL_MS,
-        work: recoveryWork,
-    }));
-    checks.push(createDiagnosticCheck("cron-dispatch", "定时派发", enabledCronJobs.length > 0 ? "ok" : "warn", enabledCronJobs.length > 0
-        ? `已启用 ${enabledCronJobs.length} 个定时任务，可自动创建开发任务`
-        : "暂无启用中的定时任务；需要自动接活时可在定时任务页创建", { total: cronJobs.length, enabled: enabledCronJobs.length }));
-    const cronDailyDevProtocol = runCronDailyDevProtocolSelfTestSafe();
-    checks.push(createDiagnosticCheck("cron-daily-dev-protocol", "定时业务开发协议", cronDailyDevProtocol.pass ? "ok" : "fail", cronDailyDevProtocol.pass
-        ? "daily_dev 定时任务会创建群聊主 Agent 任务，并把定时提示词写入任务级业务/接口文档"
-        : "daily_dev 定时任务未能稳定生成主 Agent 闭环任务或缺少任务级文档", cronDailyDevProtocol));
-    checks.push(createDiagnosticCheck("receipt-gate", "完成结果说明验收", "ok", "子 Agent 输出必须包含结构化结果说明，队列会按结构化结果说明和主 Agent 复盘判定完成", { autoTaskCount: autoTasks.length }));
-    const dailyDevGateSelfTest = getDailyDevCompletionGateSelfTest();
-    checks.push(createDiagnosticCheck("daily-dev-completion-gate", "业务开发完成门禁", dailyDevGateSelfTest.pass ? "ok" : "fail", dailyDevGateSelfTest.pass
-        ? "daily_dev 任务必须具备主 Agent 协调计划、派发证据、Worker 通知、子 Agent 结果说明、主 Agent 最终复盘、实际代码变更证据和已执行验证记录，不能把建议性回复误判为完成"
-        : "daily_dev 完成门禁自检失败，需要检查任务验收逻辑", { requiredEvidence: ["coordinator_plan", "assignment_evidence", "worker_notification", "child_agent_receipt", "coordinator_final_review", "actual_file_changes", "executed_verification"], selfTest: dailyDevGateSelfTest }));
-    const collaborationUx = runCollaborationUxSelfTest();
-    checks.push(createDiagnosticCheck("group-collaboration-ux", "群聊 AI 编程体验", collaborationUx.pass ? "ok" : "fail", collaborationUx.pass
-        ? "群聊使用对话/项目分析/项目任务三态、任务意图门禁和单任务卡；普通问候不展示任务卡，项目询问可只读分析，内部协议默认进入技术详情"
-        : "群聊协作体验自检失败，需要检查任务卡、交付摘要或追加要求分类", collaborationUx));
-    const mainAgentActions = runGroupMainAgentActionRegistrySelfTest();
-    checks.push(createDiagnosticCheck("group-main-agent-action-registry", "群聊主 Agent 动作注册表", mainAgentActions.pass ? "ok" : "fail", mainAgentActions.pass
-        ? `群聊主 Agent 已登记 ${mainAgentActions.total} 个可治理动作：只读观察、任务创建、子 Agent 派发、追问、任务治理、结果读取、重规划和最终回复均有权限边界与完成证据`
-        : "群聊主 Agent 动作注册表不完整，需要补齐动作、权限门禁或完成证据", mainAgentActions));
-    const mainAgentToolLoop = runGroupMainAgentToolLoopSelfTest();
-    checks.push(createDiagnosticCheck("group-main-agent-tool-loop", "群聊主 Agent 多步工作循环", mainAgentToolLoop.pass ? "ok" : "fail", mainAgentToolLoop.pass
-        ? "群聊主 Agent 已具备 decision -> action -> observation -> verify -> reply 链路模型；普通对话不派发，项目分析只读，明确任务才创建/派发，高风险治理必须显式授权"
-        : "群聊主 Agent 多步工作循环自检失败，需要检查动作选择、权限判断或验收链路", mainAgentToolLoop));
-    const rehearsal = buildDailyDevWorkflowRehearsal();
-    checks.push(createDiagnosticCheck("daily-dev-rehearsal", "闭环演练", rehearsal.pass ? "ok" : "fail", rehearsal.pass
-        ? "日常开发闭环演练通过：任务模板、子 Agent 结果说明、主 Agent 复盘、实际变更门禁、验证门禁和交付摘要均可闭合"
-        : "日常开发闭环演练未通过，请先检查开发群聊、子 Agent 工作目录或完成门禁", {
-        group: rehearsal.group,
-        steps: rehearsal.steps,
-        taskDocumentContext: rehearsal.task_document_context,
-        noChangeResult: rehearsal.no_change_result,
-        doneResult: rehearsal.done_result,
-        propagatedAssignmentSummary: rehearsal.propagated_assignment_summary,
-        workerNotification: rehearsal.worker_notification,
-        scratchpadContext: rehearsal.scratchpad_context,
-        reworkProtocol: rehearsal.rework_protocol,
-        deliverySummary: rehearsal.delivery_summary,
-    }));
-    const smokeStatus = getDailyDevSmokeStatus();
-    const mainAgentCapabilityEvidence = [
-        { id: "business_intake", label: "接收业务描述/文档", ok: cronDailyDevProtocol.pass, evidence: cronDailyDevProtocol.pass ? "任务级业务/接口文档会进入 daily_dev 任务" : "定时/任务入口未稳定写入业务文档" },
-        { id: "configurable_project_agents", label: "读取可配置项目 Agent", ok: configs.length > 0 && groupsWithReadyMembers.length > 0, evidence: `项目配置 ${configs.length} 个，可执行开发群聊 ${groupsWithReadyMembers.length} 个` },
-        { id: "coordinator_plan", label: "主 Agent 计划", ok: coordinatorProtocol.pass, evidence: coordinatorProtocol.pass ? `可生成 ${coordinatorProtocol.coordinationPlan?.phases?.length || 0} 阶段计划` : "协调计划自测失败" },
-        { id: "structured_dispatch", label: "结构化派发", ok: Object.values(collaborationProtocol.structuredAssignmentChecks || {}).every(Boolean), evidence: "assignments 会保留目标、任务、依赖和续跑语义" },
-        { id: "worker_execution_receipt", label: "子 Agent 执行与结果说明", ok: workerProtocolPass, evidence: workerProtocolPass ? "task-notification、CCM_AGENT_RECEIPT 和 scratchpad 自测通过" : "Worker 通知/结果说明协议自测失败" },
-        { id: "review_rework", label: "主 Agent 复盘返工", ok: reworkProtocol.pass, evidence: reworkProtocol.pass ? "发现缺口会生成同 Worker 续跑返工工作单" : "返工协议自测失败" },
-        { id: "completion_gate", label: "完成门禁", ok: dailyDevGateSelfTest.pass, evidence: dailyDevGateSelfTest.pass ? "必须有计划、派发、Worker 通知、结果说明、复盘、实际变更和已执行验证" : "完成门禁自测失败" },
-        { id: "workflow_rehearsal", label: "闭环演练", ok: rehearsal.pass, evidence: rehearsal.pass ? "模拟闭环可闭合" : "闭环演练失败" },
-        { id: "live_execution_probe", label: "真实执行准入", ok: dailyDevExecutionReady, evidence: dailyDevExecutionReady ? `全员探针通过群聊 ${agentProbeMatrix.group_ready}/${agentProbeMatrix.group_total}` : matrixReadinessMessage, liveGate: true },
-    ];
-    const mainAgentCoreReady = mainAgentCapabilityEvidence.filter((item) => !item.liveGate).every((item) => item.ok);
-    checks.push(createDiagnosticCheck("main-agent-capability", "群聊主 Agent 实用性", !mainAgentCoreReady ? "fail" : (dailyDevExecutionReady ? "ok" : "warn"), !mainAgentCoreReady
-        ? "主 Agent 日常开发闭环仍有核心协议缺口，暂不能稳定替你接开发任务"
-        : (dailyDevExecutionReady
-            ? "主 Agent 已具备接收业务任务、计划、派发、验收返工和总结交付的真实执行准入"
-            : "主 Agent 协议闭环已具备，但真实替你干活前还需要目标开发群的项目 Agent 全员 CLI 探针通过"), {
-        core_ready: mainAgentCoreReady,
-        live_ready: dailyDevExecutionReady,
-        evidence: mainAgentCapabilityEvidence,
-    }));
-    checks.push(createDiagnosticCheck("daily-dev-smoke-status", "真实试运行", smokeStatus.pass ? "ok" : (smokeStatus.status === "blocked" || smokeStatus.status === "failed" ? "warn" : "warn"), smokeStatus.message, smokeStatus));
-    checks.push(createDiagnosticCheck("shared-docs", "业务文档入口", devGroups.some((group) => group.readyBacklogs > 0 || group.sharedFiles > 0) ? "ok" : "warn", devGroups.some((group) => group.readyBacklogs > 0)
-        ? "已有 ready 状态的业务需求池文件，定时 daily_dev 可自动认领并派发"
-        : devGroups.some((group) => group.sharedFiles > 0)
-            ? "已有群聊共享文件，主 Agent 拆分任务时会带入文档上下文；可通过业务开发任务入口沉淀 ready 需求池"
-            : "尚未上传群聊共享文件；也可以先把业务文档直接写进任务描述", devGroups.map((group) => ({
-        id: group.id,
-        name: group.name,
-        sharedFiles: group.sharedFiles,
-        backlogFiles: group.backlogFiles,
-        readyBacklogs: group.readyBacklogs,
-        backlogCounts: group.backlogCounts,
-    }))));
-    const failCount = checks.filter(check => check.status === "fail").length;
-    const warnCount = checks.filter(check => check.status === "warn").length;
-    const readiness = failCount > 0 ? "blocked" : (warnCount > 0 ? "partial" : "ready");
-    const totalReadyBacklogs = devGroups.reduce((sum, group) => sum + Number(group.readyBacklogs || 0), 0);
-    const totalSharedFiles = devGroups.reduce((sum, group) => sum + Number(group.sharedFiles || 0), 0);
-    const executableGroups = groupsWithReadyMembers.length;
-    const continuationGapTasks = tasks.filter((task) => hasDailyDevContinuationGaps(task));
-    const autopilotNextActions = [];
-    if (!dailyDevExecutionReady)
-        autopilotNextActions.push("先在设置页对目标开发群点击“复检全部”，至少让一个开发群聊的所有可执行项目 Agent 全员通过真实 CLI 探针");
-    if (executableGroups === 0)
-        autopilotNextActions.push("创建开发群聊，并加入至少一个具备可写工作目录的项目子 Agent");
-    if (missingVerificationMembers.length > 0)
-        autopilotNextActions.push("为缺少验证命令的项目子 Agent 配置项目验证命令，提升自动验收可靠性");
-    if (continuationGapTasks.length > 0 && dailyDevExecutionReady)
-        autopilotNextActions.push("运行一次自动开发或等待 daily_dev 定时任务，系统会优先续跑已有交付缺口任务");
-    if (!smokeStatus.pass)
-        autopilotNextActions.push(smokeStatus.status === "no_task" ? "创建真实试运行任务，验证主 Agent 到子 Agent 写文件的端到端闭环" : "查看真实试运行状态，按缺口续跑或修复执行通道后再复检");
-    if (continuationGapTasks.length === 0 && totalReadyBacklogs === 0 && totalSharedFiles === 0)
-        autopilotNextActions.push("上传 PRD、接口说明或业务描述到开发群聊，或在任务派发页创建业务开发任务");
-    if (totalSharedFiles > 0 && totalReadyBacklogs === 0)
-        autopilotNextActions.push("等待 daily_dev 定时任务自动导入共享文档，或在需求池里点击“导入共享文档”");
-    if (dailyDevCronJobs.length === 0)
-        autopilotNextActions.push("创建并启用 daily_dev 定时任务，让系统定时认领 ready 需求");
-    if (totalReadyBacklogs > 0 && dailyDevExecutionReady)
-        autopilotNextActions.push("可以批量派发可接活需求，主 Agent 会拆分给子 Agent 执行");
-    if (recoveryWork.total > 0)
-        autopilotNextActions.push("执行通道恢复后运行恢复监控，自动重试等待中的开发任务");
-    if (autopilotNextActions.length === 0)
-        autopilotNextActions.push("自动开发链路已具备接单条件：继续补充业务文档或等待定时任务触发");
-    const autopilotMode = !dailyDevExecutionReady || executableGroups === 0
-        ? "blocked"
-        : continuationGapTasks.length > 0
-            ? "ready_to_continue"
-            : totalReadyBacklogs > 0
-                ? "ready_to_dispatch"
-                : totalSharedFiles > 0
-                    ? "ready_to_import"
-                    : "waiting_input";
-    const autopilot = {
-        mode: autopilotMode,
-        ready: autopilotMode === "ready_to_dispatch" && dailyDevExecutionReady,
-        headline: autopilotMode === "blocked"
-            ? "自动开发暂不可用"
-            : autopilotMode === "ready_to_continue"
-                ? "已有任务可续跑"
-                : autopilotMode === "ready_to_dispatch"
-                    ? "已有需求可派发"
-                    : autopilotMode === "ready_to_import"
-                        ? "已有业务文档待导入"
-                        : "等待业务输入",
-        counts: {
-            executableGroups,
-            readyBacklogs: totalReadyBacklogs,
-            sharedFiles: totalSharedFiles,
-            continuationGaps: continuationGapTasks.length,
-            dailyDevCronJobs: dailyDevCronJobs.length,
-            queuedTasks: queueStatus.total_queued,
-            recoveryWork: recoveryWork.total,
-            verificationConfigured: configuredVerificationMembers.length,
-            verificationInferred: inferredVerificationMembers.length,
-            verificationMissing: missingVerificationMembers.length,
-            agentProbeReady: agentProbeMatrix.ready,
-            agentProbeExecutable: agentProbeMatrix.executable,
-        },
-        next_actions: autopilotNextActions.slice(0, 5),
-        recent_cron: dailyDevCronJobs
-            .filter((job) => job.last_run || job.last_result)
-            .slice(0, 5)
-            .map((job) => ({
-            id: job.id,
-            name: job.name,
-            last_status: job.last_status || "never",
-            last_result: job.last_result || "",
-            last_run: job.last_run || "",
-            last_run_meta: job.last_run_meta || null,
-        })),
-    };
-    const summary = readiness === "ready"
-        ? "主 Agent 日常开发闭环已具备接单条件"
-        : readiness === "partial"
-            ? "主 Agent 已可接单，但仍有建议完善项"
-            : "主 Agent 暂不能稳定替你执行开发任务，请先处理失败项";
-    return {
-        success: true,
-        generated_at: new Date().toISOString(),
-        readiness,
-        ready: readiness !== "blocked",
-        summary,
-        counts: {
-            checks: checks.length,
-            ok: checks.filter(check => check.status === "ok").length,
-            warn: warnCount,
-            fail: failCount,
-            groups: groups.length,
-            readyGroups: groupsWithReadyMembers.length,
-            projectConfigs: configs.length,
-            cronJobs: cronJobs.length,
-            enabledCronJobs: enabledCronJobs.length,
-            autoTasks: autoTasks.length,
-        },
-        autopilot,
-        agent_probe_matrix: agentProbeMatrix,
-        checks,
-        groups: devGroups,
-        queue_status: queueStatus,
-    };
+    return require("./collaboration-agent-probes").buildDailyDevAgentDiagnostics();
 }
 function getAgentProbeBatchTargets(payload = {}) {
     const diagnostics = buildDailyDevAgentDiagnostics();
@@ -26515,400 +18654,7 @@ function mergeCoordinatorDocumentContexts(...contexts) {
     return text || undefined;
 }
 function runCollaborationProtocolSelfTest() {
-    const reworkProtocol = runCoordinatorReworkProtocolSelfTest();
-    const agentCollaborationProtocol = (0, collaboration_protocol_1.runAgentCollaborationProtocolSelfTest)();
-    const startupTaskRecovery = (0, startup_task_recovery_1.runStartupTaskRecoveryDecisionSelfTest)();
-    const testAgentRunner = (0, test_agent_runner_1.runTestAgentRunnerSelfTest)();
-    const coordinatorVisibleMessageSelfTest = getCoordinatorVisibleMessageSelfTest();
-    const assignmentGroup = {
-        members: [
-            { project: "coordinator", role: "coordinator" },
-            { project: "backend-service" },
-            { project: "web-app" },
-        ],
-    };
-    const structuredMentions = getCoordinatorActionMentions({
-        content: "我已经形成计划，下面按结构化 assignments 派发。",
-        assignments: [
-            {
-                project: "backend-service",
-                task: "主 Agent 工作单：实现退款审核接口 POST /api/refunds/:id/audit，并返回 CCM_AGENT_RECEIPT。",
-                reason: "后端负责接口契约",
-            },
-            {
-                project: "web-app",
-                task: "主 Agent 工作单：对接退款审核接口并补充页面验证，返回 CCM_AGENT_RECEIPT。",
-                reason: "前端负责页面入口",
-                dependsOn: "backend-service",
-                rework: true,
-                attempt: 2,
-                continuationOf: "web-app",
-                continuationStrategy: "same_worker_scratchpad",
-            },
-        ],
-    }, assignmentGroup, "coordinator");
-    const taskDocumentContext = buildTaskSourceDocumentsContext({
-        business_goal: "实现订单退款审核功能",
-        acceptance_criteria: "后端校验权限，前端展示审核结果，主 Agent 输出交付报告。",
-        source_documents: "接口：POST /api/refunds/:id/audit\n字段：approved(boolean), reason(string)\n验收：子 Agent 结果说明和已执行验证。",
-    });
-    const mergedDocumentContext = mergeCoordinatorDocumentContexts("", taskDocumentContext);
-    const taskDocumentChecks = {
-        hasBusinessGoal: taskDocumentContext.includes("业务目标"),
-        hasAcceptance: taskDocumentContext.includes("验收标准"),
-        hasSourceDocument: taskDocumentContext.includes("/api/refunds/:id/audit"),
-        mergeKeepsTaskDocument: String(mergedDocumentContext || "").includes("approved(boolean)"),
-    };
-    const structuredAssignmentChecks = {
-        hasTwoMentions: structuredMentions.length === 2,
-        preservesTarget: structuredMentions.some((item) => item.targetName === "backend-service"),
-        preservesTask: structuredMentions.some((item) => String(item.message || "").includes("/api/refunds/:id/audit")),
-        preservesDependency: structuredMentions.some((item) => item.targetName === "web-app" && item.dependsOn === "backend-service"),
-        preservesContinuation: structuredMentions.some((item) => item.targetName === "web-app" && item.rework === true && item.attempt === 2 && item.continuationStrategy === "same_worker_scratchpad"),
-    };
-    const executionFixActions = buildAgentExecutionFixActions({
-        error: "API Error: Unable to connect to API (ConnectionRefused)",
-        agentType: "claudecode",
-    });
-    const executionFixChecks = {
-        hasCliCheck: executionFixActions.some((item) => item.includes("claude --permission-mode auto -p") || item.includes("claude --permission-mode acceptEdits -p") || item.includes("claude -p")),
-        hasApiNetworkHint: executionFixActions.some((item) => item.includes("代理环境变量") || item.includes("API Base URL")),
-        hasRetryAction: executionFixActions.some((item) => item.includes("复检执行通道") || item.includes("立即恢复自动任务")),
-    };
-    const recentFailedProbeHealth = getAgentProbeHealth({
-        success: false,
-        message: "API Error: Unable to connect to API (ConnectionRefused)",
-        checked_at: new Date().toISOString(),
-        age_ms: 1000,
-    });
-    const freshOkProbeHealth = getAgentProbeHealth({
-        success: true,
-        message: "Agent CLI 探针通过",
-        checked_at: new Date().toISOString(),
-        age_ms: 1000,
-    });
-    const readyWithoutProbe = {
-        ready: true,
-        mode: "node-child-process",
-        message: "Node 可启动子进程",
-        probeHealth: { status: "missing", successFresh: false, message: "尚未运行 Agent CLI 探针" },
-    };
-    const readyWithFreshProbe = {
-        ...readyWithoutProbe,
-        probeHealth: freshOkProbeHealth,
-        probe: { success: true, age_ms: 1000, target: { group_id: "g-dev", project: "backend-service", agent_type: "claudecode" }, capabilities: { write: { pass: true } } },
-    };
-    const backendProbeKey = getAgentProbeTargetStatusKey({ group_id: "g-dev", project: "backend-service", agent_type: "claudecode" });
-    const webProbeKey = getAgentProbeTargetStatusKey({ group_id: "g-dev", project: "web-app", agent_type: "codex" });
-    const targetMatchPartial = doesProbeTargetMatchRequired({ group_id: "g-dev", project: "web-app", agent_type: "codex" }, { groupId: "g-dev", project: "web-app" });
-    const groupProbeTargets = [
-        { group_id: "g-dev", group_name: "Dev", project: "backend-service", agent_type: "claudecode" },
-        { group_id: "g-dev", group_name: "Dev", project: "web-app", agent_type: "codex" },
-    ];
-    const groupProbeOneMissing = summarizeAgentProbeTargets(groupProbeTargets, (target) => {
-        if (target.project === "backend-service")
-            return { success: true, age_ms: 1000, target, capabilities: { write: { pass: true } } };
-        return null;
-    });
-    const groupProbeAllFresh = summarizeAgentProbeTargets(groupProbeTargets, (target) => ({
-        success: true,
-        age_ms: 1000,
-        target,
-        capabilities: { write: { pass: true } },
-    }));
-    const explicitProjectDoesNotNeedGroupProbe = taskNeedsGroupWideAgentProbe({
-        workflow_type: "daily_dev",
-        assign_type: "project",
-        group_id: "g-dev",
-        workflow_meta: { target_member: "backend-service" },
-    }) === false;
-    const recoveryProbeGroups = buildAgentRecoveryProbeGroups([
-        {
-            id: "t-blocked-backend",
-            auto_execute: true,
-            status: "pending",
-            last_queue_blocked_at: new Date().toISOString(),
-            workflow_type: "daily_dev",
-            group_id: "g-dev",
-            workflow_meta: { target_member: "backend-service", agent_type: "claudecode" },
-        },
-        {
-            id: "t-runtime-web",
-            auto_execute: true,
-            status: "failed",
-            status_detail: "Agent Runner 错误: ConnectionRefused",
-            workflow_type: "daily_dev",
-            group_id: "g-dev",
-            workflow_meta: { target_member: "web-app", agent_type: "codex" },
-        },
-    ]);
-    const backendRecoveryGroup = recoveryProbeGroups.find((group) => group.probe_target?.project === "backend-service");
-    const webRecoveryGroup = recoveryProbeGroups.find((group) => group.probe_target?.project === "web-app");
-    const targetRecoveryMatch = taskMatchesAgentProbeTarget({ workflow_type: "daily_dev", group_id: "g-dev", workflow_meta: { target_member: "web-app" } }, { groupId: "g-dev", project: "web-app" });
-    const retryProbeAfterRecentFailure = enforceAgentProbeExecutionReadiness({
-        childProcess: { ok: true, stdout: "ok" },
-        externalRunner: { active: false },
-        probeHealth: recentFailedProbeHealth,
-    });
-    const runnerProbeFailure = getAgentProbeOutputFailure("[web-app] Agent Runner 错误: API Error: Unable to connect to API (ConnectionRefused)");
-    const freshProbeRecoveryGate = hasFreshSuccessfulAgentProbe({ probe: { success: true, age_ms: 1000 } });
-    const staleProbeRecoveryGate = hasFreshSuccessfulAgentProbe({ probe: { success: true, age_ms: AGENT_PROBE_SUCCESS_FRESH_MS + 1000 } });
-    const dailyDevProbeRequired = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, readyWithoutProbe);
-    const dailyDevWatchdogGapGate = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, readyWithoutProbe);
-    const dailyDevProbePassed = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, readyWithFreshProbe);
-    const dailyDevProbeTargetMismatch = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev", workflow_meta: { target_member: "web-app" } }, readyWithFreshProbe);
-    const generalProbeNotRequired = enforceTaskAgentProbeReadiness({ workflow_type: "general" }, readyWithoutProbe);
-    const probeHealthChecks = {
-        recentFailureBlocks: recentFailedProbeHealth.failureRecent === true && recentFailedProbeHealth.status === "failed",
-        freshSuccessPasses: freshOkProbeHealth.successFresh === true && freshOkProbeHealth.status === "ok",
-        probeCanRetryAfterRecentFailure: retryProbeAfterRecentFailure.ready === true && retryProbeAfterRecentFailure.mode === "node-child-process-probe",
-        probeFailureKeepsRunnerError: String(runnerProbeFailure.message || "").includes("ConnectionRefused") && String(runnerProbeFailure.error || "").includes("Agent Runner 错误"),
-        freshProbeEnablesImmediateRecovery: freshProbeRecoveryGate === true,
-        staleProbeDoesNotEnableImmediateRecovery: staleProbeRecoveryGate === false,
-        dailyDevRequiresFreshProbe: dailyDevProbeRequired.ready === false && dailyDevProbeRequired.mode === "agent-cli-probe-required",
-        dailyDevWatchdogGapsRequireFreshProbe: dailyDevWatchdogGapGate.ready === false && dailyDevWatchdogGapGate.mode === "agent-cli-probe-required",
-        dailyDevFreshProbePasses: dailyDevProbePassed.ready === true,
-        dailyDevFreshProbeMustMatchTarget: dailyDevProbeTargetMismatch.ready === false && String(dailyDevProbeTargetMismatch.message || "").includes("目标不匹配"),
-        groupProbeRequiresAllMembers: groupProbeOneMissing.allReady === false && groupProbeOneMissing.ready === 1 && groupProbeOneMissing.total === 2,
-        groupProbeAllMembersPass: groupProbeAllFresh.allReady === true && groupProbeAllFresh.ready === 2,
-        explicitProjectBypassesGroupWideProbe: explicitProjectDoesNotNeedGroupProbe === true,
-        targetProbeKeysAreIsolated: !!backendProbeKey && !!webProbeKey && backendProbeKey !== webProbeKey,
-        targetProbePartialMatchWorks: targetMatchPartial === true,
-        recoveryProbeGroupsAreTargeted: recoveryProbeGroups.length === 2 && !!backendRecoveryGroup && !!webRecoveryGroup,
-        recoveryProbePayloadKeepsTarget: webRecoveryGroup?.probe_payload?.group_id === "g-dev" && webRecoveryGroup?.probe_payload?.target_member === "web-app",
-        recoveryTargetMatchWorks: targetRecoveryMatch === true,
-        generalTaskDoesNotRequireProbe: generalProbeNotRequired.ready === true,
-    };
-    const notifiedOutput = (0, agent_notifications_1.formatCollectedAgentOutput)("backend-service", "已实现退款审核接口并运行 npm test。", {
-        agent: "backend-service",
-        status: "done",
-        summary: "完成退款审核接口",
-        actions: ["实现 POST /api/refunds/:id/audit"],
-        filesChanged: ["src/refunds/audit.ts"],
-        verification: ["npm test passed"],
-        blockers: [],
-        needs: [],
-    });
-    const missingReceiptOutput = (0, agent_notifications_1.formatCollectedAgentOutput)("web-app", "已处理页面入口，但未提交结果说明。", null);
-    const notificationFollowUps = buildEvidenceGateFollowUps(assignmentGroup, [missingReceiptOutput]);
-    const taskNotificationDisplay = (0, agent_notifications_1.runTaskNotificationDisplaySelfTest)();
-    const parsedMissingNotification = (0, agent_notifications_1.parseTaskNotificationsFromText)(missingReceiptOutput)[0] || {};
-    const taskNotificationChecks = {
-        hasXmlEnvelope: notifiedOutput.includes("<task-notification>") && notifiedOutput.includes("</task-notification>"),
-        hasTaskId: (0, agent_notifications_1.getCollectedOutputAgent)(notifiedOutput) === "backend-service",
-        hasCompletedStatus: (0, agent_notifications_1.extractTaskNotificationTag)(notifiedOutput, "status") === "completed",
-        detectsMissingReceipt: notificationFollowUps.some((item) => item.targetName === "web-app" && String(item.reason || "").includes("缺少结构化结果说明")),
-        missingReceiptFollowUpHasUserPreview: notificationFollowUps.some((item) => item.targetName === "web-app" && String(item.summary || "").includes("补齐可验收结果说明")),
-        missingReceiptSummaryFriendly: String(parsedMissingNotification.summary || "").includes("结构化结果说明"),
-        missingReceiptSummaryHidesProtocol: !/CCM_AGENT_RECEIPT|task-notification|receipt-status|Worker completed|trace_id|session_id/i.test(JSON.stringify({ summary: parsedMissingNotification.summary, result: parsedMissingNotification.result })),
-        displaySelfTestPasses: taskNotificationDisplay.pass === true,
-    };
-    const blockedDependencyOutput = (0, agent_notifications_1.formatCollectedAgentOutput)("backend-service", "后端接口字段未确认，无法继续。", {
-        agent: "backend-service",
-        status: "blocked",
-        summary: "接口字段未确认",
-        actions: ["检查接口文档"],
-        filesChanged: [],
-        verification: [],
-        blockers: ["approved 字段语义缺失"],
-        needs: ["用户或后端确认字段契约"],
-    });
-    const doneDependencyState = getAgentDependencyStateFromOutputs("backend-service", [notifiedOutput]);
-    const blockedDependencyState = getAgentDependencyStateFromOutputs("backend-service", [blockedDependencyOutput]);
-    const recoveredDependencyState = getAgentDependencyStateFromOutputs("backend-service", [blockedDependencyOutput, notifiedOutput]);
-    const dependencyGateChecks = {
-        doneDependencyPasses: doneDependencyState.ok === true,
-        blockedDependencyStopsDownstream: blockedDependencyState.ok === false && blockedDependencyState.status === "blocked",
-        blockedDependencyExplainsReason: String(blockedDependencyState.reason || "").includes("接口字段未确认"),
-        latestRecoveredReceiptUnblocksDownstream: recoveredDependencyState.ok === true && recoveredDependencyState.status === "done",
-    };
-    const notificationDeliverySummary = buildDeliverySummary({
-        title: "通知摘要自测",
-        workflow_type: "daily_dev",
-        requires_verification: false,
-    }, {
-        report: notifiedOutput,
-        review: { status: "complete", content: "主 Agent 已复盘通知" },
-    }, "waiting");
-    const notificationDeliveryChecks = {
-        summaryHasWorkerNotification: notificationDeliverySummary.worker_notification_count === 1,
-        summaryKeepsNotificationTaskId: notificationDeliverySummary.worker_notifications?.[0]?.task_id === "backend-service",
-        summaryUsesNotificationAgent: notificationDeliverySummary.agents?.includes("backend-service"),
-        userReportHidesNotificationProtocol: !String(notificationDeliverySummary.user_report || "").includes("Worker 通知"),
-    };
-    const failedNotificationSummary = buildDeliverySummary({
-        id: "task-gap",
-        title: "通知缺口续跑自测",
-        workflow_type: "daily_dev",
-        requires_verification: false,
-    }, {
-        report: (0, agent_notifications_1.formatCollectedAgentOutput)("web-app", "页面入口处理失败，缺少接口字段。", {
-            agent: "web-app",
-            status: "blocked",
-            summary: "缺少退款审核接口字段",
-            actions: ["检查订单详情页入口"],
-            filesChanged: [],
-            verification: [],
-            blockers: ["approved 字段含义未确认"],
-            needs: ["后端确认字段契约"],
-        }),
-        review: { status: "needs_followup", content: "主 Agent 需要 web-app 继续返工" },
-    }, "waiting");
-    const gapTask = {
-        id: "task-gap",
-        title: "退款审核入口",
-        workflow_type: "daily_dev",
-        status: "in_progress",
-        delivery_summary: failedNotificationSummary,
-    };
-    const gapDraft = buildTaskGapContinuationDraft(gapTask);
-    const missingCoordinationTask = {
-        id: "task-missing-coordination",
-        title: "缺协作证据续跑自测",
-        workflow_type: "daily_dev",
-        status: "in_progress",
-        delivery_summary: {
-            status: "waiting",
-            detail: "业务开发任务缺少主 Agent 协调计划证据，不能判定完成",
-            coordination_plan_count: 0,
-            assignment_count: 0,
-            worker_notification_count: 0,
-            receipt_statuses: [{ agent: "web-app", status: "done", summary: "已完成页面改动" }],
-            has_final_review: true,
-            actual_file_change_count: 1,
-            verification_executed: ["npm test"],
-        },
-    };
-    const missingCoordinationDraft = buildTaskGapContinuationDraft(missingCoordinationTask);
-    const gapFingerprint = getTaskGapFingerprint(gapTask);
-    const attemptedGapTask = {
-        ...gapTask,
-        collaboration_state: { gap: { fingerprint: gapFingerprint, items: getTaskGapItems(gapTask), auto_attempts: 1 } },
-    };
-    const changedGapTask = {
-        ...attemptedGapTask,
-        delivery_summary: {
-            ...failedNotificationSummary,
-            blockers: [...(failedNotificationSummary.blockers || []), "新增：支付权限规则需要用户确认"],
-        },
-    };
-    const exhaustedGapState = reconcileTaskCollaborationState(attemptedGapTask, attemptedGapTask.collaboration_state);
-    const userTaskCard = buildTaskCardView({ ...attemptedGapTask, collaboration_state: exhaustedGapState }, [], []);
-    const continuationGapChecks = {
-        workerNotificationTriggersGap: hasDailyDevContinuationGaps(gapTask),
-        draftIncludesWorkerNotification: gapDraft.includes("上一轮子 Agent 执行结果") && gapDraft.includes("web-app"),
-        draftIncludesSameWorkerStrategy: gapDraft.includes("same_worker_scratchpad") && gapDraft.includes("同一子 Agent 续跑目标"),
-        missingCoordinationTriggersGap: hasDailyDevContinuationGaps(missingCoordinationTask),
-        draftIncludesCoordinationEvidenceGap: missingCoordinationDraft.includes("需要补齐的主 Agent 协作证据")
-            && missingCoordinationDraft.includes("协调计划")
-            && missingCoordinationDraft.includes("派发证据")
-            && missingCoordinationDraft.includes("子 Agent 执行结果"),
-        firstGapCanAutoContinue: canAutoContinueTaskGaps(gapTask) === true,
-        unchangedGapDoesNotLoop: canAutoContinueTaskGaps(attemptedGapTask) === false,
-        changedGapAllowsNewTargetedAttempt: getTaskGapFingerprint(changedGapTask) !== gapFingerprint && canAutoContinueTaskGaps(changedGapTask) === true,
-        exhaustedGapNeedsUserDecision: exhaustedGapState.phase === "needs_user" && exhaustedGapState.needs_user === true,
-        automaticContinuationIsInternal: isAutomaticGapContinuationSource("watchdog_gap_rework") && !isAutomaticGapContinuationSource("user"),
-        userTaskCardExplainsNextAction: userTaskCard.phase === "needs_user" && userTaskCard.blockers.length > 0 && /补充|确认/.test(String(userTaskCard.next_action)),
-        userTaskCardHidesProtocolTerms: !JSON.stringify({ completed: userTaskCard.completed, blockers: userTaskCard.blockers, next_action: userTaskCard.next_action }).includes("CCM_AGENT_RECEIPT"),
-    };
-    const scratchpadMemory = (0, memory_1.appendWorkerLedger)((0, memory_1.createEmptyGroupMemory)("selftest"), {
-        taskId: "task-refund",
-        project: "backend-service",
-        status: "completed",
-        receiptStatus: "done",
-        summary: "后端确认 POST /api/refunds/:id/audit 契约",
-        verification: ["npm test passed"],
-    });
-    const scratchpadContext = (0, memory_1.buildGroupMemoryContext)(scratchpadMemory);
-    const scratchpadChecks = {
-        storesWorkerLedger: Array.isArray(scratchpadMemory.workerLedger) && scratchpadMemory.workerLedger.length === 1,
-        contextIncludesScratchpad: scratchpadContext.includes("Worker scratchpad"),
-        contextIncludesWorkerSummary: scratchpadContext.includes("/api/refunds/:id/audit"),
-    };
-    const qaRequiredTask = { workflow_type: "daily_dev", assign_type: "group", description: "前端必须通过 ask_agent 向后端询问接口后续跑" };
-    const qaGateCheck = buildAcceptanceGate(qaRequiredTask, null, {
-        coordination_plan_count: 1,
-        assignment_count: 2,
-        receipt_statuses: [{ status: "done" }],
-        has_final_review: true,
-        actual_file_change_count: 1,
-        verification_executed: ["npm test"],
-        verification_required_gate_passed: true,
-        verification_source_gate_passed: true,
-        external_runner_verification_count: 1,
-        blockers: [],
-        needs: [],
-        agent_qa_count: 0,
-        agent_qa_accepted_count: 0,
-        agent_qa_resumed_count: 0,
-        agent_qa_gate_passed: false,
-        project_policy_gate_passed: true,
-    }, "waiting");
-    const agentQaRequirementChecks = {
-        infersExplicitAskAgentRequirement: taskRequiresAgentQa(qaRequiredTask),
-        explicitFalseDisablesRequirement: taskRequiresAgentQa({ ...qaRequiredTask, requires_agent_qa: false }) === false,
-        missingQaBlocksAcceptance: qaGateCheck.checks.find((item) => item.id === "agent_qa")?.ok === false && qaGateCheck.pass === false,
-    };
-    const defaultCodeRequirements = normalizeGlobalMissionTargetRequirements({}, {});
-    const explicitNonCodeRequirements = normalizeGlobalMissionTargetRequirements({
-        requires_code_changes: false,
-        requires_verification: false,
-        requires_independent_review: false,
-    }, {});
-    const targetOverrideRequirements = normalizeGlobalMissionTargetRequirements({
-        requires_code_changes: false,
-        requires_independent_review: false,
-    }, {
-        requiresCodeChanges: true,
-        requiresIndependentReview: true,
-    });
-    const globalMissionRequirementChecks = {
-        codeTaskDefaultsToIndependentReview: defaultCodeRequirements.requires_code_changes === true
-            && defaultCodeRequirements.requires_verification === true
-            && defaultCodeRequirements.requires_independent_review === true,
-        explicitNonCodeTaskCanDisableReview: explicitNonCodeRequirements.requires_code_changes === false
-            && explicitNonCodeRequirements.requires_verification === false
-            && explicitNonCodeRequirements.requires_independent_review === false,
-        targetRequirementOverridesMissionDefault: targetOverrideRequirements.requires_code_changes === true
-            && targetOverrideRequirements.requires_independent_review === true,
-    };
-    return {
-        pass: reworkProtocol.pass
-            && agentCollaborationProtocol.pass
-            && startupTaskRecovery.pass
-            && testAgentRunner.pass
-            && Object.values(taskDocumentChecks).every(Boolean)
-            && Object.values(structuredAssignmentChecks).every(Boolean)
-            && Object.values(executionFixChecks).every(Boolean)
-            && Object.values(probeHealthChecks).every(Boolean)
-            && Object.values(taskNotificationChecks).every(Boolean)
-            && Object.values(dependencyGateChecks).every(Boolean)
-            && Object.values(notificationDeliveryChecks).every(Boolean)
-            && Object.values(continuationGapChecks).every(Boolean)
-            && Object.values(scratchpadChecks).every(Boolean)
-            && coordinatorVisibleMessageSelfTest.pass
-            && Object.values(agentQaRequirementChecks).every(Boolean)
-            && Object.values(globalMissionRequirementChecks).every(Boolean),
-        reworkProtocol,
-        agentCollaborationProtocol,
-        startupTaskRecovery,
-        testAgentRunner,
-        taskDocumentContextPreview: taskDocumentContext.slice(0, 600),
-        taskDocumentChecks,
-        structuredAssignmentChecks,
-        executionFixChecks,
-        executionFixActions,
-        probeHealthChecks,
-        taskNotificationChecks,
-        taskNotificationDisplay,
-        dependencyGateChecks,
-        notificationDeliveryChecks,
-        continuationGapChecks,
-        scratchpadChecks,
-        coordinatorVisibleMessageSelfTest,
-        agentQaRequirementChecks,
-        globalMissionRequirementChecks,
-    };
+    return require("./collaboration-protocol-self-tests").runCollaborationProtocolSelfTest();
 }
 function normalizeToolSelection(tools = {}) {
     return {
@@ -27118,18 +18864,7 @@ function runtimeToolDispatchBlockedMessage(projectName, runtimeToolContext = {})
     return `${projectName} MCP/Skill 授权未就绪，已阻止派发子 Agent：${gate.reason || "存在不可用授权项"}`;
 }
 function runtimeToolDispatchBlockedReceipt(projectName, runtimeToolContext = {}) {
-    const message = runtimeToolDispatchBlockedMessage(projectName, runtimeToolContext);
-    return {
-        agent: projectName,
-        status: "blocked",
-        summary: message,
-        actions: [],
-        filesChanged: [],
-        verification: [],
-        blockers: [message],
-        needs: ["在 CCM 工具配置中修复缺失 MCP/Skill，或从项目/群聊授权中移除不可用项后重新派发"],
-        runtimeToolDispatchGate: runtimeToolContext.dispatchGate || runtimeToolContext.audit?.dispatch_gate || null,
-    };
+    return require("./collaboration-acceptance").runtimeToolDispatchBlockedReceipt(projectName, runtimeToolContext);
 }
 function assertRuntimeToolDispatchReady(projectName, runtimeToolContext = {}) {
     if (runtimeToolContext.dispatchBlocked || runtimeToolContext.dispatchGate?.dispatchReady === false) {
@@ -27168,6 +18903,8 @@ function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allo
             workDir,
             baseWorkDir: configuredProjectWorkDir(projectName) || workDir,
             projects: internalProjects,
+            memoryReceiptChallenge: options.memoryReceiptChallenge || null,
+            memoryReceiptFile: options.memoryReceiptFile || "",
         })
         : {};
     const audit = (0, runtime_tool_sync_1.syncRuntimeTools)(workDir, agentType, allowedTools, {
@@ -27337,102 +19074,13 @@ function buildTaskContinuationBlock(message) {
     ].join("\n");
 }
 function createTask(task) {
-    const tasks = (0, db_1.loadTasks)();
-    const idempotencyKey = String(task.idempotency_key || task.idempotencyKey || "").trim();
-    if (idempotencyKey) {
-        const existing = tasks.find((item) => String(item.idempotency_key || "") === idempotencyKey);
-        if (existing)
-            return existing;
-    }
-    const taskGroupId = String(task.group_id || task.groupId || "").trim();
-    const taskGroupSession = taskGroupId
-        ? (0, storage_1.resolveWritableGroupChatSession)(taskGroupId, task.group_session_id || task.groupSessionId || "", {
-            title: (0, memory_1.compactMemoryText)(task.title || "任务会话", 80),
-        })
-        : null;
-    const taskGroupSessionId = String(taskGroupSession?.id || "");
-    const semanticGoal = compactFormText(task.business_goal || task.businessGoal || task.description || task.title, "").toLowerCase().replace(/\s+/g, " ");
-    const semanticTarget = [taskGroupId, taskGroupSessionId, task.target_project || task.targetProject || "", task.workflow_type || task.workflowType || "general"].join("|").toLowerCase();
-    if (semanticGoal && task.allow_duplicate !== true && task.allowDuplicate !== true) {
-        const duplicate = [...tasks].reverse().find((item) => {
-            if (item.archived || item.deleted_at || ["done", "cancelled", "archived", "failed"].includes(String(item.status || "")))
-                return false;
-            if (Date.now() - Date.parse(item.created_at || "") > 5 * 60 * 1000)
-                return false;
-            const itemGoal = compactFormText(item.business_goal || item.description || item.title, "").toLowerCase().replace(/\s+/g, " ");
-            const itemTarget = [item.group_id || "", item.group_session_id || item.groupSessionId || "", item.target_project || "", item.workflow_type || "general"].join("|").toLowerCase();
-            return itemGoal === semanticGoal && itemTarget === semanticTarget;
-        });
-        if (duplicate)
-            return { ...duplicate, deduplicated: true, duplicate_reason: "5 分钟内已存在相同目标与执行范围的活动任务" };
-    }
-    const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id || task.traceId, "task");
-    const newTask = {
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        title: task.title,
-        description: task.description || "",
-        target_project: task.target_project,
-        group_id: taskGroupId || null,
-        group_session_id: taskGroupSessionId || null,
-        assign_type: task.assign_type || "project",
-        status: "pending",
-        priority: task.priority || "normal",
-        auto_execute: !!(task.auto_execute || task.autoExecute),
-        queue_scope: task.queue_scope || task.queueScope || "",
-        child_agent_isolation: task.child_agent_isolation || task.childAgentIsolation || "",
-        branch_policy: task.branch_policy || task.branchPolicy || "",
-        commit_policy: task.commit_policy || task.commitPolicy || "",
-        allowed_paths: Array.isArray(task.allowed_paths || task.allowedPaths) ? (task.allowed_paths || task.allowedPaths) : [],
-        workflow_type: task.workflow_type || task.workflowType || "general",
-        business_goal: task.business_goal || task.businessGoal || "",
-        acceptance_criteria: task.acceptance_criteria || task.acceptanceCriteria || "",
-        source_documents: task.source_documents || task.sourceDocuments || "",
-        source_attachments: Array.isArray(task.source_attachments || task.sourceAttachments)
-            ? (task.source_attachments || task.sourceAttachments)
-            : [],
-        requirement_extraction: task.requirement_extraction || task.requirementExtraction || null,
-        source_ingestion: task.source_ingestion || task.sourceIngestion || null,
-        requires_code_changes: task.requires_code_changes ?? task.requiresCodeChanges ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev"),
-        requires_verification: task.requires_verification ?? task.requiresVerification ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev"),
-        requires_independent_review: task.requires_independent_review ?? task.requiresIndependentReview ?? false,
-        requires_agent_qa: task.requires_agent_qa ?? task.requiresAgentQa ?? false,
-        workflow_meta: task.workflow_meta || task.workflowMeta || null,
-        parent_task_id: task.parent_task_id || task.parentTaskId || null,
-        global_mission_id: task.global_mission_id || task.globalMissionId || null,
-        mission_target: task.mission_target || task.missionTarget || null,
-        mission_handoff: task.mission_handoff || task.missionHandoff || null,
-        mission_dependencies: Array.isArray(task.mission_dependencies || task.missionDependencies)
-            ? (task.mission_dependencies || task.missionDependencies)
-            : [],
-        child_task_ids: Array.isArray(task.child_task_ids || task.childTaskIds) ? (task.child_task_ids || task.childTaskIds) : [],
-        mission_plan: task.mission_plan || task.missionPlan || null,
-        followups: Array.isArray(task.followups) ? task.followups : [],
-        intake_state: task.intake_state || task.intakeState || null,
-        intake_draft: task.intake_draft || task.intakeDraft || null,
-        cron_job_id: task.cron_job_id || null,
-        cron_trigger: task.cron_trigger || null,
-        trace_id: traceId,
-        idempotency_key: idempotencyKey || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-    };
-    newTask.work_items = (0, work_items_1.buildMainAgentWorkItems)(newTask);
-    newTask.work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(newTask.work_items);
-    tasks.push(newTask);
-    (0, db_1.saveTasks)(tasks);
-    (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent" } });
-    return newTask;
+    return require("./collaboration-task-service").createTask(task);
 }
 function classifyTaskContinuation(message) {
-    const text = String(message || "").trim();
-    if (/(?:这是|作为|创建|开始).{0,10}(?:新任务|另一个任务)|与当前任务无关|另外一个项目/i.test(text))
-        return "new_task";
-    if (/(?:目标|需求|方案).{0,12}(?:改成|调整为|替换为)|不要.{0,30}(?:改为|改成)|以.+为准/i.test(text))
-        return "revise_goal";
-    return "supplement";
+    return require("./collaboration-task-service").classifyTaskContinuation(message);
 }
 function looksLikeTaskContinuation(message) {
-    return /^(?:再|还要|还需要|另外补充|补充|继续|接着|顺便|刚才|上面|这个任务|把它)|(?:改成|调整为|再加|再补|继续修改|基于刚才)/i.test(String(message || "").trim());
+    return require("./collaboration-task-service").looksLikeTaskContinuation(message);
 }
 function getGlobalMissionDeps() {
     return { listExecutions: execution_kernel_1.listExecutions, taskRequiresCodeChanges, taskRequiresVerification };
@@ -27501,119 +19149,25 @@ function getGlobalDirectDispatchMeta(task) {
     return meta;
 }
 function getGlobalDirectDispatchContinuationKey(task) {
-    const state = task?.collaboration_state || {};
-    const last = state.last_continuation || task?.last_continuation || null;
-    const interruption = state.goal_revision_interruption || {};
-    const kind = normalizeContinuationKind(last?.kind || last?.rework_kind || "");
-    const replanRequired = kind === "revise_goal"
-        || last?.replan_required === true
-        || task?.plan_revision_required === true
-        || interruption.requested === true;
-    if (!replanRequired && !last?.at && !interruption.requested_at)
-        return "";
-    const reason = (0, memory_1.compactMemoryText)(last?.reason || interruption.reason || task?.status_detail || "", 220);
-    return [
-        task?.id || "",
-        kind || "continuation",
-        Number(task?.followup_revision || 0),
-        last?.at || "",
-        interruption.requested_at || "",
-        reason,
-    ].filter(Boolean).join("|");
+    return require("./collaboration-global-missions").getGlobalDirectDispatchContinuationKey(task);
 }
 function shouldNotifyGlobalDirectDispatchContinuation(task, previousStatus = "") {
-    const meta = getGlobalDirectDispatchMeta(task);
-    if (!meta)
-        return false;
-    if (!String(meta.session_id || "").trim())
-        return false;
-    if (["done", "cancelled", "failed"].includes(String(task?.status || "").toLowerCase()))
-        return false;
-    if (["done", "cancelled"].includes(String(previousStatus || "").toLowerCase()))
-        return false;
-    const key = getGlobalDirectDispatchContinuationKey(task);
-    if (!key)
-        return false;
-    if (String(meta.continuation_notified_key || "") === key)
-        return false;
-    return true;
+    return require("./collaboration-global-missions").shouldNotifyGlobalDirectDispatchContinuation(task, previousStatus);
 }
 function buildGlobalDirectDispatchContinuationMessage(task) {
-    const state = task?.collaboration_state || {};
-    const last = state.last_continuation || task?.last_continuation || {};
-    const interruption = state.goal_revision_interruption || {};
-    const kind = normalizeContinuationKind(last?.kind || last?.rework_kind || "");
-    const reason = (0, memory_1.compactMemoryText)(last?.reason || interruption.reason || task?.status_detail || "用户补充了新的要求，我会重新核对计划。", 360);
-    const route = interruption.requested && !interruption.resolved_at
-        ? "正在停止当前执行轮，避免子 Agent 继续旧方向。"
-        : kind === "revise_goal" || last?.replan_required === true || task?.plan_revision_required === true
-            ? "会先按最新要求重新核对目标、范围和验收标准，再继续派发或验收。"
-            : "会把补充要求接到同一个任务里继续处理。";
-    return [
-        "你派发到群聊主 Agent 的任务收到新的补充要求。",
-        "",
-        reason ? `- 最新要求：${reason}` : "",
-        `- 当前处理：${route}`,
-        "- 结果口径：这还不是完成结果；最终仍以群聊任务卡的计划、执行、验收和最终总结为准。",
-        "",
-        "底层执行记录、子 Agent 工作包和排障信息仍保留在群聊任务卡的技术详情里。",
-    ].filter(Boolean).join("\n");
+    return require("./collaboration-global-missions").buildGlobalDirectDispatchContinuationMessage(task);
 }
 function shouldNotifyGlobalDirectDispatchCompletion(task, previousStatus = "") {
-    const meta = getGlobalDirectDispatchMeta(task);
-    if (!meta)
-        return false;
-    if (meta.completion_notified_at)
-        return false;
-    if (!String(meta.session_id || "").trim())
-        return false;
-    if (previousStatus === "done")
-        return false;
-    if (String(task?.status || "") !== "done")
-        return false;
-    if (!hasStrongTaskAcceptanceEvidence(task, [], task?.delivery_summary || {}))
-        return false;
-    return true;
+    return require("./collaboration-global-missions").shouldNotifyGlobalDirectDispatchCompletion(task, previousStatus);
 }
 function buildGlobalDirectDispatchCompletionMessage(task) {
-    const report = (0, task_delivery_report_1.buildTaskDeliveryReport)(task, task?.delivery_summary || {}, "done", task?.status_detail || "任务已完成");
-    return [
-        "你派发到群聊主 Agent 的任务已经通过验收。",
-        "",
-        report.markdown,
-        "",
-        "我已把这份最终总结同步回全局 Agent 会话。底层执行记录和排障信息仍保留在群聊任务卡的技术详情里。",
-    ].join("\n");
+    return require("./collaboration-global-missions").buildGlobalDirectDispatchCompletionMessage(task);
 }
 function shouldNotifyGlobalDirectDispatchRollback(task, previousStatus = "") {
-    const meta = getGlobalDirectDispatchMeta(task);
-    if (!meta)
-        return false;
-    if (meta.rollback_notified_at)
-        return false;
-    if (!String(meta.session_id || "").trim())
-        return false;
-    if (String(task?.status || "") !== "cancelled")
-        return false;
-    if (!task?.rolled_back_at && task?.delivery_summary?.reverted !== true)
-        return false;
-    if (previousStatus === "cancelled" && task?.delivery_summary?.reverted !== true)
-        return false;
-    return true;
+    return require("./collaboration-global-missions").shouldNotifyGlobalDirectDispatchRollback(task, previousStatus);
 }
 function buildGlobalDirectDispatchRollbackMessage(task) {
-    const summary = task?.delivery_summary || {};
-    const rollbackCount = Array.isArray(task?.rollback_results) ? task.rollback_results.length : 0;
-    const reason = (0, memory_1.compactMemoryText)(task?.rollback_reason || summary.rollback_reason || "用户发起安全撤销", 280);
-    return [
-        "你派发到群聊主 Agent 的任务已安全撤销。",
-        "",
-        rollbackCount ? `- 撤销结果：已恢复 ${rollbackCount} 个任务检查点，最近一轮改动不再视为已交付。` : "- 撤销结果：最近一轮改动不再视为已交付。",
-        reason ? `- 撤销原因：${reason}` : "",
-        "- 后续处理：如果你还要继续这个需求，我会重新读取当前代码状态，再重新规划、派发和验收。",
-        "",
-        "技术执行记录仍保留在群聊任务卡的技术详情里，用户可见区只保留这份结论。",
-    ].filter(Boolean).join("\n");
+    return require("./collaboration-global-missions").buildGlobalDirectDispatchRollbackMessage(task);
 }
 function recordGlobalDirectDispatchCompletionMemory(task, meta, content) {
     try {
@@ -27839,70 +19393,13 @@ function appendGlobalDirectDispatchRollbackToHistory(task, previousStatus = "") 
     return true;
 }
 function updateTask(id, updates) {
-    const tasks = (0, db_1.loadTasks)();
-    const idx = tasks.findIndex(t => t.id === id);
-    if (idx === -1)
-        return null;
-    const previousStatus = tasks[idx].status;
-    const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
-    const previousCollaborationState = tasks[idx].collaboration_state || {};
-    tasks[idx].trace_id = (0, reliability_ledger_1.ensureTraceId)(tasks[idx].trace_id || updates.trace_id || updates.traceId, "task");
-    if (updates.receipt) {
-        updates.receipt_idempotency_key = crypto.createHash("sha256").update(JSON.stringify(updates.receipt)).digest("hex");
-    }
-    Object.assign(tasks[idx], updates, { updated_at: new Date().toISOString() });
-    if (updates.delivery_summary && typeof updates.delivery_summary === "object") {
-        tasks[idx].collaboration_state = reconcileTaskCollaborationState(tasks[idx], previousCollaborationState);
-    }
-    else if (updates.status === "done" || updates.status === "cancelled") {
-        tasks[idx].collaboration_state = reconcileTaskCollaborationState(tasks[idx], previousCollaborationState);
-    }
-    else if (updates.collaboration_state && typeof updates.collaboration_state === "object") {
-        tasks[idx].collaboration_state = { ...previousCollaborationState, ...updates.collaboration_state, updated_at: new Date().toISOString() };
-    }
-    const taskExecutions = (0, execution_kernel_1.listExecutions)({ taskId: id });
-    tasks[idx].lifecycle = deriveTaskLifecycle(tasks[idx], taskExecutions);
-    tasks[idx].work_items = (0, work_items_1.buildMainAgentWorkItems)(tasks[idx], { executions: taskExecutions });
-    tasks[idx].work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(tasks[idx].work_items);
-    if (updates.status === "done") {
-        tasks[idx].completed_at = updates.completed_at || new Date().toISOString();
-    }
-    else if (updates.status && updates.status !== "done") {
-        delete tasks[idx].completed_at;
-    }
-    if (tasks[idx].parent_task_id) {
-        refreshGlobalMissionParentInTaskList(tasks, tasks[idx].parent_task_id);
-    }
-    appendGlobalDirectDispatchContinuationToHistory(tasks[idx], previousStatus);
-    appendGlobalDirectDispatchCompletionToHistory(tasks[idx], previousStatus);
-    appendGlobalDirectDispatchRollbackToHistory(tasks[idx], previousStatus);
-    (0, db_1.saveTasks)(tasks);
-    if (updates.status && updates.status !== previousStatus) {
-        (0, reliability_ledger_1.appendTraceEvent)(tasks[idx].trace_id, { id: `task:${id}:status:${updates.status}:${tasks[idx].updated_at}`, type: "task.status_changed", status: updates.status === "failed" ? "error" : updates.status === "done" ? "ok" : "info", task_id: id, group_id: tasks[idx].group_id || "", agent: tasks[idx].target_project || "", message: `${previousStatus || "unknown"} → ${updates.status}`, data: { from: previousStatus || "", to: updates.status, detail: String(updates.status_detail || updates.result || "").slice(0, 500) } });
-    }
-    if (updates.receipt && updates.receipt_idempotency_key !== previousReceiptKey) {
-        (0, reliability_ledger_1.appendTraceEvent)(tasks[idx].trace_id, { id: `task:${id}:receipt:${updates.receipt_idempotency_key}`, type: "worker.receipt_persisted", status: updates.receipt.status === "done" ? "ok" : updates.receipt.status === "failed" ? "error" : "warning", task_id: id, group_id: tasks[idx].group_id || "", agent: updates.receipt.agent || tasks[idx].target_project || "", message: updates.receipt.summary || `回执状态 ${updates.receipt.status || "unknown"}`, data: { receipt_status: updates.receipt.status || "", filesChanged: updates.receipt.filesChanged || [], verification: updates.receipt.verification || [] } });
-    }
-    return tasks[idx];
+    return require("./collaboration-task-service").updateTask(id, updates);
 }
 function refreshGlobalDevelopmentMissions() {
-    const tasks = (0, db_1.loadTasks)();
-    const parents = tasks.filter((item) => item.workflow_type === "global_mission");
-    for (const parent of parents)
-        refreshGlobalMissionParentInTaskList(tasks, parent.id);
-    (0, db_1.saveTasks)(tasks);
-    return parents.map((parent) => tasks.find((item) => item.id === parent.id));
+    return require("./collaboration-global-missions").refreshGlobalDevelopmentMissions();
 }
 function getGlobalDevelopmentMission(id) {
-    refreshGlobalDevelopmentMissions();
-    const tasks = (0, db_1.loadTasks)();
-    const mission = tasks.find((item) => item.id === id && item.workflow_type === "global_mission");
-    if (!mission)
-        return null;
-    return {
-        mission,
-        children: tasks.filter((item) => item.parent_task_id === id),
-    };
+    return require("./collaboration-global-missions").getGlobalDevelopmentMission(id);
 }
 function getMissionDependencyRefs(task) {
     const value = task?.mission_dependencies || task?.mission_target?.depends_on || task?.mission_target?.dependsOn || [];
@@ -27915,17 +19412,7 @@ function missionChildMatchesRef(task, ref) {
         .some(value => String(value).toLowerCase() === String(ref).toLowerCase());
 }
 function removeTaskFromQueues(taskId) {
-    let removed = 0;
-    for (const queue of taskQueues.values()) {
-        let index = queue.indexOf(taskId);
-        while (index >= 0) {
-            queue.splice(index, 1);
-            removed++;
-            index = queue.indexOf(taskId);
-        }
-    }
-    runningTaskIds.delete(taskId);
-    return removed;
+    return require("./collaboration-task-service").removeTaskFromQueues(taskId);
 }
 function appendGlobalMissionSupervisorTimeline(mission, actions = [], waitingUser = [], terminal = false) {
     if (!mission?.id)
@@ -27980,824 +19467,28 @@ function appendGlobalMissionSupervisorTimeline(mission, actions = [], waitingUse
     });
 }
 function superviseGlobalDevelopmentMissionCycle(id, ctx, options = {}) {
-    const initial = getGlobalDevelopmentMission(id);
-    if (!initial)
-        return { success: false, error: "全局任务不存在", terminal: true };
-    const maxAttempts = Math.max(1, Math.min(20, Number(options.max_attempts || options.maxAttempts || 3)));
-    const staleMs = Math.max(30_000, Number(options.stale_ms || options.staleMs || TASK_WATCHDOG_STALE_MS));
-    const autoMerge = options.auto_merge !== false && options.autoMerge !== false;
-    const actions = [];
-    const waitingUser = [];
-    const childByRef = (ref) => initial.children.find((item) => missionChildMatchesRef(item, ref));
-    const dependencyGraph = new Map(initial.children.map((child) => [child.id, getMissionDependencyRefs(child).map(ref => childByRef(ref)?.id).filter(Boolean)]));
-    const visiting = new Set();
-    const visited = new Set();
-    const cyclic = new Set();
-    const visit = (taskId, stack = []) => {
-        if (visiting.has(taskId)) {
-            const start = stack.indexOf(taskId);
-            for (const idInCycle of stack.slice(Math.max(0, start)))
-                cyclic.add(idInCycle);
-            cyclic.add(taskId);
-            return;
-        }
-        if (visited.has(taskId))
-            return;
-        visiting.add(taskId);
-        for (const dependencyId of dependencyGraph.get(taskId) || [])
-            visit(dependencyId, [...stack, taskId]);
-        visiting.delete(taskId);
-        visited.add(taskId);
-    };
-    for (const child of initial.children)
-        visit(child.id);
-    for (const child of initial.children) {
-        if (cyclic.has(child.id)) {
-            waitingUser.push({ task_id: child.id, reason: "检测到循环依赖，需要用户修改目标依赖或人工接管" });
-            actions.push({ type: "dependency_cycle", task_id: child.id, dependencies: dependencyGraph.get(child.id) || [] });
-            continue;
-        }
-        const dependencyRefs = getMissionDependencyRefs(child);
-        const dependencies = dependencyRefs.map(ref => ({ ref, task: childByRef(ref) }));
-        const unknownDependencies = dependencies.filter(item => !item.task).map(item => item.ref);
-        const blockingDependencies = dependencies.filter(item => item.task && !globalMissionChildGatePassed(item.task));
-        if (unknownDependencies.length > 0) {
-            waitingUser.push({ task_id: child.id, reason: `找不到前置依赖：${unknownDependencies.join("、")}` });
-            actions.push({ type: "dependency_invalid", task_id: child.id, dependencies: unknownDependencies });
-            continue;
-        }
-        if (blockingDependencies.length > 0) {
-            actions.push({ type: "dependency_wait", task_id: child.id, dependencies: blockingDependencies.map(item => item.task.id) });
-            continue;
-        }
-        const attempts = Math.max(Number(child.retry_count || 0), Number(child.auto_gap_continue_count || 0));
-        if (child.status === "done") {
-            const evidence = getGlobalMissionChildDeliveryEvidence(child);
-            if (evidence.merge_required && !evidence.merge_passed && autoMerge) {
-                for (const executionId of evidence.merge_pending_execution_ids) {
-                    try {
-                        const result = (0, execution_kernel_1.mergeExecutionWorktree)(executionId, {
-                            commit: true,
-                            message: `chore: 合并全局任务 ${id} 的交付变更`,
-                        });
-                        actions.push({ type: "worktree_merged", task_id: child.id, execution_id: executionId, result });
-                    }
-                    catch (error) {
-                        if (attempts >= maxAttempts) {
-                            waitingUser.push({ task_id: child.id, reason: `自动合并失败且已达到返工上限：${error?.message || error}` });
-                            actions.push({ type: "merge_failed", task_id: child.id, execution_id: executionId, error: error?.message || String(error) });
-                        }
-                        else {
-                            const message = `全局 Agent 最终合并失败：${error?.message || error}。请调查跨 Agent 冲突，在原任务会话中解决冲突、重新运行验证并提交完整结构化回执。`;
-                            const result = continueTaskWithMessage(child.id, message, ctx, {
-                                source: "mission_supervisor_gap_rework",
-                                auto_execute: true,
-                                idempotency_key: `${id}:merge:${executionId}:${attempts + 1}`,
-                                status_detail: "全局 Agent 检测到合并冲突，已按缺口返工",
-                            });
-                            actions.push({ type: "merge_conflict_rework", task_id: child.id, execution_id: executionId, result: { success: result.success, queued: result.queued }, error: error?.message || String(error) });
-                        }
-                    }
-                }
-            }
-            else if (!globalMissionChildGatePassed(child)) {
-                if (attempts >= maxAttempts) {
-                    waitingUser.push({ task_id: child.id, reason: "交付验收未通过且已达到自动返工上限" });
-                }
-                else {
-                    const result = continueTaskWithMessage(child.id, buildTaskGapContinuationDraft(child), ctx, {
-                        source: "mission_supervisor_gap_rework",
-                        auto_execute: true,
-                        idempotency_key: `${id}:gate:${child.id}:${attempts + 1}`,
-                        status_detail: "全局 Agent 检测到交付证据缺口，已自动返工",
-                    });
-                    actions.push({ type: "gate_gap_rework", task_id: child.id, result: { success: result.success, queued: result.queued } });
-                }
-            }
-            continue;
-        }
-        if (child.status === "failed") {
-            if (attempts >= maxAttempts) {
-                waitingUser.push({ task_id: child.id, reason: child.status_detail || child.result || "子任务失败且已达到自动重试上限" });
-            }
-            else {
-                const runtimeFailure = isRecoverableRuntimeFailure(child);
-                const result = runtimeFailure
-                    ? retryTask(child.id, ctx, `全局任务 ${id} 持续跟进检测到执行器异常，恢复原生会话或切换执行器后重试`, true)
-                    : continueTaskWithMessage(child.id, `全局 Agent 检测到本轮失败：${child.status_detail || child.result || "未知失败"}。请先调查根因，只针对失败缺口返工，保留已完成成果，重新运行相关验证并提交结构化回执。`, ctx, {
-                        source: "mission_supervisor_failure_rework",
-                        auto_execute: true,
-                        idempotency_key: `${id}:failure:${child.id}:${attempts + 1}`,
-                        status_detail: "全局 Agent 已按失败根因要求自动返工",
-                    });
-                actions.push({ type: runtimeFailure ? "runtime_recovery" : "failure_rework", task_id: child.id, result: { success: result.success, queued: result.queued } });
-            }
-            continue;
-        }
-        if (child.status === "cancelled") {
-            waitingUser.push({ task_id: child.id, reason: "子任务已取消" });
-            continue;
-        }
-        if (child.status === "pending" && !isTaskQueuedInMemory(child.id) && !runningTaskIds.has(child.id)) {
-            if (child.auto_execute === false) {
-                waitingUser.push({ task_id: child.id, reason: "子任务配置为手动启动，等待用户确认派发" });
-                actions.push({ type: "manual_dispatch_required", task_id: child.id });
-                continue;
-            }
-            const result = enqueueTask(child.id, ctx);
-            actions.push({ type: dependencyRefs.length ? "dependency_released" : "queue_recovered", task_id: child.id, result });
-            continue;
-        }
-        if (child.status === "in_progress" && !runningTaskIds.has(child.id) && getTaskAgeMs(child) >= staleMs) {
-            if (attempts >= maxAttempts) {
-                waitingUser.push({ task_id: child.id, reason: "子任务执行超时且已达到恢复上限" });
-            }
-            else {
-                const result = retryTask(child.id, ctx, `全局任务 ${id} 持续跟进检测到执行中断或超时`, true);
-                actions.push({ type: "stalled_recovery", task_id: child.id, result: { success: result.success, queued: result.queued } });
-            }
-        }
-    }
-    const current = getGlobalDevelopmentMission(id);
-    const summary = current.mission.mission_summary || {};
-    const terminal = summary.all_passed === true;
-    if (actions.length > 0 || terminal || waitingUser.length > 0) {
-        (0, reliability_ledger_1.appendTraceEvent)(current.mission.trace_id, {
-            id: `mission:${id}:supervisor:${Date.now()}`,
-            type: terminal ? "mission.delivery_completed" : "mission.supervisor_cycle",
-            status: terminal ? "ok" : waitingUser.length ? "warning" : "info",
-            task_id: id,
-            message: terminal ? "全局任务全部交付验收通过" : `持续跟进执行 ${actions.length} 个动作，${waitingUser.length} 项需要人工处理`,
-            data: { actions, waiting_user: waitingUser, summary },
-        });
-        appendGlobalMissionSupervisorTimeline(current.mission, actions, waitingUser, terminal);
-    }
-    return {
-        success: true,
-        mission: current.mission,
-        children: current.children,
-        terminal,
-        waiting_user: waitingUser,
-        actions,
-    };
+    return require("./collaboration-global-missions").superviseGlobalDevelopmentMissionCycle(id, ctx, options);
 }
 async function controlGlobalDevelopmentMission(id, operation, ctx, payload = {}) {
-    const current = getGlobalDevelopmentMission(id);
-    if (!current)
-        return { success: false, status: 404, error: "全局任务不存在" };
-    const op = String(operation || "").toLowerCase();
-    const now = new Date().toISOString();
-    if (!["pause", "resume", "cancel", "takeover", "update_goal"].includes(op)) {
-        return { success: false, status: 400, error: `不支持的全局任务操作：${operation}` };
-    }
-    if (op === "update_goal") {
-        const previousGoal = compactFormText(current.mission.business_goal || current.mission.description || current.mission.title, "");
-        const requestedGoal = compactFormText(payload.business_goal || payload.businessGoal || payload.goal, "");
-        const acceptance = compactFormText(payload.acceptance || payload.acceptance_criteria || payload.acceptanceCriteria, current.mission.acceptance_criteria || "");
-        const continuation = payload.continuation && typeof payload.continuation === "object" ? payload.continuation : null;
-        const source = compactFormText(continuation?.source || payload.source || "mission_supervisor_goal_update", "mission_supervisor_goal_update");
-        const continuationMessage = compactFormText(payload.message
-            || payload.followup
-            || continuation?.message
-            || continuation?.reason
-            || continuation?.detail
-            || payload.reason, "");
-        const reworkKind = compactFormText(continuation?.rework_kind || continuation?.reworkKind || "", "");
-        const requestedKind = String(payload.continuation_kind
-            || payload.continuationKind
-            || continuation?.kind
-            || continuation?.continuation_kind
-            || "").trim();
-        const isNextWorkItem = reworkKind === "next_claimable_work_item"
-            || /next_work_item|user_next_work_item/i.test(`${source} ${reworkKind}`);
-        const inferredKind = requestedKind && requestedKind !== "auto"
-            ? normalizeContinuationKind(requestedKind)
-            : isNextWorkItem
-                ? "supplement"
-                : classifyTaskContinuation(continuationMessage || (requestedGoal ? `目标调整为：${requestedGoal}` : "补充当前全局任务"));
-        if (inferredKind === "new_task") {
-            return { success: false, status: 409, error: "这条要求看起来是独立新任务，请新建全局任务，不会混入当前持续跟进。" };
-        }
-        const continuationKind = normalizeContinuationKind(inferredKind);
-        const goal = requestedGoal || [
-            previousGoal,
-            continuationMessage ? `${continuationKind === "revise_goal" ? "目标调整" : "补充要求"}：${continuationMessage}` : "",
-        ].filter(Boolean).join("\n");
-        const followup = [
-            continuationKind === "revise_goal" ? "全局目标已调整，请停止旧方向并重新核对计划。" : "全局任务收到补充要求，请并入当前任务继续处理。",
-            continuationMessage ? `用户最新要求：${continuationMessage}` : "",
-            goal ? `当前全局目标：${goal}` : "",
-            `验收标准：${acceptance || "沿用原标准"}`,
-        ].filter(Boolean).join("\n");
-        const continuationResults = [];
-        for (const child of current.children) {
-            if (["cancelled"].includes(child.status))
-                continue;
-            const result = continueTaskWithMessage(child.id, followup, ctx, {
-                source,
-                continuationKind,
-                interrupt_current_run: continuationKind === "revise_goal",
-                rework_kind: reworkKind,
-                target: continuation?.target || continuation?.agent || continuation?.project || child.target_project || "",
-                reason: continuationMessage || continuation?.reason || payload.reason || "",
-                title: continuation?.title || continuation?.label || (continuationKind === "revise_goal" ? "全局目标调整" : "全局任务补充"),
-                work_item_id: continuation?.work_item_id || continuation?.workItemId || "",
-                status_detail: continuationKind === "revise_goal"
-                    ? "目标调整已接收；旧执行轮正在停止，随后会按新目标重新规划"
-                    : "补充要求已接收；继续当前任务链路",
-                idempotencyKey: payload.request_id || payload.requestId
-                    ? `${payload.request_id || payload.requestId}:${child.id}`
-                    : "",
-            });
-            if (result.success) {
-                updateTask(child.id, {
-                    business_goal: goal,
-                    acceptance_criteria: acceptance,
-                    global_mission_goal_updated_at: now,
-                    global_mission_continuation_kind: continuationKind,
-                });
-            }
-            continuationResults.push({
-                task_id: child.id,
-                target: child.target_project || child.mission_target?.name || "",
-                success: result.success === true,
-                queued: result.queued === true,
-                deferred: result.deferred === true,
-                interrupted_current_run: result.interrupted_current_run === true,
-                interruption_success: result.interruption?.success !== false,
-                continuation_kind: result.continuation_kind || continuationKind,
-                error: result.error || result.interruption?.error || "",
-            });
-        }
-        const continuationSummary = {
-            schema: "ccm-global-mission-continuation-summary-v1",
-            kind: continuationKind,
-            source,
-            replan_required: continuationKind === "revise_goal",
-            interrupt_current_run: continuationKind === "revise_goal",
-            affected_task_count: continuationResults.filter(item => item.success).length,
-            queued_task_count: continuationResults.filter(item => item.queued).length,
-            deferred_task_count: continuationResults.filter(item => item.deferred).length,
-            interruption_requested_count: continuationResults.filter(item => item.interrupted_current_run).length,
-            interrupted_task_count: continuationResults.filter(item => item.interrupted_current_run && item.interruption_success).length,
-            interruption_failed_count: continuationResults.filter(item => item.interrupted_current_run && !item.interruption_success).length,
-            failed_task_count: continuationResults.filter(item => !item.success).length,
-            results: continuationResults,
-            at: now,
-        };
-        const statusDetail = isNextWorkItem
-            ? "已接上全局任务的下一步派发，我会继续跟进"
-            : continuationKind === "revise_goal"
-                ? continuationSummary.interruption_requested_count > 0
-                    ? `目标调整已接收；已停止 ${continuationSummary.interruption_requested_count} 个旧执行轮，正在按新目标重新规划`
-                    : "目标调整已接收；正在按新目标重新规划"
-                : `补充要求已接收；已同步 ${continuationSummary.affected_task_count} 个子任务，继续当前任务链路`;
-        const continuationState = {
-            ...(current.mission.collaboration_state || {}),
-            phase: "reworking",
-            needs_user: false,
-            last_continuation: {
-                source,
-                at: now,
-                automatic: false,
-                kind: continuationKind,
-                status: continuationSummary.interruption_requested_count > 0 ? "interrupting" : "accepted",
-                replan_required: continuationSummary.replan_required,
-                interrupt_current_run: continuationSummary.interrupt_current_run,
-                rework_kind: reworkKind,
-                target: compactFormText(continuation?.target || continuation?.agent || continuation?.project || "", ""),
-                reason: continuationMessage,
-                title: compactFormText(continuation?.title || continuation?.label || "", ""),
-                work_item_id: compactFormText(continuation?.work_item_id || continuation?.workItemId || "", ""),
-                affected_task_count: continuationSummary.affected_task_count,
-                queued_task_count: continuationSummary.queued_task_count,
-                deferred_task_count: continuationSummary.deferred_task_count,
-                interrupted_task_count: continuationSummary.interrupted_task_count,
-                failed_task_count: continuationSummary.failed_task_count,
-            },
-            continuation_events: [
-                ...(Array.isArray(current.mission.collaboration_state?.continuation_events) ? current.mission.collaboration_state.continuation_events : []),
-                {
-                    source,
-                    at: now,
-                    kind: continuationKind,
-                    status: continuationSummary.interruption_requested_count > 0 ? "interrupting" : "accepted",
-                    replan_required: continuationSummary.replan_required,
-                    interrupt_current_run: continuationSummary.interrupt_current_run,
-                    rework_kind: reworkKind,
-                    target: compactFormText(continuation?.target || continuation?.agent || continuation?.project || "", ""),
-                    reason: continuationMessage,
-                    title: compactFormText(continuation?.title || continuation?.label || "", ""),
-                    work_item_id: compactFormText(continuation?.work_item_id || continuation?.workItemId || "", ""),
-                    affected_task_count: continuationSummary.affected_task_count,
-                    queued_task_count: continuationSummary.queued_task_count,
-                    deferred_task_count: continuationSummary.deferred_task_count,
-                    interrupted_task_count: continuationSummary.interrupted_task_count,
-                    failed_task_count: continuationSummary.failed_task_count,
-                },
-            ].slice(-20),
-            continuation_summary: continuationSummary,
-            updated_at: now,
-        };
-        updateTask(id, {
-            business_goal: goal,
-            description: goal,
-            acceptance_criteria: acceptance,
-            status_detail: statusDetail,
-            collaboration_state: continuationState,
-            plan_revision_required: continuationKind === "revise_goal",
-            last_goal_revision_at: continuationKind === "revise_goal" ? now : current.mission.last_goal_revision_at,
-            followup_revision: Number(current.mission.followup_revision || 0) + 1,
-        });
-        (0, logs_1.appendTaskTimelineEvent)(id, {
-            type: isNextWorkItem ? "next_work_item_dispatch" : continuationKind === "revise_goal" ? "global_mission_goal_revision" : "global_mission_supplement",
-            title: isNextWorkItem ? "全局任务下一步派发已接上" : continuationKind === "revise_goal" ? "目标调整已接收" : "补充要求已接收",
-            detail: (0, memory_1.compactMemoryText)(statusDetail, 260),
-            status: continuationSummary.failed_task_count > 0 ? "warn" : "active",
-            phase: "rework",
-            agent: compactFormText(continuation?.target || "", ""),
-            data: {
-                source,
-                kind: continuationKind,
-                work_item_id: continuation?.work_item_id || continuation?.workItemId || "",
-                continuation_summary: continuationSummary,
-            },
-        });
-        (0, reliability_ledger_1.appendTraceEvent)(current.mission.trace_id, {
-            id: `mission:${id}:continuation:${Date.now()}`,
-            type: continuationKind === "revise_goal" ? "mission.goal_revised" : "mission.requirement_supplemented",
-            status: continuationSummary.failed_task_count > 0 ? "warning" : "ok",
-            task_id: id,
-            message: statusDetail,
-            data: continuationSummary,
-        });
-        return {
-            success: true,
-            operation: op,
-            continuation_kind: continuationKind,
-            continuation_summary: continuationSummary,
-            ...getGlobalDevelopmentMission(id),
-        };
-    }
-    else if (op === "cancel") {
-        for (const child of current.children) {
-            if (["done", "cancelled"].includes(child.status))
-                continue;
-            removeTaskFromQueues(child.id);
-            const reason = compactFormText(payload.reason, "用户取消全局任务");
-            (0, execution_kernel_1.requestTaskCancellation)(child.id, reason, String(payload.actor || "global-agent"));
-            (0, test_agent_runner_1.cancelTestAgentRunsForTask)(child.id, reason);
-            const running = runningTaskIds.has(child.id);
-            updateTask(child.id, { status: running ? "in_progress" : "cancelled", status_detail: running ? "全局任务取消请求已发送，正在终止执行" : "随全局任务取消", cancellation_requested_at: now, cancellation_reason: reason });
-            await ctx.onTaskStatusChange?.(child, running ? "cancelling" : "cancelled", reason);
-        }
-        updateTask(id, { status: "cancelled", status_detail: compactFormText(payload.reason, "全局任务已取消"), cancelled_at: now });
-    }
-    else {
-        const paused = op === "pause" || op === "takeover";
-        for (const child of current.children) {
-            if (["done", "cancelled"].includes(child.status))
-                continue;
-            updateTask(child.id, { is_paused: paused, paused, status_detail: paused ? (op === "takeover" ? "已转为人工接管" : "我已暂停后续调度") : "我已恢复后续调度" });
-            if (paused)
-                removeTaskFromQueues(child.id);
-        }
-        updateTask(id, {
-            is_paused: paused,
-            paused,
-            supervisor_control: { mode: op === "takeover" ? "manual" : paused ? "paused" : "automatic", updated_at: now, actor: payload.actor || "user" },
-            status_detail: op === "takeover" ? "用户已人工接管，自动跟进停止操作" : paused ? "全局任务跟进已暂停" : "全局任务跟进已恢复",
-        });
-    }
-    return { success: true, operation: op, ...getGlobalDevelopmentMission(id) };
+    return require("./collaboration-global-missions").controlGlobalDevelopmentMission(id, operation, ctx, payload);
 }
 function targetProjectForMissionTarget(target) {
     return String(target?.type === "group" ? target?.coordinator : (target?.project || target?.name || "")).trim();
 }
 function buildGlobalMissionTargetHandoff(input) {
-    const target = input.target || {};
-    const targetProject = target.type === "group" ? target.coordinator : target.project;
-    const dependencyRefs = Array.isArray(target.depends_on || target.dependsOn)
-        ? (target.depends_on || target.dependsOn)
-        : (target.depends_on || target.dependsOn ? [target.depends_on || target.dependsOn] : []);
-    const handoff = (0, worker_handoff_1.buildSelfContainedWorkerHandoff)({
-        group: target.type === "group" ? input.group : null,
-        project: targetProject || target.name || "target-agent",
-        task: [
-            `全局任务：${input.businessGoal}`,
-            `本目标任务：${input.childGoal}`,
-            target.type === "group"
-                ? `目标群聊：${target.name || target.group_id}；由群聊主 Agent ${target.coordinator || "coordinator"} 继续拆分、派发和验收。`
-                : `目标项目：${target.project || target.name}；由项目 Agent 直接执行、验证并回执。`,
-            dependencyRefs.length ? `前置依赖：${dependencyRefs.join("、")}` : "",
-        ].filter(Boolean).join("\n"),
-        userGoal: input.businessGoal,
-        source: "全局主 Agent",
-        reason: target.reason || "全局主 Agent 根据用户目标和目标职责分派",
-        traceId: input.traceId,
-        taskId: input.parent?.id || "",
-        analysis: {
-            summary: input.businessGoal,
-            documentFindings: splitUserAcceptanceText(input.sourceDocuments || ""),
-            constraints: [
-                `这是全局任务 ${input.parent?.id || ""} 的子任务；必须向全局 Agent 提供可审计交付证据。`,
-                "最终完成不能只靠口头说明，必须有实际产出、验证和主 Agent 复盘证据。",
-            ],
-        },
-        dependencies: dependencyRefs.map((ref) => ({ project: ref, reason: "全局任务前置依赖" })),
-        verificationHints: [],
-        acceptance: splitUserAcceptanceText(input.acceptance),
-        requiresCodeChanges: target.requires_code_changes !== false,
-        allowedScope: [
-            target.type === "group"
-                ? `只在 ${target.name || target.group_id} 群聊及其成员项目职责范围内推进`
-                : `只在 ${target.project || target.name} 项目职责范围内推进`,
-            "围绕本目标任务完成实现、验证和交付证据",
-            "如发现依赖其他目标，写入 blockers/needs，由全局 Agent 协调",
-        ],
-        forbiddenScope: [
-            "不要修改与本目标无关的项目或模块",
-            "不要绕过全局任务依赖顺序",
-            "不要把已派发/正在执行说成已完成",
-        ],
-        doneCriteria: [
-            "目标覆盖：说明本目标如何满足全局任务的一部分",
-            "交付证据：列出实际文件/配置/文档变更或说明无需变更的依据",
-            "验证证据：列出已执行验证，失败时先修复或明确阻塞",
-            "全局汇总：回执里保留风险、待确认事项和依赖消费情况，方便全局 Agent 最终总结",
-        ],
-    });
-    return {
-        ...handoff,
-        global_mission: {
-            mission_id: input.parent?.id || "",
-            target_type: target.type,
-            target_name: target.name || target.project || target.group_id || "",
-            priority: input.priority || "normal",
-            depends_on: dependencyRefs,
-        },
-    };
+    return require("./collaboration-global-missions").buildGlobalMissionTargetHandoff(input);
 }
 function buildGlobalGroupTestAgentOwnership() {
-    return {
-        schema: "ccm-global-group-test-agent-ownership-v1",
-        global_agent: "dispatch_and_relay_only",
-        group_main_agent: "plan_dispatch_accept_review_and_summarize",
-        project_agent: "execute_and_return_receipt",
-        test_agent: "independent_review_after_group_acceptance",
-    };
+    return require("./collaboration-test-agent-runtime").buildGlobalGroupTestAgentOwnership();
 }
 function normalizeGlobalMissionTargetRequirements(payload, target) {
-    const requiresCodeChanges = target?.requires_code_changes
-        ?? target?.requiresCodeChanges
-        ?? payload?.requires_code_changes
-        ?? payload?.requiresCodeChanges
-        ?? true;
-    const requiresVerification = target?.requires_verification
-        ?? target?.requiresVerification
-        ?? payload?.requires_verification
-        ?? payload?.requiresVerification
-        ?? true;
-    const requiresIndependentReview = target?.requires_independent_review
-        ?? target?.requiresIndependentReview
-        ?? payload?.requires_independent_review
-        ?? payload?.requiresIndependentReview
-        ?? (requiresCodeChanges !== false);
-    return {
-        requires_code_changes: requiresCodeChanges !== false,
-        requires_verification: requiresVerification !== false,
-        requires_independent_review: requiresIndependentReview !== false,
-    };
+    return require("./collaboration-global-missions").normalizeGlobalMissionTargetRequirements(payload, target);
 }
 function createGlobalDevelopmentMission(payload, ctx) {
-    const missionIdempotencyKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
-    if (missionIdempotencyKey) {
-        const existingParent = (0, db_1.loadTasks)().find((item) => item.workflow_type === "global_mission" && item.idempotency_key === missionIdempotencyKey);
-        if (existingParent) {
-            const taskMap = new Map((0, db_1.loadTasks)().map((item) => [item.id, item]));
-            return { success: true, duplicate: true, mission: existingParent, children: (existingParent.child_task_ids || []).map((id) => ({ task: taskMap.get(id) })).filter((item) => item.task), rejected: [] };
-        }
-    }
-    const missionTraceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "mission");
-    const groups = (0, storage_1.loadGroups)();
-    const configs = (0, db_1.getConfigs)();
-    const requestedTargets = Array.isArray(payload.targets) ? payload.targets : [];
-    const fallbackTarget = groups[0]
-        ? [{ type: "group", group_id: groups[0].id, reason: "未明确目标，交由默认开发群聊主 Agent分析" }]
-        : [];
-    const targets = (requestedTargets.length > 0 ? requestedTargets : fallbackTarget)
-        .map((item) => ({
-        ...item,
-        ...normalizeGlobalMissionTargetRequirements(payload, item),
-        type: String(item.type || item.target_type || (item.group_id || item.groupId ? "group" : "project")).toLowerCase(),
-        group_id: item.group_id || item.groupId || "",
-        project: item.project || item.project_name || item.projectName || "",
-        task: item.task || item.instructions || item.message || "",
-        reason: item.reason || "",
-    }));
-    const resolved = [];
-    const rejected = [];
-    const seen = new Set();
-    for (const target of targets) {
-        if (target.type === "group") {
-            const group = groups.find((item) => item.id === target.group_id || item.name === target.group_id);
-            if (!group) {
-                rejected.push({ target, reason: "群聊不存在" });
-                continue;
-            }
-            let readiness;
-            try {
-                readiness = validateDailyDevGroupReady(group);
-            }
-            catch (error) {
-                rejected.push({ target, reason: error.message });
-                continue;
-            }
-            const key = `group:${group.id}`;
-            if (seen.has(key))
-                continue;
-            seen.add(key);
-            resolved.push({
-                ...target,
-                type: "group",
-                group_id: group.id,
-                name: group.name || group.id,
-                coordinator: readiness.coordinator.project,
-                ownership_chain: buildGlobalGroupTestAgentOwnership(),
-            });
-            continue;
-        }
-        const config = configs.find((item) => item.name === target.project);
-        if (!config) {
-            rejected.push({ target, reason: "项目不存在" });
-            continue;
-        }
-        const candidateGroups = groups.filter((group) => (group.members || []).some((member) => String(member?.project || "").trim() === config.name));
-        const requestedGroupId = String(target.group_id || target.groupId || "").trim();
-        const orderedGroups = requestedGroupId
-            ? [
-                ...candidateGroups.filter((group) => group.id === requestedGroupId || group.name === requestedGroupId),
-                ...candidateGroups.filter((group) => group.id !== requestedGroupId && group.name !== requestedGroupId),
-            ]
-            : candidateGroups;
-        let selectedGroup = null;
-        let selectedReadiness = null;
-        for (const group of orderedGroups) {
-            try {
-                selectedReadiness = validateDailyDevGroupReady(group);
-                selectedGroup = group;
-                break;
-            }
-            catch { }
-        }
-        if (!selectedGroup || !selectedReadiness) {
-            rejected.push({
-                target,
-                reason: `项目 ${config.name} 尚未加入可执行的协作群，无法交给群聊主 Agent 完成计划、验收和 TestAgent 复核`,
-            });
-            continue;
-        }
-        const key = `group:${selectedGroup.id}:project:${config.name}`;
-        if (seen.has(key))
-            continue;
-        seen.add(key);
-        resolved.push({
-            ...target,
-            type: "group",
-            group_id: selectedGroup.id,
-            name: selectedGroup.name || selectedGroup.id,
-            coordinator: selectedReadiness.coordinator.project,
-            requested_target_type: "project",
-            requested_project: config.name,
-            project: config.name,
-            ownership_chain: buildGlobalGroupTestAgentOwnership(),
-        });
-    }
-    if (resolved.length === 0) {
-        throw new Error(rejected[0]?.reason || "没有可分派的群聊主 Agent或项目 Agent");
-    }
-    const title = compactFormText(payload.title, compactFormText(payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80));
-    const businessGoal = compactFormText(payload.business_goal || payload.businessGoal || payload.goal || title, title);
-    const acceptance = compactFormText(payload.acceptance || payload.acceptance_criteria || payload.acceptanceCriteria, "所有子任务必须完成实际代码变更和已执行验证；群聊主 Agent与项目 Agent交付验收全部通过后，全局 Agent才能报告完成。");
-    const sourceDocuments = compactFormText(payload.documents || payload.source_documents || payload.sourceDocuments, "");
-    const sourceAttachments = Array.isArray(payload.source_attachments || payload.sourceAttachments)
-        ? (payload.source_attachments || payload.sourceAttachments)
-        : [];
-    const requirementExtraction = payload.requirement_extraction || payload.requirementExtraction || null;
-    const sourceIngestion = payload.source_ingestion || payload.sourceIngestion || null;
-    const autoExecute = payload.auto_execute !== false && payload.autoExecute !== false;
-    const parent = createTask({
-        title,
-        description: businessGoal,
-        target_project: "global-agent",
-        assign_type: "global",
-        priority: payload.priority || "normal",
-        auto_execute: false,
-        workflow_type: "global_mission",
-        business_goal: businessGoal,
-        acceptance_criteria: acceptance,
-        source_documents: sourceDocuments,
-        source_attachments: sourceAttachments,
-        requirement_extraction: requirementExtraction,
-        source_ingestion: sourceIngestion,
-        requires_code_changes: resolved.some((item) => item.requires_code_changes !== false),
-        requires_verification: true,
-        requires_independent_review: resolved.some((item) => item.requires_independent_review === true),
-        mission_plan: {
-            execution_order: payload.execution_order || payload.executionOrder || "parallel",
-            targets: resolved,
-            rejected,
-            created_at: new Date().toISOString(),
-        },
-        workflow_meta: {
-            intake: {
-                source: payload.source || "global-agent",
-                created_at: new Date().toISOString(),
-                attachment_count: sourceAttachments.length,
-                requirement_extraction: requirementExtraction,
-                source_ingestion: sourceIngestion,
-            },
-            global_control: {
-                owner_agent: "global-agent",
-                state: "dispatching",
-            },
-        },
-        trace_id: missionTraceId,
-        idempotency_key: missionIdempotencyKey || null,
-    });
-    (0, logs_1.appendTaskTimelineEvent)(parent.id, {
-        type: "global_mission_plan",
-        title: "全局 Agent生成跨项目总计划",
-        detail: `已识别 ${resolved.length} 个执行目标`,
-        status: "active",
-        phase: "planning",
-        agent: "global-agent",
-        data: { targets: resolved, rejected },
-    });
-    const children = [];
-    const targetHandoffs = [];
-    for (const target of resolved) {
-        const childGoal = compactFormText(target.task, businessGoal);
-        const childTitle = (0, memory_1.compactMemoryText)(`${title} - ${target.name}`, 100);
-        const targetGroup = target.type === "group" ? groups.find((item) => item.id === target.group_id) : null;
-        const missionHandoff = buildGlobalMissionTargetHandoff({
-            parent,
-            target,
-            group: targetGroup,
-            businessGoal,
-            childGoal,
-            acceptance,
-            sourceDocuments,
-            traceId: missionTraceId,
-            priority: payload.priority || "normal",
-        });
-        const missionHandoffSummary = (0, worker_handoff_1.summarizeWorkerHandoffForUser)(missionHandoff);
-        const child = createTask({
-            title: childTitle,
-            description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)({
-                title: childTitle,
-                business_goal: childGoal,
-                scope: target.reason || payload.scope || "由目标 Agent根据总任务识别负责范围",
-                documents: sourceDocuments,
-                acceptance,
-                constraints: `这是全局任务 ${parent.id} 的子任务；必须向全局 Agent提供可审计交付证据。`,
-            }),
-            target_project: target.type === "group" ? target.coordinator : target.project,
-            group_id: target.type === "group" ? target.group_id : null,
-            assign_type: target.type === "group" ? "group" : "project",
-            priority: payload.priority || "normal",
-            auto_execute: autoExecute,
-            workflow_type: "daily_dev",
-            business_goal: childGoal,
-            acceptance_criteria: acceptance,
-            source_documents: sourceDocuments,
-            source_attachments: sourceAttachments,
-            requirement_extraction: requirementExtraction,
-            source_ingestion: sourceIngestion,
-            requires_code_changes: target.requires_code_changes,
-            requires_verification: target.requires_verification,
-            requires_independent_review: target.requires_independent_review,
-            parent_task_id: parent.id,
-            global_mission_id: parent.id,
-            mission_target: target,
-            mission_handoff: missionHandoff,
-            mission_dependencies: Array.isArray(target.depends_on || target.dependsOn)
-                ? (target.depends_on || target.dependsOn)
-                : (target.depends_on || target.dependsOn ? [target.depends_on || target.dependsOn] : []),
-            workflow_meta: {
-                global_mission: {
-                    parent_task_id: parent.id,
-                    owner_agent: "global-agent",
-                    target_type: target.type,
-                    target_name: target.name,
-                    handoff: missionHandoffSummary,
-                    requirement_extraction: requirementExtraction,
-                    source_ingestion: sourceIngestion,
-                },
-            },
-            trace_id: missionTraceId,
-            idempotency_key: missionIdempotencyKey ? `${missionIdempotencyKey}:target:${target.type}:${target.group_id || target.project}` : null,
-        });
-        targetHandoffs.push({ ...missionHandoffSummary, child_task_id: child.id, target_type: target.type, target_name: target.name || target.project || target.group_id || "" });
-        (0, runtime_kernel_1.recordAgentRuntimeLifecycle)({
-            scope: target.type === "group" ? "group" : "worker",
-            traceId: missionTraceId,
-            taskId: child.id,
-            groupId: target.type === "group" ? target.group_id : "",
-            agent: "global-agent",
-            action: "dispatch_worker",
-            phase: "global_mission_handoff",
-            risk: "agent",
-            target: targetProjectForMissionTarget(target),
-            status: "planned",
-            message: `我已为 ${target.name || target.project || target.group_id} 生成子任务交接包`,
-            data: { worker_handoff: missionHandoffSummary, worker_context_packet: missionHandoff.worker_context_packet, global_mission_id: parent.id },
-        });
-        (0, logs_1.appendTaskTimelineEvent)(child.id, {
-            type: "global_mission_handoff_ready",
-            title: "我已补齐子任务交接",
-            detail: target.reason || "目标、范围、依赖、验收和全局汇总要求已打包",
-            status: autoExecute ? "active" : "pending",
-            phase: "dispatching",
-            agent: "global-agent",
-            data: { parent_task_id: parent.id, target, mission_handoff: missionHandoffSummary, worker_context_packet: missionHandoff.worker_context_packet },
-        });
-        const hasDependencies = Array.isArray(child.mission_dependencies) && child.mission_dependencies.length > 0;
-        const queueResult = autoExecute && !hasDependencies
-            ? enqueueTask(child.id, ctx)
-            : { queued: false, message: hasDependencies ? "子任务已创建，等待前置依赖通过交付验收" : "子任务已创建，等待手动启动" };
-        children.push({ task: child, target, queue_result: queueResult });
-    }
-    const updatedParent = updateTask(parent.id, {
-        status: "in_progress",
-        child_task_ids: children.map((item) => item.task.id),
-        status_detail: `全局 Agent已向 ${children.length} 个目标派发子任务`,
-        mission_plan: {
-            ...(parent.mission_plan || {}),
-            target_handoffs: targetHandoffs,
-            handoff_schema: "ccm-self-contained-worker-handoff-v1",
-        },
-    }) || parent;
-    refreshGlobalDevelopmentMissions();
-    return {
-        success: true,
-        mission: getGlobalDevelopmentMission(updatedParent.id)?.mission || updatedParent,
-        children,
-        rejected,
-    };
+    return require("./collaboration-global-missions").createGlobalDevelopmentMission(payload, ctx);
 }
 function canCompleteDailyDevFromDeliverySummary(task, execution, summary) {
-    if (task?.workflow_type !== "daily_dev")
-        return false;
-    if (!summary || execution?.status === "failed")
-        return false;
-    const receiptStatuses = Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : [];
-    const hasDoneReceipt = receiptStatuses.some((item) => item?.status === "done")
-        || execution?.receipt?.status === "done"
-        || task?.receipt?.status === "done";
-    const hasBlockingReceipt = receiptStatuses.some((item) => ["failed", "blocked", "needs_info", "partial"].includes(String(item?.status || "")));
-    const actualChangeCount = Number(summary.actual_file_change_count || task?.file_changes?.count || execution?.fileChanges?.count || 0);
-    const executedVerificationCount = Number(summary.verification_executed?.length || 0);
-    const coordinationPlanCount = Number(summary.coordination_plan_count || 0);
-    const assignmentCount = Number(summary.assignment_count || 0);
-    const workerNotificationCount = Number(summary.worker_notification_count || 0);
-    const openSummaryItems = [
-        ...(Array.isArray(summary.blockers) ? summary.blockers : []),
-        ...(Array.isArray(summary.blocking_needs)
-            ? summary.blocking_needs
-            : (Array.isArray(summary.needs) ? summary.needs.filter((item) => !isAdvisoryNeed(item, task)) : [])),
-        ...(Array.isArray(summary.verification_failed) ? summary.verification_failed : []),
-        ...(Array.isArray(summary.verification_suggested) ? summary.verification_suggested : []),
-    ].filter(Boolean);
-    if (hasBlockingReceipt || openSummaryItems.length > 0)
-        return false;
-    if (coordinationPlanCount <= 0 || assignmentCount <= 0 || workerNotificationCount <= 0)
-        return false;
-    if (!hasDoneReceipt || !summary.has_final_review)
-        return false;
-    if (taskRequiresCodeChanges(task) && actualChangeCount <= 0)
-        return false;
-    if (taskRequiresVerification(task) && executedVerificationCount <= 0)
-        return false;
-    if (taskRequiresVerification(task) && summary.verification_required_gate_passed === false)
-        return false;
-    if (taskRequiresVerification(task) && summary.verification_source_gate_passed !== true)
-        return false;
-    if (summary.independent_review_required === true && summary.independent_review_gate_passed !== true)
-        return false;
-    if (summary.post_review_spot_check_required === true && summary.post_review_spot_check_gate_passed !== true)
-        return false;
-    if ((taskRequiresCodeChanges(task) || taskRequiresVerification(task)) && summary.ack_gate_passed !== true)
-        return false;
-    if ((taskRequiresCodeChanges(task) || taskRequiresVerification(task)) && summary.receipt_quality_gate_passed !== true)
-        return false;
-    if (summary.contract_injection_gate_passed === false)
-        return false;
-    if (summary.work_item_summary?.total && summary.work_item_summary.all_completed !== true)
-        return false;
-    if (summary.acceptance_gate && summary.acceptance_gate.pass !== true)
-        return false;
-    return true;
+    return require("./collaboration-task-service").canCompleteDailyDevFromDeliverySummary(task, execution, summary);
 }
 function reconcileTaskDeliveryEvidence(taskId) {
     const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
@@ -28918,175 +19609,7 @@ function validateTaskManualStatusUpdate(current, updates) {
     return `业务开发任务不能手动标记完成，缺少验收证据：${missing.join("、")}。请通过队列让主 Agent 继续执行，或在任务报告中补齐证据后由系统完成。`;
 }
 function buildTaskGapContinuationDraft(task) {
-    const summary = task?.delivery_summary || {};
-    const workerNotifications = Array.isArray(summary.worker_notifications) ? summary.worker_notifications : [];
-    const assignmentEvidence = Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [];
-    const coordinationPlanCount = Number(summary.coordination_plan_count || 0);
-    const assignmentCount = Number(summary.assignment_count || assignmentEvidence.length || 0);
-    const workerNotificationCount = Number(summary.worker_notification_count || workerNotifications.length || 0);
-    const relatedWorkers = uniqueStrings([
-        ...workerNotifications.map((item) => item.task_id),
-        ...assignmentEvidence.map((item) => item.project),
-        ...((Array.isArray(summary.receipts) ? summary.receipts : []).map((item) => item.agent)),
-        ...((Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : []).map((item) => item.agent)),
-        ...((Array.isArray(summary.verification_required_missing) ? summary.verification_required_missing : []).map((item) => item.agent)),
-    ].filter(Boolean)).slice(0, 8);
-    const lines = [
-        `请继续推进任务：${task?.title || ""}`,
-        "",
-    ];
-    if (relatedWorkers.length) {
-        lines.push("同一子 Agent 续跑目标：");
-        relatedWorkers.forEach(worker => lines.push(`- ${worker}：continuationStrategy=same_worker_scratchpad，优先承接上一轮执行结果和结果说明继续处理。`));
-        lines.push("");
-    }
-    if (workerNotifications.length) {
-        lines.push("上一轮子 Agent 执行结果：");
-        workerNotifications.slice(0, 10).forEach((item) => {
-            lines.push(`- ${item.task_id || "未知子 Agent"}：执行状态 ${item.status || "unknown"} / 结果说明 ${item.receipt_status || "missing"}；${String(item.summary || item.result || "无摘要").slice(0, 500)}`);
-        });
-        lines.push("");
-    }
-    const blockers = [
-        ...(Array.isArray(summary.blockers) ? summary.blockers : []),
-        ...(Array.isArray(summary.needs) ? summary.needs : []),
-    ].filter(Boolean);
-    if (blockers.length) {
-        lines.push("需要处理的阻塞/待补充：");
-        blockers.slice(0, 10).forEach((item) => lines.push(`- ${String(item).slice(0, 500)}`));
-        lines.push("");
-    }
-    const coordinationGaps = [
-        coordinationPlanCount > 0 ? "" : "缺少主 Agent 协调计划证据：请先重新理解业务文档，输出可验收的协调计划，再派发 Worker。",
-        assignmentCount > 0 ? "" : "缺少主 Agent 派发证据：请生成 self-contained assignment，并明确派发给目标项目子 Agent。",
-        workerNotificationCount > 0 ? "" : "缺少子 Agent 执行结果：请让目标子 Agent 实际执行，并提交可验收的结构化结果说明。",
-    ].filter(Boolean);
-    if (coordinationGaps.length) {
-        lines.push("需要补齐的主 Agent 协作证据：");
-        coordinationGaps.forEach(item => lines.push(`- ${item}`));
-        lines.push("");
-    }
-    if (summary.agent_qa_required && summary.agent_qa_gate_passed !== true) {
-        lines.push("需要补齐的 Agent 协作问答证据：");
-        lines.push(`- 当前问答 ${Number(summary.agent_qa_count || 0)} 条、采纳 ${Number(summary.agent_qa_accepted_count || 0)} 条、回答后续跑 ${Number(summary.agent_qa_resumed_count || 0)} 条。`);
-        lines.push("- 让实际被阻塞的子 Agent 输出 ask_agent/request_review，目标 Agent 提供文件、合同或验证证据；主 Agent 采纳后必须自动恢复原任务会话。不得用普通 @消息冒充 Agent QA。");
-        lines.push("");
-    }
-    const ackRewriteRows = (0, protocol_gates_1.getTaskAckRewriteRows)(task);
-    if (ackRewriteRows.length) {
-        lines.push("需要先返工的 ACK 前置审核：");
-        ackRewriteRows.slice(0, 10).forEach((row) => {
-            lines.push(`- ${row.agent}：${row.reason || "ACK 不合格"}。请只重写接单 ACK，必须包含 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear。`);
-            if (row.unclear?.length)
-                lines.push(`  - 未澄清项：${row.unclear.join("；")}`);
-        });
-        lines.push("- ACK 未通过前不得宣布 daily_dev 完成；ACK 合格后再继续实现、验证或验收。");
-        lines.push("");
-    }
-    const contractInjection = (0, protocol_gates_1.getTaskContractInjectionRows)(task);
-    const contractGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [], Array.isArray(summary.receipts) ? summary.receipts : []);
-    if (contractGate.required && !contractGate.pass) {
-        lines.push("需要注入依赖 Agent 的 contractChanges：");
-        contractGate.missing.slice(0, 12).forEach((row) => {
-            const endpoint = row.endpoint || row.type || "contract";
-            const injection = (0, runtime_kernel_1.buildContractInjectionEvent)({
-                traceId: task?.trace_id || task?.traceId || "",
-                taskId: task?.id || "",
-                sourceAgent: row.source || row.source_agent || row.producer || "",
-                targetAgent: row.target || row.consumer || "",
-                contract: row,
-            });
-            lines.push(`- ${row.target}：续跑同一任务和同 Agent 会话，注入 ${endpoint}；injection_id=${injection.injection_id}。${row.summary || "结构化契约变化需要同步给消费者 Agent"}`);
-        });
-        contractGate.unconsumed.slice(0, 12).forEach((row) => {
-            const endpoint = row.endpoint || row.type || "contract";
-            lines.push(`- ${row.target}：已收到 ${endpoint} 注入但回执未完成消费；请复用原任务和同 Agent 会话续跑，回执 consumedInjectionIds 必须包含 ${row.injection_id}，contractConsumption 必须写 status=adapted/no_change/not_required 之一，并附适配/无需适配/验证证据。${row.consumption_reason ? `当前问题：${row.consumption_reason}` : ""}`);
-        });
-        lines.push("- 主 Agent 必须优先复用原任务、原 Trace、原 native session/scratchpad，通过同一任务卡继续派发，不要新建无关任务。");
-        lines.push("- 依赖 Agent 收到注入后必须说明是否需要适配代码、是否已完成适配和验证；回执里保留 contractChanges 消费结论，并引用对应 injection_id。");
-        lines.push("");
-    }
-    if (Array.isArray(summary.verification_required_missing) && summary.verification_required_missing.length) {
-        lines.push("需要补齐的项目验证命令证据：");
-        summary.verification_required_missing.slice(0, 10).forEach((item) => {
-            const required = Array.isArray(item?.required) ? item.required.join(" / ") : "项目配置验证命令";
-            lines.push(`- ${item?.agent || "未知 Agent"}：请实际运行并回执 ${required}`);
-        });
-        lines.push("");
-    }
-    if (Array.isArray(summary.verification_suggested) && summary.verification_suggested.length) {
-        lines.push("以下验证只是建议或未执行，需要改为实际执行结果：");
-        summary.verification_suggested.slice(0, 10).forEach((item) => lines.push(`- ${String(item).slice(0, 500)}`));
-        lines.push("");
-    }
-    if (Array.isArray(summary.verification_failed) && summary.verification_failed.length) {
-        lines.push("以下验证失败，需要修复后重新验证：");
-        summary.verification_failed.slice(0, 10).forEach((item) => lines.push(`- ${String(item).slice(0, 500)}`));
-        lines.push("");
-    }
-    if (summary.independent_review_required === true && summary.independent_review_gate_passed !== true) {
-        const independentGate = summary.independent_review_gate || {};
-        const failedEvidence = Array.isArray(independentGate.failed_evidence) ? independentGate.failed_evidence : [];
-        if (independentGate.status === "failed" || failedEvidence.length) {
-            lines.push("复杂变更复核未通过，需要原实现成员返工：");
-            lines.push(`- 触发原因：${independentGate.reason || "复杂代码变更复核未通过"}`);
-            failedEvidence.slice(0, 6).forEach((item) => {
-                const subject = item.reviewSubject || item.review_subject || item.requester || "";
-                const reviewer = item.reviewer || "TestAgent";
-                const summaryLine = (0, memory_1.compactMemoryText)(item.summary || (Array.isArray(item.evidence) ? item.evidence.join("；") : "") || "复核未通过", 420);
-                lines.push(`- ${subject ? `${subject}：` : ""}${reviewer} 复核未通过；${summaryLine}`);
-            });
-            lines.push("- 让原实现成员复用同一任务和同一子 Agent 上下文修复失败点；修复后重新提交结果说明，并重新运行 TestAgent/独立复核。");
-            lines.push("- 主 Agent 不能把失败复核当作已完成；只有修复后复核通过，才能进入最终总结。");
-        }
-        else {
-            lines.push("需要补齐的复杂变更独立复核：");
-            lines.push(`- 触发原因：${independentGate.reason || "复杂代码变更需要另一个 Agent 复核"}`);
-            const highRiskFiles = Array.isArray(independentGate.high_risk_files) ? independentGate.high_risk_files : [];
-            highRiskFiles.slice(0, 8).forEach((item) => {
-                lines.push(`- 高风险文件：${[item.project, item.path].filter(Boolean).join(": ")}`);
-            });
-            lines.push("- 让非原实现者的 Agent 使用 request_review 做只读复核，检查目标覆盖、关键风险和验证证据；主 Agent 采纳回答后必须回到原任务继续收敛。");
-            lines.push("- 或让第三方写代码 Agent 在 CCM_AGENT_RECEIPT.independentReview / codeReview 中返回 reviewer、verdict=passed、summary 和 evidence。");
-        }
-        lines.push("");
-    }
-    if (summary.post_review_spot_check_required === true && summary.post_review_spot_check_gate_passed !== true) {
-        const spotCheckGate = summary.post_review_spot_check_gate || {};
-        const spotCheckSummary = summary.post_review_spot_check_summary || spotCheckGate.summary || {};
-        lines.push("TestAgent 通过后的完成前抽查尚未通过：");
-        lines.push(`- ${spotCheckSummary.headline || spotCheckGate.reason || "主 Agent 还没有完成关键验证抽查。"}`);
-        lines.push("- 优先沿用原 TestAgent 工作单重新复验，并根据最新真实输出重新判断。");
-        lines.push("- 抽查与 TestAgent 结论一致前，不能进入最终完成总结。");
-        lines.push("");
-    }
-    const receipts = [
-        ...(Array.isArray(summary.receipts) ? summary.receipts : []),
-        ...(Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : []),
-    ].filter((item) => item && item.status && item.status !== "done");
-    if (receipts.length) {
-        lines.push("需要跟进的子 Agent 结果说明：");
-        receipts.slice(0, 8).forEach((item) => {
-            lines.push(`- ${item.agent || "未知 Agent"}：${item.status || "unknown"}；${String(item.summary || item.message || "无摘要").slice(0, 500)}`);
-            const needs = [
-                ...(Array.isArray(item.blockers) ? item.blockers : []),
-                ...(Array.isArray(item.needs) ? item.needs : []),
-            ].filter(Boolean);
-            needs.slice(0, 5).forEach((need) => lines.push(`  - ${String(need).slice(0, 500)}`));
-        });
-        lines.push("");
-    }
-    if (task?.review?.content || task?.review?.summary) {
-        lines.push("主 Agent 复盘提示：");
-        lines.push(String(task.review.content || task.review.summary).slice(0, 1200));
-        lines.push("");
-    }
-    lines.push("继续执行要求：");
-    lines.push("- 主 Agent 先判断这些阻塞是否已被本次补充消解。");
-    lines.push("- 如可继续，优先派发给相关子 Agent 返工，并保持同一子 Agent 上下文续跑；不要重新派给无关 Agent。");
-    lines.push("- 子 Agent 返工工作单必须写清上一轮执行结果/结果说明缺口、补齐动作、实际文件变更和验证命令。");
-    lines.push("- 完成后仍需主 Agent 协调计划、派发证据、子 Agent 执行结果、结构化结果说明、主 Agent 复盘、实际变更证据和已执行验证记录。");
-    return lines.filter((line, index, arr) => line || arr[index - 1]).join("\n").trim();
+    return require("./collaboration-acceptance").buildTaskGapContinuationDraft(task);
 }
 function buildTargetedReworkContinuationDraft(task, payload = {}) {
     const base = buildTaskGapContinuationDraft(task);
@@ -29137,113 +19660,26 @@ function buildTargetedReworkContinuationDraft(task, payload = {}) {
     ].filter(Boolean).join("\n");
 }
 function getTaskGapItems(task) {
-    const summary = task?.delivery_summary || {};
-    const items = [];
-    if (summary.acceptance_gate_passed === true && !hasStrongTaskAcceptanceEvidence(task, [], summary))
-        items.push("acceptance_evidence");
-    if (Number(summary.coordination_plan_count || 0) <= 0)
-        items.push("coordination_plan");
-    if (Number(summary.assignment_count || 0) <= 0)
-        items.push("assignment_evidence");
-    if (Number(summary.worker_notification_count || 0) <= 0)
-        items.push("worker_notification");
-    for (const value of Array.isArray(summary.blockers) ? summary.blockers : [])
-        items.push(`blocker:${(0, memory_1.compactMemoryText)(value, 240)}`);
-    const blockingNeeds = Array.isArray(summary.blocking_needs)
-        ? summary.blocking_needs
-        : Array.isArray(summary.needs)
-            ? summary.needs
-            : [];
-    for (const value of blockingNeeds)
-        items.push(`need:${(0, memory_1.compactMemoryText)(value, 240)}`);
-    for (const value of Array.isArray(summary.verification_failed) ? summary.verification_failed : [])
-        items.push(`verification_failed:${(0, memory_1.compactMemoryText)(value, 240)}`);
-    for (const value of Array.isArray(summary.verification_suggested) ? summary.verification_suggested : [])
-        items.push(`verification_unexecuted:${(0, memory_1.compactMemoryText)(value, 240)}`);
-    for (const value of Array.isArray(summary.verification_required_missing) ? summary.verification_required_missing : []) {
-        const required = (Array.isArray(value?.required) ? value.required : []).map((item) => (0, memory_1.compactMemoryText)(item, 160)).sort().join("|");
-        items.push(`verification_required:${(0, memory_1.compactMemoryText)(value?.agent || "agent", 80)}:${required}`);
-    }
-    const receipts = [
-        ...(Array.isArray(summary.receipts) ? summary.receipts : []),
-        ...(Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : []),
-    ];
-    for (const receipt of receipts) {
-        const status = String(receipt?.status || "").trim();
-        if (status && status !== "done")
-            items.push(`receipt:${(0, memory_1.compactMemoryText)(receipt?.agent || "agent", 80)}:${status}`);
-    }
-    for (const row of (0, protocol_gates_1.getTaskAckRewriteRows)(task)) {
-        items.push(`ack_rewrite:${(0, memory_1.compactMemoryText)(row.agent, 80)}:${row.status}:${(0, memory_1.compactMemoryText)(row.reason, 180)}`);
-    }
-    const contractInjection = (0, protocol_gates_1.getTaskContractInjectionRows)(task);
-    const contractGate = (0, protocol_gates_1.evaluateContractInjectionGate)(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [], Array.isArray(summary.receipts) ? summary.receipts : []);
-    for (const row of contractGate.missing || []) {
-        items.push(`contract_inject:${(0, memory_1.compactMemoryText)(row.target, 80)}:${(0, memory_1.compactMemoryText)(row.endpoint || row.type || "contract", 180)}`);
-    }
-    for (const row of contractGate.unconsumed || []) {
-        items.push(`contract_consume:${(0, memory_1.compactMemoryText)(row.target, 80)}:${(0, memory_1.compactMemoryText)(row.injection_id || row.endpoint || row.type || "contract", 180)}`);
-    }
-    const latestWorkerNotifications = new Map();
-    for (const notification of Array.isArray(summary.worker_notifications) ? summary.worker_notifications : []) {
-        const worker = (0, memory_1.compactMemoryText)(notification?.task_id || notification?.agent || "worker", 80);
-        latestWorkerNotifications.set(worker.toLowerCase(), notification);
-    }
-    for (const notification of latestWorkerNotifications.values()) {
-        const status = String(notification?.status || "").trim();
-        const receiptStatus = String(notification?.receipt_status || "").trim();
-        if (["failed", "blocked", "partial", "missing_receipt", "needs_info"].includes(status) || (receiptStatus && receiptStatus !== "done")) {
-            items.push(`notification:${(0, memory_1.compactMemoryText)(notification?.task_id || notification?.agent || "worker", 80)}:${status}:${receiptStatus}`);
-        }
-    }
-    if (summary.agent_qa_required === true && summary.agent_qa_gate_passed !== true)
-        items.push("agent_qa_evidence");
-    if (summary.independent_review_required === true && summary.independent_review_gate_passed !== true)
-        items.push(`independent_review:${(0, memory_1.compactMemoryText)(summary.independent_review_gate?.reason || "required", 220)}`);
-    return uniqueStrings(items.filter(Boolean)).sort();
+    return require("./collaboration-acceptance").getTaskGapItems(task);
 }
 function getTaskGapFingerprint(task) {
-    const items = getTaskGapItems(task);
-    if (!items.length)
-        return "";
-    return crypto.createHash("sha256").update(JSON.stringify(items)).digest("hex").slice(0, 24);
+    return require("./collaboration-acceptance").getTaskGapFingerprint(task);
 }
 function isAutomaticGapContinuationSource(source) {
     return /(gap_rework|autopilot_gap|watchdog_gap|automatic_gap)/i.test(String(source || ""));
 }
 function canAutoContinueTaskGaps(task) {
-    if (!hasDailyDevContinuationGaps(task))
-        return false;
-    const fingerprint = getTaskGapFingerprint(task);
-    const previous = task?.collaboration_state?.gap || {};
-    return !(fingerprint && previous.fingerprint === fingerprint && Number(previous.auto_attempts || 0) >= 1);
+    return require("./collaboration-acceptance").canAutoContinueTaskGaps(task);
 }
 function reconcileTaskCollaborationState(task, previous = {}) {
-    const now = new Date().toISOString();
-    if (task?.status === "done" && hasStrongTaskAcceptanceEvidence(task, [], task?.delivery_summary || {}))
-        return { ...previous, phase: "completed", needs_user: false, completed_at: task.completed_at || now, updated_at: now };
-    if (task?.status === "cancelled")
-        return { ...previous, phase: "cancelled", needs_user: false, updated_at: now };
-    const items = getTaskGapItems(task);
-    const fingerprint = items.length ? getTaskGapFingerprint(task) : "";
-    const oldGap = previous?.gap || {};
-    const sameGap = !!fingerprint && oldGap.fingerprint === fingerprint;
-    const attempts = sameGap ? Number(oldGap.auto_attempts || 0) : 0;
-    const exhausted = items.length > 0 && attempts >= 1;
-    return {
-        ...previous,
-        phase: exhausted ? "needs_user" : items.length ? "reviewing" : task?.status === "in_progress" ? "executing" : "planning",
-        needs_user: exhausted,
-        gap: items.length ? { ...oldGap, fingerprint, items, auto_attempts: attempts, updated_at: now } : null,
-        updated_at: now,
-    };
+    return require("./collaboration-task-service").reconcileTaskCollaborationState(task, previous);
 }
 function hasDailyDevContinuationGaps(task) {
     if (!task || task.workflow_type !== "daily_dev")
         return false;
     if (task.status === "done" && hasStrongTaskAcceptanceEvidence(task, [], task?.delivery_summary || {}))
         return false;
-    if (isTaskPaused(task) || runningTaskIds.has(task.id) || isTaskQueuedInMemory(task.id))
+    if (isTaskPaused(task) || exports.runningTaskIds.has(task.id) || isTaskQueuedInMemory(task.id))
         return false;
     const summary = task.delivery_summary || {};
     const hasSummaryGaps = [
@@ -29299,7 +19735,7 @@ function taskNeedsUserIntervention(task) {
 function getTaskExecutionPhase(task) {
     if (task?.status === "done")
         return hasStrongTaskAcceptanceEvidence(task, [], task?.delivery_summary || {}) ? "done" : "reviewing";
-    if (runningTaskIds.has(task?.id) || task?.status === "in_progress")
+    if (exports.runningTaskIds.has(task?.id) || task?.status === "in_progress")
         return "running";
     if (taskNeedsUserIntervention(task))
         return "blocked";
@@ -29462,44 +19898,7 @@ function buildExecutionDashboard(limit = 12) {
     };
 }
 function continueDailyDevTasksFromGaps(ctx, options = {}) {
-    const groupId = String(options.group_id || options.groupId || "").trim();
-    const limit = Math.max(1, Math.min(50, Number(options.limit || 5)));
-    const maxPerTask = Math.max(1, Math.min(20, Number(options.max_per_task || options.maxPerTask || 3)));
-    const candidates = (0, db_1.loadTasks)()
-        .filter(task => hasDailyDevContinuationGaps(task))
-        .filter(task => canAutoContinueTaskGaps(task))
-        .filter(task => !groupId || task.group_id === groupId)
-        .filter(task => Number(task.auto_gap_continue_count || 0) < maxPerTask)
-        .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))
-        .slice(0, limit);
-    const results = candidates.map((task) => {
-        const message = buildTaskGapContinuationDraft(task);
-        const result = continueTaskWithMessage(task.id, message, ctx, {
-            source: options.source || "autopilot_gap_rework",
-            auto_execute: options.auto_execute,
-            autoExecute: options.autoExecute,
-            status_detail: "自动驾驶已按交付缺口生成返工说明，等待主 Agent 继续执行",
-        });
-        return {
-            task_id: task.id,
-            title: task.title,
-            group_id: task.group_id,
-            ...result,
-            task: undefined,
-            continuation_message: message,
-        };
-    });
-    return {
-        success: true,
-        total_candidates: candidates.length,
-        continued: results.filter((item) => item.success).length,
-        queued: results.filter((item) => item.queued).length,
-        blocked: results.filter((item) => item.queue_result?.blocked).length,
-        failed: results.filter((item) => !item.success).length,
-        limit,
-        max_per_task: maxPerTask,
-        results,
-    };
+    return require("./collaboration-task-service").continueDailyDevTasksFromGaps(ctx, options);
 }
 function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     if (!taskId)
@@ -29516,7 +19915,7 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     if (continuationKind === "new_task") {
         return { success: false, status: 409, new_task_suggested: true, error: "这条要求看起来是一个独立新任务，请直接在群聊发送，不会混入当前任务。" };
     }
-    const currentlyRunning = runningTaskIds.has(taskId);
+    const currentlyRunning = exports.runningTaskIds.has(taskId);
     const source = String(options.source || "user");
     const automaticGapContinuation = isAutomaticGapContinuationSource(source);
     const internalContinuation = options.internal === true || options.internalContinuation === true || /dependency_unlocked_next_work_item/i.test(source);
@@ -29766,57 +20165,10 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     };
 }
 function retryTask(id, ctx, reason = "", autoExecute = true) {
-    if (runningTaskIds.has(id)) {
-        return { success: false, status: 409, error: "任务正在执行中，请等待本轮结束后再重试" };
-    }
-    const current = (0, db_1.loadTasks)().find(t => t.id === id);
-    if (!current)
-        return { success: false, status: 404, error: "任务不存在" };
-    if (current.status === "done")
-        return { success: false, status: 409, error: "已完成任务不能重试" };
-    const retryCount = Number(current.retry_count || 0) + 1;
-    (0, execution_kernel_1.clearTaskCancellation)(id);
-    const retryReason = compactFormText(reason, "用户重新入队");
-    const previousDelivery = (current.delivery_summary || current.receipt || current.review || current.final_report || current.result)
-        ? {
-            retry: retryCount,
-            archived_at: new Date().toISOString(),
-            reason: retryReason,
-            status: current.status,
-            status_detail: current.status_detail || "",
-            receipt: current.receipt || null,
-            review: current.review || null,
-            file_changes: current.file_changes || null,
-            delivery_summary: current.delivery_summary || null,
-            final_report: current.final_report || "",
-            result: current.result || "",
-        }
-        : null;
-    const task = updateTask(id, {
-        status: "pending",
-        is_paused: false,
-        paused: false,
-        queued_at: null,
-        started_at: null,
-        result: "",
-        final_report: "",
-        status_detail: `第 ${retryCount} 次重试，等待主 Agent 重新执行`,
-        // 当前证据在新一轮产出前仍是唯一可追溯事实；同时冻结到历史，禁止重试把证据链抹掉。
-        delivery_history: previousDelivery
-            ? [...(Array.isArray(current.delivery_history) ? current.delivery_history : []), previousDelivery].slice(-20)
-            : (Array.isArray(current.delivery_history) ? current.delivery_history : []),
-        retry_count: retryCount,
-        last_retry_at: new Date().toISOString(),
-        last_retry_reason: retryReason,
-    });
-    if (task)
-        updateGroupTaskInlineStatus(task, "pending", `第 ${retryCount} 次重试，等待主 Agent 重新执行`);
-    (0, logs_1.addTaskLog)(id, "info", `任务重新入队重试：${retryReason}`);
-    const queueResult = autoExecute ? enqueueTask(id, ctx) : null;
-    return { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: getQueueStatus() };
+    return require("./collaboration-task-service").retryTask(id, ctx, reason, autoExecute);
 }
 function switchTaskExecutor(id, requestedRuntime, ctx, options = {}) {
-    if (runningTaskIds.has(id))
+    if (exports.runningTaskIds.has(id))
         return { success: false, status: 409, error: "任务正在执行中，请先暂停或等待本轮结束后再切换执行器" };
     const current = (0, db_1.loadTasks)().find((task) => task.id === id);
     if (!current)
@@ -29922,7 +20274,7 @@ function archiveTask(id, reason = "用户删除任务") {
     if (current.archived || current.deleted_at)
         return current;
     removeTaskFromQueues(id);
-    const running = runningTaskIds.has(id);
+    const running = exports.runningTaskIds.has(id);
     let cancellation = null;
     if (!['done', 'cancelled'].includes(String(current.status || ''))) {
         try {
@@ -30007,32 +20359,7 @@ function restoreArchivedTask(id) {
     return tasks[index];
 }
 function purgeArchivedTask(id) {
-    const tasks = (0, db_1.loadTasks)();
-    const current = tasks.find(task => task.id === id);
-    if (!current)
-        return null;
-    if (!current.archived && !current.deleted_at)
-        throw new Error("任务必须先删除归档，才能永久清除");
-    removeTaskFromQueues(id);
-    (0, execution_kernel_1.requestTaskCancellation)(id, "永久清除归档任务", "task-governance");
-    (0, agent_sessions_1.closeTaskAgentSessions)({ taskId: id }, "永久清除归档任务");
-    (0, reliability_ledger_1.releaseTaskLease)(id, "purged");
-    for (const execution of (0, execution_kernel_1.listExecutions)({ taskId: id })) {
-        if (execution.workspace?.mode === "worktree" && !execution.workspace?.cleanedAt) {
-            try {
-                (0, execution_kernel_1.cleanupExecutionWorktree)(execution.id, true);
-            }
-            catch { }
-        }
-    }
-    const purgedSessions = (0, agent_sessions_1.purgeTaskAgentSessions)(id);
-    const purgedExecutionArtifacts = (0, execution_kernel_1.purgeTaskExecutionArtifacts)(id);
-    const purgedTestAgentArtifacts = (0, artifact_retention_1.purgeTestAgentArtifactsForTask)(id);
-    const purgedTestAgentRuns = (0, test_agent_runner_1.purgeTestAgentRunnerRecordsForTask)(id);
-    const purgedReplayJournal = (0, task_replay_journal_1.purgeTaskReplayJournalForTask)(id);
-    (0, execution_kernel_1.clearTaskCancellation)(id);
-    (0, db_1.saveTasks)(tasks.filter(task => task.id !== id));
-    return { ...current, purge_cleanup: { sessions: purgedSessions.length, test_agent_artifacts: purgedTestAgentArtifacts, test_agent_runs: purgedTestAgentRuns, replay_journal: purgedReplayJournal, ...purgedExecutionArtifacts } };
+    return require("./collaboration-task-service").purgeArchivedTask(id);
 }
 (0, daily_dev_backlog_1.configureDailyDevBacklogRuntime)({
     validateDailyDevGroupReady,
@@ -30049,1836 +20376,6 @@ function purgeArchivedTask(id) {
     hasDailyDevContinuationGaps,
 });
 function handleCollaborationApi(pathname, req, res, parsed, ctx) {
-    (0, group_session_memory_model_extraction_1.configureGroupSessionMemoryModelExecutor)(async (request) => {
-        const group = (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === String(request.groupId || ""));
-        if (!group)
-            throw new Error("session_memory_model_group_not_found");
-        const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
-        const candidates = [coordinator, ...(0, group_orchestrator_1.getRoutableMembers)(group)].filter(Boolean);
-        const configs = (0, db_1.getConfigs)();
-        let selected = null;
-        let config = null;
-        for (const candidate of candidates) {
-            const match = configs.find((item) => item.name === candidate.project);
-            if (match) {
-                selected = candidate;
-                config = match;
-                break;
-            }
-        }
-        if (!selected || !config)
-            throw new Error("session_memory_model_executor_not_configured");
-        const info = (0, db_1.getConfigInfo)(config.path);
-        const agentType = String(info[0]?.agent || selected.agent || "claudecode");
-        const sandbox = path.join(utils_1.CCM_DIR, "session-memory-extractor-sandbox", String(request.scopeId || "session").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 180));
-        fs.mkdirSync(sandbox, { recursive: true });
-        let executionMetadata = {};
-        const output = await ctx.callAgent(selected.project, request.prompt, sandbox, agentType, 120_000, {
-            tab: "groups",
-            groupId: request.groupId,
-            group_session_id: request.groupSessionId,
-            taskId: request.executionId,
-            executionId: request.executionId,
-            title: "Session Memory background extraction",
-            background: true,
-            skipIndependentVerification: true,
-            allowedTools: [],
-            maxOutputBytes: 1024 * 1024,
-            maxContextOutputBytes: 512 * 1024,
-            onDone: (metadata) => { executionMetadata = metadata || {}; },
-        });
-        if (/^\[[^\]]+\]\s+Agent(?:\s+Runner)?\s+(?:错误|响应超时)/i.test(String(output || "").trim())) {
-            throw new Error(`session_memory_model_executor_failed:${String(output || "").slice(0, 300)}`);
-        }
-        if (executionMetadata?.fileChanges?.count > 0) {
-            throw new Error("session_memory_model_executor_modified_sandbox");
-        }
-        return {
-            output,
-            project: selected.project,
-            agentType,
-            nativeSessionId: String(executionMetadata.nativeSessionId || ""),
-            model: String(executionMetadata.nativeModelCapabilityReceipt?.model || executionMetadata.nativeModelCapabilityRecord?.entry?.model || ""),
-        };
-    });
-    (0, group_memory_index_1.configureGroupTypedMemoryManifestSelector)(async (request) => {
-        const group = (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === String(request.groupId || ""));
-        if (!group)
-            throw new Error("typed_memory_manifest_selector_group_not_found");
-        const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
-        const candidates = [coordinator, ...(0, group_orchestrator_1.getRoutableMembers)(group)].filter(Boolean);
-        const configs = (0, db_1.getConfigs)();
-        let selected = null;
-        let config = null;
-        for (const candidate of candidates) {
-            const match = configs.find((item) => item.name === candidate.project);
-            if (!match)
-                continue;
-            selected = candidate;
-            config = match;
-            break;
-        }
-        if (!selected || !config)
-            throw new Error("typed_memory_manifest_selector_executor_not_configured");
-        const info = (0, db_1.getConfigInfo)(config.path);
-        const agentType = String(info[0]?.agent || selected.agent || "claudecode");
-        const sandbox = path.join(utils_1.CCM_DIR, "memory-manifest-selector-sandbox", String(request.scopeId || "session").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 180));
-        fs.mkdirSync(sandbox, { recursive: true });
-        let executionMetadata = {};
-        const prompt = [
-            String(request.systemPrompt || ""),
-            "",
-            String(request.userPrompt || ""),
-            "",
-            "Return only one JSON object matching this schema: {\"selected_memories\":[\"filename.md\"]}. Do not use tools, inspect files, or modify the workspace.",
-        ].join("\n");
-        const output = await ctx.callAgent(selected.project, prompt, sandbox, agentType, 120_000, {
-            tab: "groups",
-            groupId: request.groupId,
-            group_session_id: request.groupSessionId,
-            taskId: request.requestId,
-            executionId: request.requestId,
-            title: "Typed Memory manifest selection",
-            background: true,
-            skipIndependentVerification: true,
-            allowedTools: [],
-            maxOutputBytes: 64 * 1024,
-            maxContextOutputBytes: 64 * 1024,
-            onDone: (metadata) => { executionMetadata = metadata || {}; },
-        });
-        if (/^\[[^\]]+\]\s+Agent(?:\s+Runner)?\s+(?:错误|响应超时)/i.test(String(output || "").trim())) {
-            throw new Error(`typed_memory_manifest_selector_failed:${String(output || "").slice(0, 300)}`);
-        }
-        if (executionMetadata?.fileChanges?.count > 0)
-            throw new Error("typed_memory_manifest_selector_modified_sandbox");
-        return {
-            output,
-            project: selected.project,
-            agentType,
-            nativeSessionId: String(executionMetadata.nativeSessionId || ""),
-            model: String(executionMetadata.nativeModelCapabilityReceipt?.model || executionMetadata.nativeModelCapabilityRecord?.entry?.model || ""),
-        };
-    });
-    if (pathname === "/api/tasks/replay/artifact" && req.method === "GET") {
-        const taskId = String(parsed.query.task_id || parsed.query.taskId || "").trim();
-        const runId = String(parsed.query.run_id || parsed.query.runId || "").trim();
-        const artifactId = String(parsed.query.artifact_id || parsed.query.artifactId || "").trim();
-        if (!taskId || !runId || !artifactId) {
-            (0, utils_1.sendJson)(res, { error: "缺少任务、运行或证据 ID" }, 400);
-            return true;
-        }
-        const artifact = (0, task_replay_1.resolveTaskReplayArtifact)({ taskId, runId, artifactId });
-        if (!artifact) {
-            (0, utils_1.sendJson)(res, { error: "证据不存在、已过期或不属于该任务" }, 404);
-            return true;
-        }
-        try {
-            const stat = fs.statSync(artifact.file_path);
-            const disposition = artifact.preview_kind === "download" ? "attachment" : "inline";
-            const fileName = path.basename(artifact.file_name).replace(/[\r\n"\\]/g, "_");
-            res.writeHead(200, {
-                "Content-Type": artifact.mime_type,
-                "Content-Length": stat.size,
-                "Content-Disposition": `${disposition}; filename="${fileName}"`,
-                "Cache-Control": "private, no-store",
-                "X-Content-Type-Options": "nosniff",
-            });
-            const stream = fs.createReadStream(artifact.file_path);
-            stream.on("error", () => { if (!res.writableEnded)
-                res.end(); });
-            stream.pipe(res);
-        }
-        catch {
-            if (!res.headersSent)
-                (0, utils_1.sendJson)(res, { error: "证据暂时无法读取" }, 500);
-            else if (!res.writableEnded)
-                res.end();
-        }
-        return true;
-    }
-    if (pathname === "/api/tasks/replay" && req.method === "GET") {
-        const taskId = String(parsed.query.id || parsed.query.task_id || parsed.query.taskId || "").trim();
-        if (!taskId) {
-            const limit = Math.max(1, Math.min(100, Number(parsed.query.limit || 40)));
-            (0, utils_1.sendJson)(res, { success: true, index: (0, task_replay_1.buildTaskReplayIndex)(limit) });
-            return true;
-        }
-        const replay = (0, task_replay_1.buildCompleteTaskReplay)(taskId);
-        if (!replay) {
-            (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-            return true;
-        }
-        (0, utils_1.sendJson)(res, { success: true, replay });
-        return true;
-    }
-    if (pathname === "/api/tasks/replay/self-test" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, self_test: (0, task_replay_1.runTaskReplayContractSelfTest)() });
-        return true;
-    }
-    if (pathname === "/api/tasks/entity-chain" && req.method === "GET") {
-        const taskId = String(parsed.query.id || parsed.query.task_id || parsed.query.taskId || "");
-        if (!taskId) {
-            (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
-            return true;
-        }
-        const chain = buildTaskEntityChain(taskId);
-        if (!chain) {
-            (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-            return true;
-        }
-        (0, utils_1.sendJson)(res, { success: true, chain });
-        return true;
-    }
-    if (pathname === "/api/tasks/execution-dashboard" && req.method === "GET") {
-        const limit = Math.max(1, Math.min(50, Number(parsed.query.limit || 12)));
-        (0, utils_1.sendJson)(res, buildExecutionDashboard(limit));
-        return true;
-    }
-    if (pathname === "/api/tasks/executions" && req.method === "GET") {
-        const executionId = String(parsed.query.execution_id || parsed.query.executionId || "");
-        const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
-        (0, utils_1.sendJson)(res, { success: true, execution: executionId ? (0, execution_kernel_1.loadExecution)(executionId) : null, executions: executionId ? [] : (0, execution_kernel_1.listExecutions)(taskId ? { taskId } : {}) });
-        return true;
-    }
-    if (pathname === "/api/tasks/native-sessions" && req.method === "GET") {
-        const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
-        if (!taskId) {
-            (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
-            return true;
-        }
-        const sessions = (0, agent_sessions_1.listTaskAgentSessions)({ taskId }).map(session => ({ ...session, continuity: (0, agent_sessions_1.getTaskAgentSessionContinuity)(session) }));
-        (0, utils_1.sendJson)(res, { success: true, task_id: taskId, sessions });
-        return true;
-    }
-    if (pathname === "/api/orchestrator/resilience" && req.method === "GET") {
-        const runtimes = (0, runtime_1.getPublicAgentRuntimes)().map(runtime => ({ id: runtime.id, label: runtime.label, available: (0, collaboration_resilience_1.isRuntimeCommandAvailable)(runtime.id), sessionResume: runtime.capabilities.sessionResume }));
-        (0, utils_1.sendJson)(res, { success: true, self_test: (0, collaboration_resilience_1.runCollaborationResilienceSelfTest)(), runtimes });
-        return true;
-    }
-    if (pathname === "/api/reliability/traces" && req.method === "GET") {
-        const traceId = String(parsed.query.id || parsed.query.trace_id || "").trim();
-        const taskId = String(parsed.query.task_id || "").trim();
-        if (traceId) {
-            const trace = (0, reliability_ledger_1.getTrace)(traceId);
-            if (!trace)
-                return (0, utils_1.sendJson)(res, { success: false, error: "Trace 不存在" }, 404);
-            (0, utils_1.sendJson)(res, { success: true, trace });
-            return true;
-        }
-        const traces = (0, reliability_ledger_1.listTraces)(Number(parsed.query.limit || 50)).filter((trace) => !taskId || trace.task_id === taskId || trace.events?.some((event) => event.task_id === taskId));
-        (0, utils_1.sendJson)(res, { success: true, traces });
-        return true;
-    }
-    if (pathname === "/api/reliability/self-test" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, result: (0, reliability_ledger_1.runReliabilityLedgerSelfTest)() });
-        return true;
-    }
-    if (pathname === "/api/reliability/drills/run" && req.method === "POST") {
-        try {
-            const outcome = (0, reliability_drills_1.runScheduledProductionReliabilityDrill)({ force: true });
-            const result = outcome.result;
-            (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
-        }
-        catch (error) {
-            (0, utils_1.sendJson)(res, { success: false, error: error.message || String(error) }, 500);
-        }
-        return true;
-    }
-    if (pathname === "/api/reliability/drills/status" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, status: (0, reliability_drills_1.getReliabilityDrillStatus)() });
-        return true;
-    }
-    if (pathname === "/api/reliability/soak/status" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, state: (0, soak_test_1.getSoakTestStatus)(), report: (0, soak_test_1.getSoakReport)() });
-        return true;
-    }
-    if (pathname === "/api/reliability/process-lifecycle" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, ...(0, process_lifecycle_1.getProcessLifecycleSnapshot)({ limit: Number(parsed.query?.limit || 5000), event_limit: Number(parsed.query?.event_limit || 100) }) });
-        return true;
-    }
-    if (pathname === "/api/reliability/process-lifecycle/self-test" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, self_test: (0, process_lifecycle_1.runProcessLifecycleSelfTest)() });
-        return true;
-    }
-    if (pathname === "/api/reliability/debt" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, debt: (0, soak_test_1.inspectReliabilityDebt)() });
-        return true;
-    }
-    if (pathname === "/api/reliability/debt/reconcile" && req.method === "POST") {
-        let body = "";
-        req.on("data", chunk => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const result = (0, soak_test_1.reconcileStabilityDebt)(payload.reason || "用户启动生产级稳定性验收前清理历史债务");
-                (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 409);
-            }
-            catch (error) {
-                (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/reliability/restart-intent" && req.method === "POST") {
-        let body = "";
-        req.on("data", chunk => body += chunk);
-        req.on("end", () => {
-            try {
-                (0, utils_1.sendJson)(res, { success: true, intent: (0, process_lifecycle_1.registerRestartIntent)(body ? JSON.parse(body) : {}) });
-            }
-            catch (error) {
-                (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/reliability/soak/self-test" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, result: (0, soak_test_1.runSoakTestSelfTest)() });
-        return true;
-    }
-    if (["/api/reliability/soak/start", "/api/reliability/soak/stop", "/api/reliability/soak/sample"].includes(pathname) && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                if (pathname.endsWith("/start"))
-                    (0, utils_1.sendJson)(res, { success: true, ...(await (0, soak_test_1.startSoakTest)(payload)) });
-                else if (pathname.endsWith("/stop"))
-                    (0, utils_1.sendJson)(res, { success: true, state: (0, soak_test_1.stopSoakTest)(payload.reason || "用户停止浸泡测试") });
-                else
-                    (0, utils_1.sendJson)(res, { success: true, state: await (0, soak_test_1.sampleSoakTestNow)() });
-            }
-            catch (error) {
-                (0, utils_1.sendJson)(res, { success: false, error: error.message || String(error) }, 500);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/execution-kernel/self-test" && req.method === "GET") {
-        try {
-            (0, utils_1.sendJson)(res, { success: true, ...(0, execution_kernel_1.runExecutionKernelSelfTest)() });
-        }
-        catch (e) {
-            (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);
-        }
-        return true;
-    }
-    if (pathname === "/api/tasks/rollback" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const taskId = String(payload.task_id || payload.taskId || payload.id || "");
-                if (!taskId)
-                    return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
-                const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
-                if (!task)
-                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-                if (runningTaskIds.has(taskId))
-                    return (0, utils_1.sendJson)(res, { error: "任务仍在执行，请先停止后再撤销" }, 409);
-                const checkpointIds = uniqueStrings((0, execution_kernel_1.listExecutions)({ taskId }).flatMap((item) => item.checkpointIds || [])).reverse();
-                if (!checkpointIds.length)
-                    return (0, utils_1.sendJson)(res, { error: "该任务没有可用的安全检查点" }, 409);
-                const reason = compactFormText(payload.reason, "用户安全撤销任务改动");
-                const rollbacks = checkpointIds.map((checkpointId) => (0, execution_kernel_1.rollbackExecutionCheckpoint)(checkpointId, reason, { allowShared: true }));
-                const now = new Date().toISOString();
-                const summary = { ...(task.delivery_summary || {}), headline: "最近一轮改动已安全撤销", acceptance_gate_passed: false, reverted: true, reverted_at: now };
-                const updated = updateTask(taskId, { status: "cancelled", auto_execute: false, rolled_back_at: now, rollback_reason: reason, rollback_results: rollbacks, status_detail: "已安全撤销到任务开始前", delivery_summary: summary });
-                (0, agent_sessions_1.closeTaskAgentSessions)({ taskId }, "用户安全撤销任务改动");
-                updateGroupTaskInlineStatus(updated || task, "cancelled", "已安全撤销到任务开始前");
-                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "task_rollback", title: "安全撤销完成", detail: `已恢复 ${rollbacks.length} 个检查点`, status: "ok", phase: "cancelled", data: { checkpoint_ids: checkpointIds } });
-                (0, logs_1.addTaskLog)(taskId, "warning", `安全撤销完成：恢复 ${rollbacks.length} 个检查点`);
-                (0, utils_1.sendJson)(res, { success: true, task: updated, rollbacks });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 409);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/cancel" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const taskId = String(payload.task_id || payload.taskId || payload.id || "");
-                if (!taskId)
-                    return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
-                const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
-                if (!task)
-                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-                if (task.status === "done")
-                    return (0, utils_1.sendJson)(res, { error: "已完成任务不能取消" }, 409);
-                for (const queue of taskQueues.values()) {
-                    let index = queue.indexOf(taskId);
-                    while (index >= 0) {
-                        queue.splice(index, 1);
-                        index = queue.indexOf(taskId);
-                    }
-                }
-                const reason = compactFormText(payload.reason, "用户主动停止任务");
-                const cancellation = (0, execution_kernel_1.requestTaskCancellation)(taskId, reason, String(payload.actor || "local-user"));
-                const testAgentRunsCancelled = (0, test_agent_runner_1.cancelTestAgentRunsForTask)(taskId, reason);
-                const isRunning = runningTaskIds.has(taskId);
-                const sessions = (0, agent_sessions_1.closeTaskAgentSessions)({ taskId }, "用户取消任务，关闭任务级原生会话");
-                const idempotencySettled = task.trace_id ? (0, reliability_ledger_1.settleIdempotencyByTrace)(task.trace_id, "failed", { cancelled: true, task_id: taskId, reason }) : [];
-                const worktrees = [];
-                for (const execution of (0, execution_kernel_1.listExecutions)({ taskId })) {
-                    if (execution.workspace?.mode !== "worktree" || execution.workspace?.cleanedAt)
-                        continue;
-                    try {
-                        worktrees.push({ execution_id: execution.id, ...(0, execution_kernel_1.cleanupExecutionWorktree)(execution.id, true) });
-                    }
-                    catch (error) {
-                        worktrees.push({ execution_id: execution.id, success: false, error: error.message });
-                    }
-                }
-                const updated = updateTask(taskId, { status: isRunning ? "in_progress" : "cancelled", auto_execute: false, is_paused: true, paused: true, status_detail: isRunning ? "取消请求已发送，正在终止 Agent 进程" : "任务已取消", cancellation_requested_at: new Date().toISOString(), cancellation_reason: reason, cancellation_cleanup: { sessions_closed: sessions.length, test_agent_runs_cancelled: testAgentRunsCancelled.length, idempotency_settled: Array.isArray(idempotencySettled) ? idempotencySettled.length : Number(idempotencySettled || 0), worktrees }, ...(isRunning ? {} : { cancelled_at: new Date().toISOString() }) });
-                if (!isRunning) {
-                    (0, reliability_ledger_1.releaseTaskLease)(taskId, "cancelled");
-                    (0, execution_kernel_1.clearTaskCancellation)(taskId);
-                }
-                updateGroupTaskInlineStatus(updated || task, isRunning ? "in_progress" : "cancelled", isRunning ? "正在终止 Agent 进程" : "任务已取消");
-                (0, logs_1.addTaskLog)(taskId, "warning", isRunning ? "已发送取消请求，正在终止 Agent 进程树" : "已从队列移除并取消任务");
-                await ctx.onTaskStatusChange?.(updated || task, isRunning ? "cancelling" : "cancelled", reason);
-                (0, utils_1.sendJson)(res, { success: true, task: updated, running: isRunning, cancellation, cleanup: updated?.cancellation_cleanup, queue_status: getQueueStatus() });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (["/api/tasks/execution/rollback", "/api/tasks/execution/merge", "/api/tasks/execution/cleanup"].includes(pathname) && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                let result;
-                if (pathname.endsWith("/rollback"))
-                    result = (0, execution_kernel_1.rollbackExecutionCheckpoint)(String(payload.checkpoint_id || payload.checkpointId || ""), String(payload.reason || ""), { allowShared: payload.allow_shared === true || payload.allowShared === true });
-                else if (pathname.endsWith("/merge"))
-                    result = (0, execution_kernel_1.mergeExecutionWorktree)(String(payload.execution_id || payload.executionId || ""), { force: !!payload.force, commit: payload.commit !== false, message: payload.message || "" });
-                else
-                    result = (0, execution_kernel_1.cleanupExecutionWorktree)(String(payload.execution_id || payload.executionId || ""), !!payload.force);
-                const executionId = String(payload.execution_id || payload.executionId || result?.executionId || "");
-                const executionRecord = executionId ? (0, execution_kernel_1.loadExecution)(executionId) : null;
-                const task = executionRecord?.taskId ? (0, db_1.loadTasks)().find((item) => item.id === executionRecord.taskId) : null;
-                if (task?.trace_id) {
-                    const action = pathname.endsWith("/merge") ? "merge" : pathname.endsWith("/rollback") ? "rollback" : "cleanup";
-                    (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, { id: `execution:${executionId}:${action}:${result?.mergeCommit || result?.rolledBackAt || result?.cleanedAt || "done"}`, type: `execution.${action}`, status: "ok", task_id: task.id, group_id: task.group_id || "", agent: executionRecord?.project || "", message: result?.duplicate ? `${action} 重复请求已复用原结果` : `${action} 操作完成`, data: result });
-                }
-                (0, utils_1.sendJson)(res, result);
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 409);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/execution/checkpoint" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const executionId = String(payload.execution_id || payload.executionId || "").trim();
-                if (!executionId)
-                    return (0, utils_1.sendJson)(res, { error: "缺少 Execution ID" }, 400);
-                const execution = (0, execution_kernel_1.loadExecution)(executionId);
-                if (!execution)
-                    return (0, utils_1.sendJson)(res, { error: "执行记录不存在" }, 404);
-                const workDir = String(execution.workspace?.worktreePath || execution.workspace?.workDir || execution.packet?.workDir || "").trim();
-                if (!workDir || !fs.existsSync(workDir))
-                    return (0, utils_1.sendJson)(res, { error: "执行工作目录不存在" }, 409);
-                const checkpoint = (0, execution_kernel_1.createExecutionCheckpoint)({ executionId, taskId: execution.taskId, workDir, mode: execution.workspace?.mode || execution.packet?.isolation?.mode || "shared", label: String(payload.label || "用户检查点") });
-                if (execution.taskId) {
-                    const task = (0, db_1.loadTasks)().find((item) => item.id === execution.taskId);
-                    if (task?.trace_id)
-                        (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, { type: "execution.checkpoint", status: "ok", task_id: task.id, agent: execution.project, message: `已创建检查点 ${checkpoint.id}`, data: { execution_id: executionId, checkpoint_id: checkpoint.id } });
-                }
-                (0, utils_1.sendJson)(res, { success: true, checkpoint });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 409);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks" && req.method === "GET") {
-        const includeArchived = String(parsed.query.include_archived || parsed.query.includeArchived || "") === "true";
-        const onlyArchived = String(parsed.query.archived || "") === "true";
-        const allTasks = (0, db_1.loadTasks)();
-        const tasks = onlyArchived
-            ? allTasks.filter((task) => task.archived || task.deleted_at)
-            : includeArchived ? allTasks : allTasks.filter((task) => !task.archived && !task.deleted_at);
-        (0, utils_1.sendJson)(res, { tasks, archived_count: allTasks.filter((task) => task.archived || task.deleted_at).length });
-        return true;
-    }
-    if (pathname === "/api/usability/intake/preview" && req.method === "POST") {
-        const handleIntakePreview = async (payload, files = []) => {
-            try {
-                const userRequirement = compactFormText(payload.requirement || payload.goal || payload.message, "");
-                const sourceIngestion = await (0, source_ingestion_1.ingestRequirementSources)({ files, userText: userRequirement, extractRequirement: true });
-                const extractedRequirement = sourceIngestion.requirement;
-                const requirement = compactFormText(extractedRequirement?.business_goal || userRequirement, "");
-                if (!requirement && sourceIngestion.sources.length === 0)
-                    return (0, utils_1.sendJson)(res, { error: "请先说说你想完成什么，或者上传需求资料" }, 400);
-                const groups = (0, storage_1.loadGroups)();
-                const group = groups.find((item) => item.id === (payload.group_id || payload.groupId)) || null;
-                const requestedProject = compactFormText(payload.target_project || payload.targetProject, "");
-                const coordinator = group?.members?.find((member) => member.role === "coordinator")?.project || group?.members?.[0]?.project || "";
-                const targetProject = requestedProject || coordinator || (0, db_1.getConfigs)()[0]?.name || "";
-                if (!targetProject && !group)
-                    return (0, utils_1.sendJson)(res, { error: "还没有可执行项目，请先添加项目或开发群聊" }, 409);
-                const lower = `${requirement}\n${sourceIngestion.source_documents}`.toLowerCase();
-                const areas = [
-                    /(页面|前端|ui|组件|样式)/i.test(lower) ? "前端页面与交互" : "",
-                    /(接口|后端|服务|数据库|api)/i.test(lower) ? "后端接口与数据" : "",
-                    /(测试|修复|bug|报错)/i.test(lower) ? "测试与回归验证" : "",
-                ].filter(Boolean);
-                if (!areas.length)
-                    areas.push(group ? "群聊内相关项目" : "目标项目");
-                const acceptanceFallback = compactFormText(payload.acceptance_criteria || payload.acceptanceCriteria, "") || [
-                    "目标功能按描述完成，并覆盖主要正常流程",
-                    "相关项目通过现有构建或测试命令",
-                    "交付报告列出实际修改文件、验证结果和剩余风险",
-                ].join("；");
-                const fallbackRisks = [
-                    group ? "多个项目之间的接口或数据契约需要保持一致" : "实现范围可能需要根据现有代码进一步收敛",
-                    "涉及既有行为时需要回归验证，避免影响当前功能",
-                ];
-                const extractedAcceptance = extractedRequirement?.acceptance_criteria || [];
-                const acceptance = extractedAcceptance.length ? extractedAcceptance.join("；") : acceptanceFallback;
-                const title = compactFormText(payload.title, "") || extractedRequirement?.title || requirement.replace(/\s+/g, " ").slice(0, 48) || "处理提交的需求资料";
-                const intakeDraft = {
-                    ...(0, source_ingestion_1.requirementToIntakeDraft)(extractedRequirement, {
-                        requirement,
-                        scope: areas,
-                        acceptance: acceptance.split("；").filter(Boolean),
-                        risks: fallbackRisks,
-                    }),
-                    project: targetProject,
-                    group_id: group?.id || "",
-                    group_name: group?.name || "",
-                    source_summary: sourceIngestion.user_summary,
-                    source_ingestion: sourceIngestion.technical,
-                };
-                const sourceDocuments = [
-                    userRequirement ? `用户输入：\n${userRequirement}` : "",
-                    sourceIngestion.source_documents,
-                    extractedRequirement ? `结构化需求：\n${JSON.stringify(extractedRequirement, null, 2)}` : "",
-                ].filter(Boolean).join("\n\n");
-                const task = createTask({
-                    title,
-                    description: requirement,
-                    business_goal: requirement,
-                    acceptance_criteria: acceptance,
-                    source_documents: sourceDocuments,
-                    source_attachments: sourceIngestion.attachments,
-                    requirement_extraction: extractedRequirement,
-                    source_ingestion: sourceIngestion.technical,
-                    target_project: targetProject,
-                    group_id: group?.id || null,
-                    assign_type: group ? "group" : "project",
-                    workflow_type: group ? "daily_dev" : "general",
-                    requires_code_changes: payload.requires_code_changes !== false,
-                    requires_verification: true,
-                    auto_execute: false,
-                    intake_state: "awaiting_confirmation",
-                    intake_draft: intakeDraft,
-                });
-                const updated = updateTask(task.id, { status: "pending", auto_execute: false, intake_state: "awaiting_confirmation", intake_draft: intakeDraft, status_detail: "执行计划已准备好，等待你确认" }) || task;
-                (0, reliability_ledger_1.appendTraceEvent)(updated.trace_id, { type: "intake.previewed", status: "ok", task_id: updated.id, group_id: updated.group_id || "", agent: targetProject, message: "已生成执行前确认卡，尚未开始执行", data: intakeDraft });
-                (0, logs_1.appendTaskTimelineEvent)(updated.id, {
-                    type: "requirement_sources_ingested",
-                    title: "需求资料已读取",
-                    detail: sourceIngestion.user_summary || "已根据用户文字整理需求",
-                    status: sourceIngestion.warnings.length ? "warning" : "completed",
-                    data: sourceIngestion.technical,
-                });
-                (0, utils_1.sendJson)(res, { success: true, task: updated, confirmation: intakeDraft, source_ingestion: sourceIngestion.technical, same_task_trace: true });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        };
-        const contentType = String(req.headers["content-type"] || "");
-        if (contentType.includes("multipart/form-data")) {
-            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
-                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
-                if (!boundary)
-                    throw new Error("无效的附件请求");
-                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
-                return handleIntakePreview(fields || {}, files || []);
-            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
-            return true;
-        }
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                handleIntakePreview(body ? JSON.parse(body) : {});
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/usability/intake/confirm" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const taskId = String(payload.task_id || payload.id || "").trim();
-                const acceptFeedback = compactFormText(payload.accept_feedback || payload.acceptFeedback || payload.feedback || payload.message || "", "");
-                const current = (0, db_1.loadTasks)().find((item) => item.id === taskId);
-                if (!current)
-                    return (0, utils_1.sendJson)(res, { error: "确认卡对应的任务不存在" }, 404);
-                if (current.intake_state === "confirmed")
-                    return (0, utils_1.sendJson)(res, { success: true, duplicate: true, task: current, trace_id: current.trace_id });
-                if (current.intake_state !== "awaiting_confirmation")
-                    return (0, utils_1.sendJson)(res, { error: "这张确认卡已经失效" }, 409);
-                const confirmedAt = new Date().toISOString();
-                const basePlan = getTaskPlanMode(current) || current.intake_draft || {};
-                const acceptedPlan = buildAcceptedPlanModeDraft(basePlan, acceptFeedback, confirmedAt);
-                const meta = current.workflow_meta || {};
-                const acceptanceText = current.acceptance_criteria || current.acceptanceCriteria || "";
-                const nextAcceptance = acceptFeedback
-                    ? uniqueStrings([...splitUserAcceptanceText(acceptanceText), `执行时纳入用户补充要求：${acceptFeedback}`]).join("\n")
-                    : acceptanceText;
-                const nextSourceDocuments = acceptFeedback
-                    ? [
-                        current.source_documents || current.sourceDocuments || "",
-                        `用户确认执行前计划时补充要求（${confirmedAt}）：${acceptFeedback}`,
-                    ].filter(Boolean).join("\n\n")
-                    : (current.source_documents || current.sourceDocuments || "");
-                const task = updateTask(taskId, {
-                    intake_state: "confirmed",
-                    confirmed_at: confirmedAt,
-                    auto_execute: true,
-                    status: "pending",
-                    status_detail: acceptFeedback ? "你已确认执行计划，并补充了执行要求，正在进入执行队列" : "你已确认执行计划，正在进入执行队列",
-                    intake_draft: acceptedPlan,
-                    plan_accept_feedback: acceptFeedback,
-                    last_plan_accept_feedback: acceptFeedback,
-                    last_plan_accept_feedback_at: acceptFeedback ? confirmedAt : "",
-                    ...(acceptFeedback ? { acceptance_criteria: nextAcceptance, source_documents: nextSourceDocuments } : {}),
-                    workflow_meta: {
-                        ...meta,
-                        plan_mode: acceptedPlan,
-                        intake: {
-                            ...(meta.intake || {}),
-                            plan_mode: acceptedPlan,
-                            accepted_feedback: acceptFeedback,
-                            accepted_at: confirmedAt,
-                        },
-                        project_mission: {
-                            ...(meta.project_mission || {}),
-                            control_state: "confirmed",
-                        },
-                    },
-                }) || current;
-                (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, {
-                    type: "intake.confirmed",
-                    status: "ok",
-                    task_id: task.id,
-                    group_id: task.group_id || "",
-                    agent: task.target_project || "",
-                    message: acceptFeedback ? "用户确认执行，并补充执行要求" : "用户确认执行，复用原 Task/Trace 开始工作",
-                    data: { same_task_trace: true, has_accept_feedback: !!acceptFeedback, accept_feedback: acceptFeedback || undefined },
-                });
-                (0, logs_1.appendTaskTimelineEvent)(task.id, {
-                    type: "plan_mode_confirmed",
-                    title: "用户已确认执行前计划",
-                    detail: acceptFeedback ? `带着补充要求进入执行队列：${(0, memory_1.compactMemoryText)(acceptFeedback, 180)}` : "复用同一任务和 Trace 进入执行队列",
-                    status: "ok",
-                    phase: "queued",
-                    agent: task.target_project || "",
-                    data: { same_task_trace: true, has_accept_feedback: !!acceptFeedback },
-                });
-                if (acceptFeedback)
-                    (0, logs_1.addTaskLog)(task.id, "info", `确认执行前计划时补充要求：${acceptFeedback}`);
-                const queueResult = enqueueTask(task.id, ctx);
-                const updated = updateTask(task.id, {
-                    status_detail: queueResult.message || "已进入执行队列",
-                    workflow_meta: {
-                        ...(task.workflow_meta || {}),
-                        project_mission: {
-                            ...((task.workflow_meta || {}).project_mission || {}),
-                            control_state: "queued",
-                        },
-                    },
-                }) || task;
-                updateGroupTaskInlineStatus(updated, updated.status, updated.status_detail || "已进入执行队列");
-                (0, utils_1.sendJson)(res, { success: true, task: updated, queued: !!queueResult.queued, queue_result: queueResult, trace_id: task.trace_id, same_task_trace: true });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/usability/intake/revise" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const taskId = String(payload.task_id || payload.id || "").trim();
-                const feedback = compactFormText(payload.feedback || payload.message || payload.reason || "", "");
-                const current = (0, db_1.loadTasks)().find((item) => item.id === taskId);
-                if (!current)
-                    return (0, utils_1.sendJson)(res, { error: "确认卡对应的任务不存在" }, 404);
-                if (current.intake_state !== "awaiting_confirmation")
-                    return (0, utils_1.sendJson)(res, { error: "这张确认卡已经失效，不能调整计划" }, 409);
-                if (!feedback)
-                    return (0, utils_1.sendJson)(res, { error: "请填写希望主 Agent 调整的地方" }, 400);
-                const basePlan = getTaskPlanMode(current) || current.intake_draft || {};
-                const revisedPlan = buildRevisedPlanModeDraft(basePlan, feedback);
-                const meta = current.workflow_meta || {};
-                const task = updateTask(taskId, {
-                    intake_state: "awaiting_confirmation",
-                    intake_draft: revisedPlan,
-                    auto_execute: false,
-                    status: "pending",
-                    status_detail: "执行前计划已按你的反馈调整，等待你重新确认",
-                    plan_revision_count: revisedPlan.revision_count,
-                    last_plan_revision_feedback: revisedPlan.last_revision_feedback,
-                    last_plan_revision_at: revisedPlan.revised_at,
-                    workflow_meta: {
-                        ...meta,
-                        plan_mode: revisedPlan,
-                        intake: { ...(meta.intake || {}), plan_mode: revisedPlan },
-                        project_mission: {
-                            ...(meta.project_mission || {}),
-                            control_state: "plan_revision_requested",
-                        },
-                    },
-                }) || current;
-                (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, {
-                    type: "intake.revision_requested",
-                    status: "ok",
-                    task_id: task.id,
-                    group_id: task.group_id || "",
-                    agent: task.target_project || "",
-                    message: "用户退回执行前计划并要求调整",
-                    data: { feedback: revisedPlan.last_revision_feedback, revision_count: revisedPlan.revision_count, same_task_trace: true },
-                });
-                (0, logs_1.appendTaskTimelineEvent)(task.id, {
-                    type: "plan_mode_revision_requested",
-                    title: "用户要求调整执行前计划",
-                    detail: revisedPlan.last_revision_feedback,
-                    status: "warn",
-                    phase: "planning",
-                    agent: task.target_project || "",
-                    data: { revision_count: revisedPlan.revision_count, same_task_trace: true },
-                });
-                (0, logs_1.addTaskLog)(task.id, "info", `执行前计划退回调整：${revisedPlan.last_revision_feedback}`);
-                updateGroupTaskInlineStatus(task, "pending", task.status_detail || "执行前计划已调整，等待重新确认");
-                (0, utils_1.sendJson)(res, { success: true, task, plan_mode: revisedPlan, trace_id: task.trace_id, same_task_trace: true });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/create" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = JSON.parse(body);
-                const task = createTask(payload);
-                let queueResult = null;
-                if (payload.auto_execute || payload.autoExecute) {
-                    queueResult = enqueueTask(task.id, ctx);
-                }
-                (0, utils_1.sendJson)(res, { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: getQueueStatus() });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/create-daily-dev" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            let operationKey = "";
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                operationKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
-                const traceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "daily-dev");
-                const groupId = payload.group_id || payload.groupId;
-                if (!groupId)
-                    return (0, utils_1.sendJson)(res, { error: "请选择目标开发群聊" }, 400);
-                const groups = (0, storage_1.loadGroups)();
-                const group = groups.find(g => g.id === groupId);
-                if (!group)
-                    return (0, utils_1.sendJson)(res, { error: "开发群聊不存在" }, 404);
-                const groupReadiness = validateDailyDevGroupReady(group);
-                const goal = compactFormText(payload.business_goal || payload.businessGoal || payload.goal || payload.description, "");
-                if (!goal)
-                    return (0, utils_1.sendJson)(res, { error: "请输入业务目标" }, 400);
-                const quality = (0, daily_dev_backlog_1.evaluateDailyDevIntakeQuality)(payload, goal);
-                const forceQualityGate = !!(payload.force_quality_gate || payload.forceQualityGate || payload.force);
-                if (!quality.pass && !forceQualityGate) {
-                    return (0, utils_1.sendJson)(res, {
-                        success: false,
-                        needs_confirmation: true,
-                        error: quality.message,
-                        quality,
-                    }, 422);
-                }
-                const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "create-daily-dev", key: operationKey, traceId, leaseMs: 60_000 }) : null;
-                if (operation && !operation.acquired) {
-                    const existingTask = operation.record?.result?.task_id ? (0, db_1.loadTasks)().find((item) => item.id === operation.record.result.task_id) : null;
-                    (0, utils_1.sendJson)(res, { success: true, duplicate: true, task: existingTask, trace_id: operation.traceId });
-                    return;
-                }
-                const title = compactFormText(payload.title, goal.slice(0, 60));
-                const backlogFile = (0, daily_dev_backlog_1.persistDailyDevBacklogFile)(groups, group, payload, title, goal);
-                const sourceDocuments = [
-                    payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "",
-                    backlogFile ? `群聊需求池文件：${backlogFile.name}` : "",
-                ].filter(Boolean).join("\n\n");
-                const taskPayload = { ...payload, documents: sourceDocuments, source_documents: sourceDocuments };
-                const task = createTask({
-                    title,
-                    description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)(taskPayload),
-                    target_project: groupReadiness.coordinator.project,
-                    group_id: groupId,
-                    assign_type: "group",
-                    priority: payload.priority || "normal",
-                    auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
-                    workflow_type: "daily_dev",
-                    requires_code_changes: payload.requires_code_changes !== false && payload.requiresCodeChanges !== false,
-                    requires_verification: payload.requires_verification !== false && payload.requiresVerification !== false,
-                    business_goal: goal,
-                    acceptance_criteria: payload.acceptance || payload.acceptance_criteria || payload.acceptanceCriteria || "",
-                    source_documents: sourceDocuments,
-                    workflow_meta: {
-                        ...(payload.workflow_meta || payload.workflowMeta || {}),
-                        intake_quality: quality,
-                        intake: backlogFile ? {
-                            backlog_file: backlogFile.name,
-                            persisted_at: new Date().toISOString(),
-                            source: "create-daily-dev",
-                        } : null,
-                    },
-                    trace_id: traceId,
-                    idempotency_key: operationKey || null,
-                });
-                if (backlogFile) {
-                    (0, daily_dev_backlog_1.markDailyDevBacklogStatus)(groupId, backlogFile.name, "dispatched", {
-                        task_id: task.id,
-                        result: "业务开发任务已创建并关联此需求池条目",
-                    });
-                }
-                let queueResult = null;
-                if (task.auto_execute) {
-                    queueResult = enqueueTask(task.id, ctx);
-                    if (backlogFile && queueResult?.blocked) {
-                        (0, daily_dev_backlog_1.markDailyDevBacklogStatus)(groupId, backlogFile.name, "dispatched", {
-                            task_id: task.id,
-                            result: queueResult.message || "任务已创建，等待执行通道恢复",
-                        });
-                    }
-                }
-                if (operationKey)
-                    (0, reliability_ledger_1.completeIdempotency)("create-daily-dev", operationKey, { task_id: task.id, queued: !!queueResult?.queued });
-                (0, utils_1.sendJson)(res, { success: true, task, backlog_file: backlogFile?.name || null, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: getQueueStatus() });
-            }
-            catch (e) {
-                if (operationKey) {
-                    try {
-                        (0, reliability_ledger_1.failIdempotency)("create-daily-dev", operationKey, e);
-                    }
-                    catch { }
-                }
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/daily-dev-backlog" && req.method === "GET") {
-        const groupId = String(parsed.query.group_id || parsed.query.groupId || "");
-        const items = (0, daily_dev_backlog_1.listDailyDevBacklogs)(groupId);
-        const counts = items.reduce((acc, item) => {
-            acc[item.status] = Number(acc[item.status] || 0) + 1;
-            return acc;
-        }, {});
-        (0, utils_1.sendJson)(res, { success: true, items, counts });
-        return true;
-    }
-    if (pathname === "/api/tasks/daily-dev-backlog/status" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const groupId = payload.group_id || payload.groupId;
-                const name = payload.name || payload.file || payload.fileName;
-                const status = String(payload.status || "").trim();
-                if (!groupId || !name || !status)
-                    return (0, utils_1.sendJson)(res, { error: "缺少 group_id、name 或 status" }, 400);
-                if (!["draft", "needs_user", "ready", "planned", "dispatched", "queued", "in_progress", "running", "reviewing", "blocked", "done", "failed"].includes(status)) {
-                    return (0, utils_1.sendJson)(res, { error: "不支持的需求池状态" }, 400);
-                }
-                const file = (0, daily_dev_backlog_1.markDailyDevBacklogStatus)(groupId, name, status, {
-                    result: payload.reason || `用户手动设置为 ${status}`,
-                });
-                if (!file)
-                    return (0, utils_1.sendJson)(res, { error: "需求池文件不存在" }, 404);
-                const items = (0, daily_dev_backlog_1.listDailyDevBacklogs)(groupId);
-                (0, utils_1.sendJson)(res, { success: true, file, items });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/daily-dev-backlog/import-shared" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const result = (0, daily_dev_backlog_1.importSharedDocsToDailyDevBacklog)({
-                    group_id: payload.group_id || payload.groupId || "",
-                    limit: payload.limit || 20,
-                    force: !!payload.force,
-                    priority: payload.priority || "normal",
-                    requires_code_changes: payload.requires_code_changes !== false && payload.requiresCodeChanges !== false,
-                });
-                (0, utils_1.sendJson)(res, result);
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/daily-dev-backlog/dispatch" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const groupId = payload.group_id || payload.groupId;
-                const name = payload.name || payload.file || payload.fileName;
-                if (!groupId || !name)
-                    return (0, utils_1.sendJson)(res, { error: "缺少 group_id 或 name" }, 400);
-                const result = (0, daily_dev_backlog_1.dispatchDailyDevBacklog)(groupId, name, ctx, {
-                    auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
-                    force: !!payload.force,
-                });
-                if (!result.success)
-                    return (0, utils_1.sendJson)(res, { error: result.error }, result.status || 400);
-                (0, utils_1.sendJson)(res, result);
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/daily-dev-backlog/dispatch-ready" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const result = (0, daily_dev_backlog_1.dispatchReadyDailyDevBacklogs)(ctx, {
-                    group_id: payload.group_id || payload.groupId || "",
-                    limit: payload.limit || 20,
-                    auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
-                    only_executable_groups: payload.only_executable_groups !== false && payload.onlyExecutableGroups !== false,
-                });
-                (0, utils_1.sendJson)(res, result);
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/update" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const { id, ...updates } = JSON.parse(body);
-                const current = (0, db_1.loadTasks)().find(t => t.id === id);
-                if (!current)
-                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-                const validationError = validateTaskManualStatusUpdate(current, updates);
-                if (validationError)
-                    return (0, utils_1.sendJson)(res, { error: validationError }, 409);
-                const task = updateTask(id, updates);
-                if (!task)
-                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-                updateGroupTaskInlineStatus(task, task.status, task.status_detail || "任务状态已更新");
-                (0, utils_1.sendJson)(res, { success: true, task });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/reconcile-delivery" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const taskId = String(payload.task_id || payload.taskId || payload.id || "");
-                if (!taskId)
-                    return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
-                const result = reconcileTaskDeliveryEvidence(taskId);
-                (0, utils_1.sendJson)(res, result, result.success ? 200 : (result.status || 400));
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/continue" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const taskId = payload.task_id || payload.id;
-                const message = compactFormText(payload.message || payload.followup || payload.note, "");
-                const result = continueTaskWithMessage(taskId, message, ctx, {
-                    source: payload.source || "user",
-                    auto_execute: payload.auto_execute,
-                    autoExecute: payload.autoExecute,
-                    continuationKind: payload.continuation_kind || payload.continuationKind || "auto",
-                    idempotencyKey: payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId,
-                });
-                if (!result.success)
-                    return (0, utils_1.sendJson)(res, { error: result.error, new_task_suggested: result.new_task_suggested === true, continuation_kind: result.new_task_suggested ? "new_task" : undefined }, result.status || 400);
-                (0, utils_1.sendJson)(res, result);
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/continue-from-gaps" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const payload = body ? JSON.parse(body) : {};
-                const taskId = payload.task_id || payload.id;
-                if (!taskId)
-                    return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
-                const current = (0, db_1.loadTasks)().find(t => t.id === taskId);
-                if (!current)
-                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-                if (current.status === "done")
-                    return (0, utils_1.sendJson)(res, { error: "已完成任务不需要按缺口继续" }, 409);
-                const targeted = payload.rework_kind || payload.reworkKind || payload.work_item_id || payload.workItemId || payload.target || payload.agent || payload.project || payload.reason;
-                const message = compactFormText(payload.message, "") || (targeted ? buildTargetedReworkContinuationDraft(current, payload) : buildTaskGapContinuationDraft(current));
-                const reworkKind = compactFormText(payload.rework_kind || payload.reworkKind || "", "");
-                const target = compactFormText(payload.target || payload.agent || payload.project || "", "");
-                const reason = compactFormText(payload.reason || payload.detail || "", "");
-                const title = compactFormText(payload.title || payload.label || "", "");
-                const workItemId = compactFormText(payload.work_item_id || payload.workItemId || "", "");
-                const isNextWorkItem = reworkKind === "next_claimable_work_item" || /user_next_work_item|next_work_item/i.test(String(payload.source || ""));
-                const friendlyStatus = targeted
-                    ? isNextWorkItem
-                        ? `已接上${target ? ` ${target} 的` : ""}下一步工作项，等待主 Agent 继续派发`
-                        : `已接上${target ? ` ${target} 的` : ""}精准返工，等待主 Agent 继续执行`
-                    : "已按交付缺口生成返工说明，等待主 Agent 继续执行";
-                let claimOwner = target;
-                let claimRef = workItemId || target;
-                if (isNextWorkItem) {
-                    const currentItems = getTaskWorkItems(current);
-                    const requestedItem = currentItems.find((item) => [item.id, item.target, item.owner, item.subject].some(value => String(value || "").toLowerCase() === String(claimRef || "").toLowerCase()));
-                    claimRef = claimRef || requestedItem?.id || "";
-                    claimOwner = claimOwner || requestedItem?.owner || requestedItem?.target || "";
-                    const preflight = (0, work_items_1.claimMainAgentWorkItem)(currentItems, claimRef, claimOwner, { checkOwnerBusy: true });
-                    if (!preflight.ok) {
-                        const claimSummary = (0, work_items_1.buildMainAgentWorkItemClaimSummary)(preflight, claimOwner, claimRef);
-                        persistTaskWorkItems(taskId, preflight.items, {
-                            last_claim_summary: claimSummary,
-                            last_claim_attempt: { agent: claimOwner, item_id: preflight.item?.id || "", result: "waiting", reason: preflight.reason || "", at: new Date().toISOString() },
-                        });
-                        (0, logs_1.addTaskLog)(taskId, "warning", claimSummary.headline);
-                        return (0, utils_1.sendJson)(res, {
-                            success: true,
-                            waiting: true,
-                            queued: false,
-                            work_item_claim_summary: claimSummary,
-                            task: getTaskById(taskId),
-                        });
-                    }
-                }
-                const result = continueTaskWithMessage(taskId, message, ctx, {
-                    source: payload.source || (targeted ? "targeted_gap_rework" : "auto_gap_rework"),
-                    auto_execute: payload.auto_execute,
-                    autoExecute: payload.autoExecute,
-                    status_detail: friendlyStatus,
-                    rework_kind: reworkKind,
-                    target,
-                    reason,
-                    title,
-                    work_item_id: workItemId,
-                    idempotencyKey: payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId,
-                });
-                if (!result.success)
-                    return (0, utils_1.sendJson)(res, { error: result.error }, result.status || 400);
-                const claimResult = isNextWorkItem
-                    ? claimTaskWorkItemForAgent(taskId, claimOwner, reason || title, { itemRef: claimRef, checkOwnerBusy: true })
-                    : null;
-                (0, utils_1.sendJson)(res, {
-                    ...result,
-                    continuation_message: message,
-                    queued: true,
-                    work_item_claim_summary: claimResult?.summary || null,
-                });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if ((0, task_governance_routes_1.handleTaskGovernanceRoutes)(req, res, parsed, ctx, {
-        compactFormText,
-        uniqueStrings,
-        archiveTask,
-        restoreArchivedTask,
-        purgeArchivedTask,
-        removeTaskFromQueues,
-        updateTask,
-        enqueueTask,
-        retryTask,
-        retryRuntimeFailedTasks,
-        getQueueStatus,
-        getTaskWatchdogStatus,
-        runTaskWatchdog,
-        cleanupRuntimeDebt,
-        resumeTaskQueues,
-        clearTaskQueues: () => taskQueues.clear(),
-        taskWatchdogStaleMs: TASK_WATCHDOG_STALE_MS,
-    }))
-        return true;
-    // === 群聊主 Agent / Orchestrator API ===
-    if ((0, orchestrator_routes_1.handleOrchestratorRoutes)(req, res, parsed, ctx, {
-        buildCoordinatorSharedFilesContext,
-        runGroupOrchestrator: group_orchestrator_1.runGroupOrchestrator,
-        buildDailyDevAgentDiagnostics,
-        replayAgentTrace: runtime_kernel_1.replayAgentTrace,
-        buildTraceReplaySuite: runtime_kernel_1.buildTraceReplaySuite,
-        runAgentRuntimeKernelSelfTest: runtime_kernel_1.runAgentRuntimeKernelSelfTest,
-        runWorkerHandoffSelfTest: worker_handoff_1.runWorkerHandoffSelfTest,
-        runGroupMainAgentActionRegistrySelfTest,
-        runGroupMainAgentToolLoopSelfTest,
-        getGroupMainAgentActionRegistry,
-        applyRuntimeMonitorControl,
-        buildDailyDevWorkflowRehearsal,
-        createDailyDevSmokeTask,
-        getDailyDevSmokeStatus,
-        runAgentCliProbeBatch,
-        runAgentCliProbe,
-        switchTaskExecutor,
-        runRuntimeFallbackProbe,
-        runAgentRecoveryMonitorOnce,
-    }))
-        return true;
-    if ((0, group_routes_1.handleBasicGroupRoutes)(req, res, parsed, ctx, {
-        getGroupMemoryFile: memory_1.getGroupMemoryFile,
-        loadGroupMemory: memory_1.loadGroupMemory,
-        saveGroupMemory: memory_1.saveGroupMemory,
-        buildGroupMemoryContext: memory_1.buildGroupMemoryContext,
-        buildAgentMemoryPacket: memory_1.buildAgentMemoryPacket,
-        buildInlineTaskRuntime,
-        getAgentQaItemsForGroup: agent_qa_service_1.getAgentQaItemsForGroup,
-        deleteGroupSessionMemoryArtifacts: memory_1.deleteGroupSessionMemoryArtifacts,
-    }))
-        return true;
-    // === Agent 间问答 API ===
-    if ((0, agent_qa_routes_1.handleAgentQaRoutes)(req, res, parsed, ctx, {
-        getAgentQaItemsForGroup: agent_qa_service_1.getAgentQaItemsForGroup,
-        runAgentCollaborationProtocolSelfTest: collaboration_protocol_1.runAgentCollaborationProtocolSelfTest,
-        setAgentQaArbitration: agent_qa_service_1.setAgentQaArbitration,
-        resumeAgentQaFromStoredContinuation,
-        setAgentQaManualTakeover: agent_qa_service_1.setAgentQaManualTakeover,
-        retryAgentQaItem,
-        listGroupCoordinationRequests: group_coordination_store_1.listGroupCoordinationRequests,
-    }))
-        return true;
-    if ((0, group_live_routes_1.handleGroupLiveRoutes)(req, res, parsed, ctx, {
-        writeSse,
-        ensureTraceId: reliability_ledger_1.ensureTraceId,
-        classifyGroupProjectTaskIntentWithAgent,
-        shouldCreatePersistentGroupTask,
-        shouldUseProjectAnalysisMode,
-        classifyTaskContinuation,
-        looksLikeTaskContinuation,
-        continueTaskWithMessage,
-        appendMainAgentDecisionTrace,
-        applyMainAgentDecisionPetState,
-        validateDailyDevGroupReady,
-        compactMemoryText: memory_1.compactMemoryText,
-        buildGroupPlanModePreflight,
-        createTask,
-        updateTask,
-        appendTaskTimelineEvent: logs_1.appendTaskTimelineEvent,
-        buildWorkflowMeta,
-        buildInlineTaskRuntime,
-        updateGroupMemory: memory_1.updateGroupMemory,
-        enqueueTask,
-        buildCoordinatorSharedFilesContext,
-        buildGroupProjectAnalysisContext,
-        normalizePlanAssignments,
-        getInitialWorkflowMeta,
-        getCoordinatorActionMentions,
-        processCrossAgents,
-        runCoordinatorReviewLoop,
-        buildGroupContextPacket: memory_1.buildGroupContextPacket,
-        buildAgentToolContext,
-        prepareAgentRuntimeTools,
-        getProjectExtraConfig,
-        buildAgentMemoryContextBundle: memory_1.buildAgentMemoryContextBundle,
-        buildAgentMemoryContextBundleWithManifestSelection: memory_1.buildAgentMemoryContextBundleWithManifestSelection,
-        buildAgentMemoryPacket: memory_1.buildAgentMemoryPacket,
-        buildChildAgentDevelopmentContract,
-        buildProjectVerificationHints,
-        buildAgentQaProtocolInstructions,
-        getAgentQaItemsForGroup: agent_qa_service_1.getAgentQaItemsForGroup,
-        handleAgentQaRequests,
-        runtimeToolSnapshotFromAudit,
-        extractActionableMentions,
-        extractAgentReceipt: agent_receipts_1.extractAgentReceipt,
-    }))
-        return true;
-    if (pathname === "/api/tasks/auto-assign" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { task_id, group_id } = JSON.parse(body);
-                const tasks = (0, db_1.loadTasks)();
-                const task = tasks.find(t => t.id === task_id);
-                if (!task)
-                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-                const configs = (0, db_1.getConfigs)();
-                const config = configs.find(c => c.name === task.target_project);
-                if (!config)
-                    return (0, utils_1.sendJson)(res, { error: "项目配置不存在" }, 400);
-                const info = (0, db_1.getConfigInfo)(config.path);
-                const workDir = info[0]?.workDir;
-                const agentType = info[0]?.agent || "claudecode";
-                updateTask(task_id, { status: "in_progress" });
-                const autoAssignGroupId = String(group_id || task.group_id || "");
-                const group = autoAssignGroupId ? (0, storage_1.loadGroups)().find(g => g.id === autoAssignGroupId) : null;
-                const toolContext = buildAgentToolContext(ctx, group, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`);
-                const runtimeToolContext = prepareAgentRuntimeTools(autoAssignGroupId, task.target_project, workDir, agentType, toolContext.allowedTools, null, { taskId: task.id, task, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
-                if (runtimeToolContext.dispatchBlocked) {
-                    const blockedReceipt = runtimeToolDispatchBlockedReceipt(task.target_project, runtimeToolContext);
-                    updateTask(task_id, { status: "blocked", status_detail: blockedReceipt.summary });
-                    (0, logs_1.addTaskLog)(task_id, "warning", blockedReceipt.summary);
-                    (0, logs_1.appendTaskTimelineEvent)(task_id, { type: "runtime_tool_dispatch_blocked", title: `${task.target_project} 工具授权派发被阻断`, detail: blockedReceipt.summary, status: "warn", phase: "dispatching", agent: task.target_project, data: { runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate } });
-                    return (0, utils_1.sendJson)(res, { success: false, error: blockedReceipt.summary, runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate }, 409);
-                }
-                const directTaskText = buildChildAgentTaskText(`${task.title}\n${task.description || ""}`, task);
-                let autoAssignTaskSession = (0, agent_sessions_1.openTaskAgentSession)({
-                    scopeId: task.id,
-                    taskId: task.id,
-                    groupId: autoAssignGroupId,
-                    project: task.target_project,
-                    agentType,
-                });
-                const autoAssignMemoryDeliveryAttemptSequence = autoAssignTaskSession ? autoAssignTaskSession.turnCount + 1 : 0;
-                const autoAssignGroupSessionId = String(task.group_session_id || task.groupSessionId || "");
-                let autoAssignInvocationEdge = autoAssignGroupId && autoAssignTaskSession && autoAssignGroupSessionId.startsWith("gcs_") ? (0, task_agent_invocation_lineage_1.prepareTaskAgentInvocationEdge)({
-                    groupId: autoAssignGroupId,
-                    groupSessionId: autoAssignGroupSessionId,
-                    taskId: task.id,
-                    targetProject: task.target_project,
-                    taskAgentSessionId: autoAssignTaskSession.id,
-                    nativeSessionId: autoAssignTaskSession.nativeSessionId || "",
-                    executionId: task.id,
-                    attemptSequence: autoAssignMemoryDeliveryAttemptSequence,
-                    providerAttempt: 1,
-                    invocationKind: autoAssignMemoryDeliveryAttemptSequence > 1 ? "resume" : "spawn",
-                    branchKind: "main",
-                }) : null;
-                const autoAssignGroupMemoryContext = autoAssignGroupId
-                    ? await (0, memory_1.buildAgentMemoryContextBundleWithManifestSelection)(autoAssignGroupId, task.target_project, directTaskText, {
-                        taskId: task.id,
-                        traceId: task.trace_id || "",
-                        agentType,
-                        taskAgentSessionId: autoAssignTaskSession?.id || "",
-                        nativeSessionId: autoAssignTaskSession?.nativeSessionId || "",
-                        taskAgentSessionTurn: autoAssignMemoryDeliveryAttemptSequence,
-                        modelContextWindow: autoAssignTaskSession?.modelContextWindow || 0,
-                        groupSessionId: task.group_session_id || task.groupSessionId || "",
-                        requireExactGroupSession: true,
-                        task,
-                        ...taskAgentInvocationMemoryOptions(autoAssignInvocationEdge),
-                    })
-                    : null;
-                const autoAssignContinuation = buildWorkerContinuationHandoff(task, task.target_project);
-                const autoAssignHandoff = buildChildAgentWorkerHandoff(task.target_project, directTaskText, {
-                    source: task.global_mission_id ? "全局主 Agent 子任务自动派发" : "自动派发",
-                    reason: task.mission_target?.reason || "",
-                    acceptance: task.acceptance_criteria || "",
-                    requires_code_changes: task.requires_code_changes,
-                    verification_hints: buildProjectVerificationHints(task.target_project, workDir),
-                    work_dir: workDir,
-                    agent_type: agentType,
-                    model: autoAssignTaskSession?.modelId || "",
-                    task_id: task.id,
-                    trace_id: task.trace_id || "",
-                    task,
-                    group,
-                    worker_context_packet: task.mission_handoff?.worker_context_packet || null,
-                    dependencies: Array.isArray(task.mission_handoff?.global_mission?.depends_on)
-                        ? task.mission_handoff.global_mission.depends_on.map((ref) => ({ project: ref, reason: "全局任务前置依赖" }))
-                        : [],
-                    analysis: {
-                        constraints: Array.isArray(task.mission_handoff?.done_criteria) ? task.mission_handoff.done_criteria : [],
-                    },
-                    memory: autoAssignGroupMemoryContext,
-                    continuation: autoAssignContinuation,
-                });
-                const autoAssignPendingCapacityGate = autoAssignTaskSession?.capacityDowngradeGate || null;
-                const autoAssignCapacityRevalidationPreparation = autoAssignTaskSession
-                    ? (0, agent_sessions_1.prepareTaskAgentSessionCapacityRevalidation)(autoAssignTaskSession.id, autoAssignHandoff.worker_context_packet)
-                    : null;
-                if (autoAssignTaskSession?.capacityRevalidationRequired === true && autoAssignCapacityRevalidationPreparation?.prepared !== true) {
-                    throw new Error(`模型容量下降后的上下文重建未通过：${autoAssignCapacityRevalidationPreparation?.reason || "packet_capacity_not_revalidated"}`);
-                }
-                if (autoAssignCapacityRevalidationPreparation?.session)
-                    autoAssignTaskSession = autoAssignCapacityRevalidationPreparation.session;
-                let autoAssignCapacityRevalidationCommitted = autoAssignCapacityRevalidationPreparation?.required !== true;
-                (0, logs_1.addTaskLog)(task.id, "info", `${task.target_project} 自动派发工作单已补齐：目标、范围、验收、ACK 和回执要求已打包`);
-                (0, logs_1.appendTaskTimelineEvent)(task.id, {
-                    type: "worker_handoff_ready",
-                    title: `${task.target_project} 工作单已补齐`,
-                    detail: "自动派发已补齐目标、范围、边界、验收、ACK 和回执要求",
-                    status: "ok",
-                    phase: "dispatching",
-                    agent: task.target_project,
-                    data: { worker_handoff: (0, worker_handoff_1.summarizeWorkerHandoffForUser)(autoAssignHandoff), worker_context_packet: autoAssignHandoff.worker_context_packet },
-                });
-                (0, runtime_kernel_1.recordAgentRuntimeLifecycle)({
-                    scope: autoAssignGroupId ? "group" : "worker",
-                    traceId: task.trace_id || "",
-                    taskId: task.id,
-                    groupId: autoAssignGroupId,
-                    agent: "auto-assign",
-                    action: "dispatch_worker",
-                    phase: "handoff",
-                    risk: "agent",
-                    target: task.target_project,
-                    status: "planned",
-                    message: `${task.target_project} 自动派发自包含工作单已生成`,
-                    data: {
-                        worker_handoff: (0, worker_handoff_1.summarizeWorkerHandoffForUser)(autoAssignHandoff),
-                        worker_context_packet: autoAssignHandoff.worker_context_packet,
-                        source: "auto-assign",
-                    },
-                });
-                const developmentContract = buildChildAgentDevelopmentContract(task.target_project, directTaskText, {
-                    source: task.global_mission_id ? "全局主 Agent 子任务自动派发" : "自动派发",
-                    reason: task.mission_target?.reason || "",
-                    acceptance: task.acceptance_criteria || "",
-                    requires_code_changes: task.requires_code_changes,
-                    verification_hints: buildProjectVerificationHints(task.target_project, workDir),
-                    work_dir: workDir,
-                    agent_type: agentType,
-                    task_id: task.id,
-                    trace_id: task.trace_id || "",
-                    task,
-                    group,
-                    worker_context_packet: task.mission_handoff?.worker_context_packet || null,
-                    dependencies: Array.isArray(task.mission_handoff?.global_mission?.depends_on)
-                        ? task.mission_handoff.global_mission.depends_on.map((ref) => ({ project: ref, reason: "全局任务前置依赖" }))
-                        : [],
-                    memory: autoAssignGroupMemoryContext,
-                    continuation: autoAssignContinuation,
-                    handoff: autoAssignHandoff,
-                });
-                const executePrompt = `${developmentContract}\n\n📋 执行任务：${task.title}\n${directTaskText}\n\n请直接完成开发工作。完成后必须追加 CCM_AGENT_RECEIPT 结构化回执。`;
-                const changeSnapshot = workDir ? ctx.createFileChangeSnapshot(workDir) : null;
-                let autoAssignNativeSessionId = "";
-                let autoAssignNativeContinuationEvidence = null;
-                let autoAssignNativeModelCapabilityReceipt = null;
-                let autoAssignModelCapabilityRecord = null;
-                let autoAssignSucceeded = true;
-                let autoAssignError = "";
-                let autoAssignRunnerRequestId = "";
-                let autoAssignRunnerStarted = false;
-                const autoAssignRenderedPrompt = `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${executePrompt}`;
-                let autoAssignMemoryContextSnapshot = null;
-                if (autoAssignTaskSession) {
-                    const bound = (0, agent_sessions_1.bindTaskAgentMemoryContextSnapshot)(autoAssignTaskSession.id, {
-                        taskId: task.id,
-                        groupId: autoAssignGroupId,
-                        project: task.target_project,
-                        agentType,
-                        nativeSessionId: autoAssignTaskSession.nativeSessionId || "",
-                        turn: autoAssignMemoryDeliveryAttemptSequence,
-                        executionId: task.id,
-                        traceId: task.trace_id || "",
-                        workerContextPacket: autoAssignHandoff.worker_context_packet,
-                        workerHandoff: autoAssignHandoff,
-                        memoryContext: autoAssignGroupMemoryContext,
-                        renderedHandoff: developmentContract,
-                        renderedPrompt: autoAssignRenderedPrompt,
-                        runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
-                        invocationLineage: autoAssignInvocationEdge,
-                    });
-                    autoAssignMemoryContextSnapshot = bound?.snapshot || null;
-                }
-                const autoAssignTypedMemoryDispatchAdmission = (0, memory_1.admitChildTypedMemoryDelivery)(autoAssignGroupMemoryContext, {
-                    workerContextPacket: autoAssignHandoff.worker_context_packet,
-                    renderedPrompt: autoAssignRenderedPrompt,
-                    attemptSequence: autoAssignMemoryDeliveryAttemptSequence,
-                });
-                if (autoAssignTypedMemoryDispatchAdmission.admitted !== true) {
-                    throw new Error(`类型化记忆 dispatch-time consume 门禁未通过：${autoAssignTypedMemoryDispatchAdmission.reason || "unknown"}`);
-                }
-                const autoAssignTypedMemoryDispatchStartedAt = new Date().toISOString();
-                const autoAssignTypedMemoryDispatchWal = (0, memory_1.createChildTypedMemoryDispatchWal)(autoAssignTypedMemoryDispatchAdmission, {
-                    memoryBundle: autoAssignGroupMemoryContext,
-                    workerContextPacket: autoAssignHandoff.worker_context_packet,
-                    renderedPrompt: autoAssignRenderedPrompt,
-                    snapshotRenderedPrompt: autoAssignRenderedPrompt,
-                    executionId: task.id,
-                    capacityRevalidationProof: autoAssignCapacityRevalidationPreparation?.proof || null,
-                });
-                let autoAssignTypedMemoryDispatchWalRecord = (0, memory_1.markChildTypedMemoryDispatchStarted)(autoAssignTypedMemoryDispatchWal, {
-                    dispatchStartedAt: autoAssignTypedMemoryDispatchStartedAt,
-                    transport: agentType,
-                });
-                if (!autoAssignCapacityRevalidationCommitted && autoAssignTaskSession && autoAssignCapacityRevalidationPreparation?.proof && autoAssignTypedMemoryDispatchWalRecord) {
-                    const capacityCommit = (0, agent_sessions_1.commitTaskAgentSessionCapacityRevalidation)(autoAssignTaskSession.id, autoAssignCapacityRevalidationPreparation.proof, {
-                        typedMemoryDispatchWalRecordChecksum: autoAssignTypedMemoryDispatchWalRecord.record_checksum,
-                        typedMemoryDispatchWalState: autoAssignTypedMemoryDispatchWalRecord.state,
-                    });
-                    if (capacityCommit?.acknowledged !== true)
-                        throw new Error(`模型容量下降门禁提交失败：${capacityCommit?.reason || "capacity_revalidation_commit_failed"}`);
-                    autoAssignTaskSession = capacityCommit.session || autoAssignTaskSession;
-                    autoAssignCapacityRevalidationCommitted = true;
-                    if (autoAssignPendingCapacityGate) {
-                        (0, logs_1.addTaskLog)(task.id, "info", `${task.target_project} 已按下降后的模型容量重建并压缩上下文包，且已绑定 durable dispatch`);
-                        (0, logs_1.appendTaskTimelineEvent)(task.id, {
-                            type: "task_agent_capacity_revalidated",
-                            title: `${task.target_project} 容量降级上下文已重建`,
-                            detail: `${autoAssignPendingCapacityGate.previous_context_window || 0} -> ${autoAssignPendingCapacityGate.current_context_window || 0} token`,
-                            status: "ok",
-                            phase: "dispatching",
-                            agent: task.target_project,
-                            data: {
-                                capacity_downgrade_gate: autoAssignPendingCapacityGate,
-                                capacity_revalidation_proof: autoAssignCapacityRevalidationPreparation.proof,
-                                capacity_revalidation_commit_receipt: capacityCommit.receipt,
-                                worker_context_packet_id: autoAssignHandoff.worker_context_packet?.packet_id || "",
-                            },
-                        });
-                    }
-                }
-                if (autoAssignInvocationEdge) {
-                    autoAssignInvocationEdge = (0, task_agent_invocation_lineage_1.bindTaskAgentInvocationContext)(autoAssignInvocationEdge, {
-                        workerContextPacketId: autoAssignHandoff.worker_context_packet?.packet_id || "",
-                        memoryContextSnapshotId: autoAssignMemoryContextSnapshot?.snapshot_id || "",
-                        memoryContextSnapshotChecksum: autoAssignMemoryContextSnapshot?.checksum || "",
-                        groupSessionMemoryBinding: autoAssignMemoryContextSnapshot?.context?.group_session_memory_binding || null,
-                        summaryCapsuleChecksum: autoAssignHandoff.worker_context_packet?.post_turn_summary_delivery_capsule?.capsule_checksum || "",
-                        typedMemoryDeliveryCapsule: autoAssignHandoff.worker_context_packet?.typed_memory_delivery_capsule || null,
-                        renderedPrompt: autoAssignRenderedPrompt,
-                    });
-                    autoAssignInvocationEdge = (0, task_agent_invocation_lineage_1.dispatchTaskAgentInvocationEdge)(autoAssignInvocationEdge, {
-                        transport: agentType,
-                        dispatchedAt: autoAssignTypedMemoryDispatchStartedAt,
-                        dispatchTicketId: autoAssignTypedMemoryDispatchAdmission.ticket?.ticket_id || "",
-                        dispatchTicketChecksum: autoAssignTypedMemoryDispatchAdmission.ticket?.ticket_checksum || "",
-                        typedMemoryDispatchWalFile: autoAssignTypedMemoryDispatchWalRecord?.file || "",
-                        typedMemoryDispatchWalRecordChecksum: autoAssignTypedMemoryDispatchWalRecord?.record_checksum || "",
-                        typedMemoryDispatchWalState: autoAssignTypedMemoryDispatchWalRecord?.state || "",
-                        platformDispatchId: autoAssignTypedMemoryDispatchWalRecord?.platform_dispatch_id || "",
-                    });
-                }
-                const taskResult = await ctx.callAgent(task.target_project, autoAssignRenderedPrompt, workDir, agentType, 300000, {
-                    tab: autoAssignGroupId ? "groups" : "projects",
-                    groupId: autoAssignGroupId,
-                    project: task.target_project,
-                    allowedTools: toolContext.allowedTools,
-                    mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
-                    runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
-                    runtimeToolDispatchGate: runtimeToolContext.dispatchGate,
-                    taskId: task.id,
-                    executionId: task.id,
-                    model: autoAssignTaskSession?.modelId || "",
-                    taskAgentSessionId: autoAssignTaskSession?.id || "",
-                    ...taskAgentSessionLifecycleRunnerOptions(autoAssignMemoryContextSnapshot),
-                    agentSession: autoAssignTaskSession ? (0, agent_sessions_1.getTaskAgentSessionOptions)(autoAssignTaskSession) : null,
-                    durableDispatch: autoAssignTypedMemoryDispatchAdmission.required === true || autoAssignCapacityRevalidationPreparation?.required === true,
-                    onRunnerRequestCreated: (requestId) => {
-                        autoAssignRunnerRequestId = String(requestId || "");
-                        if (autoAssignTypedMemoryDispatchWalRecord && autoAssignRunnerRequestId) {
-                            autoAssignTypedMemoryDispatchWalRecord = (0, memory_1.markChildTypedMemoryDispatchStarted)({ required: true, record: autoAssignTypedMemoryDispatchWalRecord }, {
-                                dispatchStartedAt: autoAssignTypedMemoryDispatchStartedAt,
-                                transport: autoAssignRunnerRequestId.startsWith("adr_") ? "server_direct_cli" : "external_runner",
-                                runnerRequestId: autoAssignRunnerRequestId,
-                            });
-                        }
-                        if (autoAssignInvocationEdge && autoAssignRunnerRequestId) {
-                            autoAssignInvocationEdge = (0, task_agent_invocation_lineage_1.bindTaskAgentInvocationRunnerRequest)(autoAssignInvocationEdge, autoAssignRunnerRequestId, {
-                                typedMemoryDispatchWalRecordChecksum: autoAssignTypedMemoryDispatchWalRecord?.record_checksum || "",
-                                typedMemoryDispatchWalState: autoAssignTypedMemoryDispatchWalRecord?.state || "",
-                            });
-                        }
-                    },
-                    onDone: (opts) => {
-                        autoAssignNativeSessionId = String(opts?.nativeSessionId || "");
-                        autoAssignNativeContinuationEvidence = opts?.nativeContinuationEvidence || null;
-                        autoAssignNativeModelCapabilityReceipt = opts?.nativeModelCapabilityReceipt || null;
-                        autoAssignModelCapabilityRecord = opts?.nativeModelCapabilityRecord || null;
-                        autoAssignSucceeded = opts?.isError !== true;
-                        autoAssignError = String(opts?.error || opts?.message || "");
-                        autoAssignRunnerRequestId = String(opts?.runnerRequestId || autoAssignRunnerRequestId || "");
-                        autoAssignRunnerStarted = opts?.runnerStarted === true;
-                    },
-                });
-                if (!autoAssignCapacityRevalidationCommitted && autoAssignTaskSession && autoAssignCapacityRevalidationPreparation?.proof) {
-                    const capacityCommit = (0, agent_sessions_1.commitTaskAgentSessionCapacityRevalidation)(autoAssignTaskSession.id, autoAssignCapacityRevalidationPreparation.proof, {
-                        runnerRequestId: autoAssignRunnerRequestId,
-                        runnerStarted: autoAssignRunnerStarted,
-                    });
-                    if (capacityCommit?.acknowledged !== true)
-                        throw new Error(`模型容量下降门禁缺少 durable dispatch 证明：${capacityCommit?.reason || "capacity_revalidation_commit_failed"}`);
-                    autoAssignTaskSession = capacityCommit.session || autoAssignTaskSession;
-                    autoAssignCapacityRevalidationCommitted = true;
-                    if (autoAssignPendingCapacityGate) {
-                        (0, logs_1.addTaskLog)(task.id, "info", `${task.target_project} 已按下降后的模型容量重建并压缩上下文包，且已绑定 runner return`);
-                        (0, logs_1.appendTaskTimelineEvent)(task.id, {
-                            type: "task_agent_capacity_revalidated",
-                            title: `${task.target_project} 容量降级上下文已重建`,
-                            detail: `${autoAssignPendingCapacityGate.previous_context_window || 0} -> ${autoAssignPendingCapacityGate.current_context_window || 0} token`,
-                            status: "ok",
-                            phase: "executing",
-                            agent: task.target_project,
-                            data: {
-                                capacity_downgrade_gate: autoAssignPendingCapacityGate,
-                                capacity_revalidation_proof: autoAssignCapacityRevalidationPreparation.proof,
-                                capacity_revalidation_commit_receipt: capacityCommit.receipt,
-                                worker_context_packet_id: autoAssignHandoff.worker_context_packet?.packet_id || "",
-                            },
-                        });
-                    }
-                }
-                if (autoAssignInvocationEdge) {
-                    const autoAssignFailed = !autoAssignSucceeded || (0, agent_receipts_1.checkTaskFailure)(taskResult);
-                    autoAssignInvocationEdge = (0, task_agent_invocation_lineage_1.completeTaskAgentInvocationEdge)(autoAssignInvocationEdge, {
-                        success: !autoAssignFailed,
-                        nativeSessionId: autoAssignNativeSessionId || autoAssignTaskSession?.nativeSessionId || "",
-                        nativeContinuationEvidence: autoAssignNativeContinuationEvidence,
-                        nativeModelCapabilityReceipt: autoAssignNativeModelCapabilityReceipt,
-                        nativeModelCapabilityRecord: autoAssignModelCapabilityRecord,
-                        provider: agentType,
-                        runnerRequestId: autoAssignRunnerRequestId,
-                        output: taskResult,
-                        error: autoAssignError,
-                        reason: autoAssignFailed ? "execution_failed" : "execution_completed",
-                    });
-                }
-                let autoAssignMemoryContextDelivery = null;
-                if (autoAssignTypedMemoryDispatchWalRecord && autoAssignRunnerStarted) {
-                    autoAssignTypedMemoryDispatchWalRecord = (0, memory_1.markChildTypedMemoryRunnerReturned)(autoAssignTypedMemoryDispatchWalRecord, {
-                        runnerRequestId: autoAssignRunnerRequestId,
-                        runnerSucceeded: autoAssignSucceeded,
-                        output: taskResult,
-                    });
-                }
-                const autoAssignFileChanges = workDir ? ctx.getFileChanges(task.target_project, changeSnapshot) : null;
-                if (autoAssignTaskSession && autoAssignMemoryContextSnapshot) {
-                    const delivery = (0, agent_sessions_1.recordTaskAgentMemoryContextDelivery)(autoAssignTaskSession.id, {
-                        snapshotId: autoAssignMemoryContextSnapshot.snapshot_id || autoAssignTaskSession.memoryContextSnapshotId || "",
-                        renderedPrompt: autoAssignRenderedPrompt,
-                        snapshotRenderedPrompt: autoAssignRenderedPrompt,
-                        executionId: task.id,
-                        traceId: task.trace_id || "",
-                        runtime: agentType,
-                        attempt: autoAssignMemoryDeliveryAttemptSequence,
-                        nativeSessionId: autoAssignNativeSessionId || autoAssignTaskSession.nativeSessionId || "",
-                        runnerRequestId: autoAssignRunnerRequestId,
-                        dispatched: autoAssignRunnerStarted,
-                        executionSucceeded: autoAssignSucceeded,
-                        output: taskResult,
-                        fileChanges: autoAssignFileChanges,
-                        nativeContinuationEvidence: autoAssignNativeContinuationEvidence,
-                        runnerStarted: autoAssignRunnerStarted,
-                        invocationEdgeId: autoAssignInvocationEdge?.invocation_edge_id || "",
-                    });
-                    autoAssignMemoryContextDelivery = delivery?.receipt || null;
-                    if (autoAssignTypedMemoryDispatchWalRecord && autoAssignMemoryContextDelivery?.delivered === true) {
-                        autoAssignTypedMemoryDispatchWalRecord = (0, memory_1.markChildTypedMemoryRunnerReturned)(autoAssignTypedMemoryDispatchWalRecord, {
-                            runnerRequestId: autoAssignRunnerRequestId,
-                            runnerSucceeded: autoAssignSucceeded,
-                            output: taskResult,
-                            deliveryReceipt: autoAssignMemoryContextDelivery,
-                        });
-                    }
-                }
-                if (autoAssignInvocationEdge) {
-                    autoAssignInvocationEdge = (0, task_agent_invocation_lineage_1.bindTaskAgentInvocationMemoryDelivery)(autoAssignInvocationEdge, {
-                        deliveryReceipt: autoAssignMemoryContextDelivery,
-                    });
-                }
-                const autoAssignTypedMemoryDeliveryCommit = (0, memory_1.commitChildTypedMemoryDelivery)(autoAssignGroupMemoryContext, {
-                    workerContextPacket: autoAssignHandoff.worker_context_packet,
-                    dispatchEvidence: {
-                        renderedPrompt: autoAssignRenderedPrompt,
-                        deliveryReceipt: autoAssignMemoryContextDelivery,
-                        dispatchTicket: autoAssignTypedMemoryDispatchAdmission.ticket,
-                        dispatchStartedAt: autoAssignTypedMemoryDispatchStartedAt,
-                        dispatched: autoAssignRunnerStarted,
-                        executionReturned: autoAssignRunnerStarted,
-                    },
-                });
-                if (autoAssignTypedMemoryDeliveryCommit.committed === true) {
-                    (0, logs_1.addTaskLog)(task.id, "info", `${task.target_project} 自动派发类型化记忆投递租约已提交：${autoAssignTypedMemoryDeliveryCommit.lease?.leaseId || "unknown"}`);
-                }
-                if (autoAssignTypedMemoryDispatchWalRecord && autoAssignRunnerStarted && autoAssignMemoryContextDelivery?.delivered === true) {
-                    autoAssignTypedMemoryDispatchWalRecord = (0, memory_1.markChildTypedMemoryDispatchCommitted)(autoAssignTypedMemoryDispatchWalRecord, autoAssignTypedMemoryDeliveryCommit);
-                }
-                if (autoAssignTaskSession) {
-                    autoAssignTaskSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(autoAssignTaskSession.id, {
-                        nativeSessionId: autoAssignNativeSessionId,
-                        nativeContinuationEvidence: autoAssignNativeContinuationEvidence,
-                        nativeContinuationUnverified: autoAssignNativeContinuationEvidence?.nativeResumeRequested === true
-                            && autoAssignNativeContinuationEvidence?.nativeContinuationAcknowledged !== true,
-                        success: autoAssignSucceeded,
-                        error: autoAssignError || (!autoAssignSucceeded ? taskResult : ""),
-                        nativeModelCapabilityRecord: autoAssignModelCapabilityRecord,
-                        runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
-                    }) || autoAssignTaskSession;
-                }
-                const fileChanges = autoAssignFileChanges;
-                const execution = getTaskExecutionFromReceipt(taskResult, (0, agent_receipts_1.extractAgentReceipt)(taskResult, task.target_project), { fileChanges });
-                const isCompleted = execution.status === "done";
-                const legacyDeliverySummary = buildDeliverySummary(task, execution, isCompleted ? "done" : "waiting");
-                const updatedTask = updateTask(task_id, {
-                    status: isCompleted ? "done" : "in_progress",
-                    result: taskResult.substring(0, 500),
-                    final_report: execution.report || taskResult,
-                    status_detail: execution.detail || (isCompleted ? "验收通过" : "等待补充信息或返工"),
-                    receipt: execution.receipt || null,
-                    file_changes: execution.fileChanges || null,
-                    delivery_summary: legacyDeliverySummary,
-                }) || { ...task, status: isCompleted ? "done" : "in_progress", delivery_summary: legacyDeliverySummary, status_detail: execution.detail || (isCompleted ? "验收通过" : "等待补充信息或返工") };
-                if (autoAssignGroupId) {
-                    appendLegacyTaskExecutionGroupReport({
-                        groupId: autoAssignGroupId,
-                        task: updatedTask,
-                        status: isCompleted ? "done" : "waiting",
-                        detail: execution.detail || (isCompleted ? "验收通过" : "等待补充信息或返工"),
-                        rawResult: taskResult,
-                        fileChanges,
-                    });
-                }
-                (0, utils_1.sendJson)(res, { success: true, task, completed: isCompleted, result: taskResult });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 500);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/tasks/auto-execute-all" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const tasks = (0, db_1.loadTasks)().filter(t => t.status === "pending");
-                if (tasks.length === 0) {
-                    return (0, utils_1.sendJson)(res, { success: true, message: "没有待执行的任务" });
-                }
-                const results = tasks.map(task => ({
-                    task_id: task.id,
-                    title: task.title,
-                    ...enqueueTask(task.id, ctx)
-                }));
-                const queuedCount = results.filter(r => r.queued).length;
-                (0, utils_1.sendJson)(res, {
-                    success: true,
-                    message: `${queuedCount}/${tasks.length} 个任务已加入队列`,
-                    results,
-                    queue_status: getQueueStatus()
-                });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 500);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/review" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const { group_id, project, diff, reviewers } = JSON.parse(body);
-                if (!diff)
-                    return (0, utils_1.sendJson)(res, { error: "请提供代码变更内容" }, 400);
-                const configs = (0, db_1.getConfigs)();
-                const reviewPrompt = `请审查以下代码变更，从你的专业角度给出意见：
-
-项目：${project}
-代码变更：
-\`\`\`
-${diff}
-\`\`\`
-
-请从以下角度审查：
-1. 代码质量
-2. 潜在 bug
-3. 安全问题
-4. 性能影响
-5. 与你的项目的兼容性
-
-返回 JSON 格式：
-{
-  "issues": [
-    {
-      "severity": "high/medium/low",
-      "description": "问题描述",
-      "suggestion": "修改建议"
-    }
-  ],
-  "overall": "总体评价"
-}`;
-                const reviewResults = [];
-                const reviewGroup = group_id ? (0, storage_1.loadGroups)().find(g => g.id === group_id) : null;
-                for (const reviewer of (reviewers || [])) {
-                    const config = configs.find(c => c.name === reviewer);
-                    if (!config)
-                        continue;
-                    const info = (0, db_1.getConfigInfo)(config.path);
-                    const workDir = info[0]?.workDir;
-                    const agentType = info[0]?.agent || "claudecode";
-                    try {
-                        const toolContext = buildAgentToolContext(ctx, reviewGroup, reviewer, reviewPrompt);
-                        const runtimeToolContext = prepareAgentRuntimeTools(group_id || "", reviewer, workDir, agentType, toolContext.allowedTools, null, {
-                            toolAudit: toolContext.toolAudit,
-                            authorizationReadiness: toolContext.authorizationReadiness,
-                        });
-                        assertRuntimeToolDispatchReady(reviewer, runtimeToolContext);
-                        const result = await ctx.callAgent(reviewer, `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${reviewPrompt}`, workDir, agentType, 120000, {
-                            tab: group_id ? "groups" : "projects",
-                            groupId: group_id,
-                            project: reviewer,
-                            allowedTools: toolContext.allowedTools,
-                            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
-                            runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
-                            runtimeToolDispatchGate: runtimeToolContext.dispatchGate,
-                        });
-                        reviewResults.push({ reviewer, result });
-                    }
-                    catch (e) {
-                        reviewResults.push({ reviewer, error: e.message });
-                    }
-                }
-                if (group_id) {
-                    const groups = (0, storage_1.loadGroups)();
-                    const group = groups.find(g => g.id === group_id);
-                    const coordinator = group ? (0, group_orchestrator_1.getCoordinatorMember)(group) : { project: "coordinator" };
-                    appendLegacyCodeReviewGroupReport({
-                        groupId: group_id,
-                        project,
-                        coordinator: coordinator.project,
-                        reviewResults,
-                    });
-                }
-                (0, utils_1.sendJson)(res, { success: true, reviews: reviewResults });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 500);
-            }
-        });
-        return true;
-    }
-    if (pathname === "/api/collaboration/stats" && req.method === "GET") {
-        const tasks = (0, db_1.loadTasks)();
-        const groups = (0, storage_1.loadGroups)();
-        const stats = {
-            total_tasks: tasks.length,
-            pending_tasks: tasks.filter((t) => t.status === "pending").length,
-            in_progress_tasks: tasks.filter((t) => t.status === "in_progress").length,
-            done_tasks: tasks.filter((t) => t.status === "done").length,
-            failed_tasks: tasks.filter((t) => t.status === "failed").length,
-            completion_rate: tasks.length > 0 ? Math.round(tasks.filter((t) => t.status === "done").length / tasks.length * 100) : 0,
-            groups_count: groups.length,
-            recent_activities: []
-        };
-        for (const group of groups.slice(0, 3)) {
-            const messages = (0, storage_1.getGroupMessages)(group.id).slice(-5);
-            for (const msg of messages) {
-                stats.recent_activities.push({
-                    group: group.name,
-                    agent: msg.agent || "user",
-                    content: msg.content?.substring(0, 100),
-                    timestamp: msg.timestamp
-                });
-            }
-        }
-        stats.recent_activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        stats.recent_activities = stats.recent_activities.slice(0, 10);
-        (0, utils_1.sendJson)(res, stats);
-        return true;
-    }
-    if (pathname === "/api/test/mentions" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                const { text, group_id } = JSON.parse(body);
-                let validMentions = [];
-                if (group_id) {
-                    const groups = (0, storage_1.loadGroups)();
-                    const group = groups.find(g => g.id === group_id);
-                    if (group) {
-                        validMentions = extractActionableMentions(text, group, "");
-                    }
-                }
-                (0, utils_1.sendJson)(res, {
-                    success: true,
-                    input: text,
-                    valid_mentions: validMentions.map(m => m.mention),
-                    extracted_messages: validMentions.map(m => ({ mention: m.mention, target: m.targetName, message: m.message }))
-                });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
-        return true;
-    }
-    if ((0, feishu_routes_1.handleFeishuRoutes)(req, res, parsed))
-        return true;
-    return false;
+    return require("./collaboration-routes").handleCollaborationApi(pathname, req, res, parsed, ctx);
 }
 //# sourceMappingURL=collaboration.js.map

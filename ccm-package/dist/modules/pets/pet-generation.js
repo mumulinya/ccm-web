@@ -48,7 +48,6 @@ const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
-const runtime_1 = require("../../agents/runtime");
 const utils_1 = require("../../core/utils");
 const JOBS_FILE = path.join(utils_1.CCM_DIR, "pet-generation-jobs.json");
 const RUNS_DIR = path.join(utils_1.CCM_DIR, "pet-generation");
@@ -59,6 +58,109 @@ const pendingQueue = [];
 const MAX_CONCURRENT_GENERATIONS = 1;
 let configChangedNotifier = null;
 let lifecycleNotifier = null;
+let cachedPetCodexRuntime;
+function quoteShellArg(value) {
+    return `"${String(value || "").replace(/"/g, '\\"')}"`;
+}
+function semanticVersionParts(value) {
+    const match = String(value || "").match(/\b(\d+)\.(\d+)\.(\d+)(?:[-+]([^\s]+))?/);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3]), match[4] ? 0 : 1] : [0, 0, 0, 0];
+}
+function compareSemanticVersions(left, right) {
+    const a = semanticVersionParts(left);
+    const b = semanticVersionParts(right);
+    for (let index = 0; index < a.length; index++) {
+        if (a[index] !== b[index])
+            return a[index] - b[index];
+    }
+    return 0;
+}
+function discoverPatchedCodexExecutables(root, maxDepth = 9) {
+    const results = [];
+    const visit = (directory, depth) => {
+        if (depth > maxDepth || results.length >= 20)
+            return;
+        let entries = [];
+        try {
+            entries = fs.readdirSync(directory, { withFileTypes: true });
+        }
+        catch {
+            return;
+        }
+        for (const entry of entries) {
+            if (results.length >= 20)
+                break;
+            if (entry.isSymbolicLink())
+                continue;
+            const candidate = path.join(directory, entry.name);
+            if (entry.isFile() && /^codex\.exe$/i.test(entry.name) && /codexpatched/i.test(candidate)) {
+                results.push(candidate);
+            }
+            else if (entry.isDirectory()) {
+                visit(candidate, depth + 1);
+            }
+        }
+    };
+    if (fs.existsSync(root))
+        visit(root, 0);
+    return results;
+}
+function probeCodexRuntime(command) {
+    try {
+        const absolute = path.isAbsolute(command);
+        const result = (0, child_process_1.spawnSync)(command, ["--version"], {
+            windowsHide: true,
+            encoding: "utf-8",
+            timeout: 15_000,
+            shell: process.platform === "win32" && !absolute,
+        });
+        const version = String(result.stdout || result.stderr || "").trim().split(/\r?\n/)[0].slice(0, 160);
+        const semanticVersion = version.match(/\b\d+(?:\.\d+){2}(?:[-+][0-9A-Za-z.-]+)?/)?.[0] || "";
+        return result.status === 0 && semanticVersion ? { command, version, semanticVersion } : null;
+    }
+    catch {
+        return null;
+    }
+}
+function resolvePetCodexRuntime() {
+    if (cachedPetCodexRuntime !== undefined)
+        return cachedPetCodexRuntime;
+    const explicit = [process.env.CCM_PET_CODEX_COMMAND, process.env.CCM_CODEX_COMMAND]
+        .map(value => String(value || "").trim())
+        .filter(Boolean);
+    const documentsRoot = path.join(os.homedir(), "Documents", "Codex");
+    const candidates = Array.from(new Set([
+        ...explicit,
+        ...discoverPatchedCodexExecutables(documentsRoot),
+        "codex",
+    ]));
+    const available = candidates.map(probeCodexRuntime).filter(Boolean);
+    available.sort((left, right) => compareSemanticVersions(right.semanticVersion, left.semanticVersion));
+    cachedPetCodexRuntime = available[0] || null;
+    return cachedPetCodexRuntime;
+}
+function buildPetCodexCommand(promptPath, runtime) {
+    const executable = path.isAbsolute(runtime.command) ? quoteShellArg(runtime.command) : runtime.command;
+    const input = process.platform === "win32" ? `type ${quoteShellArg(promptPath)}` : `cat ${quoteShellArg(promptPath)}`;
+    return `${input} | ${executable} exec --sandbox danger-full-access --ephemeral --skip-git-repo-check -`;
+}
+function petGenerationExitError(job, code, signal) {
+    let log = "";
+    try {
+        log = fs.readFileSync(job.logPath, "utf-8").slice(-12_000);
+    }
+    catch { }
+    if (/failed to parse model_catalog_json|unknown variant [`'"](max|ultra)/i.test(log)) {
+        return "Codex CLI 与当前模型目录不兼容，请升级 Codex CLI 后重试";
+    }
+    if (/requires a newer version of Codex|upgrade to the latest app or CLI/i.test(log)) {
+        return "当前 Codex CLI 版本过旧，无法使用所选模型，请升级后重试";
+    }
+    if (/image[_ -]?gen|image generation/i.test(log) && /not found|unavailable|missing|disabled/i.test(log)) {
+        return "当前 Codex 运行时没有可用的图像生成能力";
+    }
+    return `Codex 生成进程退出：${code ?? signal ?? "unknown"}`;
+}
 function setPetGenerationConfigChangedNotifier(notifier) {
     configChangedNotifier = notifier;
 }
@@ -283,13 +385,15 @@ function watchProgress(job) {
     progressWatchers.set(job.id, timer);
 }
 function runGenerationJob(job) {
-    if (!(0, runtime_1.isAgentRuntimeAvailable)("codex")) {
+    const runtime = resolvePetCodexRuntime();
+    if (!runtime) {
         patchJob(job.id, { status: "failed", stageLabel: "无法启动生成", error: "未检测到 Codex CLI，无法使用 hatch-pet 生成动作图集" });
         queueMicrotask(pumpGenerationQueue);
         return;
     }
     fs.writeFileSync(job.promptPath, buildGenerationPrompt(job), "utf-8");
-    const command = (0, runtime_1.buildAgentCommand)("codex", job.promptPath, { persistSession: false });
+    const command = buildPetCodexCommand(job.promptPath, runtime);
+    fs.writeFileSync(job.logPath, `[CCM] 使用 ${runtime.version} 生成宠物\n`, { encoding: "utf-8", flag: "a" });
     const out = fs.openSync(job.logPath, "a");
     const child = (0, child_process_1.spawn)(command, [], {
         cwd: job.runDir,
@@ -323,7 +427,7 @@ function runGenerationJob(job) {
         if (current?.status === "cancelled")
             return;
         if (code !== 0) {
-            patchJob(job.id, { status: "failed", stageLabel: "宠物生成失败", progress: Math.min(95, current?.progress || 0), error: `Codex 生成进程退出：${code ?? signal ?? "unknown"}` });
+            patchJob(job.id, { status: "failed", stageLabel: "宠物生成失败", progress: Math.min(95, current?.progress || 0), error: petGenerationExitError(job, code, signal) });
             pumpGenerationQueue();
             return;
         }
@@ -528,6 +632,7 @@ function runPetGenerationContractSelfTest() {
     let rejectsV1 = false;
     let rejectsWrongDimensions = false;
     let acceptsV2 = false;
+    let catalogErrorFriendly = false;
     try {
         const v1 = makeJob("v1");
         fs.writeFileSync(path.join(v1.runDir, "final", "pet.json"), JSON.stringify({ spriteVersionNumber: 1, spritesheetPath: "spritesheet.webp" }));
@@ -552,6 +657,9 @@ function runPetGenerationContractSelfTest() {
         writePngHeader(path.join(valid.runDir, "final", "spritesheet.webp"), 1536, 2288);
         writeQaFixtures(valid);
         acceptsV2 = verifyGeneratedPackage(valid).manifest.spriteVersionNumber === 2;
+        const catalogError = makeJob("catalog-error");
+        fs.writeFileSync(catalogError.logPath, "failed to parse model_catalog_json: unknown variant `max`");
+        catalogErrorFriendly = petGenerationExitError(catalogError, 1, null).includes("模型目录不兼容");
     }
     finally {
         fs.rmSync(fixtureRoot, { recursive: true, force: true });
@@ -565,6 +673,9 @@ function runPetGenerationContractSelfTest() {
         generated_skin_targets_system_agents: ["global-agent", "music-agent"].every(item => ["global-agent", "music-agent"].includes(item)),
         reference_path_is_workspace_scoped: !isPathInside(utils_1.CCM_DIR, path.resolve(utils_1.CCM_DIR, "..", "outside.png")),
         all_terminal_states_supported: ["completed", "failed", "cancelled"].every(status => ["completed", "failed", "cancelled"].includes(status)),
+        semantic_version_prefers_newer_runtime: compareSemanticVersions("0.144.0-alpha.4", "0.115.0") > 0,
+        launch_command_preserves_ephemeral_full_access: buildPetCodexCommand("C:\\tmp\\prompt.md", { command: "C:\\tmp\\codex.exe" }).includes("--sandbox danger-full-access --ephemeral --skip-git-repo-check"),
+        catalog_incompatibility_is_actionable: catalogErrorFriendly,
     };
     return { schema: "ccm-pet-generation-contract-selftest-v1", pass: Object.values(checks).every(Boolean), checks };
 }

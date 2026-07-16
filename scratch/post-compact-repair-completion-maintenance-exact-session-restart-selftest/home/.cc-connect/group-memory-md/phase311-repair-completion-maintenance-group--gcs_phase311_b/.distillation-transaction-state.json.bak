@@ -1,0 +1,23 @@
+{
+  "schema": "ccm-group-typed-memory-distillation-transaction-state-v1",
+  "version": 1,
+  "groupId": "phase311-repair-completion-maintenance-group--gcs_phase311_b",
+  "status": "in_progress",
+  "mutationKind": "post_compact_receipt_memory_usage_repair",
+  "mutationKinds": [
+    "post_compact_receipt_memory_usage_repair"
+  ],
+  "leaseId": "gtmdl_348f02fb7cc04d792308fd7153546bed",
+  "fencingToken": 1784073513586236,
+  "lastFencingToken": 1784073513586236,
+  "lastCommittedFencingToken": 1784073513281236,
+  "recoveredLeaseCount": 0,
+  "waitedMs": 0,
+  "writeCount": 0,
+  "startedAt": "2026-07-14T23:58:33.585Z",
+  "completedAt": "",
+  "failedAt": "",
+  "error": "",
+  "updatedAt": "2026-07-14T23:58:33.585Z",
+  "stateChecksum": "5eca93ffee354d91b27abc5c1db11dbf501fa11bd2db9fcc5d47e552f8ccf910"
+}

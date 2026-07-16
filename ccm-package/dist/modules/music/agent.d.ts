@@ -46,6 +46,8 @@ export declare function runMusicAgentIntentSelfTest(): {
         currentMessageNotDuplicated: boolean;
         conversationStartsWithUser: boolean;
         structuredTextContentSupported: boolean;
+        openAiBaseUrlUsesUnifiedEndpoint: boolean;
+        anthropicBaseUrlUsesUnifiedEndpoint: boolean;
     };
     samples: {
         playSpecific: {

@@ -33,6 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.signInternalMcpEvidence = signInternalMcpEvidence;
+exports.verifyInternalMcpEvidenceSignature = verifyInternalMcpEvidenceSignature;
 exports.sealInternalMcpTaskContext = sealInternalMcpTaskContext;
 exports.openInternalMcpTaskContext = openInternalMcpTaskContext;
 exports.buildInternalMcpServerConfig = buildInternalMcpServerConfig;
@@ -49,17 +51,38 @@ const SECRET_FILE = path.join(CCM_DIR, "private", "internal-mcp-context-secret")
 const AUDIT_FILE = path.join(CCM_DIR, "tools", "internal-mcp-invocations.jsonl");
 const CONTEXT_TTL_MS = 14 * 24 * 60 * 60_000;
 function ensureSecret() {
-    fs.mkdirSync(path.dirname(SECRET_FILE), { recursive: true });
-    if (!fs.existsSync(SECRET_FILE)) {
-        fs.writeFileSync(SECRET_FILE, crypto.randomBytes(32).toString("base64url"), { encoding: "utf-8", mode: 0o600 });
+    const secretFile = path.resolve(String(process.env.CCM_INTERNAL_MCP_SECRET_FILE || SECRET_FILE));
+    fs.mkdirSync(path.dirname(secretFile), { recursive: true });
+    if (!fs.existsSync(secretFile)) {
+        fs.writeFileSync(secretFile, crypto.randomBytes(32).toString("base64url"), { encoding: "utf-8", mode: 0o600 });
     }
-    const value = fs.readFileSync(SECRET_FILE, "utf-8").trim();
+    const value = fs.readFileSync(secretFile, "utf-8").trim();
     if (value.length < 32)
         throw new Error("内部 MCP 上下文密钥无效");
     return value;
 }
 function signature(payload) {
     return crypto.createHmac("sha256", ensureSecret()).update(payload).digest("base64url");
+}
+function canonical(value) {
+    if (Array.isArray(value))
+        return value.map(canonical);
+    if (!value || typeof value !== "object")
+        return value;
+    return Object.keys(value).sort().reduce((result, key) => {
+        if (value[key] !== undefined)
+            result[key] = canonical(value[key]);
+        return result;
+    }, {});
+}
+function signInternalMcpEvidence(value) {
+    return signature(JSON.stringify(canonical(value || {})));
+}
+function verifyInternalMcpEvidenceSignature(value, supplied) {
+    const expected = signInternalMcpEvidence(value);
+    const left = Buffer.from(String(supplied || ""));
+    const right = Buffer.from(expected);
+    return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 function sealInternalMcpTaskContext(input) {
     const issuedAt = input.issuedAt || new Date().toISOString();
@@ -102,7 +125,10 @@ function buildInternalMcpServerConfig(entryFile, context) {
     return {
         command: process.execPath,
         args: [entryFile],
-        env: { CCM_INTERNAL_MCP_CONTEXT: sealInternalMcpTaskContext(context) },
+        env: {
+            CCM_INTERNAL_MCP_CONTEXT: sealInternalMcpTaskContext(context),
+            CCM_INTERNAL_MCP_SECRET_FILE: path.resolve(String(process.env.CCM_INTERNAL_MCP_SECRET_FILE || SECRET_FILE)),
+        },
     };
 }
 function assertInternalMcpRole(context, roles, action) {

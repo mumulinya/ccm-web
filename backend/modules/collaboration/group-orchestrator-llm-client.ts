@@ -2,7 +2,7 @@ import * as http from "http";
 import * as https from "https";
 import { recordProviderNativeCompactExecutionReceipt } from "./provider-native-compact-execution-receipt";
 import { verifyGroupApiMicrocompactNativeApplyPlan } from "./group-memory-compaction";
-import { notifyGroupPromptCacheDeletion } from "./group-prompt-cache-break-detection";
+import { notifyGroupPromptCacheDeletion, recordGroupPromptCacheState } from "./group-prompt-cache-break-detection";
 
 export type LlmChatMessage = {
   role: string;
@@ -31,6 +31,8 @@ type LlmCallOptions = {
   api_microcompact_native_apply_plan?: any;
   apiMicrocompactNativeApplyTelemetry?: any;
   api_microcompact_native_apply_telemetry?: any;
+  promptCacheTracking?: any;
+  prompt_cache_tracking?: any;
   onUsage?: (usage: LlmTokenUsage) => void;
 };
 
@@ -261,6 +263,30 @@ function providerRequestId(response: any) {
     || responseHeader(response, "x-anthropic-request-id");
 }
 
+function recordAnthropicPromptCacheState(config: any, options: LlmCallOptions, body: any, headers: Record<string, string>) {
+  const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
+  const groupId = String(tracking?.groupId || tracking?.group_id || "").trim();
+  const groupSessionId = String(tracking?.groupSessionId || tracking?.group_session_id || "").trim();
+  if (!groupId || !groupSessionId.startsWith("gcs_")) return null;
+  const betaHeader = Object.entries(headers || {}).find(([key]) => key.toLowerCase() === "anthropic-beta")?.[1] || "";
+  try {
+    return recordGroupPromptCacheState({
+      ...tracking,
+      groupId,
+      groupSessionId,
+      provider: "anthropic",
+      model: config.model,
+      system: body?.system || "",
+      toolSchemas: body?.tools || tracking?.toolSchemas || tracking?.tool_schemas || [],
+      betaHeaders: String(betaHeader).split(",").map(value => value.trim()).filter(Boolean),
+      cachedMicrocompactEnabled: !!body?.context_management,
+      extraBodyParams: tracking?.extraBodyParams || tracking?.extra_body_params || {},
+    });
+  } catch {
+    return null;
+  }
+}
+
 function recordApiMicrocompactNativeAdapterTelemetry(options: LlmCallOptions, input: any = {}) {
   const plan = getApiMicrocompactNativeApplyPlan(options);
   if (!plan?.schema) return null;
@@ -353,6 +379,7 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
     }, options);
+    recordAnthropicPromptCacheState(config, options, patched.body, patched.headers);
     const sentAt = new Date().toISOString();
     let response: any = null;
     try {

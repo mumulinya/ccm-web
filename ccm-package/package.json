@@ -42,11 +42,11 @@
   "author": "",
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "ccm": "file:..",
+    "better-sqlite3": "^12.11.1",
     "electron": "^35.7.5",
     "zod": "^3.25.76"
   }

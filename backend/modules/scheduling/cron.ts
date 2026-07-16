@@ -12,6 +12,10 @@ import {
 import { CCM_DIR } from "../../core/utils";
 import { readJsonWithBackup, withFileLock, writeJsonAtomic } from "../../core/atomic-json-file";
 import {
+  getLiveProviderMemoryEnduranceSchedulerStatus,
+  runLiveProviderMemoryEnduranceSchedulerTick,
+} from "../../integrations/live-provider-memory-endurance";
+import {
   claimReadyDailyDevBacklog,
   continueDailyDevTasksFromGaps,
   createAndQueueTask,
@@ -1266,6 +1270,11 @@ async function tickCronScheduler(ctx: CollabCtx) {
   } catch (error: any) {
     console.error("[Cron][MemoryMaintenance]", error?.message || error);
   }
+  try {
+    runLiveProviderMemoryEnduranceSchedulerTick({ at: now.toISOString() });
+  } catch (error: any) {
+    console.error("[Cron][MemoryEndurance]", error?.message || error);
+  }
 }
 
 export function startCronScheduler(ctx: CollabCtx) {
@@ -1311,6 +1320,7 @@ function schedulerStatus() {
       createdTaskCount: 0,
       createdApprovalReceiptCount: 0,
     },
+    live_provider_memory_endurance: getLiveProviderMemoryEnduranceSchedulerStatus(),
   };
 }
 

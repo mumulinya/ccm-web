@@ -42,30 +42,20 @@ exports.appendTaskTimelineEvent = appendTaskTimelineEvent;
 exports.getTaskTimeline = getTaskTimeline;
 exports.getTaskLogs = getTaskLogs;
 exports.clearTaskLogs = clearTaskLogs;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
-const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
+const task_store_1 = require("../../core/task-store");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 // === 群聊日志管理 ===
 function safeAddGroupLog(groupId, level, category, message, details = null) {
     try {
-        const logs = fs.existsSync(utils_1.GROUP_LOGS_FILE_SHARED)
-            ? JSON.parse(fs.readFileSync(utils_1.GROUP_LOGS_FILE_SHARED, "utf-8"))
-            : {};
-        if (!logs[groupId])
-            logs[groupId] = [];
-        logs[groupId].push({
+        (0, task_store_1.appendGroupLogRecord)(groupId, {
             timestamp: new Date().toISOString(),
             level,
             category,
             message,
             details
-        });
-        if (logs[groupId].length > 500)
-            logs[groupId] = logs[groupId].slice(-500);
-        fs.writeFileSync(utils_1.GROUP_LOGS_FILE_SHARED, JSON.stringify(logs, null, 2));
+        }, 500);
     }
     catch (e) {
         console.error("保存群聊日志失败:", e.message);
@@ -73,9 +63,7 @@ function safeAddGroupLog(groupId, level, category, message, details = null) {
 }
 function loadGroupLogs() {
     try {
-        if (fs.existsSync(utils_1.GROUP_LOGS_FILE)) {
-            return JSON.parse(fs.readFileSync(utils_1.GROUP_LOGS_FILE, "utf-8"));
-        }
+        return (0, task_store_1.loadGroupLogsFromSqlite)();
     }
     catch (e) {
         console.error("加载群聊日志失败:", e.message);
@@ -84,62 +72,28 @@ function loadGroupLogs() {
 }
 function saveGroupLogs(logs) {
     try {
-        fs.writeFileSync(utils_1.GROUP_LOGS_FILE, JSON.stringify(logs, null, 2));
+        (0, task_store_1.replaceGroupLogsInSqlite)(logs);
     }
     catch (e) {
         console.error("保存群聊日志失败:", e.message);
     }
 }
 function addGroupLog(groupId, level, category, message, details = null) {
-    const logs = loadGroupLogs();
-    if (!logs[groupId])
-        logs[groupId] = [];
-    logs[groupId].push({
+    (0, task_store_1.appendGroupLogRecord)(groupId, {
         timestamp: new Date().toISOString(),
         level,
         category,
         message,
         details
-    });
-    if (logs[groupId].length > 500) {
-        logs[groupId] = logs[groupId].slice(-500);
-    }
-    saveGroupLogs(logs);
+    }, 500);
 }
 // === 任务日志系统 ===
-const TASK_LOGS_FILE = path.join(utils_1.CCM_DIR, "task-logs.json");
-function loadTaskLogs() {
-    try {
-        if (fs.existsSync(TASK_LOGS_FILE)) {
-            return JSON.parse(fs.readFileSync(TASK_LOGS_FILE, "utf-8"));
-        }
-    }
-    catch (e) {
-        console.error("加载任务日志失败:", e.message);
-    }
-    return {};
-}
-function saveTaskLogs(logs) {
-    try {
-        fs.writeFileSync(TASK_LOGS_FILE, JSON.stringify(logs, null, 2));
-    }
-    catch (e) {
-        console.error("保存任务日志失败:", e.message);
-    }
-}
 function addTaskLog(taskId, level, message) {
-    const logs = loadTaskLogs();
-    if (!logs[taskId])
-        logs[taskId] = [];
-    logs[taskId].push({
+    (0, task_store_1.appendTaskLogRecord)(taskId, {
         timestamp: new Date().toISOString(),
         level,
         message
-    });
-    if (logs[taskId].length > 100) {
-        logs[taskId] = logs[taskId].slice(-100);
-    }
-    saveTaskLogs(logs);
+    }, 100);
     console.log(`[任务日志] [${taskId}] [${level}] ${message.substring(0, 100)}`);
 }
 function appendTaskTimelineEvent(taskId, event = {}) {
@@ -190,13 +144,9 @@ function getTaskTimeline(task, execution = {}) {
     }).slice(-160);
 }
 function getTaskLogs(taskId, limit = 50) {
-    const logs = loadTaskLogs();
-    const taskLogs = logs[taskId] || [];
-    return taskLogs.slice(-limit);
+    return (0, task_store_1.getTaskLogRecords)(taskId, limit);
 }
 function clearTaskLogs(taskId) {
-    const logs = loadTaskLogs();
-    delete logs[taskId];
-    saveTaskLogs(logs);
+    return (0, task_store_1.clearTaskLogRecords)(taskId);
 }
 //# sourceMappingURL=logs.js.map

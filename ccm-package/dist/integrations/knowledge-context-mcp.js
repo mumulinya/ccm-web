@@ -41,6 +41,7 @@ const knowledge_index_1 = require("../modules/knowledge/knowledge-index");
 const knowledge_files_1 = require("../modules/knowledge/knowledge-files");
 const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
+const memory_context_consumption_receipt_1 = require("./memory-context-consumption-receipt");
 exports.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME = "ccm__knowledge_context";
 function buildKnowledgeContextMcpServerConfig(context) {
     return (0, internal_mcp_runtime_1.buildInternalMcpServerConfig)(path.join(__dirname, "knowledge-context-mcp.js"), context);
@@ -67,6 +68,20 @@ const tools = [
         inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 100 } }, additionalProperties: false },
     },
 ];
+const memoryReceiptTool = {
+    name: "acknowledge_memory_context",
+    description: "确认当前模型已加载本轮 CCM 受信记忆上下文。仅接受签名任务上下文中的一次性 challenge；此回执不代表采纳每条记忆。",
+    inputSchema: {
+        type: "object",
+        required: ["challenge_id"],
+        properties: { challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" } },
+        additionalProperties: false,
+    },
+    roles: ["project-child-agent"],
+};
+function toolsForContext(context) {
+    return context.memoryReceiptChallenge?.challenge_id ? [...tools, memoryReceiptTool] : tools;
+}
 let indexReady = null;
 function ensureIndex() {
     if (!indexReady)
@@ -126,6 +141,9 @@ async function scopedSearch(context, query, limit, filename = "") {
     }));
 }
 async function callTool(context, name, args) {
+    if (name === "acknowledge_memory_context") {
+        return { success: true, state: "loaded", receipt: (0, memory_context_consumption_receipt_1.recordMemoryContextConsumptionReceipt)(context, args) };
+    }
     if (name === "get_project_context") {
         const task = (0, internal_mcp_task_store_1.getBoundInternalMcpTask)(context);
         const focus = internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(args?.focus, 1200);
@@ -172,7 +190,7 @@ async function callTool(context, name, args) {
     throw new Error(`未知知识上下文工具：${name}`);
 }
 function runKnowledgeContextMcpServer() {
-    (0, internal_mcp_runtime_1.runInternalMcpServer)({ name: exports.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME, tools, callTool });
+    (0, internal_mcp_runtime_1.runInternalMcpServer)({ name: exports.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME, tools: toolsForContext, callTool });
 }
 if (require.main === module)
     runKnowledgeContextMcpServer();

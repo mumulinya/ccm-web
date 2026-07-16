@@ -1,0 +1,67 @@
+{
+  "schema": "ccm-group-typed-memory-shape-trend-ledger-v1",
+  "version": 1,
+  "scopeId": "phase307-replay-repair-feedback-group--gcs_phase307_b",
+  "bodyFree": true,
+  "retentionDays": 180,
+  "mutableDays": 35,
+  "maxKeysPerBucket": 1200,
+  "generation": 8,
+  "headBucketChecksum": "8e472e46da5b8590e49063e0dfb3c77712726a4885e7cec6d23d49aef22759da",
+  "buckets": [
+    {
+      "date": "2026-07-14",
+      "sealed": false,
+      "sealedAt": "",
+      "selector": {
+        "runCount": 0,
+        "candidateTotal": 0,
+        "selectedTotal": 0,
+        "emptyCount": 0,
+        "selectedAgeWeightedDays": 0,
+        "selectedAgeDocumentCount": 0,
+        "freshCount": 0,
+        "staleCount": 0,
+        "candidateCapacityRunCount": 0,
+        "selectionCapacityRunCount": 0
+      },
+      "write": {
+        "eventCount": 8,
+        "changedCount": 7,
+        "createCount": 5,
+        "updateCount": 2,
+        "noopCount": 1,
+        "growthBytes": 9601,
+        "afterBytesTotal": 13366,
+        "maxAfterBytes": 2702,
+        "nearBodyLimitCount": 0,
+        "truncatedBodyCount": 0
+      },
+      "consumption": {
+        "outcomeCount": 0,
+        "deliveredDocumentCount": 0,
+        "usedDocumentCount": 0,
+        "verifiedDocumentCount": 0,
+        "ignoredDocumentCount": 0,
+        "unreportedDocumentCount": 0,
+        "strongReceiptOutcomeCount": 0,
+        "unexpectedClaimCount": 0
+      },
+      "contributionKeys": [
+        "36b24e0b2c6d48c9ba69f1a796061610",
+        "054a9e63852e70805c682d768d62602f",
+        "6a1e3b0b1036f0de74419a124b5cb5c8",
+        "f84b2142bca6591fe630db03fa6ad11a",
+        "da7a7b434dc7f1be52a1826785ff973a",
+        "7fca4827fbebe1fa51d35d8df33a422b",
+        "c405f114acd153c2dcaeb0c75198433a",
+        "278e2dc79f6fd916fcc943e0d1a9f5f2"
+      ],
+      "previousBucketChecksum": "",
+      "updatedAt": "2026-07-14T23:40:10.019Z",
+      "checksum": "8e472e46da5b8590e49063e0dfb3c77712726a4885e7cec6d23d49aef22759da"
+    }
+  ],
+  "updatedAt": "2026-07-14T23:40:10.019Z",
+  "checksum": "53eed121b08a351bb221fb3173e75ef72d60ddc4f762b066a826e6f11e762bdc"
+}

@@ -5,6 +5,7 @@ export declare function buildTestAcceptanceMcpServerConfig(context: Omit<Interna
     args: string[];
     env: {
         CCM_INTERNAL_MCP_CONTEXT: string;
+        CCM_INTERNAL_MCP_SECRET_FILE: string;
     };
 };
 export declare function runTestAcceptanceMcpServer(): void;

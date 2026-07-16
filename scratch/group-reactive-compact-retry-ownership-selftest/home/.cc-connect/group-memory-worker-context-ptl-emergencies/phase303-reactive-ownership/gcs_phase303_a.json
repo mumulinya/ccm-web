@@ -1,0 +1,39 @@
+{
+  "schema": "ccm-worker-context-ptl-emergency-hint-v1",
+  "version": 1,
+  "hint_id": "wcptl:98120c9b1a6142",
+  "groupId": "phase303-reactive-ownership",
+  "groupSessionId": "gcs_phase303_a",
+  "scopeId": "phase303-reactive-ownership::gcs_phase303_a",
+  "file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-reactive-compact-retry-ownership-selftest\\home\\.cc-connect\\group-memory-worker-context-ptl-emergencies\\phase303-reactive-ownership\\gcs_phase303_a.json",
+  "engaged": true,
+  "emergency_level": "critical",
+  "reason": "WorkerContextPacket repeated compact failure requires PTL emergency downgrade: task_compacted_still_blocked=1",
+  "blocked_outcome_count": 1,
+  "task_compacted_blocked_count": 1,
+  "repeated_failed_categories": [],
+  "source_ledger_file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-reactive-compact-retry-ownership-selftest\\home\\.cc-connect\\group-memory-worker-context-compact-outcomes\\phase303-reactive-ownership\\gcs_phase303_a.json",
+  "source_strategy_file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-reactive-compact-retry-ownership-selftest\\home\\.cc-connect\\group-memory-worker-context-compact-strategies\\phase303-reactive-ownership\\gcs_phase303_a.json",
+  "recommended_retry_options": {
+    "memory": {
+      "maxRenderedChars": 900,
+      "maxJsonChars": 700,
+      "maxRecallItems": 3
+    },
+    "replayRepairDispatchBriefs": {
+      "maxBriefs": 4,
+      "maxStringChars": 120,
+      "maxIdChars": 100
+    },
+    "metadata": {
+      "maxCategories": 1,
+      "maxItems": 2,
+      "maxStringChars": 100,
+      "maxDependencyReasonChars": 100,
+      "maxContractSummaryChars": 100
+    },
+    "maxTaskChars": 1400
+  },
+  "generated_at": "2026-07-15T04:26:13.053Z",
+  "updatedAt": "2026-07-15T04:26:13.053Z"
+}

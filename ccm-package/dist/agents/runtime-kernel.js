@@ -57,6 +57,7 @@ exports.runAgentRuntimeKernelSelfTest = runAgentRuntimeKernelSelfTest;
 exports.runWorkerContextUsageSelfTest = runWorkerContextUsageSelfTest;
 exports.runWorkerContextProviderDispatchOverrideFollowupReceiptContractSelfTest = runWorkerContextProviderDispatchOverrideFollowupReceiptContractSelfTest;
 const crypto = __importStar(require("crypto"));
+const task_agent_memory_entry_sync_1 = require("../tasks/task-agent-memory-entry-sync");
 const context_budget_1 = require("../system/context-budget");
 const reliability_ledger_1 = require("../system/reliability-ledger");
 const group_post_turn_summary_1 = require("../modules/collaboration/group-post-turn-summary");
@@ -90,6 +91,13 @@ function uniqueRuntimeStrings(values = [], limit = 24) {
 function renderWorkerPacketMemory(memory) {
     if (!memory)
         return "";
+    const transport = (0, task_agent_memory_entry_sync_1.taskAgentMemoryTransport)(memory);
+    if (transport.present && !transport.valid)
+        return `[CCM task-Agent memory entry sync invalid: ${transport.issues.join(",")}]`;
+    if (transport.mode === "continuation")
+        return "";
+    if (transport.mode === "delta")
+        return transport.text;
     const compactMemory = (value, max = 5000) => {
         const text = typeof value === "string" ? value : JSON.stringify(value || {});
         return text.length <= max ? text : `${text.slice(0, Math.ceil(max * 0.68))}\n...[memory truncated ${text.length - max} chars]...\n${text.slice(-Math.floor(max * 0.2))}`;
@@ -2365,9 +2373,12 @@ function renderWorkerContextPacket(packet) {
     const memoryText = renderWorkerPacketMemory(packet?.memory || null);
     const memoryPolicyText = renderWorkerMemoryPolicy(packet?.memory_policy || packet?.memoryPolicy || null);
     const typedMemoryDeliveryExpectedBinding = buildWorkerTypedMemoryDeliveryExpectedBinding(packet, packet?.memory || null);
-    const typedMemoryDeliveryCapsuleText = renderWorkerTypedMemoryDeliveryCapsule(packet?.typed_memory_delivery_capsule
-        || packet?.typedMemoryDeliveryCapsule
-        || extractWorkerTypedMemoryDeliveryCapsule(packet?.memory || null), typedMemoryDeliveryExpectedBinding);
+    const memoryEntryTransport = (0, task_agent_memory_entry_sync_1.taskAgentMemoryTransport)(packet?.memory || null);
+    const typedMemoryDeliveryCapsuleText = ["delta", "continuation"].includes(memoryEntryTransport.mode)
+        ? ""
+        : renderWorkerTypedMemoryDeliveryCapsule(packet?.typed_memory_delivery_capsule
+            || packet?.typedMemoryDeliveryCapsule
+            || extractWorkerTypedMemoryDeliveryCapsule(packet?.memory || null), typedMemoryDeliveryExpectedBinding);
     const postTurnSummaryDeliveryCapsule = packet?.post_turn_summary_delivery_capsule
         || packet?.postTurnSummaryDeliveryCapsule
         || (0, group_post_turn_summary_1.extractGroupPostTurnSummaryDeliveryCapsule)(packet?.memory || null);

@@ -107,12 +107,12 @@ export const GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = ".instructions-loade
 
 export type GroupTypedMemoryType = "user" | "feedback" | "project" | "reference";
 
-const GROUP_TYPED_MEMORY_DIR = path.join(CCM_DIR, "group-memory-md");
+export const GROUP_TYPED_MEMORY_DIR = path.join(CCM_DIR, "group-memory-md");
 const GLOBAL_PROVIDER_DISPATCH_RELIABILITY_DIR = path.join(CCM_DIR, "global-provider-reliability");
-const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-work-items");
+export const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-work-items");
 const VALID_TYPES = new Set<GroupTypedMemoryType>(["user", "feedback", "project", "reference"]);
-const CLAUDE_EDITABLE_SETTING_SOURCES = ["userSettings", "projectSettings", "localSettings"] as const;
-const CLAUDE_ALWAYS_ON_SETTING_SOURCES = ["policySettings", "flagSettings"] as const;
+export const CLAUDE_EDITABLE_SETTING_SOURCES = ["userSettings", "projectSettings", "localSettings"] as const;
+export const CLAUDE_ALWAYS_ON_SETTING_SOURCES = ["policySettings", "flagSettings"] as const;
 const CLAUDE_MEMORY_INCLUDE_TEXT_EXTENSIONS = new Set([
   ".md", ".txt", ".text", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv",
   ".html", ".htm", ".css", ".scss", ".sass", ".less",
@@ -121,24 +121,23 @@ const CLAUDE_MEMORY_INCLUDE_TEXT_EXTENSIONS = new Set([
   ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
   ".sql", ".graphql", ".gql", ".proto", ".ini", ".cfg", ".conf",
 ]);
-const groupMemoryInstructionsLoadedHooks = new Set<(input: any) => any>();
-type GroupTypedMemoryManifestSelectorExecutor = (request: any) => Promise<any>;
-let configuredGroupTypedMemoryManifestSelectorExecutor: GroupTypedMemoryManifestSelectorExecutor | null = null;
-const activeGroupTypedMemoryDistillationMutations = new Map<string, any>();
+export const groupMemoryInstructionsLoadedHooks = new Set<(input: any) => any>();
+export type GroupTypedMemoryManifestSelectorExecutor = (request: any) => Promise<any>;
+export const activeGroupTypedMemoryDistillationMutations = new Map<string, any>();
 const DELIVERY_CLEANUP_EXECUTOR_INSTANCE_ID = `${os.hostname()}:${process.pid}:${crypto.randomBytes(6).toString("hex")}`;
 const DELIVERY_CLEANUP_EXECUTION_LEASE_TTL_MS = 30_000;
 const DELIVERY_CLEANUP_EXECUTION_LEASE_MAX_TTL_MS = 5 * 60_000;
 
-function now() {
+export function now() {
   return new Date().toISOString();
 }
 
-function safeSegment(value: any, fallback = "unknown") {
+export function safeSegment(value: any, fallback = "unknown") {
   const text = String(value || "").trim().replace(/[^a-zA-Z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120);
   return text || fallback;
 }
 
-function normalizeMemoryType(value: any): GroupTypedMemoryType {
+export function normalizeMemoryType(value: any): GroupTypedMemoryType {
   const type = String(value || "").trim().toLowerCase() as GroupTypedMemoryType;
   return VALID_TYPES.has(type) ? type : "project";
 }
@@ -154,7 +153,7 @@ function normalizeClaudeSettingSourceName(value: any) {
   return "";
 }
 
-function parseClaudeSettingSources(value: any) {
+export function parseClaudeSettingSources(value: any) {
   if (value === undefined || value === null) return null;
   const raw = Array.isArray(value)
     ? value
@@ -172,35 +171,10 @@ function parseClaudeSettingSources(value: any) {
 }
 
 export function buildClaudeMemorySettingSourcePolicy(options: any = {}) {
-  const configured = parseClaudeSettingSources(options.settingSources ?? options.setting_sources ?? process.env.CCM_CLAUDE_SETTING_SOURCES);
-  const editable = configured
-    ? configured.enabled.filter(source => (CLAUDE_EDITABLE_SETTING_SOURCES as readonly string[]).includes(source))
-    : [...CLAUDE_EDITABLE_SETTING_SOURCES];
-  const enabled = new Set<string>([
-    ...editable,
-    ...CLAUDE_ALWAYS_ON_SETTING_SOURCES,
-    ...(configured?.enabled || []).filter(source => (CLAUDE_ALWAYS_ON_SETTING_SOURCES as readonly string[]).includes(source)),
-  ]);
-  const explicitDisable = (camel: string, snake: string) => options[camel] === false || options[snake] === false;
-  const policy = {
-    schema: "ccm-claude-memory-setting-source-policy-v1",
-    version: GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION,
-    configured: configured ? configured.enabled : null,
-    invalid: configured?.invalid || [],
-    enabled: [...enabled],
-    disabled: [...CLAUDE_EDITABLE_SETTING_SOURCES, ...CLAUDE_ALWAYS_ON_SETTING_SOURCES].filter(source => !enabled.has(source)),
-    isolationMode: configured !== null && editable.length === 0,
-    includeUser: enabled.has("userSettings") && !explicitDisable("includeUser", "include_user"),
-    includeProject: enabled.has("projectSettings") && !explicitDisable("includeProject", "include_project"),
-    includeLocal: enabled.has("localSettings") && !explicitDisable("includeLocal", "include_local"),
-    includeManaged: enabled.has("policySettings") && !explicitDisable("includeManaged", "include_managed"),
-    includeFlagSettings: enabled.has("flagSettings"),
-    order: ["userSettings", "projectSettings", "localSettings", "flagSettings", "policySettings"],
-  };
-  return policy;
+  return require("./group-memory-loading").buildClaudeMemorySettingSourcePolicy(options);
 }
 
-function compactText(value: any, max = 1000) {
+export function compactText(value: any, max = 1000) {
   const text = String(value || "").replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
   if (text.length <= max) return text;
   const head = Math.max(1, Math.floor(max * 0.65));
@@ -208,7 +182,7 @@ function compactText(value: any, max = 1000) {
   return `${text.slice(0, head)}\n...[typed-memory truncated]...\n${text.slice(-tail)}`;
 }
 
-function uniqueStrings(values: any[] = [], limit = 20) {
+export function uniqueStrings(values: any[] = [], limit = 20) {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const raw of values) {
@@ -222,7 +196,7 @@ function uniqueStrings(values: any[] = [], limit = 20) {
   return result;
 }
 
-function checksum(value: any, length = 16) {
+export function checksum(value: any, length = 16) {
   const input = Buffer.isBuffer(value) ? value : typeof value === "string" ? value : JSON.stringify(value);
   return crypto.createHash("sha256").update(input).digest("hex").slice(0, length);
 }
@@ -233,7 +207,7 @@ function ensureGroupTypedMemoryDir(groupId: string) {
   return dir;
 }
 
-function writeTextAtomicRaw(file: string, content: string) {
+export function writeTextAtomicRaw(file: string, content: string) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   try {
     if (fs.existsSync(file) && fs.readFileSync(file, "utf-8") === content) return false;
@@ -250,7 +224,7 @@ function writeTextAtomic(file: string, content: string) {
   return stageGroupTypedMemoryArtifact(mutation, file, content);
 }
 
-function readJson(file: string, fallback: any) {
+export function readJson(file: string, fallback: any) {
   const mutation = activeGroupTypedMemoryArtifactMutationForFile(file);
   const pending = mutation?.pendingArtifacts?.get(normalizeArtifactFile(file));
   if (pending) {
@@ -260,7 +234,7 @@ function readJson(file: string, fallback: any) {
   try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return fallback; }
 }
 
-function writeJsonAtomic(file: string, value: any) {
+export function writeJsonAtomic(file: string, value: any) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (path.basename(file) === GROUP_TYPED_MEMORY_DISTILLATION_LEDGER) {
     const groupId = String(value?.groupId || "");
@@ -320,7 +294,7 @@ function renderFrontmatter(meta: any) {
   return lines.join("\n");
 }
 
-function parseFrontmatter(content: string) {
+export function parseFrontmatter(content: string) {
   const text = String(content || "");
   if (!text.startsWith("---")) return { meta: {}, body: text.trim() };
   const end = text.indexOf("\n---", 3);
@@ -336,7 +310,7 @@ function parseFrontmatter(content: string) {
   return { meta, body: text.slice(end + 4).trim() };
 }
 
-function normalizePathGlobs(value: any) {
+export function normalizePathGlobs(value: any) {
   const raw = Array.isArray(value)
     ? value
     : String(value || "").split(/[,;\n]+/);
@@ -408,7 +382,7 @@ function pathMatchesTypedMemoryGlobs(targetPath: string, globs: any[] = []) {
   return false;
 }
 
-function evaluateTypedMemoryPathCondition(doc: any, targetPaths: any[] = []) {
+export function evaluateTypedMemoryPathCondition(doc: any, targetPaths: any[] = []) {
   const globs = normalizePathGlobs(doc?.paths || doc?.pathGlobs || doc?.globs || []);
   if (!globs.length) return { conditional: false, matched: true, matchedPaths: [], globs };
   const paths = deriveGroupTypedMemoryTargetPaths("", targetPaths);
@@ -442,7 +416,7 @@ function listMemoryMarkdownFiles(groupId: string) {
   return [...files.values()];
 }
 
-function tokens(value: any) {
+export function tokens(value: any) {
   const text = String(value || "").toLowerCase();
   const result = new Set<string>();
   for (const match of text.matchAll(/[a-z0-9_./\\:-]{3,}/g)) result.add(match[0]);
@@ -534,7 +508,7 @@ function semanticRecallFeatures(value: any) {
   };
 }
 
-function semanticRecallCorpusStats(docs: any[] = [], query = "") {
+export function semanticRecallCorpusStats(docs: any[] = [], query = "") {
   const queryFeatures = semanticRecallFeatures(query);
   const docFeatures = new Map<string, any>();
   const documentFrequency = new Map<string, number>();
@@ -556,7 +530,7 @@ function roundSemanticRecallScore(value: any, precision = 3) {
   return Math.round(number * factor) / factor;
 }
 
-function scoreSemanticNaturalLanguageRecall(doc: any, stats: any) {
+export function scoreSemanticNaturalLanguageRecall(doc: any, stats: any) {
   const query = stats.queryFeatures || semanticRecallFeatures("");
   const key = String(doc.relPath || doc.file || doc.name || "");
   const features = stats.docFeatures.get(key) || semanticRecallFeatures(`${doc.name || ""}\n${doc.description || ""}\n${doc.body || ""}`);
@@ -635,7 +609,7 @@ function scoreSemanticNaturalLanguageRecall(doc: any, stats: any) {
   };
 }
 
-function semanticRecallDuplicateOf(candidate: any, accepted: any[] = []) {
+export function semanticRecallDuplicateOf(candidate: any, accepted: any[] = []) {
   const candidateSemantic = candidate.semanticReference || {};
   const candidateConcepts = new Set<string>(candidateSemantic.documentConcepts || []);
   const candidatePolarities = new Set<string>(candidateSemantic.documentPolarities || []);
@@ -663,7 +637,7 @@ function semanticRecallDuplicateOf(candidate: any, accepted: any[] = []) {
   return null;
 }
 
-function extractSemanticRecallSnippet(body: string, queryFeatures: any, max = 700) {
+export function extractSemanticRecallSnippet(body: string, queryFeatures: any, max = 700) {
   const queryConcepts = new Set<string>(queryFeatures?.concepts || []);
   const queryTokens = new Set<string>(queryFeatures?.semanticTokens || []);
   const lines = String(body || "").split(/\n+/).filter(Boolean);
@@ -691,7 +665,7 @@ function extractSnippet(body: string, queryTokens: string[], max = 700) {
   return compactText(picked, max);
 }
 
-function normalizePostCompactCandidateUsageHints(input: any = {}) {
+export function normalizePostCompactCandidateUsageHints(input: any = {}) {
   const usage = input.postCompactCandidateUsage
     || input.post_compact_candidate_usage
     || input.candidateUsage
@@ -724,7 +698,7 @@ function normalizePostCompactCandidateUsageHints(input: any = {}) {
   }).filter((row: any) => row.candidate_id || row.value);
 }
 
-function scorePostCompactCandidateUsageHint(corpus: string, hints: any[] = []) {
+export function scorePostCompactCandidateUsageHint(corpus: string, hints: any[] = []) {
   const matched: any[] = [];
   let adjustment = 0;
   for (const hint of hints) {
@@ -769,7 +743,7 @@ function normalizeWorkerContextPressureStatus(rawStatus: any, pressure = 0, free
   return "";
 }
 
-function normalizeWorkerContextPressureRecallSignals(options: any = {}) {
+export function normalizeWorkerContextPressureRecallSignals(options: any = {}) {
   const sources: any[] = [];
   const memory = options.groupMemory || options.group_memory || options.memory || options.workerMemory || options.worker_memory || null;
   const addSource = (source: string, raw: any) => {
@@ -930,7 +904,7 @@ function classifyWorkerContextPressureRecallDoc(corpus: string, doc: any = {}) {
   };
 }
 
-function scoreWorkerContextPressureRecall(corpus: string, doc: any, signals: any = {}, queryText = "", queryTokens: string[] = []) {
+export function scoreWorkerContextPressureRecall(corpus: string, doc: any, signals: any = {}, queryText = "", queryTokens: string[] = []) {
   const classification = classifyWorkerContextPressureRecallDoc(corpus, doc);
   if (!classification.pressure_doc) {
     return {
@@ -998,7 +972,7 @@ function scoreWorkerContextPressureRecall(corpus: string, doc: any, signals: any
   };
 }
 
-function normalizeWorkerContextPressureRecallUsageState(value: any) {
+export function normalizeWorkerContextPressureRecallUsageState(value: any) {
   const state = String(value || "").toLowerCase().trim();
   if (["used", "ignored", "verified", "mentioned"].includes(state)) return state;
   if (["checked", "reviewed", "validated", "confirmed"].includes(state)) return "verified";
@@ -1007,14 +981,14 @@ function normalizeWorkerContextPressureRecallUsageState(value: any) {
   return "";
 }
 
-function roundPressureRecallUsageWeight(value: any, precision = 3) {
+export function roundPressureRecallUsageWeight(value: any, precision = 3) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) return 0;
   const factor = Math.pow(10, precision);
   return Math.round(number * factor) / factor;
 }
 
-function normalizeWorkerContextPressureRecallUsageAging(options: any = {}) {
+export function normalizeWorkerContextPressureRecallUsageAging(options: any = {}) {
   const disabled = options.disableUsageAging === true
     || options.disable_usage_aging === true
     || options.usageAging === false
@@ -1070,13 +1044,13 @@ function workerContextPressureRecallUsageEntryTimeMs(entry: any = {}, fallbackMs
   return Number.isFinite(parsed) ? parsed : fallbackMs;
 }
 
-function workerContextPressureRecallUsageAgeDays(entry: any = {}, aging: any = {}) {
+export function workerContextPressureRecallUsageAgeDays(entry: any = {}, aging: any = {}) {
   const nowMs = Number(aging.now_ms || Date.now());
   const timeMs = workerContextPressureRecallUsageEntryTimeMs(entry, nowMs);
   return Math.max(0, (nowMs - timeMs) / (24 * 60 * 60 * 1000));
 }
 
-function workerContextPressureRecallUsageDecayWeight(ageDays: any, aging: any = {}) {
+export function workerContextPressureRecallUsageDecayWeight(ageDays: any, aging: any = {}) {
   if (aging.enabled === false) return 1;
   const days = Math.max(0, Number(ageDays || 0));
   const halfLifeDays = Math.max(1, Number(aging.half_life_days || GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS));
@@ -1084,7 +1058,7 @@ function workerContextPressureRecallUsageDecayWeight(ageDays: any, aging: any = 
   return roundPressureRecallUsageWeight(Math.max(Number(aging.min_decay_weight || 0), weight), 4);
 }
 
-function workerContextPressureRecallStatsKey(row: any = {}, targetProject = "") {
+export function workerContextPressureRecallStatsKey(row: any = {}, targetProject = "") {
   const relPath = String(row.rel_path || row.relPath || "").trim().toLowerCase();
   const name = String(row.name || "").trim().toLowerCase();
   return [
@@ -1093,7 +1067,7 @@ function workerContextPressureRecallStatsKey(row: any = {}, targetProject = "") 
   ].join("|");
 }
 
-function workerContextPressureRecallUsageRecommendation(stats: any = {}) {
+export function workerContextPressureRecallUsageRecommendation(stats: any = {}) {
   const weightedTotal = Number(stats.weighted_total_count ?? stats.total_weighted_count ?? 0);
   const rawTotal = Number(stats.total_count || 0);
   const staleCount = Number(stats.stale_count || 0);
@@ -1111,7 +1085,7 @@ function workerContextPressureRecallUsageRecommendation(stats: any = {}) {
   return "neutral_verify_current_pressure";
 }
 
-function buildWorkerContextPressureRecallUsageEntry(groupId: string, input: any = {}, row: any = {}) {
+export function buildWorkerContextPressureRecallUsageEntry(groupId: string, input: any = {}, row: any = {}) {
   const usageState = normalizeWorkerContextPressureRecallUsageState(row.usage_state || row.usageState || row.status || row.state);
   if (!usageState) return null;
   const relPath = String(row.rel_path || row.relPath || "").trim();
@@ -1155,32 +1129,11 @@ function buildWorkerContextPressureRecallUsageEntry(groupId: string, input: any 
 }
 
 export function readGroupTypedMemoryPressureRecallUsageLedger(groupId: string) {
-  const file = getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
-    return {
-      ...parsed,
-      file,
-      stats: parsed?.stats && typeof parsed.stats === "object" ? parsed.stats : {},
-      entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
-      totals: parsed?.totals && typeof parsed.totals === "object" ? parsed.totals : {},
-    };
-  } catch {
-    return {
-      schema: "ccm-group-typed-memory-pressure-recall-usage-ledger-v1",
-      version: 1,
-      groupId,
-      file,
-      stats: {},
-      entries: [],
-      totals: { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 },
-      updatedAt: "",
-    };
-  }
+  return require("./group-memory-recall-usage").readGroupTypedMemoryPressureRecallUsageLedger(groupId);
 }
 
-function getGroupPressureRecallUsageRepairWorkItemsFile(groupId: string) {
-  return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${safeSegment(groupId)}.json`);
+export function getGroupPressureRecallUsageRepairWorkItemsFile(groupId: string) {
+  return require("./group-memory-recall-usage").getGroupPressureRecallUsageRepairWorkItemsFile(groupId);
 }
 
 function normalizePressureRecallUsageRepairStatus(value: any) {
@@ -1267,7 +1220,7 @@ function matchWorkerContextPressureRecallUsageRepairHint(row: any = {}, repairHi
   }) || null;
 }
 
-function writeGroupTypedMemoryPressureRecallUsageLedger(groupId: string, ledger: any) {
+export function writeGroupTypedMemoryPressureRecallUsageLedger(groupId: string, ledger: any) {
   const file = getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
   const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).slice(-260);
   writeJsonAtomic(file, {
@@ -1282,115 +1235,14 @@ function writeGroupTypedMemoryPressureRecallUsageLedger(groupId: string, ledger:
 }
 
 export function recordGroupTypedMemoryPressureRecallUsageLedger(groupId: string, input: any = {}) {
-  groupId = String(groupId || "").trim();
-  if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true) return null;
-  const rows = Array.isArray(input.rows)
-    ? input.rows
-    : Array.isArray(input.pressureRecallUsageRows || input.pressure_recall_usage_rows)
-      ? (input.pressureRecallUsageRows || input.pressure_recall_usage_rows)
-      : [];
-  const entries = rows
-    .map((row: any) => buildWorkerContextPressureRecallUsageEntry(groupId, input, row))
-    .filter(Boolean);
-  const file = getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
-  if (!entries.length) {
-    const ledger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
-    return {
-      schema: "ccm-group-typed-memory-pressure-recall-usage-record-v1",
-      groupId,
-      file,
-      skipped: true,
-      reason: "no_pressure_recall_usage_rows",
-      recorded_count: 0,
-      totals: ledger.totals || {},
-    };
-  }
-  const ledger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
-  const seen = new Set((ledger.entries || []).map((entry: any) => entry.entry_id));
-  const newEntries = entries.filter((entry: any) => !seen.has(entry.entry_id));
-  const stats = ledger.stats || {};
-  for (const entry of newEntries) {
-    const key = workerContextPressureRecallStatsKey(entry, entry.target_project);
-    const current = stats[key] || {
-      rel_path: entry.rel_path,
-      name: entry.name,
-      type: entry.type,
-      source: entry.source,
-      target_project: entry.target_project,
-      kinds: entry.kinds || [],
-      used_count: 0,
-      ignored_count: 0,
-      verified_count: 0,
-      mentioned_count: 0,
-      total_count: 0,
-      agents: [],
-      task_ids: [],
-      packet_ids: [],
-      provenance_statuses: [],
-      repair_work_item_ids: [],
-      repair_statuses: [],
-      repair_gap_types: [],
-      first_seen_at: entry.generated_at,
-    };
-    current.rel_path = current.rel_path || entry.rel_path;
-    current.name = current.name || entry.name;
-    current.type = current.type || entry.type;
-    current.source = current.source || entry.source;
-    current.target_project = current.target_project || entry.target_project;
-    current.kinds = uniqueStrings([...(Array.isArray(current.kinds) ? current.kinds : []), ...(entry.kinds || [])], 12);
-    current[`${entry.usage_state}_count`] = Number(current[`${entry.usage_state}_count`] || 0) + 1;
-    current.total_count = Number(current.total_count || 0) + 1;
-    current.last_usage_state = entry.usage_state;
-    current.last_agent = entry.agent;
-    current.last_task_id = entry.task_id;
-    current.last_worker_context_packet_id = entry.worker_context_packet_id;
-    current.last_pressure_status = entry.pressure_status || current.last_pressure_status || "";
-    current.last_provenance_status = entry.provenance_status || current.last_provenance_status || "";
-    current.last_repair_status = entry.repair_status || current.last_repair_status || "";
-    current.last_repair_work_item_id = entry.repair_work_item_id || current.last_repair_work_item_id || "";
-    current.last_repair_gap_type = entry.repair_gap_type || current.last_repair_gap_type || "";
-    current.current_source_verified_count = Number(current.current_source_verified_count || 0) + (entry.current_source_verified === true ? 1 : 0);
-    current.last_seen_at = entry.generated_at;
-    current.agents = uniqueStrings([...(Array.isArray(current.agents) ? current.agents : []), entry.agent].filter(Boolean), 12);
-    current.task_ids = uniqueStrings([...(Array.isArray(current.task_ids) ? current.task_ids : []), entry.task_id].filter(Boolean), 12);
-    current.packet_ids = uniqueStrings([...(Array.isArray(current.packet_ids) ? current.packet_ids : []), entry.worker_context_packet_id].filter(Boolean), 12);
-    current.provenance_statuses = uniqueStrings([...(Array.isArray(current.provenance_statuses) ? current.provenance_statuses : []), entry.provenance_status].filter(Boolean), 12);
-    current.repair_work_item_ids = uniqueStrings([...(Array.isArray(current.repair_work_item_ids) ? current.repair_work_item_ids : []), entry.repair_work_item_id].filter(Boolean), 12);
-    current.repair_statuses = uniqueStrings([...(Array.isArray(current.repair_statuses) ? current.repair_statuses : []), entry.repair_status].filter(Boolean), 12);
-    current.repair_gap_types = uniqueStrings([...(Array.isArray(current.repair_gap_types) ? current.repair_gap_types : []), entry.repair_gap_type].filter(Boolean), 12);
-    current.recommendation = workerContextPressureRecallUsageRecommendation(current);
-    stats[key] = current;
-  }
-  const allEntries = [...(ledger.entries || []), ...newEntries].slice(-260);
-  const totals = allEntries.reduce((acc: any, entry: any) => {
-    const state = normalizeWorkerContextPressureRecallUsageState(entry.usage_state);
-    if (state) acc[state] = Number(acc[state] || 0) + 1;
-    acc.total += 1;
-    return acc;
-  }, { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 });
-  const updatedAt = String(input.generatedAt || input.generated_at || now());
-  writeGroupTypedMemoryPressureRecallUsageLedger(groupId, {
-    stats,
-    entries: allEntries,
-    totals,
-    updatedAt,
-  });
-  return {
-    schema: "ccm-group-typed-memory-pressure-recall-usage-record-v1",
-    groupId,
-    file,
-    recorded_count: newEntries.length,
-    duplicate_count: entries.length - newEntries.length,
-    totals,
-    updatedAt,
-  };
+  return require("./group-memory-recall-usage").recordGroupTypedMemoryPressureRecallUsageLedger(groupId, input);
 }
 
-function getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(groupId: string) {
+export function getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(groupId: string) {
   return path.join(getGroupTypedMemoryDir(groupId), GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_USAGE_LEDGER);
 }
 
-function normalizePostCompactCompletionMemoryPreservationClosureUsageState(value: any) {
+export function normalizePostCompactCompletionMemoryPreservationClosureUsageState(value: any) {
   const state = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (["used", "applied", "consumed"].includes(state)) return "used";
   if (["verified", "checked", "reverified"].includes(state)) return "verified";
@@ -1408,7 +1260,7 @@ const POST_COMPACT_CLOSURE_TASK_FAMILY_CHINESE_STOP_BIGRAMS = new Set([
   "记忆", "压缩", "修复", "回执", "会话", "上下", "下文", "任务", "继续", "当前", "源码", "验证", "群聊", "智能", "召回",
 ]);
 
-function normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(text: any, explicitKey: any = "") {
+export function normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(text: any, explicitKey: any = "") {
   const explicit = String(explicitKey || "").trim().toLowerCase().replace(/[^a-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 96);
   const source = compactText(text || "", 1200).toLowerCase();
   const asciiTokens = (source.match(/[a-z0-9_./:-]{3,}/g) || [])
@@ -1435,7 +1287,7 @@ function normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(text:
   };
 }
 
-function postCompactCompletionMemoryPreservationClosureTaskFamilyRelevance(entry: any = {}, queryFamily: any = {}, options: any = {}) {
+export function postCompactCompletionMemoryPreservationClosureTaskFamilyRelevance(entry: any = {}, queryFamily: any = {}, options: any = {}) {
   const entryKey = String(entry.task_family_key || entry.taskFamilyKey || "").trim();
   const entryTokens = uniqueStrings(entry.task_family_tokens || entry.taskFamilyTokens || [], 40);
   const queryKey = String(queryFamily.key || "").trim();
@@ -1463,7 +1315,7 @@ function postCompactCompletionMemoryPreservationClosureTaskFamilyRelevance(entry
   };
 }
 
-function normalizePostCompactCompletionMemoryPreservationClosureUsageAging(options: any = {}) {
+export function normalizePostCompactCompletionMemoryPreservationClosureUsageAging(options: any = {}) {
   return normalizeWorkerContextPressureRecallUsageAging({
     ...options,
     usageHalfLifeDays: options.postCompactClosureUsageHalfLifeDays
@@ -1559,7 +1411,7 @@ function clusterPostCompactCompletionMemoryPreservationClosureEvidence(entries: 
   });
 }
 
-function scorePostCompactCompletionMemoryPreservationClosureEvidence(entries: any[] = [], options: any = {}) {
+export function scorePostCompactCompletionMemoryPreservationClosureEvidence(entries: any[] = [], options: any = {}) {
   const independentEntries = clusterPostCompactCompletionMemoryPreservationClosureEvidence(entries).map((entry: any) => {
     const sourceReliability = postCompactCompletionMemoryPreservationClosureReceiptSourceReliability(entry, options);
     return {
@@ -1603,7 +1455,7 @@ function scorePostCompactCompletionMemoryPreservationClosureEvidence(entries: an
   };
 }
 
-function arbitratePostCompactCompletionMemoryPreservationClosureEvidenceConflict(independentEntries: any[] = [], options: any = {}) {
+export function arbitratePostCompactCompletionMemoryPreservationClosureEvidenceConflict(independentEntries: any[] = [], options: any = {}) {
   const compliant = independentEntries.filter((entry: any) => entry.compliant === true);
   const positiveEntries = compliant.filter((entry: any) => ["used", "verified"].includes(String(entry.usage_state || "")));
   const ignoredEntries = compliant.filter((entry: any) => entry.usage_state === "ignored");
@@ -1665,7 +1517,7 @@ function arbitratePostCompactCompletionMemoryPreservationClosureEvidenceConflict
   };
 }
 
-function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats: any = {}, options: any = {}) {
+export function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats: any = {}, options: any = {}) {
   const ignoredThreshold = Math.max(1, Number(options.weightedIgnoredThreshold || options.weighted_ignored_threshold || 1.5));
   const used = Number(stats.weighted_used_count ?? stats.used_count ?? 0);
   const verified = Number(stats.weighted_verified_count ?? stats.verified_count ?? 0);
@@ -1694,440 +1546,18 @@ function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats
 }
 
 export function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId: string, options: any = {}) {
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, options);
-  const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
-  const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
-  const typedScopeId = groupSessionId ? `${sourceGroupId}--${groupSessionId}` : String(groupId || sourceGroupId).trim();
-  const file = getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(typedScopeId);
-  const parsed = readJson(file, null);
-  if (parsed?.schema === "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1") {
-    return {
-      ...parsed,
-      groupId: sourceGroupId,
-      sourceGroupId,
-      groupSessionId,
-      typedScopeId,
-      exactSession: !!groupSessionId,
-      file,
-      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
-      stats: parsed.stats && typeof parsed.stats === "object" ? parsed.stats : {},
-      totals: parsed.totals && typeof parsed.totals === "object" ? parsed.totals : {},
-    };
-  }
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1",
-    version: 1,
-    groupId: sourceGroupId,
-    sourceGroupId,
-    groupSessionId,
-    typedScopeId,
-    exactSession: !!groupSessionId,
-    file,
-    entries: [],
-    stats: {},
-    totals: { used: 0, verified: 0, ignored: 0, mentioned: 0, stale: 0, compliant: 0, noncompliant: 0, total: 0 },
-    updatedAt: "",
-  };
+  return require("./group-memory-recall-usage").readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId, options);
 }
 
 export function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId: string, input: any = {}) {
-  groupId = String(groupId || "").trim();
-  const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
-  if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true) return null;
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, input);
-  const sourceGroupId = String(input.sourceGroupId || input.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
-  const groupSessionId = String(input.groupSessionId || input.group_session_id || scopeIdentity.groupSessionId || "").trim();
-  const typedScopeId = groupSessionId ? `${sourceGroupId}--${groupSessionId}` : groupId;
-  const generatedAt = String(input.generatedAt || input.generated_at || now());
-  const rows = (Array.isArray(input.rows) ? input.rows : [])
-    .map((raw: any) => {
-      const relPath = String(raw.rel_path || raw.relPath || "").trim();
-      const usageState = normalizePostCompactCompletionMemoryPreservationClosureUsageState(raw.usage_state || raw.usageState);
-      if (relPath !== closureRelPath || !usageState) return null;
-      const currentSourceVerified = raw.current_source_verified === true || raw.currentSourceVerified === true;
-      const reason = compactText(raw.reason || "", 500);
-      const semanticCompliance = usageState === "ignored" ? !!reason : ["used", "verified"].includes(usageState) && currentSourceVerified;
-      const compliant = typeof raw.compliant === "boolean" ? raw.compliant : semanticCompliance;
-      const taskText = compactText(raw.task_text || raw.taskText || raw.task || input.taskText || input.task_text || input.task || "", 900);
-      const taskFamily = normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(
-        taskText,
-        raw.task_family_key || raw.taskFamilyKey || input.taskFamilyKey || input.task_family_key
-      );
-      const conflictResolutionRequested = raw.conflict_resolution === true || raw.conflictResolution === true;
-      const conflictResolution = conflictResolutionRequested
-        && compliant
-        && !!String(raw.task_agent_session_id || raw.taskAgentSessionId || input.taskAgentSessionId || input.task_agent_session_id || "").trim()
-        && !!String(raw.native_session_id || raw.nativeSessionId || input.nativeSessionId || input.native_session_id || "").trim();
-      const entryCore = {
-        group_id: sourceGroupId,
-        source_group_id: sourceGroupId,
-        group_session_id: groupSessionId,
-        typed_scope_id: typedScopeId,
-        target_project: String(raw.target_project || raw.targetProject || input.targetProject || input.target_project || "").trim(),
-        agent: String(raw.agent || raw.agent_type || raw.agentType || input.agent || input.agentType || input.agent_type || "").trim(),
-        task_id: String(raw.task_id || raw.taskId || input.taskId || input.task_id || "").trim(),
-        task_text: taskText,
-        task_family_key: taskFamily.key,
-        task_family_tokens: taskFamily.tokens,
-        execution_id: String(raw.execution_id || raw.executionId || input.executionId || input.execution_id || "").trim(),
-        worker_context_packet_id: String(raw.worker_context_packet_id || raw.workerContextPacketId || input.workerContextPacketId || input.worker_context_packet_id || "").trim(),
-        binding_id: String(raw.binding_id || raw.bindingId || input.bindingId || input.binding_id || "").trim(),
-        task_agent_session_id: String(raw.task_agent_session_id || raw.taskAgentSessionId || input.taskAgentSessionId || input.task_agent_session_id || "").trim(),
-        native_session_id: String(raw.native_session_id || raw.nativeSessionId || input.nativeSessionId || input.native_session_id || "").trim(),
-        receipt_source: String(raw.receipt_source || raw.receiptSource || input.receiptSource || input.receipt_source || "").trim(),
-        receipt_status: String(raw.receipt_status || raw.receiptStatus || input.receiptStatus || input.receipt_status || "").trim(),
-        rel_path: relPath,
-        usage_state: usageState,
-        current_source_verified: currentSourceVerified,
-        compliant,
-        stale: ["used", "verified"].includes(usageState) && !currentSourceVerified,
-        reason,
-        repair_work_item_id: String(raw.repair_work_item_id || raw.repairWorkItemId || "").trim(),
-        conflict_resolution: conflictResolution,
-        conflict_resolution_state: conflictResolution ? usageState : "",
-        conflict_parent_arbitration_state: String(raw.conflict_parent_arbitration_state || raw.conflictParentArbitrationState || "").trim(),
-        conflict_parent_fingerprint: String(raw.conflict_parent_fingerprint || raw.conflictParentFingerprint || "").trim(),
-        conflict_parent_ratio: Number(raw.conflict_parent_ratio || raw.conflictParentRatio || 0),
-        conflict_parent_positive_weight: Number(raw.conflict_parent_positive_weight || raw.conflictParentPositiveWeight || 0),
-        conflict_parent_ignored_weight: Number(raw.conflict_parent_ignored_weight || raw.conflictParentIgnoredWeight || 0),
-        conflict_resolution_reversible: conflictResolution,
-        generated_at: generatedAt,
-      };
-      return {
-        schema: "ccm-post-compact-completion-memory-preservation-closure-usage-entry-v1",
-        entry_id: `pccmpu_${checksum([
-          entryCore.group_id,
-          entryCore.group_session_id,
-          entryCore.typed_scope_id,
-          entryCore.target_project,
-          entryCore.task_id,
-          entryCore.task_family_key,
-          entryCore.execution_id,
-          entryCore.worker_context_packet_id,
-          entryCore.binding_id,
-          entryCore.task_agent_session_id,
-          entryCore.native_session_id,
-          entryCore.rel_path,
-          entryCore.usage_state,
-          entryCore.current_source_verified,
-          entryCore.compliant,
-          entryCore.reason,
-          entryCore.repair_work_item_id,
-          entryCore.conflict_resolution,
-          entryCore.conflict_parent_fingerprint,
-        ], 20)}`,
-        ...entryCore,
-      };
-    })
-    .filter(Boolean);
-  const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(typedScopeId, {
-    sourceGroupId,
-    groupSessionId,
-  });
-  if (!rows.length) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-record-v1",
-    groupId: sourceGroupId,
-    sourceGroupId,
-    groupSessionId,
-    typedScopeId,
-    exactSession: !!groupSessionId,
-    file: ledger.file,
-    skipped: true,
-    reason: "no_closure_usage_rows",
-    recordedCount: 0,
-    totals: ledger.totals || {},
-  };
-  const existingIds = new Set((ledger.entries || []).map((entry: any) => entry.entry_id));
-  const newEntries = rows.filter((entry: any) => !existingIds.has(entry.entry_id));
-  const stats = { ...(ledger.stats || {}) };
-  for (const entry of newEntries) {
-    const key = `${String(entry.target_project || "").toLowerCase()}|${entry.rel_path}`;
-    const current: any = stats[key] || {
-      target_project: entry.target_project,
-      rel_path: entry.rel_path,
-      used_count: 0,
-      verified_count: 0,
-      ignored_count: 0,
-      mentioned_count: 0,
-      stale_count: 0,
-      compliant_count: 0,
-      noncompliant_count: 0,
-      total_count: 0,
-      task_agent_session_ids: [],
-      native_session_ids: [],
-      packet_ids: [],
-      first_seen_at: entry.generated_at,
-    };
-    current[`${entry.usage_state}_count`] = Number(current[`${entry.usage_state}_count`] || 0) + 1;
-    current.stale_count = Number(current.stale_count || 0) + (entry.stale ? 1 : 0);
-    current[entry.compliant ? "compliant_count" : "noncompliant_count"] = Number(current[entry.compliant ? "compliant_count" : "noncompliant_count"] || 0) + 1;
-    current.total_count = Number(current.total_count || 0) + 1;
-    current.last_usage_state = entry.usage_state;
-    current.last_compliant = entry.compliant === true;
-    current.active_receipt_repair_required = entry.compliant !== true;
-    current.last_current_source_verified = entry.current_source_verified === true;
-    current.last_reason = entry.reason;
-    current.last_repair_work_item_id = entry.repair_work_item_id;
-    current.last_seen_at = entry.generated_at;
-    current.task_agent_session_ids = uniqueStrings([...(current.task_agent_session_ids || []), entry.task_agent_session_id].filter(Boolean), 24);
-    current.native_session_ids = uniqueStrings([...(current.native_session_ids || []), entry.native_session_id].filter(Boolean), 24);
-    current.packet_ids = uniqueStrings([...(current.packet_ids || []), entry.worker_context_packet_id].filter(Boolean), 24);
-    current.recommendation = postCompactCompletionMemoryPreservationClosureUsageRecommendation(current, input);
-    stats[key] = current;
-  }
-  const entries = [...(ledger.entries || []), ...newEntries].slice(-320);
-  const totals = entries.reduce((acc: any, entry: any) => {
-    acc[entry.usage_state] = Number(acc[entry.usage_state] || 0) + 1;
-    acc.stale += entry.stale ? 1 : 0;
-    acc[entry.compliant ? "compliant" : "noncompliant"] += 1;
-    acc.total += 1;
-    return acc;
-  }, { used: 0, verified: 0, ignored: 0, mentioned: 0, stale: 0, compliant: 0, noncompliant: 0, total: 0 });
-  writeJsonAtomic(ledger.file, {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-ledger-v1",
-    version: 1,
-    groupId: sourceGroupId,
-    sourceGroupId,
-    groupSessionId,
-    typedScopeId,
-    exactSession: !!groupSessionId,
-    entries,
-    stats,
-    totals,
-    updatedAt: generatedAt,
-  });
-  const conflictResolutionRows = rows.filter((entry: any) => entry.conflict_resolution === true);
-  let conflictResolutionDistillation: any = null;
-  if (conflictResolutionRows.length) {
-    try {
-      conflictResolutionDistillation = distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(typedScopeId, {
-        rows: conflictResolutionRows,
-      }, {
-        sourceGroupId,
-        groupSessionId,
-        reason: "closure-feedback-conflict-current-session-resolution",
-        updatedAt: generatedAt,
-      });
-    } catch (error: any) {
-      conflictResolutionDistillation = {
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-error-v1",
-        error: compactText(error?.message || error || "conflict resolution distillation failed", 500),
-      };
-    }
-  }
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-record-v1",
-    groupId: sourceGroupId,
-    sourceGroupId,
-    groupSessionId,
-    typedScopeId,
-    exactSession: !!groupSessionId,
-    file: ledger.file,
-    recordedCount: newEntries.length,
-    duplicateCount: rows.length - newEntries.length,
-    totals,
-    conflictResolutionDistillation,
-    updatedAt: generatedAt,
-  };
+  return require("./group-memory-recall-usage").recordPostCompactCompletionMemoryPreservationClosureUsage(groupId, input);
 }
 
 export function buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId: string, options: any = {}) {
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, options);
-  const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
-  const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
-  const typedScopeId = groupSessionId ? `${sourceGroupId}--${groupSessionId}` : groupId;
-  const ledger = readPostCompactCompletionMemoryPreservationClosureUsageLedger(typedScopeId, { sourceGroupId, groupSessionId });
-  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
-  const closureRelPath = "post-compact-completion-memory-preservation-repair-closures.md";
-  const taskText = compactText(options.task || options.taskText || options.task_text || options.taskQuery || options.task_query || "", 1200);
-  const queryFamily = normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(
-    taskText,
-    options.taskFamilyKey || options.task_family_key
-  );
-  const aging = normalizePostCompactCompletionMemoryPreservationClosureUsageAging(options);
-  const sourceEntries = (Array.isArray(ledger.entries) ? ledger.entries : []).filter((entry: any) => {
-    const projectMatches = !targetProject || !entry.target_project || String(entry.target_project).toLowerCase() === targetProject;
-    return projectMatches && entry.rel_path === closureRelPath;
-  });
-  const scoredEntries = sourceEntries.map((entry: any) => {
-    const relevance = postCompactCompletionMemoryPreservationClosureTaskFamilyRelevance(entry, queryFamily, options);
-    const ageDays = workerContextPressureRecallUsageAgeDays(entry, aging);
-    const decayWeight = workerContextPressureRecallUsageDecayWeight(ageDays, aging);
-    const relevanceWeight = relevance.matched ? Math.max(0.75, Number(relevance.score || 0)) : 0;
-    return {
-      ...entry,
-      task_family_relevance: relevance,
-      age_days: roundPressureRecallUsageWeight(ageDays, 3),
-      decay_weight: decayWeight,
-      effective_weight: roundPressureRecallUsageWeight(decayWeight * relevanceWeight, 4),
-    };
-  });
-  const relevantEntries = scoredEntries.filter((entry: any) => entry.task_family_relevance?.matched === true);
-  const evidence = scorePostCompactCompletionMemoryPreservationClosureEvidence(relevantEntries, options);
-  const independentEntries = evidence.independentEntries || [];
-  const conflict = arbitratePostCompactCompletionMemoryPreservationClosureEvidenceConflict(independentEntries, options);
-  const resolutionEntries = independentEntries.filter((entry: any) => entry.conflict_resolution === true && entry.compliant === true);
-  const latestResolution = [...resolutionEntries].sort((a: any, b: any) => String(b.generated_at || "").localeCompare(String(a.generated_at || "")))[0] || null;
-  const resolutionState = String(latestResolution?.conflict_resolution_state || latestResolution?.usage_state || "");
-  const resolutionAt = String(latestResolution?.generated_at || "");
-  const laterOpposingEntries = latestResolution ? independentEntries.filter((entry: any) => {
-    if (String(entry.generated_at || "").localeCompare(resolutionAt) <= 0 || entry.compliant !== true) return false;
-    const state = String(entry.usage_state || "");
-    return ["used", "verified"].includes(resolutionState) ? state === "ignored" : ["used", "verified"].includes(state);
-  }) : [];
-  const laterOpposingWeight = laterOpposingEntries.reduce((sum: number, entry: any) => sum + Number(entry.independent_effective_weight || 0), 0);
-  const resolutionReopened = !!latestResolution && laterOpposingWeight >= Number(conflict.min_branch_weight || GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_MIN_BRANCH_WEIGHT);
-  const resolutionActive = !!latestResolution && !resolutionReopened;
-  const conflictResolution = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-feedback-conflict-resolution-v1",
-    active: resolutionActive,
-    reopened: resolutionReopened,
-    state: latestResolution
-      ? resolutionReopened
-        ? "reopened_by_later_reliable_opposition"
-        : ["used", "verified"].includes(resolutionState)
-          ? "resolved_used_or_verified_reverify_future_session"
-          : "resolved_ignored_reverify_future_session"
-      : "unresolved",
-    resolution_entry_id: latestResolution?.entry_id || "",
-    resolution_usage_state: resolutionState,
-    task_agent_session_id: latestResolution?.task_agent_session_id || "",
-    native_session_id: latestResolution?.native_session_id || "",
-    worker_context_packet_id: latestResolution?.worker_context_packet_id || "",
-    current_source_verified: latestResolution?.current_source_verified === true,
-    reason: latestResolution?.reason || "",
-    parent_conflict_fingerprint: latestResolution?.conflict_parent_fingerprint || "",
-    resolved_at: resolutionAt,
-    later_opposing_entry_ids: uniqueStrings(laterOpposingEntries.map((entry: any) => entry.entry_id), 32),
-    later_opposing_weight: roundPressureRecallUsageWeight(laterOpposingWeight, 4),
-    reversible: true,
-    historical_branches_preserved: true,
-    historical_majority_authorization_allowed: false,
-  };
-  const effectiveConflict = {
-    ...conflict,
-    active: resolutionReopened ? true : conflict.active === true && !resolutionActive,
-    historical_conflict_detected: conflict.active === true,
-    resolution: conflictResolution,
-    arbitration_state: resolutionActive ? conflictResolution.state : resolutionReopened ? "contradictory_reverify_current_session" : conflict.arbitration_state,
-    current_session_verification_required: resolutionReopened ? true : conflict.active === true && !resolutionActive,
-  };
-  const latest = [...independentEntries].sort((a: any, b: any) => String(b.generated_at || "").localeCompare(String(a.generated_at || "")))[0] || null;
-  const primary: any = independentEntries.reduce((acc: any, entry: any) => {
-    const state = normalizePostCompactCompletionMemoryPreservationClosureUsageState(entry.usage_state);
-    if (!state) return acc;
-    acc[`${state}_count`] = Number(acc[`${state}_count`] || 0) + 1;
-    acc[`weighted_${state}_count`] = Number(acc[`weighted_${state}_count`] || 0) + Number(entry.independent_effective_weight || 0);
-    acc.total_count = Number(acc.total_count || 0) + 1;
-    acc.weighted_total_count = Number(acc.weighted_total_count || 0) + Number(entry.independent_effective_weight || 0);
-    acc.stale_count = Number(acc.stale_count || 0) + (Number(entry.age_days || 0) >= Number(aging.stale_after_days || 45) ? 1 : 0);
-    acc.fresh_count = Number(acc.fresh_count || 0) + (Number(entry.age_days || 0) < Number(aging.stale_after_days || 45) ? 1 : 0);
-    acc[entry.compliant === true ? "compliant_count" : "noncompliant_count"] = Number(acc[entry.compliant === true ? "compliant_count" : "noncompliant_count"] || 0) + 1;
-    acc.task_family_keys = uniqueStrings([...(acc.task_family_keys || []), entry.task_family_key].filter(Boolean), 24);
-    return acc;
-  }, {
-    target_project: String(options.targetProject || options.target_project || ""),
-    rel_path: closureRelPath,
-    used_count: 0,
-    verified_count: 0,
-    ignored_count: 0,
-    mentioned_count: 0,
-    weighted_used_count: 0,
-    weighted_verified_count: 0,
-    weighted_ignored_count: 0,
-    weighted_mentioned_count: 0,
-    total_count: 0,
-    weighted_total_count: 0,
-    stale_count: 0,
-    fresh_count: 0,
-    compliant_count: 0,
-    noncompliant_count: 0,
-    task_family_keys: [],
-  });
-  for (const state of ["used", "verified", "ignored", "mentioned"]) {
-    primary[`weighted_${state}_count`] = roundPressureRecallUsageWeight(primary[`weighted_${state}_count`] || 0, 4);
-  }
-  primary.weighted_total_count = roundPressureRecallUsageWeight(primary.weighted_total_count || 0, 4);
-  primary.last_usage_state = latest?.usage_state || "";
-  primary.last_compliant = latest ? latest.compliant === true : null;
-  primary.last_current_source_verified = latest?.current_source_verified === true;
-  primary.last_feedback_age_days = Number(latest?.age_days || 0);
-  primary.last_feedback_fresh = !!latest && Number(latest.age_days || 0) < Number(aging.stale_after_days || 45);
-  primary.active_receipt_repair_required = !!latest && latest.compliant !== true && primary.last_feedback_fresh;
-  primary.evidence_confidence = evidence.confidence;
-  primary.evidence_confidence_threshold = evidence.confidenceThreshold;
-  primary.independent_evidence_count = evidence.independentEvidenceCount;
-  primary.independent_session_count = evidence.independentSessionCount;
-  primary.independent_packet_count = evidence.independentPacketCount;
-  primary.correlated_duplicate_count = evidence.correlatedDuplicateCount;
-  primary.distinct_provider_count = evidence.distinctProviderCount;
-  primary.distinct_receipt_source_count = evidence.distinctReceiptSourceCount;
-  primary.feedback_conflict_active = effectiveConflict.active === true;
-  primary.feedback_conflict_ratio = effectiveConflict.conflict_ratio;
-  primary.conflict_resolution_active = conflictResolution.active === true;
-  primary.conflict_resolution_usage_state = conflictResolution.resolution_usage_state;
-  primary.recommendation = postCompactCompletionMemoryPreservationClosureUsageRecommendation(primary, options);
-  const rows = primary.total_count > 0 ? [primary] : [];
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-usage-summary-v1",
-    version: 2,
-    groupId: sourceGroupId,
-    sourceGroupId,
-    groupSessionId,
-    typedScopeId,
-    exactSession: !!groupSessionId,
-    targetProject: String(options.targetProject || options.target_project || ""),
-    file: ledger.file,
-    entryCount: sourceEntries.length,
-    rawMatchedEntryCount: relevantEntries.length,
-    matchedEntryCount: independentEntries.length,
-    unrelatedEntryCount: scoredEntries.length - relevantEntries.length,
-    correlatedDuplicateCount: evidence.correlatedDuplicateCount,
-    rowCount: rows.length,
-    recommendation: primary.recommendation || "neutral_reverify_current_source",
-    activeReceiptRepairRequired: primary.active_receipt_repair_required === true,
-    usedCount: Number(primary.used_count || 0),
-    verifiedCount: Number(primary.verified_count || 0),
-    ignoredCount: Number(primary.ignored_count || 0),
-    staleCount: Number(primary.stale_count || 0),
-    compliantCount: Number(primary.compliant_count || 0),
-    noncompliantCount: Number(primary.noncompliant_count || 0),
-    weightedUsedCount: Number(primary.weighted_used_count || 0),
-    weightedVerifiedCount: Number(primary.weighted_verified_count || 0),
-    weightedIgnoredCount: Number(primary.weighted_ignored_count || 0),
-    weightedTotalCount: Number(primary.weighted_total_count || 0),
-    evidenceConfidence: Number(evidence.confidence || 0),
-    evidenceConfidenceThreshold: Number(evidence.confidenceThreshold || 0),
-    independentEvidenceCount: Number(evidence.independentEvidenceCount || 0),
-    independentSessionCount: Number(evidence.independentSessionCount || 0),
-    independentPacketCount: Number(evidence.independentPacketCount || 0),
-    distinctProviderCount: Number(evidence.distinctProviderCount || 0),
-    distinctReceiptSourceCount: Number(evidence.distinctReceiptSourceCount || 0),
-    averageSourceReliability: Number(evidence.averageSourceReliability || 0),
-    evidenceProviders: evidence.providers || [],
-    evidenceReceiptSources: evidence.receiptSources || [],
-    feedbackConflict: effectiveConflict,
-    historicalFeedbackConflict: conflict,
-    feedbackConflictResolution: conflictResolution,
-    feedbackConflictActive: effectiveConflict.active === true,
-    feedbackArbitrationState: effectiveConflict.arbitration_state,
-    currentSessionConflictVerificationRequired: effectiveConflict.current_session_verification_required === true,
-    historicalMajorityAuthorizationAllowed: false,
-    taskFamily: queryFamily,
-    taskFamilyRelevant: relevantEntries.length > 0,
-    taskFamilyRelevanceThreshold: Number(options.taskFamilyRelevanceThreshold
-      ?? options.task_family_relevance_threshold
-      ?? GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_TASK_FAMILY_RELEVANCE_THRESHOLD),
-    aging,
-    feedbackEntries: independentEntries.slice(-24),
-    rawFeedbackEntries: scoredEntries.slice(-24),
-    rows,
-    immutableClosureHistoryPreserved: true,
-    updatedAt: ledger.updatedAt || "",
-  };
+  return require("./group-memory-recall-usage").buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId, options);
 }
 
-function normalizeWorkerContextPressureRecallUsageStatsRow(row: any = {}, aging: any = {}) {
+export function normalizeWorkerContextPressureRecallUsageStatsRow(row: any = {}, aging: any = {}) {
   const clone: any = { ...row };
   const ageDays = workerContextPressureRecallUsageAgeDays({
     last_seen_at: clone.last_seen_at || clone.lastSeenAt || clone.generated_at || clone.generatedAt,
@@ -2146,7 +1576,7 @@ function normalizeWorkerContextPressureRecallUsageStatsRow(row: any = {}, aging:
   return clone;
 }
 
-function buildWorkerContextPressureRecallUsageStatsRowsFromEntries(entries: any[] = [], aging: any = {}) {
+export function buildWorkerContextPressureRecallUsageStatsRowsFromEntries(entries: any[] = [], aging: any = {}) {
   const stats: Record<string, any> = {};
   for (const entry of Array.isArray(entries) ? entries : []) {
     const usageState = normalizeWorkerContextPressureRecallUsageState(entry?.usage_state || entry?.usageState);
@@ -2280,7 +1710,7 @@ function sortWorkerContextPressureRecallUsageRows(statsRows: any[] = []) {
   });
 }
 
-function filterWorkerContextPressureRecallUsageRows(statsRows: any[] = [], options: any = {}) {
+export function filterWorkerContextPressureRecallUsageRows(statsRows: any[] = [], options: any = {}) {
   const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
   const docs = Array.isArray(options.docs || options.recalledDocs || options.recalled_docs) ? (options.docs || options.recalledDocs || options.recalled_docs) : [];
   const relPaths = new Set(docs.map((doc: any) => String(doc.relPath || doc.rel_path || "").trim().toLowerCase()).filter(Boolean));
@@ -2292,7 +1722,7 @@ function filterWorkerContextPressureRecallUsageRows(statsRows: any[] = [], optio
       || names.has(String(row.name || "").trim().toLowerCase())));
 }
 
-function buildWorkerContextPressureRecallUsageSummaryFromRows(groupId: string, statsRows: any[] = [], options: any = {}) {
+export function buildWorkerContextPressureRecallUsageSummaryFromRows(groupId: string, statsRows: any[] = [], options: any = {}) {
   const aging = options.aging?.schema ? options.aging : normalizeWorkerContextPressureRecallUsageAging(options);
   const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
   const summaryStats = summarizeWorkerContextPressureRecallUsageRows(statsRows);
@@ -2323,27 +1753,10 @@ function buildWorkerContextPressureRecallUsageSummaryFromRows(groupId: string, s
 }
 
 export function buildGroupTypedMemoryPressureRecallUsageSummary(groupId: string, options: any = {}) {
-  groupId = String(groupId || "").trim();
-  const ledger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
-  const aging = normalizeWorkerContextPressureRecallUsageAging(options);
-  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
-  const sourceRows = Array.isArray(ledger.entries) && ledger.entries.length
-    ? buildWorkerContextPressureRecallUsageStatsRowsFromEntries(ledger.entries, aging)
-    : Object.values(ledger.stats || {}).map((row: any) => normalizeWorkerContextPressureRecallUsageStatsRow(row, aging));
-  const statsRows = filterWorkerContextPressureRecallUsageRows(sourceRows, options);
-  return buildWorkerContextPressureRecallUsageSummaryFromRows(groupId, statsRows, {
-    ...options,
-    targetProject,
-    aging,
-    ledgerFile: ledger.file,
-    recentEntries: (ledger.entries || [])
-      .filter((entry: any) => !targetProject || String(entry.target_project || "").toLowerCase() === targetProject)
-      .slice(-16),
-    updatedAt: ledger.updatedAt || "",
-  });
+  return require("./group-memory-recall-usage").buildGroupTypedMemoryPressureRecallUsageSummary(groupId, options);
 }
 
-function listGroupTypedMemoryPressureRecallUsageLedgers(options: any = {}) {
+export function listGroupTypedMemoryPressureRecallUsageLedgers(options: any = {}) {
   const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids || options.crossGroupIds || options.cross_group_ids)
     ? (options.groupIds || options.group_ids || options.crossGroupIds || options.cross_group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
     : [];
@@ -2383,63 +1796,10 @@ function listGroupTypedMemoryPressureRecallUsageLedgers(options: any = {}) {
 }
 
 export function buildGroupTypedMemoryPressureRecallUsageProjectSummary(groupId: string, options: any = {}) {
-  groupId = String(groupId || "").trim();
-  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
-  const includeCurrent = options.includeCurrentGroup === true || options.include_current_group === true;
-  const currentIds = new Set([groupId, safeSegment(groupId)].map(item => String(item || "").trim().toLowerCase()).filter(Boolean));
-  const aging = normalizeWorkerContextPressureRecallUsageAging(options);
-  const ledgers = listGroupTypedMemoryPressureRecallUsageLedgers({
-    ...options,
-    excludeGroupIds: includeCurrent ? options.excludeGroupIds || options.exclude_group_ids || [] : [
-      ...(Array.isArray(options.excludeGroupIds || options.exclude_group_ids) ? (options.excludeGroupIds || options.exclude_group_ids) : []),
-      ...Array.from(currentIds),
-    ],
-  });
-  const entries: any[] = [];
-  const sourceGroups: any[] = [];
-  for (const item of ledgers) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(item.file, "utf-8"));
-      const ledgerGroupId = String(parsed.groupId || parsed.group_id || item.groupId || "").trim();
-      if (!includeCurrent && currentIds.has(ledgerGroupId.toLowerCase())) continue;
-      const ledgerEntries = (Array.isArray(parsed.entries) ? parsed.entries : [])
-        .filter((entry: any) => !targetProject || String(entry.target_project || entry.targetProject || "").trim().toLowerCase() === targetProject)
-        .map((entry: any) => ({ ...entry, group_id: entry.group_id || entry.groupId || ledgerGroupId || item.groupId }));
-      if (!ledgerEntries.length) continue;
-      entries.push(...ledgerEntries);
-      sourceGroups.push({
-        groupId: ledgerGroupId || item.groupId,
-        file: item.file,
-        entry_count: ledgerEntries.length,
-        updatedAt: parsed.updatedAt || parsed.updated_at || "",
-      });
-    } catch {}
-  }
-  const sourceRows = buildWorkerContextPressureRecallUsageStatsRowsFromEntries(entries, aging);
-  const statsRows = filterWorkerContextPressureRecallUsageRows(sourceRows, options);
-  const recentEntries = entries
-    .sort((a: any, b: any) => String(b.generated_at || b.generatedAt || "").localeCompare(String(a.generated_at || a.generatedAt || "")))
-    .slice(0, 16)
-    .reverse();
-  return {
-    ...buildWorkerContextPressureRecallUsageSummaryFromRows(groupId, statsRows, {
-      ...options,
-      schema: "ccm-group-typed-memory-pressure-recall-usage-project-summary-v1",
-      targetProject,
-      aging,
-      ledgerFile: "",
-      recentEntries,
-      updatedAt: sourceGroups.map((item: any) => item.updatedAt).filter(Boolean).sort().slice(-1)[0] || "",
-    }),
-    source: "cross_group_project_pressure_recall_usage",
-    include_current_group: includeCurrent,
-    source_group_count: sourceGroups.length,
-    source_groups: sourceGroups.slice(0, 24),
-    entry_count: entries.length,
-  };
+  return require("./group-memory-recall-usage").buildGroupTypedMemoryPressureRecallUsageProjectSummary(groupId, options);
 }
 
-function normalizeWorkerContextPressureRecallUsageHints(groupId: string, options: any = {}) {
+export function normalizeWorkerContextPressureRecallUsageHints(groupId: string, options: any = {}) {
   const explicit = options.workerContextPressureRecallUsage
     || options.worker_context_pressure_recall_usage
     || options.pressureRecallUsage
@@ -2538,7 +1898,7 @@ function normalizeWorkerContextPressureRecallUsageHints(groupId: string, options
   }).filter(Boolean);
 }
 
-function scoreWorkerContextPressureRecallUsageHint(doc: any, hints: any[] = [], signals: any = {}) {
+export function scoreWorkerContextPressureRecallUsageHint(doc: any, hints: any[] = [], signals: any = {}) {
   const matched: any[] = [];
   let adjustment = 0;
   if (signals.active !== true || !Array.isArray(hints) || !hints.length) return { adjustment, matched };
@@ -2590,7 +1950,7 @@ function scoreWorkerContextPressureRecallUsageHint(doc: any, hints: any[] = [], 
   return { adjustment, matched };
 }
 
-function normalizePressureProvenanceDispatchFeedbackPolicyForRecall(options: any = {}) {
+export function normalizePressureProvenanceDispatchFeedbackPolicyForRecall(options: any = {}) {
   const candidate = options.pressureProvenanceDispatchFeedbackPolicy
     || options.pressure_provenance_dispatch_feedback_policy
     || options.pressureProvenancePreDispatchComplianceDispatchPolicy
@@ -2635,7 +1995,7 @@ function pressureProvenanceFeedbackRecallUnderRepair(value: any = {}) {
     || value.repairOpen === true;
 }
 
-function scoreWorkerContextPressureFeedbackPolicyRecallRisk(doc: any, corpus: string, pressureUsage: any = {}, policy: any = {}, queryText = "", queryTokens: string[] = []) {
+export function scoreWorkerContextPressureFeedbackPolicyRecallRisk(doc: any, corpus: string, pressureUsage: any = {}, policy: any = {}, queryText = "", queryTokens: string[] = []) {
   const active = policy?.active === true && policy?.disabled !== true;
   const matched = Array.isArray(pressureUsage?.matched)
     ? pressureUsage.matched.filter((match: any) => pressureProvenanceFeedbackRecallUnderRepair(match))
@@ -2755,19 +2115,19 @@ export function getGroupTypedMemoryStaleCandidateLedgerFile(groupId: string) {
 }
 
 export function getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId: string) {
-  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER);
+  return require("./group-memory-recall-usage").getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
 }
 
 export function getGroupTypedMemoryDistillationLedgerFile(groupId: string) {
-  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_DISTILLATION_LEDGER);
+  return require("./group-memory-distillation").getGroupTypedMemoryDistillationLedgerFile(groupId);
 }
 
 export function getGroupTypedMemoryDistillationLockFile(groupId: string) {
-  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_DISTILLATION_LOCK);
+  return require("./group-memory-distillation").getGroupTypedMemoryDistillationLockFile(groupId);
 }
 
 export function getGroupTypedMemoryDistillationTransactionStateFile(groupId: string) {
-  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_STATE);
+  return require("./group-memory-distillation").getGroupTypedMemoryDistillationTransactionStateFile(groupId);
 }
 
 export function getGroupTypedMemoryArtifactTransactionJournalFile(groupId: string) {
@@ -2818,7 +2178,7 @@ function stageGroupTypedMemoryArtifact(mutation: any, file: string, content: str
   return true;
 }
 
-function stageGroupTypedMemoryArtifactRemoval(mutation: any, file: string) {
+export function stageGroupTypedMemoryArtifactRemoval(mutation: any, file: string) {
   const target = path.resolve(file);
   if (!isCoordinatedGroupTypedMemoryArtifactFile(String(mutation.groupId || ""), target)) {
     throw new Error("typed_memory_artifact_target_outside_mutation_scope");
@@ -2957,7 +2317,7 @@ function cleanupGroupTypedMemoryArtifactStage(groupId: string, leaseId: string) 
   try { if (fs.existsSync(root) && fs.readdirSync(root).length === 0) fs.rmdirSync(root); } catch {}
 }
 
-function recoverGroupTypedMemoryArtifactTransaction(groupId: string) {
+export function recoverGroupTypedMemoryArtifactTransaction(groupId: string) {
   const inspected = inspectGroupTypedMemoryArtifactTransaction(groupId);
   if (!inspected.present) return { recovered: false, reason: "artifact_journal_absent" };
   if (!inspected.valid) throw new Error("typed_memory_artifact_journal_corrupt");
@@ -3046,7 +2406,7 @@ function prepareGroupTypedMemoryArtifactTransaction(context: any) {
   });
 }
 
-function commitGroupTypedMemoryArtifactMutation(context: any) {
+export function commitGroupTypedMemoryArtifactMutation(context: any) {
   const journal = prepareGroupTypedMemoryArtifactTransaction(context);
   if (!journal) return { committed: false, artifactCount: 0, reason: "no_staged_artifacts" };
   const groupId = String(context.groupId || "");
@@ -3166,7 +2526,7 @@ export function ensureGroupTypedMemoryArtifactReadConsistency(groupId: string, o
   };
 }
 
-function groupTypedMemoryDistillationLockChecksum(lock: any = {}) {
+export function groupTypedMemoryDistillationLockChecksum(lock: any = {}) {
   return checksum({
     schema: lock.schema || "",
     version: Number(lock.version || 0),
@@ -3183,7 +2543,7 @@ function groupTypedMemoryDistillationLockChecksum(lock: any = {}) {
   }, 64);
 }
 
-function groupTypedMemoryDistillationStateChecksum(state: any = {}) {
+export function groupTypedMemoryDistillationStateChecksum(state: any = {}) {
   return checksum({
     schema: state.schema || "",
     version: Number(state.version || 0),
@@ -3207,74 +2567,25 @@ function groupTypedMemoryDistillationStateChecksum(state: any = {}) {
   }, 64);
 }
 
-function typedMemoryDistillationProcessAlive(pid: number) {
+export function typedMemoryDistillationProcessAlive(pid: number) {
   if (!Number.isFinite(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function typedMemoryDistillationWait(ms: number) {
+export function typedMemoryDistillationWait(ms: number) {
   if (!Number.isFinite(ms) || ms <= 0) return;
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(1, Math.floor(ms))); } catch {}
 }
 
 export function inspectGroupTypedMemoryDistillationLock(groupId: string, options: any = {}) {
-  const file = String(options.file || getGroupTypedMemoryDistillationLockFile(groupId));
-  const lock = readJson(file, null);
-  const filePresent = fs.existsSync(file);
-  if (!lock) {
-    let ageMs = 0;
-    try { ageMs = Math.max(0, Date.now() - fs.statSync(file).mtimeMs); } catch {}
-    return filePresent
-      ? { file, present: true, valid: false, checksumValid: false, identityValid: false, active: false, stale: false, corrupt: true, ageMs, lock: null }
-      : { file, present: false, valid: true, active: false, stale: false, corrupt: false, ageMs: 0, lock: null };
-  }
-  const checksumValid = String(lock.lockChecksum || "") === groupTypedMemoryDistillationLockChecksum(lock);
-  const identityValid = lock.schema === "ccm-group-typed-memory-distillation-lock-v1"
-    && Number(lock.version || 0) === GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION
-    && String(lock.groupId || "") === groupId
-    && !!String(lock.leaseId || "")
-    && Number(lock.fencingToken || 0) > 0;
-  const ownerLocal = String(lock.ownerHostname || "") === os.hostname();
-  const ownerAlive = !ownerLocal || typedMemoryDistillationProcessAlive(Number(lock.ownerPid || 0));
-  const expiresAtMs = Date.parse(String(lock.expiresAt || ""));
-  const unexpired = Number.isFinite(expiresAtMs) && Date.now() < expiresAtMs;
-  const valid = checksumValid && identityValid;
-  // A live local owner remains authoritative even if a long synchronous
-  // distillation crosses its nominal TTL. Remote owners require an unexpired lease.
-  const active = valid && lock.status === "active" && ownerAlive && (ownerLocal || unexpired);
-  let ageMs = 0;
-  try { ageMs = Math.max(0, Date.now() - fs.statSync(file).mtimeMs); } catch {}
-  return {
-    file,
-    present: true,
-    valid,
-    checksumValid,
-    identityValid,
-    active,
-    stale: valid && lock.status === "active" && !active,
-    ownerLocal,
-    ownerAlive,
-    unexpired,
-    ageMs,
-    lock,
-  };
+  return require("./group-memory-distillation").inspectGroupTypedMemoryDistillationLock(groupId, options);
 }
 
 export function readGroupTypedMemoryDistillationTransactionState(groupId: string) {
-  const file = getGroupTypedMemoryDistillationTransactionStateFile(groupId);
-  const state = readJson(file, null);
-  const filePresent = fs.existsSync(file);
-  if (!state) return filePresent
-    ? { file, present: true, valid: false, checksumValid: false, identityValid: false, corrupt: true, state: null }
-    : { file, present: false, valid: true, corrupt: false, state: null };
-  const checksumValid = String(state.stateChecksum || "") === groupTypedMemoryDistillationStateChecksum(state);
-  const identityValid = state.schema === "ccm-group-typed-memory-distillation-transaction-state-v1"
-    && Number(state.version || 0) === GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION
-    && String(state.groupId || "") === groupId;
-  return { file, present: true, valid: checksumValid && identityValid, checksumValid, identityValid, state };
+  return require("./group-memory-distillation").readGroupTypedMemoryDistillationTransactionState(groupId);
 }
 
-function writeGroupTypedMemoryDistillationTransactionState(groupId: string, value: any) {
+export function writeGroupTypedMemoryDistillationTransactionState(groupId: string, value: any) {
   const file = getGroupTypedMemoryDistillationTransactionStateFile(groupId);
   const state = {
     schema: "ccm-group-typed-memory-distillation-transaction-state-v1",
@@ -3310,7 +2621,7 @@ function writeGroupTypedMemoryDistillationLockHandle(handle: any, patch: any = {
   return lock;
 }
 
-function acquireGroupTypedMemoryDistillationLock(groupId: string, options: any = {}) {
+export function acquireGroupTypedMemoryDistillationLock(groupId: string, options: any = {}) {
   const file = getGroupTypedMemoryDistillationLockFile(groupId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const maxWaitMs = Math.max(0, Math.min(30_000, Number(options.transactionMaxWaitMs ?? options.transaction_max_wait_ms ?? 10_000)));
@@ -3396,7 +2707,7 @@ function acquireGroupTypedMemoryDistillationLock(groupId: string, options: any =
   return { acquired: false, reason: "distillation_lock_contended", waitedMs };
 }
 
-function verifyGroupTypedMemoryDistillationLock(handle: any) {
+export function verifyGroupTypedMemoryDistillationLock(handle: any) {
   if (!handle || handle.released === true || Number(handle.fd) < 0) return { owned: false, reason: "lock_handle_unavailable" };
   const status = inspectGroupTypedMemoryDistillationLock(String(handle.lock?.groupId || ""), { file: handle.file });
   const owned = status.valid === true
@@ -3419,7 +2730,7 @@ function renewGroupTypedMemoryDistillationLock(handle: any) {
   return { renewed: after.owned, reason: after.owned ? "renewed" : after.reason, verification: after, lock: handle.lock };
 }
 
-function releaseGroupTypedMemoryDistillationLock(handle: any, finalStatus = "completed") {
+export function releaseGroupTypedMemoryDistillationLock(handle: any, finalStatus = "completed") {
   if (!handle || handle.released === true || Number(handle.fd) < 0) return false;
   const releasedAt = now();
   try {
@@ -3440,149 +2751,27 @@ function releaseGroupTypedMemoryDistillationLock(handle: any, finalStatus = "com
   return true;
 }
 
-function runGroupTypedMemoryDistillationMutation(groupId: string, mutationKind: string, options: any, operation: (context: any) => any) {
-  const existing = activeGroupTypedMemoryDistillationMutations.get(groupId);
-  if (existing?.handle) {
-    existing.depth = Number(existing.depth || 1) + 1;
-    existing.mutationKinds = [...new Set([...(existing.mutationKinds || []), mutationKind])];
-    try {
-      return operation(existing);
-    } finally {
-      existing.depth = Math.max(1, Number(existing.depth || 2) - 1);
-    }
-  }
-
-  const acquired = acquireGroupTypedMemoryDistillationLock(groupId, { ...(options || {}), mutationKind });
-  if (!acquired.acquired) {
-    const error: any = new Error(`typed_memory_distillation_mutation_unavailable:${acquired.reason || "lock_unavailable"}`);
-    error.code = acquired.reason || "distillation_lock_unavailable";
-    error.transaction = acquired;
-    throw error;
-  }
-  const handle = acquired.handle;
-  const context: any = {
-    groupId,
-    mutationKind,
-    mutationKinds: [mutationKind],
-    handle,
-    options: options || {},
-    pendingArtifacts: new Map<string, any>(),
-    depth: 1,
-    writeCount: 0,
-    startedAt: String(handle.lock?.acquiredAt || now()),
-  };
-  activeGroupTypedMemoryDistillationMutations.set(groupId, context);
-  try {
-    context.artifactRecovery = recoverGroupTypedMemoryArtifactTransaction(groupId);
-    const diagnosticHoldMs = Math.max(0, Math.min(10_000, Number(options?.__mutationDiagnosticHoldMs || 0)));
-    if (diagnosticHoldMs > 0) typedMemoryDistillationWait(diagnosticHoldMs);
-    const value = operation(context);
-    commitGroupTypedMemoryArtifactMutation(context);
-    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
-    if (!ownership.owned) throw new Error(`typed_memory_distillation_lock_lost_after_mutation:${ownership.reason}`);
-    const completedAt = now();
-    const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
-    const committed = Number(context.writeCount || 0) > 0;
-    writeGroupTypedMemoryDistillationTransactionState(groupId, {
-      status: "completed",
-      mutationKind,
-      mutationKinds: context.mutationKinds,
-      lastMutationKind: mutationKind,
-      leaseId: String(handle.lock?.leaseId || ""),
-      fencingToken: Number(handle.lock?.fencingToken || 0),
-      lastFencingToken: Number(handle.lock?.fencingToken || 0),
-      lastCommittedFencingToken: committed
-        ? Number(handle.lock?.fencingToken || 0)
-        : Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
-      recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
-      waitedMs: Number(acquired.waitedMs || 0),
-      writeCount: Number(context.writeCount || 0),
-      startedAt: context.startedAt,
-      completedAt,
-      failedAt: "",
-      error: "",
-      updatedAt: completedAt,
-    });
-    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-    return {
-      ...value,
-      distillationMutation: {
-        schema: "ccm-group-typed-memory-distillation-mutation-v1",
-        version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
-        groupId,
-        mutationKind,
-        mutationKinds: context.mutationKinds,
-        leaseId: String(handle.lock?.leaseId || ""),
-        fencingToken: Number(handle.lock?.fencingToken || 0),
-        waitedMs: Number(acquired.waitedMs || 0),
-        recoveredLeaseCount: Number(acquired.recoveredLeaseCount || 0),
-        writeCount: Number(context.writeCount || 0),
-        status: "completed",
-        acquiredAt: context.startedAt,
-        completedAt,
-        artifactTransaction: context.artifactTransaction || null,
-        artifactRecovery: context.artifactRecovery || null,
-      },
-    };
-  } catch (error: any) {
-    const failedAt = now();
-    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
-    if (ownership.owned) {
-      const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
-      writeGroupTypedMemoryDistillationTransactionState(groupId, {
-        status: "failed",
-        mutationKind,
-        mutationKinds: context.mutationKinds,
-        lastMutationKind: String(priorState.valid ? priorState.state?.lastMutationKind || "" : ""),
-        leaseId: String(handle.lock?.leaseId || ""),
-        fencingToken: Number(handle.lock?.fencingToken || 0),
-        lastFencingToken: Number(handle.lock?.fencingToken || 0),
-        lastCommittedFencingToken: Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
-        recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
-        waitedMs: Number(acquired.waitedMs || 0),
-        writeCount: Number(context.writeCount || 0),
-        startedAt: context.startedAt,
-        completedAt: "",
-        failedAt,
-        error: compactText(error?.message || error, 800),
-        updatedAt: failedAt,
-      });
-    }
-    throw error;
-  } finally {
-    activeGroupTypedMemoryDistillationMutations.delete(groupId);
-    releaseGroupTypedMemoryDistillationLock(handle, context.writeCount > 0 ? "completed" : "no_write");
-  }
+export function runGroupTypedMemoryDistillationMutation(groupId: string, mutationKind: string, options: any, operation: (context: any) => any) {
+  return require("./group-memory-distillation").runGroupTypedMemoryDistillationMutation(groupId, mutationKind, options, operation);
 }
 
 export function getGroupClaudeInstructionsLoadedHookLedgerFile(groupId: string) {
-  return path.join(getGroupTypedMemoryDir(groupId), GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER);
+  return require("./group-memory-loading").getGroupClaudeInstructionsLoadedHookLedgerFile(groupId);
 }
 
 export function registerGroupMemoryInstructionsLoadedHook(hook: (input: any) => any) {
-  if (typeof hook !== "function") throw new Error("InstructionsLoaded hook must be a function");
-  groupMemoryInstructionsLoadedHooks.add(hook);
-  return () => groupMemoryInstructionsLoadedHooks.delete(hook);
+  return require("./group-memory-loading").registerGroupMemoryInstructionsLoadedHook(hook);
 }
 
 export function hasGroupMemoryInstructionsLoadedHook() {
-  return groupMemoryInstructionsLoadedHooks.size > 0;
+  return require("./group-memory-loading").hasGroupMemoryInstructionsLoadedHook();
 }
 
 export function loadGroupClaudeInstructionsLoadedHookLedger(groupId: string) {
-  const file = getGroupClaudeInstructionsLoadedHookLedgerFile(groupId);
-  const parsed = readJson(file, {});
-  return {
-    schema: "ccm-claude-instructions-loaded-hook-ledger-v1",
-    version: GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION,
-    groupId,
-    file,
-    entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
-    updatedAt: String(parsed?.updatedAt || ""),
-  };
+  return require("./group-memory-loading").loadGroupClaudeInstructionsLoadedHookLedger(groupId);
 }
 
-function writeGroupClaudeInstructionsLoadedHookLedger(groupId: string, ledger: any) {
+export function writeGroupClaudeInstructionsLoadedHookLedger(groupId: string, ledger: any) {
   const file = getGroupClaudeInstructionsLoadedHookLedgerFile(groupId);
   const value = {
     schema: "ccm-claude-instructions-loaded-hook-ledger-v1",
@@ -3596,99 +2785,27 @@ function writeGroupClaudeInstructionsLoadedHookLedger(groupId: string, ledger: a
 }
 
 export function executeGroupMemoryInstructionsLoadedHooks(groupId: string, input: any = {}) {
-  const event = {
-    schema: "ccm-claude-instructions-loaded-hook-event-v1",
-    version: GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION,
-    groupId,
-    hook_event_name: "InstructionsLoaded",
-    file_path: String(input.filePath || input.file_path || ""),
-    memory_type: String(input.memoryType || input.memory_type || "Project"),
-    load_reason: String(input.loadReason || input.load_reason || "context_bundle"),
-    globs: normalizePathGlobs(input.globs || input.paths || []),
-    trigger_file_path: String(input.triggerFilePath || input.trigger_file_path || ""),
-    parent_file_path: String(input.parentFilePath || input.parent_file_path || ""),
-    source: String(input.source || ""),
-    scope: String(input.scope || ""),
-    kind: String(input.kind || ""),
-    rel_path: String(input.relPath || input.rel_path || ""),
-    firedAt: now(),
-  };
-  const rows: any[] = [];
-  let index = 0;
-  for (const hook of groupMemoryInstructionsLoadedHooks) {
-    const startedAt = Date.now();
-    try {
-      const output = hook(event);
-      const returnedPromise = !!output && typeof output.then === "function";
-      rows.push({
-        hookIndex: index,
-        status: returnedPromise ? "async_not_awaited" : "ok",
-        durationMs: Date.now() - startedAt,
-        result: returnedPromise ? "Promise returned by sync pipeline" : compactText(JSON.stringify(output ?? null), 1000),
-      });
-    } catch (error: any) {
-      rows.push({
-        hookIndex: index,
-        status: "error",
-        durationMs: Date.now() - startedAt,
-        error: compactText(error?.message || error, 1000),
-      });
-    }
-    index += 1;
-  }
-  const summary = {
-    schema: "ccm-claude-instructions-loaded-hook-execution-v1",
-    version: GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION,
-    groupId,
-    configured: groupMemoryInstructionsLoadedHooks.size > 0,
-    hookCount: groupMemoryInstructionsLoadedHooks.size,
-    event,
-    rows,
-    firedCount: rows.length,
-    failureCount: rows.filter(row => row.status === "error").length,
-    ledgerFile: getGroupClaudeInstructionsLoadedHookLedgerFile(groupId),
-  };
-  if (summary.configured) {
-    const ledger = loadGroupClaudeInstructionsLoadedHookLedger(groupId);
-    writeGroupClaudeInstructionsLoadedHookLedger(groupId, {
-      ...ledger,
-      entries: [...(ledger.entries || []), summary],
-    });
-  }
-  return summary;
+  return require("./group-memory-loading").executeGroupMemoryInstructionsLoadedHooks(groupId, input);
 }
 
 export function getGroupClaudeMemoryExternalIncludeApprovalLedgerFile(groupId: string) {
-  return path.join(getGroupTypedMemoryDir(groupId), GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER);
+  return require("./group-memory-loading").getGroupClaudeMemoryExternalIncludeApprovalLedgerFile(groupId);
 }
 
-function normalizeExternalIncludeApprovalPath(file: any) {
+export function normalizeExternalIncludeApprovalPath(file: any) {
   const text = String(file || "").trim();
   return text ? path.resolve(text).replace(/\\/g, "/") : "";
 }
 
-function externalIncludeApprovalKey(file: any) {
+export function externalIncludeApprovalKey(file: any) {
   return checksum(normalizeExternalIncludeApprovalPath(file), 24);
 }
 
 export function loadGroupClaudeMemoryExternalIncludeApprovalLedger(groupId: string) {
-  const file = getGroupClaudeMemoryExternalIncludeApprovalLedgerFile(groupId);
-  const parsed = readJson(file, {});
-  return {
-    schema: "ccm-claude-memory-external-include-approval-ledger-v1",
-    version: GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION,
-    groupId,
-    file,
-    hasExternalIncludesApproved: parsed?.hasExternalIncludesApproved === true,
-    hasExternalIncludesWarningShown: parsed?.hasExternalIncludesWarningShown === true,
-    warningShownAt: String(parsed?.warningShownAt || ""),
-    approved: Array.isArray(parsed?.approved) ? parsed.approved : [],
-    warnings: Array.isArray(parsed?.warnings) ? parsed.warnings : [],
-    updatedAt: String(parsed?.updatedAt || ""),
-  };
+  return require("./group-memory-loading").loadGroupClaudeMemoryExternalIncludeApprovalLedger(groupId);
 }
 
-function writeGroupClaudeMemoryExternalIncludeApprovalLedger(groupId: string, ledger: any) {
+export function writeGroupClaudeMemoryExternalIncludeApprovalLedger(groupId: string, ledger: any) {
   const file = getGroupClaudeMemoryExternalIncludeApprovalLedgerFile(groupId);
   const value = {
     schema: "ccm-claude-memory-external-include-approval-ledger-v1",
@@ -3706,60 +2823,11 @@ function writeGroupClaudeMemoryExternalIncludeApprovalLedger(groupId: string, le
 }
 
 export function approveGroupClaudeMemoryExternalInclude(groupId: string, input: any = {}) {
-  const ledger = loadGroupClaudeMemoryExternalIncludeApprovalLedger(groupId);
-  const includes = Array.isArray(input.includes)
-    ? input.includes
-    : Array.isArray(input.paths)
-      ? input.paths.map((item: any) => ({ path: item }))
-      : [input];
-  const approvedBy = String(input.approvedBy || input.approved_by || "local-user");
-  const approveAll = input.approveAll === true || input.approve_all === true || input.hasExternalIncludesApproved === true;
-  const approved = new Map<string, any>();
-  for (const item of ledger.approved || []) {
-    if (!item?.key) continue;
-    approved.set(String(item.key), item);
-  }
-  for (const item of includes) {
-    const includePath = normalizeExternalIncludeApprovalPath(item?.path || item?.ref || item);
-    if (!includePath) continue;
-    const key = externalIncludeApprovalKey(includePath);
-    approved.set(key, {
-      key,
-      path: includePath,
-      parent: String(item?.parent || item?.from || input.parent || ""),
-      scope: String(item?.scope || input.scope || ""),
-      kind: String(item?.kind || input.kind || ""),
-      approvedBy,
-      approvedAt: now(),
-    });
-  }
-  return writeGroupClaudeMemoryExternalIncludeApprovalLedger(groupId, {
-    ...ledger,
-    hasExternalIncludesApproved: ledger.hasExternalIncludesApproved === true || approveAll,
-    approved: [...approved.values()],
-  });
+  return require("./group-memory-loading").approveGroupClaudeMemoryExternalInclude(groupId, input);
 }
 
 export function markGroupClaudeMemoryExternalIncludeWarningShown(groupId: string, input: any = {}) {
-  const ledger = loadGroupClaudeMemoryExternalIncludeApprovalLedger(groupId);
-  const includes = Array.isArray(input.includes) ? input.includes : [];
-  const warnings = [...(ledger.warnings || []), {
-    shownAt: now(),
-    actor: String(input.actor || "system"),
-    count: Number(input.count || includes.length || 0),
-    includes: includes.slice(0, 40).map((item: any) => ({
-      path: normalizeExternalIncludeApprovalPath(item?.path || item?.ref || item),
-      parent: String(item?.parent || item?.from || ""),
-      scope: String(item?.scope || ""),
-      kind: String(item?.kind || ""),
-    })),
-  }];
-  return writeGroupClaudeMemoryExternalIncludeApprovalLedger(groupId, {
-    ...ledger,
-    hasExternalIncludesWarningShown: true,
-    warningShownAt: ledger.warningShownAt || now(),
-    warnings,
-  });
+  return require("./group-memory-loading").markGroupClaudeMemoryExternalIncludeWarningShown(groupId, input);
 }
 
 export function upsertGroupTypedMemoryDocument(groupId: string, input: any) {
@@ -3797,7 +2865,7 @@ export function upsertGroupTypedMemoryDocument(groupId: string, input: any) {
   return { file, changed, slug, type, name, writeShapeTelemetry, writeShapeTelemetryError };
 }
 
-function listMarkdownFilesRecursive(dir: string, options: any = {}) {
+export function listMarkdownFilesRecursive(dir: string, options: any = {}) {
   const maxFiles = Math.max(1, Math.min(300, Number(options.maxFiles || options.max_files || 80)));
   const result: string[] = [];
   const visit = (current: string) => {
@@ -3815,12 +2883,12 @@ function listMarkdownFilesRecursive(dir: string, options: any = {}) {
   return result;
 }
 
-function projectMemoryRelPath(projectRoot: string, file: string) {
+export function projectMemoryRelPath(projectRoot: string, file: string) {
   const rel = path.relative(projectRoot, file).replace(/\\/g, "/");
   return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : path.basename(file);
 }
 
-function executeInstructionsLoadedHooksForImportedClaudeMemory(groupId: string, items: any[] = [], options: any = {}) {
+export function executeInstructionsLoadedHooksForImportedClaudeMemory(groupId: string, items: any[] = [], options: any = {}) {
   const executions: any[] = [];
   const baseLoadReason = String(options.instructionsLoadReason || options.instructions_load_reason || options.memoryReloadReason || options.memory_reload_reason || options.loadReason || options.load_reason || "context_bundle");
   for (const item of items || []) {
@@ -3860,164 +2928,14 @@ function executeInstructionsLoadedHooksForImportedClaudeMemory(groupId: string, 
 }
 
 export function discoverProjectMemoryFiles(projectRoot: string, options: any = {}) {
-  const root = path.resolve(String(projectRoot || ""));
-  const settingSourcePolicy = buildClaudeMemorySettingSourcePolicy(options);
-  const includeProject = settingSourcePolicy.includeProject;
-  const includeLocal = settingSourcePolicy.includeLocal;
-  const maxParentDepth = Math.max(0, Math.min(12, Number(options.maxParentDepth || options.max_parent_depth || 0)));
-  const maxRuleFiles = Math.max(1, Math.min(300, Number(options.maxRuleFiles || options.max_rule_files || 80)));
-  if (!root || !fs.existsSync(root)) {
-    return {
-      schema: "ccm-project-memory-discovery-v1",
-      version: 1,
-      projectRoot: root,
-      status: "missing_project_root",
-      settingSourcePolicy,
-      files: [],
-      issues: [{ type: "missing_project_root", path: root }],
-    };
-  }
-  const dirs: string[] = [];
-  let current = root;
-  for (let depth = 0; depth <= maxParentDepth; depth += 1) {
-    dirs.push(current);
-    const parent = path.dirname(current);
-    if (!parent || parent === current) break;
-    current = parent;
-  }
-  const files: any[] = [];
-  const issues: any[] = [];
-  const seen = new Set<string>();
-  const addFile = (file: string, kind: string, baseDir: string) => {
-    const resolved = path.resolve(file);
-    const key = normalizeFileKey(resolved);
-    if (seen.has(key)) return;
-    seen.add(key);
-    if (!fs.existsSync(resolved)) return;
-    try {
-      const stat = fs.statSync(resolved);
-      if (!stat.isFile()) return;
-      const content = fs.readFileSync(resolved, "utf-8");
-      const parsed = parseFrontmatter(content);
-      files.push({
-        file: resolved,
-        relPath: projectMemoryRelPath(root, resolved),
-        baseDir,
-        kind,
-        memoryType: kind === "local" ? "local" : "project",
-        name: parsed.meta.name || path.basename(resolved),
-        description: parsed.meta.description || compactText(parsed.body.split(/\n+/).find(Boolean) || "", 180),
-        paths: normalizePathGlobs(parsed.meta.paths || parsed.meta.path_globs || parsed.meta.globs || []),
-        bytes: stat.size,
-        mtimeMs: stat.mtimeMs,
-        checksum: checksum(content, 24),
-        body: parsed.body || content,
-      });
-    } catch (error: any) {
-      issues.push({ type: "unreadable_project_memory", path: resolved, error: compactText(error?.message || error, 260) });
-    }
-  };
-  for (const dir of dirs.reverse()) {
-    if (includeProject) {
-      addFile(path.join(dir, "CLAUDE.md"), "project", dir);
-      addFile(path.join(dir, ".claude", "CLAUDE.md"), "project", dir);
-      const rulesDir = path.join(dir, ".claude", "rules");
-      for (const file of listMarkdownFilesRecursive(rulesDir, { maxFiles: maxRuleFiles })) addFile(file, "project_rule", dir);
-    }
-    if (includeLocal) addFile(path.join(dir, "CLAUDE.local.md"), "local", dir);
-  }
-  return {
-    schema: "ccm-project-memory-discovery-v1",
-    version: 1,
-    projectRoot: root,
-    status: files.length ? "found" : "empty",
-    settingSourcePolicy,
-    includeProject,
-    includeLocal,
-    maxParentDepth,
-    maxRuleFiles,
-    discoveredCount: files.length,
-    files,
-    issues,
-  };
+  return require("./group-memory-loading").discoverProjectMemoryFiles(projectRoot, options);
 }
 
 export function importProjectMemoryFilesToGroupTypedMemory(groupId: string, projectRoot: string, options: any = {}) {
-  const discovery = discoverProjectMemoryFiles(projectRoot, options);
-  const projectName = safeSegment(options.project || options.projectName || options.project_name || path.basename(String(projectRoot || "project")), "project");
-  const maxImportFiles = Math.max(1, Math.min(300, Number(options.maxImportFiles || options.max_import_files || 80)));
-  const includeAudit = buildClaudeMemoryIncludeExpansion(discovery.files || [], {
-    groupId,
-    allowedRoots: [discovery.projectRoot],
-    allowExternalIncludes: options.allowExternalIncludes === true || options.allow_external_includes === true,
-    maxIncludeDepth: options.maxIncludeDepth || options.max_include_depth,
-  });
-  const importItems = [...(discovery.files || []), ...(includeAudit.files || [])];
-  const boundedImportItems = importItems.slice(0, maxImportFiles);
-  const writes: any[] = [];
-  const skipped: any[] = [];
-  for (const item of boundedImportItems) {
-    const rel = String(item.relPath || path.basename(item.file || "memory.md"));
-    const slug = safeSegment(`project-${projectName}-${rel.replace(/\.md$/i, "")}`, `project-${projectName}-memory`);
-    const titlePrefix = item.includeParentFile
-      ? "Project Memory Include"
-      : item.kind === "local" ? "Local Project Memory" : item.kind === "project_rule" ? "Project Rule" : "Project Memory";
-    const body = [
-      `# ${titlePrefix}: ${rel}`,
-      "",
-      `Imported from ${item.file}`,
-      item.includeParentFile ? `Included by ${item.includeParentFile}` : "",
-      item.includeDepth ? `Include depth: ${item.includeDepth}` : "",
-      "",
-      neutralizeClaudeMemoryIncludeRefs(item.body || ""),
-    ].filter(line => line !== "").join("\n");
-    const write = upsertGroupTypedMemoryDocument(groupId, {
-      type: item.kind === "local" ? "project" : "reference",
-      slug,
-      name: `${titlePrefix}: ${rel}`,
-      description: item.description || `${titlePrefix} imported from ${rel}`,
-      source: `project-memory:${projectName}:${item.kind}:${rel}`,
-      paths: item.paths || [],
-      updatedAt: new Date(Number(item.mtimeMs || Date.now())).toISOString(),
-      body,
-    });
-    writes.push({ ...write, sourceFile: item.file, relPath: rel, kind: item.kind, paths: item.paths || [], checksum: item.checksum, includeParentFile: item.includeParentFile || "", includeDepth: Number(item.includeDepth || 0) });
-  }
-  if (importItems.length > maxImportFiles) {
-    skipped.push({ type: "max_import_files", count: importItems.length - maxImportFiles });
-  }
-  const instructionsLoadedHooks = executeInstructionsLoadedHooksForImportedClaudeMemory(groupId, boundedImportItems, {
-    ...options,
-    loadReason: options.instructionsLoadReason || options.instructions_load_reason || "project_memory_import",
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-project-memory-import-v1",
-    version: GROUP_PROJECT_MEMORY_IMPORT_VERSION,
-    groupId,
-    project: projectName,
-    projectRoot: discovery.projectRoot,
-    status: discovery.status === "missing_project_root" ? "missing_project_root" : "imported",
-    settingSourcePolicy: discovery.settingSourcePolicy,
-    includeProject: discovery.includeProject,
-    includeLocal: discovery.includeLocal,
-    discoveredCount: discovery.discoveredCount || 0,
-    importedCount: writes.length,
-    instructionsLoadedHooks,
-    includeAudit: {
-      ...includeAudit,
-      files: undefined,
-      importedIncludeCount: writes.filter(item => Number(item.includeDepth || 0) > 0).length,
-    },
-    skipped,
-    issues: [...(discovery.issues || []), ...(includeAudit.issues || [])],
-    writes,
-    index,
-    importedAt: now(),
-  };
+  return require("./group-memory-loading").importProjectMemoryFilesToGroupTypedMemory(groupId, projectRoot, options);
 }
 
-function defaultManagedClaudeMemoryRoot() {
+export function defaultManagedClaudeMemoryRoot() {
   if (process.env.CCM_MANAGED_CLAUDE_MEMORY_DIR) return process.env.CCM_MANAGED_CLAUDE_MEMORY_DIR;
   if (process.env.CLAUDE_CODE_MANAGED_SETTINGS_PATH) return process.env.CLAUDE_CODE_MANAGED_SETTINGS_PATH;
   if (process.platform === "win32") return "C:\\Program Files\\ClaudeCode";
@@ -4025,158 +2943,19 @@ function defaultManagedClaudeMemoryRoot() {
   return "/etc/claude-code";
 }
 
-function defaultUserClaudeMemoryRoot() {
+export function defaultUserClaudeMemoryRoot() {
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
 }
 
 export function discoverGlobalClaudeMemoryFiles(options: any = {}) {
-  const settingSourcePolicy = buildClaudeMemorySettingSourcePolicy(options);
-  const includeUser = settingSourcePolicy.includeUser;
-  const includeManaged = settingSourcePolicy.includeManaged;
-  const userRoot = path.resolve(String(options.userRoot || options.user_root || defaultUserClaudeMemoryRoot()));
-  const managedRoot = path.resolve(String(options.managedRoot || options.managed_root || defaultManagedClaudeMemoryRoot()));
-  const maxRuleFiles = Math.max(1, Math.min(300, Number(options.maxRuleFiles || options.max_rule_files || 80)));
-  const files: any[] = [];
-  const issues: any[] = [];
-  const seen = new Set<string>();
-  const addFile = (file: string, scope: string, kind: string, root: string) => {
-    const resolved = path.resolve(file);
-    const key = normalizeFileKey(resolved);
-    if (seen.has(key)) return;
-    seen.add(key);
-    if (!fs.existsSync(resolved)) return;
-    try {
-      const stat = fs.statSync(resolved);
-      if (!stat.isFile()) return;
-      const content = fs.readFileSync(resolved, "utf-8");
-      const parsed = parseFrontmatter(content);
-      files.push({
-        file: resolved,
-        relPath: path.relative(root, resolved).replace(/\\/g, "/") || path.basename(resolved),
-        root,
-        scope,
-        kind,
-        name: parsed.meta.name || path.basename(resolved),
-        description: parsed.meta.description || compactText(parsed.body.split(/\n+/).find(Boolean) || "", 180),
-        paths: normalizePathGlobs(parsed.meta.paths || parsed.meta.path_globs || parsed.meta.globs || []),
-        bytes: stat.size,
-        mtimeMs: stat.mtimeMs,
-        checksum: checksum(content, 24),
-        body: parsed.body || content,
-      });
-    } catch (error: any) {
-      issues.push({ type: "unreadable_global_claude_memory", path: resolved, error: compactText(error?.message || error, 260) });
-    }
-  };
-  if (includeManaged && fs.existsSync(managedRoot)) {
-    addFile(path.join(managedRoot, "CLAUDE.md"), "managed", "managed", managedRoot);
-    for (const file of listMarkdownFilesRecursive(path.join(managedRoot, ".claude", "rules"), { maxFiles: maxRuleFiles })) {
-      addFile(file, "managed", "managed_rule", managedRoot);
-    }
-  } else if (includeManaged && (options.managedRoot || options.managed_root || process.env.CCM_MANAGED_CLAUDE_MEMORY_DIR || process.env.CLAUDE_CODE_MANAGED_SETTINGS_PATH)) {
-    issues.push({ type: "missing_managed_root", path: managedRoot });
-  }
-  if (includeUser && fs.existsSync(userRoot)) {
-    addFile(path.join(userRoot, "CLAUDE.md"), "user", "user", userRoot);
-    for (const file of listMarkdownFilesRecursive(path.join(userRoot, "rules"), { maxFiles: maxRuleFiles })) {
-      addFile(file, "user", "user_rule", userRoot);
-    }
-  } else if (includeUser && (options.userRoot || options.user_root || process.env.CLAUDE_CONFIG_DIR)) {
-    issues.push({ type: "missing_user_root", path: userRoot });
-  }
-  return {
-    schema: "ccm-global-claude-memory-discovery-v1",
-    version: 1,
-    status: files.length ? "found" : "empty",
-    settingSourcePolicy,
-    includeUser,
-    includeManaged,
-    userRoot,
-    managedRoot,
-    discoveredCount: files.length,
-    files,
-    issues,
-  };
+  return require("./group-memory-loading").discoverGlobalClaudeMemoryFiles(options);
 }
 
 export function importGlobalClaudeMemoryToGroupTypedMemory(groupId: string, options: any = {}) {
-  const discovery = discoverGlobalClaudeMemoryFiles(options);
-  const maxImportFiles = Math.max(1, Math.min(300, Number(options.maxImportFiles || options.max_import_files || 80)));
-  const includeAudit = buildClaudeMemoryIncludeExpansion(discovery.files || [], {
-    groupId,
-    maxIncludeDepth: options.maxIncludeDepth || options.max_include_depth,
-    allowUserExternalIncludes: options.allowUserExternalIncludes !== false && options.allow_user_external_includes !== false,
-    allowExternalForItem: (item: any) => {
-      if (item?.scope === "user") return options.allowUserExternalIncludes !== false && options.allow_user_external_includes !== false;
-      return options.allowExternalIncludes === true || options.allow_external_includes === true;
-    },
-  });
-  const importItems = [...(discovery.files || []), ...(includeAudit.files || [])];
-  const boundedImportItems = importItems.slice(0, maxImportFiles);
-  const writes: any[] = [];
-  const skipped: any[] = [];
-  for (const item of boundedImportItems) {
-    const rel = String(item.relPath || path.basename(item.file || "CLAUDE.md"));
-    const slug = safeSegment(`global-claude-${item.scope}-${rel.replace(/\.md$/i, "")}`, `global-claude-${item.scope}-memory`);
-    const titlePrefix = item.scope === "managed"
-      ? (item.includeParentFile ? "Managed Claude Include" : item.kind === "managed_rule" ? "Managed Claude Rule" : "Managed Claude Memory")
-      : (item.includeParentFile ? "User Claude Include" : item.kind === "user_rule" ? "User Claude Rule" : "User Claude Memory");
-    const body = [
-      `# ${titlePrefix}: ${rel}`,
-      "",
-      `Imported from ${item.file}`,
-      item.includeParentFile ? `Included by ${item.includeParentFile}` : "",
-      item.includeDepth ? `Include depth: ${item.includeDepth}` : "",
-      "",
-      neutralizeClaudeMemoryIncludeRefs(item.body || ""),
-    ].filter(line => line !== "").join("\n");
-    const write = upsertGroupTypedMemoryDocument(groupId, {
-      type: item.scope === "user" ? "user" : "reference",
-      slug,
-      name: `${titlePrefix}: ${rel}`,
-      description: item.description || `${titlePrefix} imported from ${rel}`,
-      source: `global-claude-memory:${item.scope}:${item.kind}:${rel}`,
-      paths: item.paths || [],
-      updatedAt: new Date(Number(item.mtimeMs || Date.now())).toISOString(),
-      body,
-    });
-    writes.push({ ...write, sourceFile: item.file, relPath: rel, scope: item.scope, kind: item.kind, paths: item.paths || [], checksum: item.checksum, includeParentFile: item.includeParentFile || "", includeDepth: Number(item.includeDepth || 0) });
-  }
-  if (importItems.length > maxImportFiles) {
-    skipped.push({ type: "max_import_files", count: importItems.length - maxImportFiles });
-  }
-  const instructionsLoadedHooks = executeInstructionsLoadedHooksForImportedClaudeMemory(groupId, boundedImportItems, {
-    ...options,
-    loadReason: options.instructionsLoadReason || options.instructions_load_reason || "global_claude_memory_import",
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-global-claude-memory-import-v1",
-    version: GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION,
-    groupId,
-    status: discovery.status === "empty" ? "empty" : "imported",
-    settingSourcePolicy: discovery.settingSourcePolicy,
-    includeUser: discovery.includeUser,
-    includeManaged: discovery.includeManaged,
-    userRoot: discovery.userRoot,
-    managedRoot: discovery.managedRoot,
-    discoveredCount: discovery.discoveredCount || 0,
-    importedCount: writes.length,
-    instructionsLoadedHooks,
-    includeAudit: {
-      ...includeAudit,
-      files: undefined,
-      importedIncludeCount: writes.filter(item => Number(item.includeDepth || 0) > 0).length,
-    },
-    skipped,
-    issues: [...(discovery.issues || []), ...(includeAudit.issues || [])],
-    writes,
-    index,
-    importedAt: now(),
-  };
+  return require("./group-memory-loading").importGlobalClaudeMemoryToGroupTypedMemory(groupId, options);
 }
 
-function scanGroupTypedMemoryDocumentsRaw(groupId: string) {
+export function scanGroupTypedMemoryDocumentsRaw(groupId: string) {
   return listMemoryMarkdownFiles(groupId).map(file => {
     const content = readGroupTypedMemoryArtifactText(file);
     if (content === null) return null;
@@ -4246,7 +3025,7 @@ export function buildGroupTypedMemoryIndex(groupId: string) {
   };
 }
 
-function groupTypedMemoryPriority(type: any) {
+export function groupTypedMemoryPriority(type: any) {
   const value = normalizeMemoryType(type);
   if (value === "user") return 400;
   if (value === "feedback") return 300;
@@ -4254,11 +3033,11 @@ function groupTypedMemoryPriority(type: any) {
   return 100;
 }
 
-function normalizeFileKey(file: string) {
+export function normalizeFileKey(file: string) {
   return path.resolve(file).replace(/\\/g, "/").toLowerCase();
 }
 
-function isPathInside(baseDir: string, file: string) {
+export function isPathInside(baseDir: string, file: string) {
   const base = normalizeFileKey(baseDir);
   const target = normalizeFileKey(file);
   return target === base || target.startsWith(`${base}/`);
@@ -4308,7 +3087,7 @@ function resolveClaudeMemoryIncludePath(baseFile: string, ref: string) {
   return path.resolve(path.dirname(baseFile), cleaned);
 }
 
-function neutralizeClaudeMemoryIncludeRefs(content: string) {
+export function neutralizeClaudeMemoryIncludeRefs(content: string) {
   const lines: string[] = [];
   let inFence = false;
   for (const rawLine of String(content || "").split(/\n/)) {
@@ -4341,7 +3120,7 @@ function claudeMemoryIncludeRelPath(file: string, roots: string[] = []) {
   return `external/${checksum(resolved, 10)}-${path.basename(resolved)}`;
 }
 
-function buildClaudeMemoryIncludeExpansion(sourceItems: any[] = [], options: any = {}) {
+export function buildClaudeMemoryIncludeExpansion(sourceItems: any[] = [], options: any = {}) {
   const maxIncludeDepth = Math.max(1, Math.min(12, Number(options.maxIncludeDepth || options.max_include_depth || GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH)));
   const groupId = String(options.groupId || options.group_id || "");
   const approvalLedger = options.externalIncludeApprovalLedger
@@ -4536,14 +3315,14 @@ function buildClaudeMemoryIncludeExpansion(sourceItems: any[] = [], options: any
   };
 }
 
-function resolveTypedMemoryIncludePath(baseFile: string, ref: string) {
+export function resolveTypedMemoryIncludePath(baseFile: string, ref: string) {
   const cleaned = stripIncludePath(ref);
   if (!cleaned) return "";
   if (path.isAbsolute(cleaned) || /^[A-Za-z]:[\\/]/.test(cleaned)) return path.resolve(cleaned);
   return path.resolve(path.dirname(baseFile), cleaned);
 }
 
-function buildTypedMemoryLoadEntry(input: any) {
+export function buildTypedMemoryLoadEntry(input: any) {
   const file = String(input.file || "");
   const stat = fs.statSync(file);
   const sourceContent = fs.readFileSync(file, "utf-8");
@@ -4591,171 +3370,11 @@ function buildTypedMemoryLoadEntry(input: any) {
 }
 
 export function buildGroupTypedMemoryLoadPlan(groupId: string, options: any = {}) {
-  const index = buildGroupTypedMemoryIndex(groupId);
-  const dir = index.dir;
-  const maxEntries = Math.max(4, Math.min(240, Number(options.maxEntries || options.max_entries || GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES)));
-  const maxIncludeDepth = Math.max(1, Math.min(12, Number(options.maxIncludeDepth || options.max_include_depth || GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH)));
-  const targetPaths = deriveGroupTypedMemoryTargetPaths(options.query || "", options.targetPaths || options.target_paths || []);
-  const docs = scanGroupTypedMemoryDocuments(groupId);
-  const pathConditions = new Map<string, any>();
-  for (const doc of docs) pathConditions.set(normalizeFileKey(doc.file), evaluateTypedMemoryPathCondition(doc, targetPaths));
-  const docByFile = new Map<string, any>();
-  for (const doc of docs) docByFile.set(normalizeFileKey(doc.file), doc);
-  const sortedDocs = docs.slice().sort((a: any, b: any) => {
-    const byPriority = groupTypedMemoryPriority(a.type) - groupTypedMemoryPriority(b.type);
-    if (byPriority !== 0) return byPriority;
-    const byTime = Number(a.mtimeMs || 0) - Number(b.mtimeMs || 0);
-    return byTime !== 0 ? byTime : String(a.relPath || "").localeCompare(String(b.relPath || ""));
-  });
-  const entries: any[] = [];
-  const issues: any[] = [];
-  const processed = new Set<string>();
-  const visiting = new Set<string>();
-  const addIssue = (issue: any) => {
-    issues.push({
-      type: issue.type || "include_issue",
-      ref: String(issue.ref || ""),
-      from: String(issue.from || ""),
-      detail: compactText(issue.detail || "", 500),
-    });
-  };
-  const processFile = (file: string, input: any = {}) => {
-    const resolved = path.resolve(file);
-    const key = normalizeFileKey(resolved);
-    const from = String(input.parentRelPath || "");
-    if (!isPathInside(dir, resolved)) {
-      addIssue({ type: "external_include_skipped", ref: resolved, from, detail: "include path is outside this group's typed memory directory" });
-      return;
-    }
-    if (visiting.has(key)) {
-      addIssue({ type: "circular_include", ref: path.basename(resolved), from, detail: "cycle detected while expanding typed memory @include" });
-      return;
-    }
-    if (processed.has(key)) return;
-    if (!fs.existsSync(resolved)) {
-      addIssue({ type: "missing_include", ref: resolved, from, detail: "typed memory @include target does not exist" });
-      return;
-    }
-    if (Number(input.depth || 0) > maxIncludeDepth) {
-      addIssue({ type: "max_include_depth", ref: resolved, from, detail: `include depth exceeded ${maxIncludeDepth}` });
-      return;
-    }
-    visiting.add(key);
-    let entry: any;
-    try {
-      const known = docByFile.get(key);
-      entry = buildTypedMemoryLoadEntry({
-        file: resolved,
-        kind: input.kind || (known ? "typed_doc" : "include"),
-        relPath: known?.relPath || path.relative(dir, resolved).replace(/\\/g, "/"),
-        type: known?.type || input.type,
-        pathGlobs: known?.paths || input.pathGlobs || [],
-        pathCondition: input.pathCondition || pathConditions.get(key) || evaluateTypedMemoryPathCondition(known || {}, targetPaths),
-        targetPaths,
-        depth: input.depth || 0,
-        parentRelPath: input.parentRelPath || "",
-      });
-      for (const ref of entry.includeRefs || []) {
-        const includePath = resolveTypedMemoryIncludePath(resolved, ref);
-        processFile(includePath, {
-          kind: "include",
-          depth: Number(entry.includeDepth || 0) + 1,
-          parentRelPath: entry.relPath,
-          type: entry.type,
-        });
-      }
-      entries.push(entry);
-      processed.add(key);
-    } catch (error: any) {
-      addIssue({ type: "unreadable_memory_file", ref: resolved, from, detail: error?.message || error });
-    } finally {
-      visiting.delete(key);
-    }
-  };
-  processFile(index.file, { kind: "entrypoint", relPath: GROUP_TYPED_MEMORY_ENTRYPOINT, depth: 0 });
-  let conditionalMatched = 0;
-  let conditionalSkipped = 0;
-  for (const doc of sortedDocs) {
-    const condition = pathConditions.get(normalizeFileKey(doc.file)) || evaluateTypedMemoryPathCondition(doc, targetPaths);
-    if (condition.conditional && !condition.matched) {
-      conditionalSkipped += 1;
-      continue;
-    }
-    if (condition.conditional && condition.matched) conditionalMatched += 1;
-    processFile(doc.file, { kind: "typed_doc", relPath: doc.relPath, type: doc.type, depth: 0, pathCondition: condition, targetPaths });
-  }
-  const boundedEntries = entries.slice(0, maxEntries).map((entry, loadOrder) => ({ ...entry, loadOrder }));
-  const entrypointEntry = entries.find(entry => entry.kind === "entrypoint") || null;
-  const entryListTruncated = entries.length > boundedEntries.length;
-  const entrypointTruncated = entrypointEntry?.entrypointTruncation?.truncated === true;
-  const truncated = entryListTruncated || entrypointTruncated;
-  const totalBytes = boundedEntries.reduce((sum, entry) => sum + Number(entry.bytes || 0), 0);
-  const estimatedTokens = boundedEntries.reduce((sum, entry) => sum + Number(entry.estimatedTokens || 0), 0);
-  const byType = boundedEntries.reduce((acc: any, entry: any) => {
-    const key = String(entry.type || entry.kind || "unknown");
-    acc[key] = Number(acc[key] || 0) + 1;
-    return acc;
-  }, {});
-  const status = issues.some(issue => issue.type === "missing_include" || issue.type === "circular_include" || issue.type === "unreadable_memory_file")
-    ? "include_warnings"
-    : truncated ? "truncated" : "pass";
-  return {
-    schema: "ccm-group-typed-memory-load-plan-v1",
-    version: GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION,
-    groupId,
-    generatedAt: now(),
-    status,
-    pass: status === "pass",
-    loadOrderPolicy: "entrypoint_first_then_lower_priority_docs_then_higher_priority_docs; includes_load_before_parent",
-    priorityTiers: {
-      entrypoint: 0,
-      reference: groupTypedMemoryPriority("reference"),
-      project: groupTypedMemoryPriority("project"),
-      feedback: groupTypedMemoryPriority("feedback"),
-      user: groupTypedMemoryPriority("user"),
-    },
-    maxEntries,
-    maxIncludeDepth,
-    targetPaths,
-    conditionalMatched,
-    conditionalSkipped,
-    entryCount: boundedEntries.length,
-    totalDiscoveredEntries: entries.length,
-    truncated,
-    entryListTruncated,
-    entrypointTruncated,
-    entrypointTruncation: entrypointEntry?.entrypointTruncation || null,
-    totalBytes,
-    estimatedTokens,
-    byType,
-    issues,
-    indexFile: index.file,
-    memoryDir: dir,
-    entries: boundedEntries,
-  };
+  return require("./group-memory-loading").buildGroupTypedMemoryLoadPlan(groupId, options);
 }
 
 export function renderGroupTypedMemoryLoadPlan(plan: any) {
-  if (!plan?.schema) return "";
-  const lines = [
-    `类型化 MEMORY.md 加载计划：${plan.status || "unknown"}；加载 ${plan.entryCount || 0}/${plan.totalDiscoveredEntries || 0} 项，约 ${plan.estimatedTokens || 0} tokens；条件匹配 ${plan.conditionalMatched || 0}、跳过 ${plan.conditionalSkipped || 0}；策略 ${plan.loadOrderPolicy || "unknown"}。`,
-    `- 优先级：entrypoint < reference < project < feedback < user；高优先级记忆在后加载，子 Agent 应优先服从后加载内容。`,
-  ];
-  if (Array.isArray(plan.targetPaths) && plan.targetPaths.length) {
-    lines.push(`- 路径条件目标：${plan.targetPaths.slice(0, 8).join("、")}。`);
-  }
-  if (Array.isArray(plan.issues) && plan.issues.length) {
-    lines.push(`- 加载计划警告：${plan.issues.slice(0, 5).map((issue: any) => `${issue.type}:${issue.from || "root"}->${issue.ref || ""}`).join("；")}`);
-  }
-  const entries = Array.isArray(plan.entries) ? plan.entries : [];
-  const preview = entries.slice(-8);
-  if (preview.length) {
-    lines.push("- 加载顺序预览（后面的优先级更高）：");
-    for (const entry of preview) {
-      lines.push(`  - #${entry.loadOrder ?? 0} [${entry.type || entry.kind}] ${entry.relPath || ""}${entry.parentRelPath ? `（include by ${entry.parentRelPath}）` : ""}`);
-    }
-  }
-  return lines.join("\n");
+  return require("./group-memory-loading").renderGroupTypedMemoryLoadPlan(plan);
 }
 
 function listLines(title: string, items: any[], mapper: (item: any) => string, limit = 12) {
@@ -5117,7 +3736,7 @@ function extractGroupLogPositiveFeedbackLifecycleRequests(groupId: string, messa
   return requests;
 }
 
-function positiveFeedbackLifecycleEventChecksum(event: any) {
+export function positiveFeedbackLifecycleEventChecksum(event: any) {
   return checksum([
     event.schema,
     event.groupId,
@@ -5274,7 +3893,7 @@ function applyGroupPositiveFeedbackLifecycle(groupId: string, facts: any, reques
   };
 }
 
-function groupLogDistillationAdmission(candidate: any) {
+export function groupLogDistillationAdmission(candidate: any) {
   const text = String(candidate?.text || "");
   const structured = candidate?.memoryAdmission || {};
   const activityNoise = GROUP_LOG_ACTIVITY_NOISE_PATTERN.test(text);
@@ -5525,15 +4144,7 @@ function buildGroupLogDistillationAdmissionLedger(previous: any = {}, admitted: 
 }
 
 export function readGroupTypedMemoryDistillationLedger(groupId: string) {
-  const file = getGroupTypedMemoryDistillationLedgerFile(groupId);
-  const state = readJson(file, {
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: {},
-    updatedAt: "",
-  });
-  return { ...state, facts: state?.facts && typeof state.facts === "object" ? state.facts : {}, file };
+  return require("./group-memory-distillation").readGroupTypedMemoryDistillationLedger(groupId);
 }
 
 function pruneDistilledFacts(facts: any = {}, perTypeLimit = GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT) {
@@ -5868,7 +4479,7 @@ function preservedGroupTypedMemoryDistillationArchives(...ledgers: any[]) {
   return out;
 }
 
-function modelExtractionTypedArchiveChecksum(archive: any) {
+export function modelExtractionTypedArchiveChecksum(archive: any) {
   const payload = { ...(archive || {}) };
   delete payload.checksum;
   return checksum(JSON.stringify(payload), 64);
@@ -5893,7 +4504,7 @@ function modelExtractionGraphChecksum(graph: any) {
   return checksum(JSON.stringify(payload), 64);
 }
 
-function modelExtractionEvidenceComparable(value: any) {
+export function modelExtractionEvidenceComparable(value: any) {
   return String(value || "")
     .replace(/^[-*+]\s+/, "")
     .replace(/^\d+[.)]\s+/, "")
@@ -5923,7 +4534,7 @@ function verifyModelExtractionGraphForTypedMemory(graph: any) {
   });
 }
 
-function validateModelExtractionTypedMemoryInput(scopeId: string, input: any) {
+export function validateModelExtractionTypedMemoryInput(scopeId: string, input: any) {
   if (!isExactGroupTypedMemorySessionScope(scopeId)) throw new Error("model_extraction_typed_memory_requires_exact_group_gcs_scope");
   const separator = scopeId.lastIndexOf("--gcs_");
   const groupId = scopeId.slice(0, separator);
@@ -6409,7 +5020,7 @@ export function buildGroupSessionModelExtractionTypedMemoryTopics(factsInput: an
   };
 }
 
-function renderModelExtractionTypedMemoryBody(title: string, facts: any[], updatedAt: string) {
+export function renderModelExtractionTypedMemoryBody(title: string, facts: any[], updatedAt: string) {
   const lines = [
     `# ${title}`,
     "",
@@ -6426,258 +5037,7 @@ function renderModelExtractionTypedMemoryBody(title: string, facts: any[], updat
 }
 
 export function distillGroupSessionModelExtractionToTypedMemory(scopeId: string, input: any, options: any = {}) {
-  const validated = validateModelExtractionTypedMemoryInput(String(scopeId || "").trim(), input);
-  return runGroupTypedMemoryDistillationMutation(scopeId, "model_extraction_typed_memory", options, () => {
-    if (options.__modelExtractionTypedMemoryFailAfterSnapshot === true) {
-      throw new Error("model_extraction_typed_memory_injected_failure");
-    }
-    const at = String(options.at || validated.receipt.completedAt || now());
-    const ledger = readGroupTypedMemoryDistillationLedger(scopeId);
-    const previousArchive = ledger.modelExtractionTypedMemoryArchive || null;
-    if (previousArchive?.schema
-      && (previousArchive.schema !== "ccm-group-session-model-extraction-typed-memory-archive-v1"
-        || modelExtractionTypedArchiveChecksum(previousArchive) !== String(previousArchive.checksum || ""))) {
-      throw new Error("model_extraction_typed_memory_archive_integrity_invalid");
-    }
-    const sourceById = new Map(validated.sourceRows.map((row: any) => [String(row?.id || ""), row]));
-    const edges = Array.isArray(validated.graph.edges) ? validated.graph.edges : [];
-    const edgeByNewChecksum = new Map(edges.map((edge: any) => [String(edge.newFactChecksum || ""), edge]));
-    const facts = new Map<string, any>(Object.entries(previousArchive?.facts || {}));
-    const rejections: any[] = [];
-    const admitted: any[] = [];
-    let duplicateCount = 0;
-    let supersededCount = 0;
-
-    for (const edge of edges) {
-      for (const [factId, fact] of facts.entries()) {
-        if (fact.status !== "active") continue;
-        if (![fact.graphFactChecksum, fact.anchorChecksum, fact.sourceFactChecksum].includes(String(edge.oldFactChecksum || ""))) continue;
-        facts.set(factId, {
-          ...fact,
-          status: "superseded",
-          supersededAt: at,
-          supersededByGraphFactChecksum: String(edge.newFactChecksum || ""),
-          supersessionEdgeId: String(edge.edgeId || ""),
-          supersessionExecutionId: String(validated.receipt.executionId || ""),
-        });
-        supersededCount += 1;
-      }
-    }
-
-    const activeFacts = Array.isArray(validated.graph.activeFacts) ? validated.graph.activeFacts : [];
-    for (const proposal of activeFacts) {
-      const proposalType = String(proposal?.type || "");
-      const source = String(proposal?.source || "");
-      const reject = (reason: string) => rejections.push({
-        proposalType,
-        source,
-        factChecksum: String(proposal?.factChecksum || ""),
-        sourceMessageId: String(proposal?.sourceMessageId || ""),
-        reason,
-        executionId: String(validated.receipt.executionId || ""),
-        rejectedAt: at,
-      });
-      if (["unresolved", "path", "symbol"].includes(proposalType)) {
-        reject("ephemeral_or_derivable_fact_shape");
-        continue;
-      }
-      if (!["constraint", "replacement"].includes(proposalType)) {
-        reject("unsupported_model_fact_shape");
-        continue;
-      }
-      if (!["model_confirmed_source", "explicit_replacement"].includes(source)) {
-        reject("missing_current_raw_message_evidence");
-        continue;
-      }
-      const edge: any = source === "explicit_replacement"
-        ? edgeByNewChecksum.get(String(proposal.factChecksum || ""))
-        : null;
-      const sourceMessageId = String(proposal.sourceMessageId || edge?.sourceMessageId || "");
-      const sourceRow: any = sourceById.get(sourceMessageId);
-      const sourceContent = String(sourceRow?.content || "");
-      const sourceChecksum = checksum(sourceContent, 32);
-      const expectedSourceChecksum = String(proposal.sourceMessageChecksum || edge?.sourceMessageChecksum || "");
-      const text = compactText(proposal.text || edge?.replacementText || "", 900);
-      const comparableText = modelExtractionEvidenceComparable(text);
-      const sourceComparable = modelExtractionEvidenceComparable(sourceContent);
-      const markdownComparable = modelExtractionEvidenceComparable(validated.markdown);
-      if (!sourceRow || String(sourceRow?.role || "").toLowerCase() !== "user") {
-        reject("source_message_missing_or_not_user");
-        continue;
-      }
-      if (!expectedSourceChecksum || sourceChecksum !== expectedSourceChecksum) {
-        reject("source_message_checksum_mismatch");
-        continue;
-      }
-      if (!comparableText || !sourceComparable.includes(comparableText) || !markdownComparable.includes(comparableText)) {
-        reject("fact_not_exactly_bound_to_source_and_model_output");
-        continue;
-      }
-      const category: GroupTypedMemoryType = proposalType === "replacement" ? "feedback" : "user";
-      const stableFactChecksum = checksum([category, comparableText], 64);
-      const existing = facts.get(stableFactChecksum);
-      if (existing?.status === "active") duplicateCount += 1;
-      const fact = {
-        schema: "ccm-group-session-model-extraction-typed-memory-fact-v1",
-        version: GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION,
-        stableFactChecksum,
-        graphFactChecksum: String(proposal.factChecksum || ""),
-        anchorChecksum: checksum(`constraint\0${text}`, 32),
-        sourceFactChecksum: checksum(text, 32),
-        category,
-        proposalType,
-        text,
-        status: "active",
-        sourceMessageId,
-        sourceMessageChecksum: sourceChecksum,
-        sourceTranscriptChecksum: String(validated.receipt.requestAudit?.sourceTranscriptChecksum || ""),
-        executionId: String(validated.receipt.executionId || ""),
-        receiptChecksum: String(validated.receipt.checksum || ""),
-        requestArtifactChecksum: String(validated.receipt.requestArtifactChecksum || ""),
-        graphChecksum: String(validated.graph.checksum || ""),
-        extractionFencingToken: Number(validated.receipt.fencingToken || 0),
-        firstCommittedAt: existing?.firstCommittedAt || at,
-        lastCommittedAt: at,
-      };
-      facts.set(stableFactChecksum, fact);
-      admitted.push(fact);
-    }
-
-    let boundedFacts = Array.from(facts.entries())
-      .sort((a: any, b: any) => Number(a[1].status === "active") - Number(b[1].status === "active")
-        || String(a[1].lastCommittedAt || a[1].supersededAt || "").localeCompare(String(b[1].lastCommittedAt || b[1].supersededAt || "")))
-      .slice(-500);
-    const topicLifecycle = buildGroupSessionModelExtractionTypedMemoryTopics(
-      Object.fromEntries(boundedFacts),
-      previousArchive?.topics || {},
-      { at, maxTopicsPerCategory: options.maxTopicsPerCategory || options.max_topics_per_category }
-    );
-    boundedFacts = Object.entries(topicLifecycle.facts || {});
-    const activeTopicRows = Object.values(topicLifecycle.topics || {})
-      .filter((topic: any) => topic?.status === "active")
-      .sort((a: any, b: any) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.name || "").localeCompare(String(b.name || "")));
-    const topicDocumentSpecs: any[] = [];
-    for (const topic of activeTopicRows as any[]) {
-      const rows = (topic.factChecksums || [])
-        .map((factChecksum: string) => topicLifecycle.facts?.[factChecksum])
-        .filter((fact: any) => fact?.status === "active");
-      const partCount = Math.max(1, Math.ceil(rows.length / GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE));
-      topic.docSlugs = [];
-      for (let part = 0; part < partCount; part += 1) {
-        const partRows = rows.slice(part * GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE, (part + 1) * GROUP_SESSION_MODEL_EXTRACTION_MAX_FACTS_PER_TOPIC_FILE);
-        if (!partRows.length) continue;
-        const slug = `${topic.slug}${partCount > 1 ? `-part-${part + 1}` : ""}`;
-        topic.docSlugs.push(slug);
-        topicDocumentSpecs.push({
-          topic,
-          rows: partRows,
-          slug,
-          name: partCount > 1 ? `${topic.name} (${part + 1}/${partCount})` : topic.name,
-          description: `${topic.category === "feedback" ? "User corrections" : "Durable user constraints"} about ${(topic.concepts || []).slice(0, 4).join(", ") || "a stable semantic topic"}.`,
-        });
-      }
-    }
-    const execution = {
-      executionId: String(validated.receipt.executionId || ""),
-      receiptChecksum: String(validated.receipt.checksum || ""),
-      graphChecksum: String(validated.graph.checksum || ""),
-      proposalCount: activeFacts.length,
-      admittedCount: admitted.length,
-      rejectedCount: rejections.length,
-      duplicateCount,
-      supersededCount,
-      activeTopicCount: topicLifecycle.activeTopicCount,
-      createdTopicCount: topicLifecycle.createdTopicCount,
-      reusedTopicCount: topicLifecycle.reusedTopicCount,
-      consolidatedFactCount: topicLifecycle.consolidatedFactCount,
-      unclassifiedFactCount: topicLifecycle.unclassifiedFactCount,
-      lowConfidenceFactCount: topicLifecycle.lowConfidenceFactCount,
-      rebalancedFactCount: topicLifecycle.rebalancedFactCount,
-      crossLanguageReuseCount: topicLifecycle.crossLanguageReuseCount,
-      status: "committed",
-      committedAt: at,
-    };
-    const executions = [...(Array.isArray(previousArchive?.executions) ? previousArchive.executions : [])
-      .filter((row: any) => String(row?.executionId || "") !== execution.executionId), execution].slice(-200);
-    const archiveCore: any = {
-      schema: "ccm-group-session-model-extraction-typed-memory-archive-v1",
-      version: GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION,
-      scopeId,
-      groupId: validated.groupId,
-      groupSessionId: validated.groupSessionId,
-      facts: Object.fromEntries(boundedFacts),
-      topics: topicLifecycle.topics,
-      executions,
-      rejections: [...(Array.isArray(previousArchive?.rejections) ? previousArchive.rejections : []), ...rejections].slice(-500),
-      activeFactCount: boundedFacts.filter(([, fact]: any) => fact.status === "active").length,
-      supersededFactCount: boundedFacts.filter(([, fact]: any) => fact.status === "superseded").length,
-      activeTopicCount: topicLifecycle.activeTopicCount,
-      retiredTopicCount: topicLifecycle.retiredTopicCount,
-      mergedTopicCount: topicLifecycle.mergedTopicCount,
-      consolidatedFactCount: topicLifecycle.consolidatedFactCount,
-      unclassifiedFactCount: topicLifecycle.unclassifiedFactCount,
-      lowConfidenceFactCount: topicLifecycle.lowConfidenceFactCount,
-      rebalancedFactCount: topicLifecycle.rebalancedFactCount,
-      crossLanguageReuseCount: topicLifecycle.crossLanguageReuseCount,
-      updatedAt: at,
-    };
-    const archive = { ...archiveCore, checksum: modelExtractionTypedArchiveChecksum(archiveCore) };
-    const writes: any[] = [];
-    const currentDocSlugs = new Set(topicDocumentSpecs.map(spec => spec.slug));
-    for (const doc of scanGroupTypedMemoryDocumentsRaw(scopeId)) {
-      if (String(doc.source || "") !== "auto:model-extraction-evidence-admission" || currentDocSlugs.has(String(doc.relPath || "").replace(/\.md$/i, ""))) continue;
-      stageGroupTypedMemoryArtifactRemoval(activeGroupTypedMemoryDistillationMutations.get(scopeId), doc.file);
-    }
-    for (const spec of topicDocumentSpecs) {
-      writes.push(upsertGroupTypedMemoryDocument(scopeId, {
-        type: spec.topic.category,
-        slug: spec.slug,
-        name: spec.name,
-        description: spec.description,
-        source: "auto:model-extraction-evidence-admission",
-        updatedAt: at,
-        body: renderModelExtractionTypedMemoryBody(spec.name, spec.rows, at),
-        maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
-      }));
-    }
-    const index = buildGroupTypedMemoryIndex(scopeId);
-    writeJsonAtomic(ledger.file, {
-      ...ledger,
-      schema: "ccm-group-typed-memory-distillation-ledger-v1",
-      version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-      groupId: scopeId,
-      modelExtractionTypedMemoryArchive: archive,
-      updatedAt: at,
-    });
-    return {
-      schema: "ccm-group-session-model-extraction-typed-memory-commit-v1",
-      version: GROUP_SESSION_MODEL_EXTRACTION_TYPED_MEMORY_VERSION,
-      committed: true,
-      status: "committed",
-      scopeId,
-      executionId: execution.executionId,
-      proposalCount: activeFacts.length,
-      admittedCount: admitted.length,
-      rejectedCount: rejections.length,
-      duplicateCount,
-      supersededCount,
-      activeFactCount: archive.activeFactCount,
-      activeTopicCount: topicLifecycle.activeTopicCount,
-      retiredTopicCount: topicLifecycle.retiredTopicCount,
-      mergedTopicCount: topicLifecycle.mergedTopicCount,
-      createdTopicCount: topicLifecycle.createdTopicCount,
-      reusedTopicCount: topicLifecycle.reusedTopicCount,
-      consolidatedFactCount: topicLifecycle.consolidatedFactCount,
-      unclassifiedFactCount: topicLifecycle.unclassifiedFactCount,
-      lowConfidenceFactCount: topicLifecycle.lowConfidenceFactCount,
-      rebalancedFactCount: topicLifecycle.rebalancedFactCount,
-      crossLanguageReuseCount: topicLifecycle.crossLanguageReuseCount,
-      archiveChecksum: archive.checksum,
-      writes,
-      index,
-      rejections,
-    };
-  });
+  return require("./group-memory-distillation").distillGroupSessionModelExtractionToTypedMemory(scopeId, input, options);
 }
 
 function normalizeProviderReproofReceiptConsumptionStatus(value: any) {
@@ -6729,7 +5089,7 @@ function providerReproofReceiptConsumptionInputRows(input: any = {}) {
   return reportGroups.flatMap((group: any) => Array.isArray(group.bindings) ? group.bindings : []);
 }
 
-function normalizeProviderReproofReceiptConsumptionRows(input: any = {}, options: any = {}) {
+export function normalizeProviderReproofReceiptConsumptionRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
   return providerReproofReceiptConsumptionInputRows(input).map((raw: any, index: number) => {
@@ -6780,7 +5140,7 @@ function normalizeProviderReproofReceiptConsumptionRows(input: any = {}, options
     .filter((row: any) => ["strong", "used", "verified", "ignored", "blocked"].includes(row.status));
 }
 
-function mergeProviderReproofReceiptConsumptionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeProviderReproofReceiptConsumptionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -6814,7 +5174,7 @@ function mergeProviderReproofReceiptConsumptionRows(existing: any[] = [], incomi
   };
 }
 
-function renderProviderReproofReceiptConsumptionBody(title: string, rows: any[] = [], options: any = {}) {
+export function renderProviderReproofReceiptConsumptionBody(title: string, rows: any[] = [], options: any = {}) {
   const lines = [
     `# ${title}`,
     "",
@@ -6842,115 +5202,12 @@ function renderProviderReproofReceiptConsumptionBody(title: string, rows: any[] 
   return lines.join("\n").trim() + "\n";
 }
 
-function providerReproofReceiptConsumptionArchive(rows: any[] = [], options: any = {}) {
-  const updatedAt = String(options.updatedAt || now());
-  const promoted = rows.filter((row: any) => row.category === "promoted");
-  const caution = rows.filter((row: any) => row.category === "caution");
-  return {
-    schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
-    version: GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-    archived_count: rows.length,
-    promoted_count: promoted.length,
-    caution_count: caution.length,
-    strong_receipt_claim_count: rows.filter((row: any) => row.status === "strong").length,
-    used_count: rows.filter((row: any) => row.status === "used").length,
-    verified_count: rows.filter((row: any) => row.status === "verified").length,
-    ignored_count: rows.filter((row: any) => row.status === "ignored").length,
-    blocked_count: rows.filter((row: any) => row.status === "blocked").length,
-    rows,
-    updatedAt,
-  };
+export function providerReproofReceiptConsumptionArchive(rows: any[] = [], options: any = {}) {
+  return require("./group-memory-distillation").providerReproofReceiptConsumptionArchive(rows, options);
 }
 
 export function distillProviderReproofReceiptConsumptionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_reproof_receipt_consumption", options, () => distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
-      version: GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
-    groupId,
-    sourceGroupId: options.sourceGroupId || options.source_group_id || "",
-    groupSessionId: options.groupSessionId || options.group_session_id || "",
-  });
-  const sourceGroupId = scopeIdentity.rootGroupId || groupId;
-  const groupSessionId = scopeIdentity.groupSessionId;
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeProviderReproofReceiptConsumptionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
-  const previousArchive = ledger.providerReproofReceiptConsumptionArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeProviderReproofReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = { ...providerReproofReceiptConsumptionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
-  const writes: any[] = [];
-  const promotedRows = archive.rows.filter((row: any) => row.category === "promoted");
-  const cautionRows = archive.rows.filter((row: any) => row.category === "caution");
-  if (promotedRows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "provider-reproof-receipt-consumption-recall",
-      name: "Provider re-proof receipt consumption recall",
-      description: "Provider re-proof dispatch briefs that child Agents actually used, verified, or claimed strong after WorkerContextPacket injection.",
-      source: "auto:provider-reproof-receipt-consumption-distillation",
-      updatedAt,
-      body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Recall", promotedRows, { updatedAt, groupSessionId }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  if (cautionRows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "provider-reproof-receipt-consumption-cautions",
-      name: "Provider re-proof receipt consumption cautions",
-      description: "Provider re-proof dispatch briefs that child Agents ignored or blocked; keep them as cautionary memory, not promoted context.",
-      source: "auto:provider-reproof-receipt-consumption-distillation",
-      updatedAt,
-      body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Cautions", cautionRows, { updatedAt, groupSessionId }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    providerReproofReceiptConsumptionArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
-    version: GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    promotedCount: archive.promoted_count,
-    cautionCount: archive.caution_count,
-    strongReceiptClaimCount: archive.strong_receipt_claim_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input, options);
 }
 
 function providerRankingProvenanceCompactRepairReceiptConsumptionInputRows(input: any = {}) {
@@ -6989,7 +5246,7 @@ function providerRankingProvenanceCompactRepairReceiptConsumptionRowId(row: any 
   ], 24)}`;
 }
 
-function normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input: any = {}, options: any = {}) {
+export function normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
   return providerRankingProvenanceCompactRepairReceiptConsumptionInputRows(input).map((raw: any, index: number) => {
@@ -7071,7 +5328,7 @@ function normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(i
     .filter((row: any) => row.typed_memory_rel_paths.length > 0 && row.typed_memory_row_ids.length > 0);
 }
 
-function mergeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -7106,27 +5363,11 @@ function mergeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(exist
   };
 }
 
-function providerRankingProvenanceCompactRepairReceiptConsumptionArchive(rows: any[] = [], options: any = {}) {
-  const updatedAt = String(options.updatedAt || now());
-  const relPaths = uniqueStrings(rows.flatMap((row: any) => row.typed_memory_rel_paths || []), 80);
-  const rowIds = uniqueStrings(rows.flatMap((row: any) => row.typed_memory_row_ids || []), 120);
-  return {
-    schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
-    version: GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-    archived_count: rows.length,
-    verified_count: rows.filter((row: any) => row.status === "verified").length,
-    preserved_count: rows.filter((row: any) => row.provider_ranking_provenance_preserved === true).length,
-    receipt_count: uniqueStrings(rows.map((row: any) => row.provider_switch_decision_receipt_id).filter(Boolean), 120).length,
-    rel_path_count: relPaths.length,
-    row_id_count: rowIds.length,
-    typed_memory_rel_paths: relPaths,
-    typed_memory_row_ids: rowIds,
-    rows,
-    updatedAt,
-  };
+export function providerRankingProvenanceCompactRepairReceiptConsumptionArchive(rows: any[] = [], options: any = {}) {
+  return require("./group-memory-distillation").providerRankingProvenanceCompactRepairReceiptConsumptionArchive(rows, options);
 }
 
-function renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(archive: any = {}, options: any = {}) {
+export function renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const lines = [
     "# Provider Ranking Provenance Compact Repair Receipt Memory",
@@ -7161,82 +5402,7 @@ function renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(arch
 }
 
 export function distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_ranking_provenance_compact_repair", options, () => distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
-      version: GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
-    groupId,
-    sourceGroupId: options.sourceGroupId || options.source_group_id || "",
-    groupSessionId: options.groupSessionId || options.group_session_id || "",
-  });
-  const sourceGroupId = scopeIdentity.rootGroupId || groupId;
-  const groupSessionId = scopeIdentity.groupSessionId;
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
-  const previousArchive = ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeProviderRankingProvenanceCompactRepairReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = { ...providerRankingProvenanceCompactRepairReceiptConsumptionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "provider-ranking-provenance-compact-repair-receipt-memory",
-      name: "Provider ranking provenance compact repair receipt memory",
-      description: "Verified child Agent receipts proving provider ranking provenance compact repair consumed typed MEMORY.md and provider switch receipt context.",
-      source: "auto:provider-ranking-provenance-compact-repair-receipt-consumption-distillation",
-      updatedAt,
-      body: renderProviderRankingProvenanceCompactRepairReceiptConsumptionBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 20_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    providerRankingProvenanceCompactRepairReceiptConsumptionArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-provider-ranking-provenance-compact-repair-receipt-consumption-distillation-v1",
-    version: GROUP_PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    verifiedCount: archive.verified_count,
-    preservedCount: archive.preserved_count,
-    receiptCount: archive.receipt_count,
-    relPathCount: archive.rel_path_count,
-    rowIdCount: archive.row_id_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, input, options);
 }
 
 function postCompactReinjectionRepairReceiptConsumptionInputRows(input: any = {}) {
@@ -7283,7 +5449,7 @@ function postCompactReinjectionRepairReceiptConsumptionRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizePostCompactReinjectionRepairReceiptConsumptionRows(input: any = {}, options: any = {}) {
+export function normalizePostCompactReinjectionRepairReceiptConsumptionRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
   return postCompactReinjectionRepairReceiptConsumptionInputRows(input).map((raw: any, index: number) => {
@@ -7385,7 +5551,7 @@ function normalizePostCompactReinjectionRepairReceiptConsumptionRows(input: any 
     .filter((row: any) => row.resolution_reason === "post_compact_reinjection_repair_receipt_verified");
 }
 
-function mergePostCompactReinjectionRepairReceiptConsumptionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergePostCompactReinjectionRepairReceiptConsumptionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -7420,26 +5586,11 @@ function mergePostCompactReinjectionRepairReceiptConsumptionRows(existing: any[]
   };
 }
 
-function postCompactReinjectionRepairReceiptConsumptionArchive(rows: any[] = [], options: any = {}) {
-  const updatedAt = String(options.updatedAt || now());
-  return {
-    schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
-    version: GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-    archived_count: rows.length,
-    restored_count: rows.filter((row: any) => row.category === "restored").length,
-    caution_count: rows.filter((row: any) => row.category === "caution").length,
-    used_count: rows.filter((row: any) => row.usage_state === "used").length,
-    verified_count: rows.filter((row: any) => row.usage_state === "verified").length,
-    ignored_count: rows.filter((row: any) => row.usage_state === "ignored").length,
-    current_source_verified_count: rows.filter((row: any) => row.current_source_verified === true).length,
-    task_session_count: uniqueStrings(rows.map((row: any) => row.task_agent_session_id).filter(Boolean), 240).length,
-    native_session_count: uniqueStrings(rows.map((row: any) => row.native_session_id).filter(Boolean), 240).length,
-    rows,
-    updatedAt,
-  };
+export function postCompactReinjectionRepairReceiptConsumptionArchive(rows: any[] = [], options: any = {}) {
+  return require("./group-memory-distillation").postCompactReinjectionRepairReceiptConsumptionArchive(rows, options);
 }
 
-function renderPostCompactReinjectionRepairReceiptConsumptionBody(title: string, rows: any[] = [], options: any = {}) {
+export function renderPostCompactReinjectionRepairReceiptConsumptionBody(title: string, rows: any[] = [], options: any = {}) {
   const lines = [
     `# ${title}`,
     "",
@@ -7472,99 +5623,7 @@ function renderPostCompactReinjectionRepairReceiptConsumptionBody(title: string,
 }
 
 export function distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_reinjection_repair", options, () => distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
-      version: GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
-    groupId,
-    sourceGroupId: options.sourceGroupId || options.source_group_id || "",
-    groupSessionId: options.groupSessionId || options.group_session_id || "",
-  });
-  const sourceGroupId = scopeIdentity.rootGroupId || groupId;
-  const groupSessionId = scopeIdentity.groupSessionId;
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizePostCompactReinjectionRepairReceiptConsumptionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
-  const previousArchive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergePostCompactReinjectionRepairReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = { ...postCompactReinjectionRepairReceiptConsumptionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
-  const writes: any[] = [];
-  const restoredRows = archive.rows.filter((row: any) => row.category === "restored");
-  const cautionRows = archive.rows.filter((row: any) => row.category === "caution");
-  if (restoredRows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "post-compact-reinjection-repair-receipt-memory",
-      name: "Post-compact reinjection repair receipt memory",
-      description: "Verified exact gate/candidate repair completions bound to child Agent task and native sessions; historical recovery evidence requires current-source revalidation before reuse.",
-      source: "auto:post-compact-reinjection-repair-receipt-consumption-distillation",
-      updatedAt,
-      body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Memory", restoredRows, { updatedAt, groupSessionId }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
-    }));
-  }
-  if (cautionRows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "post-compact-reinjection-repair-receipt-cautions",
-      name: "Post-compact reinjection repair receipt cautions",
-      description: "Verified ignored post-compact reinjection candidates; retain the closure evidence without promoting the ignored candidate into future task context.",
-      source: "auto:post-compact-reinjection-repair-receipt-consumption-distillation",
-      updatedAt,
-      body: renderPostCompactReinjectionRepairReceiptConsumptionBody("Post-Compact Reinjection Repair Receipt Cautions", cautionRows, { updatedAt, groupSessionId }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    postCompactReinjectionRepairReceiptConsumptionArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-post-compact-reinjection-repair-receipt-consumption-distillation-v1",
-    version: GROUP_POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    restoredCount: archive.restored_count,
-    cautionCount: archive.caution_count,
-    usedCount: archive.used_count,
-    verifiedCount: archive.verified_count,
-    ignoredCount: archive.ignored_count,
-    currentSourceVerifiedCount: archive.current_source_verified_count,
-    taskSessionCount: archive.task_session_count,
-    nativeSessionCount: archive.native_session_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, input, options);
 }
 
 function postCompactReceiptMemoryUsageRepairCompletionInputRows(input: any = {}) {
@@ -7592,7 +5651,7 @@ function postCompactReceiptMemoryUsageRepairCompletionRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input: any = {}, options: any = {}) {
+export function normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
   const requiredEvents = ["dispatch", "child_agent_start", "worker_handoff_ready", "task_agent_memory_context_snapshot", "child_agent_receipt"];
@@ -7697,7 +5756,7 @@ function normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input: any =
     .filter((row: any) => requiredEvents.every(eventType => row.event_types.includes(eventType)));
 }
 
-function mergePostCompactReceiptMemoryUsageRepairCompletionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergePostCompactReceiptMemoryUsageRepairCompletionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -7731,7 +5790,7 @@ function mergePostCompactReceiptMemoryUsageRepairCompletionRows(existing: any[] 
   };
 }
 
-function postCompactReceiptMemoryUsageRepairCompletionArchive(rows: any[] = [], options: any = {}) {
+export function postCompactReceiptMemoryUsageRepairCompletionArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   return {
     schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
@@ -7746,7 +5805,7 @@ function postCompactReceiptMemoryUsageRepairCompletionArchive(rows: any[] = [], 
   };
 }
 
-function renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive: any = {}, options: any = {}) {
+export function renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const lines = [
     "# Post-Compact Receipt Memory Usage Repair Completions",
@@ -7776,81 +5835,7 @@ function renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive: any = 
 }
 
 export function distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_receipt_memory_usage_repair", options, () => distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
-      version: GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
-    groupId,
-    sourceGroupId: options.sourceGroupId || options.source_group_id || "",
-    groupSessionId: options.groupSessionId || options.group_session_id || "",
-  });
-  const sourceGroupId = scopeIdentity.rootGroupId || groupId;
-  const groupSessionId = scopeIdentity.groupSessionId;
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizePostCompactReceiptMemoryUsageRepairCompletionRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
-  const previousArchive = ledger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergePostCompactReceiptMemoryUsageRepairCompletionRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = { ...postCompactReceiptMemoryUsageRepairCompletionArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "post-compact-receipt-memory-usage-repair-completions",
-      name: "Post-compact receipt memory usage repair completions",
-      description: "Verified corrected-receipt completions from new repair sessions, with per-document usage evidence and mandatory future current-source reverification.",
-      source: "auto:post-compact-receipt-memory-usage-repair-completion-distillation",
-      updatedAt,
-      body: renderPostCompactReceiptMemoryUsageRepairCompletionBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    postCompactReceiptMemoryUsageRepairCompletionArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-post-compact-receipt-memory-usage-repair-completion-distillation-v1",
-    version: GROUP_POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    verifiedCount: archive.verified_count,
-    originalSessionCount: archive.original_session_count,
-    repairSessionCount: archive.repair_session_count,
-    requiredDocCount: archive.required_doc_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupId, input, options);
 }
 
 function postCompactCompletionMemoryPreservationRepairClosureInputRows(input: any = {}) {
@@ -7885,7 +5870,7 @@ function postCompactCompletionMemoryPreservationRepairClosureRowId(row: any = {}
   ], 24)}`;
 }
 
-function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input: any = {}, options: any = {}) {
+export function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   const forcedGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
   return postCompactCompletionMemoryPreservationRepairClosureInputRows(input).map((raw: any, index: number) => {
@@ -7950,7 +5935,7 @@ function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input
     .filter((row: any) => !row.historical_native_session_ids.includes(row.current_native_session_id));
 }
 
-function mergePostCompactCompletionMemoryPreservationRepairClosureRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergePostCompactCompletionMemoryPreservationRepairClosureRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing) {
@@ -7984,23 +5969,11 @@ function mergePostCompactCompletionMemoryPreservationRepairClosureRows(existing:
   };
 }
 
-function postCompactCompletionMemoryPreservationRepairClosureArchive(rows: any[] = [], options: any = {}) {
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
-    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
-    archived_count: rows.length,
-    verified_count: rows.filter((row: any) => row.exact_identity_restored && row.current_session_boundary_restored).length,
-    failed_outcome_count: uniqueStrings(rows.map((row: any) => row.failed_outcome_id), 480).length,
-    corrected_outcome_count: uniqueStrings(rows.map((row: any) => row.corrected_outcome_id), 480).length,
-    completion_doc_count: uniqueStrings(rows.flatMap((row: any) => row.completion_doc_rel_paths || []), 240).length,
-    completion_work_item_count: uniqueStrings(rows.flatMap((row: any) => row.completion_work_item_ids || []), 480).length,
-    timeline_binding_count: uniqueStrings(rows.flatMap((row: any) => row.completion_timeline_binding_ids || []), 480).length,
-    rows,
-    updatedAt: String(options.updatedAt || now()),
-  };
+export function postCompactCompletionMemoryPreservationRepairClosureArchive(rows: any[] = [], options: any = {}) {
+  return require("./group-memory-distillation").postCompactCompletionMemoryPreservationRepairClosureArchive(rows, options);
 }
 
-function renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive: any = {}, options: any = {}) {
+export function renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const lines = [
     "# Post-Compact Completion Memory Preservation Repair Closures",
@@ -8029,95 +6002,10 @@ function renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive:
 }
 
 export function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_completion_memory_preservation_closure", options, () => distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
-      version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, ledger);
-  const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
-  const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
-  const incomingRows = normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input, {
-    ...options,
-    groupId: sourceGroupId,
-    groupSessionId,
-    updatedAt,
-  });
-  const previousArchive = ledger.postCompactCompletionMemoryPreservationRepairClosureArchive || {};
-  const merged = mergePostCompactCompletionMemoryPreservationRepairClosureRows(
-    Array.isArray(previousArchive.rows) ? previousArchive.rows : [],
-    incomingRows,
-    { ...options, updatedAt }
-  );
-  const archive = {
-    ...postCompactCompletionMemoryPreservationRepairClosureArchive(merged.rows, { updatedAt }),
-    sourceGroupId,
-    groupSessionId,
-    exactSession: !!groupSessionId,
-  };
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "post-compact-completion-memory-preservation-repair-closures",
-      name: "Post-compact completion memory preservation repair closures",
-      description: "Verified newer compact outcomes that restored corrected-receipt completion identity and session authority, with mandatory future current-source reverification.",
-      source: "auto:post-compact-completion-memory-preservation-repair-closure-distillation",
-      updatedAt,
-      body: renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive, { updatedAt, sourceGroupId, groupSessionId }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    postCompactCompletionMemoryPreservationRepairClosureArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-repair-closure-distillation-v1",
-    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_REPAIR_CLOSURE_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    verifiedCount: archive.verified_count,
-    failedOutcomeCount: archive.failed_outcome_count,
-    correctedOutcomeCount: archive.corrected_outcome_count,
-    completionDocCount: archive.completion_doc_count,
-    completionWorkItemCount: archive.completion_work_item_count,
-    timelineBindingCount: archive.timeline_binding_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, input, options);
 }
 
-function normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId: string, input: any = {}, options: any = {}) {
+export function normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId: string, input: any = {}, options: any = {}) {
   const rows = Array.isArray(input) ? input : Array.isArray(input.rows) ? input.rows : [];
   const scopeIdentity = typedMemorySessionScopeIdentity(groupId, options);
   const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
@@ -8176,7 +6064,7 @@ function normalizePostCompactCompletionMemoryPreservationClosureConflictResoluti
     .filter((row: any) => row.resolution_usage_state === "ignored" ? !!row.reason : ["used", "verified"].includes(row.resolution_usage_state) && row.current_source_verified === true);
 }
 
-function renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive: any = {}, options: any = {}) {
+export function renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const lines = [
     "# Post-Compact Completion Memory Preservation Closure Conflict Resolutions",
@@ -8203,46 +6091,24 @@ function renderPostCompactCompletionMemoryPreservationClosureConflictResolutionB
   return lines.join("\n").trim() + "\n";
 }
 
-function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId: string) {
+export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId: string) {
   return path.join(getGroupTypedMemoryDir(groupId), GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_DIR);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "manifest.json");
+  return require("./group-memory-loading").getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId);
 }
 
-function conflictResolutionColdArchiveManifestChecksum(manifest: any = {}) {
-  const value: any = {
-    group_id: manifest.group_id || "",
-    row_count: Number(manifest.row_count || 0),
-    hot_row_count: Number(manifest.hot_row_count || 0),
-    rows_checksum: manifest.rows_checksum || "",
-    shards: (manifest.shards || []).map((shard: any) => ({
-      bucket: shard.bucket || "",
-      rel_path: shard.rel_path || "",
-      content_checksum: shard.content_checksum || "",
-      row_count: Number(shard.row_count || 0),
-      row_ids_checksum: shard.row_ids_checksum || "",
-    })),
-  };
-  if (manifest.generation_number !== undefined
-    || manifest.generation_id
-    || manifest.previous_manifest_checksum
-    || manifest.previous_manifest_rel_path) {
-    value.generation_number = Number(manifest.generation_number || 0);
-    value.generation_id = manifest.generation_id || "";
-    value.previous_manifest_checksum = manifest.previous_manifest_checksum || "";
-    value.previous_manifest_rel_path = manifest.previous_manifest_rel_path || "";
-  }
-  return checksum(value, 48);
+export function conflictResolutionColdArchiveManifestChecksum(manifest: any = {}) {
+  return require("./group-memory-loading").conflictResolutionColdArchiveManifestChecksum(manifest);
 }
 
-function getConflictResolutionColdArchiveManifestGenerationsDir(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "manifests");
+export function getConflictResolutionColdArchiveManifestGenerationsDir(groupId: string) {
+  return require("./group-memory-loading").getConflictResolutionColdArchiveManifestGenerationsDir(groupId);
 }
 
-function getConflictResolutionColdArchiveManifestGenerationFile(groupId: string, manifestChecksum: string) {
-  return path.join(getConflictResolutionColdArchiveManifestGenerationsDir(groupId), `${safeSegment(manifestChecksum, "invalid")}.json`);
+export function getConflictResolutionColdArchiveManifestGenerationFile(groupId: string, manifestChecksum: string) {
+  return require("./group-memory-loading").getConflictResolutionColdArchiveManifestGenerationFile(groupId, manifestChecksum);
 }
 
 function conflictResolutionColdArchiveShardFile(groupId: string, relPath: string) {
@@ -8253,14 +6119,11 @@ function conflictResolutionColdArchiveShardFile(groupId: string, relPath: string
   return file;
 }
 
-function readConflictResolutionColdArchiveManifest(groupId: string) {
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId);
-  const manifest = readJson(file, null);
-  if (!manifest) return null;
-  return { ...manifest, file };
+export function readConflictResolutionColdArchiveManifest(groupId: string) {
+  return require("./group-memory-loading").readConflictResolutionColdArchiveManifest(groupId);
 }
 
-function readAndVerifyConflictResolutionColdArchiveShard(groupId: string, descriptor: any = {}) {
+export function readAndVerifyConflictResolutionColdArchiveShard(groupId: string, descriptor: any = {}) {
   try {
     const file = conflictResolutionColdArchiveShardFile(groupId, descriptor.rel_path || descriptor.relPath || "");
     const shard = readJson(file, null);
@@ -8288,193 +6151,26 @@ function readAndVerifyConflictResolutionColdArchiveShard(groupId: string, descri
 }
 
 export function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, options: any = {}) {
-  const explicitManifest = options.manifest && typeof options.manifest === "object" ? options.manifest : null;
-  const manifest = explicitManifest || readConflictResolutionColdArchiveManifest(groupId);
-  if (!manifest) {
-    return {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-archive-verification-v1",
-      groupId,
-      status: "missing",
-      valid: false,
-      manifestFile: getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId),
-      manifest: null,
-      shardCount: 0,
-      verifiedShardCount: 0,
-      rowCount: 0,
-      rows: [],
-      gaps: ["cold_archive_manifest_missing"],
-    };
-  }
-  const manifestChecksumValid = manifest.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-manifest-v1"
-    && String(manifest.group_id || "") === groupId
-    && String(manifest.manifest_checksum || "") === conflictResolutionColdArchiveManifestChecksum(manifest);
-  const shardResults = (Array.isArray(manifest.shards) ? manifest.shards : []).map((descriptor: any) => readAndVerifyConflictResolutionColdArchiveShard(groupId, descriptor));
-  const rows = shardResults.flatMap((result: any) => result.valid ? result.rows : []);
-  const rowIds = rows.map((row: any) => String(row.row_id || "")).filter(Boolean);
-  const uniqueRowIds = new Set(rowIds);
-  const rowsChecksumValid = rows.length === Number(manifest.row_count || 0)
-    && uniqueRowIds.size === rows.length
-    && checksum([...rows].sort((a: any, b: any) => String(a.row_id || "").localeCompare(String(b.row_id || ""))), 48) === String(manifest.rows_checksum || "");
-  const valid = manifestChecksumValid && shardResults.every((result: any) => result.valid) && rowsChecksumValid;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-archive-verification-v1",
-    groupId,
-    status: valid ? "ok" : "fail",
-    valid,
-    manifestFile: options.manifestFile || options.manifest_file || manifest.file || getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId),
-    manifest,
-    manifestChecksumValid,
-    shardCount: shardResults.length,
-    verifiedShardCount: shardResults.filter((result: any) => result.valid).length,
-    rowCount: rows.length,
-    rows: options.includeRows === true || options.include_rows === true ? rows : [],
-    shardResults: shardResults.map((result: any) => ({
-      valid: result.valid,
-      file: result.file,
-      bucket: result.descriptor?.bucket || "",
-      rowCount: result.rows.length,
-      contentChecksum: result.descriptor?.content_checksum || "",
-      calculatedChecksum: result.calculatedChecksum,
-      error: result.error,
-    })),
-    gaps: [
-      ...(!manifestChecksumValid ? ["cold_archive_manifest_checksum_mismatch"] : []),
-      ...shardResults.filter((result: any) => !result.valid).map((result: any) => `cold_archive_shard_invalid:${result.descriptor?.bucket || "unknown"}`),
-      ...(!rowsChecksumValid ? ["cold_archive_rows_checksum_or_count_mismatch"] : []),
-    ],
-  };
+  return require("./group-memory-distillation").verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, options);
 }
 
-function readPreviousConflictResolutionColdArchiveManifest(groupId: string, currentManifest: any = {}) {
-  const checksumValue = String(currentManifest.previous_manifest_checksum || "").trim();
-  if (!checksumValue) return null;
-  const expectedFile = getConflictResolutionColdArchiveManifestGenerationFile(groupId, checksumValue);
-  const expectedRelPath = path.relative(getGroupTypedMemoryDir(groupId), expectedFile).split(path.sep).join("/");
-  if (String(currentManifest.previous_manifest_rel_path || "") !== expectedRelPath) return {
-    invalidLink: true,
-    expectedFile,
-    expectedRelPath,
-    actualRelPath: String(currentManifest.previous_manifest_rel_path || ""),
-  };
-  const manifest = readJson(expectedFile, null);
-  return manifest ? { ...manifest, file: expectedFile } : { missing: true, expectedFile, expectedRelPath };
+export function readPreviousConflictResolutionColdArchiveManifest(groupId: string, currentManifest: any = {}) {
+  return require("./group-memory-loading").readPreviousConflictResolutionColdArchiveManifest(groupId, currentManifest);
 }
 
 export function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId: string, options: any = {}) {
-  const currentManifest = readConflictResolutionColdArchiveManifest(groupId);
-  const current = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, {
-    manifest: currentManifest,
-    manifestFile: currentManifest?.file,
-    includeRows: true,
-  });
-  const generationNumber = Number(currentManifest?.generation_number || 0);
-  const currentGenerationFile = currentManifest?.manifest_checksum
-    ? getConflictResolutionColdArchiveManifestGenerationFile(groupId, currentManifest.manifest_checksum)
-    : "";
-  const currentGenerationManifest = currentGenerationFile ? readJson(currentGenerationFile, null) : null;
-  const currentGenerationCopyValid = !!currentGenerationManifest
-    && currentGenerationManifest.manifest_checksum === currentManifest?.manifest_checksum
-    && conflictResolutionColdArchiveManifestChecksum(currentGenerationManifest) === currentManifest?.manifest_checksum;
-  const previousManifest = currentManifest ? readPreviousConflictResolutionColdArchiveManifest(groupId, currentManifest) : null;
-  const previousRequired = generationNumber >= 2 || !!currentManifest?.previous_manifest_checksum;
-  const previous = previousManifest && !previousManifest.invalidLink && !previousManifest.missing
-    ? verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, {
-      manifest: previousManifest,
-      manifestFile: previousManifest.file,
-      includeRows: true,
-    })
-    : null;
-  const linkValid = !previousRequired || (!!previousManifest
-    && !previousManifest.invalidLink
-    && !previousManifest.missing
-    && String(previousManifest.manifest_checksum || "") === String(currentManifest?.previous_manifest_checksum || "")
-    && Number(previousManifest.generation_number || Math.max(1, generationNumber - 1)) < generationNumber);
-  const currentRowIds = new Set((current.rows || []).map((row: any) => String(row.row_id || "")));
-  const previousRowsRecoverable = !previousRequired || (previous?.valid === true
-    && (previous.rows || []).every((row: any) => currentRowIds.has(String(row.row_id || ""))));
-  const valid = current.valid === true
-    && currentGenerationCopyValid
-    && (!previousRequired || previous?.valid === true)
-    && linkValid
-    && previousRowsRecoverable;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-manifest-generation-verification-v1",
-    groupId,
-    status: valid ? "ok" : "fail",
-    valid,
-    generationNumber,
-    currentManifestChecksum: currentManifest?.manifest_checksum || "",
-    currentGenerationFile,
-    currentGenerationCopyValid,
-    previousManifestChecksum: currentManifest?.previous_manifest_checksum || "",
-    previousRequired,
-    current,
-    previous,
-    linkValid,
-    previousRowsRecoverable,
-    recoverySimulationPassed: valid && previousRowsRecoverable,
-    gaps: [
-      ...(current.valid ? [] : ["current_manifest_generation_invalid"]),
-      ...(currentGenerationCopyValid ? [] : ["current_manifest_generation_copy_invalid"]),
-      ...(previousRequired && previous?.valid !== true ? ["previous_manifest_generation_invalid"] : []),
-      ...(!linkValid ? ["manifest_generation_link_invalid"] : []),
-      ...(!previousRowsRecoverable ? ["previous_generation_rows_not_recoverable_from_current"] : []),
-    ],
-  };
+  return require("./group-memory-loading").verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId, options);
 }
 
 export function recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestFromGeneration(groupId: string, options: any = {}) {
-  const generationsDir = getConflictResolutionColdArchiveManifestGenerationsDir(groupId);
-  const candidates: any[] = [];
-  try {
-    for (const name of fs.readdirSync(generationsDir).filter(name => name.endsWith(".json"))) {
-      const file = path.join(generationsDir, name);
-      const manifest = readJson(file, null);
-      if (!manifest || String(manifest.group_id || "") !== groupId) continue;
-      const verification = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, {
-        manifest,
-        manifestFile: file,
-      });
-      if (verification.valid) candidates.push({ manifest, file, verification });
-    }
-  } catch {}
-  candidates.sort((a, b) => Number(b.manifest.generation_number || 0) - Number(a.manifest.generation_number || 0)
-    || String(b.manifest.updated_at || "").localeCompare(String(a.manifest.updated_at || "")));
-  const selected = candidates[0] || null;
-  if (!selected) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-manifest-recovery-v1",
-    groupId,
-    status: "blocked",
-    recovered: false,
-    reason: "no_valid_manifest_generation",
-    candidateCount: candidates.length,
-  };
-  const current = readConflictResolutionColdArchiveManifest(groupId);
-  const currentValid = current
-    ? verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, { manifest: current, manifestFile: current.file }).valid === true
-    : false;
-  const alreadyCurrent = currentValid && current?.manifest_checksum === selected.manifest.manifest_checksum;
-  if (!alreadyCurrent && options.dryRun !== true && options.dry_run !== true) {
-    writeJsonAtomic(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId), selected.manifest);
-  }
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-manifest-recovery-v1",
-    groupId,
-    status: alreadyCurrent ? "already_current" : options.dryRun === true || options.dry_run === true ? "recoverable" : "recovered",
-    recovered: alreadyCurrent || !(options.dryRun === true || options.dry_run === true),
-    alreadyCurrent,
-    candidateCount: candidates.length,
-    selectedGenerationNumber: Number(selected.manifest.generation_number || 0),
-    selectedManifestChecksum: selected.manifest.manifest_checksum || "",
-    selectedManifestFile: selected.file,
-  };
+  return require("./group-memory-loading").recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestFromGeneration(groupId, options);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "quarantine.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile(groupId);
 }
 
-function listConflictResolutionColdArchiveShardFiles(groupId: string) {
+export function listConflictResolutionColdArchiveShardFiles(groupId: string) {
   const root = path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "shards");
   const files: string[] = [];
   const visit = (dir: string) => {
@@ -8490,7 +6186,7 @@ function listConflictResolutionColdArchiveShardFiles(groupId: string) {
   return files.sort();
 }
 
-function readStandaloneConflictResolutionColdArchiveShard(groupId: string, file: string) {
+export function readStandaloneConflictResolutionColdArchiveShard(groupId: string, file: string) {
   try {
     const coldDir = path.resolve(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId));
     const resolved = path.resolve(file);
@@ -8511,7 +6207,7 @@ function readStandaloneConflictResolutionColdArchiveShard(groupId: string, file:
   }
 }
 
-function conflictResolutionOpenRepairEntryIds(groupId: string) {
+export function conflictResolutionOpenRepairEntryIds(groupId: string) {
   const file = path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${safeSegment(groupId)}.json`);
   const ledger = readJson(file, {});
   const openStatuses = new Set(["pending", "in_progress", "running", "claimed", "dispatching", "blocked", "needs_info", "needs_user", "waiting"]);
@@ -8521,7 +6217,7 @@ function conflictResolutionOpenRepairEntryIds(groupId: string) {
     .filter(Boolean));
 }
 
-function conflictResolutionQuarantineChecksum(value: any = {}) {
+export function conflictResolutionQuarantineChecksum(value: any = {}) {
   return checksum({
     group_id: value.group_id || "",
     current_manifest_checksum: value.current_manifest_checksum || "",
@@ -8539,149 +6235,30 @@ function conflictResolutionQuarantineChecksum(value: any = {}) {
 }
 
 export function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId: string, options: any = {}) {
-  const at = String(options.at || options.generatedAt || options.generated_at || now());
-  const atMs = Date.parse(at);
-  const gracePeriodMs = Math.max(0, Number(options.gracePeriodMs ?? options.grace_period_ms ?? 7 * 24 * 60 * 60 * 1000));
-  const deleteEligible = options.deleteEligible === true || options.delete_eligible === true;
-  const dryRun = options.dryRun === true || options.dry_run === true;
-  const rawAllowedRelPaths = options.allowedRelPaths || options.allowed_rel_paths;
-  const approvalRestricted = Array.isArray(rawAllowedRelPaths);
-  const allowedRelPaths = new Set(uniqueStrings(Array.isArray(rawAllowedRelPaths) ? rawAllowedRelPaths : [], 5000));
-  const generationHealth = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
-  const currentManifest = generationHealth.current?.manifest || {};
-  const previousManifest = generationHealth.previous?.manifest || {};
-  const typedDir = getGroupTypedMemoryDir(groupId);
-  const referenced = new Set<string>([
-    ...(currentManifest.shards || []).map((shard: any) => String(shard.rel_path || "")),
-    ...(previousManifest.shards || []).map((shard: any) => String(shard.rel_path || "")),
-  ]);
-  const currentRowIds = new Set((generationHealth.current?.rows || []).map((row: any) => String(row.row_id || "")));
-  const openRepairEntryIds = conflictResolutionOpenRepairEntryIds(groupId);
-  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile(groupId);
-  const existing = readJson(quarantineFile, {});
-  const existingPresent = fs.existsSync(quarantineFile);
-  const existingValid = !existingPresent || (existing.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-orphan-quarantine-v1"
-    && String(existing.group_id || "") === groupId
-    && String(existing.quarantine_checksum || "") === conflictResolutionQuarantineChecksum(existing));
-  const existingByPath = new Map<string, any>((existingValid && Array.isArray(existing.entries) ? existing.entries : []).map((entry: any) => [String(entry.rel_path || ""), entry]));
-  const shardFiles = listConflictResolutionColdArchiveShardFiles(groupId);
-  const orphanFiles = shardFiles.filter(file => !referenced.has(path.relative(typedDir, file).split(path.sep).join("/")));
-  const rows: any[] = [];
-  for (const file of orphanFiles) {
-    const relPath = path.relative(typedDir, file).split(path.sep).join("/");
-    const previous = existingByPath.get(relPath) || null;
-    const shard = readStandaloneConflictResolutionColdArchiveShard(groupId, file);
-    const resolutionEntryIds = uniqueStrings((shard.rows || []).map((row: any) => row.resolution_entry_id), (shard.rows || []).length || 1);
-    const referencedByOpenRepair = resolutionEntryIds.some((entryId: string) => openRepairEntryIds.has(entryId));
-    const recoveryCovered = shard.valid === true && (shard.rows || []).every((row: any) => currentRowIds.has(String(row.row_id || "")));
-    const firstSeenAt = String(previous?.first_seen_at || at);
-    const firstSeenMs = Date.parse(firstSeenAt);
-    const eligibleAfterMs = Number.isFinite(firstSeenMs) ? firstSeenMs + gracePeriodMs : Number.POSITIVE_INFINITY;
-    const eligibleAfter = Number.isFinite(eligibleAfterMs) ? new Date(eligibleAfterMs).toISOString() : "";
-    const graceElapsed = !!previous && Number.isFinite(atMs) && Number.isFinite(eligibleAfterMs) && atMs >= eligibleAfterMs;
-    const explicitlyApproved = !approvalRestricted || allowedRelPaths.has(relPath);
-    const canDelete = deleteEligible
-      && !dryRun
-      && !!previous
-      && existingValid
-      && graceElapsed
-      && generationHealth.valid === true
-      && generationHealth.previousRequired === true
-      && generationHealth.previous?.valid === true
-      && generationHealth.recoverySimulationPassed === true
-      && shard.valid === true
-      && recoveryCovered
-      && !referencedByOpenRepair
-      && explicitlyApproved;
-    let status = !existingValid ? "blocked_quarantine_integrity"
-      : referencedByOpenRepair ? "protected_open_repair"
-      : !shard.valid ? "blocked_invalid_shard"
-      : !generationHealth.valid ? "blocked_manifest_generation"
-      : !recoveryCovered ? "blocked_recovery_simulation"
-      : graceElapsed && !explicitlyApproved ? "awaiting_explicit_approval"
-      : graceElapsed ? "eligible" : "quarantined";
-    let deletedAt = String(previous?.deleted_at || "");
-    if (canDelete) {
-      fs.unlinkSync(file);
-      status = "deleted";
-      deletedAt = at;
-    }
-    rows.push({
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-orphan-shard-v1",
-      group_id: groupId,
-      rel_path: relPath,
-      content_checksum: shard.shard?.content_checksum || path.basename(file, ".json"),
-      row_count: (shard.rows || []).length,
-      row_ids_checksum: checksum((shard.rows || []).map((row: any) => row.row_id), 48),
-      resolution_entry_ids: resolutionEntryIds,
-      first_seen_at: firstSeenAt,
-      last_seen_at: at,
-      eligible_after: eligibleAfter,
-      grace_elapsed: graceElapsed,
-      shard_valid: shard.valid === true,
-      recovery_covered: recoveryCovered,
-      referenced_by_open_repair: referencedByOpenRepair,
-      explicitly_approved: explicitlyApproved,
-      status,
-      deleted_at: deletedAt,
-      error: shard.error || "",
-    });
-  }
-  for (const entry of existingValid && Array.isArray(existing.entries) ? existing.entries : []) {
-    if (rows.some(row => row.rel_path === entry.rel_path)) continue;
-    if (entry.status === "deleted") rows.push(entry);
-  }
-  const quarantine: any = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-orphan-quarantine-v1",
-    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_COLD_ARCHIVE_VERSION,
-    group_id: groupId,
-    current_manifest_checksum: currentManifest.manifest_checksum || "",
-    previous_manifest_checksum: previousManifest.manifest_checksum || "",
-    grace_period_ms: gracePeriodMs,
-    generation_chain_valid: generationHealth.valid === true,
-    recovery_simulation_passed: generationHealth.recoverySimulationPassed === true,
-    quarantine_input_valid: existingValid,
-    orphan_count: rows.filter(row => row.status !== "deleted").length,
-    quarantined_count: rows.filter(row => row.status === "quarantined").length,
-    protected_open_repair_count: rows.filter(row => row.status === "protected_open_repair").length,
-    eligible_count: rows.filter(row => row.status === "eligible").length,
-    deleted_count: rows.filter(row => row.status === "deleted").length,
-    blocked_count: rows.filter(row => String(row.status || "").startsWith("blocked_")).length,
-    entries: rows.sort((a, b) => String(a.rel_path || "").localeCompare(String(b.rel_path || ""))),
-    updated_at: at,
-  };
-  quarantine.quarantine_checksum = conflictResolutionQuarantineChecksum(quarantine);
-  if (!dryRun && existingValid) writeJsonAtomic(quarantineFile, quarantine);
-  return {
-    ...quarantine,
-    file: quarantineFile,
-    dry_run: dryRun,
-    delete_eligible: deleteEligible,
-    generation_health: generationHealth,
-  };
+  return require("./group-memory-maintenance").reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, options);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-ledger.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "gc-approval-receipts.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notifications.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceiptFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-receipts.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceiptFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-deliveries.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
 }
 
-function conflictResolutionMaintenanceScopeMetadata(scopeId: string) {
+export function conflictResolutionMaintenanceScopeMetadata(scopeId: string) {
   const ledger = readJson(getGroupTypedMemoryDistillationLedgerFile(scopeId), {});
   const identity = typedMemorySessionScopeIdentity(scopeId, ledger);
   return {
@@ -8692,7 +6269,7 @@ function conflictResolutionMaintenanceScopeMetadata(scopeId: string) {
   };
 }
 
-function conflictResolutionMaintenanceState(groupId: string, options: any = {}) {
+export function conflictResolutionMaintenanceState(groupId: string, options: any = {}) {
   const at = String(options.at || options.now || now());
   const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
   const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
@@ -8727,7 +6304,7 @@ function conflictResolutionMaintenanceState(groupId: string, options: any = {}) 
   };
 }
 
-function conflictResolutionMaintenanceNotificationReceiptChecksum(receipt: any = {}) {
+export function conflictResolutionMaintenanceNotificationReceiptChecksum(receipt: any = {}) {
   return checksum({
     receipt_id: receipt.receipt_id || "",
     receipt_kind: receipt.receipt_kind || "",
@@ -8748,7 +6325,7 @@ function conflictResolutionMaintenanceNotificationReceiptChecksum(receipt: any =
   }, 48);
 }
 
-function readConflictResolutionMaintenanceNotificationReceiptLedger(groupId: string) {
+export function readConflictResolutionMaintenanceNotificationReceiptLedger(groupId: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceiptFile(groupId);
   const ledger = readJson(file, {});
   return {
@@ -8777,7 +6354,7 @@ function writeConflictResolutionMaintenanceNotificationReceiptLedger(groupId: st
   return { ...value, file };
 }
 
-function createConflictResolutionMaintenanceNotificationReceipt(groupId: string, kind: "acknowledged" | "suppressed", input: any = {}) {
+export function createConflictResolutionMaintenanceNotificationReceipt(groupId: string, kind: "acknowledged" | "suppressed", input: any = {}) {
   const at = String(input.at || input.issuedAt || input.issued_at || now());
   const audience = String(input.audience || "").trim().toLowerCase();
   const notificationId = String(input.notificationId || input.notification_id || "").trim();
@@ -8839,42 +6416,18 @@ function createConflictResolutionMaintenanceNotificationReceipt(groupId: string,
 }
 
 export function acknowledgePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId: string, input: any = {}) {
-  return createConflictResolutionMaintenanceNotificationReceipt(groupId, "acknowledged", input);
+  return require("./group-memory-maintenance").acknowledgePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId, input);
 }
 
 export function suppressPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId: string, input: any = {}) {
-  return createConflictResolutionMaintenanceNotificationReceipt(groupId, "suppressed", input);
+  return require("./group-memory-maintenance").suppressPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId, input);
 }
 
 export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceipts(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const atMs = Date.parse(at);
-  const ledger = readConflictResolutionMaintenanceNotificationReceiptLedger(groupId);
-  const entries = ledger.entries.map((receipt: any) => {
-    const checksumValid = receipt.receipt_checksum === conflictResolutionMaintenanceNotificationReceiptChecksum(receipt);
-    const expiresAtMs = Date.parse(String(receipt.expires_at || ""));
-    const valid = receipt.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-receipt-v1"
-      && String(receipt.group_id || "") === groupId
-      && new Set(["acknowledged", "suppressed"]).has(String(receipt.receipt_kind || ""))
-      && receipt.actor_role === receipt.audience
-      && receipt.advisory_visibility_only === true
-      && receipt.destructive_action_authorized === false
-      && receipt.should_create_real_task === false
-      && checksumValid
-      && Number.isFinite(expiresAtMs)
-      && Number.isFinite(atMs)
-      && atMs <= expiresAtMs;
-    return { ...receipt, checksum_valid: checksumValid, expired: Number.isFinite(expiresAtMs) && Number.isFinite(atMs) ? atMs > expiresAtMs : true, valid };
-  });
-  return {
-    ...ledger,
-    entries,
-    valid_receipt_count: entries.filter((entry: any) => entry.valid).length,
-    invalid_receipt_count: entries.filter((entry: any) => !entry.valid).length,
-  };
+  return require("./group-memory-maintenance").inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceipts(groupId, options);
 }
 
-function conflictResolutionMaintenanceNotificationDeliveryChecksum(entry: any = {}) {
+export function conflictResolutionMaintenanceNotificationDeliveryChecksum(entry: any = {}) {
   return checksum({
     delivery_id: entry.delivery_id || "",
     group_id: entry.group_id || "",
@@ -8891,7 +6444,7 @@ function conflictResolutionMaintenanceNotificationDeliveryChecksum(entry: any = 
   }, 48);
 }
 
-function conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry: any = {}) {
+export function conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry: any = {}) {
   return checksum({
     compact_id: entry.compact_id || "",
     group_id: entry.group_id || "",
@@ -8920,19 +6473,19 @@ function conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(value: 
   }, 48);
 }
 
-function getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId: string) {
+export function getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId: string) {
   return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-deliveries.previous.json");
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-quarantine.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
 }
 
-function getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId: string) {
+export function getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId: string) {
   return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "delivery-telemetry-recovery-evidence");
 }
 
-function verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId: string, file: string) {
+export function verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId: string, file: string) {
   const present = fs.existsSync(file);
   const value = readJson(file, null);
   const detailed = Array.isArray(value?.entries) ? value.entries : [];
@@ -8967,33 +6520,11 @@ function verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(
 }
 
 export function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId: string) {
-  const currentFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
-  const previousFile = getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId);
-  const current = verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId, currentFile);
-  const previous = verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId, previousFile);
-  const previousRequired = current.valid && !!current.value?.previous_ledger_checksum;
-  const chainValid = !previousRequired || (previous.valid && current.value.previous_ledger_checksum === previous.ledger_checksum);
-  const recoverable = !current.valid && previous.valid;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-generation-verification-v1",
-    group_id: groupId,
-    status: current.valid && chainValid ? "ok" : recoverable ? "recoverable" : current.present || previous.present ? "blocked" : "empty",
-    valid: current.valid && chainValid,
-    recoverable,
-    current,
-    previous,
-    previous_required: previousRequired,
-    chain_valid: chainValid,
-    gaps: [
-      ...(!current.valid && current.present ? [current.error] : []),
-      ...(previousRequired && !previous.valid ? [previous.error || "delivery_previous_invalid"] : []),
-      ...(!chainValid ? ["delivery_generation_chain_invalid"] : []),
-    ],
-  };
+  return require("./group-memory-maintenance").verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupGroupLedgerLockFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-ledger.lock");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupGroupLedgerLockFile(groupId);
 }
 
 function cleanupGroupLedgerLockChecksum(lock: any = {}) {
@@ -9009,7 +6540,7 @@ function cleanupGroupLedgerLockChecksum(lock: any = {}) {
   }, 48);
 }
 
-function readCleanupGroupLedgerLock(groupId: string, at: string) {
+export function readCleanupGroupLedgerLock(groupId: string, at: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupGroupLedgerLockFile(groupId);
   const lock = readJson(file, null);
   if (!lock) return { file, present: false, valid: true, active: false, abandoned: false, lock: null };
@@ -9118,7 +6649,7 @@ function releaseCleanupGroupLedgerLock(groupId: string, handle: any) {
   if (owned) try { fs.unlinkSync(handle.file); } catch {}
 }
 
-function withCleanupGroupLedgerLock<T>(groupId: string, at: string, options: any, run: (handle: any) => T): T {
+export function withCleanupGroupLedgerLock<T>(groupId: string, at: string, options: any, run: (handle: any) => T): T {
   const existing = options?.groupLedgerLockHandle || null;
   if (existing) {
     if (!cleanupGroupLedgerLockHeld(groupId, existing)) throw new Error("cleanup_group_ledger_lock_lost");
@@ -9130,7 +6661,7 @@ function withCleanupGroupLedgerLock<T>(groupId: string, at: string, options: any
   finally { releaseCleanupGroupLedgerLock(groupId, acquired.handle); }
 }
 
-function appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entry: any, at: string) {
+export function appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entry: any, at: string) {
   return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "quarantine-append" }, groupLedgerLockHandle => {
     const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
     const ledger = readJson(file, {});
@@ -9161,7 +6692,7 @@ function appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(group
   });
 }
 
-function conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(value: any = {}) {
+export function conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(value: any = {}) {
   return checksum({
     compact_id: value.compact_id || "",
     group_id: value.group_id || "",
@@ -9231,7 +6762,7 @@ function retainConflictResolutionMaintenanceNotificationDeliveryQuarantine(group
   };
 }
 
-function writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entries: any[], at: string, options: any = {}) {
+export function writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entries: any[], at: string, options: any = {}) {
   return withCleanupGroupLedgerLock(groupId, at, options, groupLedgerLockHandle => {
     const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
     const current = readJson(file, {});
@@ -9266,7 +6797,7 @@ function writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupI
   });
 }
 
-function conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(value: any = {}) {
+export function conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(value: any = {}) {
   const payload: any = {
     group_id: value.group_id || "",
     entries: (value.entries || []).map((row: any) => ({
@@ -9287,55 +6818,14 @@ function conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(val
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineRetention(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
-  const ledger = readJson(file, {});
-  const present = fs.existsSync(file);
-  if (!present) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-retention-v1",
-    group_id: groupId,
-    status: "empty",
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-  };
-  if (String(ledger.group_id || "") !== groupId || ledger.quarantine_checksum !== conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(ledger)) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-retention-v1",
-    group_id: groupId,
-    status: "blocked",
-    reason: "delivery_quarantine_checksum_invalid",
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-  };
-  const written = writeConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, ledger.entries || [], at, {
-    ...options,
-    compactedEntries: ledger.compacted_entries || [],
-    expectedQuarantineChecksum: ledger.quarantine_checksum || "",
-  });
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-retention-v1",
-    group_id: groupId,
-    status: "ok",
-    retention: written.retention,
-    quarantine_checksum: written.quarantine_checksum,
-    unresolved_count: written.entries.length,
-    compacted_count: written.compacted_quarantine_count,
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-    file,
-  };
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineRetention(groupId, options);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-receipts.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptFile(groupId);
 }
 
-function conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt: any = {}) {
+export function conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt: any = {}) {
   return checksum({
     receipt_id: receipt.receipt_id || "",
     group_id: receipt.group_id || "",
@@ -9376,7 +6866,7 @@ function conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedgerCh
   }, 48);
 }
 
-function readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId: string) {
+export function readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptFile(groupId);
   const ledger = readJson(file, {});
   const revision = Number(ledger.revision || 0);
@@ -9421,7 +6911,7 @@ function writeConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLed
   });
 }
 
-function mutateConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId: string, at: string, mutate: (entries: any[], ledger: any) => any[], options: any = {}) {
+export function mutateConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId: string, at: string, mutate: (entries: any[], ledger: any) => any[], options: any = {}) {
   return withCleanupGroupLedgerLock(groupId, at, options, groupLedgerLockHandle => {
     const current = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
     if (!current.ledger_checksum_valid) throw new Error("cleanup_receipt_ledger_checksum_invalid");
@@ -9436,12 +6926,11 @@ function mutateConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLe
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournalFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-journals.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournalFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupLeaseFile(groupId: string, receiptId: string) {
-  const directory = path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-leases");
-  return path.join(directory, `${checksum([groupId, receiptId], 32)}.json`);
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupLeaseFile(groupId, receiptId);
 }
 
 function conflictResolutionMaintenanceNotificationDeliveryCleanupLeaseChecksum(lease: any = {}) {
@@ -9470,7 +6959,7 @@ function cleanupLeaseProcessAlive(pid: number) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function inspectConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId: string, receiptId: string, at: string) {
+export function inspectConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId: string, receiptId: string, at: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupLeaseFile(groupId, receiptId);
   const lease = readJson(file, null);
   if (!lease) return { file, present: false, valid: true, active: false, abandoned: false, lease: null };
@@ -9510,7 +6999,7 @@ function writeConflictResolutionMaintenanceNotificationDeliveryCleanupLeaseHandl
   return lease;
 }
 
-function acquireConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId: string, receiptId: string, executionId: string, options: any = {}) {
+export function acquireConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId: string, receiptId: string, executionId: string, options: any = {}) {
   const at = String(options.at || now());
   const atMs = Date.parse(at);
   const effectiveAtMs = Number.isFinite(atMs) ? atMs : Date.now();
@@ -9568,7 +7057,7 @@ function acquireConflictResolutionMaintenanceNotificationDeliveryCleanupLease(gr
   return { acquired: false, reason: "cleanup_execution_lease_contended" };
 }
 
-function cleanupLeaseHeld(handle: any) {
+export function cleanupLeaseHeld(handle: any) {
   if (!handle || handle.released === true || Number(handle.fd) < 0) return false;
   const current = readJson(handle.file, null);
   return !!current
@@ -9578,7 +7067,7 @@ function cleanupLeaseHeld(handle: any) {
     && Number(current.fencing_token || 0) === Number(handle.lease.fencing_token || 0);
 }
 
-function renewConflictResolutionMaintenanceNotificationDeliveryCleanupLease(handle: any) {
+export function renewConflictResolutionMaintenanceNotificationDeliveryCleanupLease(handle: any) {
   if (!cleanupLeaseHeld(handle)) return false;
   const elapsedMs = Math.max(0, Date.now() - Number(handle.acquiredWallMs || Date.now()));
   const logicalNowMs = Number(handle.acquiredLogicalMs || Date.now()) + elapsedMs;
@@ -9591,7 +7080,7 @@ function renewConflictResolutionMaintenanceNotificationDeliveryCleanupLease(hand
   return cleanupLeaseHeld(handle);
 }
 
-function releaseConflictResolutionMaintenanceNotificationDeliveryCleanupLease(handle: any, at: string, finalStatus: string) {
+export function releaseConflictResolutionMaintenanceNotificationDeliveryCleanupLease(handle: any, at: string, finalStatus: string) {
   if (!handle || handle.released === true) return false;
   let released = false;
   try {
@@ -9613,7 +7102,7 @@ function releaseConflictResolutionMaintenanceNotificationDeliveryCleanupLease(ha
   return released;
 }
 
-function abandonConflictResolutionMaintenanceNotificationDeliveryCleanupLease(handle: any) {
+export function abandonConflictResolutionMaintenanceNotificationDeliveryCleanupLease(handle: any) {
   if (!handle || handle.released === true) return;
   try { fs.closeSync(handle.fd); } catch {}
   handle.released = true;
@@ -9637,7 +7126,7 @@ function attachConflictResolutionMaintenanceNotificationDeliveryCleanupLease(jou
   };
 }
 
-function conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal: any = {}) {
+export function conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal: any = {}) {
   const value: any = {
     execution_id: journal.execution_id || "",
     group_id: journal.group_id || "",
@@ -9677,7 +7166,7 @@ function conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum
   return checksum(value, 48);
 }
 
-function readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId: string) {
+export function readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournalFile(groupId);
   const ledger = readJson(file, {});
   const revision = Number(ledger.revision || 0);
@@ -9737,7 +7226,7 @@ function writeConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLed
   });
 }
 
-function upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId: string, journal: any, at: string, options: any = {}) {
+export function upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId: string, journal: any, at: string, options: any = {}) {
   return withCleanupGroupLedgerLock(groupId, at, options, groupLedgerLockHandle => {
     const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
     if (!ledger.ledger_checksum_valid) throw new Error("cleanup_journal_ledger_checksum_invalid");
@@ -9768,10 +7257,10 @@ function upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(g
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commits.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitFile(groupId);
 }
 
-function conflictResolutionMaintenanceNotificationDeliveryCleanupCommitChecksum(transaction: any = {}) {
+export function conflictResolutionMaintenanceNotificationDeliveryCleanupCommitChecksum(transaction: any = {}) {
   return checksum({
     transaction_id: transaction.transaction_id || "",
     group_id: transaction.group_id || "",
@@ -9823,7 +7312,7 @@ function conflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedgerChe
   return checksum(payload, 48);
 }
 
-function readConflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedger(groupId: string) {
+export function readConflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedger(groupId: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitFile(groupId);
   const ledger = readJson(file, {});
   const revision = Number(ledger.revision || 0);
@@ -9896,7 +7385,7 @@ function upsertConflictResolutionMaintenanceNotificationDeliveryCleanupCommit(gr
   });
 }
 
-function cleanupCommitPhaseRank(phase: string) {
+export function cleanupCommitPhaseRank(phase: string) {
   return ({ prepared: 1, quarantine_committed: 2, receipt_committed: 3, journal_committed: 4, completed: 5 } as any)[phase] || 0;
 }
 
@@ -9908,18 +7397,18 @@ function maybeInterruptCleanupCommit(options: any, phase: string) {
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-quarantine.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-work-items.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-dispatch-briefs.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId);
 }
 
-function cleanupCommitTransactionLinkGaps(groupId: string, transaction: any, commitLedger: any, receiptLedger: any, journalLedger: any) {
+export function cleanupCommitTransactionLinkGaps(groupId: string, transaction: any, commitLedger: any, receiptLedger: any, journalLedger: any) {
   const gaps: string[] = [];
   if (!commitLedger.ledger_checksum_valid) gaps.push("commit_ledger_checksum_invalid");
   if (transaction.transaction_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupCommitChecksum(transaction)) gaps.push("transaction_checksum_invalid");
@@ -9946,273 +7435,86 @@ function cleanupCommitTransactionLinkGaps(groupId: string, transaction: any, com
   return { gaps: uniqueStrings(gaps, 40), receipt, journal };
 }
 
-function writeCleanupCommitDiscoveryArtifacts(groupId: string, invalidRows: any[], at: string) {
-  return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-commit-repair-discovery-artifacts" }, () => {
-    const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId);
-    const workItemFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId);
-    const briefFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId);
-    const quarantineCurrent = readJson(quarantineFile, {});
-    const workItemCurrent = readJson(workItemFile, {});
-    const briefCurrent = readJson(briefFile, {});
-    const transactionLedger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-    if (!transactionLedger.ledger_checksum_valid) throw new Error("cleanup commit repair resolution transaction ledger checksum invalid");
-    const resolutionBoundWorkItemIds = new Set(transactionLedger.entries.map((entry: any) => entry.work_item_id));
-    const quarantineById = new Map<string, any>((quarantineCurrent.entries || []).map((entry: any) => [entry.quarantine_id, entry]));
-    const workItemById = new Map<string, any>((workItemCurrent.entries || []).map((entry: any) => [entry.work_item_id, entry]));
-    const briefById = new Map<string, any>((briefCurrent.entries || []).map((entry: any) => [entry.brief_id, entry]));
-    for (const row of invalidRows) {
-    const gapsRoot = checksum(row.gaps || [], 32);
-    const quarantineId = `cleanup-commit-quarantine:${checksum([groupId, row.transaction?.transaction_id || row.transaction_id, gapsRoot], 24)}`;
-    const workItemId = `cleanup-commit-repair:${checksum([groupId, quarantineId], 24)}`;
-    const briefId = `cleanup-commit-repair-brief:${checksum([groupId, workItemId], 24)}`;
-      if (resolutionBoundWorkItemIds.has(workItemId)) continue;
-      const evidence: any = {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-quarantine-entry-v1",
-      quarantine_id: quarantineId,
-      group_id: groupId,
-      transaction_id: row.transaction?.transaction_id || row.transaction_id || "",
-      observed_group_id: row.transaction?.group_id || "",
-      gaps: row.gaps || [],
-      transaction_checksum: row.transaction?.transaction_checksum || "",
-      status: "quarantined_unproven_commit",
-      first_seen_at: quarantineById.get(quarantineId)?.first_seen_at || at,
-      last_seen_at: at,
-    };
-      evidence.evidence_checksum = checksum(evidence, 48);
-      quarantineById.set(quarantineId, evidence);
-      const workItem: any = {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-work-item-v1",
-      work_item_id: workItemId,
-      group_id: groupId,
-      transaction_id: evidence.transaction_id,
-      quarantine_id: quarantineId,
-      status: workItemById.get(workItemId)?.status || "pending",
-      priority: "critical",
-      reason: "cleanup commit WAL cannot be recovered without exact receipt, journal and candidate proof",
-      gaps: evidence.gaps,
-      required_proof: ["valid group-local receipt checksum", "valid journal checksum and execution binding", "exact candidate IDs root", "valid commit-ledger checksum"],
-      should_create_real_task: false,
-      created_at: workItemById.get(workItemId)?.created_at || at,
-      updated_at: at,
-    };
-      workItem.work_item_checksum = checksum(workItem, 48);
-      workItemById.set(workItemId, workItem);
-      const brief: any = {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-dispatch-brief-v1",
-      brief_id: briefId,
-      group_id: groupId,
-      work_item_id: workItemId,
-      transaction_id: evidence.transaction_id,
-      target_agent_role: "group-main-agent",
-      title: "Repair unproven cleanup commit WAL binding",
-      status: briefById.get(briefId)?.status || "ready",
-      instructions: ["Do not delete evidence or rewrite the WAL", "Re-prove receipt, journal and candidate bindings", "Resolve or explicitly cancel the repair work item with operator evidence"],
-      required_files: [quarantineFile, getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitFile(groupId)],
-      should_create_real_task: false,
-      created_at: briefById.get(briefId)?.created_at || at,
-      updated_at: at,
-    };
-      brief.brief_checksum = checksum(brief, 48);
-      briefById.set(briefId, brief);
-    }
-    const quarantineEntries = [...quarantineById.values()].slice(-240);
-    const workItems = [...workItemById.values()].slice(-240);
-    const briefs = [...briefById.values()].slice(-240);
-    writeJsonAtomic(quarantineFile, { schema: "ccm-cleanup-commit-quarantine-ledger-v1", version: 1, group_id: groupId, entries: quarantineEntries, entry_count: quarantineEntries.length, updated_at: at, ledger_checksum: checksum(quarantineEntries.map((entry: any) => entry.evidence_checksum), 48) });
-    writeJsonAtomic(workItemFile, { schema: "ccm-cleanup-commit-repair-work-item-ledger-v1", version: 1, group_id: groupId, entries: workItems, open_count: workItems.filter((entry: any) => !["resolved", "cancelled"].includes(entry.status)).length, updated_at: at, ledger_checksum: checksum(workItems.map((entry: any) => entry.work_item_checksum), 48) });
-    writeJsonAtomic(briefFile, { schema: "ccm-cleanup-commit-repair-dispatch-brief-ledger-v1", version: 1, group_id: groupId, entries: briefs, ready_count: briefs.length, updated_at: at, ledger_checksum: checksum(briefs.map((entry: any) => entry.brief_checksum), 48) });
-    return { quarantineFile, workItemFile, briefFile, quarantineEntries, workItems, briefs };
-  });
+export function writeCleanupCommitDiscoveryArtifacts(groupId: string, invalidRows: any[], at: string) {
+  return require("./group-memory-maintenance").writeCleanupCommitDiscoveryArtifacts(groupId, invalidRows, at);
 }
 
 export function discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommits(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  let commitLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedger(groupId);
-  let receiptLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
-  let journalLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
-  const evaluate = () => commitLedger.entries.map((transaction: any) => {
-    const links = cleanupCommitTransactionLinkGaps(groupId, transaction, commitLedger, receiptLedger, journalLedger);
-    const open = transaction.status !== "completed" && transaction.status !== "cancelled";
-    return {
-      transaction_id: transaction.transaction_id || "",
-      transaction,
-      phase: transaction.phase || "",
-      status: transaction.status || "",
-      gaps: links.gaps,
-      recoverable: open && links.gaps.length === 0 && !!links.journal,
-      invalid: links.gaps.length > 0,
-    };
-  });
-  let rows = evaluate();
-  let automaticRecoveryAttempted = false;
-  if (options.recover !== false && options.persist === true && rows.some((row: any) => row.recoverable)) {
-    automaticRecoveryAttempted = true;
-    reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals(groupId, { at, persist: true, trigger: options.trigger || "startup-discovery" });
-    commitLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedger(groupId);
-    receiptLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
-    journalLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
-    rows = evaluate();
-  }
-  const invalidRows = rows.filter((row: any) => row.invalid);
-  const artifacts = options.persist === true && invalidRows.length > 0 ? writeCleanupCommitDiscoveryArtifacts(groupId, invalidRows, at) : null;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-discovery-v1",
-    group_id: groupId,
-    generated_at: at,
-    transaction_count: rows.length,
-    open_transaction_count: rows.filter((row: any) => row.status !== "completed" && row.status !== "cancelled").length,
-    recoverable_transaction_count: rows.filter((row: any) => row.recoverable).length,
-    invalid_transaction_count: invalidRows.length,
-    quarantined_transaction_count: artifacts?.quarantineEntries?.length || 0,
-    repair_work_item_count: artifacts?.workItems?.length || 0,
-    repair_dispatch_brief_count: artifacts?.briefs?.length || 0,
-    automatic_recovery_attempted: automaticRecoveryAttempted,
-    rows: rows.map(({ transaction, ...row }: any) => row),
-    quarantine_file: artifacts?.quarantineFile || getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId),
-    repair_work_item_file: artifacts?.workItemFile || getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId),
-    repair_dispatch_brief_file: artifacts?.briefFile || getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId),
-    destructive_action_authorized: false,
-    deleted_count: 0,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    policy: "startup_discovers_all_wal_entries_auto_recovers_only_exact_links_quarantines_unproven",
-  };
+  return require("./group-memory-maintenance").discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommits(groupId, options);
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitStartupDiscovery(groupIds: string[] = [], options: any = {}) {
-  const rows = uniqueStrings(groupIds, 1000).map(groupId => discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommits(groupId, options));
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-startup-discovery-v1",
-    generated_at: String(options.at || options.now || now()),
-    group_count: rows.length,
-    transaction_count: rows.reduce((sum, row) => sum + Number(row.transaction_count || 0), 0),
-    open_transaction_count: rows.reduce((sum, row) => sum + Number(row.open_transaction_count || 0), 0),
-    invalid_transaction_count: rows.reduce((sum, row) => sum + Number(row.invalid_transaction_count || 0), 0),
-    repair_work_item_count: rows.reduce((sum, row) => sum + Number(row.repair_work_item_count || 0), 0),
-    repair_dispatch_brief_count: rows.reduce((sum, row) => sum + Number(row.repair_dispatch_brief_count || 0), 0),
-    rows,
-    destructive_action_authorized: false,
-    deleted_count: 0,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-  };
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitStartupDiscovery(groupIds, options);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-assignments.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-resolution-receipts.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-resolution-transactions.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionQuarantineFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-resolution-transaction-quarantine.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionQuarantineFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionRepairWorkItemFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-resolution-transaction-work-items.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionRepairWorkItemFile(groupId);
 }
 
 export function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionRepairDispatchBriefFile(groupId: string) {
-  return path.join(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId), "maintenance-notification-delivery-cleanup-commit-repair-resolution-transaction-dispatch-briefs.json");
+  return require("./group-memory-maintenance").getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionRepairDispatchBriefFile(groupId);
 }
 
-function cleanupCommitRepairItemChecksum(item: any = {}) {
+export function cleanupCommitRepairItemChecksum(item: any = {}) {
   const { work_item_checksum, ...value } = item;
   return checksum(value, 48);
 }
 
-function cleanupCommitRepairEvidenceChecksum(evidence: any = {}) {
+export function cleanupCommitRepairEvidenceChecksum(evidence: any = {}) {
   const { evidence_checksum, ...value } = evidence;
   return checksum(value, 48);
 }
 
-function cleanupCommitRepairBriefChecksum(brief: any = {}) {
+export function cleanupCommitRepairBriefChecksum(brief: any = {}) {
   const { brief_checksum, ...value } = brief;
   return checksum(value, 48);
 }
 
-function cleanupCommitRepairAssignmentChecksum(binding: any = {}) {
+export function cleanupCommitRepairAssignmentChecksum(binding: any = {}) {
   const { binding_checksum, ...value } = binding;
   return checksum(value, 48);
 }
 
-function cleanupCommitRepairLedgerValid(ledger: any, groupId: string, checksumField: string, entryChecksum: (entry: any) => string) {
+export function cleanupCommitRepairLedgerValid(ledger: any, groupId: string, checksumField: string, entryChecksum: (entry: any) => string) {
   const entries = Array.isArray(ledger?.entries) ? ledger.entries : [];
   return String(ledger?.group_id || "") === groupId
     && entries.every((entry: any) => entry?.[checksumField] === entryChecksum(entry))
     && ledger?.ledger_checksum === checksum(entries.map((entry: any) => entry?.[checksumField] || ""), 48);
 }
 
-function writeCleanupCommitRepairWorkItems(groupId: string, entries: any[], at: string) {
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId);
-  const valueEntries = entries.map((entry: any) => ({ ...entry, work_item_checksum: cleanupCommitRepairItemChecksum(entry) })).slice(-240);
-  writeJsonAtomic(file, { schema: "ccm-cleanup-commit-repair-work-item-ledger-v1", version: 1, group_id: groupId, entries: valueEntries, open_count: valueEntries.filter((entry: any) => !["resolved", "cancelled"].includes(entry.status)).length, updated_at: at, ledger_checksum: checksum(valueEntries.map((entry: any) => entry.work_item_checksum), 48) });
-  return valueEntries;
+export function writeCleanupCommitRepairWorkItems(groupId: string, entries: any[], at: string) {
+  return require("./group-memory-maintenance").writeCleanupCommitRepairWorkItems(groupId, entries, at);
 }
 
-function writeCleanupCommitRepairBriefs(groupId: string, entries: any[], at: string) {
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId);
-  const valueEntries = entries.map((entry: any) => ({ ...entry, brief_checksum: cleanupCommitRepairBriefChecksum(entry) })).slice(-240);
-  writeJsonAtomic(file, { schema: "ccm-cleanup-commit-repair-dispatch-brief-ledger-v1", version: 1, group_id: groupId, entries: valueEntries, ready_count: valueEntries.filter((entry: any) => entry.status === "ready" || entry.status === "assigned").length, updated_at: at, ledger_checksum: checksum(valueEntries.map((entry: any) => entry.brief_checksum), 48) });
-  return valueEntries;
+export function writeCleanupCommitRepairBriefs(groupId: string, entries: any[], at: string) {
+  return require("./group-memory-maintenance").writeCleanupCommitRepairBriefs(groupId, entries, at);
 }
 
-function writeCleanupCommitRepairAssignments(groupId: string, entries: any[], at: string) {
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupId);
-  const valueEntries = entries.map((entry: any) => ({ ...entry, binding_checksum: cleanupCommitRepairAssignmentChecksum(entry) })).slice(-240);
-  writeJsonAtomic(file, {
-    schema: "ccm-cleanup-commit-repair-assignment-ledger-v1",
-    version: 1,
-    group_id: groupId,
-    entries: valueEntries,
-    active_count: valueEntries.filter((entry: any) => entry.status === "active").length,
-    updated_at: at,
-    ledger_checksum: checksum(valueEntries.map((entry: any) => entry.binding_checksum), 48),
-  });
-  return valueEntries;
+export function writeCleanupCommitRepairAssignments(groupId: string, entries: any[], at: string) {
+  return require("./group-memory-maintenance").writeCleanupCommitRepairAssignments(groupId, entries, at);
 }
 
 export function updatePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItem(groupId: string, input: any = {}) {
-  const at = String(input.at || input.now || now());
-  const workItemId = String(input.workItemId || input.work_item_id || "").trim();
-  const action = String(input.action || "").trim().toLowerCase();
-  const actorRole = String(input.actorRole || input.actor_role || "").trim().toLowerCase();
-  const actorId = String(input.actorId || input.actor_id || "").trim();
-  const reason = String(input.reason || "").trim();
-  if (input.explicitAction !== true && input.explicit_action !== true) throw new Error("cleanup commit repair lifecycle requires explicitAction=true");
-  if (!new Set(["group-main-agent", "local-user"]).has(actorRole)) throw new Error("cleanup commit repair lifecycle actor role is not authorized");
-  if (!actorId || !reason || !new Set(["claim", "dispatch", "reopen"]).has(action)) throw new Error("cleanup commit repair lifecycle action is invalid");
-  return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-commit-repair-lifecycle" }, () => {
-    assertNoConflictingCleanupCommitRepairResolutionTransaction(groupId, workItemId);
-    const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId);
-    const ledger = readJson(file, {});
-    if (!cleanupCommitRepairLedgerValid(ledger, groupId, "work_item_checksum", cleanupCommitRepairItemChecksum)) {
-      throw new Error("cleanup commit repair work item ledger checksum invalid");
-    }
-    const index = (ledger.entries || []).findIndex((entry: any) => entry.work_item_id === workItemId);
-    if (index < 0) throw new Error("cleanup commit repair work item not found");
-    const current = ledger.entries[index];
-    if (current.work_item_checksum !== cleanupCommitRepairItemChecksum(current)) throw new Error("cleanup commit repair work item checksum invalid");
-    const allowed = action === "claim" ? current.status === "pending" || current.status === "reopened"
-      : action === "dispatch" ? current.status === "claimed"
-        : ["resolved", "cancelled", "blocked"].includes(current.status);
-    if (!allowed) throw new Error("cleanup commit repair lifecycle transition is invalid");
-    const status = action === "claim" ? "claimed" : action === "dispatch" ? "dispatched" : "reopened";
-    const updated = { ...current, status, [`${action}ed_at`]: at, [`${action}ed_by`]: actorId, lifecycle_reason: reason, updated_at: at };
-    const entries = [...ledger.entries];
-    entries[index] = updated;
-    const written = writeCleanupCommitRepairWorkItems(groupId, entries, at);
-    return written[index];
-  });
+  return require("./group-memory-maintenance").updatePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItem(groupId, input);
 }
 
-function cleanupCommitRepairResolutionReceiptChecksum(receipt: any = {}) {
+export function cleanupCommitRepairResolutionReceiptChecksum(receipt: any = {}) {
   return checksum({
     receipt_id: receipt.receipt_id || "", group_id: receipt.group_id || "", work_item_id: receipt.work_item_id || "", transaction_id: receipt.transaction_id || "",
     work_item_checksum: receipt.work_item_checksum || "", quarantine_evidence_checksum: receipt.quarantine_evidence_checksum || "", resolution_action: receipt.resolution_action || "",
@@ -10220,7 +7522,7 @@ function cleanupCommitRepairResolutionReceiptChecksum(receipt: any = {}) {
   }, 48);
 }
 
-function cleanupCommitRepairResolutionReceiptStateChecksum(receipt: any = {}) {
+export function cleanupCommitRepairResolutionReceiptStateChecksum(receipt: any = {}) {
   return checksum({
     receipt_checksum: receipt.receipt_checksum || "",
     consumed: receipt.consumed === true,
@@ -10228,25 +7530,11 @@ function cleanupCommitRepairResolutionReceiptStateChecksum(receipt: any = {}) {
   }, 48);
 }
 
-function writeCleanupCommitRepairResolutionReceipts(groupId: string, entries: any[], at: string) {
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupId);
-  const valueEntries = entries.map((entry: any) => ({
-    ...entry,
-    receipt_state_checksum: cleanupCommitRepairResolutionReceiptStateChecksum(entry),
-  })).slice(-240);
-  writeJsonAtomic(file, {
-    schema: "ccm-cleanup-commit-repair-resolution-receipt-ledger-v1",
-    version: 1,
-    group_id: groupId,
-    entries: valueEntries,
-    open_count: valueEntries.filter((entry: any) => entry.consumed !== true).length,
-    updated_at: at,
-    ledger_checksum: checksum(valueEntries.map((entry: any) => entry.receipt_state_checksum), 48),
-  });
-  return valueEntries;
+export function writeCleanupCommitRepairResolutionReceipts(groupId: string, entries: any[], at: string) {
+  return require("./group-memory-maintenance").writeCleanupCommitRepairResolutionReceipts(groupId, entries, at);
 }
 
-function cleanupCommitRepairResolutionReceiptLedgerValid(ledger: any, groupId: string) {
+export function cleanupCommitRepairResolutionReceiptLedgerValid(ledger: any, groupId: string) {
   const entries = Array.isArray(ledger?.entries) ? ledger.entries : [];
   return String(ledger?.group_id || "") === groupId
     && entries.every((entry: any) => entry.receipt_checksum === cleanupCommitRepairResolutionReceiptChecksum(entry)
@@ -10254,11 +7542,11 @@ function cleanupCommitRepairResolutionReceiptLedgerValid(ledger: any, groupId: s
     && ledger?.ledger_checksum === checksum(entries.map((entry: any) => entry.receipt_state_checksum || ""), 48);
 }
 
-function cleanupCommitRepairResolutionTransactionPhaseRank(phase: string) {
+export function cleanupCommitRepairResolutionTransactionPhaseRank(phase: string) {
   return ({ prepared: 1, work_item_committed: 2, brief_committed: 3, assignment_committed: 4, receipt_committed: 5, completed: 6 } as any)[phase] || 0;
 }
 
-function cleanupCommitRepairResolutionTransactionChecksum(transaction: any = {}) {
+export function cleanupCommitRepairResolutionTransactionChecksum(transaction: any = {}) {
   return checksum({
     resolution_transaction_id: transaction.resolution_transaction_id || "",
     group_id: transaction.group_id || "",
@@ -10281,7 +7569,7 @@ function cleanupCommitRepairResolutionTransactionChecksum(transaction: any = {})
   }, 48);
 }
 
-function cleanupCommitRepairResolutionTransactionCompactChecksum(value: any = {}) {
+export function cleanupCommitRepairResolutionTransactionCompactChecksum(value: any = {}) {
   return checksum({
     group_id: value.group_id || "",
     compacted_count: Number(value.compacted_count || 0),
@@ -10293,7 +7581,7 @@ function cleanupCommitRepairResolutionTransactionCompactChecksum(value: any = {}
   }, 48);
 }
 
-function cleanupCommitRepairResolutionTransactionLedgerChecksum(ledger: any = {}) {
+export function cleanupCommitRepairResolutionTransactionLedgerChecksum(ledger: any = {}) {
   const payload: any = {
     group_id: ledger.group_id || "",
     revision: Number(ledger.revision || 0),
@@ -10311,30 +7599,11 @@ function cleanupCommitRepairResolutionTransactionLedgerChecksum(ledger: any = {}
   return checksum(payload, 48);
 }
 
-function readCleanupCommitRepairResolutionTransactionLedger(groupId: string) {
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionFile(groupId);
-  const ledger = readJson(file, {});
-  const revision = Number(ledger.revision || 0);
-  const ledgerChecksum = String(ledger.ledger_checksum || "");
-  const compactedHistory = ledger.compacted_history || null;
-  const compactedHistoryValid = !compactedHistory || compactedHistory.compact_checksum === cleanupCommitRepairResolutionTransactionCompactChecksum(compactedHistory);
-  return {
-    schema: "ccm-cleanup-commit-repair-resolution-transaction-ledger-v1",
-    version: 1,
-    group_id: groupId,
-    revision,
-    previous_ledger_checksum: String(ledger.previous_ledger_checksum || ""),
-    entries: Array.isArray(ledger.entries) ? ledger.entries : [],
-    ledger_checksum: ledgerChecksum,
-    ledger_checksum_valid: (((!ledgerChecksum && revision === 0)
-      || (!!ledgerChecksum && String(ledger.group_id || "") === groupId && ledgerChecksum === cleanupCommitRepairResolutionTransactionLedgerChecksum(ledger))) && compactedHistoryValid),
-    compacted_history: compactedHistory,
-    compacted_history_valid: compactedHistoryValid,
-    file,
-  };
+export function readCleanupCommitRepairResolutionTransactionLedger(groupId: string) {
+  return require("./group-memory-maintenance").readCleanupCommitRepairResolutionTransactionLedger(groupId);
 }
 
-function upsertCleanupCommitRepairResolutionTransaction(groupId: string, transactionInput: any, at: string, options: any = {}) {
+export function upsertCleanupCommitRepairResolutionTransaction(groupId: string, transactionInput: any, at: string, options: any = {}) {
   return withCleanupGroupLedgerLock(groupId, at, { ...options, ownerRole: options.ownerRole || "cleanup-commit-repair-resolution-transaction" }, groupLedgerLockHandle => {
     const ledger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
     if (!ledger.ledger_checksum_valid) throw new Error("cleanup commit repair resolution transaction ledger checksum invalid");
@@ -10404,12 +7673,12 @@ function cleanupCommitRepairTargetSnapshotsMatch(entries: any[], idField: string
   return checksum(cleanupCommitRepairTargetSnapshots(entries, idField, checksumField), 48) === checksum(expected || [], 48);
 }
 
-function maybeInterruptCleanupCommitRepairResolution(options: any, phase: string) {
+export function maybeInterruptCleanupCommitRepairResolution(options: any, phase: string) {
   const requested = String(options.simulateResolutionCrashAfter || options.simulate_resolution_crash_after || "").trim().toLowerCase();
   if (requested === phase) throw new Error(`simulated_cleanup_commit_repair_resolution_interruption_after_${phase}`);
 }
 
-function assertNoConflictingCleanupCommitRepairResolutionTransaction(groupId: string, workItemId: string, allowedTransactionId = "") {
+export function assertNoConflictingCleanupCommitRepairResolutionTransaction(groupId: string, workItemId: string, allowedTransactionId = "") {
   const ledger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
   if (!ledger.ledger_checksum_valid) throw new Error("cleanup commit repair resolution transaction ledger checksum invalid");
   const conflict = ledger.entries.find((entry: any) => entry.work_item_id === workItemId
@@ -10428,7 +7697,7 @@ function validateCleanupCommitRepairResolutionEvidence(groupId: string, evidence
   return evidence;
 }
 
-function prepareCleanupCommitRepairResolutionTransaction(groupId: string, receipt: any, at: string, options: any = {}) {
+export function prepareCleanupCommitRepairResolutionTransaction(groupId: string, receipt: any, at: string, options: any = {}) {
   const workLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId), {});
   const briefLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId), {});
   const assignmentLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupId), {});
@@ -10486,7 +7755,7 @@ function prepareCleanupCommitRepairResolutionTransaction(groupId: string, receip
   return upsertCleanupCommitRepairResolutionTransaction(groupId, transaction, at, options).transaction;
 }
 
-function advanceCleanupCommitRepairResolutionTransaction(groupId: string, transactionInput: any, at: string, options: any = {}) {
+export function advanceCleanupCommitRepairResolutionTransaction(groupId: string, transactionInput: any, at: string, options: any = {}) {
   let transaction: any = { ...transactionInput };
   if (transaction.transaction_checksum !== cleanupCommitRepairResolutionTransactionChecksum(transaction)
     || transaction.group_id !== groupId
@@ -10623,214 +7892,22 @@ function advanceCleanupCommitRepairResolutionTransaction(groupId: string, transa
 }
 
 export function createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupId: string, input: any = {}) {
-  const at = String(input.at || input.now || now());
-  const workItemId = String(input.workItemId || input.work_item_id || "").trim();
-  const action = String(input.resolutionAction || input.resolution_action || "resolved").trim().toLowerCase();
-  const actorRole = String(input.actorRole || input.actor_role || "").trim().toLowerCase();
-  const actorId = String(input.actorId || input.actor_id || "").trim();
-  const reason = String(input.reason || "").trim();
-  if (input.explicitApproval !== true && input.explicit_approval !== true) throw new Error("cleanup commit repair resolution requires explicitApproval=true");
-  if (!new Set(["group-main-agent", "local-user"]).has(actorRole) || !actorId || !reason || !new Set(["resolved", "cancelled"]).has(action)) throw new Error("cleanup commit repair resolution approval is invalid");
-  return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-commit-repair-resolution-approval" }, () => {
-    assertNoConflictingCleanupCommitRepairResolutionTransaction(groupId, workItemId);
-    const workLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId), {});
-    if (!cleanupCommitRepairLedgerValid(workLedger, groupId, "work_item_checksum", cleanupCommitRepairItemChecksum)) {
-      throw new Error("cleanup commit repair work item ledger checksum invalid");
-    }
-    const item = (workLedger.entries || []).find((entry: any) => entry.work_item_id === workItemId) || null;
-    if (!item || item.work_item_checksum !== cleanupCommitRepairItemChecksum(item) || !["claimed", "dispatched"].includes(item.status)) throw new Error("cleanup commit repair work item is not resolvable");
-    const quarantineLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId), {});
-    const evidence = (quarantineLedger.entries || []).find((entry: any) => entry.quarantine_id === item.quarantine_id) || null;
-    if (!evidence?.evidence_checksum || evidence.group_id !== groupId || evidence.evidence_checksum !== cleanupCommitRepairEvidenceChecksum(evidence)
-      || quarantineLedger.ledger_checksum !== checksum((quarantineLedger.entries || []).map((entry: any) => entry.evidence_checksum || ""), 48)) {
-      throw new Error("cleanup commit repair quarantine evidence missing or invalid");
-    }
-    const expiresInMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(input.expiresInMs || input.expires_in_ms || 30 * 60 * 1000)));
-    const receipt: any = {
-      schema: "ccm-cleanup-commit-repair-resolution-receipt-v1", version: 1,
-      receipt_id: `cleanup-commit-repair-resolution:${checksum([groupId, workItemId, item.work_item_checksum, action, actorId, at], 24)}`,
-      group_id: groupId, work_item_id: workItemId, transaction_id: item.transaction_id, work_item_checksum: item.work_item_checksum,
-      quarantine_evidence_checksum: evidence.evidence_checksum, resolution_action: action, actor_role: actorRole, actor_id: actorId, reason,
-      issued_at: at, expires_at: new Date(Date.parse(at) + expiresInMs).toISOString(), single_use: true, consumed: false,
-    };
-    receipt.receipt_checksum = cleanupCommitRepairResolutionReceiptChecksum(receipt);
-    const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupId);
-    const ledger = readJson(file, {});
-    if (Array.isArray(ledger.entries) && ledger.entries.length > 0 && !cleanupCommitRepairResolutionReceiptLedgerValid(ledger, groupId)) {
-      throw new Error("cleanup commit repair resolution receipt ledger checksum invalid");
-    }
-    const entries = [...(ledger.entries || []).filter((entry: any) => entry.receipt_id !== receipt.receipt_id), receipt].slice(-240);
-    const written = writeCleanupCommitRepairResolutionReceipts(groupId, entries, at);
-    return written[written.length - 1];
-  });
+  return require("./group-memory-maintenance").createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupId, input);
 }
 
 export function executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupId: string, input: any = {}) {
-  const at = String(input.at || input.now || now());
-  const receiptId = String(input.receiptId || input.receipt_id || "").trim();
-  if (input.explicitExecution !== true && input.explicit_execution !== true) throw new Error("cleanup commit repair resolution requires explicitExecution=true");
-  try {
-    return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-commit-repair-resolution-executor" }, groupLedgerLockHandle => {
-      const receiptLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupId), {});
-      if (!cleanupCommitRepairResolutionReceiptLedgerValid(receiptLedger, groupId)) throw new Error("cleanup commit repair resolution receipt ledger checksum invalid");
-      const transactionLedger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-      if (!transactionLedger.ledger_checksum_valid) throw new Error("cleanup commit repair resolution transaction ledger checksum invalid");
-      let transaction = transactionLedger.entries.find((entry: any) => entry.receipt_id === receiptId && entry.status !== "cancelled") || null;
-      if (transaction?.status === "completed") throw new Error("cleanup commit repair resolution receipt invalid or consumed");
-      if (transaction) {
-        if (transaction.transaction_checksum !== cleanupCommitRepairResolutionTransactionChecksum(transaction) || transaction.group_id !== groupId) {
-          throw new Error("cleanup commit repair resolution transaction invalid");
-        }
-        transaction = upsertCleanupCommitRepairResolutionTransaction(groupId, {
-          ...transaction,
-          recovery_count: Number(transaction.recovery_count || 0) + 1,
-        }, at, { groupLedgerLockHandle, ownerRole: "cleanup-commit-repair-resolution-resume" }).transaction;
-      } else {
-        const receipt = (receiptLedger.entries || []).find((entry: any) => entry.receipt_id === receiptId) || null;
-        if (!receipt || receipt.receipt_checksum !== cleanupCommitRepairResolutionReceiptChecksum(receipt) || receipt.group_id !== groupId || receipt.consumed === true) {
-          throw new Error("cleanup commit repair resolution receipt invalid or consumed");
-        }
-        const executionAtMs = Date.parse(at);
-        const expiresAtMs = Date.parse(receipt.expires_at || "");
-        if (!Number.isFinite(executionAtMs) || !Number.isFinite(expiresAtMs) || executionAtMs > expiresAtMs) throw new Error("cleanup commit repair resolution receipt expired");
-        transaction = prepareCleanupCommitRepairResolutionTransaction(groupId, receipt, at, { groupLedgerLockHandle });
-        maybeInterruptCleanupCommitRepairResolution(input, "prepared");
-      }
-      return advanceCleanupCommitRepairResolutionTransaction(groupId, transaction, at, { ...input, groupLedgerLockHandle });
-    });
-  } catch (error: any) {
-    const reason = String(error?.message || error);
-    if (reason.startsWith("simulated_cleanup_commit_repair_resolution_interruption_after_")) {
-      const ledger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-      const transaction = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
-      return {
-        status: "interrupted",
-        reason,
-        group_id: groupId,
-        receipt_id: receiptId,
-        resolution_transaction_id: transaction?.resolution_transaction_id || "",
-        resolution_transaction_phase: transaction?.phase || "",
-        destructive_action_authorized: false,
-        deleted_count: 0,
-        created_task_count: 0,
-        created_approval_receipt_count: 0,
-      };
-    }
-    throw error;
-  }
+  return require("./group-memory-maintenance").executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupId, input);
 }
 
 export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId: string) {
-  const ledger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-  const rows = ledger.entries.map((transaction: any) => {
-    const checksumValid = transaction.transaction_checksum === cleanupCommitRepairResolutionTransactionChecksum(transaction);
-    const groupValid = transaction.group_id === groupId;
-    const phaseValid = cleanupCommitRepairResolutionTransactionPhaseRank(transaction.phase) > 0;
-    const completed = transaction.status === "completed";
-    const completionProofValid = !completed || (transaction.phase === "completed"
-      && !!transaction.work_item_commit?.work_item_checksum
-      && !!transaction.brief_commit?.target_root
-      && !!transaction.assignment_commit?.target_root
-      && !!transaction.receipt_commit?.target_root
-      && !!transaction.completed_at);
-    return {
-      resolution_transaction_id: transaction.resolution_transaction_id || "",
-      work_item_id: transaction.work_item_id || "",
-      receipt_id: transaction.receipt_id || "",
-      phase: transaction.phase || "",
-      status: transaction.status || "",
-      checksum_valid: checksumValid,
-      group_valid: groupValid,
-      phase_valid: phaseValid,
-      completion_proof_valid: completionProofValid,
-      recovery_count: Number(transaction.recovery_count || 0),
-      valid: checksumValid && groupValid && phaseValid && completionProofValid,
-    };
-  });
-  const invalidCount = rows.filter((row: any) => !row.valid).length + (ledger.ledger_checksum_valid ? 0 : 1);
-  return {
-    schema: "ccm-cleanup-commit-repair-resolution-transaction-health-v1",
-    group_id: groupId,
-    status: ledger.entries.length === 0 ? "empty" : invalidCount > 0 ? "blocked" : rows.some((row: any) => row.status !== "completed" && row.status !== "cancelled") ? "recoverable" : "ok",
-    file: ledger.file,
-    ledger_revision: ledger.revision,
-    ledger_checksum: ledger.ledger_checksum,
-    ledger_checksum_valid: ledger.ledger_checksum_valid,
-    compacted_history: ledger.compacted_history || null,
-    compacted_history_valid: ledger.compacted_history_valid !== false,
-    compacted_transaction_count: Number(ledger.compacted_history?.compacted_count || 0),
-    transaction_count: rows.length,
-    open_transaction_count: rows.filter((row: any) => row.status !== "completed" && row.status !== "cancelled").length,
-    completed_transaction_count: rows.filter((row: any) => row.status === "completed").length,
-    recovered_transaction_count: rows.filter((row: any) => row.recovery_count > 0).length,
-    invalid_transaction_count: invalidCount,
-    rows,
-    destructive_action_authorized: false,
-    deleted_count: 0,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-  };
+  return require("./group-memory-maintenance").inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId);
 }
 
 export function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  try {
-    return withCleanupGroupLedgerLock(groupId, at, { ...options, ownerRole: "cleanup-commit-repair-resolution-recovery" }, groupLedgerLockHandle => {
-      let ledger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-      if (!ledger.ledger_checksum_valid) throw new Error("cleanup commit repair resolution transaction ledger checksum invalid");
-      let recoveredCount = 0;
-      const errors: any[] = [];
-      for (const candidate of ledger.entries.filter((entry: any) => entry.status !== "completed" && entry.status !== "cancelled")) {
-        try {
-          const authoritativeLedger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-          const authoritativeCandidate = authoritativeLedger.entries.find((entry: any) => entry.resolution_transaction_id === candidate.resolution_transaction_id) || null;
-          const gaps = authoritativeCandidate ? cleanupCommitRepairResolutionTransactionLinkGaps(groupId, authoritativeCandidate, authoritativeLedger) : ["resolution_transaction_missing"];
-          if (!authoritativeCandidate || gaps.length > 0) throw new Error(`cleanup commit repair resolution transaction is not exactly recoverable: ${gaps.join(",")}`);
-          const transaction = upsertCleanupCommitRepairResolutionTransaction(groupId, {
-            ...authoritativeCandidate,
-            recovery_count: Number(authoritativeCandidate.recovery_count || 0) + 1,
-          }, at, { groupLedgerLockHandle, ownerRole: "cleanup-commit-repair-resolution-recovery" }).transaction;
-          advanceCleanupCommitRepairResolutionTransaction(groupId, transaction, at, { groupLedgerLockHandle });
-          recoveredCount++;
-        } catch (error: any) {
-          errors.push({ resolution_transaction_id: candidate.resolution_transaction_id || "", error: String(error?.message || error) });
-        }
-      }
-      ledger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-      const health = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId);
-      return {
-        ...health,
-        status: errors.length > 0 || health.invalid_transaction_count > 0 ? "blocked" : health.open_transaction_count > 0 ? "recoverable" : health.transaction_count > 0 ? "ok" : "empty",
-        recovered_now_count: recoveredCount,
-        recovery_error_count: errors.length,
-        recovery_errors: errors,
-        trigger: String(options.trigger || "manual"),
-        generated_at: at,
-        destructive_action_authorized: false,
-        deleted_count: 0,
-        created_task_count: 0,
-        created_approval_receipt_count: 0,
-      };
-    });
-  } catch (error: any) {
-    const health = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId);
-    return {
-      ...health,
-      status: "blocked",
-      recovered_now_count: 0,
-      recovery_error_count: 1,
-      recovery_errors: [{ resolution_transaction_id: "", error: String(error?.message || error) }],
-      trigger: String(options.trigger || "manual"),
-      generated_at: at,
-      destructive_action_authorized: false,
-      deleted_count: 0,
-      created_task_count: 0,
-      created_approval_receipt_count: 0,
-    };
-  }
+  return require("./group-memory-maintenance").reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId, options);
 }
 
-function cleanupCommitRepairResolutionTransactionLinkGaps(groupId: string, transaction: any, transactionLedger: any) {
+export function cleanupCommitRepairResolutionTransactionLinkGaps(groupId: string, transaction: any, transactionLedger: any) {
   const gaps: string[] = [];
   if (!transactionLedger.ledger_checksum_valid) gaps.push("resolution_transaction_ledger_checksum_invalid");
   if (transaction.transaction_checksum !== cleanupCommitRepairResolutionTransactionChecksum(transaction)) gaps.push("resolution_transaction_checksum_invalid");
@@ -10912,14 +7989,14 @@ function cleanupCommitRepairResolutionTransactionArtifactChecksum(entry: any = {
   return checksum(value, 48);
 }
 
-function cleanupCommitRepairResolutionTransactionArtifactLedgerValid(ledger: any, groupId: string, checksumField: string) {
+export function cleanupCommitRepairResolutionTransactionArtifactLedgerValid(ledger: any, groupId: string, checksumField: string) {
   const entries = Array.isArray(ledger?.entries) ? ledger.entries : [];
   return String(ledger?.group_id || "") === groupId
     && entries.every((entry: any) => entry[checksumField] === cleanupCommitRepairResolutionTransactionArtifactChecksum(entry, checksumField))
     && ledger.ledger_checksum === checksum(entries.map((entry: any) => entry[checksumField] || ""), 48);
 }
 
-function writeCleanupCommitRepairResolutionTransactionDiscoveryArtifacts(groupId: string, invalidRows: any[], at: string) {
+export function writeCleanupCommitRepairResolutionTransactionDiscoveryArtifacts(groupId: string, invalidRows: any[], at: string) {
   return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-commit-repair-resolution-transaction-discovery" }, () => {
     const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionQuarantineFile(groupId);
     const workItemFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionRepairWorkItemFile(groupId);
@@ -11028,930 +8105,38 @@ function writeCleanupCommitRepairResolutionTransactionDiscoveryArtifacts(groupId
 }
 
 export function discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  let transactionLedger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-  const evaluate = () => transactionLedger.entries.map((transaction: any) => {
-    const gaps = cleanupCommitRepairResolutionTransactionLinkGaps(groupId, transaction, transactionLedger);
-    const open = transaction.status !== "completed" && transaction.status !== "cancelled";
-    return {
-      resolution_transaction_id: transaction.resolution_transaction_id || "",
-      transaction,
-      phase: transaction.phase || "",
-      status: transaction.status || "",
-      gaps,
-      invalid: gaps.length > 0,
-      recoverable: open && gaps.length === 0,
-    };
-  });
-  let rows = evaluate();
-  let recovery: any = null;
-  if (options.recover !== false && rows.some((row: any) => row.recoverable)) {
-    recovery = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId, { at, trigger: options.trigger || "startup-discovery" });
-    transactionLedger = readCleanupCommitRepairResolutionTransactionLedger(groupId);
-    rows = evaluate();
-  }
-  const invalidRows = rows.filter((row: any) => row.invalid);
-  let artifacts: any = null;
-  if (options.persist !== false) artifacts = writeCleanupCommitRepairResolutionTransactionDiscoveryArtifacts(groupId, invalidRows, at);
-  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionQuarantineFile(groupId);
-  const workItemFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionRepairWorkItemFile(groupId);
-  const briefFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionRepairDispatchBriefFile(groupId);
-  const quarantineLedger = readJson(quarantineFile, {});
-  const workItemLedger = readJson(workItemFile, {});
-  const briefLedger = readJson(briefFile, {});
-  const quarantineArtifactValid = !Array.isArray(quarantineLedger.entries) || quarantineLedger.entries.length === 0
-    || cleanupCommitRepairResolutionTransactionArtifactLedgerValid(quarantineLedger, groupId, "evidence_checksum");
-  const workItemArtifactValid = !Array.isArray(workItemLedger.entries) || workItemLedger.entries.length === 0
-    || cleanupCommitRepairResolutionTransactionArtifactLedgerValid(workItemLedger, groupId, "work_item_checksum");
-  const briefArtifactValid = !Array.isArray(briefLedger.entries) || briefLedger.entries.length === 0
-    || cleanupCommitRepairResolutionTransactionArtifactLedgerValid(briefLedger, groupId, "brief_checksum");
-  const artifactIntegrityValid = quarantineArtifactValid && workItemArtifactValid && briefArtifactValid;
-  const invalidIds = new Set(invalidRows.map((row: any) => row.resolution_transaction_id));
-  const containedIds = new Set((quarantineLedger.entries || []).filter((entry: any) => entry.status === "quarantined_unproven_resolution_transaction").map((entry: any) => entry.resolution_transaction_id));
-  const workIds = new Set((workItemLedger.entries || []).filter((entry: any) => !["resolved", "cancelled"].includes(entry.status)).map((entry: any) => entry.resolution_transaction_id));
-  const briefIds = new Set((briefLedger.entries || []).filter((entry: any) => entry.status === "ready").map((entry: any) => entry.resolution_transaction_id));
-  const containedInvalidCount = artifactIntegrityValid ? [...invalidIds].filter(id => containedIds.has(id) && workIds.has(id) && briefIds.has(id)).length : 0;
-  const recoverableCount = rows.filter((row: any) => row.recoverable).length;
-  const openCount = rows.filter((row: any) => row.status !== "completed" && row.status !== "cancelled").length;
-  const uncontainedInvalidCount = Math.max(0, invalidRows.length - containedInvalidCount);
-  return {
-    schema: "ccm-cleanup-commit-repair-resolution-transaction-startup-discovery-v1",
-    version: 1,
-    group_id: groupId,
-    generated_at: at,
-    status: uncontainedInvalidCount > 0 ? "blocked" : recoverableCount > 0 ? "recoverable" : invalidRows.length > 0 ? "contained" : rows.length > 0 || transactionLedger.compacted_history ? "ok" : "empty",
-    transaction_ledger_file: transactionLedger.file,
-    transaction_ledger_revision: transactionLedger.revision,
-    transaction_ledger_checksum_valid: transactionLedger.ledger_checksum_valid,
-    ledger_checksum_valid: transactionLedger.ledger_checksum_valid,
-    transaction_count: rows.length,
-    compacted_transaction_count: Number(transactionLedger.compacted_history?.compacted_count || 0),
-    compacted_history: transactionLedger.compacted_history || null,
-    compacted_history_valid: transactionLedger.compacted_history_valid !== false,
-    artifact_ledger_integrity_valid: artifactIntegrityValid,
-    quarantine_artifact_ledger_valid: quarantineArtifactValid,
-    repair_work_item_ledger_valid: workItemArtifactValid,
-    repair_dispatch_brief_ledger_valid: briefArtifactValid,
-    open_transaction_count: openCount,
-    recoverable_transaction_count: recoverableCount,
-    invalid_transaction_count: invalidRows.length,
-    contained_invalid_transaction_count: containedInvalidCount,
-    uncontained_invalid_transaction_count: uncontainedInvalidCount,
-    automatic_recovery_attempted: !!recovery,
-    recovered_now_count: Number(recovery?.recovered_now_count || 0),
-    rows,
-    quarantine_file: artifacts?.quarantineFile || quarantineFile,
-    repair_work_item_file: artifacts?.workItemFile || workItemFile,
-    repair_dispatch_brief_file: artifacts?.briefFile || briefFile,
-    repair_work_item_count: (workItemLedger.entries || []).filter((entry: any) => !["resolved", "cancelled"].includes(entry.status)).length,
-    repair_dispatch_brief_count: (briefLedger.entries || []).filter((entry: any) => entry.status === "ready").length,
-    destructive_action_authorized: false,
-    deleted_count: 0,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-  };
+  return require("./group-memory-maintenance").discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId, options);
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionStartupDiscovery(groupIds: string[] = [], options: any = {}) {
-  const rows = uniqueStrings(groupIds, 500).map(groupId => discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupId, options));
-  return {
-    schema: "ccm-cleanup-commit-repair-resolution-transaction-startup-discovery-batch-v1",
-    generated_at: String(options.at || options.now || now()),
-    group_count: rows.length,
-    transaction_count: rows.reduce((sum, row) => sum + Number(row.transaction_count || 0), 0),
-    compacted_transaction_count: rows.reduce((sum, row) => sum + Number(row.compacted_transaction_count || 0), 0),
-    open_transaction_count: rows.reduce((sum, row) => sum + Number(row.open_transaction_count || 0), 0),
-    invalid_transaction_count: rows.reduce((sum, row) => sum + Number(row.invalid_transaction_count || 0), 0),
-    contained_invalid_transaction_count: rows.reduce((sum, row) => sum + Number(row.contained_invalid_transaction_count || 0), 0),
-    recovered_now_count: rows.reduce((sum, row) => sum + Number(row.recovered_now_count || 0), 0),
-    repair_work_item_count: rows.reduce((sum, row) => sum + Number(row.repair_work_item_count || 0), 0),
-    repair_dispatch_brief_count: rows.reduce((sum, row) => sum + Number(row.repair_dispatch_brief_count || 0), 0),
-    rows,
-    destructive_action_authorized: false,
-    deleted_count: 0,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-  };
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionStartupDiscovery(groupIds, options);
 }
 
 export function createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignment(groupId: string, input: any = {}) {
-  const at = String(input.at || input.now || now());
-  const workItemId = String(input.workItemId || input.work_item_id || "").trim();
-  const project = String(input.project || input.targetProject || input.target_project || "").trim();
-  const agentType = String(input.agentType || input.agent_type || "").trim();
-  const assignmentId = String(input.assignmentId || input.assignment_id || "").trim();
-  const childSessionId = String(input.childSessionId || input.child_session_id || "").trim();
-  const actorRole = String(input.actorRole || input.actor_role || "").trim().toLowerCase();
-  const actorId = String(input.actorId || input.actor_id || "").trim();
-  if (input.explicitAssignment !== true && input.explicit_assignment !== true) throw new Error("cleanup commit repair assignment requires explicitAssignment=true");
-  if (!new Set(["group-main-agent", "local-user"]).has(actorRole) || !actorId) throw new Error("cleanup commit repair assignment actor is not authorized");
-  if (!project || !agentType || !assignmentId) throw new Error("cleanup commit repair assignment target is incomplete");
-  return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-commit-repair-assignment" }, () => {
-    assertNoConflictingCleanupCommitRepairResolutionTransaction(groupId, workItemId);
-    const workLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId), {});
-    const briefLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId), {});
-    if (!cleanupCommitRepairLedgerValid(workLedger, groupId, "work_item_checksum", cleanupCommitRepairItemChecksum)) {
-      throw new Error("cleanup commit repair work item ledger checksum invalid");
-    }
-    if (!cleanupCommitRepairLedgerValid(briefLedger, groupId, "brief_checksum", cleanupCommitRepairBriefChecksum)) {
-      throw new Error("cleanup commit repair brief ledger checksum invalid");
-    }
-    const item = (workLedger.entries || []).find((entry: any) => entry.work_item_id === workItemId) || null;
-    const brief = (briefLedger.entries || []).find((entry: any) => entry.work_item_id === workItemId) || null;
-    if (!item || !brief || !["claimed", "dispatched"].includes(item.status) || brief.status === "closed") throw new Error("cleanup commit repair item is not assignable");
-    const binding: any = {
-      schema: "ccm-cleanup-commit-repair-assignment-v1", version: 1,
-      binding_id: `cleanup-commit-repair-assignment:${checksum([groupId, workItemId, assignmentId, project, agentType, childSessionId], 24)}`,
-      group_id: groupId, work_item_id: workItemId, brief_id: brief.brief_id, transaction_id: item.transaction_id,
-      assignment_id: assignmentId, project, agent_type: agentType, child_session_id: childSessionId,
-      assigned_by_role: actorRole, assigned_by: actorId, status: "active", assigned_at: at,
-    };
-    binding.binding_checksum = cleanupCommitRepairAssignmentChecksum(binding);
-    const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupId);
-    const ledger = readJson(file, {});
-    if (Array.isArray(ledger.entries) && ledger.entries.length > 0 && !cleanupCommitRepairLedgerValid(ledger, groupId, "binding_checksum", cleanupCommitRepairAssignmentChecksum)) {
-      throw new Error("cleanup commit repair assignment ledger checksum invalid");
-    }
-    const entries = [...(ledger.entries || []).filter((entry: any) => entry.binding_id !== binding.binding_id), binding].slice(-240);
-    writeCleanupCommitRepairAssignments(groupId, entries, at);
-    writeCleanupCommitRepairBriefs(groupId, (briefLedger.entries || []).map((entry: any) => entry.brief_id === brief.brief_id ? { ...entry, status: "assigned", assignment_binding_id: binding.binding_id, assigned_at: at } : entry), at);
-    return binding;
-  });
+  return require("./group-memory-maintenance").createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignment(groupId, input);
 }
 
 export function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupId: string, audience: string, options: any = {}) {
-  const normalizedAudience = String(audience || "").trim().toLowerCase();
-  const workLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId), {});
-  const briefLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId), {});
-  const assignmentLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupId), {});
-  const workLedgerValid = cleanupCommitRepairLedgerValid(workLedger, groupId, "work_item_checksum", cleanupCommitRepairItemChecksum);
-  const briefLedgerValid = cleanupCommitRepairLedgerValid(briefLedger, groupId, "brief_checksum", cleanupCommitRepairBriefChecksum);
-  const assignmentLedgerEmpty = !Array.isArray(assignmentLedger.entries) || assignmentLedger.entries.length === 0;
-  const assignmentLedgerValid = assignmentLedgerEmpty || cleanupCommitRepairLedgerValid(assignmentLedger, groupId, "binding_checksum", cleanupCommitRepairAssignmentChecksum);
-  const integrityValid = workLedgerValid && briefLedgerValid && assignmentLedgerValid;
-  const openIds = new Set(integrityValid ? (workLedger.entries || []).filter((entry: any) => !["resolved", "cancelled"].includes(entry.status)).map((entry: any) => entry.work_item_id) : []);
-  let briefs = integrityValid ? (briefLedger.entries || []).filter((entry: any) => entry.group_id === groupId
-    && openIds.has(entry.work_item_id) && entry.status !== "closed" && entry.should_create_real_task === false) : [];
-  let assignment: any = null;
-  if (normalizedAudience === "project-child-agent") {
-    const assignmentId = String(options.assignmentId || options.assignment_id || "").trim();
-    const project = String(options.project || options.targetProject || options.target_project || "").trim();
-    const agentType = String(options.agentType || options.agent_type || "").trim();
-    const childSessionId = String(options.childSessionId || options.child_session_id || "").trim();
-    assignment = (assignmentLedger.entries || []).find((entry: any) => entry.status === "active"
-      && entry.group_id === groupId && entry.assignment_id === assignmentId && entry.project === project && entry.agent_type === agentType
-      && (!entry.child_session_id || entry.child_session_id === childSessionId)
-      && entry.binding_checksum === cleanupCommitRepairAssignmentChecksum(entry)) || null;
-    briefs = assignment ? briefs.filter((entry: any) => entry.brief_id === assignment.brief_id) : [];
-  } else if (normalizedAudience === "global-agent") {
-    briefs = briefs.slice(0, Math.max(1, Number(options.limit || 4))).map((entry: any) => ({ brief_id: entry.brief_id, work_item_id: entry.work_item_id, transaction_id: entry.transaction_id, title: entry.title, status: entry.status }));
-  } else if (normalizedAudience === "group-main-agent") {
-    briefs = briefs.slice(0, Math.max(1, Number(options.limit || 8)));
-  } else {
-    briefs = [];
-  }
-  const context = {
-    schema: "ccm-cleanup-commit-repair-context-v1", group_id: groupId, audience: normalizedAudience,
-    brief_count: briefs.length, briefs, assignment_binding_id: assignment?.binding_id || "",
-    integrity_valid: integrityValid,
-    can_claim_or_dispatch: normalizedAudience === "group-main-agent",
-    can_resolve_without_receipt: false,
-    cross_group_authorization_allowed: false,
-    policy: normalizedAudience === "project-child-agent" ? "exact_assignment_only_no_resolution_authority" : normalizedAudience === "global-agent" ? "visibility_only_no_cross_group_authority" : "group_local_repair_planning_only_explicit_resolution_receipt_required",
-  };
-  return { ...context, rendered: briefs.length ? `Cleanup commit repair context:\n${JSON.stringify(context)}` : "" };
+  return require("./group-memory-maintenance").buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupId, audience, options);
 }
 
 export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairLifecycle(groupId: string) {
-  const quarantineLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId), {});
-  const workLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId), {});
-  const briefLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupId), {});
-  const assignmentLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupId), {});
-  const receiptLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupId), {});
-  const workEntries = Array.isArray(workLedger.entries) ? workLedger.entries : [];
-  const briefEntries = Array.isArray(briefLedger.entries) ? briefLedger.entries : [];
-  const assignmentEntries = Array.isArray(assignmentLedger.entries) ? assignmentLedger.entries : [];
-  const receiptEntries = Array.isArray(receiptLedger.entries) ? receiptLedger.entries : [];
-  const quarantineEntries = Array.isArray(quarantineLedger.entries) ? quarantineLedger.entries : [];
-  const present = workEntries.length > 0 || briefEntries.length > 0 || assignmentEntries.length > 0 || receiptEntries.length > 0;
-  const quarantineValid = quarantineEntries.length === 0 || (quarantineLedger.group_id === groupId
-    && quarantineEntries.every((entry: any) => entry.group_id === groupId && entry.evidence_checksum === cleanupCommitRepairEvidenceChecksum(entry))
-    && quarantineLedger.ledger_checksum === checksum(quarantineEntries.map((entry: any) => entry.evidence_checksum || ""), 48));
-  const workValid = workEntries.length === 0 || cleanupCommitRepairLedgerValid(workLedger, groupId, "work_item_checksum", cleanupCommitRepairItemChecksum);
-  const briefValid = briefEntries.length === 0 || cleanupCommitRepairLedgerValid(briefLedger, groupId, "brief_checksum", cleanupCommitRepairBriefChecksum);
-  const assignmentValid = assignmentEntries.length === 0 || cleanupCommitRepairLedgerValid(assignmentLedger, groupId, "binding_checksum", cleanupCommitRepairAssignmentChecksum);
-  const receiptValid = receiptEntries.length === 0 || cleanupCommitRepairResolutionReceiptLedgerValid(receiptLedger, groupId);
-  const openItems = workEntries.filter((entry: any) => !["resolved", "cancelled"].includes(entry.status));
-  const terminalItems = workEntries.filter((entry: any) => ["resolved", "cancelled"].includes(entry.status));
-  const openIds = new Set(openItems.map((entry: any) => entry.work_item_id));
-  const terminalIds = new Set(terminalItems.map((entry: any) => entry.work_item_id));
-  const openItemsCovered = openItems.every((item: any) => briefEntries.some((brief: any) => brief.group_id === groupId
-    && brief.work_item_id === item.work_item_id && brief.status !== "closed" && brief.should_create_real_task === false));
-  const terminalBriefLeakCount = briefEntries.filter((brief: any) => terminalIds.has(brief.work_item_id) && brief.status !== "closed").length;
-  const invalidAssignmentCount = assignmentEntries.filter((binding: any) => binding.status === "active" && (binding.group_id !== groupId
-    || !openIds.has(binding.work_item_id)
-    || !briefEntries.some((brief: any) => brief.brief_id === binding.brief_id && brief.work_item_id === binding.work_item_id && brief.status !== "closed"))).length;
-  const invalidReceiptCount = receiptEntries.filter((receipt: any) => receipt.group_id !== groupId
-    || (receipt.consumed === true && !terminalIds.has(receipt.work_item_id))
-    || (receipt.consumed !== true && !openIds.has(receipt.work_item_id))).length;
-  const nonTasking = workEntries.every((entry: any) => entry.should_create_real_task === false)
-    && briefEntries.every((entry: any) => entry.should_create_real_task === false);
-  const integrityValid = quarantineValid && workValid && briefValid && assignmentValid && receiptValid;
-  const safe = integrityValid && openItemsCovered && terminalBriefLeakCount === 0 && invalidAssignmentCount === 0 && invalidReceiptCount === 0 && nonTasking;
-  return {
-    schema: "ccm-cleanup-commit-repair-lifecycle-health-v1",
-    group_id: groupId,
-    present,
-    status: !present ? "empty" : safe ? "ok" : "fail",
-    integrity_valid: integrityValid,
-    quarantine_valid: quarantineValid,
-    work_item_ledger_valid: workValid,
-    brief_ledger_valid: briefValid,
-    assignment_ledger_valid: assignmentValid,
-    resolution_receipt_ledger_valid: receiptValid,
-    open_work_item_count: openItems.length,
-    terminal_work_item_count: terminalItems.length,
-    open_items_covered: openItemsCovered,
-    terminal_brief_leak_count: terminalBriefLeakCount,
-    invalid_assignment_count: invalidAssignmentCount,
-    invalid_resolution_receipt_count: invalidReceiptCount,
-    non_tasking: nonTasking,
-    destructive_action_authorized: false,
-    cross_group_authorization_allowed: false,
-    policy: "group_local_checksummed_lifecycle_exact_assignment_single_use_resolution_receipt",
-  };
+  return require("./group-memory-maintenance").inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairLifecycle(groupId);
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairLifecycleContextSelfTest() {
-  const suffix = `${process.pid}-${Date.now()}`;
-  const groupA = `cleanup-commit-repair-lifecycle-a-${suffix}`;
-  const groupB = `cleanup-commit-repair-lifecycle-b-${suffix}`;
-  const workItemId = `cleanup-commit-repair:selftest-${suffix}`;
-  const briefId = `cleanup-commit-repair-brief:selftest-${suffix}`;
-  const quarantineId = `cleanup-commit-quarantine:selftest-${suffix}`;
-  const transactionId = `delivery-cleanup-commit:selftest-${suffix}`;
-  const workFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupA);
-  const briefFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupA);
-  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupA);
-  const receiptFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupA);
-  const approvalFileA = getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupA);
-  const approvalFileB = getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupB);
-  const cleanupDirs = [...new Set([path.dirname(workFile), path.dirname(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupB))])];
-  const tasksBefore = require("../../core/db").loadTasks().length;
-  const approvalsBefore = (readJson(approvalFileA, {}).entries || []).length + (readJson(approvalFileB, {}).entries || []).length;
-  const throws = (fn: () => any, includes = "") => {
-    try { fn(); return false; } catch (error: any) { return !includes || String(error?.message || error).includes(includes); }
-  };
-  try {
-    const at = "2026-07-12T14:00:00.000Z";
-    const evidence: any = {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-quarantine-entry-v1",
-      quarantine_id: quarantineId,
-      group_id: groupA,
-      transaction_id: transactionId,
-      observed_group_id: groupA,
-      gaps: ["transaction_journal_missing"],
-      transaction_checksum: `transaction-checksum-${suffix}`,
-      status: "quarantined_unproven_commit",
-      first_seen_at: at,
-      last_seen_at: at,
-    };
-    evidence.evidence_checksum = cleanupCommitRepairEvidenceChecksum(evidence);
-    writeJsonAtomic(quarantineFile, {
-      schema: "ccm-cleanup-commit-quarantine-ledger-v1",
-      version: 1,
-      group_id: groupA,
-      entries: [evidence],
-      entry_count: 1,
-      updated_at: at,
-      ledger_checksum: checksum([evidence.evidence_checksum], 48),
-    });
-    writeCleanupCommitRepairWorkItems(groupA, [{
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-work-item-v1",
-      work_item_id: workItemId,
-      group_id: groupA,
-      transaction_id: transactionId,
-      quarantine_id: quarantineId,
-      status: "pending",
-      priority: "critical",
-      reason: "selftest unproven cleanup commit WAL binding",
-      gaps: ["transaction_journal_missing"],
-      required_proof: ["valid group-local receipt checksum", "exact journal binding"],
-      should_create_real_task: false,
-      created_at: at,
-      updated_at: at,
-    }], at);
-    writeCleanupCommitRepairBriefs(groupA, [{
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-dispatch-brief-v1",
-      brief_id: briefId,
-      group_id: groupA,
-      work_item_id: workItemId,
-      transaction_id: transactionId,
-      target_agent_role: "group-main-agent",
-      title: "Repair selftest cleanup commit WAL binding",
-      status: "ready",
-      instructions: ["Do not delete evidence or rewrite the WAL", "Re-prove exact bindings"],
-      required_files: [quarantineFile],
-      should_create_real_task: false,
-      created_at: at,
-      updated_at: at,
-    }], at);
-
-    const group = { id: groupA, name: "Repair lifecycle selftest", members: [{ project: "api", agent: "claudecode" }] };
-    const { buildCoordinatorMaintenanceNotificationInstructions, buildWorkerContextPacketForAssignment } = require("./group-orchestrator");
-    const { buildAgenticContext } = require("../global/global-agent");
-    const mainBefore = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "group-main-agent");
-    const globalBefore = buildAgenticContext("", "", { groups: [group, { id: groupB, name: "Other group", members: [] }] }).cleanup_commit_repair_context || null;
-    const coordinatorBefore = buildCoordinatorMaintenanceNotificationInstructions(group, { at }).cleanup_commit_repair_context;
-    const globalClaimBlocked = throws(() => updatePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItem(groupA, {
-      at: "2026-07-12T14:00:10.000Z", workItemId, action: "claim", actorRole: "global-agent", actorId: "global", reason: "not authorized", explicitAction: true,
-    }), "not authorized");
-    const claimed = updatePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItem(groupA, {
-      at: "2026-07-12T14:00:11.000Z", workItemId, action: "claim", actorRole: "group-main-agent", actorId: "coordinator", reason: "accept repair", explicitAction: true,
-    });
-    const dispatched = updatePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItem(groupA, {
-      at: "2026-07-12T14:00:12.000Z", workItemId, action: "dispatch", actorRole: "group-main-agent", actorId: "coordinator", reason: "send exact evidence review", explicitAction: true,
-    });
-    const assignmentId = `api::${groupA}|coordinator|api|repair-selftest::initial::1`;
-    const unauthorizedAssignmentBlocked = throws(() => createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignment(groupA, {
-      at: "2026-07-12T14:00:13.000Z", workItemId, project: "api", agentType: "claudecode", assignmentId, childSessionId: "child-session-1",
-      actorRole: "global-agent", actorId: "global", explicitAssignment: true,
-    }), "not authorized");
-    const assignment = createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignment(groupA, {
-      at: "2026-07-12T14:00:14.000Z", workItemId, project: "api", agentType: "claudecode", assignmentId, childSessionId: "child-session-1",
-      actorRole: "group-main-agent", actorId: "coordinator", explicitAssignment: true,
-    });
-    const childOptions = { assignmentId, project: "api", agentType: "claudecode", childSessionId: "child-session-1" };
-    const childExact = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "project-child-agent", childOptions);
-    const childUnassigned = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "project-child-agent", { ...childOptions, assignmentId: "wrong-assignment" });
-    const childWrongProject = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "project-child-agent", { ...childOptions, project: "frontend" });
-    const childWrongSession = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "project-child-agent", { ...childOptions, childSessionId: "wrong-session" });
-    const childWrongGroup = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupB, "project-child-agent", childOptions);
-    const baseAssignment = { project: "api", task: "repair selftest", assignmentId, scopeId: groupA, agentType: "claudecode" };
-    const exactPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], { group, childSessionId: "child-session-1" });
-    const wrongPacket = buildWorkerContextPacketForAssignment({ ...baseAssignment, assignmentId: "wrong-assignment" }, "", [], { group, childSessionId: "child-session-1" });
-
-    const expiredReceipt = createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupA, {
-      at: "2026-07-12T14:01:00.000Z", workItemId, resolutionAction: "resolved", actorRole: "group-main-agent", actorId: "coordinator", reason: "expired approval selftest", explicitApproval: true, expiresInMs: 60_000,
-    });
-    const expiredBlocked = throws(() => executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupA, {
-      at: "2026-07-12T14:02:01.000Z", receiptId: expiredReceipt.receipt_id, explicitExecution: true,
-    }), "expired");
-    const validReceipt = createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupA, {
-      at: "2026-07-12T14:03:00.000Z", workItemId, resolutionAction: "resolved", actorRole: "group-main-agent", actorId: "coordinator", reason: "proof reviewed", explicitApproval: true, expiresInMs: 60_000,
-    });
-    const crossGroupBlocked = throws(() => executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupB, {
-      at: "2026-07-12T14:03:10.000Z", receiptId: validReceipt.receipt_id, explicitExecution: true,
-    }), "ledger checksum invalid");
-    const resolved = executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupA, {
-      at: "2026-07-12T14:03:20.000Z", receiptId: validReceipt.receipt_id, explicitExecution: true,
-    });
-    const replayBlocked = throws(() => executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupA, {
-      at: "2026-07-12T14:03:21.000Z", receiptId: validReceipt.receipt_id, explicitExecution: true,
-    }), "invalid or consumed");
-    const qualityCheckId = "post_compact_completion_memory_preservation_closure_conflict_resolution_maintenance_notification_delivery_cleanup_commit_repair_lifecycle_context";
-    const { buildMemoryQualityReport } = require("../knowledge/memory-control-center");
-    const qualityBeforeTamper = buildMemoryQualityReport({ checkIds: [qualityCheckId], groupIds: [groupA], now: "2026-07-12T14:03:21.500Z", refresh: true, writeTargeted: false }).checks?.[0] || {};
-    const receiptLedger = readJson(receiptFile, {});
-    writeJsonAtomic(receiptFile, {
-      ...receiptLedger,
-      entries: (receiptLedger.entries || []).map((entry: any) => entry.receipt_id === validReceipt.receipt_id ? { ...entry, consumed: false } : entry),
-    });
-    const consumedStateTamperBlocked = throws(() => executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupA, {
-      at: "2026-07-12T14:03:22.000Z", receiptId: validReceipt.receipt_id, explicitExecution: true,
-    }), "ledger checksum invalid");
-    const qualityAfterTamper = buildMemoryQualityReport({ checkIds: [qualityCheckId], groupIds: [groupA], now: "2026-07-12T14:03:22.500Z", refresh: true, writeTargeted: false }).checks?.[0] || {};
-    const mainAfter = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "group-main-agent");
-    const childAfter = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairContext(groupA, "project-child-agent", childOptions);
-    const coordinatorAfter = buildCoordinatorMaintenanceNotificationInstructions(group, { at: "2026-07-12T14:03:30.000Z" }).cleanup_commit_repair_context;
-    const globalAfter = buildAgenticContext("", "", { groups: [group] }).cleanup_commit_repair_context || null;
-    const quarantineAfter = readJson(quarantineFile, {});
-    const approvalsAfter = (readJson(approvalFileA, {}).entries || []).length + (readJson(approvalFileB, {}).entries || []).length;
-    const checks = {
-      readyBriefInjectedIntoGroupMainAndCoordinator: mainBefore.brief_count === 1 && coordinatorBefore.brief_count === 1,
-      globalAgentExcludesGroupScopedRepairContext: globalBefore == null,
-      globalAgentCannotClaimOrAssign: globalClaimBlocked && unauthorizedAssignmentBlocked,
-      lifecycleTransitionsPendingClaimedDispatched: claimed.status === "claimed" && dispatched.status === "dispatched",
-      exactAssignmentBindingCreated: assignment.group_id === groupA && assignment.assignment_id === assignmentId && assignment.child_session_id === "child-session-1",
-      unassignedAndMismatchedChildrenSeeNoBrief: childUnassigned.brief_count === 0 && childWrongProject.brief_count === 0 && childWrongSession.brief_count === 0 && childWrongGroup.brief_count === 0,
-      exactChildAndWorkerPacketReceiveOneBrief: childExact.brief_count === 1 && childExact.briefs[0]?.brief_id === briefId
-        && exactPacket.cleanup_commit_repair_context?.brief_count === 1 && wrongPacket.cleanup_commit_repair_context == null,
-      approvalAndExecutionAreSeparated: validReceipt.consumed === false && resolved.status === "resolved" && resolved.resolution_receipt_id === validReceipt.receipt_id,
-      expiredAndCrossGroupReceiptsBlocked: expiredBlocked && crossGroupBlocked,
-      replayAndConsumedStateTamperBlocked: replayBlocked && consumedStateTamperBlocked,
-      persistentQualityGateAcceptsHealthyAndRejectsTamper: qualityBeforeTamper.id === qualityCheckId && qualityBeforeTamper.status === "ok"
-        && qualityAfterTamper.id === qualityCheckId && qualityAfterTamper.status === "fail",
-      resolvedBriefRemovedFromAllContexts: mainAfter.brief_count === 0 && childAfter.brief_count === 0 && coordinatorAfter.brief_count === 0 && globalAfter == null,
-      evidenceTasksAndApprovalsPreserved: quarantineAfter.entries?.[0]?.evidence_checksum === evidence.evidence_checksum
-        && require("../../core/db").loadTasks().length === tasksBefore && approvalsAfter === approvalsBefore,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      lifecycle: { claimed: claimed.status, dispatched: dispatched.status, resolved: resolved.status },
-      assignment: { binding_id: assignment.binding_id, packet_brief_count: exactPacket.cleanup_commit_repair_context?.brief_count || 0 },
-      receipt: { expiredBlocked, crossGroupBlocked, replayBlocked, consumedStateTamperBlocked },
-      quality: {
-        before: { id: qualityBeforeTamper.id, status: qualityBeforeTamper.status, report: qualityBeforeTamper.report },
-        after: { id: qualityAfterTamper.id, status: qualityAfterTamper.status, report: qualityAfterTamper.report },
-      },
-    };
-  } finally {
-    for (const dir of cleanupDirs) {
-      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-    }
-  }
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairLifecycleContextSelfTest();
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionSelfTest() {
-  const suffix = `${process.pid}-${Date.now()}`;
-  const groupA = `cleanup-commit-repair-resolution-tx-a-${suffix}`;
-  const groupB = `cleanup-commit-repair-resolution-tx-b-${suffix}`;
-  const groupC = `cleanup-commit-repair-resolution-tx-c-${suffix}`;
-  const phases = ["prepared", "work_item_written", "work_item_committed", "brief_written", "brief_committed", "assignment_written", "assignment_committed", "receipt_written", "receipt_committed"];
-  const schedulerStateFile = path.join(CCM_DIR, "memory-control", `cleanup-commit-repair-resolution-tx-selftest-${suffix}.json`);
-  const groupIds = [groupA, groupB, groupC];
-  const cleanupDirs = groupIds.map(groupId => path.dirname(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId)));
-  const tasksBefore = require("../../core/db").loadTasks().length;
-  const approvalFiles = groupIds.map(groupId => getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId));
-  const approvalsBefore = approvalFiles.reduce((sum, file) => sum + (readJson(file, {}).entries || []).length, 0);
-  const throws = (fn: () => any, includes = "") => {
-    try { fn(); return false; } catch (error: any) { return !includes || String(error?.message || error).includes(includes); }
-  };
-  const seed = (groupId: string, labels: string[], baseAt: string) => {
-    const evidenceEntries: any[] = [];
-    const workEntries: any[] = [];
-    const briefEntries: any[] = [];
-    const assignmentEntries: any[] = [];
-    for (const [index, label] of labels.entries()) {
-      const transactionId = `delivery-cleanup-commit:${groupId}:${label}`;
-      const gaps = ["transaction_journal_missing"];
-      const quarantineId = `cleanup-commit-quarantine:${checksum([groupId, transactionId, checksum(gaps, 32)], 24)}`;
-      const workItemId = `cleanup-commit-repair:${checksum([groupId, quarantineId], 24)}`;
-      const briefId = `cleanup-commit-repair-brief:${checksum([groupId, workItemId], 24)}`;
-      const evidence: any = {
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-quarantine-entry-v1",
-        quarantine_id: quarantineId,
-        group_id: groupId,
-        transaction_id: transactionId,
-        observed_group_id: groupId,
-        gaps,
-        transaction_checksum: `transaction-checksum-${label}`,
-        status: "quarantined_unproven_commit",
-        first_seen_at: baseAt,
-        last_seen_at: baseAt,
-      };
-      evidence.evidence_checksum = cleanupCommitRepairEvidenceChecksum(evidence);
-      evidenceEntries.push(evidence);
-      workEntries.push({
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-work-item-v1",
-        work_item_id: workItemId,
-        group_id: groupId,
-        transaction_id: transactionId,
-        quarantine_id: quarantineId,
-        status: "dispatched",
-        priority: "critical",
-        reason: `resolution transaction selftest ${label}`,
-        gaps: ["transaction_journal_missing"],
-        required_proof: ["valid exact binding"],
-        should_create_real_task: false,
-        created_at: baseAt,
-        updated_at: baseAt,
-      });
-      briefEntries.push({
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-dispatch-brief-v1",
-        brief_id: briefId,
-        group_id: groupId,
-        work_item_id: workItemId,
-        transaction_id: transactionId,
-        target_agent_role: "group-main-agent",
-        title: `Repair resolution transaction ${label}`,
-        status: "assigned",
-        instructions: ["Preserve evidence"],
-        required_files: [],
-        should_create_real_task: false,
-        created_at: baseAt,
-        updated_at: baseAt,
-      });
-      assignmentEntries.push({
-        schema: "ccm-cleanup-commit-repair-assignment-v1",
-        version: 1,
-        binding_id: `cleanup-commit-repair-assignment:${groupId}:${label}`,
-        group_id: groupId,
-        work_item_id: workItemId,
-        brief_id: briefId,
-        transaction_id: transactionId,
-        assignment_id: `assignment:${groupId}:${label}`,
-        project: "api",
-        agent_type: "claudecode",
-        child_session_id: `child-session:${label}`,
-        assigned_by_role: "group-main-agent",
-        assigned_by: "coordinator",
-        status: "active",
-        assigned_at: baseAt,
-      });
-    }
-    const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId);
-    writeJsonAtomic(quarantineFile, {
-      schema: "ccm-cleanup-commit-quarantine-ledger-v1",
-      version: 1,
-      group_id: groupId,
-      entries: evidenceEntries,
-      entry_count: evidenceEntries.length,
-      updated_at: baseAt,
-      ledger_checksum: checksum(evidenceEntries.map(entry => entry.evidence_checksum), 48),
-    });
-    const writtenWork = writeCleanupCommitRepairWorkItems(groupId, workEntries, baseAt);
-    writeCleanupCommitRepairBriefs(groupId, briefEntries, baseAt);
-    writeCleanupCommitRepairAssignments(groupId, assignmentEntries, baseAt);
-    const receipts = writtenWork.map((item: any, index: number) => createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupId, {
-      at: new Date(Date.parse(baseAt) + (index + 1) * 1_000).toISOString(),
-      workItemId: item.work_item_id,
-      resolutionAction: "resolved",
-      actorRole: "group-main-agent",
-      actorId: "coordinator",
-      reason: `verified resolution proof ${labels[index]}`,
-      explicitApproval: true,
-      expiresInMs: 60 * 60 * 1000,
-    }));
-    return { workItems: writtenWork, receipts, evidenceEntries };
-  };
-  try {
-    const seededA = seed(groupA, phases, "2026-07-12T16:00:00.000Z");
-    const seededB = seed(groupB, ["isolation"], "2026-07-12T16:00:00.000Z");
-    const moduleFile = path.resolve(__dirname, "group-memory-index.js");
-    const childProcess = require("child_process");
-    const interrupted: any[] = [];
-    for (const [index, phase] of phases.entries()) {
-      const script = [
-        "const m=require(process.argv[1]);",
-        "const r=m.executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(process.argv[2],{at:process.argv[4],receiptId:process.argv[3],explicitExecution:true,simulateResolutionCrashAfter:process.argv[5]});",
-        "process.stdout.write(JSON.stringify(r));",
-        "process.exit(r.status==='interrupted'?0:1);",
-      ].join("");
-      const at = new Date(Date.parse("2026-07-12T16:10:00.000Z") + index * 1_000).toISOString();
-      const run = childProcess.spawnSync(process.execPath, ["-e", script, moduleFile, groupA, seededA.receipts[index].receipt_id, at, phase], {
-        cwd: process.cwd(), encoding: "utf-8", windowsHide: true, timeout: 30_000,
-      });
-      let result: any = null;
-      try { result = JSON.parse(String(run.stdout || "{}")); } catch { result = { status: "invalid_child_output", stderr: run.stderr }; }
-      interrupted.push({ phase, runStatus: run.status, result });
-    }
-    const beforeRecovery = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupA);
-    const discoveryEntriesBefore = {
-      quarantine: readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupA), {}).entries || [],
-      work: readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupA), {}).entries || [],
-      brief: readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupA), {}).entries || [],
-    };
-    writeCleanupCommitDiscoveryArtifacts(groupA, phases.map(label => ({
-      transaction_id: `delivery-cleanup-commit:${groupA}:${label}`,
-      transaction: {
-        transaction_id: `delivery-cleanup-commit:${groupA}:${label}`,
-        group_id: groupA,
-        transaction_checksum: `transaction-checksum-${label}`,
-      },
-      gaps: ["transaction_journal_missing"],
-    })), "2026-07-12T16:10:30.000Z");
-    const discoveryEntriesAfter = {
-      quarantine: readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupA), {}).entries || [],
-      work: readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupA), {}).entries || [],
-      brief: readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupA), {}).entries || [],
-    };
-    const preparedWork = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupA), {}).entries?.[0] || {};
-    const mutationBlocked = throws(() => updatePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItem(groupA, {
-      at: "2026-07-12T16:11:00.000Z", workItemId: seededA.workItems[0].work_item_id, action: "reopen", actorRole: "group-main-agent", actorId: "coordinator", reason: "must wait for recovery", explicitAction: true,
-    }), "transaction already in progress");
-    const groupBBefore = {
-      work: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupB), "utf-8"), 48),
-      brief: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupB), "utf-8"), 48),
-      assignment: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupB), "utf-8"), 48),
-      receipt: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupB), "utf-8"), 48),
-    };
-    const recovered = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupA, {
-      at: "2026-07-12T16:20:00.000Z", trigger: "startup-selftest",
-    });
-    const recoveredAgain = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupA, {
-      at: "2026-07-12T16:20:01.000Z", trigger: "startup-selftest-repeat",
-    });
-    const workAfter = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupA), {}).entries || [];
-    const briefAfter = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupA), {}).entries || [];
-    const assignmentAfter = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupA), {}).entries || [];
-    const receiptAfter = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupA), {}).entries || [];
-    const groupBAfter = {
-      work: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupB), "utf-8"), 48),
-      brief: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupB), "utf-8"), 48),
-      assignment: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairAssignmentFile(groupB), "utf-8"), 48),
-      receipt: checksum(fs.readFileSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupB), "utf-8"), 48),
-    };
-
-    const seededC = seed(groupC, ["scheduler"], "2026-07-12T17:00:00.000Z");
-    const schedulerCrash = executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupC, {
-      at: "2026-07-12T17:00:10.000Z", receiptId: seededC.receipts[0].receipt_id, explicitExecution: true, simulateResolutionCrashAfter: "brief_written",
-    });
-    writeJsonAtomic(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupC), { schema: "selftest-manifest", group_id: groupC });
-    const safeTelemetry = () => ({ destructive_action_authorized: false, deleted_count: 0, created_task_count: 0, created_approval_receipt_count: 0 });
-    const { runConflictResolutionMemoryMaintenanceSchedulerTick } = require("../scheduling/cron");
-    const scheduler = runConflictResolutionMemoryMaintenanceSchedulerTick({
-      at: "2026-07-12T17:01:00.000Z", groupIds: [groupC], force: true, stateFile: schedulerStateFile,
-      runMaintenance: () => ({ dueCount: 0, skippedCount: 1, destructiveActionAuthorized: false, deletedCount: 0 }),
-      runTelemetryRecovery: safeTelemetry,
-      runTelemetryOrphanReconciliation: safeTelemetry,
-      runTelemetryCleanupCommitDiscovery: safeTelemetry,
-      runTelemetryCleanupJournalReconciliation: () => ({ ...safeTelemetry(), ledger_checksum_valid: true, commit_ledger_checksum_valid: true, group_ledger_lock_valid: true, invalid_commit_transaction_count: 0, candidate_claim_conflict_count: 0 }),
-      runTelemetryQuarantineRetention: safeTelemetry,
-      runTelemetryRetention: safeTelemetry,
-    });
-    const qualityId = "post_compact_completion_memory_preservation_closure_conflict_resolution_maintenance_notification_delivery_cleanup_commit_repair_resolution_transaction";
-    const { buildMemoryQualityReport } = require("../knowledge/memory-control-center");
-    const qualityBeforeTamper = buildMemoryQualityReport({ checkIds: [qualityId], groupIds: [groupA, groupC], now: "2026-07-12T17:02:00.000Z", refresh: true, writeTargeted: false }).checks?.[0] || {};
-    const transactionFileA = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionFile(groupA);
-    const transactionLedgerA = readJson(transactionFileA, {});
-    writeJsonAtomic(transactionFileA, {
-      ...transactionLedgerA,
-      entries: (transactionLedgerA.entries || []).map((entry: any, index: number) => index === 0 ? { ...entry, recovery_count: Number(entry.recovery_count || 0) + 1 } : entry),
-    });
-    const tamperedHealth = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupA);
-    const tamperedRecovery = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupA, { at: "2026-07-12T17:02:01.000Z", trigger: "tamper-selftest" });
-    const qualityAfterTamper = buildMemoryQualityReport({ checkIds: [qualityId], groupIds: [groupA], now: "2026-07-12T17:02:02.000Z", refresh: true, writeTargeted: false }).checks?.[0] || {};
-    const approvalsAfter = approvalFiles.reduce((sum, file) => sum + (readJson(file, {}).entries || []).length, 0);
-    const expectedWriteBeforePhase = new Map([
-      ["prepared", "prepared"], ["work_item_written", "prepared"], ["work_item_committed", "work_item_committed"],
-      ["brief_written", "work_item_committed"], ["brief_committed", "brief_committed"],
-      ["assignment_written", "brief_committed"], ["assignment_committed", "assignment_committed"],
-      ["receipt_written", "assignment_committed"], ["receipt_committed", "receipt_committed"],
-    ]);
-    const checks = {
-      allCrashBoundariesPersistAnOpenTransaction: interrupted.length === phases.length
-        && interrupted.every(row => row.runStatus === 0 && row.result.status === "interrupted" && !!row.result.resolution_transaction_id)
-        && beforeRecovery.open_transaction_count === phases.length,
-      writeBeforePhaseInterruptionsRetainPreviousDurablePhase: interrupted.every(row => row.result.resolution_transaction_phase === expectedWriteBeforePhase.get(row.phase)),
-      preparedWalPrecedesAnyRepairLedgerMutation: preparedWork.status === "dispatched" && !preparedWork.resolution_receipt_id,
-      discoveryPreservesArtifactsBoundByOpenResolutionTransactions: checksum(discoveryEntriesBefore, 48) === checksum(discoveryEntriesAfter, 48),
-      concurrentMutationBlockedWhileTransactionOpen: mutationBlocked,
-      startupReconciliationRecoversEveryOpenTransaction: recovered.status === "ok" && recovered.recovered_now_count === phases.length
-        && recovered.open_transaction_count === 0 && recovered.invalid_transaction_count === 0,
-      completedTransactionsCarryAllPhaseProofs: recovered.rows.length === phases.length && recovered.rows.every((row: any) => row.status === "completed" && row.phase === "completed" && row.completion_proof_valid),
-      allRepairLedgersConvergeToTerminalState: workAfter.every((entry: any) => entry.status === "resolved" && !!entry.resolution_receipt_id)
-        && briefAfter.every((entry: any) => entry.status === "closed" && !!entry.resolution_receipt_id)
-        && assignmentAfter.every((entry: any) => entry.status === "closed" && !!entry.resolution_receipt_id)
-        && receiptAfter.every((entry: any) => entry.consumed === true),
-      repeatedReconciliationIsIdempotent: recoveredAgain.status === "ok" && recoveredAgain.recovered_now_count === 0 && recoveredAgain.open_transaction_count === 0,
-      otherGroupLedgersRemainByteStable: JSON.stringify(groupBBefore) === JSON.stringify(groupBAfter)
-        && seededB.workItems.length === 1 && seededB.receipts.length === 1,
-      schedulerRunsRealResolutionRecovery: schedulerCrash.status === "interrupted" && scheduler.failedCount === 0
-        && scheduler.deliveryCleanupCommitRepairResolutionRecoveredNowCount === 1
-        && scheduler.deliveryCleanupCommitRepairResolutionOpenTransactionCount === 0,
-      qualityGateAcceptsRecoveredStateAndRejectsTamper: qualityBeforeTamper.id === qualityId && qualityBeforeTamper.status === "ok"
-        && qualityAfterTamper.id === qualityId && qualityAfterTamper.status === "fail",
-      transactionAndLedgerTamperFailClosed: tamperedHealth.invalid_transaction_count > 0 && tamperedRecovery.status === "blocked" && tamperedRecovery.recovered_now_count === 0,
-      recoveryCreatesNoTasksApprovalsOrDeletionAuthority: require("../../core/db").loadTasks().length === tasksBefore
-        && approvalsAfter === approvalsBefore && recovered.destructive_action_authorized === false && recovered.deleted_count === 0
-        && scheduler.destructiveActionAuthorized === false && scheduler.deletedCount === 0,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      crashMatrix: interrupted.map(row => ({ requested: row.phase, durablePhase: row.result.resolution_transaction_phase, status: row.result.status })),
-      recovery: { recoveredNow: recovered.recovered_now_count, completed: recovered.completed_transaction_count, open: recovered.open_transaction_count, invalid: recovered.invalid_transaction_count },
-      scheduler: { failed: scheduler.failedCount, recoveredNow: scheduler.deliveryCleanupCommitRepairResolutionRecoveredNowCount, open: scheduler.deliveryCleanupCommitRepairResolutionOpenTransactionCount },
-      quality: { before: qualityBeforeTamper.status, after: qualityAfterTamper.status },
-    };
-  } finally {
-    for (const file of [schedulerStateFile, `${schedulerStateFile}.bak`]) {
-      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
-    }
-    for (const dir of cleanupDirs) {
-      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-    }
-  }
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionSelfTest();
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionStartupDiscoverySelfTest() {
-  const suffix = `${process.pid}-${Date.now()}`;
-  const groupA = `cleanup-commit-repair-resolution-discovery-a-${suffix}`;
-  const groupB = `cleanup-commit-repair-resolution-discovery-b-${suffix}`;
-  const groupIds = [groupA, groupB];
-  const schedulerStateFile = path.join(CCM_DIR, "memory-control", `cleanup-commit-repair-resolution-discovery-selftest-${suffix}.json`);
-  const cleanupDirs = groupIds.map(groupId => path.dirname(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupId)));
-  const approvalFiles = groupIds.map(groupId => getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId));
-  const tasksBefore = require("../../core/db").loadTasks().length;
-  const approvalsBefore = approvalFiles.reduce((sum, file) => sum + (readJson(file, {}).entries || []).length, 0);
-  const seed = (groupId: string, labels: string[], baseAt: string) => {
-    const evidenceEntries: any[] = [];
-    const workEntries: any[] = [];
-    const briefEntries: any[] = [];
-    for (const label of labels) {
-      const transactionId = `delivery-cleanup-commit:${groupId}:${label}`;
-      const gaps = ["transaction_journal_missing"];
-      const quarantineId = `cleanup-commit-quarantine:${checksum([groupId, transactionId, checksum(gaps, 32)], 24)}`;
-      const workItemId = `cleanup-commit-repair:${checksum([groupId, quarantineId], 24)}`;
-      const briefId = `cleanup-commit-repair-brief:${checksum([groupId, workItemId], 24)}`;
-      const evidence: any = {
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-quarantine-entry-v1",
-        quarantine_id: quarantineId,
-        group_id: groupId,
-        transaction_id: transactionId,
-        observed_group_id: groupId,
-        gaps,
-        transaction_checksum: `transaction-checksum-${label}`,
-        status: "quarantined_unproven_commit",
-        first_seen_at: baseAt,
-        last_seen_at: baseAt,
-      };
-      evidence.evidence_checksum = cleanupCommitRepairEvidenceChecksum(evidence);
-      evidenceEntries.push(evidence);
-      workEntries.push({
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-work-item-v1",
-        work_item_id: workItemId,
-        group_id: groupId,
-        transaction_id: transactionId,
-        quarantine_id: quarantineId,
-        status: "dispatched",
-        priority: "critical",
-        reason: `startup discovery ${label}`,
-        gaps,
-        required_proof: ["exact group-local proof"],
-        should_create_real_task: false,
-        created_at: baseAt,
-        updated_at: baseAt,
-      });
-      briefEntries.push({
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-commit-repair-dispatch-brief-v1",
-        brief_id: briefId,
-        group_id: groupId,
-        work_item_id: workItemId,
-        transaction_id: transactionId,
-        target_agent_role: "group-main-agent",
-        title: `Startup discovery ${label}`,
-        status: "ready",
-        instructions: ["Preserve evidence"],
-        required_files: [],
-        should_create_real_task: false,
-        created_at: baseAt,
-        updated_at: baseAt,
-      });
-    }
-    const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupId);
-    writeJsonAtomic(quarantineFile, {
-      schema: "ccm-cleanup-commit-quarantine-ledger-v1", version: 1, group_id: groupId,
-      entries: evidenceEntries, entry_count: evidenceEntries.length, updated_at: baseAt,
-      ledger_checksum: checksum(evidenceEntries.map(entry => entry.evidence_checksum), 48),
-    });
-    const workItems = writeCleanupCommitRepairWorkItems(groupId, workEntries, baseAt);
-    writeCleanupCommitRepairBriefs(groupId, briefEntries, baseAt);
-    const receipts = workItems.map((item: any, index: number) => createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupId, {
-      at: new Date(Date.parse(baseAt) + (index + 1) * 1_000).toISOString(),
-      workItemId: item.work_item_id,
-      resolutionAction: "resolved",
-      actorRole: "group-main-agent",
-      actorId: "coordinator",
-      reason: `verified startup discovery proof ${labels[index]}`,
-      explicitApproval: true,
-      expiresInMs: 60 * 60 * 1000,
-    }));
-    return { workItems, receipts, evidenceEntries };
-  };
-  try {
-    const compactLabels = Array.from({ length: 7 }, (_, index) => `compact-${index}`);
-    const seededA = seed(groupA, compactLabels, "2026-07-12T18:00:00.000Z");
-    const compactExecutions = seededA.receipts.map((receipt: any, index: number) => executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupA, {
-      at: new Date(Date.parse("2026-07-12T18:05:00.000Z") + index * 1_000).toISOString(),
-      receiptId: receipt.receipt_id,
-      explicitExecution: true,
-      resolutionTransactionTerminalLimit: 4,
-    }));
-    const retainedTransactionLedgerA = readCleanupCommitRepairResolutionTransactionLedger(groupA);
-    const retainedWorkItemIds = new Set(retainedTransactionLedgerA.entries.map((entry: any) => entry.work_item_id));
-    const retainedArtifactSnapshot = () => ({
-      quarantine: (readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitQuarantineFile(groupA), {}).entries || []).filter((entry: any) => retainedWorkItemIds.has((seededA.workItems.find((item: any) => item.quarantine_id === entry.quarantine_id) || {}).work_item_id)),
-      work: (readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairWorkItemFile(groupA), {}).entries || []).filter((entry: any) => retainedWorkItemIds.has(entry.work_item_id)),
-      brief: (readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairDispatchBriefFile(groupA), {}).entries || []).filter((entry: any) => retainedWorkItemIds.has(entry.work_item_id)),
-    });
-    const retainedArtifactsBeforeDiscovery = retainedArtifactSnapshot();
-    writeCleanupCommitDiscoveryArtifacts(groupA, compactLabels.map(label => ({
-      transaction_id: `delivery-cleanup-commit:${groupA}:${label}`,
-      transaction: { transaction_id: `delivery-cleanup-commit:${groupA}:${label}`, group_id: groupA, transaction_checksum: `transaction-checksum-${label}` },
-      gaps: ["transaction_journal_missing"],
-    })), "2026-07-12T18:05:30.000Z");
-    const retainedArtifactsAfterDiscovery = retainedArtifactSnapshot();
-    const compactDiscovery = discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupA, {
-      at: "2026-07-12T18:06:00.000Z", persist: true, recover: true, trigger: "startup-selftest-compact",
-    });
-
-    const invalidLabels = ["recoverable", "cross-group", "checksum-tamper", "missing-receipt"];
-    const seededB = seed(groupB, invalidLabels, "2026-07-12T18:10:00.000Z");
-    const prepared = seededB.receipts.map((receipt: any, index: number) => executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceipt(groupB, {
-      at: new Date(Date.parse("2026-07-12T18:15:00.000Z") + index * 1_000).toISOString(),
-      receiptId: receipt.receipt_id,
-      explicitExecution: true,
-      simulateResolutionCrashAfter: "prepared",
-    }));
-    const transactionFileB = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionFile(groupB);
-    const transactionLedgerB = readJson(transactionFileB, {});
-    const txByReceipt = new Map((transactionLedgerB.entries || []).map((entry: any) => [entry.receipt_id, entry]));
-    const crossTx: any = { ...(txByReceipt.get(seededB.receipts[1].receipt_id) as any), group_id: groupA };
-    crossTx.transaction_checksum = cleanupCommitRepairResolutionTransactionChecksum(crossTx);
-    const tamperedTx: any = { ...(txByReceipt.get(seededB.receipts[2].receipt_id) as any), recovery_count: 77 };
-    const updatedTransactions = (transactionLedgerB.entries || []).map((entry: any) => entry.receipt_id === crossTx.receipt_id ? crossTx : entry.receipt_id === tamperedTx.receipt_id ? tamperedTx : entry);
-    const updatedTransactionLedger: any = { ...transactionLedgerB, entries: updatedTransactions };
-    updatedTransactionLedger.ledger_checksum = cleanupCommitRepairResolutionTransactionLedgerChecksum(updatedTransactionLedger);
-    writeJsonAtomic(transactionFileB, updatedTransactionLedger);
-    const receiptFileB = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionReceiptFile(groupB);
-    const receiptLedgerB = readJson(receiptFileB, {});
-    writeCleanupCommitRepairResolutionReceipts(groupB, (receiptLedgerB.entries || []).filter((entry: any) => entry.receipt_id !== seededB.receipts[3].receipt_id), "2026-07-12T18:15:10.000Z");
-    const invalidIds = new Set([crossTx.resolution_transaction_id, tamperedTx.resolution_transaction_id, (txByReceipt.get(seededB.receipts[3].receipt_id) as any).resolution_transaction_id]);
-    const invalidBefore = new Map((readJson(transactionFileB, {}).entries || []).filter((entry: any) => invalidIds.has(entry.resolution_transaction_id)).map((entry: any) => [entry.resolution_transaction_id, checksum(entry, 48)]));
-    const discoveryB = discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupB, {
-      at: "2026-07-12T18:16:00.000Z", persist: true, recover: true, trigger: "startup-selftest-invalid",
-    });
-    const invalidAfter = new Map((readJson(transactionFileB, {}).entries || []).filter((entry: any) => invalidIds.has(entry.resolution_transaction_id)).map((entry: any) => [entry.resolution_transaction_id, checksum(entry, 48)]));
-    const discoveryBRepeat = discoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactions(groupB, {
-      at: "2026-07-12T18:16:01.000Z", persist: true, recover: true, trigger: "startup-selftest-invalid-repeat",
-    });
-    const batch = runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionStartupDiscovery([groupA, groupB], {
-      at: "2026-07-12T18:16:02.000Z", persist: true, recover: true, trigger: "startup-selftest-batch",
-    });
-    const workArtifacts = readJson(discoveryB.repair_work_item_file, {}).entries || [];
-    const briefArtifacts = readJson(discoveryB.repair_dispatch_brief_file, {}).entries || [];
-    const quarantineArtifacts = readJson(discoveryB.quarantine_file, {}).entries || [];
-
-    writeJsonAtomic(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupB), { schema: "selftest-manifest", group_id: groupB });
-    const safeTelemetry = () => ({ destructive_action_authorized: false, deleted_count: 0, created_task_count: 0, created_approval_receipt_count: 0 });
-    const { runConflictResolutionMemoryMaintenanceSchedulerTick } = require("../scheduling/cron");
-    const scheduler = runConflictResolutionMemoryMaintenanceSchedulerTick({
-      at: "2026-07-12T18:17:00.000Z", groupIds: [groupB], force: true, stateFile: schedulerStateFile,
-      runMaintenance: () => ({ dueCount: 0, skippedCount: 1, destructiveActionAuthorized: false, deletedCount: 0 }),
-      runTelemetryRecovery: safeTelemetry,
-      runTelemetryOrphanReconciliation: safeTelemetry,
-      runTelemetryCleanupCommitDiscovery: safeTelemetry,
-      runTelemetryCleanupJournalReconciliation: () => ({ ...safeTelemetry(), ledger_checksum_valid: true, commit_ledger_checksum_valid: true, group_ledger_lock_valid: true, invalid_commit_transaction_count: 0, candidate_claim_conflict_count: 0 }),
-      runTelemetryQuarantineRetention: safeTelemetry,
-      runTelemetryRetention: safeTelemetry,
-    });
-
-    const qualityId = "post_compact_completion_memory_preservation_closure_conflict_resolution_maintenance_notification_delivery_cleanup_commit_repair_resolution_transaction_startup_discovery";
-    const { buildMemoryQualityReport } = require("../knowledge/memory-control-center");
-    const qualityBeforeTamper = buildMemoryQualityReport({ checkIds: [qualityId], groupIds: [groupA, groupB], now: "2026-07-12T18:18:00.000Z", refresh: true, writeTargeted: false }).checks?.[0] || {};
-    const transactionLedgerA = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionFile(groupA), {});
-    writeJsonAtomic(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionFile(groupA), {
-      ...transactionLedgerA,
-      compacted_history: { ...transactionLedgerA.compacted_history, transaction_ids_root: `${transactionLedgerA.compacted_history?.transaction_ids_root || ""}-tampered` },
-    });
-    const qualityAfterCompactTamper = buildMemoryQualityReport({ checkIds: [qualityId], groupIds: [groupA], now: "2026-07-12T18:18:01.000Z", refresh: true, writeTargeted: false }).checks?.[0] || {};
-    const approvalsAfter = approvalFiles.reduce((sum, file) => sum + (readJson(file, {}).entries || []).length, 0);
-    const checks = {
-      terminalResolutionHistoryCompactsWithAuditRoot: compactExecutions.every((entry: any) => entry.status === "resolved")
-        && compactDiscovery.transaction_count === 4 && compactDiscovery.compacted_transaction_count === 3
-        && compactDiscovery.compacted_history_valid === true && !!compactDiscovery.compacted_history?.transaction_ids_root
-        && !!compactDiscovery.compacted_history?.transaction_checksums_root && !!compactDiscovery.compacted_history?.compact_checksum,
-      terminalDetailedTransactionEvidenceRemainsFrozenAcrossDiscovery: checksum(retainedArtifactsBeforeDiscovery, 48) === checksum(retainedArtifactsAfterDiscovery, 48)
-        && compactDiscovery.invalid_transaction_count === 0,
-      walFirstDiscoveryRecoversExactTransaction: prepared.every((entry: any) => entry.status === "interrupted")
-        && discoveryB.recovered_now_count === 1 && discoveryB.rows.some((row: any) => row.transaction.receipt_id === seededB.receipts[0].receipt_id && row.status === "completed"),
-      missingReceiptTransactionIsFoundDirectlyFromWal: discoveryB.rows.some((row: any) => row.resolution_transaction_id === (txByReceipt.get(seededB.receipts[3].receipt_id) as any).resolution_transaction_id
-        && row.gaps.includes("resolution_transaction_receipt_missing")),
-      crossGroupAndChecksumTamperAreNotAutoRecovered: discoveryB.invalid_transaction_count === 3
-        && discoveryB.rows.some((row: any) => row.resolution_transaction_id === crossTx.resolution_transaction_id && row.gaps.includes("resolution_transaction_group_mismatch"))
-        && discoveryB.rows.some((row: any) => row.resolution_transaction_id === tamperedTx.resolution_transaction_id && row.gaps.includes("resolution_transaction_checksum_invalid")),
-      invalidTransactionsAreFullyContainedWithoutTasks: discoveryB.contained_invalid_transaction_count === 3 && discoveryB.uncontained_invalid_transaction_count === 0
-        && quarantineArtifacts.filter((entry: any) => entry.status === "quarantined_unproven_resolution_transaction").length === 3
-        && workArtifacts.filter((entry: any) => entry.status === "pending" && entry.should_create_real_task === false).length === 3
-        && briefArtifacts.filter((entry: any) => entry.status === "ready" && entry.should_create_real_task === false).length === 3,
-      containmentDoesNotRewriteInvalidWalRows: [...invalidBefore].every(([id, value]) => invalidAfter.get(id) === value),
-      repeatedDiscoveryIsIdempotent: discoveryBRepeat.repair_work_item_count === discoveryB.repair_work_item_count
-        && discoveryBRepeat.repair_dispatch_brief_count === discoveryB.repair_dispatch_brief_count
-        && discoveryBRepeat.contained_invalid_transaction_count === discoveryB.contained_invalid_transaction_count,
-      startupBatchCoversMultipleGroups: batch.group_count === 2 && batch.compacted_transaction_count === 3
-        && batch.invalid_transaction_count === 3 && batch.contained_invalid_transaction_count === 3,
-      schedulerAcceptsContainedInvalidState: scheduler.failedCount === 0
-        && scheduler.deliveryCleanupCommitRepairResolutionContainedInvalidTransactionCount === 3
-        && scheduler.deliveryCleanupCommitRepairResolutionRecoveredNowCount === 0,
-      qualityGateAcceptsHealthyOrContainedAndRejectsCompactTamper: qualityBeforeTamper.id === qualityId && qualityBeforeTamper.status === "ok"
-        && Number(qualityBeforeTamper.checked || 0) === 2 && Number(qualityBeforeTamper.passed || 0) === 2
-        && qualityAfterCompactTamper.id === qualityId && qualityAfterCompactTamper.status === "fail",
-      recoveryAndContainmentCreateNoTasksApprovalsOrDeletion: require("../../core/db").loadTasks().length === tasksBefore
-        && approvalsAfter === approvalsBefore && discoveryB.destructive_action_authorized === false && discoveryB.deleted_count === 0
-        && scheduler.destructiveActionAuthorized === false && scheduler.deletedCount === 0,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      compact: { retained: compactDiscovery.transaction_count, compacted: compactDiscovery.compacted_transaction_count, history: compactDiscovery.compacted_history },
-      discovery: { recovered: discoveryB.recovered_now_count, invalid: discoveryB.invalid_transaction_count, contained: discoveryB.contained_invalid_transaction_count, repairs: discoveryB.repair_work_item_count, briefs: discoveryB.repair_dispatch_brief_count },
-      scheduler: { failed: scheduler.failedCount, contained: scheduler.deliveryCleanupCommitRepairResolutionContainedInvalidTransactionCount },
-      quality: { before: qualityBeforeTamper.status, afterCompactTamper: qualityAfterCompactTamper.status },
-    };
-  } finally {
-    for (const file of [schedulerStateFile, `${schedulerStateFile}.bak`]) {
-      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
-    }
-    for (const dir of cleanupDirs) {
-      try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-    }
-  }
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupCommitRepairResolutionTransactionStartupDiscoverySelfTest();
 }
 
-function finalizeConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId: string, journalInput: any, at: string, leaseHandle: any, options: any = {}) {
+export function finalizeConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId: string, journalInput: any, at: string, leaseHandle: any, options: any = {}) {
   return withCleanupGroupLedgerLock(groupId, at, { ...options, ownerRole: options.ownerRole || "cleanup-finalization" }, groupLedgerLockHandle => {
     if (!cleanupLeaseHeld(leaseHandle)) throw new Error("cleanup_execution_lease_lost");
     let journalLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
@@ -12126,229 +8311,11 @@ function finalizeConflictResolutionMaintenanceNotificationDeliveryCleanupJournal
 }
 
 export function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
-  let reconciledCount = 0;
-  let recoveredExecutorCount = 0;
-  const rows = ledger.entries.map((journalInput: any) => {
-    let journal = journalInput;
-    let checksumValid = journal.journal_checksum === conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal);
-    const groupValid = String(journal.group_id || "") === groupId;
-    let reconciliationBlockedReason = "";
-    let leaseActive = false;
-    let leaseRecovered = false;
-    let leaseStatus = inspectConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId, String(journal.receipt_id || ""), at);
-    if (options.persist === true && journal.status === "in_progress" && checksumValid && groupValid) {
-      const leaseResult = acquireConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId, String(journal.receipt_id || ""), String(journal.execution_id || ""), {
-        at,
-        ttlMs: options.leaseTtlMs || options.lease_ttl_ms,
-        ownerRole: "scheduler-reconciler",
-      });
-      if (!leaseResult.acquired) {
-        leaseActive = leaseResult.reason === "cleanup_execution_lease_busy";
-        if (!leaseActive) reconciliationBlockedReason = leaseResult.reason || "cleanup_execution_lease_unavailable";
-      } else {
-        const leaseHandle = leaseResult.handle;
-        leaseRecovered = leaseResult.recovered === true;
-        if (leaseRecovered) recoveredExecutorCount++;
-        try {
-          const recoveredCandidates = (journal.candidates || []).map((candidate: any) => candidate.status === "delete_intent" && !fs.existsSync(candidate.target_path)
-            ? { ...candidate, status: "deleted", deleted_at: candidate.deleted_at || at, recovered_from_intent_at: at }
-            : candidate);
-          if (recoveredCandidates.some((candidate: any, index: number) => candidate.status !== journal.candidates?.[index]?.status)) {
-            journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, { ...journal, candidates: recoveredCandidates }, at, { leaseHandle });
-            checksumValid = true;
-            reconciledCount++;
-          }
-          const allDeleted = recoveredCandidates.length > 0 && recoveredCandidates.every((candidate: any) => candidate.status === "deleted");
-          if (allDeleted) {
-            const finalization = finalizeConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, { ...journal, candidates: recoveredCandidates }, at, leaseHandle, {
-              ownerRole: "scheduler-cleanup-finalization",
-            });
-            journal = finalization.journal;
-            checksumValid = true;
-            reconciledCount++;
-          }
-        } catch (error: any) {
-          reconciliationBlockedReason = String(error?.message || error || "cleanup_journal_reconciliation_failed");
-        } finally {
-          releaseConflictResolutionMaintenanceNotificationDeliveryCleanupLease(leaseHandle, at, reconciliationBlockedReason ? "scheduler_blocked" : "scheduler_reconciled");
-        }
-      }
-    } else if (options.persist === true
-      && (journal.status === "completed" || journal.status === "cancelled")
-      && checksumValid
-      && groupValid
-      && leaseStatus.abandoned === true) {
-      const terminalLeaseResult = acquireConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId, String(journal.receipt_id || ""), String(journal.execution_id || ""), {
-        at,
-        ttlMs: options.leaseTtlMs || options.lease_ttl_ms,
-        ownerRole: "scheduler-terminal-lease-reconciler",
-      });
-      if (terminalLeaseResult.acquired) {
-        const terminalLeaseHandle = terminalLeaseResult.handle;
-        try {
-          leaseRecovered = terminalLeaseResult.recovered === true;
-          if (leaseRecovered) recoveredExecutorCount++;
-          const openCommit = readConflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedger(groupId).entries.find((entry: any) => entry.execution_id === journal.execution_id && entry.status !== "completed") || null;
-          if (journal.status === "completed" && openCommit) {
-            const finalization = finalizeConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, journal, at, terminalLeaseHandle, {
-              ownerRole: "scheduler-terminal-commit-reconciler",
-            });
-            journal = finalization.journal;
-          }
-          reconciledCount++;
-        } catch (error: any) {
-          reconciliationBlockedReason = String(error?.message || error || "cleanup_terminal_commit_reconciliation_failed");
-        } finally {
-          releaseConflictResolutionMaintenanceNotificationDeliveryCleanupLease(terminalLeaseHandle, at, reconciliationBlockedReason ? "scheduler_terminal_commit_blocked" : "scheduler_terminal_lease_released");
-        }
-      } else if (terminalLeaseResult.reason !== "cleanup_execution_lease_busy") {
-        reconciliationBlockedReason = terminalLeaseResult.reason || "cleanup_terminal_execution_lease_unavailable";
-      }
-    }
-    leaseStatus = inspectConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId, String(journal.receipt_id || ""), at);
-    leaseActive = leaseActive || leaseStatus.active === true;
-    let missingPendingCount = 0;
-    let missingIntentCount = 0;
-    for (const candidate of journal.candidates || []) {
-      if (candidate.status === "deleted") continue;
-      const exists = fs.existsSync(candidate.target_path);
-      if (!exists && candidate.status === "delete_intent") missingIntentCount++;
-      if (!exists && candidate.status === "pending") missingPendingCount++;
-    }
-    const resumable = journal.status === "in_progress" && checksumValid && groupValid && missingPendingCount === 0 && !leaseActive && !reconciliationBlockedReason;
-    return {
-      execution_id: journal.execution_id,
-      receipt_id: journal.receipt_id,
-      status: journal.status,
-      checksum_valid: checksumValid,
-      group_valid: groupValid,
-      resumable,
-      lease_active: leaseActive,
-      lease_valid: leaseStatus.valid !== false,
-      lease_abandoned: leaseStatus.abandoned === true,
-      lease_recovered: leaseRecovered,
-      lease_id: leaseStatus.lease?.lease_id || journal.lease_id || "",
-      lease_fencing_token: Number(journal.lease_fencing_token || leaseStatus.lease?.fencing_token || 0),
-      current_lease_fencing_token: Number(leaseStatus.lease?.fencing_token || 0),
-      lease_recovery_count: Number(leaseStatus.lease?.recovery_count || journal.lease_recovery_count || 0),
-      missing_after_intent_count: missingIntentCount,
-      missing_without_intent_count: missingPendingCount,
-      deleted_count: (journal.candidates || []).filter((candidate: any) => candidate.status === "deleted").length + missingIntentCount,
-      candidate_count: (journal.candidates || []).length,
-      reconciliation_blocked_reason: reconciliationBlockedReason,
-    };
-  });
-  const candidateClaims = new Map<string, string[]>();
-  for (const row of ledger.entries.filter((entry: any) => entry.status !== "cancelled")) {
-    for (const candidate of row.candidates || []) {
-      const quarantineId = String(candidate.quarantine_id || "");
-      if (!quarantineId) continue;
-      candidateClaims.set(quarantineId, [...(candidateClaims.get(quarantineId) || []), String(row.execution_id || "")]);
-    }
-  }
-  const claimConflicts = [...candidateClaims.entries()].filter(([, executionIds]) => new Set(executionIds).size > 1);
-  const groupLedgerLock = readCleanupGroupLedgerLock(groupId, at);
-  const commitLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedger(groupId);
-  const commitRows = commitLedger.entries.map((transaction: any) => {
-    const completed = transaction.status === "completed" && transaction.phase === "completed";
-    const revisionBindingsValid = !completed || (
-      Number(transaction.quarantine_commit?.revision || 0) > Number(transaction.before?.quarantine_revision || 0)
-      && Number(transaction.receipt_commit?.revision || 0) > Number(transaction.before?.receipt_ledger_revision || 0)
-      && Number(transaction.journal_commit?.revision || 0) > Number(transaction.before?.journal_ledger_revision || 0)
-      && !!transaction.quarantine_commit?.checksum
-      && !!transaction.receipt_commit?.checksum
-      && !!transaction.journal_commit?.checksum
-    );
-    return {
-      transaction_id: transaction.transaction_id || "",
-      receipt_id: transaction.receipt_id || "",
-      execution_id: transaction.execution_id || "",
-      phase: transaction.phase || "",
-      status: transaction.status || "",
-      checksum_valid: transaction.transaction_checksum === conflictResolutionMaintenanceNotificationDeliveryCleanupCommitChecksum(transaction),
-      group_valid: String(transaction.group_id || "") === groupId,
-      revision_bindings_valid: revisionBindingsValid,
-      latest_fencing_token: Number(transaction.latest_fencing_token || 0),
-      recovery_count: Number(transaction.recovery_count || 0),
-    };
-  });
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-journal-reconciliation-v1",
-    group_id: groupId,
-    generated_at: at,
-    journal_count: rows.length,
-    ledger_revision: Number(ledger.revision || 0),
-    ledger_checksum: ledger.ledger_checksum || "",
-    ledger_checksum_valid: ledger.ledger_checksum_valid !== false,
-    candidate_claim_conflict_count: claimConflicts.length,
-    candidate_claim_conflicts: claimConflicts.slice(0, 20).map(([quarantineId, executionIds]) => ({ quarantine_id: quarantineId, execution_ids: [...new Set(executionIds)] })),
-    group_ledger_lock_present: groupLedgerLock.present,
-    group_ledger_lock_valid: groupLedgerLock.valid,
-    group_ledger_lock_active: groupLedgerLock.active,
-    group_ledger_lock_abandoned: groupLedgerLock.abandoned,
-    commit_ledger_file: commitLedger.file,
-    commit_ledger_revision: Number(commitLedger.revision || 0),
-    commit_ledger_checksum: commitLedger.ledger_checksum || "",
-    commit_ledger_checksum_valid: commitLedger.ledger_checksum_valid !== false,
-    commit_compacted_transaction_count: Number(commitLedger.compacted_history?.compacted_count || 0),
-    commit_compacted_history_valid: commitLedger.compacted_history_valid !== false,
-    commit_compacted_history: commitLedger.compacted_history || null,
-    commit_transaction_count: commitRows.length,
-    open_commit_transaction_count: commitRows.filter((row: any) => row.status !== "completed" && row.status !== "cancelled").length,
-    invalid_commit_transaction_count: commitRows.filter((row: any) => !row.checksum_valid || !row.group_valid || !row.revision_bindings_valid || cleanupCommitPhaseRank(row.phase) === 0).length + (commitLedger.ledger_checksum_valid === false ? 1 : 0),
-    recovered_commit_transaction_count: commitRows.filter((row: any) => row.recovery_count > 0).length,
-    commit_transactions: commitRows,
-    open_journal_count: rows.filter((row: any) => row.status === "in_progress").length,
-    leased_journal_count: rows.filter((row: any) => row.lease_active).length,
-    abandoned_journal_count: rows.filter((row: any) => row.lease_abandoned).length,
-    resumable_journal_count: rows.filter((row: any) => row.resumable).length,
-    blocked_journal_count: rows.filter((row: any) => row.status === "in_progress" && !row.resumable && !row.lease_active).length,
-    invalid_journal_count: rows.filter((row: any) => !row.checksum_valid || !row.group_valid || row.lease_valid === false).length + (ledger.ledger_checksum_valid === false ? 1 : 0),
-    reconciled_journal_count: reconciledCount,
-    recovered_executor_count: recoveredExecutorCount,
-    rows,
-    destructive_action_authorized: false,
-    resumed_count: 0,
-    deleted_count: 0,
-    policy: "per_journal_fenced_lease_scheduler_reconciles_metadata_only_explicit_execution_deletes",
-    file: ledger.file,
-  };
+  return require("./group-memory-maintenance").reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals(groupId, options);
 }
 
 export function revokePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId: string, input: any = {}) {
-  const at = String(input.at || input.revokedAt || input.revoked_at || now());
-  const receiptId = String(input.receiptId || input.receipt_id || "").trim();
-  const actorId = String(input.actorId || input.actor_id || input.actor || "").trim();
-  const reason = String(input.reason || "").trim();
-  if (input.explicitRevocation !== true && input.explicit_revocation !== true) throw new Error("delivery cleanup revocation requires explicitRevocation=true");
-  if (!actorId || !reason) throw new Error("delivery cleanup revocation requires actorId and reason");
-  return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-receipt-revocation" }, groupLedgerLockHandle => {
-    const ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
-    const receipt = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
-    if (!receipt) throw new Error("delivery cleanup receipt not found");
-    if (String(receipt.group_id || "") !== groupId) throw new Error("delivery cleanup receipt group mismatch");
-    if (receipt.consumed === true) throw new Error("consumed delivery cleanup receipt cannot be revoked");
-    if (receipt.revoked === true) return receipt;
-    if (receipt.receipt_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt)) throw new Error("delivery cleanup receipt checksum invalid");
-    const journals = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
-    if (journals.entries.some((journal: any) => journal.receipt_id === receiptId && journal.status === "in_progress")) {
-      throw new Error("delivery cleanup receipt with in-progress journal cannot be revoked");
-    }
-    const revoked = {
-      ...receipt,
-      revoked: true,
-      revoked_at: at,
-      revoked_by: actorId,
-      revocation_reason: reason,
-    };
-    mutateConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId, at, entries => entries.map((entry: any) => entry.receipt_id === receiptId ? revoked : entry), {
-      groupLedgerLockHandle,
-      ownerRole: "cleanup-receipt-revocation",
-    });
-    return revoked;
-  });
+  return require("./group-memory-maintenance").revokePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId, input);
 }
 
 function pathWithinDirectory(target: string, directory: string) {
@@ -12357,7 +8324,7 @@ function pathWithinDirectory(target: string, directory: string) {
   return resolvedTarget.startsWith(`${resolvedDirectory}${path.sep}`);
 }
 
-function buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates(groupId: string, options: any = {}) {
+export function buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates(groupId: string, options: any = {}) {
   const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
   const quarantine = readJson(quarantineFile, {});
   if (quarantine.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-v1"
@@ -12416,503 +8383,26 @@ function buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates
 }
 
 export function createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId: string, input: any = {}) {
-  const at = String(input.at || input.issuedAt || input.issued_at || now());
-  const actorRole = String(input.actorRole || input.actor_role || "").trim().toLowerCase();
-  const actorId = String(input.actorId || input.actor_id || input.actor || "").trim();
-  const reason = String(input.reason || "").trim();
-  if (input.explicitApproval !== true && input.explicit_approval !== true) throw new Error("delivery cleanup receipt requires explicitApproval=true");
-  if (!new Set(["group-main-agent", "global-agent", "local-user"]).has(actorRole)) throw new Error("delivery cleanup actor role is invalid");
-  if (!actorId || !reason) throw new Error("delivery cleanup receipt requires actorId and reason");
-  return withCleanupGroupLedgerLock(groupId, at, { ownerRole: "cleanup-receipt-issuance" }, groupLedgerLockHandle => {
-    if (typeof input.onGroupLedgerLockAcquired === "function") input.onGroupLedgerLockAcquired({
-      lock_id: groupLedgerLockHandle.lock?.lock_id || "",
-      waited_ms: Number(groupLedgerLockHandle.waitedMs || 0),
-    });
-    const selection = buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates(groupId, input);
-    if (!selection.candidates.length) throw new Error("delivery cleanup requires at least one eligible non-current evidence file");
-    const expiresInMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(input.expiresInMs || input.expires_in_ms || 30 * 60 * 1000)));
-    const receipt: any = {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-receipt-v1",
-      version: 1,
-      receipt_id: `delivery-telemetry-cleanup:${checksum([groupId, selection.quarantine.quarantine_checksum, selection.candidates, actorRole, actorId, at], 24)}`,
-      group_id: groupId,
-      actor_role: actorRole,
-      actor_id: actorId,
-      reason,
-      quarantine_checksum: selection.quarantine.quarantine_checksum,
-      current_ledger_checksum: selection.generation.current.ledger_checksum,
-      previous_ledger_checksum: selection.generation.previous.ledger_checksum,
-      latest_recovery_proof_id: selection.latestRecoveryProofId,
-      candidates: selection.candidates.sort((a: any, b: any) => a.target_path.localeCompare(b.target_path)),
-      issued_at: at,
-      expires_at: new Date(Date.parse(at) + expiresInMs).toISOString(),
-      single_use: true,
-      consumed: false,
-      authorization_boundary: "exact_group_quarantine_generation_and_file_checksum_only",
-    };
-    receipt.receipt_checksum = conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt);
-    mutateConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId, at, entries => {
-      if (entries.some((entry: any) => entry.receipt_id === receipt.receipt_id)) throw new Error("cleanup_receipt_duplicate_id");
-      return [...entries, receipt];
-    }, { groupLedgerLockHandle, ownerRole: "cleanup-receipt-issuance" });
-    return receipt;
-  });
+  return require("./group-memory-maintenance").createPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId, input);
 }
 
 export function executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId: string, input: any = {}) {
-  const at = String(input.at || input.executedAt || input.executed_at || now());
-  const trigger = String(input.trigger || input.source || "manual").trim().toLowerCase();
-  const receiptId = String(input.receiptId || input.receipt_id || "").trim();
-  let ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
-  let receipt = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
-  const blocked = (reason: string, extra: any = {}) => ({
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
-    group_id: groupId,
-    receipt_id: receiptId,
-    status: "blocked",
-    executed: false,
-    reason,
-    deleted_count: 0,
-    ...extra,
-  });
-  if (["background", "timer", "scheduler", "cron", "automatic", "auto"].includes(trigger)) return blocked("background_trigger_cannot_cleanup_delivery_evidence");
-  if (input.explicitExecution !== true && input.explicit_execution !== true) return blocked("explicit_execution_required");
-  if (!receipt) return blocked("cleanup_receipt_not_found");
-  if (String(receipt.group_id || "") !== groupId) return blocked("cleanup_receipt_group_mismatch");
-  if (receipt.consumed === true) return blocked("cleanup_receipt_already_consumed");
-  if (receipt.revoked === true) return blocked("cleanup_receipt_revoked");
-  if (receipt.single_use !== true || receipt.receipt_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt)) return blocked("cleanup_receipt_checksum_invalid");
-  const journalLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
-  let journal = journalLedger.entries.find((entry: any) => entry.receipt_id === receiptId && entry.status === "in_progress") || null;
-  if (journal && (journal.journal_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal)
-    || String(journal.group_id || "") !== groupId
-    || journal.receipt_checksum !== receipt.receipt_checksum)) return blocked("cleanup_journal_checksum_invalid");
-  const executionId = String(journal?.execution_id || `delivery-telemetry-cleanup-execution:${checksum([groupId, receiptId, receipt.receipt_checksum], 24)}`);
-  const atMs = Date.parse(at);
-  const expiresAtMs = Date.parse(String(receipt.expires_at || ""));
-  if (!journal && (!Number.isFinite(atMs) || !Number.isFinite(expiresAtMs) || atMs > expiresAtMs)) return blocked("cleanup_receipt_expired");
-  const leaseResult = acquireConflictResolutionMaintenanceNotificationDeliveryCleanupLease(groupId, receiptId, executionId, {
-    at,
-    ttlMs: input.leaseTtlMs || input.lease_ttl_ms,
-    ownerInstanceId: input.executorId || input.executor_id,
-    ownerRole: "explicit-executor",
-  });
-  if (!leaseResult.acquired) return blocked(leaseResult.reason || "cleanup_execution_lease_unavailable", {
-    competing_lease_id: leaseResult.status?.lease?.lease_id || "",
-    competing_owner_instance_id: leaseResult.status?.lease?.owner_instance_id || "",
-    competing_fencing_token: Number(leaseResult.status?.lease?.fencing_token || 0),
-  });
-  const leaseHandle = leaseResult.handle;
-  let preserveLeaseForRecovery = false;
-  let completed = false;
-  let resumed = !!journal;
-  try {
-    if (typeof input.onLeaseAcquired === "function") input.onLeaseAcquired({ ...leaseHandle.lease, lease_checksum: undefined });
-    if (!cleanupLeaseHeld(leaseHandle)) return blocked("cleanup_execution_lease_lost", { lease_id: leaseHandle.lease.lease_id, fencing_token: leaseHandle.lease.fencing_token });
-
-    ledger = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
-    receipt = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
-    if (!receipt) return blocked("cleanup_receipt_not_found");
-    if (String(receipt.group_id || "") !== groupId) return blocked("cleanup_receipt_group_mismatch");
-    if (receipt.consumed === true) return blocked("cleanup_receipt_already_consumed");
-    if (receipt.revoked === true) return blocked("cleanup_receipt_revoked");
-    if (receipt.single_use !== true || receipt.receipt_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt)) return blocked("cleanup_receipt_checksum_invalid");
-
-    const authoritativeJournals = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId);
-    journal = authoritativeJournals.entries.find((entry: any) => entry.receipt_id === receiptId && entry.status === "in_progress") || null;
-    resumed = !!journal;
-    if (journal && (journal.journal_checksum !== conflictResolutionMaintenanceNotificationDeliveryCleanupJournalChecksum(journal)
-      || String(journal.group_id || "") !== groupId
-      || journal.receipt_checksum !== receipt.receipt_checksum)) return blocked("cleanup_journal_checksum_invalid");
-    if (!journal && (!Number.isFinite(atMs) || !Number.isFinite(expiresAtMs) || atMs > expiresAtMs)) return blocked("cleanup_receipt_expired");
-
-    const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
-    const quarantine = readJson(quarantineFile, {});
-    const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
-    if (!generation.valid) return blocked("cleanup_delivery_generation_stale");
-    if (String(quarantine.group_id || "") !== groupId || quarantine.quarantine_checksum !== conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(quarantine)) return blocked("cleanup_quarantine_checksum_invalid");
-    if (!journal && quarantine.quarantine_checksum !== receipt.quarantine_checksum) return blocked("cleanup_quarantine_stale");
-    const quarantineEntriesCurrent = Array.isArray(quarantine.entries) ? quarantine.entries : [];
-    if (journal) {
-      const currentQuarantineIds = new Set(quarantineEntriesCurrent.map((entry: any) => entry.quarantine_id));
-      if ((journal.candidates || []).some((candidate: any) => !currentQuarantineIds.has(candidate.quarantine_id))) return blocked("cleanup_journal_candidate_missing_from_quarantine");
-    }
-    const latestRecoveryProofId = quarantineEntriesCurrent
-      .filter((entry: any) => entry.status === "quarantined_corrupt_current")
-      .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")))[0]?.quarantine_id || "";
-    if (!journal && (generation.current.ledger_checksum !== receipt.current_ledger_checksum || generation.previous.ledger_checksum !== receipt.previous_ledger_checksum)) return blocked("cleanup_delivery_generation_stale");
-    if (latestRecoveryProofId !== receipt.latest_recovery_proof_id) return blocked("cleanup_latest_recovery_proof_changed");
-    if (!journal) {
-      let selection: any;
-      try { selection = buildConflictResolutionMaintenanceNotificationDeliveryCleanupCandidates(groupId, { quarantineIds: receipt.candidates.map((candidate: any) => candidate.quarantine_id) }); }
-      catch { return blocked("cleanup_candidate_state_stale_or_protected"); }
-      const selectedById = new Map(selection.candidates.map((candidate: any) => [candidate.quarantine_id, candidate]));
-      for (const candidate of receipt.candidates) {
-        const current = selectedById.get(candidate.quarantine_id) as any;
-        if (!current || current.target_path !== candidate.target_path || current.target_kind !== candidate.target_kind || current.target_content_checksum !== candidate.target_content_checksum) return blocked("cleanup_candidate_checksum_stale");
-      }
-      journal = {
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-journal-v1",
-        version: 1,
-        execution_id: executionId,
-        group_id: groupId,
-        receipt_id: receiptId,
-        receipt_checksum: receipt.receipt_checksum,
-        quarantine_checksum: receipt.quarantine_checksum,
-        current_ledger_checksum: receipt.current_ledger_checksum,
-        previous_ledger_checksum: receipt.previous_ledger_checksum,
-        latest_recovery_proof_id: receipt.latest_recovery_proof_id,
-        status: "in_progress",
-        candidates: receipt.candidates.map((candidate: any) => ({ ...candidate, status: "pending", intent_at: "", deleted_at: "" })),
-        started_at: at,
-        updated_at: at,
-        completed_at: "",
-      };
-    }
-    journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, journal, at, { leaseHandle });
-    if (typeof input.onJournalLeasePersisted === "function") input.onJournalLeasePersisted({ ...journal });
-    if (!renewConflictResolutionMaintenanceNotificationDeliveryCleanupLease(leaseHandle)) return blocked("cleanup_execution_lease_lost", { lease_id: leaseHandle.lease.lease_id, fencing_token: leaseHandle.lease.fencing_token });
-
-    let newlyDeleted = 0;
-    const simulateCrashAfterDeletes = Math.max(0, Number(input.simulateCrashAfterDeletes || input.simulate_crash_after_deletes || 0));
-    for (let index = 0; index < journal.candidates.length; index++) {
-      if (!renewConflictResolutionMaintenanceNotificationDeliveryCleanupLease(leaseHandle)) return blocked("cleanup_execution_lease_lost", { lease_id: leaseHandle.lease.lease_id, fencing_token: leaseHandle.lease.fencing_token });
-      let candidate = journal.candidates[index];
-      if (candidate.status === "deleted") continue;
-      if (candidate.status === "pending") {
-        if (!fs.existsSync(candidate.target_path)) return blocked("cleanup_pending_candidate_missing_without_intent");
-        let content = "";
-        try { content = fs.readFileSync(candidate.target_path, "utf-8"); } catch { return blocked("cleanup_candidate_read_failed"); }
-        if (checksum(content, 48) !== candidate.target_content_checksum) return blocked("cleanup_candidate_checksum_stale");
-        candidate = { ...candidate, status: "delete_intent", intent_at: at };
-        journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, {
-          ...journal,
-          candidates: journal.candidates.map((entry: any, candidateIndex: number) => candidateIndex === index ? candidate : entry),
-        }, at, { leaseHandle });
-      }
-      if (candidate.status === "delete_intent") {
-        if (!cleanupLeaseHeld(leaseHandle)) return blocked("cleanup_execution_lease_lost", { lease_id: leaseHandle.lease.lease_id, fencing_token: leaseHandle.lease.fencing_token });
-        if (fs.existsSync(candidate.target_path)) {
-          let content = "";
-          try { content = fs.readFileSync(candidate.target_path, "utf-8"); } catch { return blocked("cleanup_candidate_read_failed"); }
-          if (checksum(content, 48) !== candidate.target_content_checksum) return blocked("cleanup_candidate_checksum_stale");
-          fs.unlinkSync(candidate.target_path);
-        }
-        candidate = { ...candidate, status: "deleted", deleted_at: at };
-        journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, {
-          ...journal,
-          candidates: journal.candidates.map((entry: any, candidateIndex: number) => candidateIndex === index ? candidate : entry),
-        }, at, { leaseHandle });
-        newlyDeleted++;
-        if (simulateCrashAfterDeletes > 0 && newlyDeleted >= simulateCrashAfterDeletes) {
-          preserveLeaseForRecovery = true;
-          return {
-            schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
-            group_id: groupId,
-            receipt_id: receiptId,
-            execution_id: journal.execution_id,
-            status: "interrupted",
-            executed: false,
-            resumed,
-            lease_id: leaseHandle.lease.lease_id,
-            fencing_token: leaseHandle.lease.fencing_token,
-            lease_expires_at: leaseHandle.lease.expires_at,
-            deleted_count: journal.candidates.filter((entry: any) => entry.status === "deleted").length,
-            newly_deleted_count: newlyDeleted,
-            remaining_count: journal.candidates.filter((entry: any) => entry.status !== "deleted").length,
-            reason: "simulated_process_interruption_after_delete",
-          };
-        }
-      }
-    }
-    if (input.simulateCrashBeforeFinalize === true || input.simulate_crash_before_finalize === true) {
-      preserveLeaseForRecovery = true;
-      return {
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
-        group_id: groupId,
-        receipt_id: receiptId,
-        execution_id: journal.execution_id,
-        status: "interrupted",
-        executed: false,
-        resumed,
-        lease_id: leaseHandle.lease.lease_id,
-        fencing_token: leaseHandle.lease.fencing_token,
-        lease_expires_at: leaseHandle.lease.expires_at,
-        deleted_count: journal.candidates.length,
-        newly_deleted_count: newlyDeleted,
-        remaining_count: 0,
-        reason: "simulated_process_interruption_before_finalize",
-      };
-    }
-    if (!renewConflictResolutionMaintenanceNotificationDeliveryCleanupLease(leaseHandle)) return blocked("cleanup_execution_lease_lost", { lease_id: leaseHandle.lease.lease_id, fencing_token: leaseHandle.lease.fencing_token });
-    const finalization = finalizeConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, journal, at, leaseHandle, {
-      ownerRole: "explicit-cleanup-finalization",
-      simulateCommitCrashAfter: input.simulateCommitCrashAfter || input.simulate_commit_crash_after,
-      commitTerminalLimit: input.commitTerminalLimit || input.commit_terminal_limit,
-    });
-    journal = finalization.journal;
-    const updatedQuarantine = finalization.updatedQuarantine;
-    completed = true;
-    if (input.simulateCrashAfterFinalize === true || input.simulate_crash_after_finalize === true) {
-      preserveLeaseForRecovery = true;
-      return {
-        schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
-        group_id: groupId,
-        receipt_id: receiptId,
-        execution_id: journal.execution_id,
-        status: "interrupted",
-        executed: true,
-        finalized: true,
-        resumed,
-        lease_id: leaseHandle.lease.lease_id,
-        fencing_token: leaseHandle.lease.fencing_token,
-        lease_expires_at: leaseHandle.lease.expires_at,
-        deleted_count: journal.candidates.length,
-        newly_deleted_count: newlyDeleted,
-        remaining_count: 0,
-        reason: "simulated_process_interruption_after_finalize",
-      };
-    }
-    return {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-execution-v1",
-      group_id: groupId,
-      receipt_id: receiptId,
-      execution_id: journal.execution_id,
-      status: "executed",
-      executed: true,
-      resumed,
-      lease_id: leaseHandle.lease.lease_id,
-      fencing_token: leaseHandle.lease.fencing_token,
-      lease_recovered: leaseResult.recovered === true,
-      lease_recovery_count: leaseHandle.lease.recovery_count,
-      deleted_count: journal.candidates.length,
-      newly_deleted_count: newlyDeleted,
-      deleted_paths: journal.candidates.map((candidate: any) => candidate.target_path),
-      quarantine_checksum_after: updatedQuarantine.quarantine_checksum,
-      destructive_action_authorized: true,
-      explicit_receipt_required: true,
-      executed_at: at,
-    };
-  } catch (error: any) {
-    const reason = String(error?.message || error || "cleanup_execution_failed");
-    if (reason.startsWith("simulated_cleanup_commit_interruption_after_")) {
-      preserveLeaseForRecovery = true;
-      const commitLedger = readConflictResolutionMaintenanceNotificationDeliveryCleanupCommitLedger(groupId);
-      const transaction = commitLedger.entries.find((entry: any) => entry.execution_id === journal?.execution_id && entry.receipt_id === receiptId) || null;
-      const latestJournal = readConflictResolutionMaintenanceNotificationDeliveryCleanupJournalLedger(groupId).entries.find((entry: any) => entry.execution_id === journal?.execution_id) || journal;
-      completed = latestJournal?.status === "completed";
-      return blocked(reason, {
-        status: "interrupted",
-        executed: completed,
-        finalized: completed,
-        execution_id: journal?.execution_id || executionId,
-        commit_transaction_id: transaction?.transaction_id || "",
-        commit_phase: transaction?.phase || "",
-        commit_recovery_count: Number(transaction?.recovery_count || 0),
-        lease_id: leaseHandle.lease.lease_id,
-        fencing_token: leaseHandle.lease.fencing_token,
-        lease_expires_at: leaseHandle.lease.expires_at,
-        deleted_count: (journal?.candidates || []).filter((entry: any) => entry.status === "deleted").length,
-        remaining_count: 0,
-      });
-    }
-    return blocked(reason.startsWith("cleanup_") ? reason : "cleanup_execution_failed", {
-      lease_id: leaseHandle.lease.lease_id,
-      fencing_token: leaseHandle.lease.fencing_token,
-    });
-  } finally {
-    if (preserveLeaseForRecovery) {
-      abandonConflictResolutionMaintenanceNotificationDeliveryCleanupLease(leaseHandle);
-    } else {
-      if (!completed && journal?.status === "in_progress" && cleanupLeaseHeld(leaseHandle)) {
-        try { journal = upsertConflictResolutionMaintenanceNotificationDeliveryCleanupJournal(groupId, journal, at, { leaseHandle, leaseStatus: "released" }); } catch {}
-      }
-      releaseConflictResolutionMaintenanceNotificationDeliveryCleanupLease(leaseHandle, at, completed ? "executed" : "blocked_or_released");
-    }
-  }
+  return require("./group-memory-maintenance").executePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupReceipt(groupId, input);
 }
 
 export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanup(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const atMs = Date.parse(at);
-  const receipts = readConflictResolutionMaintenanceNotificationDeliveryCleanupReceiptLedger(groupId);
-  const receiptRows = receipts.entries.map((receipt: any) => {
-    const checksumValid = receipt.receipt_checksum === conflictResolutionMaintenanceNotificationDeliveryCleanupReceiptChecksum(receipt);
-    const expiresAtMs = Date.parse(String(receipt.expires_at || ""));
-    const valid = receipt.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-receipt-v1"
-      && String(receipt.group_id || "") === groupId
-      && receipt.single_use === true
-      && checksumValid;
-    return { ...receipt, checksum_valid: checksumValid, expired: Number.isFinite(atMs) && Number.isFinite(expiresAtMs) ? atMs > expiresAtMs : true, valid };
-  });
-  const recoveryHealth = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRecoveryHealth(groupId, { at });
-  const journalReconciliation = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupJournals(groupId, { at, persist: false });
-  const quarantine = readJson(recoveryHealth.quarantine_file, {});
-  const groupLedgerLock = readCleanupGroupLedgerLock(groupId, at);
-  const entries = Array.isArray(quarantine.entries) ? quarantine.entries : [];
-  const latestProof = recoveryHealth.latest_recovery_proof_id
-    ? entries.find((entry: any) => entry.quarantine_id === recoveryHealth.latest_recovery_proof_id) || null
-    : null;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-cleanup-status-v1",
-    group_id: groupId,
-    generated_at: at,
-    receipt_file: receipts.file,
-    receipt_ledger_revision: Number(receipts.revision || 0),
-    receipt_ledger_checksum: receipts.ledger_checksum || "",
-    receipt_ledger_checksum_valid: receipts.ledger_checksum_valid !== false,
-    receipt_count: receiptRows.length,
-    open_receipt_count: receiptRows.filter((receipt: any) => receipt.consumed !== true && receipt.revoked !== true).length,
-    consumed_receipt_count: receiptRows.filter((receipt: any) => receipt.consumed === true).length,
-    invalid_receipt_count: receiptRows.filter((receipt: any) => !receipt.valid).length + (receipts.ledger_checksum_valid === false ? 1 : 0),
-    expired_open_receipt_count: receiptRows.filter((receipt: any) => receipt.expired && receipt.consumed !== true && receipt.revoked !== true).length,
-    receipts: receiptRows,
-    recovery_health: recoveryHealth,
-    quarantine_revision: Number(quarantine.revision || 0),
-    quarantine_checksum_valid: quarantine.quarantine_checksum === conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(quarantine),
-    unresolved_quarantine_count: entries.length,
-    compacted_quarantine_count: Number(quarantine.compacted_quarantine_count || recoveryHealth.compacted_quarantine_count || 0),
-    latest_recovery_proof_id: recoveryHealth.latest_recovery_proof_id || "",
-    latest_recovery_proof_present: !!latestProof && (!latestProof.evidence_path || fs.existsSync(latestProof.evidence_path)),
-    retention: quarantine.retention || {},
-    cleanup_journals: journalReconciliation,
-    open_journal_count: journalReconciliation.open_journal_count,
-    leased_journal_count: journalReconciliation.leased_journal_count,
-    abandoned_journal_count: journalReconciliation.abandoned_journal_count,
-    resumable_journal_count: journalReconciliation.resumable_journal_count,
-    blocked_journal_count: journalReconciliation.blocked_journal_count,
-    invalid_journal_count: journalReconciliation.invalid_journal_count,
-    recovered_executor_count: journalReconciliation.recovered_executor_count,
-    journal_ledger_revision: Number(journalReconciliation.ledger_revision || 0),
-    journal_ledger_checksum: journalReconciliation.ledger_checksum || "",
-    journal_ledger_checksum_valid: journalReconciliation.ledger_checksum_valid !== false,
-    candidate_claim_conflict_count: Number(journalReconciliation.candidate_claim_conflict_count || 0),
-    commit_ledger_revision: Number(journalReconciliation.commit_ledger_revision || 0),
-    commit_ledger_checksum: journalReconciliation.commit_ledger_checksum || "",
-    commit_ledger_checksum_valid: journalReconciliation.commit_ledger_checksum_valid !== false,
-    commit_compacted_transaction_count: Number(journalReconciliation.commit_compacted_transaction_count || 0),
-    commit_compacted_history_valid: journalReconciliation.commit_compacted_history_valid !== false,
-    commit_compacted_history: journalReconciliation.commit_compacted_history || null,
-    commit_transaction_count: Number(journalReconciliation.commit_transaction_count || 0),
-    open_commit_transaction_count: Number(journalReconciliation.open_commit_transaction_count || 0),
-    invalid_commit_transaction_count: Number(journalReconciliation.invalid_commit_transaction_count || 0),
-    recovered_commit_transaction_count: Number(journalReconciliation.recovered_commit_transaction_count || 0),
-    commit_transactions: journalReconciliation.commit_transactions || [],
-    group_ledger_lock: {
-      present: groupLedgerLock.present,
-      valid: groupLedgerLock.valid,
-      active: groupLedgerLock.active,
-      abandoned: groupLedgerLock.abandoned,
-      owner_role: groupLedgerLock.lock?.owner_role || "",
-      file: groupLedgerLock.file,
-    },
-    scheduler_cleanup_authorized: false,
-    policy: "explicit_exact_checksum_single_use_cleanup_only_latest_recovery_proof_protected",
-  };
+  return require("./group-memory-maintenance").inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanup(groupId, options);
 }
 
 export function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryOrphans(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const coldDir = getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId);
-  const currentFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
-  const previousFile = getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId);
-  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
-  const candidates: any[] = [];
-  let names: string[] = [];
-  try { names = fs.readdirSync(coldDir); } catch {}
-  for (const name of names.filter(name => /^maintenance-notification-deliveries(?:\.previous)?\.json\..+\.tmp$/.test(name))) {
-    const source = path.join(coldDir, name);
-    let content = "";
-    try { content = fs.readFileSync(source, "utf-8"); } catch {}
-    candidates.push({ source_path: source, content_checksum: checksum(content, 48), reason: "interrupted_atomic_temp", status: "quarantined_temp", recovery_eligible: false });
-  }
-  if (generation.current.valid && generation.previous.present && (!generation.previous_required || !generation.chain_valid)) {
-    let content = "";
-    try { content = fs.readFileSync(previousFile, "utf-8"); } catch {}
-    candidates.push({ source_path: previousFile, content_checksum: checksum(content, 48), reason: "orphan_or_mismatched_previous", status: "quarantined_previous", recovery_eligible: false });
-  }
-  const records = options.persist === false ? candidates : candidates.map(candidate => appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, candidate, at).entry);
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-orphan-reconciliation-v1",
-    group_id: groupId,
-    status: "ok",
-    current_file: currentFile,
-    previous_file: previousFile,
-    candidate_count: candidates.length,
-    temp_candidate_count: candidates.filter(row => row.reason === "interrupted_atomic_temp").length,
-    orphan_previous_count: candidates.filter(row => row.reason === "orphan_or_mismatched_previous").length,
-    candidates: records,
-    generation,
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-  };
+  return require("./group-memory-maintenance").reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryOrphans(groupId, options);
 }
 
 export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRecoveryHealth(groupId: string, options: any = {}) {
-  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
-  const orphans = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryOrphans(groupId, { ...options, persist: false });
-  const quarantineFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId);
-  const quarantinePresent = fs.existsSync(quarantineFile);
-  const quarantine = readJson(quarantineFile, {});
-  const coldDir = path.resolve(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId));
-  const evidenceDir = path.resolve(getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId));
-  const quarantineEntries = Array.isArray(quarantine.entries) ? quarantine.entries : [];
-  const compactedQuarantineEntries = Array.isArray(quarantine.compacted_entries) ? quarantine.compacted_entries : [];
-  const quarantineChecksumValid = !quarantinePresent || (quarantine.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-v1"
-    && String(quarantine.group_id || "") === groupId
-    && quarantine.quarantine_checksum === conflictResolutionMaintenanceNotificationDeliveryQuarantineChecksum(quarantine));
-  const invalidQuarantineEntries = quarantineEntries.filter((entry: any) => {
-    const source = path.resolve(String(entry.source_path || coldDir));
-    const sourceLocal = source === coldDir || source.startsWith(`${coldDir}${path.sep}`);
-    const evidencePath = String(entry.evidence_path || "");
-    const evidenceLocal = !evidencePath || path.resolve(evidencePath).startsWith(`${evidenceDir}${path.sep}`);
-    const evidence = evidencePath ? readJson(evidencePath, null) : null;
-    const evidenceValid = !evidencePath || (!!evidence
-      && String(evidence.group_id || "") === groupId
-      && String(evidence.source_content_checksum || "") === String(entry.content_checksum || "")
-      && checksum(String(evidence.source_content || ""), 48) === String(entry.content_checksum || ""));
-    return String(entry.group_id || "") !== groupId || !sourceLocal || !evidenceLocal || !evidenceValid;
-  });
-  const invalidCompactedQuarantineEntries = compactedQuarantineEntries.filter((entry: any) => entry?.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-quarantine-compact-v1"
-    || String(entry.group_id || "") !== groupId
-    || entry.compact_checksum !== conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(entry));
-  const latestRecoveryProof = quarantineEntries
-    .filter((entry: any) => entry.status === "quarantined_corrupt_current")
-    .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")))[0] || null;
-  const safe = (generation.valid || generation.status === "empty")
-    && quarantineChecksumValid
-    && invalidQuarantineEntries.length === 0
-    && invalidCompactedQuarantineEntries.length === 0
-    && orphans.destructive_action_authorized === false
-    && orphans.created_task_count === 0
-    && orphans.created_approval_receipt_count === 0
-    && orphans.deleted_count === 0;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-recovery-health-v1",
-    group_id: groupId,
-    status: safe ? "ok" : generation.recoverable ? "recoverable" : "fail",
-    safe,
-    generation,
-    orphans,
-    quarantine_file: quarantineFile,
-    quarantine_present: quarantinePresent,
-    quarantine_checksum_valid: quarantineChecksumValid,
-    quarantine_count: quarantineEntries.length,
-    compacted_quarantine_count: compactedQuarantineEntries.reduce((sum: number, entry: any) => sum + Number(entry.cleaned_count || 0), 0),
-    invalid_quarantine_entry_count: invalidQuarantineEntries.length + invalidCompactedQuarantineEntries.length,
-    latest_recovery_proof_id: latestRecoveryProof?.quarantine_id || "",
-    latest_recovery_proof_present: !!latestRecoveryProof,
-    retention: quarantine.retention || {},
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-  };
+  return require("./group-memory-maintenance").inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRecoveryHealth(groupId, options);
 }
 
-function readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string) {
+export function readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
   const ledger = readJson(file, {});
   const present = fs.existsSync(file);
@@ -13053,7 +8543,7 @@ function retainConflictResolutionMaintenanceNotificationDeliveries(groupId: stri
   };
 }
 
-function writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string, entries: any[], at: string, options: any = {}) {
+export function writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string, entries: any[], at: string, options: any = {}) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId);
   const previousRaw = options.previousLedgerOverride && typeof options.previousLedgerOverride === "object"
     ? options.previousLedgerOverride
@@ -13087,374 +8577,26 @@ function writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: s
 }
 
 export function recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryLedger(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const apply = options.apply === true || options.recover === true || options.dryRun === false || options.dry_run === false;
-  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
-  const resultBase = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-recovery-v1",
-    group_id: groupId,
-    generation,
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-  };
-  if (generation.valid) return { ...resultBase, status: "current_valid", recovered: false, recovery_required: false };
-  if (!generation.recoverable) return {
-    ...resultBase,
-    status: generation.status === "empty" ? "empty" : "blocked",
-    recovered: false,
-    recovery_required: generation.status !== "empty",
-    reason: generation.status === "empty" ? "delivery_ledger_not_initialized" : "no_valid_same_group_previous_delivery_generation",
-  };
-  const currentFile = generation.current.file;
-  let currentContent = "";
-  try { currentContent = fs.readFileSync(currentFile, "utf-8"); } catch {}
-  const corruptChecksum = checksum(currentContent, 48);
-  const evidenceDir = getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId);
-  const evidenceFile = path.join(evidenceDir, `${corruptChecksum || "missing"}.json`);
-  if (!apply) return {
-    ...resultBase,
-    status: "recoverable",
-    recovered: false,
-    recovery_required: true,
-    selected_previous_checksum: generation.previous.ledger_checksum,
-    corrupt_current_checksum: corruptChecksum,
-    evidence_file: evidenceFile,
-  };
-  const evidence = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-recovery-evidence-v1",
-    version: 1,
-    group_id: groupId,
-    source_file: currentFile,
-    source_content_checksum: corruptChecksum,
-    source_content: currentContent,
-    reason: generation.current.error || "current_delivery_generation_invalid",
-    quarantined_at: at,
-  };
-  writeJsonAtomic(evidenceFile, evidence);
-  appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId, {
-    source_path: currentFile,
-    evidence_path: evidenceFile,
-    content_checksum: corruptChecksum,
-    reason: generation.current.error || "current_delivery_generation_invalid",
-    status: "quarantined_corrupt_current",
-    recovery_eligible: false,
-  }, at);
-  const selected = generation.previous.value;
-  const written = writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, selected.entries || [], at, {
-    ...options,
-    compactedEntries: selected.compacted_entries || [],
-    previousLedgerOverride: selected,
-  });
-  const verified = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId);
-  return {
-    ...resultBase,
-    status: verified.valid ? "recovered" : "blocked",
-    recovered: verified.valid,
-    recovery_required: !verified.valid,
-    selected_previous_checksum: generation.previous.ledger_checksum,
-    corrupt_current_checksum: corruptChecksum,
-    evidence_file: evidenceFile,
-    retention_generation: written.retention_generation,
-    ledger_checksum: written.ledger_checksum,
-    verification: verified,
-  };
+  return require("./group-memory-maintenance").recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, options);
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRetention(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const ledger = readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId);
-  if (!ledger.ledger_checksum_valid) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-retention-v1",
-    group_id: groupId,
-    status: "blocked",
-    reason: "delivery_ledger_checksum_invalid",
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-  };
-  const written = writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, ledger.entries, at, {
-    ...options,
-    compactedEntries: ledger.compacted_entries,
-  });
-  const health = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId, { ...options, at });
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-retention-v1",
-    group_id: groupId,
-    status: health.invalid_delivery_count === 0 ? "ok" : "warn",
-    retention_generation: written.retention_generation,
-    ledger_checksum: written.ledger_checksum,
-    previous_ledger_checksum: written.previous_ledger_checksum,
-    retention: written.retention,
-    health,
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-    file: written.file,
-  };
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRetention(groupId, options);
 }
 
 export function recordPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDelivery(groupId: string, audience: string, notifications: any[] = [], input: any = {}) {
-  const normalizedAudience = String(audience || "").trim().toLowerCase();
-  if (!new Set(["group-main-agent", "global-agent"]).has(normalizedAudience)) throw new Error("maintenance notification delivery audience is invalid");
-  const at = String(input.at || input.deliveredAt || input.delivered_at || now());
-  const contextId = String(input.contextId || input.context_id || "").trim();
-  const consumerSessionId = String(input.consumerSessionId || input.consumer_session_id || input.sessionId || input.session_id || "").trim();
-  const channel = String(input.channel || normalizedAudience).trim().slice(0, 80) || normalizedAudience;
-  if (!contextId || !consumerSessionId) throw new Error("maintenance notification delivery requires contextId and consumerSessionId");
-  const safeNotifications = (Array.isArray(notifications) ? notifications : []).filter((entry: any) => entry
-    && String(entry.group_id || "") === groupId
-    && String(entry.audience || "") === normalizedAudience
-    && entry.notification_id
-    && entry.state_fingerprint
-    && entry.advisory_only === true
-    && entry.destructive_action_authorized === false
-    && entry.should_create_real_task === false
-    && entry.cross_group_authorization_allowed === false);
-  const ledger = readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId);
-  if (!ledger.ledger_checksum_valid) throw new Error("maintenance notification delivery ledger checksum is invalid");
-  const byId = new Map<string, any>(ledger.entries.map((entry: any) => [String(entry.delivery_id || ""), entry]));
-  const recorded: any[] = [];
-  for (const notification of safeNotifications) {
-    const deliveryId = `conflict-resolution-maintenance-notification-delivery:${checksum([
-      groupId,
-      normalizedAudience,
-      notification.notification_id,
-      notification.state_fingerprint,
-      contextId,
-      consumerSessionId,
-    ], 24)}`;
-    const previous = byId.get(deliveryId) || null;
-    const entry: any = {
-      schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-v1",
-      version: 1,
-      delivery_id: deliveryId,
-      group_id: groupId,
-      ...conflictResolutionMaintenanceScopeMetadata(groupId),
-      audience: normalizedAudience,
-      notification_id: notification.notification_id,
-      state_fingerprint: notification.state_fingerprint,
-      severity: notification.severity || "info",
-      context_id: contextId,
-      consumer_session_id: consumerSessionId,
-      channel,
-      first_delivered_at: previous?.first_delivered_at || at,
-      last_delivered_at: at,
-      delivery_count: Number(previous?.delivery_count || 0) + 1,
-      advisory_only: true,
-      destructive_action_authorized: false,
-      should_create_real_task: false,
-      cross_group_authorization_allowed: false,
-    };
-    entry.delivery_checksum = conflictResolutionMaintenanceNotificationDeliveryChecksum(entry);
-    byId.set(deliveryId, entry);
-    recorded.push(entry);
-  }
-  if (recorded.length) writeConflictResolutionMaintenanceNotificationDeliveryLedger(groupId, [...byId.values()], at);
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-result-v1",
-    group_id: groupId,
-    ...conflictResolutionMaintenanceScopeMetadata(groupId),
-    audience: normalizedAudience,
-    context_id: contextId,
-    consumer_session_id: consumerSessionId,
-    recorded_count: recorded.length,
-    entries: recorded,
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-  };
+  return require("./group-memory-maintenance").recordPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDelivery(groupId, audience, notifications, input);
 }
 
 export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId: string, options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const atMs = Date.parse(at);
-  const unseenAfterMs = Math.max(60_000, Number(options.unseenAfterMs || options.unseen_after_ms || 15 * 60 * 1000));
-  const repeatThreshold = Math.max(2, Number(options.repeatThreshold || options.repeat_threshold || 3));
-  const ledger = readConflictResolutionMaintenanceNotificationDeliveryLedger(groupId);
-  const notificationLedger = readJson(getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId), {});
-  const pinnedCurrentNotificationIds = new Set(uniqueStrings(notificationLedger.pinned_current_notification_ids || [], 20));
-  const deliveries = ledger.entries.map((entry: any) => {
-    const checksumValid = entry.delivery_checksum === conflictResolutionMaintenanceNotificationDeliveryChecksum(entry);
-    const valid = entry.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-v1"
-      && String(entry.group_id || "") === groupId
-      && new Set(["group-main-agent", "global-agent"]).has(String(entry.audience || ""))
-      && entry.advisory_only === true
-      && entry.destructive_action_authorized === false
-      && entry.should_create_real_task === false
-      && checksumValid;
-    return { ...entry, checksum_valid: checksumValid, valid };
-  });
-  const compactedDeliveries = ledger.compacted_entries.map((entry: any) => {
-    const checksumValid = entry.compact_checksum === conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry);
-    const valid = entry.schema === "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-compact-v1"
-      && String(entry.group_id || "") === groupId
-      && new Set(["group-main-agent", "global-agent"]).has(String(entry.audience || ""))
-      && entry.advisory_only === true
-      && entry.destructive_action_authorized === false
-      && entry.should_create_real_task === false
-      && checksumValid;
-    return { ...entry, checksum_valid: checksumValid, valid };
-  });
-  const pending = ["group-main-agent", "global-agent"].flatMap(audience => {
-    const context = buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId, audience, {
-      at,
-      maxNotifications: 20,
-      recordDelivery: false,
-    });
-    return context.notifications || [];
-  });
-  const rows = pending.map((notification: any) => {
-    const matching = deliveries.filter((entry: any) => entry.valid === true
-      && entry.audience === notification.audience
-      && entry.notification_id === notification.notification_id
-      && entry.state_fingerprint === notification.state_fingerprint
-      && (!notification.state_observed_at || String(entry.last_delivered_at || "") >= String(notification.state_observed_at)));
-    const firstSeenMs = Date.parse(String(notification.first_seen_at || notification.last_seen_at || ""));
-    const ageMs = Number.isFinite(atMs) && Number.isFinite(firstSeenMs) ? Math.max(0, atMs - firstSeenMs) : 0;
-    const severe = new Set(["critical", "warn", "warning", "error"]).has(String(notification.severity || "").toLowerCase());
-    const delivered = matching.length > 0;
-    const repeatedUnseen = !delivered && severe && ageMs >= unseenAfterMs && Number(notification.seen_count || 0) >= repeatThreshold;
-    return {
-      group_id: groupId,
-      ...conflictResolutionMaintenanceScopeMetadata(groupId),
-      audience: notification.audience,
-      notification_id: notification.notification_id,
-      state_fingerprint: notification.state_fingerprint,
-      severity: notification.severity,
-      action: notification.action,
-      state_observed_at: notification.state_observed_at || "",
-      first_seen_at: notification.first_seen_at || "",
-      last_seen_at: notification.last_seen_at || "",
-      seen_count: Number(notification.seen_count || 0),
-      age_ms: ageMs,
-      delivered,
-      delivery_count: matching.reduce((sum: number, entry: any) => sum + Number(entry.delivery_count || 0), 0),
-      repeated_unseen: repeatedUnseen,
-      advisory_only: true,
-      should_create_real_task: false,
-    };
-  });
-  const currentKeys = new Map(rows.map((row: any) => [JSON.stringify([row.audience, row.notification_id, row.state_fingerprint]), row]));
-  const compactedCurrentDeliveryCount = compactedDeliveries.filter((entry: any) => {
-    const current = currentKeys.get(JSON.stringify([entry.audience, entry.notification_id, entry.state_fingerprint])) as any;
-    return !!current && (!current.state_observed_at || String(entry.last_delivered_at || "") >= String(current.state_observed_at));
-  }).length;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-delivery-health-v1",
-    group_id: groupId,
-    ...conflictResolutionMaintenanceScopeMetadata(groupId),
-    generated_at: at,
-    pending_count: rows.length,
-    delivered_pending_count: rows.filter((row: any) => row.delivered).length,
-    unseen_pending_count: rows.filter((row: any) => !row.delivered).length,
-    repeated_unseen_count: rows.filter((row: any) => row.repeated_unseen).length,
-    invalid_delivery_count: deliveries.filter((entry: any) => !entry.valid).length + compactedDeliveries.filter((entry: any) => !entry.valid).length + (ledger.ledger_checksum_valid ? 0 : 1),
-    ledger_checksum_valid: ledger.ledger_checksum_valid,
-    previous_chain_valid: ledger.previous_chain_valid,
-    retention_generation: ledger.retention_generation,
-    hot_delivery_entry_count: deliveries.length,
-    compacted_delivery_entry_count: compactedDeliveries.length,
-    compacted_current_delivery_count: compactedCurrentDeliveryCount,
-    pinned_current_notification_count: pinnedCurrentNotificationIds.size,
-    unprotected_repeated_unseen_count: rows.filter((row: any) => row.repeated_unseen && !pinnedCurrentNotificationIds.has(row.notification_id)).length,
-    retention: ledger.retention || {},
-    rows,
-    policy: "read_only_delivery_observation_no_task_no_approval_no_delete",
-    destructive_action_authorized: false,
-    created_task_count: 0,
-    created_approval_receipt_count: 0,
-    deleted_count: 0,
-    file: ledger.file,
-  };
+  return require("./group-memory-maintenance").inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId, options);
 }
 
 export function buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId: string, audience: string, options: any = {}) {
-  const normalizedAudience = String(audience || "").trim().toLowerCase();
-  if (!new Set(["group-main-agent", "global-agent"]).has(normalizedAudience)) throw new Error("maintenance notification context audience is invalid");
-  const at = String(options.at || options.now || now());
-  const notificationFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId);
-  const notificationLedger = readJson(notificationFile, {});
-  const audienceNotifications = (Array.isArray(notificationLedger.entries) ? notificationLedger.entries : [])
-    .filter((entry: any) => String(entry.group_id || "") === groupId && String(entry.audience || "") === normalizedAudience);
-  const pinnedIds = new Set(uniqueStrings(notificationLedger.pinned_current_notification_ids || [], 20));
-  const pinnedNotifications = audienceNotifications.filter((entry: any) => pinnedIds.has(String(entry.notification_id || "")));
-  const notifications = pinnedNotifications.length
-    ? pinnedNotifications
-    : audienceNotifications
-      .sort((a: any, b: any) => String(b.state_observed_at || b.last_seen_at || "").localeCompare(String(a.state_observed_at || a.last_seen_at || "")))
-      .slice(0, 8);
-  const receiptInspection = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationReceipts(groupId, { at });
-  const receipts = receiptInspection.entries.filter((entry: any) => entry.valid === true && entry.audience === normalizedAudience);
-  const stateCache = new Map<string, any>();
-  const currentRows = notifications.filter((entry: any) => {
-    const gracePeriodMs = Number(entry.grace_period_ms || 0);
-    const observedAt = String(entry.state_observed_at || entry.first_seen_at || at);
-    const cacheKey = `${observedAt}:${gracePeriodMs}`;
-    if (!stateCache.has(cacheKey)) stateCache.set(cacheKey, conflictResolutionMaintenanceState(groupId, { at: observedAt, gracePeriodMs }));
-    const state = stateCache.get(cacheKey);
-    return state.revalidated === true
-      && entry.state_fingerprint === state.state_fingerprint
-      && (!entry.current_manifest_checksum || entry.current_manifest_checksum === state.current_manifest_checksum)
-      && (!entry.previous_manifest_checksum || entry.previous_manifest_checksum === state.previous_manifest_checksum)
-      && (!entry.quarantine_checksum || entry.quarantine_checksum === state.quarantine_checksum);
-  });
-  const hiddenIds = new Set(receipts.map((receipt: any) => `${receipt.notification_id}:${receipt.state_fingerprint}`));
-  const maxNotifications = Math.max(1, Math.min(20, Number(options.maxNotifications || options.max_notifications || 4)));
-  const pending = currentRows
-    .filter((entry: any) => !hiddenIds.has(`${entry.notification_id}:${entry.state_fingerprint}`))
-    .sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")))
-    .slice(0, maxNotifications)
-    .map((entry: any) => ({
-      notification_id: entry.notification_id,
-      group_id: groupId,
-      ...conflictResolutionMaintenanceScopeMetadata(groupId),
-      audience: normalizedAudience,
-      state_fingerprint: entry.state_fingerprint,
-      severity: entry.severity || "info",
-      action: entry.action || "continue_read_only_verification",
-      reason: String(entry.reason || "").slice(0, 360),
-      state_observed_at: entry.state_observed_at || "",
-      first_seen_at: entry.first_seen_at || "",
-      last_seen_at: entry.last_seen_at || "",
-      seen_count: Number(entry.seen_count || 1),
-      advisory_only: true,
-      destructive_action_authorized: false,
-      should_create_real_task: false,
-      cross_group_authorization_allowed: false,
-    }));
-  const delivery = options.recordDelivery === true && pending.length
-    ? recordPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDelivery(groupId, normalizedAudience, pending, {
-      at,
-      contextId: options.contextId || options.context_id,
-      consumerSessionId: options.consumerSessionId || options.consumer_session_id || options.sessionId || options.session_id,
-      channel: options.channel || normalizedAudience,
-    })
-    : null;
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-notification-context-v1",
-    group_id: groupId,
-    ...conflictResolutionMaintenanceScopeMetadata(groupId),
-    audience: normalizedAudience,
-    generated_at: at,
-    pending_count: pending.length,
-    current_notification_count: currentRows.length,
-    hidden_by_valid_receipt_count: currentRows.length - pending.length,
-    notifications: pending,
-    policy: "advisory_visibility_only_no_task_no_approval_no_delete",
-    advisory_only: true,
-    cross_group_authorization_allowed: false,
-    notification_file: notificationFile,
-    receipt_file: receiptInspection.file,
-    delivery,
-  };
+  return require("./group-memory-maintenance").buildPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationContext(groupId, audience, options);
 }
 
-function emitConflictResolutionMaintenanceNotifications(groupId: string, run: any = {}, options: any = {}) {
+export function emitConflictResolutionMaintenanceNotifications(groupId: string, run: any = {}, options: any = {}) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId);
   const ledger = readJson(file, {});
   const previous = Array.isArray(ledger.entries) ? ledger.entries : [];
@@ -13543,7 +8685,7 @@ function emitConflictResolutionMaintenanceNotifications(groupId: string, run: an
   return { ...value, file, stateFingerprint };
 }
 
-function conflictResolutionMaintenanceRecommendation(generation: any = {}, quarantine: any = {}) {
+export function conflictResolutionMaintenanceRecommendation(generation: any = {}, quarantine: any = {}) {
   if (generation.valid !== true) return {
     severity: "critical",
     action: "recover_or_repair_manifest_generation",
@@ -13577,80 +8719,10 @@ function conflictResolutionMaintenanceRecommendation(generation: any = {}, quara
 }
 
 export function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId: string, options: any = {}) {
-  const at = String(options.at || options.generatedAt || options.generated_at || now());
-  const trigger = String(options.trigger || options.source || "manual").trim().toLowerCase();
-  const backgroundTrigger = ["background", "timer", "scheduler", "cron", "automatic", "auto"].includes(trigger);
-  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
-  const archive = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId);
-  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
-    dryRun: true,
-    at,
-    gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
-  });
-  const recommendation = conflictResolutionMaintenanceRecommendation(generation, quarantine);
-  const intervalMs = Math.max(60_000, Number(options.intervalMs || options.interval_ms || 6 * 60 * 60 * 1000));
-  const runCore = {
-    group_id: groupId,
-    ...conflictResolutionMaintenanceScopeMetadata(groupId),
-    trigger,
-    at,
-    current_manifest_checksum: generation.currentManifestChecksum || "",
-    previous_manifest_checksum: generation.previousManifestChecksum || "",
-    quarantine_checksum: quarantine.quarantine_checksum || "",
-    generation_valid: generation.valid === true,
-    archive_valid: archive.valid === true,
-    orphan_count: Number(quarantine.orphan_count || 0),
-    eligible_count: Number(quarantine.eligible_count || 0),
-    protected_open_repair_count: Number(quarantine.protected_open_repair_count || 0),
-    grace_period_ms: Number(quarantine.grace_period_ms || 0),
-  };
-  const runId = `conflict-resolution-maintenance:${checksum(runCore, 24)}`;
-  const run = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-run-v1",
-    version: 1,
-    run_id: runId,
-    ...runCore,
-    mode: "verify_and_quarantine_dry_run_only",
-    destructive_action_authorized: false,
-    deletion_attempted: false,
-    background_trigger: backgroundTrigger,
-    recommendation,
-    group_main_agent_recommendation: {
-      ...recommendation,
-      owner: "group-main-agent",
-      should_create_real_task: false,
-      next_step_requires_explicit_dispatch: true,
-    },
-    global_agent_recommendation: {
-      ...recommendation,
-      owner: "global-agent",
-      advisory_only: true,
-      cross_group_authorization_allowed: false,
-    },
-    next_run_at: new Date(Date.parse(at) + intervalMs).toISOString(),
-  };
-  const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
-  const ledger = readJson(file, {});
-  const entries = [...(Array.isArray(ledger.entries) ? ledger.entries : []).filter((entry: any) => entry.run_id !== runId), run].slice(-240);
-  const value = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-ledger-v1",
-    version: 1,
-    group_id: groupId,
-    ...conflictResolutionMaintenanceScopeMetadata(groupId),
-    controller_policy: "background_verify_and_dry_run_never_delete",
-    entries,
-    latest_run: run,
-    next_run_at: run.next_run_at,
-    updated_at: at,
-  };
-  if (options.persist !== false) writeJsonAtomic(file, value);
-  const notifications = options.emitNotifications === true || options.emit_notifications === true
-    ? emitConflictResolutionMaintenanceNotifications(groupId, run, { at })
-    : null;
-  return { ...run, file, ledger: value, generation, archive, quarantine, notifications };
+  return require("./group-memory-maintenance").runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId, options);
 }
 
-function conflictResolutionGcApprovalReceiptChecksum(receipt: any = {}) {
+export function conflictResolutionGcApprovalReceiptChecksum(receipt: any = {}) {
   return checksum({
     receipt_id: receipt.receipt_id || "",
     group_id: receipt.group_id || "",
@@ -13673,7 +8745,7 @@ function conflictResolutionGcApprovalReceiptChecksum(receipt: any = {}) {
   }, 48);
 }
 
-function readConflictResolutionGcApprovalLedger(groupId: string) {
+export function readConflictResolutionGcApprovalLedger(groupId: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId);
   const ledger = readJson(file, {});
   return {
@@ -13686,7 +8758,7 @@ function readConflictResolutionGcApprovalLedger(groupId: string) {
   };
 }
 
-function writeConflictResolutionGcApprovalLedger(groupId: string, entries: any[], at: string) {
+export function writeConflictResolutionGcApprovalLedger(groupId: string, entries: any[], at: string) {
   const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId);
   const open = entries.filter((entry: any) => entry.consumed !== true && entry.revoked !== true);
   const terminal = entries.filter((entry: any) => entry.consumed === true || entry.revoked === true).slice(-160);
@@ -13704,275 +8776,26 @@ function writeConflictResolutionGcApprovalLedger(groupId: string, entries: any[]
 }
 
 export function createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupId: string, input: any = {}) {
-  const at = String(input.at || input.issuedAt || input.issued_at || now());
-  const actorRole = String(input.actorRole || input.actor_role || "").trim().toLowerCase();
-  const actorId = String(input.actorId || input.actor_id || input.actor || "").trim();
-  const reason = String(input.reason || "").trim();
-  if (input.explicitApproval !== true && input.explicit_approval !== true) throw new Error("GC approval requires explicitApproval=true");
-  if (!new Set(["group-main-agent", "global-agent"]).has(actorRole)) throw new Error("GC approval actor must be group-main-agent or global-agent");
-  if (!actorId) throw new Error("GC approval requires actorId");
-  if (!reason) throw new Error("GC approval requires reason");
-  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
-  if (!generation.valid) throw new Error(`GC approval blocked by invalid manifest generations: ${(generation.gaps || []).join(",")}`);
-  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
-    dryRun: true,
-    at,
-    gracePeriodMs: input.gracePeriodMs ?? input.grace_period_ms,
-  });
-  if (quarantine.quarantine_input_valid === false) throw new Error("GC approval blocked by invalid quarantine manifest");
-  const requestedPathsRaw = input.candidateRelPaths || input.candidate_rel_paths;
-  const requestedPaths = Array.isArray(requestedPathsRaw) ? new Set(uniqueStrings(requestedPathsRaw, 5000)) : null;
-  const eligible = (quarantine.entries || []).filter((entry: any) => entry.status === "eligible"
-    && entry.shard_valid === true
-    && entry.recovery_covered === true
-    && entry.referenced_by_open_repair !== true
-    && (!requestedPaths || requestedPaths.has(entry.rel_path)));
-  if (!eligible.length) throw new Error("GC approval requires at least one eligible quarantined shard");
-  if (requestedPaths && eligible.length !== requestedPaths.size) throw new Error("GC approval candidate set includes non-eligible or missing shards");
-  const expiresInMs = Math.max(60_000, Math.min(24 * 60 * 60 * 1000, Number(input.expiresInMs || input.expires_in_ms || 30 * 60 * 1000)));
-  const receiptId = `conflict-resolution-gc-approval:${checksum([
-    groupId,
-    generation.currentManifestChecksum,
-    generation.previousManifestChecksum,
-    quarantine.quarantine_checksum,
-    eligible.map((entry: any) => entry.rel_path),
-    actorRole,
-    actorId,
-    at,
-  ], 24)}`;
-  const receipt: any = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-approval-receipt-v1",
-    version: 1,
-    receipt_id: receiptId,
-    group_id: groupId,
-    approved: true,
-    allow_delete: true,
-    actor_role: actorRole,
-    actor_id: actorId,
-    reason,
-    current_manifest_checksum: generation.currentManifestChecksum,
-    previous_manifest_checksum: generation.previousManifestChecksum,
-    quarantine_checksum: quarantine.quarantine_checksum,
-    candidates: eligible.map((entry: any) => ({
-      rel_path: entry.rel_path,
-      content_checksum: entry.content_checksum,
-      row_ids_checksum: entry.row_ids_checksum,
-    })).sort((a: any, b: any) => a.rel_path.localeCompare(b.rel_path)),
-    issued_at: at,
-    expires_at: new Date(Date.parse(at) + expiresInMs).toISOString(),
-    single_use: true,
-    consumed: false,
-    authorization_boundary: "exact_group_generation_quarantine_and_shard_set_only",
-  };
-  receipt.receipt_checksum = conflictResolutionGcApprovalReceiptChecksum(receipt);
-  const ledger = readConflictResolutionGcApprovalLedger(groupId);
-  const entries = [...ledger.entries.filter((entry: any) => entry.receipt_id !== receiptId), receipt];
-  writeConflictResolutionGcApprovalLedger(groupId, entries, at);
-  return receipt;
+  return require("./group-memory-maintenance").createPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupId, input);
 }
 
 export function executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupId: string, input: any = {}) {
-  const at = String(input.at || input.executedAt || input.executed_at || now());
-  const trigger = String(input.trigger || input.source || "manual").trim().toLowerCase();
-  const receiptId = String(input.receiptId || input.receipt_id || "").trim();
-  const ledger = readConflictResolutionGcApprovalLedger(groupId);
-  const receipt = ledger.entries.find((entry: any) => entry.receipt_id === receiptId) || null;
-  const blocked = (reason: string, extra: any = {}) => ({
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-execution-v1",
-    groupId,
-    status: "blocked",
-    executed: false,
-    reason,
-    receipt_id: receiptId,
-    ...extra,
-  });
-  if (["background", "timer", "scheduler", "cron", "automatic", "auto"].includes(trigger)) return blocked("background_trigger_cannot_authorize_destructive_gc");
-  if (input.explicitExecution !== true && input.explicit_execution !== true) return blocked("explicit_execution_required");
-  if (!receipt) return blocked("approval_receipt_not_found");
-  if (String(receipt.group_id || "") !== groupId) return blocked("approval_receipt_group_mismatch");
-  if (receipt.consumed === true) return blocked("approval_receipt_already_consumed");
-  if (receipt.revoked === true) return blocked("approval_receipt_revoked");
-  if (receipt.approved !== true || receipt.allow_delete !== true || receipt.single_use !== true) return blocked("approval_receipt_policy_invalid");
-  if (receipt.receipt_checksum !== conflictResolutionGcApprovalReceiptChecksum(receipt)) return blocked("approval_receipt_checksum_invalid");
-  const expiresAt = Date.parse(String(receipt.expires_at || ""));
-  const atMs = Date.parse(at);
-  if (!Number.isFinite(expiresAt) || !Number.isFinite(atMs) || atMs > expiresAt) return blocked("approval_receipt_expired");
-  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
-  if (!generation.valid) return blocked("manifest_generation_invalid", { gaps: generation.gaps || [] });
-  if (generation.currentManifestChecksum !== receipt.current_manifest_checksum
-    || generation.previousManifestChecksum !== receipt.previous_manifest_checksum) return blocked("approval_receipt_generation_stale");
-  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
-    dryRun: true,
-    at,
-    gracePeriodMs: input.gracePeriodMs ?? input.grace_period_ms,
-  });
-  if (quarantine.quarantine_input_valid === false) return blocked("quarantine_manifest_invalid");
-  if (quarantine.quarantine_checksum !== receipt.quarantine_checksum) return blocked("approval_receipt_quarantine_stale");
-  const eligibleByPath = new Map((quarantine.entries || []).filter((entry: any) => entry.status === "eligible").map((entry: any) => [entry.rel_path, entry]));
-  const candidatesValid = (receipt.candidates || []).every((candidate: any) => {
-    const entry: any = eligibleByPath.get(candidate.rel_path);
-    return !!entry
-      && entry.content_checksum === candidate.content_checksum
-      && entry.row_ids_checksum === candidate.row_ids_checksum
-      && entry.shard_valid === true
-      && entry.recovery_covered === true
-      && entry.referenced_by_open_repair !== true;
-  });
-  if (!candidatesValid || !(receipt.candidates || []).length) return blocked("approval_receipt_candidate_set_stale");
-  const allowedRelPaths = receipt.candidates.map((candidate: any) => candidate.rel_path);
-  const result = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
-    at,
-    gracePeriodMs: input.gracePeriodMs ?? input.grace_period_ms,
-    deleteEligible: true,
-    allowedRelPaths,
-  });
-  const deletedThisRun = (result.entries || []).filter((entry: any) => entry.status === "deleted" && entry.deleted_at === at);
-  if (deletedThisRun.some((entry: any) => !allowedRelPaths.includes(entry.rel_path))) return blocked("gc_deleted_outside_approved_candidate_set");
-  const execution = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-execution-v1",
-    groupId,
-    status: "executed",
-    executed: true,
-    receipt_id: receiptId,
-    receipt_checksum: receipt.receipt_checksum,
-    deleted_count: deletedThisRun.length,
-    deleted_rel_paths: deletedThisRun.map((entry: any) => entry.rel_path),
-    current_manifest_checksum: generation.currentManifestChecksum,
-    previous_manifest_checksum: generation.previousManifestChecksum,
-    quarantine_checksum_before: quarantine.quarantine_checksum,
-    quarantine_checksum_after: result.quarantine_checksum,
-    executed_at: at,
-    actor_role: receipt.actor_role,
-    actor_id: receipt.actor_id,
-  };
-  const updatedEntries = ledger.entries.map((entry: any) => entry.receipt_id === receiptId ? {
-    ...entry,
-    consumed: true,
-    consumed_at: at,
-    execution_status: execution.status,
-    execution_deleted_count: execution.deleted_count,
-    execution_checksum: checksum(execution, 48),
-  } : entry);
-  writeConflictResolutionGcApprovalLedger(groupId, updatedEntries, at);
-  return { ...execution, result };
+  return require("./group-memory-maintenance").executePostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalReceipt(groupId, input);
 }
 
 export function inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId: string, options: any = {}) {
-  const maintenanceFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
-  const maintenanceLedger = readJson(maintenanceFile, {});
-  const approvalLedger = readConflictResolutionGcApprovalLedger(groupId);
-  const notificationFile = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId);
-  const notificationLedger = readJson(notificationFile, {});
-  const receipts = approvalLedger.entries || [];
-  const invalidReceipts = receipts.filter((receipt: any) => receipt.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-gc-approval-receipt-v1"
-    || String(receipt.group_id || "") !== groupId
-    || receipt.receipt_checksum !== conflictResolutionGcApprovalReceiptChecksum(receipt));
-  const latestRun = maintenanceLedger.latest_run || null;
-  const latestRunSafe = !latestRun || (latestRun.mode === "verify_and_quarantine_dry_run_only"
-    && latestRun.destructive_action_authorized === false
-    && latestRun.deletion_attempted === false);
-  const generation = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId);
-  const quarantine = reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId, {
-    dryRun: true,
-    at: options.at || options.now || now(),
-    gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
-  });
-  const notificationDeliveryHealth = inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryHealth(groupId, options);
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-maintenance-status-v1",
-    groupId,
-    status: latestRunSafe && invalidReceipts.length === 0 && generation.valid === true && quarantine.quarantine_input_valid !== false ? "ok" : "fail",
-    maintenanceFile,
-    approvalFile: approvalLedger.file,
-    notificationFile,
-    notifications: Array.isArray(notificationLedger.entries) ? notificationLedger.entries : [],
-    notificationCount: Number(notificationLedger.notification_count || 0),
-    notificationDeliveryHealth,
-    latestRun,
-    nextRunAt: maintenanceLedger.next_run_at || latestRun?.next_run_at || "",
-    latestRunSafe,
-    receiptCount: receipts.length,
-    openApprovalCount: receipts.filter((receipt: any) => receipt.consumed !== true && receipt.revoked !== true).length,
-    consumedApprovalCount: receipts.filter((receipt: any) => receipt.consumed === true).length,
-    invalidApprovalCount: invalidReceipts.length,
-    backgroundDeletionAuthorized: false,
-    generation,
-    quarantine,
-    recommendation: conflictResolutionMaintenanceRecommendation(generation, quarantine),
-    gaps: [
-      ...(!latestRunSafe ? ["maintenance_latest_run_violated_dry_run_boundary"] : []),
-      ...(invalidReceipts.length ? [`invalid_gc_approval_receipts:${invalidReceipts.length}`] : []),
-      ...(generation.gaps || []),
-      ...(quarantine.quarantine_input_valid === false ? ["quarantine_manifest_invalid"] : []),
-    ],
-  };
+  return require("./group-memory-maintenance").inspectPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId, options);
 }
 
 export function listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds(groupIds: string[] = [], options: any = {}) {
-  const requested = uniqueStrings(groupIds, 1000);
-  const requestedKeys = new Set(requested.flatMap((value: string) => [value.toLowerCase(), safeSegment(value).toLowerCase()]));
-  const candidates = new Set<string>();
-  for (const value of requested) {
-    if (fs.existsSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(value))) candidates.add(value);
-  }
-  try {
-    for (const entry of fs.readdirSync(GROUP_TYPED_MEMORY_DIR, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const scopeId = entry.name;
-      if (!fs.existsSync(getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(scopeId))) continue;
-      const ledger = readJson(getGroupTypedMemoryDistillationLedgerFile(scopeId), {});
-      const identity = typedMemorySessionScopeIdentity(scopeId, ledger);
-      if (requestedKeys.size
-        && !requestedKeys.has(scopeId.toLowerCase())
-        && !requestedKeys.has(safeSegment(scopeId).toLowerCase())
-        && !requestedKeys.has(identity.rootGroupId.toLowerCase())
-        && !requestedKeys.has(safeSegment(identity.rootGroupId).toLowerCase())) continue;
-      candidates.add(scopeId);
-    }
-  } catch {}
-  const maxScopes = Math.max(1, Math.min(5000, Number(options.maxScopes || options.max_scopes || 1000)));
-  return [...candidates].sort().slice(0, maxScopes);
+  return require("./group-memory-maintenance").listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds(groupIds, options);
 }
 
 export function runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupIds: string[] = [], options: any = {}) {
-  const at = String(options.at || options.now || now());
-  const atMs = Date.parse(at);
-  const scopeIds = options.expandScopes === false || options.expand_scopes === false
-    ? uniqueStrings(groupIds, 1000)
-    : listPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceScopeIds(groupIds, options);
-  const rows = scopeIds.map((groupId: string) => {
-    const file = getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId);
-    const ledger = readJson(file, {});
-    const nextRunAt = String(ledger.next_run_at || "");
-    const nextRunMs = Date.parse(nextRunAt);
-    const due = options.force === true || !Number.isFinite(nextRunMs) || (Number.isFinite(atMs) && atMs >= nextRunMs);
-    if (!due) return { groupId, due: false, skipped: true, nextRunAt, destructiveActionAuthorized: false };
-    const run = runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupId, {
-      at,
-      trigger: "background",
-      intervalMs: options.intervalMs || options.interval_ms,
-      gracePeriodMs: options.gracePeriodMs ?? options.grace_period_ms,
-      persist: options.persist !== false,
-      emitNotifications: options.emitNotifications === true || options.emit_notifications === true,
-    });
-    return { groupId, due: true, skipped: false, run, nextRunAt: run.next_run_at, destructiveActionAuthorized: false };
-  });
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-due-maintenance-v1",
-    at,
-    groupCount: rows.length,
-    rootGroupCount: new Set(rows.map((row: any) => typedMemorySessionScopeIdentity(row.groupId, readJson(getGroupTypedMemoryDistillationLedgerFile(row.groupId), {})).rootGroupId)).size,
-    exactSessionCount: rows.filter((row: any) => typedMemorySessionScopeIdentity(row.groupId, readJson(getGroupTypedMemoryDistillationLedgerFile(row.groupId), {})).exactSession).length,
-    legacyScopeCount: rows.filter((row: any) => !typedMemorySessionScopeIdentity(row.groupId, readJson(getGroupTypedMemoryDistillationLedgerFile(row.groupId), {})).exactSession).length,
-    dueCount: rows.filter(row => row.due).length,
-    skippedCount: rows.filter(row => row.skipped).length,
-    destructiveActionAuthorized: false,
-    deletedCount: 0,
-    rows,
-  };
+  return require("./group-memory-maintenance").runDuePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenance(groupIds, options);
 }
 
-function loadPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId: string) {
+export function loadPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId: string) {
   const manifest = readConflictResolutionColdArchiveManifest(groupId);
   if (!manifest) return [];
   const verification = verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, { includeRows: true });
@@ -13980,7 +8803,7 @@ function loadPostCompactCompletionMemoryPreservationClosureConflictResolutionCol
   return verification.rows || [];
 }
 
-function writePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, inputRows: any[] = [], options: any = {}) {
+export function writePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, inputRows: any[] = [], options: any = {}) {
   const rows = [...inputRows]
     .filter((row: any) => String(row.typed_scope_id || row.group_id || "") === groupId && row.row_id)
     .sort((a: any, b: any) => String(a.row_id || "").localeCompare(String(b.row_id || "")));
@@ -14088,234 +8911,15 @@ function writePostCompactCompletionMemoryPreservationClosureConflictResolutionCo
 }
 
 export function lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, query: any = {}, options: any = {}) {
-  const manifest = readConflictResolutionColdArchiveManifest(groupId);
-  if (!manifest) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
-    groupId,
-    status: "missing",
-    found: false,
-    rows: [],
-    shardsRead: 0,
-    gaps: ["cold_archive_manifest_missing"],
-  };
-  if (manifest.manifest_checksum !== conflictResolutionColdArchiveManifestChecksum(manifest)) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
-    groupId,
-    status: "tampered",
-    found: false,
-    rows: [],
-    shardsRead: 0,
-    gaps: ["cold_archive_manifest_checksum_mismatch"],
-  };
-  const rowId = String(query.rowId || query.row_id || "").trim();
-  const resolutionEntryId = String(query.resolutionEntryId || query.resolution_entry_id || query.entryId || query.entry_id || "").trim();
-  const taskFamilyKey = String(query.taskFamilyKey || query.task_family_key || "").trim();
-  const descriptors = (manifest.shards || []).filter((shard: any) => {
-    if (rowId) return (shard.row_ids || []).includes(rowId);
-    if (resolutionEntryId) return (shard.resolution_entry_ids || []).includes(resolutionEntryId);
-    if (taskFamilyKey) return (shard.task_family_keys || []).includes(taskFamilyKey);
-    return options.verifyAll === true || options.verify_all === true;
-  });
-  const shardResults = descriptors.map((descriptor: any) => readAndVerifyConflictResolutionColdArchiveShard(groupId, descriptor));
-  if (shardResults.some((result: any) => !result.valid)) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
-    groupId,
-    status: "tampered",
-    found: false,
-    rows: [],
-    shardsRead: shardResults.length,
-    gaps: shardResults.filter((result: any) => !result.valid).map((result: any) => `cold_archive_shard_invalid:${result.descriptor?.bucket || "unknown"}`),
-  };
-  const rows = shardResults.flatMap((result: any) => result.rows).filter((row: any) => {
-    if (rowId && row.row_id !== rowId) return false;
-    if (resolutionEntryId && row.resolution_entry_id !== resolutionEntryId) return false;
-    if (taskFamilyKey && row.task_family_key !== taskFamilyKey) return false;
-    return true;
-  });
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-lookup-v1",
-    groupId,
-    status: rows.length ? "found" : "not_found",
-    found: rows.length > 0,
-    rows: rows.slice(0, Math.max(1, Number(options.limit || 20))),
-    matchedRowCount: rows.length,
-    shardsRead: shardResults.length,
-    manifestChecksum: manifest.manifest_checksum,
-    gaps: [],
-  };
+  return require("./group-memory-distillation").lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, query, options);
 }
 
 export function restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId: string, query: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "conflict_resolution_cold_archive_restore", options, () => restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId, query, { ...options, __distillationMutationCoordinator: true }));
-  const lookup = lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, query, options);
-  if (lookup.status === "tampered") return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
-    groupId,
-    status: "blocked",
-    restored: false,
-    reason: "cold_archive_integrity_failed",
-    lookup,
-  };
-  if (!lookup.found || !(lookup.rows || []).length) return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
-    groupId,
-    status: "not_found",
-    restored: false,
-    reason: "matching_cold_rows_not_found",
-    lookup,
-  };
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const archive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
-  if (archive.schema !== "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1") return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
-    groupId,
-    status: "blocked",
-    restored: false,
-    reason: "hot_archive_contract_missing",
-    lookup,
-  };
-  const hotRowLimit = Math.max(20, Number(archive.hot_row_limit || GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT));
-  const requested = new Map<string, any>((lookup.rows || []).slice(0, hotRowLimit).map((row: any) => [String(row.row_id || ""), row]));
-  const merged = new Map<string, any>();
-  for (const row of Array.isArray(archive.rows) ? archive.rows : []) merged.set(String(row.row_id || ""), row);
-  for (const [rowId, row] of requested) merged.set(rowId, row);
-  const sorted = [...merged.values()].sort((a: any, b: any) => String(a.resolved_at || "").localeCompare(String(b.resolved_at || "")));
-  const requestedIds = new Set(requested.keys());
-  const recentNonRequested = sorted.filter((row: any) => !requestedIds.has(String(row.row_id || ""))).slice(-Math.max(0, hotRowLimit - requestedIds.size));
-  const restoredRows = [...recentNonRequested, ...requested.values()]
-    .sort((a: any, b: any) => String(a.resolved_at || "").localeCompare(String(b.resolved_at || "")))
-    .slice(-hotRowLimit);
-  const restoredAt = String(options.restoredAt || options.restored_at || now());
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    postCompactCompletionMemoryPreservationClosureConflictResolutionArchive: {
-      ...archive,
-      rows: restoredRows,
-      hot_row_count: restoredRows.length,
-      restored_cold_row_ids: uniqueStrings([...(archive.restored_cold_row_ids || []), ...requestedIds], 64),
-      last_cold_restore_at: restoredAt,
-      cold_restore_mode: "audit_only_not_current_authority",
-    },
-    updatedAt: restoredAt,
-  });
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-cold-restore-v1",
-    groupId,
-    status: "restored",
-    restored: true,
-    restoredRowCount: requested.size,
-    restoredRowIds: [...requestedIds],
-    hotRowCount: restoredRows.length,
-    hotRowLimit,
-    authorityBoundary: "audit_only_not_current_authority",
-    lookup,
-    restoredAt,
-  };
+  return require("./group-memory-maintenance").restorePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId, query, options);
 }
 
 export function distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "post_compact_completion_conflict_resolution", options, () => distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, ledger);
-  const sourceGroupId = String(options.sourceGroupId || options.source_group_id || scopeIdentity.rootGroupId || groupId).trim();
-  const groupSessionId = String(options.groupSessionId || options.group_session_id || scopeIdentity.groupSessionId || "").trim();
-  const incomingRows = normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId, input, {
-    ...options,
-    sourceGroupId,
-    groupSessionId,
-    updatedAt,
-  });
-  const previousArchive = ledger.postCompactCompletionMemoryPreservationClosureConflictResolutionArchive || {};
-  const previousColdRows = loadPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveRows(groupId);
-  const merged = new Map<string, any>();
-  for (const row of previousColdRows) merged.set(row.row_id, row);
-  for (const row of Array.isArray(previousArchive.rows) ? previousArchive.rows : []) merged.set(row.row_id, row);
-  const previousIds = new Set(merged.keys());
-  for (const row of incomingRows) {
-    const previous = merged.get(row.row_id);
-    merged.set(row.row_id, {
-      ...(previous || {}),
-      ...row,
-      first_seen_at: previous?.first_seen_at || row.resolved_at,
-      last_seen_at: updatedAt,
-      seen_count: Number(previous?.seen_count || 0) + 1,
-    });
-  }
-  const rows = [...merged.values()].sort((a: any, b: any) => String(a.resolved_at || "").localeCompare(String(b.resolved_at || "")));
-  const hotRowLimit = Math.max(20, Number(options.hotRowLimit || options.hot_row_limit || GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_HOT_ROW_LIMIT));
-  const hotRows = rows.slice(-hotRowLimit);
-  const coldManifest = writePostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId, rows, { ...options, updatedAt, hotRowLimit });
-  const archive = {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1",
-    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
-    sourceGroupId,
-    groupSessionId,
-    exactSession: !!groupSessionId,
-    archived_count: rows.length,
-    resolved_used_or_verified_count: rows.filter((row: any) => ["used", "verified"].includes(row.resolution_usage_state)).length,
-    resolved_ignored_count: rows.filter((row: any) => row.resolution_usage_state === "ignored").length,
-    task_family_count: uniqueStrings(rows.map((row: any) => row.task_family_key), 320).length,
-    task_session_count: uniqueStrings(rows.map((row: any) => row.task_agent_session_id), 320).length,
-    native_session_count: uniqueStrings(rows.map((row: any) => row.native_session_id), 320).length,
-    immutable_branch_count: rows.length,
-    retention_policy: "checksum_addressed_cold_shards_bounded_hot_index_render_latest_100",
-    retention_pruned_count: 0,
-    hot_row_limit: hotRowLimit,
-    hot_row_count: hotRows.length,
-    cold_archive_row_count: Number(coldManifest.row_count || 0),
-    cold_archive_shard_count: Number(coldManifest.shard_count || 0),
-    cold_archive_manifest_rel_path: path.relative(getGroupTypedMemoryDir(groupId), coldManifest.file).split(path.sep).join("/"),
-    cold_archive_manifest_checksum: coldManifest.manifest_checksum,
-    cold_archive_rows_checksum: coldManifest.rows_checksum,
-    rows: hotRows,
-    updatedAt,
-  };
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "post-compact-completion-memory-preservation-closure-conflict-resolutions",
-      name: "Post-compact completion memory preservation closure conflict resolutions",
-      description: "Session-bound, reversible current-source decisions resolving contradictory closure-memory feedback without erasing historical branches.",
-      source: "auto:post-compact-completion-memory-preservation-closure-conflict-resolution-distillation",
-      updatedAt,
-      body: renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive, { updatedAt, sourceGroupId, groupSessionId }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    postCompactCompletionMemoryPreservationClosureConflictResolutionArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-post-compact-completion-memory-preservation-closure-conflict-resolution-distillation-v1",
-    version: GROUP_POST_COMPACT_COMPLETION_MEMORY_PRESERVATION_CLOSURE_CONFLICT_RESOLUTION_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    newRowCount: rows.filter((row: any) => !previousIds.has(row.row_id)).length,
-    updatedRowCount: rows.filter((row: any) => previousIds.has(row.row_id) && incomingRows.some((incoming: any) => incoming.row_id === row.row_id)).length,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId, input, options);
 }
 
 function providerRankingMemoryUsageReceiptRepairInputRows(input: any = {}) {
@@ -14350,7 +8954,7 @@ function providerRankingMemoryUsageReceiptRepairRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizeProviderRankingMemoryUsageReceiptRepairRows(input: any = {}, options: any = {}) {
+export function normalizeProviderRankingMemoryUsageReceiptRepairRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   const forcedGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
   return providerRankingMemoryUsageReceiptRepairInputRows(input).map((raw: any, index: number) => {
@@ -14427,7 +9031,7 @@ function normalizeProviderRankingMemoryUsageReceiptRepairRows(input: any = {}, o
       || /provider ranking.*memory usage|memoryUsed|memoryIgnored|fresh valid provider switch decision receipt|ranking evidence only, not authorization/i.test(`${row.reason}\n${row.expected}\n${row.prompt_patch}\n${row.worker_task}`));
 }
 
-function mergeProviderRankingMemoryUsageReceiptRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeProviderRankingMemoryUsageReceiptRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -14459,7 +9063,7 @@ function mergeProviderRankingMemoryUsageReceiptRepairRows(existing: any[] = [], 
   };
 }
 
-function providerRankingMemoryUsageReceiptRepairArchive(rows: any[] = [], options: any = {}) {
+export function providerRankingMemoryUsageReceiptRepairArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const docRelPaths = uniqueStrings(rows.flatMap((row: any) => Array.isArray(row.doc_rel_paths) ? row.doc_rel_paths : []), 80);
   return {
@@ -14480,7 +9084,7 @@ function providerRankingMemoryUsageReceiptRepairArchive(rows: any[] = [], option
   };
 }
 
-function renderProviderRankingMemoryUsageReceiptRepairBody(archive: any = {}, options: any = {}) {
+export function renderProviderRankingMemoryUsageReceiptRepairBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const lines = [
     "# Provider Ranking Memory Usage Receipt Discipline",
@@ -14511,85 +9115,7 @@ function renderProviderRankingMemoryUsageReceiptRepairBody(archive: any = {}, op
 }
 
 export function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_ranking_memory_usage_repair", options, () => distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1",
-      version: GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
-    groupId,
-    sourceGroupId: options.sourceGroupId || options.source_group_id || "",
-    groupSessionId: options.groupSessionId || options.group_session_id || "",
-  });
-  const sourceGroupId = scopeIdentity.rootGroupId || groupId;
-  const groupSessionId = scopeIdentity.groupSessionId;
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeProviderRankingMemoryUsageReceiptRepairRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
-  const previousArchive = ledger.providerRankingMemoryUsageReceiptRepairArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeProviderRankingMemoryUsageReceiptRepairRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = { ...providerRankingMemoryUsageReceiptRepairArchive(merged.rows, { updatedAt }), sourceGroupId, groupSessionId, exactSession: !!groupSessionId };
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "provider-ranking-memory-usage-receipt-discipline",
-      name: "Provider ranking memory usage receipt discipline",
-      description: "Child Agent receipt discipline for provider ranking compact repair typed memory usage.",
-      source: "auto:provider-ranking-memory-usage-receipt-repair-distillation",
-      updatedAt,
-      body: renderProviderRankingMemoryUsageReceiptRepairBody(archive, { updatedAt, groupSessionId }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    providerRankingMemoryUsageReceiptRepairArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-provider-ranking-memory-usage-receipt-repair-distillation-v1",
-    version: GROUP_PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_REPAIR_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    openCount: archive.open_count,
-    completedCount: archive.completed_count,
-    packetBoundCount: archive.packet_bound_count,
-    docRelPathCount: archive.doc_rel_path_count,
-    correctedPromptCount: archive.corrected_prompt_count,
-    usageStatePromptCount: archive.usage_state_prompt_count,
-    authorizationBoundaryPromptCount: archive.authorization_boundary_prompt_count,
-    freshReceiptPromptCount: archive.fresh_receipt_prompt_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId, input, options);
 }
 
 function providerDispatchOverrideFollowupInputRows(input: any = {}) {
@@ -14675,7 +9201,7 @@ function providerDispatchOverrideFollowupRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizeProviderDispatchOverrideFollowupRows(input: any = {}, options: any = {}) {
+export function normalizeProviderDispatchOverrideFollowupRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   return providerDispatchOverrideFollowupInputRows(input).map((raw: any, index: number) => {
     const entry = raw?.entry || raw?.binding || raw || {};
@@ -14737,7 +9263,7 @@ function normalizeProviderDispatchOverrideFollowupRows(input: any = {}, options:
     .filter((row: any) => row.memory_provenance_usage_count > 0 && row.all_current_source_verified === true);
 }
 
-function mergeProviderDispatchOverrideFollowupRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeProviderDispatchOverrideFollowupRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -14772,7 +9298,7 @@ function mergeProviderDispatchOverrideFollowupRows(existing: any[] = [], incomin
   };
 }
 
-function pressureProvenanceProviderDispatchOverrideFollowupArchive(rows: any[] = [], options: any = {}) {
+export function pressureProvenanceProviderDispatchOverrideFollowupArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const attributionMap = new Map<string, any>();
   for (const row of rows || []) {
@@ -14820,7 +9346,7 @@ function pressureProvenanceProviderDispatchOverrideFollowupArchive(rows: any[] =
   };
 }
 
-function renderPressureProvenanceProviderDispatchOverrideFollowupBody(archive: any = {}, options: any = {}) {
+export function renderPressureProvenanceProviderDispatchOverrideFollowupBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
   const lines = [
@@ -14861,69 +9387,7 @@ function renderPressureProvenanceProviderDispatchOverrideFollowupBody(archive: a
 }
 
 export function distillProviderDispatchOverrideFollowupToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_dispatch_override_followup", options, () => distillProviderDispatchOverrideFollowupToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-pressure-provenance-provider-dispatch-override-followup-distillation-v1",
-      version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeProviderDispatchOverrideFollowupRows(input, { ...options, groupId, updatedAt });
-  const previousArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeProviderDispatchOverrideFollowupRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = pressureProvenanceProviderDispatchOverrideFollowupArchive(merged.rows, { ...options, updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "provider-dispatch-override-followup-recall",
-      name: "Provider dispatch override follow-up repair history",
-      description: "Completed pressure provenance provider dispatch overrides whose follow-up repair was verified by child Agent memoryProvenanceUsage receipts.",
-      source: "auto:pressure-provenance-provider-dispatch-override-followup-distillation",
-      updatedAt,
-      body: renderPressureProvenanceProviderDispatchOverrideFollowupBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: ledger.facts || {},
-    pressureProvenanceProviderDispatchOverrideFollowupArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-pressure-provenance-provider-dispatch-override-followup-distillation-v1",
-    version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION,
-    groupId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    completedCount: archive.completed_count,
-    attributionCount: archive.attribution_count,
-    relPathCount: archive.rel_path_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillProviderDispatchOverrideFollowupToTypedMemory(groupId, input, options);
 }
 
 function providerSwitchExecutionInputRows(input: any = {}) {
@@ -14989,7 +9453,7 @@ function providerSwitchExecutionRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizeProviderSwitchExecutionRows(input: any = {}, options: any = {}) {
+export function normalizeProviderSwitchExecutionRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   return providerSwitchExecutionInputRows(input).map((raw: any, index: number) => {
     raw = raw || {};
@@ -15069,7 +9533,7 @@ function normalizeProviderSwitchExecutionRows(input: any = {}, options: any = {}
     .filter((row: any) => row.expected_provider && row.actually_executed_provider);
 }
 
-function mergeProviderSwitchExecutionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeProviderSwitchExecutionRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -15104,7 +9568,7 @@ function mergeProviderSwitchExecutionRows(existing: any[] = [], incoming: any[] 
   };
 }
 
-function providerSwitchExecutionArchive(rows: any[] = [], options: any = {}) {
+export function providerSwitchExecutionArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const attributionMap = new Map<string, any>();
   for (const row of rows || []) {
@@ -15171,7 +9635,7 @@ function providerSwitchExecutionArchive(rows: any[] = [], options: any = {}) {
   };
 }
 
-function renderProviderSwitchExecutionBody(archive: any = {}, options: any = {}) {
+export function renderProviderSwitchExecutionBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
   const lines = [
@@ -15210,72 +9674,7 @@ function renderProviderSwitchExecutionBody(archive: any = {}, options: any = {})
 }
 
 export function distillProviderSwitchExecutionToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_switch_execution", options, () => distillProviderSwitchExecutionToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-provider-switch-execution-distillation-v1",
-      version: GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeProviderSwitchExecutionRows(input, { ...options, groupId, updatedAt });
-  const previousArchive = ledger.providerSwitchExecutionArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeProviderSwitchExecutionRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = providerSwitchExecutionArchive(merged.rows, { ...options, updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "provider-switch-execution-memory",
-      name: "Provider switch execution memory",
-      description: "System-attested provider switch executions and mismatch feedback from child Agent completion receipts.",
-      source: "auto:provider-switch-execution-distillation",
-      updatedAt,
-      body: renderProviderSwitchExecutionBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: ledger.facts || {},
-    providerSwitchExecutionArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-provider-switch-execution-distillation-v1",
-    version: GROUP_PROVIDER_SWITCH_EXECUTION_DISTILLATION_VERSION,
-    groupId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    approvedCount: archive.approved_count,
-    executedCount: archive.executed_count,
-    passedCount: archive.passed_count,
-    failedCount: archive.failed_count,
-    mismatchCount: archive.mismatch_count,
-    attributionCount: archive.attribution_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillProviderSwitchExecutionToTypedMemory(groupId, input, options);
 }
 
 function providerDispatchOverrideFollowupReceiptValidationInputRows(input: any = {}) {
@@ -15300,7 +9699,7 @@ function providerDispatchOverrideFollowupReceiptValidationRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input: any = {}, options: any = {}) {
+export function normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   const fallbackGroupSessionId = String(options.groupSessionId || options.group_session_id || input.groupSessionId || input.group_session_id || "").trim();
   return providerDispatchOverrideFollowupReceiptValidationInputRows(input).map((raw: any, index: number) => {
@@ -15364,7 +9763,7 @@ function normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input: a
     .filter((row: any) => row.attempt_status === "failed" || row.attempt_status === "passed");
 }
 
-function mergeProviderDispatchOverrideFollowupReceiptValidationRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeProviderDispatchOverrideFollowupReceiptValidationRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -15398,7 +9797,7 @@ function mergeProviderDispatchOverrideFollowupReceiptValidationRows(existing: an
   };
 }
 
-function pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive(rows: any[] = [], options: any = {}) {
+export function pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const attributionRows = new Map<string, any[]>();
   for (const row of rows || []) {
@@ -15461,7 +9860,7 @@ function pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArch
   };
 }
 
-function renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationBody(archive: any = {}, options: any = {}) {
+export function renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationBody(archive: any = {}, options: any = {}) {
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
   const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
   const lines = [
@@ -15494,83 +9893,7 @@ function renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidati
 }
 
 export function distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "provider_dispatch_override_followup_validation", options, () => distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
-      version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const scopeIdentity = typedMemorySessionScopeIdentity(groupId, {
-    groupId,
-    sourceGroupId: options.sourceGroupId || options.source_group_id || "",
-    groupSessionId: options.groupSessionId || options.group_session_id || "",
-  });
-  const sourceGroupId = scopeIdentity.rootGroupId || groupId;
-  const groupSessionId = scopeIdentity.groupSessionId;
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeProviderDispatchOverrideFollowupReceiptValidationRows(input, { ...options, groupId: sourceGroupId, groupSessionId, updatedAt });
-  const previousArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeProviderDispatchOverrideFollowupReceiptValidationRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive(merged.rows, { ...options, sourceGroupId, groupSessionId, updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "provider-dispatch-override-followup-receipt-validation-history",
-      name: "Provider dispatch override follow-up receipt validation history",
-      description: "Append-only failed and repaired corrected-receipt validation attempts used by provider-specific pre-dispatch policy.",
-      source: "auto:pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation",
-      updatedAt,
-      body: renderPressureProvenanceProviderDispatchOverrideFollowupReceiptValidationBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 24_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    facts: ledger.facts || {},
-    pressureProvenanceProviderDispatchOverrideFollowupReceiptValidationArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-validation-distillation-v1",
-    version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_RECEIPT_VALIDATION_DISTILLATION_VERSION,
-    groupId,
-    sourceGroupId,
-    groupSessionId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    attemptCount: archive.attempt_count,
-    failedCount: archive.failed_count,
-    passedCount: archive.passed_count,
-    attributionCount: archive.attribution_count,
-    escalatedAttributionCount: archive.escalated_attribution_count,
-    repairedAttributionCount: archive.repaired_attribution_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId, input, options);
 }
 
 function ignoreMemoryReceiptRepairInputRows(input: any = {}) {
@@ -15604,7 +9927,7 @@ function ignoreMemoryReceiptRepairRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizeIgnoreMemoryReceiptRepairRows(input: any = {}, options: any = {}) {
+export function normalizeIgnoreMemoryReceiptRepairRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   return ignoreMemoryReceiptRepairInputRows(input).map((raw: any, index: number) => {
     const entry = raw?.entry || raw?.item || raw?.candidate || raw?.brief || raw || {};
@@ -15654,7 +9977,7 @@ function normalizeIgnoreMemoryReceiptRepairRows(input: any = {}, options: any = 
     .filter((row: any) => row.source === "worker_context_ignore_memory_receipt_repair" || row.component === "worker_context_ignore_memory_receipt_contract" || /ignore-memory|memoryIgnored|user_requested_ignore_memory/i.test(`${row.reason}\n${row.expected}\n${row.prompt_patch}`));
 }
 
-function mergeIgnoreMemoryReceiptRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeIgnoreMemoryReceiptRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -15686,7 +10009,7 @@ function mergeIgnoreMemoryReceiptRepairRows(existing: any[] = [], incoming: any[
   };
 }
 
-function ignoreMemoryReceiptRepairArchive(rows: any[] = [], options: any = {}) {
+export function ignoreMemoryReceiptRepairArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   return {
     schema: "ccm-ignore-memory-receipt-repair-distillation-v1",
@@ -15701,7 +10024,7 @@ function ignoreMemoryReceiptRepairArchive(rows: any[] = [], options: any = {}) {
   };
 }
 
-function renderIgnoreMemoryReceiptRepairBody(rows: any[] = [], options: any = {}) {
+export function renderIgnoreMemoryReceiptRepairBody(rows: any[] = [], options: any = {}) {
   const lines = [
     "# Ignore-Memory Receipt Discipline",
     "",
@@ -15727,70 +10050,7 @@ function renderIgnoreMemoryReceiptRepairBody(rows: any[] = [], options: any = {}
 }
 
 export function distillIgnoreMemoryReceiptRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "ignore_memory_receipt_repair", options, () => distillIgnoreMemoryReceiptRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-ignore-memory-receipt-repair-distillation-v1",
-      version: GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeIgnoreMemoryReceiptRepairRows(input, { ...options, groupId, updatedAt });
-  const previousArchive = ledger.ignoreMemoryReceiptRepairArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeIgnoreMemoryReceiptRepairRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = ignoreMemoryReceiptRepairArchive(merged.rows, { updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "ignore-memory-receipt-discipline",
-      name: "Ignore-memory receipt discipline",
-      description: "Child Agent receipt discipline for WorkerContextPacket ignore-memory policy.",
-      source: "auto:ignore-memory-receipt-repair-distillation",
-      updatedAt,
-      body: renderIgnoreMemoryReceiptRepairBody(archive.rows, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 16_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: ledger.facts || {},
-    ignoreMemoryReceiptRepairArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-ignore-memory-receipt-repair-distillation-v1",
-    version: GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION,
-    groupId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    openCount: archive.open_count,
-    completedCount: archive.completed_count,
-    packetBoundCount: archive.packet_bound_count,
-    correctedPromptCount: archive.corrected_prompt_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillIgnoreMemoryReceiptRepairToTypedMemory(groupId, input, options);
 }
 
 function pressureMemoryProvenanceReceiptRepairInputRows(input: any = {}) {
@@ -15847,7 +10107,7 @@ function pressureMemoryProvenanceReceiptRepairRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizePressureMemoryProvenanceReceiptRepairRows(input: any = {}, options: any = {}) {
+export function normalizePressureMemoryProvenanceReceiptRepairRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   return pressureMemoryProvenanceReceiptRepairInputRows(input).map((raw: any, index: number) => {
     const entry = raw?.entry || raw?.item || raw?.candidate || raw?.brief || raw || {};
@@ -15922,7 +10182,7 @@ function normalizePressureMemoryProvenanceReceiptRepairRows(input: any = {}, opt
       || /memoryProvenanceUsage|provenanceStatus|repairWorkItemId|currentSourceVerified|pressure memory provenance/i.test(`${row.reason}\n${row.expected}\n${row.prompt_patch}`));
 }
 
-function mergePressureMemoryProvenanceReceiptRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergePressureMemoryProvenanceReceiptRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -15954,7 +10214,7 @@ function mergePressureMemoryProvenanceReceiptRepairRows(existing: any[] = [], in
   };
 }
 
-function pressureMemoryProvenanceReceiptRepairArchive(rows: any[] = [], options: any = {}) {
+export function pressureMemoryProvenanceReceiptRepairArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const relPaths = uniqueStrings(rows.flatMap((row: any) => Array.isArray(row.rel_paths) ? row.rel_paths : []), 80);
   const repairIds = uniqueStrings(rows.flatMap((row: any) => Array.isArray(row.repair_work_item_ids) ? row.repair_work_item_ids : []), 80);
@@ -15980,7 +10240,7 @@ function pressureMemoryProvenanceReceiptRepairArchive(rows: any[] = [], options:
   };
 }
 
-function renderPressureMemoryProvenanceReceiptRepairBody(rows: any[] = [], options: any = {}) {
+export function renderPressureMemoryProvenanceReceiptRepairBody(rows: any[] = [], options: any = {}) {
   const lines = [
     "# Pressure Memory Provenance Receipt Discipline",
     "",
@@ -16010,73 +10270,7 @@ function renderPressureMemoryProvenanceReceiptRepairBody(rows: any[] = [], optio
 }
 
 export function distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "pressure_memory_provenance_repair", options, () => distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-pressure-memory-provenance-receipt-repair-distillation-v1",
-      version: GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizePressureMemoryProvenanceReceiptRepairRows(input, { ...options, groupId, updatedAt });
-  const previousArchive = ledger.pressureMemoryProvenanceReceiptRepairArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergePressureMemoryProvenanceReceiptRepairRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = pressureMemoryProvenanceReceiptRepairArchive(merged.rows, { updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "pressure-memory-provenance-receipt-discipline",
-      name: "Pressure memory provenance receipt discipline",
-      description: "Child Agent receipt discipline for WorkerContextPacket pressure repair MEMORY.md provenance.",
-      source: "auto:pressure-memory-provenance-receipt-repair-distillation",
-      updatedAt,
-      body: renderPressureMemoryProvenanceReceiptRepairBody(archive.rows, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: ledger.facts || {},
-    pressureMemoryProvenanceReceiptRepairArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-pressure-memory-provenance-receipt-repair-distillation-v1",
-    version: GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION,
-    groupId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    openCount: archive.open_count,
-    completedCount: archive.completed_count,
-    packetBoundCount: archive.packet_bound_count,
-    relPathCount: archive.rel_path_count,
-    repairWorkItemCount: archive.repair_work_item_count,
-    correctedPromptCount: archive.corrected_prompt_count,
-    currentSourceVerifiedPromptCount: archive.current_source_verified_prompt_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId, input, options);
 }
 
 function pressureProvenancePreDispatchComplianceInputRows(input: any = {}) {
@@ -16112,7 +10306,7 @@ function pressureProvenancePreDispatchComplianceRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizePressureProvenancePreDispatchComplianceRows(input: any = {}, options: any = {}) {
+export function normalizePressureProvenancePreDispatchComplianceRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   return pressureProvenancePreDispatchComplianceInputRows(input).map((raw: any, index: number) => {
     const entry = raw?.entry || raw?.packet || raw?.violation || raw || {};
@@ -16170,7 +10364,7 @@ function normalizePressureProvenancePreDispatchComplianceRows(input: any = {}, o
     .filter((row: any) => row.pre_dispatch_prompted === true && (row.status !== "compliant" || row.gap_codes.length || row.missing_receipt || row.missing_memory_provenance_usage || row.current_source_verified_gap));
 }
 
-function mergePressureProvenancePreDispatchComplianceRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergePressureProvenancePreDispatchComplianceRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -16202,7 +10396,7 @@ function mergePressureProvenancePreDispatchComplianceRows(existing: any[] = [], 
   };
 }
 
-function pressureProvenancePreDispatchComplianceArchive(rows: any[] = [], options: any = {}) {
+export function pressureProvenancePreDispatchComplianceArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const threshold = Math.max(1, Number(options.frequentThreshold || options.frequent_threshold || 2));
   const attributionMap = new Map<string, any>();
@@ -16259,7 +10453,7 @@ function pressureProvenancePreDispatchComplianceArchive(rows: any[] = [], option
   };
 }
 
-function renderPressureProvenancePreDispatchComplianceBody(archive: any = {}, options: any = {}) {
+export function renderPressureProvenancePreDispatchComplianceBody(archive: any = {}, options: any = {}) {
   const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
   const frequent = attributions.filter((row: any) => row.frequent).length ? attributions.filter((row: any) => row.frequent) : attributions;
   const lines = [
@@ -16284,68 +10478,7 @@ function renderPressureProvenancePreDispatchComplianceBody(archive: any = {}, op
 }
 
 export function distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "pressure_provenance_pre_dispatch_compliance", options, () => distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1",
-      version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizePressureProvenancePreDispatchComplianceRows(input, { ...options, groupId, updatedAt });
-  const previousArchive = ledger.pressureProvenancePreDispatchComplianceArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergePressureProvenancePreDispatchComplianceRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = pressureProvenancePreDispatchComplianceArchive(merged.rows, { ...options, updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "pressure-provenance-pre-dispatch-compliance",
-      name: "Pressure provenance pre-dispatch compliance",
-      description: "Executor/project attribution for pressure provenance receipt failures after pre-dispatch discipline was shown.",
-      source: "auto:pressure-provenance-pre-dispatch-compliance-distillation",
-      updatedAt,
-      body: renderPressureProvenancePreDispatchComplianceBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: ledger.facts || {},
-    pressureProvenancePreDispatchComplianceArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1",
-    version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
-    groupId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    attributionCount: archive.attribution_count,
-    frequentAttributionCount: archive.frequent_attribution_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, input, options);
 }
 
 function pressureProvenancePreDispatchComplianceRecoveryRowId(row: any = {}) {
@@ -16360,7 +10493,7 @@ function pressureProvenancePreDispatchComplianceRecoveryRowId(row: any = {}) {
   ], 24)}`;
 }
 
-function normalizePressureProvenancePreDispatchComplianceRecoveryRows(input: any = {}, options: any = {}) {
+export function normalizePressureProvenancePreDispatchComplianceRecoveryRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   return pressureProvenancePreDispatchComplianceInputRows(input).map((raw: any, index: number) => {
     const entry = raw?.entry || raw?.packet || raw?.recovery || raw || {};
@@ -16409,7 +10542,7 @@ function normalizePressureProvenancePreDispatchComplianceRecoveryRows(input: any
     .filter((row: any) => row.pre_dispatch_prompted === true && row.status === "compliant" && Number(row.required_doc_count || 0) > 0);
 }
 
-function mergePressureProvenancePreDispatchComplianceRecoveryRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergePressureProvenancePreDispatchComplianceRecoveryRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -16441,7 +10574,7 @@ function mergePressureProvenancePreDispatchComplianceRecoveryRows(existing: any[
   };
 }
 
-function pressureProvenancePreDispatchComplianceRecoveryArchive(rows: any[] = [], options: any = {}) {
+export function pressureProvenancePreDispatchComplianceRecoveryArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const attributionMap = new Map<string, any>();
   for (const row of rows) {
@@ -16492,7 +10625,7 @@ function pressureProvenancePreDispatchComplianceRecoveryArchive(rows: any[] = []
   };
 }
 
-function renderPressureProvenancePreDispatchComplianceRecoveryBody(archive: any = {}, options: any = {}) {
+export function renderPressureProvenancePreDispatchComplianceRecoveryBody(archive: any = {}, options: any = {}) {
   const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
   const lines = [
     "# Pressure Provenance Compliance Recovery",
@@ -16515,68 +10648,7 @@ function renderPressureProvenancePreDispatchComplianceRecoveryBody(archive: any 
 }
 
 export function distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "pressure_provenance_compliance_recovery", options, () => distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-pressure-provenance-pre-dispatch-compliance-recovery-distillation-v1",
-      version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizePressureProvenancePreDispatchComplianceRecoveryRows(input, { ...options, groupId, updatedAt });
-  const previousArchive = ledger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergePressureProvenancePreDispatchComplianceRecoveryRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = pressureProvenancePreDispatchComplianceRecoveryArchive(merged.rows, { ...options, updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "pressure-provenance-compliance-recovery",
-      name: "Pressure provenance compliance recovery",
-      description: "Executor/project recovery evidence for compliant pressure provenance receipts after feedback policy.",
-      source: "auto:pressure-provenance-compliance-recovery-distillation",
-      updatedAt,
-      body: renderPressureProvenancePreDispatchComplianceRecoveryBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: ledger.facts || {},
-    pressureProvenancePreDispatchComplianceRecoveryArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-pressure-provenance-pre-dispatch-compliance-recovery-distillation-v1",
-    version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
-    groupId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    attributionCount: archive.attribution_count,
-    compliantCount: archive.compliant_count,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, input, options);
 }
 
 function normalizePressureProvenanceDispatchPolicyKey(value: any) {
@@ -16783,7 +10855,7 @@ function scoreProviderDispatchReliabilityRows(rows: any[] = [], options: any = {
   };
 }
 
-function typedMemorySessionScopeIdentity(scopeId: any, ledger: any = {}) {
+export function typedMemorySessionScopeIdentity(scopeId: any, ledger: any = {}) {
   const ledgerScopeId = String(ledger.groupId || ledger.group_id || scopeId || "").trim();
   const exactMatch = ledgerScopeId.match(/^(.*)--(gcs_[a-zA-Z0-9._-]+)$/);
   const explicitSessionId = String(
@@ -17880,7 +11952,7 @@ function normalizeContextUsageRepairStatus(value: any) {
   return status ? "unknown" : "compact_recommended";
 }
 
-function normalizeContextUsageRepairRows(input: any = {}, options: any = {}) {
+export function normalizeContextUsageRepairRows(input: any = {}, options: any = {}) {
   const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
   return contextUsageRepairInputRows(input).map((raw: any, index: number) => {
     const entry = raw?.entry || raw?.item || raw?.packet || raw || {};
@@ -17943,7 +12015,7 @@ function normalizeContextUsageRepairRows(input: any = {}, options: any = {}) {
     .filter((row: any) => row.source === "worker_context_packet_context_usage_repair" || /context usage|Context usage budget|free_tokens|autocompact_buffer|typed MEMORY/i.test(`${row.reason}\n${row.instruction}\n${row.expected}`));
 }
 
-function mergeContextUsageRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+export function mergeContextUsageRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const merged = new Map<string, any>();
   for (const row of existing || []) {
@@ -17975,7 +12047,7 @@ function mergeContextUsageRepairRows(existing: any[] = [], incoming: any[] = [],
   };
 }
 
-function contextUsageRepairArchive(rows: any[] = [], options: any = {}) {
+export function contextUsageRepairArchive(rows: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const overBudgetRows = rows.filter((row: any) => row.usage_status === "over_budget");
   const criticalRows = rows.filter((row: any) => row.usage_status === "critical");
@@ -17995,7 +12067,7 @@ function contextUsageRepairArchive(rows: any[] = [], options: any = {}) {
   };
 }
 
-function renderContextUsageRepairBody(rows: any[] = [], options: any = {}) {
+export function renderContextUsageRepairBody(rows: any[] = [], options: any = {}) {
   const categoryCounts = new Map<string, number>();
   for (const row of rows) {
     for (const category of row.top_categories || []) {
@@ -18038,79 +12110,14 @@ function renderContextUsageRepairBody(rows: any[] = [], options: any = {}) {
 }
 
 export function distillContextUsageRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "context_usage_repair", options, () => distillContextUsageRepairToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-context-usage-repair-distillation-v1",
-      version: GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const incomingRows = normalizeContextUsageRepairRows(input, { ...options, groupId, updatedAt });
-  const previousArchive = ledger.contextUsageRepairArchive || {};
-  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
-  const merged = mergeContextUsageRepairRows(previousRows, incomingRows, { ...options, updatedAt });
-  const archive = contextUsageRepairArchive(merged.rows, { updatedAt });
-  const writes: any[] = [];
-  if (archive.rows.length) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "worker-context-usage-pressure-discipline",
-      name: "WorkerContextPacket context usage pressure discipline",
-      description: "Reactive compact/crop discipline for WorkerContextPacket context pressure before child Agent dispatch.",
-      source: "auto:context-usage-repair-distillation",
-      updatedAt,
-      body: renderContextUsageRepairBody(archive.rows, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    facts: ledger.facts || {},
-    contextUsageRepairArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-context-usage-repair-distillation-v1",
-    version: GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION,
-    groupId,
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    incomingRowCount: incomingRows.length,
-    archivedCount: archive.archived_count,
-    overBudgetCount: archive.over_budget_count,
-    criticalCount: archive.critical_count,
-    compactRecommendedCount: archive.compact_recommended_count,
-    openCount: archive.open_count,
-    packetBoundCount: archive.packet_bound_count,
-    maxPressure: archive.max_pressure,
-    newRowCount: merged.newRowCount,
-    updatedRowCount: merged.updatedRowCount,
-    prunedRowCount: merged.prunedRowCount,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillContextUsageRepairToTypedMemory(groupId, input, options);
 }
 
-function compactStrategyInputStrategy(input: any = {}) {
+export function compactStrategyInputStrategy(input: any = {}) {
   return input.strategy || input.compactStrategy || input.compact_strategy || {};
 }
 
-function compactStrategyInputOutcomes(input: any = {}) {
+export function compactStrategyInputOutcomes(input: any = {}) {
   if (Array.isArray(input)) return input;
   if (Array.isArray(input.outcomes)) return input.outcomes;
   if (Array.isArray(input.entries)) return input.entries;
@@ -18191,7 +12198,7 @@ function normalizeCompactStrategyOutcomeRows(rows: any[] = [], options: any = {}
   }).filter((row: any) => row.distillation_candidate !== false && row.selected_categories.length > 0);
 }
 
-function compactStrategyTypedArchive(strategy: any = {}, outcomes: any[] = [], options: any = {}) {
+export function compactStrategyTypedArchive(strategy: any = {}, outcomes: any[] = [], options: any = {}) {
   const updatedAt = String(options.updatedAt || now());
   const categories = normalizeCompactStrategyCategories(strategy);
   const preferred = Array.isArray(strategy.preferred_categories || strategy.preferredCategories)
@@ -18232,7 +12239,7 @@ function compactStrategyTypedArchive(strategy: any = {}, outcomes: any[] = [], o
   };
 }
 
-function renderCompactStrategyReferenceBody(archive: any = {}, options: any = {}) {
+export function renderCompactStrategyReferenceBody(archive: any = {}, options: any = {}) {
   const lines = [
     "# WorkerContextPacket Compact Strategy Memory",
     "",
@@ -18263,7 +12270,7 @@ function renderCompactStrategyReferenceBody(archive: any = {}, options: any = {}
   return lines.join("\n").trim() + "\n";
 }
 
-function renderCompactStrategyCautionBody(archive: any = {}, options: any = {}) {
+export function renderCompactStrategyCautionBody(archive: any = {}, options: any = {}) {
   const avoidRows = (archive.categories || []).filter((row: any) => archive.avoid_categories?.includes(row.category) || row.recommendation === "avoid" || Number(row.blocked || 0) > 0);
   const blockedOutcomes = (archive.outcome_rows || []).filter((row: any) => row.status === "blocked" || row.dispatch_ready === false);
   const lines = [
@@ -18286,79 +12293,7 @@ function renderCompactStrategyCautionBody(archive: any = {}, options: any = {}) 
 }
 
 export function distillCompactStrategyToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "compact_strategy", options, () => distillCompactStrategyToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-compact-strategy-typed-memory-distillation-v1",
-      version: GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const strategy = compactStrategyInputStrategy(input);
-  const outcomes = compactStrategyInputOutcomes(input);
-  const archive = compactStrategyTypedArchive({ ...strategy, groupId: strategy.groupId || strategy.group_id || groupId }, outcomes, { ...options, groupId, updatedAt });
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const writes: any[] = [];
-  if (archive.category_count > 0 || archive.outcome_count > 0) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "worker-context-compact-strategy-memory",
-      name: "WorkerContextPacket compact strategy memory",
-      description: "Reusable compact strategy outcomes for WorkerContextPacket budget recovery.",
-      source: "auto:compact-strategy-memory-distillation",
-      updatedAt,
-      body: renderCompactStrategyReferenceBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 20_000),
-    }));
-  }
-  if (archive.avoid_count > 0 || archive.blocked_outcome_count > 0) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "worker-context-compact-strategy-cautions",
-      name: "WorkerContextPacket compact strategy cautions",
-      description: "Compact strategy categories and outcomes that blocked dispatch or need review before reuse.",
-      source: "auto:compact-strategy-memory-distillation",
-      updatedAt,
-      body: renderCompactStrategyCautionBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 16_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    groupSessionId: archive.groupSessionId || "",
-    facts: ledger.facts || {},
-    compactStrategyArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-compact-strategy-typed-memory-distillation-v1",
-    version: GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    groupSessionId: archive.groupSessionId || "",
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    archivedCount: archive.outcome_count,
-    categoryCount: archive.category_count,
-    preferredCount: archive.preferred_count,
-    avoidCount: archive.avoid_count,
-    recoveredOutcomeCount: archive.recovered_outcome_count,
-    blockedOutcomeCount: archive.blocked_outcome_count,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillCompactStrategyToTypedMemory(groupId, input, options);
 }
 
 function normalizePtlEmergencyHintForTypedMemory(input: any = {}, options: any = {}) {
@@ -18438,7 +12373,7 @@ function normalizePtlEmergencyOutcomeRows(rows: any[] = [], options: any = {}) {
   }).filter((row: any) => row.distillation_candidate !== false && (row.status === "blocked" || row.dispatch_ready === false || row.task_compacted === true));
 }
 
-function ptlEmergencyTypedArchive(groupId: string, input: any = {}, options: any = {}) {
+export function ptlEmergencyTypedArchive(groupId: string, input: any = {}, options: any = {}) {
   const hint = normalizePtlEmergencyHintForTypedMemory(input, { ...options, groupId });
   const outcomeRows = normalizePtlEmergencyOutcomeRows(
     Array.isArray(input.outcomes) ? input.outcomes
@@ -18471,7 +12406,7 @@ function ptlEmergencyTypedArchive(groupId: string, input: any = {}, options: any
   };
 }
 
-function renderPtlEmergencyTypedBody(archive: any = {}, options: any = {}) {
+export function renderPtlEmergencyTypedBody(archive: any = {}, options: any = {}) {
   const retry = archive.hint?.recommended_retry_options || {};
   const memory = retry.memory || {};
   const replay = retry.replayRepairDispatchBriefs || {};
@@ -18509,81 +12444,23 @@ function renderPtlEmergencyTypedBody(archive: any = {}, options: any = {}) {
 }
 
 export function distillPtlEmergencyDowngradeToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
-  if (options.__distillationMutationCoordinator !== true) return runGroupTypedMemoryDistillationMutation(groupId, "ptl_emergency_downgrade", options, () => distillPtlEmergencyDowngradeToTypedMemory(groupId, input, { ...options, __distillationMutationCoordinator: true }));
-  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
-    return {
-      schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
-      version: GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "disabled",
-    };
-  }
-  const updatedAt = String(options.updatedAt || options.updated_at || now());
-  const archive = ptlEmergencyTypedArchive(groupId, input, { ...options, updatedAt });
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const writes: any[] = [];
-  if (archive.engaged || archive.outcome_count > 0 || archive.blocked_outcome_count > 0) {
-    writes.push(upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "worker-context-ptl-emergency-downgrade",
-      name: "WorkerContextPacket PTL emergency downgrade discipline",
-      description: "Emergency downgrade budgets and cautions for repeated WorkerContextPacket compact failures.",
-      source: "auto:ptl-emergency-downgrade-distillation",
-      updatedAt,
-      body: renderPtlEmergencyTypedBody(archive, { updatedAt }),
-      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 16_000),
-    }));
-  }
-  const ledgerState = { ...ledger };
-  delete ledgerState.file;
-  writeJsonAtomic(ledger.file, {
-    ...ledgerState,
-    schema: "ccm-group-typed-memory-distillation-ledger-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    groupSessionId: archive.groupSessionId || "",
-    facts: ledger.facts || {},
-    ptlEmergencyArchive: archive,
-    updatedAt,
-  });
-  const index = buildGroupTypedMemoryIndex(groupId);
-  return {
-    schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
-    version: GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
-    groupId,
-    groupSessionId: archive.groupSessionId || "",
-    skipped: false,
-    reason: compactText(options.reason || "", 220),
-    ledgerFile: ledger.file,
-    engaged: archive.engaged,
-    emergencyLevel: archive.emergency_level,
-    blockedOutcomeCount: archive.blocked_outcome_count,
-    taskCompactedBlockedCount: archive.task_compacted_blocked_count,
-    failedCategoryCount: archive.failed_category_count,
-    outcomeCount: archive.outcome_count,
-    writeCount: writes.length,
-    writes,
-    index,
-    archive,
-    distilledAt: updatedAt,
-  };
+  return require("./group-memory-distillation").distillPtlEmergencyDowngradeToTypedMemory(groupId, input, options);
 }
 
-function extractPathClaims(value: any) {
+export function extractPathClaims(value: any) {
   const text = String(value || "");
   const matched = text.match(/(?:[A-Za-z]:\\[^\s，。；]+|(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]+|[\w.-]+\.(?:ts|tsx|js|jsx|vue|java|py|go|rs|md|json|toml|yaml|yml|xml|sql))/g) || [];
   return uniqueStrings(matched.map(item => item.replace(/[),.;，。；]+$/g, "")), 80);
 }
 
-function resolveClaimPath(projectRoot: string, claim: string) {
+export function resolveClaimPath(projectRoot: string, claim: string) {
   const raw = String(claim || "").trim();
   if (!raw) return "";
   if (/^[A-Za-z]:\\/.test(raw) || path.isAbsolute(raw)) return raw;
   return path.resolve(projectRoot, raw.replace(/\\/g, path.sep));
 }
 
-function addDistillationQualityCheck(checks: any[], input: any) {
+export function addDistillationQualityCheck(checks: any[], input: any) {
   checks.push({
     id: input.id,
     label: input.label,
@@ -18596,14 +12473,14 @@ function addDistillationQualityCheck(checks: any[], input: any) {
   });
 }
 
-function distillationQualityPenalty(severity: string) {
+export function distillationQualityPenalty(severity: string) {
   if (severity === "fatal") return 45;
   if (severity === "high") return 28;
   if (severity === "medium") return 14;
   return 7;
 }
 
-function collectDistilledFacts(ledger: any) {
+export function collectDistilledFacts(ledger: any) {
   const facts: any[] = [];
   for (const type of ["user", "project", "feedback", "reference"] as GroupTypedMemoryType[]) {
     for (const fact of Object.values(ledger?.facts?.[type] || {})) facts.push({ ...(fact as any), category: type });
@@ -18611,7 +12488,7 @@ function collectDistilledFacts(ledger: any) {
   return facts;
 }
 
-function extractTaskStateSignal(fact: any) {
+export function extractTaskStateSignal(fact: any) {
   const text = String(fact?.text || "");
   const taskId = String(fact?.taskId || (text.match(/\[([^\]]+)\]/)?.[1]) || "").trim();
   if (!taskId) return null;
@@ -18625,208 +12502,7 @@ function extractTaskStateSignal(fact: any) {
 }
 
 export function evaluateGroupTypedMemoryDistillationQuality(groupId: string, options: any = {}) {
-  const evaluatedAt = now();
-  const projectRoot = path.resolve(String(options.projectRoot || options.project_root || process.cwd()));
-  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-  const docs = scanGroupTypedMemoryDocuments(groupId);
-  const facts = collectDistilledFacts(ledger);
-  const checks: any[] = [];
-  const factsByType = new Map<string, any[]>();
-  for (const fact of facts) {
-    const type = normalizeMemoryType(fact.category || fact.type);
-    factsByType.set(type, [...(factsByType.get(type) || []), fact]);
-  }
-
-  const inadmissibleFacts = facts
-    .map(fact => ({ fact, admission: groupLogDistillationAdmission(fact) }))
-    .filter(row => !row.admission.admitted)
-    .map(row => `#${row.fact.messageId || ""} ${row.fact.type || row.fact.category || ""}: ${row.admission.reason}`)
-    .slice(0, 30);
-  addDistillationQualityCheck(checks, {
-    id: "long_term_write_admission",
-    label: "长期记忆写入符合非流水准入规则",
-    pass: inadmissibleFacts.length === 0 && ledger.admission?.schema === "ccm-group-typed-memory-write-admission-v1",
-    severity: "fatal",
-    detail: inadmissibleFacts.length
-      ? "长期记忆仍包含可重建、临时或缺少非显然理由的流水事实。"
-      : "通用群聊蒸馏只保留跨会话有效且满足 Claude Code 写入门槛的事实。",
-    evidence: [{
-      evaluatedThisRun: Number(ledger.admission?.evaluatedThisRun || 0),
-      admittedThisRun: Number(ledger.admission?.admittedThisRun || 0),
-      rejectedThisRun: Number(ledger.admission?.rejectedThisRun || 0),
-      evictedExistingFactCount: Number(ledger.admission?.evictedExistingFactCount || 0),
-    }],
-    gaps: inadmissibleFacts,
-  });
-
-  const invalidPositiveFeedbackFacts = facts
-    .filter(fact => fact.type === "validated_approach")
-    .filter(fact => {
-      const binding = fact?.confirmation || {};
-      return binding.schema !== "ccm-group-positive-feedback-binding-v1"
-        || binding.explicit !== true
-        || binding.targetFound !== true
-        || binding.targetSourceRole !== "assistant"
-        || binding.scopeMatches !== true
-        || binding.checksumMatches !== true
-        || binding.targetEligible !== true;
-    })
-    .map(fact => `#${fact.messageId || ""} validated_approach`)
-    .slice(0, 30);
-  addDistillationQualityCheck(checks, {
-    id: "positive_feedback_binding",
-    label: "正向反馈绑定同会话非显然做法",
-    pass: invalidPositiveFeedbackFacts.length === 0,
-    severity: "fatal",
-    detail: invalidPositiveFeedbackFacts.length
-      ? "存在没有可靠绑定到同会话 Assistant 做法的正向反馈记忆。"
-      : "正向反馈只在同会话目标、checksum、跨会话价值和 Why/How 全部成立时写入。",
-    gaps: invalidPositiveFeedbackFacts,
-  });
-
-  const positiveFeedbackLifecycle = ledger.positiveFeedbackLifecycle || {};
-  const lifecycleEvents = Array.isArray(positiveFeedbackLifecycle.events) ? positiveFeedbackLifecycle.events : [];
-  const activeFactIds = new Set(facts.map(fact => String(fact.id || "")).filter(Boolean));
-  const invalidLifecycleEvents = lifecycleEvents.filter((event: any) =>
-    event.schema !== "ccm-group-positive-feedback-lifecycle-event-v1"
-    || Number(event.version || 0) !== GROUP_POSITIVE_FEEDBACK_LIFECYCLE_VERSION
-    || event.groupId !== groupId
-    || !["revoked", "superseded"].includes(String(event.action || ""))
-    || !event.eventId
-    || !event.targetFactId
-    || !event.targetConfirmationMessageId
-    || !event.targetApproachMessageId
-    || !/^[a-f0-9]{64}$/.test(String(event.targetApproachChecksum || ""))
-    || !event.revocationMessageId
-    || !event.reason
-    || (event.action === "superseded" && (!event.replacementFactId || !event.replacementMessageId))
-    || event.eventChecksum !== positiveFeedbackLifecycleEventChecksum(event)
-    || activeFactIds.has(String(event.targetFactId || ""))
-  ).map((event: any) => `#${event.eventId || "missing"} ${event.action || "unknown"}`).slice(0, 30);
-  const lifecycleObservationsLeakBody = (Array.isArray(positiveFeedbackLifecycle.observations) ? positiveFeedbackLifecycle.observations : [])
-    .some((row: any) => row?.text !== undefined || row?.content !== undefined || row?.reasonText !== undefined);
-  const lifecycleSummaryMatches = Number(positiveFeedbackLifecycle.activeValidatedCount || 0)
-    === facts.filter(fact => fact.type === "validated_approach").length;
-  const lifecycleApplicable = positiveFeedbackLifecycle.schema === "ccm-group-positive-feedback-lifecycle-v1"
-    || lifecycleEvents.length > 0
-    || facts.some(fact => fact.type === "validated_approach");
-  addDistillationQualityCheck(checks, {
-    id: "positive_feedback_lifecycle",
-    label: "正向反馈撤销与替代保持可验证生命周期",
-    pass: !lifecycleApplicable || (positiveFeedbackLifecycle.schema === "ccm-group-positive-feedback-lifecycle-v1"
-      && positiveFeedbackLifecycle.groupId === groupId
-      && invalidLifecycleEvents.length === 0
-      && lifecycleObservationsLeakBody === false
-      && lifecycleSummaryMatches),
-    severity: "fatal",
-    detail: invalidLifecycleEvents.length || lifecycleObservationsLeakBody || !lifecycleSummaryMatches
-      ? "正向反馈生命周期存在无效事件、活动事实残留、统计偏差或拒绝正文泄漏。"
-      : "被撤销或替代的正向反馈不再进入活动 MEMORY.md，并保留同会话绑定和校验事件。",
-    gaps: [
-      ...invalidLifecycleEvents,
-      ...(lifecycleObservationsLeakBody ? ["rejected_lifecycle_observation_body_leak"] : []),
-      ...(!lifecycleSummaryMatches ? ["active_validated_count_mismatch"] : []),
-    ],
-  });
-
-  const expectedTypes = [...factsByType.keys()].filter(type => (factsByType.get(type) || []).length > 0);
-  const docsByType = new Map<string, any[]>();
-  for (const doc of docs.filter(doc => String(doc.source || "") === "auto:group-log-distillation")) {
-    docsByType.set(doc.type, [...(docsByType.get(doc.type) || []), doc]);
-  }
-  const missingTypeDocs = expectedTypes.filter(type => !(docsByType.get(type) || []).length);
-  addDistillationQualityCheck(checks, {
-    id: "typed_doc_coverage",
-    label: "蒸馏事实有对应 typed Markdown",
-    pass: missingTypeDocs.length === 0,
-    severity: "high",
-    detail: missingTypeDocs.length ? "部分蒸馏事实类别缺少对应 Markdown 记忆。" : "所有有事实的类别都有 Markdown 记忆。",
-    gaps: missingTypeDocs,
-  });
-
-  const docText = docs.filter(doc => String(doc.source || "") === "auto:group-log-distillation").map(doc => doc.body).join("\n");
-  const missingSourceLinks = facts
-    .filter(fact => fact.messageId && !docText.includes(`#${fact.messageId}`))
-    .map(fact => `#${fact.messageId} ${compactText(fact.text, 120)}`)
-    .slice(0, 20);
-  addDistillationQualityCheck(checks, {
-    id: "source_message_links_preserved",
-    label: "蒸馏事实保留 source message id",
-    pass: missingSourceLinks.length === 0,
-    severity: "fatal",
-    detail: missingSourceLinks.length ? "部分事实无法从 Markdown 中回溯到 source message id。" : "蒸馏 Markdown 保留了 source message id。",
-    gaps: missingSourceLinks,
-  });
-
-  const pathClaims = uniqueStrings(facts.flatMap(fact => extractPathClaims(fact.text)), 120);
-  const stalePaths = pathClaims
-    .map(claim => ({ claim, resolved: resolveClaimPath(projectRoot, claim) }))
-    .filter(item => item.resolved && !fs.existsSync(item.resolved))
-    .map(item => `${item.claim} -> ${item.resolved}`)
-    .slice(0, 30);
-  addDistillationQualityCheck(checks, {
-    id: "file_path_claims_checked",
-    label: "文件路径声明已按当前仓库核验",
-    pass: stalePaths.length === 0,
-    severity: "medium",
-    detail: stalePaths.length ? "部分记忆里的文件路径在当前仓库不存在，使用前必须重新核验。" : "未发现当前仓库不存在的文件路径声明。",
-    evidence: pathClaims.slice(0, 30),
-    gaps: stalePaths,
-  });
-
-  const taskSignals = facts.map(extractTaskStateSignal).filter(Boolean);
-  const taskMap = new Map<string, any[]>();
-  for (const signal of taskSignals) taskMap.set(signal.taskId, [...(taskMap.get(signal.taskId) || []), signal]);
-  const unresolvedContradictions: string[] = [];
-  for (const [taskId, signals] of taskMap.entries()) {
-    const sorted = signals.sort((a, b) => a.sourceIndex - b.sourceIndex);
-    const states = new Set(sorted.map(item => item.state));
-    const last = sorted[sorted.length - 1];
-    if (states.has("done") && states.has("blocked") && last?.state === "blocked") {
-      unresolvedContradictions.push(`[${taskId}] latest=${last.state} #${last.messageId} ${last.text}`);
-    }
-  }
-  addDistillationQualityCheck(checks, {
-    id: "no_unresolved_status_contradictions",
-    label: "完成/阻塞状态没有未解决矛盾",
-    pass: unresolvedContradictions.length === 0,
-    severity: "high",
-    detail: unresolvedContradictions.length ? "发现同一任务先完成后又阻塞，需按最新阻塞处理。" : "未发现未解决的完成/阻塞矛盾。",
-    gaps: unresolvedContradictions.slice(0, 12),
-  });
-
-  const hasUsefulFacts = facts.length > 0 && (expectedTypes.includes("user") || expectedTypes.includes("project") || expectedTypes.includes("feedback") || expectedTypes.includes("reference"));
-  addDistillationQualityCheck(checks, {
-    id: "distilled_signal_not_empty",
-    label: "蒸馏结果不是空洞记忆",
-    pass: hasUsefulFacts || Number(ledger.sourceMessageCount || 0) === 0,
-    severity: "medium",
-    detail: hasUsefulFacts ? "蒸馏 ledger 中有可召回事实。" : "存在消息来源但没有可召回蒸馏事实。",
-  });
-
-  const failedChecks = checks.filter(check => !check.pass);
-  const score = Math.max(0, Math.min(100, 100 - failedChecks.reduce((sum, check) => sum + distillationQualityPenalty(check.severity), 0)));
-  const status = failedChecks.some(check => check.severity === "fatal") || score < 60
-    ? "failed"
-    : failedChecks.some(check => check.severity === "high") || score < 80
-      ? "degraded"
-      : "pass";
-  return {
-    schema: "ccm-group-typed-memory-distillation-quality-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION,
-    groupId,
-    score,
-    pass: status === "pass",
-    status,
-    evaluatedAt,
-    projectRoot,
-    factCount: facts.length,
-    docCount: docs.length,
-    pathClaimCount: pathClaims.length,
-    stalePathCount: stalePaths.length,
-    contradictionCount: unresolvedContradictions.length,
-    checks,
-  };
+  return require("./group-memory-distillation").evaluateGroupTypedMemoryDistillationQuality(groupId, options);
 }
 
 function groupTypedMemoryDistillationArchiveFingerprint(archive: any = {}) {
@@ -18841,7 +12517,7 @@ function groupTypedMemoryDistillationArchiveFingerprint(archive: any = {}) {
   ]), 40);
 }
 
-function buildGroupTypedMemoryDistillationWorkState(groupId: string, messages: any[] = [], options: any = {}) {
+export function buildGroupTypedMemoryDistillationWorkState(groupId: string, messages: any[] = [], options: any = {}) {
   const maxMessages = Math.max(1, Math.min(5000, Number(options.maxMessages || options.max_messages || GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES)));
   const ledger = readGroupTypedMemoryDistillationLedger(groupId);
   const eligibleRows = (messages || [])
@@ -18925,40 +12601,10 @@ function buildGroupTypedMemoryDistillationWorkState(groupId: string, messages: a
 }
 
 export function inspectGroupTypedMemoryDistillationWork(groupId: string, messages: any[] = [], options: any = {}) {
-  const state = buildGroupTypedMemoryDistillationWorkState(groupId, messages, options);
-  const skipReason = state.disabled && state.recoveryReasons.length === 0
-    ? "disabled"
-    : state.runRequired
-      ? "work_pending"
-      : "no_new_messages_after_committed_cursor";
-  return {
-    schema: "ccm-group-typed-memory-distillation-preflight-v1",
-    version: 1,
-    groupId,
-    runRequired: state.runRequired,
-    skipped: !state.runRequired,
-    reason: skipReason,
-    disabled: state.disabled,
-    lockRequired: state.runRequired,
-    lockAcquired: false,
-    previousCommittedMessageId: state.previousCursorMessageId,
-    cursorFound: !state.previousCursorMessageId || state.cursorIndex >= 0,
-    cursorMissingFallback: state.cursorMissing,
-    forceRescan: state.forceRescan,
-    eligibleMessageCount: state.eligibleRows.length,
-    pendingMessageCount: state.pendingRows.length,
-    selectedMessageCount: state.selectedRows.length,
-    remainingMessageCount: Math.max(0, state.pendingRows.length - state.selectedRows.length),
-    maxMessages: state.maxMessages,
-    maintenanceRequired: state.maintenanceReasons.length > 0,
-    maintenanceReasons: state.maintenanceReasons,
-    recoveryRequired: state.recoveryReasons.length > 0,
-    recoveryReasons: state.recoveryReasons,
-    postCompactUsageArchiveChanged: state.postCompactUsageArchiveChanged,
-  };
+  return require("./group-memory-distillation").inspectGroupTypedMemoryDistillationWork(groupId, messages, options);
 }
 
-function distillGroupMessagesToTypedMemoryUnlocked(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}) {
+export function distillGroupMessagesToTypedMemoryUnlocked(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}) {
   if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
     return { schema: "ccm-group-typed-memory-distillation-v1", version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION, groupId, skipped: true, reason: "disabled" };
   }
@@ -19307,246 +12953,11 @@ function distillGroupMessagesToTypedMemoryUnlocked(groupId: string, messages: an
 }
 
 export function distillGroupMessagesToTypedMemory(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}): any {
-  const existingMutation = activeGroupTypedMemoryDistillationMutations.get(groupId);
-  if (existingMutation?.handle) {
-    existingMutation.depth = Number(existingMutation.depth || 1) + 1;
-    existingMutation.mutationKinds = [...new Set([...(existingMutation.mutationKinds || []), "group_log_distillation"])];
-    try {
-      const value = distillGroupMessagesToTypedMemoryUnlocked(groupId, messages, memory, {
-        ...options,
-        __distillationTransaction: { handle: existingMutation.handle, summary: null },
-      });
-      return {
-        ...value,
-        transaction: {
-          schema: "ccm-group-typed-memory-distillation-transaction-v1",
-          version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
-          groupId,
-          leaseId: String(existingMutation.handle.lock?.leaseId || ""),
-          fencingToken: Number(existingMutation.handle.lock?.fencingToken || 0),
-          status: "reentrant",
-          committed: value?.skipped !== true,
-        },
-      };
-    } finally {
-      existingMutation.depth = Math.max(1, Number(existingMutation.depth || 2) - 1);
-    }
-  }
-  const preflight = inspectGroupTypedMemoryDistillationWork(groupId, messages, options);
-  if (!preflight.runRequired) {
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    return {
-      schema: "ccm-group-typed-memory-distillation-v1",
-      version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: preflight.reason,
-      ledgerFile: ledger.file,
-      sourceMessageCount: 0,
-      candidateCount: 0,
-      extractedCandidateCount: 0,
-      rejectedCandidateCount: 0,
-      evictedExistingFactCount: 0,
-      newFactCount: 0,
-      updatedFactCount: 0,
-      writeCount: 0,
-      removalCount: 0,
-      writes: [],
-      removals: [],
-      quality: ledger.quality || null,
-      admission: ledger.admission || null,
-      positiveFeedbackLifecycle: {
-        ...(ledger.positiveFeedbackLifecycle || {}),
-        appliedThisRun: 0,
-        rejectedThisRun: 0,
-      },
-      cursor: {
-        schema: "ccm-group-typed-memory-distillation-cursor-v1",
-        previousCommittedMessageId: preflight.previousCommittedMessageId,
-        lastCommittedMessageId: preflight.previousCommittedMessageId,
-        cursorFound: preflight.cursorFound,
-        cursorMissingFallback: preflight.cursorMissingFallback,
-        forceRescan: preflight.forceRescan,
-        eligibleMessageCount: preflight.eligibleMessageCount,
-        pendingMessageCount: preflight.pendingMessageCount,
-        processedMessageCount: 0,
-        remainingMessageCount: preflight.pendingMessageCount,
-        batchLimited: false,
-        committedAt: String(ledger.distillationCursor?.committedAt || ledger.lastDistilledAt || ""),
-      },
-      lastDistilledMessageId: preflight.previousCommittedMessageId,
-      distilledAt: String(ledger.lastDistilledAt || ledger.updatedAt || ""),
-      preflight,
-      transaction: {
-        schema: "ccm-group-typed-memory-distillation-transaction-v1",
-        version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
-        groupId,
-        status: "preflight_skipped",
-        committed: false,
-        lockAcquired: false,
-      },
-    };
-  }
-  const acquired = acquireGroupTypedMemoryDistillationLock(groupId, { ...options, mutationKind: "group_log_distillation" });
-  if (!acquired.acquired) {
-    const error: any = new Error(`typed_memory_distillation_transaction_unavailable:${acquired.reason || "lock_unavailable"}`);
-    error.code = acquired.reason || "distillation_lock_unavailable";
-    error.transaction = acquired;
-    throw error;
-  }
-  const handle = acquired.handle;
-  const mutationContext: any = {
-    groupId,
-    mutationKind: "group_log_distillation",
-    mutationKinds: ["group_log_distillation"],
-    handle,
-    options,
-    pendingArtifacts: new Map<string, any>(),
-    depth: 1,
-    writeCount: 0,
-    startedAt: String(handle.lock?.acquiredAt || now()),
-  };
-  activeGroupTypedMemoryDistillationMutations.set(groupId, mutationContext);
-  const transactionSummary = {
-    schema: "ccm-group-typed-memory-distillation-transaction-v1",
-    version: GROUP_TYPED_MEMORY_DISTILLATION_TRANSACTION_VERSION,
-    groupId,
-    leaseId: String(handle.lock?.leaseId || ""),
-    fencingToken: Number(handle.lock?.fencingToken || 0),
-    waitedMs: Number(acquired.waitedMs || 0),
-    recoveredLeaseCount: Number(acquired.recoveredLeaseCount || 0),
-    acquiredAt: String(handle.lock?.acquiredAt || ""),
-  };
-  try {
-    mutationContext.artifactRecovery = recoverGroupTypedMemoryArtifactTransaction(groupId);
-    const diagnosticHoldMs = Math.max(0, Math.min(10_000, Number(options.__transactionDiagnosticHoldMs || 0)));
-    if (diagnosticHoldMs > 0) typedMemoryDistillationWait(diagnosticHoldMs);
-    const value = distillGroupMessagesToTypedMemoryUnlocked(groupId, messages, memory, {
-      ...options,
-      __distillationTransaction: { handle, summary: transactionSummary },
-    });
-    commitGroupTypedMemoryArtifactMutation(mutationContext);
-    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
-    if (!ownership.owned) throw new Error(`typed_memory_distillation_lock_lost_after_commit:${ownership.reason}`);
-    const completedAt = now();
-    const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
-    const committed = value?.skipped !== true;
-    writeGroupTypedMemoryDistillationTransactionState(groupId, {
-      status: "completed",
-      mutationKind: "group_log_distillation",
-      mutationKinds: mutationContext.mutationKinds,
-      lastMutationKind: "group_log_distillation",
-      leaseId: transactionSummary.leaseId,
-      fencingToken: transactionSummary.fencingToken,
-      lastFencingToken: transactionSummary.fencingToken,
-      lastCommittedFencingToken: committed
-        ? transactionSummary.fencingToken
-        : Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
-      recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
-      waitedMs: Number(acquired.waitedMs || 0),
-      writeCount: Number(mutationContext.writeCount || 0),
-      startedAt: transactionSummary.acquiredAt,
-      completedAt,
-      failedAt: "",
-      error: "",
-      updatedAt: completedAt,
-    });
-    activeGroupTypedMemoryDistillationMutations.delete(groupId);
-    releaseGroupTypedMemoryDistillationLock(handle, "completed");
-    return {
-      ...value,
-      preflight: {
-        ...preflight,
-        lockAcquired: true,
-      },
-      transaction: {
-        ...transactionSummary,
-        status: "completed",
-        committed,
-        completedAt,
-        artifactTransaction: mutationContext.artifactTransaction || null,
-        artifactRecovery: mutationContext.artifactRecovery || null,
-      },
-    };
-  } catch (error: any) {
-    const failedAt = now();
-    const ownership = verifyGroupTypedMemoryDistillationLock(handle);
-    if (ownership.owned) {
-      const priorState = readGroupTypedMemoryDistillationTransactionState(groupId);
-      writeGroupTypedMemoryDistillationTransactionState(groupId, {
-        status: "failed",
-        mutationKind: "group_log_distillation",
-        mutationKinds: mutationContext.mutationKinds,
-        lastMutationKind: String(priorState.valid ? priorState.state?.lastMutationKind || "" : ""),
-        leaseId: transactionSummary.leaseId,
-        fencingToken: transactionSummary.fencingToken,
-        lastFencingToken: transactionSummary.fencingToken,
-        lastCommittedFencingToken: Number(priorState.valid ? priorState.state?.lastCommittedFencingToken || 0 : 0),
-        recoveredLeaseCount: Number(priorState.valid ? priorState.state?.recoveredLeaseCount || 0 : acquired.recoveredLeaseCount || 0),
-        waitedMs: Number(acquired.waitedMs || 0),
-        writeCount: Number(mutationContext.writeCount || 0),
-        startedAt: transactionSummary.acquiredAt,
-        completedAt: "",
-        failedAt,
-        error: compactText(error?.message || error, 800),
-        updatedAt: failedAt,
-      });
-    }
-    activeGroupTypedMemoryDistillationMutations.delete(groupId);
-    releaseGroupTypedMemoryDistillationLock(handle, "failed");
-    throw error;
-  }
+  return require("./group-memory-distillation").distillGroupMessagesToTypedMemory(groupId, messages, memory, options);
 }
 
 export function distillGroupMessagesToTypedMemoryUntilCaughtUp(groupId: string, messages: any[] = [], memory: any = {}, options: any = {}) {
-  const maxBatches = Math.max(1, Math.min(32, Number(options.maxCatchUpBatches || options.max_catch_up_batches || 8)));
-  const batches: any[] = [];
-  let latest: any = null;
-  for (let batch = 0; batch < maxBatches; batch += 1) {
-    latest = distillGroupMessagesToTypedMemory(groupId, messages, memory, options);
-    batches.push(latest);
-    if (latest?.skipped === true || Number(latest?.cursor?.remainingMessageCount || 0) <= 0) break;
-  }
-  const sum = (key: string) => batches.reduce((total, row) => total + Number(row?.[key] || 0), 0);
-  const remainingMessageCount = Number(latest?.cursor?.remainingMessageCount || 0);
-  return {
-    ...(latest || {
-      schema: "ccm-group-typed-memory-distillation-v1",
-      version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-      groupId,
-      skipped: true,
-      reason: "no_distillation_batch_executed",
-    }),
-    sourceMessageCount: sum("sourceMessageCount"),
-    candidateCount: sum("candidateCount"),
-    extractedCandidateCount: sum("extractedCandidateCount"),
-    rejectedCandidateCount: sum("rejectedCandidateCount"),
-    evictedExistingFactCount: sum("evictedExistingFactCount"),
-    newFactCount: sum("newFactCount"),
-    updatedFactCount: sum("updatedFactCount"),
-    writeCount: sum("writeCount"),
-    removalCount: sum("removalCount"),
-    writes: batches.flatMap(row => Array.isArray(row?.writes) ? row.writes : []),
-    removals: batches.flatMap(row => Array.isArray(row?.removals) ? row.removals : []),
-    catchUp: {
-      schema: "ccm-group-typed-memory-distillation-catch-up-v1",
-      batchCount: batches.length,
-      maxBatches,
-      complete: remainingMessageCount === 0,
-      remainingMessageCount,
-      batches: batches.map((row, index) => ({
-        batch: index + 1,
-        skipped: row?.skipped === true,
-        reason: row?.reason || "",
-        sourceMessageCount: Number(row?.sourceMessageCount || 0),
-        newFactCount: Number(row?.newFactCount || 0),
-        updatedFactCount: Number(row?.updatedFactCount || 0),
-        previousCommittedMessageId: row?.cursor?.previousCommittedMessageId || "",
-        lastCommittedMessageId: row?.cursor?.lastCommittedMessageId || row?.lastDistilledMessageId || "",
-        remainingMessageCount: Number(row?.cursor?.remainingMessageCount || 0),
-      })),
-    },
-  };
+  return require("./group-memory-distillation").distillGroupMessagesToTypedMemoryUntilCaughtUp(groupId, messages, memory, options);
 }
 
 export function buildGroupDirectMemoryAction(groupId: string, input: any = {}) {
@@ -19751,7 +13162,7 @@ export function getAlreadySurfacedGroupTypedMemory(groupId: string, scope = "glo
     .slice(-Number(options.limit || 120));
 }
 
-function recordGroupTypedMemoryRecallUnlocked(groupId: string, scope: string, recall: any, query = "", options: any = {}) {
+export function recordGroupTypedMemoryRecallUnlocked(groupId: string, scope: string, recall: any, query = "", options: any = {}) {
   if (options.disableLedger === true || options.disable_ledger === true || recall?.ignored) return readGroupTypedMemoryRecallLedger(groupId);
   const deliveryCapsule = options.deliveryCapsule || options.delivery_capsule || null;
   const deliveryLease = options.deliveryLease || options.delivery_lease || null;
@@ -19889,13 +13300,7 @@ function recordGroupTypedMemoryRecallUnlocked(groupId: string, scope: string, re
 }
 
 export function recordGroupTypedMemoryRecall(groupId: string, scope: string, recall: any, query = "", options: any = {}) {
-  if (options.disableLedger === true || options.disable_ledger === true || recall?.ignored) return readGroupTypedMemoryRecallLedger(groupId);
-  const file = getGroupTypedMemoryRecallLedgerFile(groupId);
-  return withFileLock(file, () => recordGroupTypedMemoryRecallUnlocked(groupId, scope, recall, query, options), {
-    timeoutMs: 5_000,
-    retryMs: 10,
-    staleMs: 60_000,
-  });
+  return require("./group-memory-loading").recordGroupTypedMemoryRecall(groupId, scope, recall, query, options);
 }
 
 function typedMemoryConsumptionEntryChecksum(entry: any) {
@@ -19933,6 +13338,16 @@ function typedMemoryConsumptionEntryChecksum(entry: any) {
     entry.current_source_observed_checksum,
     entry.current_source_proof_id,
     entry.anomaly_codes || [],
+  );
+  if (Number(entry.version || 1) >= 3) fields.push(
+    entry.lifecycle_state,
+    entry.delivery_state,
+    entry.access_state,
+    entry.access_event_count,
+    entry.access_evidence_checksum,
+    entry.access_event_checksums || [],
+    entry.access_capture_status,
+    entry.access_evidence_valid === true,
   );
   return checksum(fields, 64);
 }
@@ -20002,7 +13417,7 @@ export function readGroupTypedMemoryConsumptionLedger(groupId: string) {
   };
 }
 
-function normalizeTypedMemoryConsumptionUsageState(value: any) {
+export function normalizeTypedMemoryConsumptionUsageState(value: any) {
   const text = String(value || "").trim().toLowerCase();
   if (/verified|validated|checked|current_source_verified|current source|re-read|核验|验证|当前源|已检查/.test(text)) return "verified";
   if (/ignored|ignore|skip|unused|not_used|未使用|不使用|忽略|跳过/.test(text)) return "ignored";
@@ -20049,11 +13464,12 @@ export function recordGroupTypedMemoryConsumptionLedger(groupId: string, input: 
   let duplicateCount = 0;
   let conflictCount = 0;
   let downgradedVerifiedCount = 0;
+  let upgradedObservationCount = 0;
   let recordedCount = 0;
   const existingIds = new Set(entries.map((entry: any) => String(entry.entry_id || "")));
-  const existingObservationStates = new Map(entries.map((entry: any) => [
+  const existingObservationStates = new Map(entries.map((entry: any, index: number) => [
     String(entry.observation_id || typedMemoryConsumptionObservationId(scopedGroupId, entry, entry)),
-    normalizeTypedMemoryConsumptionUsageState(entry.usage_state),
+    { state: normalizeTypedMemoryConsumptionUsageState(entry.usage_state), index, entryId: String(entry.entry_id || "") },
   ]));
   const incoming = rows.slice(0, 240).map((row: any) => ({
     row,
@@ -20107,14 +13523,24 @@ export function recordGroupTypedMemoryConsumptionLedger(groupId: string, input: 
     const targetProject = String(row.target_project || row.targetProject || input.targetProject || input.target_project || "").trim();
     const taskId = String(row.task_id || row.taskId || input.taskId || input.task_id || "").trim();
     const executionId = String(row.execution_id || row.executionId || input.executionId || input.execution_id || "").trim();
-    const previousObservationState = existingObservationStates.get(observationId);
-    if (previousObservationState) {
+    const previousObservation = existingObservationStates.get(observationId);
+    if (previousObservation) {
       duplicateCount += 1;
-      if (previousObservationState !== usageState) {
+      if (previousObservation.state === "mentioned" && usageState !== "mentioned") {
+        const previousIndex = entries.findIndex((entry: any) => String(entry.observation_id || typedMemoryConsumptionObservationId(scopedGroupId, entry, entry)) === observationId);
+        if (previousIndex >= 0) {
+          const [removed] = entries.splice(previousIndex, 1);
+          existingIds.delete(String(removed?.entry_id || previousObservation.entryId || ""));
+          upgradedObservationCount += 1;
+          duplicateCount -= 1;
+        }
+      } else if (usageState === "mentioned" || previousObservation.state === usageState) {
+        continue;
+      } else {
         conflictCount += 1;
         rejectedCount += 1;
+        continue;
       }
-      continue;
     }
     const receiptEvidenceChecksum = String(row.receipt_evidence_checksum || row.receiptEvidenceChecksum || checksum([
       row.memory_used || row.memoryUsed || [],
@@ -20146,7 +13572,7 @@ export function recordGroupTypedMemoryConsumptionLedger(groupId: string, input: 
     const evidenceConfidence = typedMemoryConsumptionEvidenceConfidence(row, usageState, structurallyValidProof);
     const payload: any = {
       schema: "ccm-group-typed-memory-consumption-entry-v1",
-      version: 2,
+      version: 3,
       entry_id: entryId,
       observation_id: observationId,
       group_id: scopedGroupId,
@@ -20174,6 +13600,14 @@ export function recordGroupTypedMemoryConsumptionLedger(groupId: string, input: 
       evidence_tier: evidenceTier,
       evidence_confidence: evidenceConfidence,
       anomaly_codes: anomalyCodes,
+      lifecycle_state: String(row.lifecycle_state || row.lifecycleState || (usageState === "mentioned" ? "delivered_unreported" : usageState)),
+      delivery_state: String(row.delivery_state || row.deliveryState || "delivered"),
+      access_state: String(row.access_state || row.accessState || "capture_missing"),
+      access_event_count: Math.max(0, Number(row.access_event_count || row.accessEventCount || 0)),
+      access_evidence_checksum: String(row.access_evidence_checksum || row.accessEvidenceChecksum || ""),
+      access_event_checksums: uniqueStrings(row.access_event_checksums || row.accessEventChecksums || []).slice(0, 20),
+      access_capture_status: String(row.access_capture_status || row.accessCaptureStatus || "capture_missing"),
+      access_evidence_valid: row.access_evidence_valid === true || row.accessEvidenceValid === true,
       direct_reference: row.direct_reference === true || row.directReference === true,
       query_concepts: uniqueStrings(row.query_concepts || row.queryConcepts || []).slice(0, 24),
       query_polarities: uniqueStrings(row.query_polarities || row.queryPolarities || []).slice(0, 12),
@@ -20185,7 +13619,7 @@ export function recordGroupTypedMemoryConsumptionLedger(groupId: string, input: 
     const entry = { ...payload, checksum: typedMemoryConsumptionEntryChecksum(payload) };
     entries.push(entry);
     existingIds.add(entryId);
-    existingObservationStates.set(observationId, usageState);
+    existingObservationStates.set(observationId, { state: usageState, index: entries.length - 1, entryId });
     recordedCount += 1;
   }
   const retained = entries.sort((a: any, b: any) => String(a.generated_at || "").localeCompare(String(b.generated_at || ""))).slice(-1200);
@@ -20206,6 +13640,7 @@ export function recordGroupTypedMemoryConsumptionLedger(groupId: string, input: 
     duplicate_count: duplicateCount,
     conflict_count: conflictCount,
     downgraded_verified_count: downgradedVerifiedCount,
+    upgraded_observation_count: upgradedObservationCount,
   };
 }
 
@@ -20282,7 +13717,7 @@ function typedMemoryStaleCandidateLedgerChecksum(candidates: any[], events: any[
   ], 64);
 }
 
-function isExactGroupTypedMemorySessionScope(scopeId: string) {
+export function isExactGroupTypedMemorySessionScope(scopeId: string) {
   return /^.+--gcs_[a-zA-Z0-9._-]+$/.test(String(scopeId || "").trim());
 }
 
@@ -20693,7 +14128,7 @@ export function buildGroupTypedMemoryConsumptionSummary(groupId: string, options
   };
 }
 
-function scoreGroupTypedMemoryConsumptionRecall(doc: any, summary: any) {
+export function scoreGroupTypedMemoryConsumptionRecall(doc: any, summary: any) {
   const relPath = String(doc.relPath || doc.rel_path || "").toLowerCase();
   const documentChecksum = String(doc.checksum || "");
   const matches = (summary.rows || []).filter((row: any) =>
@@ -20738,7 +14173,7 @@ function scoreGroupTypedMemoryConsumptionRecall(doc: any, summary: any) {
   };
 }
 
-function buildGroupTypedMemoryRecallFreshness(doc: any, nowMs = Date.now()) {
+export function buildGroupTypedMemoryRecallFreshness(doc: any, nowMs = Date.now()) {
   const parsedUpdatedAt = Date.parse(String(doc?.updatedAt || doc?.updated_at || ""));
   const observedMtimeMs = Number(doc?.mtimeMs || doc?.mtime_ms || 0)
     || (Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt : Number(nowMs || Date.now()));
@@ -20763,7 +14198,7 @@ function buildGroupTypedMemoryRecallFreshness(doc: any, nowMs = Date.now()) {
   };
 }
 
-const GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SYSTEM_PROMPT = `You are selecting memories that will be useful to a coding Agent as it processes a user's query. You will be given the user's query and a list of available memory files with their filenames and descriptions.
+export const GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SYSTEM_PROMPT = `You are selecting memories that will be useful to a coding Agent as it processes a user's query. You will be given the user's query and a list of available memory files with their filenames and descriptions.
 
 Return a list of filenames for the memories that will clearly be useful to the coding Agent as it processes the user's query (up to 5). Only include memories that you are certain will be helpful based on their name and description.
 - If you are unsure if a memory will be useful in processing the user's query, then do not include it in your list. Be selective and discerning.
@@ -20771,7 +14206,7 @@ Return a list of filenames for the memories that will clearly be useful to the c
 - If a list of recently-used tools is provided, do not select memories that are usage reference or API documentation for those tools. Do still select memories containing warnings, gotchas, or known issues about those tools.
 - Historical outcome hints, when present, are advisory evidence from the same group-chat session and exact query only. Never select a memory solely because it was used before, and never reject it solely because it was ignored before. The current query, filename, description, freshness, and current-source truth remain authoritative.`;
 
-function groupTypedMemoryManifestSelectionChecksum(value: any) {
+export function groupTypedMemoryManifestSelectionChecksum(value: any) {
   const payload = { ...(value || {}) };
   delete payload.checksum;
   delete payload.decisionFile;
@@ -20781,26 +14216,26 @@ function groupTypedMemoryManifestSelectionChecksum(value: any) {
   return checksum(JSON.stringify(payload), 64);
 }
 
-function groupTypedMemoryManifestSelectorCalibrationChecksum(value: any) {
+export function groupTypedMemoryManifestSelectorCalibrationChecksum(value: any) {
   const payload = { ...(value || {}) };
   delete payload.checksum;
   return checksum(JSON.stringify(payload), 64);
 }
 
 export function getGroupTypedMemoryManifestSelectorDecisionDir(scopeId: string) {
-  return path.join(getGroupTypedMemoryDir(scopeId), GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_DECISION_DIR);
+  return require("./group-memory-loading").getGroupTypedMemoryManifestSelectorDecisionDir(scopeId);
 }
 
 export function getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId: string) {
-  return path.join(getGroupTypedMemoryDir(scopeId), GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_DIR);
+  return require("./group-memory-loading").getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
 }
 
 export function getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId: string) {
-  return path.join(getGroupTypedMemoryDir(scopeId), GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_DIR);
+  return require("./group-memory-loading").getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId);
 }
 
 export function getGroupTypedMemoryManifestSelectorShapeDir(scopeId: string) {
-  return path.join(getGroupTypedMemoryDir(scopeId), GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_DIR);
+  return require("./group-memory-loading").getGroupTypedMemoryManifestSelectorShapeDir(scopeId);
 }
 
 export function getGroupTypedMemoryWriteShapeDir(scopeId: string) {
@@ -21892,7 +15327,7 @@ export function acknowledgeGroupTypedMemoryShapeTrendIncident(scopeId: string, i
   }, { timeoutMs: 5_000, retryMs: 10, staleMs: 60_000 });
 }
 
-function groupTypedMemoryManifestSelectorShapeChecksum(value: any) {
+export function groupTypedMemoryManifestSelectorShapeChecksum(value: any) {
   const payload = { ...(value || {}) };
   delete payload.checksum;
   delete payload.shapeFile;
@@ -21904,151 +15339,28 @@ function groupTypedMemoryManifestSelectorShapeChecksum(value: any) {
   return checksum(JSON.stringify(payload), 64);
 }
 
-function groupTypedMemoryManifestSelectorOutcomeChecksum(value: any) {
+export function groupTypedMemoryManifestSelectorOutcomeChecksum(value: any) {
   const payload = { ...(value || {}) };
   delete payload.checksum;
   delete payload.outcomeFile;
   return checksum(JSON.stringify(payload), 64);
 }
 
-function normalizeGroupTypedMemoryOutcomeRelPaths(value: any, limit = GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES) {
+export function normalizeGroupTypedMemoryOutcomeRelPaths(value: any, limit = GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES) {
   return uniqueStrings((Array.isArray(value) ? value : [])
     .map((item: any) => String(item || "").trim())
     .filter((item: string) => path.basename(item) === item && item.toLowerCase().endsWith(".md")), limit);
 }
 
 export function verifyGroupTypedMemoryManifestSelectorOutcome(outcome: any, expectedScopeId = "", selection: any = null) {
-  const selected = normalizeGroupTypedMemoryOutcomeRelPaths(outcome?.selectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-  const recalled = normalizeGroupTypedMemoryOutcomeRelPaths(outcome?.recalledSelectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-  const attached = normalizeGroupTypedMemoryOutcomeRelPaths(outcome?.attachedSelectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-  const selectedSet = new Set(selected);
-  const recalledSet = new Set(recalled);
-  const stage = String(outcome?.stage || "");
-  const checksumValid = !!outcome && String(outcome.checksum || "") === groupTypedMemoryManifestSelectorOutcomeChecksum(outcome);
-  const selectionValid = !selection || (
-    verifyGroupTypedMemoryManifestSelection(selection, expectedScopeId || String(outcome?.scopeId || "")).valid === true
-    && String(outcome?.requestId || "") === String(selection.requestId || "")
-    && String(outcome?.selectionChecksum || "") === String(selection.checksum || "")
-    && String(outcome?.queryChecksum || "") === String(selection.queryChecksum || "")
-    && selected.join("\n") === normalizeGroupTypedMemoryOutcomeRelPaths(selection.selectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION).join("\n")
-  );
-  const valid = !!outcome
-    && outcome.schema === "ccm-group-typed-memory-manifest-selector-outcome-v1"
-    && Number(outcome.version || 0) === GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_VERSION
-    && ["attached", "committed"].includes(stage)
-    && isExactGroupTypedMemorySessionScope(String(outcome.scopeId || ""))
-    && (!expectedScopeId || String(outcome.scopeId || "") === expectedScopeId)
-    && !!String(outcome.requestId || "")
-    && !!String(outcome.selectionChecksum || "")
-    && recalled.every((item: string) => selectedSet.has(item))
-    && attached.every((item: string) => recalledSet.has(item))
-    && (stage !== "committed" || !!String(outcome.attachedOutcomeChecksum || ""))
-    && checksumValid
-    && selectionValid;
-  return {
-    valid,
-    checksumValid,
-    scopeValid: !expectedScopeId || String(outcome?.scopeId || "") === expectedScopeId,
-    selectionValid,
-    stage,
-    selectedCount: selected.length,
-    recalledCount: recalled.length,
-    attachedCount: attached.length,
-  };
+  return require("./group-memory-loading").verifyGroupTypedMemoryManifestSelectorOutcome(outcome, expectedScopeId, selection);
 }
 
 export function recordGroupTypedMemoryManifestSelectorOutcome(scopeId: string, selection: any, input: any = {}) {
-  const selectionVerification = verifyGroupTypedMemoryManifestSelection(selection, scopeId);
-  if (!selectionVerification.valid) throw new Error("typed_memory_manifest_selector_outcome_selection_invalid");
-  const stage = String(input.stage || "attached");
-  if (!["attached", "committed"].includes(stage)) throw new Error("typed_memory_manifest_selector_outcome_stage_invalid");
-  const selectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(selection.selectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-  const selectedSet = new Set(selectedRelPaths);
-  let recalledSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(input.recalledRelPaths || input.recalled_rel_paths, GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES)
-    .filter((item: string) => selectedSet.has(item));
-  let recalledSet = new Set(recalledSelectedRelPaths);
-  let attachedSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(input.attachedRelPaths || input.attached_rel_paths, GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES)
-    .filter((item: string) => recalledSet.has(item));
-  const requestId = String(selection.requestId || "");
-  const dir = path.resolve(getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId));
-  fs.mkdirSync(dir, { recursive: true });
-  const attachedFile = path.resolve(dir, `${safeSegment(requestId, "selection")}.attached.json`);
-  const outcomeFile = path.resolve(dir, `${safeSegment(requestId, "selection")}.${stage}.json`);
-  if (path.dirname(outcomeFile).toLowerCase() !== dir.toLowerCase()) throw new Error("typed_memory_manifest_selector_outcome_path_invalid");
-  let attachedOutcome: any = input.attachedOutcome || input.attached_outcome || null;
-  if (stage === "committed" && !attachedOutcome) {
-    try { attachedOutcome = JSON.parse(fs.readFileSync(attachedFile, "utf-8")); } catch {}
-  }
-  if (stage === "committed") {
-    const attachedVerification = verifyGroupTypedMemoryManifestSelectorOutcome(attachedOutcome, scopeId, selection);
-    if (!attachedVerification.valid || attachedVerification.stage !== "attached") {
-      throw new Error("typed_memory_manifest_selector_attached_outcome_invalid");
-    }
-    if (String(attachedOutcome.capsuleChecksum || "") !== String(input.capsuleChecksum || input.capsule_checksum || "")) {
-      throw new Error("typed_memory_manifest_selector_outcome_capsule_mismatch");
-    }
-    recalledSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(attachedOutcome.recalledSelectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-    recalledSet = new Set(recalledSelectedRelPaths);
-    attachedSelectedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(attachedOutcome.attachedSelectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-  }
-  const core = {
-    schema: "ccm-group-typed-memory-manifest-selector-outcome-v1",
-    version: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_OUTCOME_VERSION,
-    scopeId,
-    requestId,
-    stage,
-    selectionStatus: String(selection.status || ""),
-    selectionChecksum: String(selection.checksum || ""),
-    queryChecksum: String(selection.queryChecksum || ""),
-    manifestChecksum: String(selection.manifestChecksum || ""),
-    selectedRelPaths,
-    recalledSelectedRelPaths,
-    attachedSelectedRelPaths,
-    selectedNotRecalledRelPaths: selectedRelPaths.filter((item: string) => !recalledSet.has(item)),
-    recalledNotAttachedRelPaths: recalledSelectedRelPaths.filter((item: string) => !attachedSelectedRelPaths.includes(item)),
-    capsuleChecksum: String(input.capsuleChecksum || input.capsule_checksum || ""),
-    attachedOutcomeChecksum: stage === "committed" ? String(attachedOutcome?.checksum || "") : "",
-    deliveryLeaseId: String(input.deliveryLeaseId || input.delivery_lease_id || ""),
-    dispatchTicketChecksum: String(input.dispatchTicketChecksum || input.dispatch_ticket_checksum || ""),
-    deliveryReceiptChecksum: String(input.deliveryReceiptChecksum || input.delivery_receipt_checksum || ""),
-    memoryContextSnapshotId: String(input.memoryContextSnapshotId || input.memory_context_snapshot_id || ""),
-    memoryContextSnapshotChecksum: String(input.memoryContextSnapshotChecksum || input.memory_context_snapshot_checksum || ""),
-    workerContextPacketId: String(input.workerContextPacketId || input.worker_context_packet_id || ""),
-    taskId: String(input.taskId || input.task_id || ""),
-    taskAgentSessionId: String(input.taskAgentSessionId || input.task_agent_session_id || ""),
-    targetProject: String(input.targetProject || input.target_project || ""),
-    recorded: input.recordOutcome !== false && input.record_outcome !== false,
-    createdAt: String(input.createdAt || input.created_at || now()),
-  };
-  const outcome: any = { ...core, checksum: groupTypedMemoryManifestSelectorOutcomeChecksum(core) };
-  const verification = verifyGroupTypedMemoryManifestSelectorOutcome(outcome, scopeId, selection);
-  if (!verification.valid) throw new Error("typed_memory_manifest_selector_outcome_invalid");
-  if (outcome.recorded !== true) return outcome;
-  if (fs.existsSync(outcomeFile)) {
-    try {
-      const existing = JSON.parse(fs.readFileSync(outcomeFile, "utf-8"));
-      if (verifyGroupTypedMemoryManifestSelectorOutcome(existing, scopeId, selection).valid
-        && String(existing.stage || "") === stage
-        && String(existing.selectionChecksum || "") === String(outcome.selectionChecksum || "")
-        && String(existing.capsuleChecksum || "") === String(outcome.capsuleChecksum || "")
-        && String(existing.attachedOutcomeChecksum || "") === String(outcome.attachedOutcomeChecksum || "")
-        && String(existing.taskId || "") === String(outcome.taskId || "")
-        && String(existing.taskAgentSessionId || "") === String(outcome.taskAgentSessionId || "")
-        && String(existing.memoryContextSnapshotId || "") === String(outcome.memoryContextSnapshotId || "")
-        && String(existing.memoryContextSnapshotChecksum || "") === String(outcome.memoryContextSnapshotChecksum || "")
-        && JSON.stringify(existing.selectedRelPaths || []) === JSON.stringify(outcome.selectedRelPaths || [])
-        && JSON.stringify(existing.recalledSelectedRelPaths || []) === JSON.stringify(outcome.recalledSelectedRelPaths || [])
-        && JSON.stringify(existing.attachedSelectedRelPaths || []) === JSON.stringify(outcome.attachedSelectedRelPaths || [])) {
-        return { ...existing, outcomeFile };
-      }
-    } catch {}
-    throw new Error("typed_memory_manifest_selector_outcome_conflict");
-  }
-  writeTextAtomicRaw(outcomeFile, JSON.stringify(outcome, null, 2));
-  return { ...outcome, outcomeFile };
+  return require("./group-memory-loading").recordGroupTypedMemoryManifestSelectorOutcome(scopeId, selection, input);
 }
 
-function groupTypedMemoryManifestSelectorConsumptionChecksum(value: any) {
+export function groupTypedMemoryManifestSelectorConsumptionChecksum(value: any) {
   const payload = { ...(value || {}) };
   delete payload.checksum;
   delete payload.consumptionFile;
@@ -22059,7 +15371,7 @@ function groupTypedMemoryManifestSelectorConsumptionChecksum(value: any) {
   return checksum(JSON.stringify(payload), 64);
 }
 
-function readGroupTypedMemoryManifestSelectorChain(scopeId: string, requestId: string) {
+export function readGroupTypedMemoryManifestSelectorChain(scopeId: string, requestId: string) {
   const decisionFile = path.join(getGroupTypedMemoryManifestSelectorDecisionDir(scopeId), `${safeSegment(requestId)}.json`);
   const outcomeDir = getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
   const attachedFile = path.join(outcomeDir, `${safeSegment(requestId)}.attached.json`);
@@ -22087,463 +15399,26 @@ function readGroupTypedMemoryManifestSelectorChain(scopeId: string, requestId: s
 }
 
 export function verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption: any, expectedScopeId = "", committedOutcome: any = null) {
-  const documents = Array.isArray(consumption?.documents) ? consumption.documents : [];
-  const relPaths = documents.map((row: any) => String(row?.relPath || ""));
-  const attachedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(committedOutcome?.attachedSelectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-  const attached = new Set(attachedRelPaths);
-  const documentsCoverAttached = !committedOutcome
-    || relPaths.map((item: string) => item.toLowerCase()).sort().join("\n") === attachedRelPaths.map((item: string) => item.toLowerCase()).sort().join("\n");
-  const checksumValid = !!consumption && String(consumption.checksum || "") === groupTypedMemoryManifestSelectorConsumptionChecksum(consumption);
-  const statesValid = documents.every((row: any) =>
-    typeof row?.relPath === "string"
-    && path.basename(row.relPath) === row.relPath
-    && row.relPath.toLowerCase().endsWith(".md")
-    && ["verified", "used", "ignored", "unreported"].includes(String(row.usageState || "")));
-  const committedValid = !committedOutcome || (
-    verifyGroupTypedMemoryManifestSelectorOutcome(committedOutcome, expectedScopeId || String(consumption?.scopeId || "")).valid === true
-    && committedOutcome.stage === "committed"
-    && String(consumption?.requestId || "") === String(committedOutcome.requestId || "")
-    && String(consumption?.committedOutcomeChecksum || "") === String(committedOutcome.checksum || "")
-    && String(consumption?.selectionChecksum || "") === String(committedOutcome.selectionChecksum || "")
-    && String(consumption?.capsuleChecksum || "") === String(committedOutcome.capsuleChecksum || "")
-    && relPaths.every((relPath: string) => attached.has(relPath))
-    && documentsCoverAttached
-  );
-  const valid = !!consumption
-    && consumption.schema === "ccm-group-typed-memory-manifest-selector-consumption-outcome-v1"
-    && Number(consumption.version || 0) === GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_VERSION
-    && isExactGroupTypedMemorySessionScope(String(consumption.scopeId || ""))
-    && (!expectedScopeId || String(consumption.scopeId || "") === expectedScopeId)
-    && !!String(consumption.requestId || "")
-    && !!String(consumption.committedOutcomeChecksum || "")
-    && documents.length <= GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION
-    && new Set(relPaths).size === relPaths.length
-    && statesValid
-    && checksumValid
-    && committedValid;
-  return {
-    valid,
-    checksumValid,
-    scopeValid: !expectedScopeId || String(consumption?.scopeId || "") === expectedScopeId,
-    committedValid,
-    statesValid,
-    documentsCoverAttached,
-    receiptBindingValid: consumption?.receiptBindingValid === true,
-    documentCount: documents.length,
-  };
+  return require("./group-memory-loading").verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, expectedScopeId, committedOutcome);
 }
 
 export function recordGroupTypedMemoryManifestSelectorConsumptionOutcomes(scopeId: string, input: any = {}) {
-  if (!isExactGroupTypedMemorySessionScope(scopeId)) return { recordedCount: 0, reason: "exact_group_gcs_scope_required", outcomes: [] };
-  const taskId = String(input.taskId || input.task_id || "");
-  const targetProject = String(input.targetProject || input.target_project || "").trim().toLowerCase();
-  const rows = Array.isArray(input.rows) ? input.rows : [];
-  const receipts = Array.isArray(input.receipts) ? input.receipts : [];
-  const committedDir = getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
-  let committedFiles: string[] = [];
-  try { committedFiles = fs.readdirSync(committedDir).filter(name => name.endsWith(".committed.json")).map(name => path.join(committedDir, name)); } catch {}
-  const outcomes: any[] = [];
-  let skippedCount = 0;
-  for (const committedFile of committedFiles) {
-    let requestId = "";
-    try { requestId = String(JSON.parse(fs.readFileSync(committedFile, "utf-8"))?.requestId || ""); } catch {}
-    if (!requestId) { skippedCount += 1; continue; }
-    const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, requestId);
-    if (!chain.valid) { skippedCount += 1; continue; }
-    const committed = chain.committed;
-    if (taskId && String(committed.taskId || "") !== taskId) continue;
-    if (targetProject && String(committed.targetProject || "").trim().toLowerCase() !== targetProject) continue;
-    const taskAgentSessionId = String(committed.taskAgentSessionId || "");
-    const attachedRelPaths = normalizeGroupTypedMemoryOutcomeRelPaths(committed.attachedSelectedRelPaths, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION);
-    if (!attachedRelPaths.length) continue;
-    const matchingRows = rows.filter((row: any) => {
-      if (String(row.task_agent_session_id || row.taskAgentSessionId || "") !== taskAgentSessionId) return false;
-      const rowProject = String(row.target_project || row.targetProject || "").trim().toLowerCase();
-      if (targetProject && rowProject && rowProject !== targetProject) return false;
-      const expectedReceiptChecksum = String(committed.deliveryReceiptChecksum || "");
-      const rowReceiptChecksum = String(row.delivery_receipt_checksum || row.deliveryReceiptChecksum || "");
-      return !expectedReceiptChecksum || !rowReceiptChecksum || expectedReceiptChecksum === rowReceiptChecksum;
-    });
-    if (!matchingRows.length) continue;
-    const rowReceiptEvidenceChecksums = new Set(matchingRows
-      .map((row: any) => String(row.receipt_evidence_checksum || row.receiptEvidenceChecksum || ""))
-      .filter(Boolean));
-    const matchingReceipts = receipts.filter((receipt: any) => {
-      if (String(receipt.task_agent_session_id || receipt.taskAgentSessionId || "") === taskAgentSessionId) return true;
-      const evidenceChecksum = checksum(JSON.stringify({
-        typedMemoryUsage: receipt.typedMemoryUsage || receipt.typed_memory_usage || [],
-        memoryUsed: receipt.memoryUsed || receipt.memory_used || [],
-        memoryIgnored: receipt.memoryIgnored || receipt.memory_ignored || [],
-        memoryContextUsage: receipt.memoryContextUsage || receipt.memory_context_usage || receipt.agentMemoryContextUsage || receipt.agent_memory_context_usage || null,
-      }), 64);
-      return rowReceiptEvidenceChecksums.has(evidenceChecksum);
-    });
-    const documentRows = attachedRelPaths.map((relPath: string) => {
-      const candidates = matchingRows.filter((row: any) => String(row.rel_path || row.relPath || "").toLowerCase() === relPath.toLowerCase());
-      const states = uniqueStrings(candidates.map((row: any) => normalizeTypedMemoryConsumptionUsageState(row.usage_state || row.usageState))).filter(Boolean);
-      const source = candidates[0] || {};
-      const declaredUsageState = states.length === 1 && ["verified", "used", "ignored"].includes(states[0]) ? states[0] : "unreported";
-      const verifiedProofValid = source.current_source_verified === true || source.currentSourceVerified === true
-        ? (source.current_source_proof_valid === true || source.currentSourceProofValid === true)
-          && String(source.evidence_tier || source.evidenceTier || "") === "system_current_source_file_proof"
-        : false;
-      const usageState = declaredUsageState === "verified" && !verifiedProofValid ? "used" : declaredUsageState;
-      return {
-        relPath,
-        usageState,
-        claimedUsageState: String(source.claimed_usage_state || source.claimedUsageState || declaredUsageState),
-        currentSourceVerified: usageState === "verified" && verifiedProofValid,
-        directReference: source.direct_reference === true || source.directReference === true,
-        evidenceTier: String(source.evidence_tier || source.evidenceTier || (usageState === "unreported" ? "snapshot_surfaced_only" : "")),
-        evidenceConfidence: Number(source.evidence_confidence ?? source.evidenceConfidence ?? (usageState === "unreported" ? 0.25 : 0)),
-        receiptEvidenceChecksum: String(source.receipt_evidence_checksum || source.receiptEvidenceChecksum || ""),
-        reason: compactText(source.reason || (usageState === "unreported" ? "valid bound receipt omitted per-relPath usage declaration" : ""), 500),
-        anomalyCodes: uniqueStrings([
-          ...(Array.isArray(source.anomaly_codes || source.anomalyCodes) ? (source.anomaly_codes || source.anomalyCodes) : []),
-          ...(states.length > 1 ? ["conflicting_usage_states"] : []),
-          ...(declaredUsageState === "verified" && !verifiedProofValid ? ["verified_without_system_current_source_proof"] : []),
-        ]).slice(0, 12),
-      };
-    });
-    const structuredClaimedRelPaths = uniqueStrings(matchingReceipts.flatMap((receipt: any) => {
-      const usage = receipt.typedMemoryUsage || receipt.typed_memory_usage || [];
-      return Array.isArray(usage) ? usage.map((row: any) => String(row?.relPath || row?.rel_path || row?.path || "").trim()) : [];
-    }).filter(Boolean), 120);
-    const attachedSet = new Set(attachedRelPaths.map(item => item.toLowerCase()));
-    const unexpectedClaimedRelPaths = structuredClaimedRelPaths.filter(item => !attachedSet.has(item.toLowerCase()));
-    const firstRow = matchingRows[0] || {};
-    const snapshotId = String(firstRow.memory_context_snapshot_id || firstRow.memoryContextSnapshotId || "");
-    const snapshotChecksum = String(firstRow.memory_context_snapshot_checksum || firstRow.memoryContextSnapshotChecksum || "");
-    const deliveryReceiptChecksum = String(firstRow.delivery_receipt_checksum || firstRow.deliveryReceiptChecksum || "");
-    const receiptEvidenceChecksum = checksum(matchingRows.map((row: any) => String(row.receipt_evidence_checksum || row.receiptEvidenceChecksum || "")), 64);
-    const receiptBindingValid = !!snapshotId && !!snapshotChecksum && !!deliveryReceiptChecksum
-      && !!String(committed.memoryContextSnapshotId || "")
-      && !!String(committed.memoryContextSnapshotChecksum || "")
-      && !!String(committed.deliveryReceiptChecksum || "")
-      && String(committed.memoryContextSnapshotId) === snapshotId
-      && String(committed.memoryContextSnapshotChecksum) === snapshotChecksum
-      && String(committed.deliveryReceiptChecksum) === deliveryReceiptChecksum;
-    const core = {
-      schema: "ccm-group-typed-memory-manifest-selector-consumption-outcome-v1",
-      version: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_CONSUMPTION_VERSION,
-      scopeId,
-      requestId,
-      committedOutcomeChecksum: String(committed.checksum || ""),
-      selectionChecksum: String(committed.selectionChecksum || ""),
-      capsuleChecksum: String(committed.capsuleChecksum || ""),
-      taskId: String(committed.taskId || ""),
-      taskAgentSessionId,
-      targetProject: String(committed.targetProject || ""),
-      memoryContextSnapshotId: snapshotId,
-      memoryContextSnapshotChecksum: snapshotChecksum,
-      deliveryReceiptChecksum,
-      receiptEvidenceChecksum,
-      receiptBindingValid,
-      documents: documentRows,
-      unexpectedClaimedRelPaths,
-      recordedAt: String(input.generatedAt || input.generated_at || now()),
-    };
-    const consumption: any = { ...core, checksum: groupTypedMemoryManifestSelectorConsumptionChecksum(core) };
-    if (!verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, scopeId, committed).valid) {
-      skippedCount += 1;
-      continue;
-    }
-    const dir = path.resolve(getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId));
-    fs.mkdirSync(dir, { recursive: true });
-    const eventId = checksum([requestId, snapshotId, deliveryReceiptChecksum, receiptEvidenceChecksum], 20);
-    const file = path.resolve(dir, `${safeSegment(requestId)}.${eventId}.json`);
-    if (path.dirname(file).toLowerCase() !== dir.toLowerCase()) { skippedCount += 1; continue; }
-    const contributeTrend = (value: any) => {
-      try {
-        return {
-          value: recordGroupTypedMemoryShapeTrendContribution(scopeId, {
-            kind: "consumption",
-            eventKey: value.checksum,
-            recordedAt: value.recordedAt,
-            metrics: {
-              documents: value.documents || [],
-              receiptBindingValid: value.receiptBindingValid === true,
-              unexpectedClaimCount: Number(value.unexpectedClaimedRelPaths?.length || 0),
-            },
-          }),
-          error: "",
-        };
-      } catch (error: any) {
-        return { value: null, error: compactText(error?.message || error, 240) };
-      }
-    };
-    if (fs.existsSync(file)) {
-      try {
-        const existing = JSON.parse(fs.readFileSync(file, "utf-8"));
-        if (verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(existing, scopeId, committed).valid) {
-          const trend = contributeTrend(existing);
-          outcomes.push({ ...existing, consumptionFile: file, idempotent: true, trendContribution: trend.value, trendContributionError: trend.error });
-          continue;
-        }
-      } catch {}
-      skippedCount += 1;
-      continue;
-    }
-    writeTextAtomicRaw(file, JSON.stringify(consumption, null, 2));
-    const trend = contributeTrend(consumption);
-    outcomes.push({ ...consumption, consumptionFile: file, idempotent: false, trendContribution: trend.value, trendContributionError: trend.error });
-  }
-  return {
-    schema: "ccm-group-typed-memory-manifest-selector-consumption-record-v1",
-    version: 1,
-    scopeId,
-    recordedCount: outcomes.filter(row => row.idempotent !== true).length,
-    idempotentCount: outcomes.filter(row => row.idempotent === true).length,
-    skippedCount,
-    outcomes,
-  };
+  return require("./group-memory-loading").recordGroupTypedMemoryManifestSelectorConsumptionOutcomes(scopeId, input);
 }
 
 export function summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId: string, options: any = {}) {
-  const dir = getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId);
-  const rows: any[] = [];
-  let unreadableCount = 0;
-  try {
-    for (const name of fs.readdirSync(dir).filter(name => name.endsWith(".json"))) {
-      const file = path.join(dir, name);
-      try {
-        const consumption = JSON.parse(fs.readFileSync(file, "utf-8"));
-        const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, String(consumption.requestId || ""));
-        const verification = verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, scopeId, chain.committed);
-        rows.push({ ...consumption, consumptionFile: file, valid: chain.valid === true && verification.valid === true });
-      } catch { unreadableCount += 1; }
-    }
-  } catch {}
-  rows.sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")) || String(b.checksum || "").localeCompare(String(a.checksum || "")));
-  const validRows = rows.filter(row => row.valid === true);
-  const latestByRequestId = new Map<string, any>();
-  for (const row of validRows) if (!latestByRequestId.has(String(row.requestId || ""))) latestByRequestId.set(String(row.requestId || ""), row);
-  const latestRows = [...latestByRequestId.values()];
-  const documents = latestRows.flatMap(row => row.documents || []);
-  const consumedRequestIds = new Set(latestRows.map(row => String(row.requestId || "")));
-  const committedRows: any[] = [];
-  try {
-    for (const name of fs.readdirSync(getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId)).filter(name => name.endsWith(".committed.json"))) {
-      try {
-        const committed = JSON.parse(fs.readFileSync(path.join(getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId), name), "utf-8"));
-        const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, String(committed.requestId || ""));
-        if (chain.valid && (chain.committed.attachedSelectedRelPaths || []).length > 0) committedRows.push(chain.committed);
-      } catch {}
-    }
-  } catch {}
-  const nowMs = Number(options.nowMs || options.now_ms || Date.now());
-  const staleAfterMs = Math.max(1_000, Number(options.staleAfterMs || options.stale_after_ms || 5 * 60_000));
-  const staleCommittedWithoutConsumptionCount = committedRows.filter(row => {
-    if (consumedRequestIds.has(String(row.requestId || ""))) return false;
-    const createdMs = Date.parse(String(row.createdAt || ""));
-    return Number.isFinite(createdMs) && nowMs - createdMs >= staleAfterMs;
-  }).length;
-  const invalidOutcomeCount = rows.filter(row => row.valid !== true).length + unreadableCount;
-  const weakReceiptBindingCount = latestRows.filter(row => row.receiptBindingValid !== true).length;
-  const unexpectedClaimCount = latestRows.reduce((sum, row) => sum + Number(row.unexpectedClaimedRelPaths?.length || 0), 0);
-  const unreportedDocumentCount = documents.filter(row => row.usageState === "unreported").length;
-  return {
-    schema: "ccm-group-typed-memory-manifest-selector-consumption-summary-v1",
-    version: 1,
-    scopeId,
-    dir,
-    present: rows.length > 0 || unreadableCount > 0,
-    valid: invalidOutcomeCount === 0,
-    closureValid: invalidOutcomeCount === 0 && weakReceiptBindingCount === 0 && unexpectedClaimCount === 0 && unreportedDocumentCount === 0 && staleCommittedWithoutConsumptionCount === 0,
-    outcomeCount: rows.length + unreadableCount,
-    validOutcomeCount: validRows.length,
-    invalidOutcomeCount,
-    consumedDeliveryCount: latestRows.length,
-    deliveredDocumentCount: documents.length,
-    usedDocumentCount: documents.filter(row => row.usageState === "used").length,
-    verifiedDocumentCount: documents.filter(row => row.usageState === "verified").length,
-    ignoredDocumentCount: documents.filter(row => row.usageState === "ignored").length,
-    unreportedDocumentCount,
-    weakReceiptBindingCount,
-    unexpectedClaimCount,
-    staleCommittedWithoutConsumptionCount,
-    committedWithoutConsumptionCount: committedRows.filter(row => !consumedRequestIds.has(String(row.requestId || ""))).length,
-    closureGapCount: invalidOutcomeCount + weakReceiptBindingCount + unexpectedClaimCount + unreportedDocumentCount + staleCommittedWithoutConsumptionCount,
-    latest: latestRows[0] ? {
-      requestId: String(latestRows[0].requestId || ""),
-      valid: latestRows[0].valid === true,
-      receiptBindingValid: latestRows[0].receiptBindingValid === true,
-      usedCount: (latestRows[0].documents || []).filter((row: any) => row.usageState === "used").length,
-      verifiedCount: (latestRows[0].documents || []).filter((row: any) => row.usageState === "verified").length,
-      ignoredCount: (latestRows[0].documents || []).filter((row: any) => row.usageState === "ignored").length,
-      unreportedCount: (latestRows[0].documents || []).filter((row: any) => row.usageState === "unreported").length,
-      recordedAt: String(latestRows[0].recordedAt || ""),
-    } : null,
-    rows: options.includeRows === true ? rows : undefined,
-  };
+  return require("./group-memory-loading").summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId, options);
 }
 
 export function verifyGroupTypedMemoryManifestSelectorCalibration(calibration: any, expectedScopeId = "", expectedQueryChecksum = "") {
-  const hints = Array.isArray(calibration?.hints) ? calibration.hints : [];
-  const checksumValid = !!calibration
-    && String(calibration.checksum || "") === groupTypedMemoryManifestSelectorCalibrationChecksum(calibration);
-  const hintsValid = hints.length <= 12 && hints.every((hint: any) =>
-    typeof hint?.relPath === "string"
-    && path.basename(hint.relPath) === hint.relPath
-    && hint.relPath.toLowerCase().endsWith(".md")
-    && ["support", "caution", "mixed"].includes(String(hint.calibration || ""))
-    && Number(hint.evidenceCount || 0) > 0
-    && Number(hint.strongReceiptCount || 0) === Number(hint.evidenceCount || 0));
-  const valid = !!calibration
-    && calibration.schema === "ccm-group-typed-memory-manifest-selector-calibration-v1"
-    && Number(calibration.version || 0) === 1
-    && calibration.advisoryOnly === true
-    && calibration.autoSuppression === false
-    && calibration.crossSessionReuse === false
-    && calibration.validScope === true
-    && isExactGroupTypedMemorySessionScope(String(calibration.scopeId || ""))
-    && (!expectedScopeId || String(calibration.scopeId || "") === expectedScopeId)
-    && !!String(calibration.queryChecksum || "")
-    && (!expectedQueryChecksum || String(calibration.queryChecksum || "") === expectedQueryChecksum)
-    && new Set(hints.map((hint: any) => String(hint.relPath || "").toLowerCase())).size === hints.length
-    && hintsValid
-    && checksumValid;
-  return {
-    valid,
-    checksumValid,
-    scopeValid: !expectedScopeId || String(calibration?.scopeId || "") === expectedScopeId,
-    queryValid: !expectedQueryChecksum || String(calibration?.queryChecksum || "") === expectedQueryChecksum,
-    hintsValid,
-    hintCount: hints.length,
-  };
+  return require("./group-memory-loading").verifyGroupTypedMemoryManifestSelectorCalibration(calibration, expectedScopeId, expectedQueryChecksum);
 }
 
 export function buildGroupTypedMemoryManifestSelectorCalibration(scopeId: string, query: string, options: any = {}) {
-  const requestedNowMs = Number(options.nowMs || options.now_ms || Date.now());
-  const nowMs = Number.isFinite(requestedNowMs) ? requestedNowMs : Date.now();
-  const generatedAt = String(options.generatedAt || options.generated_at || new Date(nowMs).toISOString());
-  const queryChecksum = checksum(String(query || ""), 64);
-  const lookbackDays = Math.max(1, Math.min(180, Number(options.lookbackDays || options.lookback_days || 30)));
-  const halfLifeDays = Math.max(1, Math.min(90, Number(options.halfLifeDays || options.half_life_days || 14)));
-  const maxHints = Math.max(1, Math.min(12, Number(options.maxHints || options.max_hints || 12)));
-  const candidateRelPaths = new Set<string>((options.candidateRelPaths || options.candidate_rel_paths || [])
-    .map((item: any) => String(item || "").trim().toLowerCase())
-    .filter(Boolean));
-  const base = {
-    schema: "ccm-group-typed-memory-manifest-selector-calibration-v1",
-    version: 1,
-    scopeId,
-    queryChecksum,
-    advisoryOnly: true,
-    autoSuppression: false,
-    crossSessionReuse: false,
-    evidencePolicy: "exact_session_exact_query_strong_receipt_latest_per_request",
-    lookbackDays,
-    halfLifeDays,
-    candidateBound: candidateRelPaths.size > 0,
-    candidateCount: candidateRelPaths.size,
-    generatedAt,
-  };
-  if (!isExactGroupTypedMemorySessionScope(scopeId)) {
-    const core = { ...base, validScope: false, evidenceCount: 0, excludedCount: 0, hintCount: 0, hints: [] };
-    return { ...core, checksum: groupTypedMemoryManifestSelectorCalibrationChecksum(core) };
-  }
-  const rows: any[] = [];
-  let excludedCount = 0;
-  const exclusionCounts: Record<string, number> = {};
-  const exclude = (reason: string) => {
-    excludedCount += 1;
-    exclusionCounts[reason] = Number(exclusionCounts[reason] || 0) + 1;
-  };
-  try {
-    for (const name of fs.readdirSync(getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId)).filter(name => name.endsWith(".json"))) {
-      try {
-        const consumption = JSON.parse(fs.readFileSync(path.join(getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId), name), "utf-8"));
-        const chain = readGroupTypedMemoryManifestSelectorChain(scopeId, String(consumption.requestId || ""));
-        const verified = chain.valid === true
-          && verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption, scopeId, chain.committed).valid === true;
-        if (!verified) { exclude("invalid_chain_or_outcome"); continue; }
-        if (consumption.receiptBindingValid !== true) { exclude("weak_receipt_binding"); continue; }
-        if (Number(consumption.unexpectedClaimedRelPaths?.length || 0) > 0) { exclude("unexpected_claim"); continue; }
-        if (String(chain.selection?.queryChecksum || "") !== queryChecksum) { exclude("query_mismatch"); continue; }
-        rows.push({ ...consumption, selection: chain.selection });
-      } catch { exclude("unreadable"); }
-    }
-  } catch {}
-  rows.sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")) || String(b.checksum || "").localeCompare(String(a.checksum || "")));
-  const latestByRequestId = new Map<string, any>();
-  for (const row of rows) if (!latestByRequestId.has(String(row.requestId || ""))) latestByRequestId.set(String(row.requestId || ""), row);
-  const aggregates = new Map<string, any>();
-  let evidenceCount = 0;
-  for (const row of latestByRequestId.values()) {
-    const recordedMs = Date.parse(String(row.recordedAt || ""));
-    if (!Number.isFinite(recordedMs)) { exclude("recorded_at_invalid"); continue; }
-    const ageDays = Math.max(0, (nowMs - recordedMs) / 86_400_000);
-    if (ageDays > lookbackDays) { exclude("outside_lookback"); continue; }
-    const decayWeight = Math.pow(0.5, ageDays / halfLifeDays);
-    for (const document of Array.isArray(row.documents) ? row.documents : []) {
-      const relPath = String(document.relPath || "");
-      const relKey = relPath.toLowerCase();
-      const usageState = String(document.usageState || "");
-      if (!relPath || !["used", "verified", "ignored"].includes(usageState)) continue;
-      if (candidateRelPaths.size > 0 && !candidateRelPaths.has(relKey)) continue;
-      const current = aggregates.get(relKey) || {
-        relPath,
-        usedCount: 0,
-        verifiedCount: 0,
-        ignoredCount: 0,
-        evidenceCount: 0,
-        strongReceiptCount: 0,
-        weightedUsed: 0,
-        weightedVerified: 0,
-        weightedIgnored: 0,
-        lastObservedAt: "",
-      };
-      current[`${usageState}Count`] = Number(current[`${usageState}Count`] || 0) + 1;
-      current[`weighted${usageState[0].toUpperCase()}${usageState.slice(1)}`] = Number(current[`weighted${usageState[0].toUpperCase()}${usageState.slice(1)}`] || 0) + decayWeight;
-      current.evidenceCount += 1;
-      current.strongReceiptCount += 1;
-      if (!current.lastObservedAt || String(row.recordedAt || "") > current.lastObservedAt) current.lastObservedAt = String(row.recordedAt || "");
-      aggregates.set(relKey, current);
-      evidenceCount += 1;
-    }
-  }
-  const hints = [...aggregates.values()].map((row: any) => {
-    const weightedUseful = Number(row.weightedUsed || 0) + Number(row.weightedVerified || 0) * 1.5;
-    const weightedIgnored = Number(row.weightedIgnored || 0);
-    const calibration = weightedUseful >= 0.5 && weightedUseful >= weightedIgnored
-      ? "support"
-      : Number(row.ignoredCount || 0) >= 2 && weightedIgnored > weightedUseful * 1.5
-        ? "caution"
-        : "mixed";
-    return {
-      relPath: row.relPath,
-      calibration,
-      evidenceCount: Number(row.evidenceCount || 0),
-      strongReceiptCount: Number(row.strongReceiptCount || 0),
-      usedCount: Number(row.usedCount || 0),
-      verifiedCount: Number(row.verifiedCount || 0),
-      ignoredCount: Number(row.ignoredCount || 0),
-      weightedUseful: Number(weightedUseful.toFixed(6)),
-      weightedIgnored: Number(weightedIgnored.toFixed(6)),
-      lastObservedAt: String(row.lastObservedAt || ""),
-    };
-  }).sort((a: any, b: any) =>
-    Number(b.weightedUseful + b.weightedIgnored) - Number(a.weightedUseful + a.weightedIgnored)
-    || String(b.lastObservedAt || "").localeCompare(String(a.lastObservedAt || ""))
-    || String(a.relPath || "").localeCompare(String(b.relPath || "")))
-    .slice(0, maxHints);
-  const core = {
-    ...base,
-    validScope: true,
-    evidenceCount,
-    excludedCount,
-    exclusionCounts,
-    hintCount: hints.length,
-    supportHintCount: hints.filter((hint: any) => hint.calibration === "support").length,
-    cautionHintCount: hints.filter((hint: any) => hint.calibration === "caution").length,
-    mixedHintCount: hints.filter((hint: any) => hint.calibration === "mixed").length,
-    hints,
-  };
-  return { ...core, checksum: groupTypedMemoryManifestSelectorCalibrationChecksum(core) };
+  return require("./group-memory-loading").buildGroupTypedMemoryManifestSelectorCalibration(scopeId, query, options);
 }
 
-function groupTypedMemoryManifestSelectorAgeStats(candidates: any[], nowMs: number) {
+export function groupTypedMemoryManifestSelectorAgeStats(candidates: any[], nowMs: number) {
   const ages = candidates.map((candidate: any) => {
     const mtimeMs = Number(candidate?.mtimeMs || 0);
     return mtimeMs > 0 ? Math.max(0, (nowMs - mtimeMs) / 86_400_000) : 0;
@@ -22557,211 +15432,15 @@ function groupTypedMemoryManifestSelectorAgeStats(candidates: any[], nowMs: numb
 }
 
 export function verifyGroupTypedMemoryManifestSelectorShape(shape: any, expectedScopeId = "", decision: any = null) {
-  const checksumValid = !!shape && String(shape.checksum || "") === groupTypedMemoryManifestSelectorShapeChecksum(shape);
-  const decisionValid = !decision || (
-    verifyGroupTypedMemoryManifestSelection(decision, expectedScopeId || String(shape?.scopeId || "")).valid === true
-    && String(shape?.requestId || "") === String(decision.requestId || "")
-    && String(shape?.decisionChecksum || "") === String(decision.checksum || "")
-    && String(shape?.queryChecksum || "") === String(decision.queryChecksum || "")
-    && String(shape?.manifestChecksum || "") === String(decision.manifestChecksum || "")
-    && Number(shape?.candidateCount || 0) === Number(decision.candidateCount || 0)
-    && Number(shape?.selectedCount || 0) === Number(decision.selectedRelPaths?.length || 0)
-  );
-  const candidateCount = Number(shape?.candidateCount || 0);
-  const selectedCount = Number(shape?.selectedCount || 0);
-  const expectedRate = candidateCount > 0 ? Number((selectedCount / candidateCount).toFixed(6)) : 0;
-  const selectedAge = shape?.selectedAgeDays || {};
-  const selectedAgeSentinelValid = selectedCount > 0
-    ? [selectedAge.newest, selectedAge.oldest, selectedAge.average].every((value: any) => Number(value) >= 0)
-    : Number(selectedAge.newest) === -1 && Number(selectedAge.oldest) === -1 && Number(selectedAge.average) === -1;
-  const valid = !!shape
-    && shape.schema === "ccm-group-typed-memory-manifest-selector-shape-v1"
-    && Number(shape.version || 0) === GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_VERSION
-    && shape.selectorRan === true
-    && isExactGroupTypedMemorySessionScope(String(shape.scopeId || ""))
-    && (!expectedScopeId || String(shape.scopeId || "") === expectedScopeId)
-    && !!String(shape.requestId || "")
-    && !!String(shape.decisionChecksum || "")
-    && candidateCount > 0
-    && selectedCount >= 0
-    && selectedCount <= Math.min(candidateCount, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION)
-    && Number(shape.selectionRate || 0) === expectedRate
-    && selectedAgeSentinelValid
-    && shape.bodyFree === true
-    && checksumValid
-    && decisionValid;
-  return {
-    valid,
-    checksumValid,
-    decisionValid,
-    scopeValid: !expectedScopeId || String(shape?.scopeId || "") === expectedScopeId,
-    selectedAgeSentinelValid,
-    candidateCount,
-    selectedCount,
-  };
+  return require("./group-memory-loading").verifyGroupTypedMemoryManifestSelectorShape(shape, expectedScopeId, decision);
 }
 
 export function recordGroupTypedMemoryManifestSelectorShape(scopeId: string, decision: any, candidates: any[] = [], input: any = {}) {
-  if (!isExactGroupTypedMemorySessionScope(scopeId)) return { recorded: false, reason: "exact_group_gcs_scope_required" };
-  const decisionVerification = verifyGroupTypedMemoryManifestSelection(decision, scopeId);
-  if (!decisionVerification.valid) throw new Error("typed_memory_manifest_selector_shape_decision_invalid");
-  if (decision.selectorRan !== true || decision.shapeTelemetryExpected !== true) return { recorded: false, reason: "selector_not_run" };
-  const candidateRows = Array.isArray(candidates) ? candidates : [];
-  if (!candidateRows.length || candidateRows.length !== Number(decision.candidateCount || 0)) {
-    throw new Error("typed_memory_manifest_selector_shape_candidates_invalid");
-  }
-  const completedMs = Date.parse(String(decision.completedAt || ""));
-  const nowMs = Number(input.nowMs || input.now_ms || (Number.isFinite(completedMs) ? completedMs : Date.now()));
-  const selectedSet = new Set((decision.selectedRelPaths || []).map((item: any) => String(item || "").toLowerCase()));
-  const selectedCandidates = candidateRows.filter((candidate: any) => selectedSet.has(String(candidate.filename || "").toLowerCase()));
-  const selectedCount = selectedCandidates.length;
-  const candidateCount = candidateRows.length;
-  const core = {
-    schema: "ccm-group-typed-memory-manifest-selector-shape-v1",
-    version: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SHAPE_VERSION,
-    scopeId,
-    requestId: String(decision.requestId || ""),
-    decisionChecksum: String(decision.checksum || ""),
-    queryChecksum: String(decision.queryChecksum || ""),
-    manifestChecksum: String(decision.manifestChecksum || ""),
-    selectorStatus: String(decision.status || ""),
-    selectorRan: true,
-    candidateCount,
-    selectedCount,
-    selectionRate: candidateCount ? Number((selectedCount / candidateCount).toFixed(6)) : 0,
-    candidateAgeDays: groupTypedMemoryManifestSelectorAgeStats(candidateRows, nowMs),
-    selectedAgeDays: groupTypedMemoryManifestSelectorAgeStats(selectedCandidates, nowMs),
-    selectedFreshCount: selectedCandidates.filter((candidate: any) => nowMs - Number(candidate.mtimeMs || nowMs) <= 86_400_000).length,
-    selectedStaleCount: selectedCandidates.filter((candidate: any) => nowMs - Number(candidate.mtimeMs || nowMs) > 86_400_000).length,
-    emptySelectionAgeSentinel: selectedCount === 0,
-    bodyFree: true,
-    recordedAt: String(input.recordedAt || input.recorded_at || decision.completedAt || now()),
-  };
-  const shape: any = { ...core, checksum: groupTypedMemoryManifestSelectorShapeChecksum(core) };
-  if (!verifyGroupTypedMemoryManifestSelectorShape(shape, scopeId, decision).valid) {
-    throw new Error("typed_memory_manifest_selector_shape_invalid");
-  }
-  if (input.recordShape === false || input.record_shape === false) return { ...shape, recorded: false };
-  const dir = path.resolve(getGroupTypedMemoryManifestSelectorShapeDir(scopeId));
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.resolve(dir, `${safeSegment(decision.requestId, "selection")}.json`);
-  if (path.dirname(file).toLowerCase() !== dir.toLowerCase()) throw new Error("typed_memory_manifest_selector_shape_path_invalid");
-  const contributeTrend = (value: any) => {
-    try {
-      return {
-        value: recordGroupTypedMemoryShapeTrendContribution(scopeId, {
-          kind: "selector",
-          eventKey: value.requestId,
-          recordedAt: value.recordedAt,
-          metrics: {
-            candidateCount: value.candidateCount,
-            selectedCount: value.selectedCount,
-            selectedAgeAverage: value.selectedAgeDays?.average,
-            freshCount: value.selectedFreshCount,
-            staleCount: value.selectedStaleCount,
-          },
-        }),
-        error: "",
-      };
-    } catch (error: any) {
-      return { value: null, error: compactText(error?.message || error, 240) };
-    }
-  };
-  if (fs.existsSync(file)) {
-    try {
-      const existing = JSON.parse(fs.readFileSync(file, "utf-8"));
-      if (verifyGroupTypedMemoryManifestSelectorShape(existing, scopeId, decision).valid) {
-        const trend = contributeTrend(existing);
-        return { ...existing, shapeFile: file, recorded: true, idempotent: true, trendContribution: trend.value, trendContributionError: trend.error };
-      }
-    } catch {}
-    throw new Error("typed_memory_manifest_selector_shape_conflict");
-  }
-  writeTextAtomicRaw(file, JSON.stringify(shape, null, 2));
-  const trend = contributeTrend(shape);
-  return { ...shape, shapeFile: file, recorded: true, idempotent: false, trendContribution: trend.value, trendContributionError: trend.error };
+  return require("./group-memory-loading").recordGroupTypedMemoryManifestSelectorShape(scopeId, decision, candidates, input);
 }
 
 export function summarizeGroupTypedMemoryManifestSelectorShapes(scopeId: string, options: any = {}) {
-  const decisions = Array.isArray(options.decisions) ? options.decisions : [];
-  const decisionsByRequestId = new Map(decisions.map((row: any) => {
-    const decision = { ...row };
-    delete decision.valid;
-    delete decision.decisionFile;
-    delete decision.recallShapeTelemetry;
-    delete decision.recallShapeTelemetryFile;
-    delete decision.recallShapeTelemetryError;
-    return [String(row.requestId || ""), decision];
-  }));
-  const rows: any[] = [];
-  let unreadableCount = 0;
-  try {
-    for (const name of fs.readdirSync(getGroupTypedMemoryManifestSelectorShapeDir(scopeId)).filter(name => name.endsWith(".json"))) {
-      const file = path.join(getGroupTypedMemoryManifestSelectorShapeDir(scopeId), name);
-      try {
-        const shape = JSON.parse(fs.readFileSync(file, "utf-8"));
-        const decision = decisionsByRequestId.get(String(shape.requestId || "")) || null;
-        const verification = verifyGroupTypedMemoryManifestSelectorShape(shape, scopeId, decision);
-        rows.push({ ...shape, shapeFile: file, valid: !!decision && verification.valid === true });
-      } catch { unreadableCount += 1; }
-    }
-  } catch {}
-  rows.sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")) || String(b.requestId || "").localeCompare(String(a.requestId || "")));
-  const expectedRequestIds = new Set<string>(decisions.filter((decision: any) => decision.shapeTelemetryExpected === true).map((decision: any) => String(decision.requestId || "")));
-  const observedRequestIds = new Set<string>(rows.filter(row => row.valid === true).map(row => String(row.requestId || "")));
-  const missingExpectedShapeCount = [...expectedRequestIds].filter(requestId => !observedRequestIds.has(requestId)).length;
-  const invalidShapeCount = rows.filter(row => row.valid !== true).length + unreadableCount;
-  const validRows = rows.filter(row => row.valid === true);
-  const consumption = summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId, { includeRows: true });
-  const latestConsumptionByRequestId = new Map<string, any>();
-  for (const row of Array.isArray(consumption.rows) ? consumption.rows.filter((item: any) => item.valid === true) : []) {
-    const requestId = String(row.requestId || "");
-    const previous = latestConsumptionByRequestId.get(requestId);
-    if (!previous || String(row.recordedAt || "") > String(previous.recordedAt || "")) latestConsumptionByRequestId.set(requestId, row);
-  }
-  const linkedRows = validRows.map(row => ({ ...row, consumption: latestConsumptionByRequestId.get(String(row.requestId || "")) || null }));
-  const documents = linkedRows.flatMap(row => row.consumption?.documents || []);
-  const candidateTotal = validRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0);
-  const selectedTotal = validRows.reduce((sum, row) => sum + Number(row.selectedCount || 0), 0);
-  const usedCount = documents.filter(row => row.usageState === "used").length;
-  const verifiedCount = documents.filter(row => row.usageState === "verified").length;
-  const ignoredCount = documents.filter(row => row.usageState === "ignored").length;
-  const unreportedCount = documents.filter(row => row.usageState === "unreported").length;
-  const declaredCount = usedCount + verifiedCount + ignoredCount;
-  const selectedAges = validRows.map(row => Number(row.selectedAgeDays?.average ?? -1)).filter(age => age >= 0);
-  return {
-    schema: "ccm-group-typed-memory-manifest-selector-shape-summary-v1",
-    version: 1,
-    scopeId,
-    dir: getGroupTypedMemoryManifestSelectorShapeDir(scopeId),
-    present: rows.length > 0 || unreadableCount > 0 || expectedRequestIds.size > 0,
-    valid: invalidShapeCount === 0 && missingExpectedShapeCount === 0,
-    shapeCount: rows.length + unreadableCount,
-    validShapeCount: validRows.length,
-    invalidShapeCount,
-    expectedShapeCount: expectedRequestIds.size,
-    missingExpectedShapeCount,
-    selectorRunCount: validRows.length,
-    emptySelectionCount: validRows.filter(row => Number(row.selectedCount || 0) === 0).length,
-    emptySelectionAgeSentinelCount: validRows.filter(row => Number(row.selectedCount || 0) === 0 && row.emptySelectionAgeSentinel === true && Number(row.selectedAgeDays?.average) === -1).length,
-    candidateTotal,
-    selectedTotal,
-    selectionRate: candidateTotal ? Number((selectedTotal / candidateTotal).toFixed(6)) : null,
-    averageEventSelectionRate: validRows.length ? Number((validRows.reduce((sum, row) => sum + Number(row.selectionRate || 0), 0) / validRows.length).toFixed(6)) : null,
-    averageSelectedAgeDays: selectedAges.length ? Number((selectedAges.reduce((sum, age) => sum + age, 0) / selectedAges.length).toFixed(6)) : -1,
-    selectedFreshCount: validRows.reduce((sum, row) => sum + Number(row.selectedFreshCount || 0), 0),
-    selectedStaleCount: validRows.reduce((sum, row) => sum + Number(row.selectedStaleCount || 0), 0),
-    consumptionLinkedRunCount: linkedRows.filter(row => !!row.consumption).length,
-    consumedDeliveredDocumentCount: documents.length,
-    consumedUsedDocumentCount: usedCount,
-    consumedVerifiedDocumentCount: verifiedCount,
-    consumedIgnoredDocumentCount: ignoredCount,
-    consumedUnreportedDocumentCount: unreportedCount,
-    consumptionReceiptCoverageRate: documents.length ? Number(((documents.length - unreportedCount) / documents.length).toFixed(6)) : null,
-    consumedUtilityRate: declaredCount ? Number(((usedCount + verifiedCount) / declaredCount).toFixed(6)) : null,
-    latest: linkedRows[0] || null,
-    rows: options.includeRows === true ? linkedRows : undefined,
-  };
+  return require("./group-memory-loading").summarizeGroupTypedMemoryManifestSelectorShapes(scopeId, options);
 }
 
 function groupTypedMemoryShapeDriftChecksum(value: any) {
@@ -22847,7 +15526,7 @@ export function verifyGroupTypedMemoryShapeDrift(report: any, expectedScopeId = 
   return { valid, checksumValid, scopeValid };
 }
 
-function buildGroupTypedMemoryShapeDrift(scopeId: string, shapeRows: any[], writeRows: any[], options: any = {}) {
+export function buildGroupTypedMemoryShapeDrift(scopeId: string, shapeRows: any[], writeRows: any[], options: any = {}) {
   const nowMs = Number(options.nowMs || options.now_ms || Date.now());
   const recentWindowDays = Math.max(1, Math.min(30, Number(options.recentWindowDays || options.recent_window_days || 7)));
   const baselineWindowDays = Math.max(recentWindowDays, Math.min(90, Number(options.baselineWindowDays || options.baseline_window_days || 21)));
@@ -22965,129 +15644,18 @@ function recordGroupTypedMemoryManifestSelectorDecision(scopeId: string, decisio
 }
 
 export function verifyGroupTypedMemoryManifestSelection(selection: any, expectedScopeId = "") {
-  const selected = Array.isArray(selection?.selectedRelPaths) ? selection.selectedRelPaths : [];
-  const calibration = selection?.calibration || null;
-  const calibrationVerification = calibration
-    ? verifyGroupTypedMemoryManifestSelectorCalibration(calibration, expectedScopeId || String(selection?.scopeId || ""), String(selection?.queryChecksum || ""))
-    : { valid: true, checksumValid: true, scopeValid: true, queryValid: true, hintCount: 0 };
-  const valid = !!selection
-    && selection.schema === "ccm-group-typed-memory-manifest-selection-v1"
-    && Number(selection.version || 0) === GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION
-    && isExactGroupTypedMemorySessionScope(String(selection.scopeId || ""))
-    && (!expectedScopeId || String(selection.scopeId || "") === expectedScopeId)
-    && selected.length <= GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION
-    && selected.every((item: any) => typeof item === "string" && path.basename(item) === item && item.toLowerCase().endsWith(".md"))
-    && calibrationVerification.valid === true
-    && (!calibration || String(selection.calibrationChecksum || "") === String(calibration.checksum || ""))
-    && String(selection.checksum || "") === groupTypedMemoryManifestSelectionChecksum(selection);
-  return {
-    valid,
-    scopeValid: !expectedScopeId || String(selection?.scopeId || "") === expectedScopeId,
-    checksumValid: !!selection && String(selection.checksum || "") === groupTypedMemoryManifestSelectionChecksum(selection),
-    calibrationValid: calibrationVerification.valid === true,
-    calibrationChecksumValid: calibrationVerification.checksumValid === true,
-    calibrationHintCount: Number(calibrationVerification.hintCount || 0),
-    selectedCount: selected.length,
-  };
+  return require("./group-memory-loading").verifyGroupTypedMemoryManifestSelection(selection, expectedScopeId);
 }
 
 export function configureGroupTypedMemoryManifestSelector(executor: GroupTypedMemoryManifestSelectorExecutor | null) {
-  configuredGroupTypedMemoryManifestSelectorExecutor = typeof executor === "function" ? executor : null;
-  return { configured: !!configuredGroupTypedMemoryManifestSelectorExecutor };
+  return require("./group-memory-loading").configureGroupTypedMemoryManifestSelector(executor);
 }
 
 export function buildGroupTypedMemoryManifest(scopeId: string, query: string, options: any = {}) {
-  if (!isExactGroupTypedMemorySessionScope(scopeId)) {
-    return {
-      schema: "ccm-group-typed-memory-selection-manifest-v1",
-      version: 1,
-      scopeId,
-      validScope: false,
-      candidates: [],
-      manifest: "",
-      candidateCount: 0,
-      filteredCount: 0,
-      filterCounts: { invalid_scope: 1 },
-      calibration: null,
-      calibrationText: "",
-      checksum: "",
-    };
-  }
-  const text = String(query || "");
-  const generatedAt = String(options.generatedAt || options.generated_at || now());
-  const index = buildGroupTypedMemoryIndex(scopeId);
-  const already = new Set<string>((options.alreadySurfaced || options.already_surfaced || [])
-    .map((item: any) => String(item || "").trim().toLowerCase()).filter(Boolean));
-  const targetPaths = deriveGroupTypedMemoryTargetPaths(text, options.targetPaths || options.target_paths || []);
-  const topicIndex = buildGroupSessionModelExtractionTopicRecallIndex(scopeId);
-  const staleIndex = buildGroupTypedMemoryPendingStaleConflictIndex(scopeId);
-  const filterCounts: Record<string, number> = {};
-  const filtered = (reason: string) => { filterCounts[reason] = Number(filterCounts[reason] || 0) + 1; };
-  const candidates = index.docs
-    .filter((doc: any) => {
-      const relPath = String(doc.relPath || "");
-      const relKey = relPath.toLowerCase();
-      const fileKey = String(doc.file || "").toLowerCase();
-      if (already.has(relKey) || already.has(fileKey)) { filtered("already_surfaced"); return false; }
-      if ((staleIndex.byRelPath.get(relKey) || []).length > 0) { filtered("pending_stale_conflict"); return false; }
-      if (String(doc.source || "") === "auto:model-extraction-evidence-admission"
-        && (!topicIndex.valid || !topicIndex.byRelPath.has(relKey))) {
-        filtered("model_topic_archive_invalid_or_unbound");
-        return false;
-      }
-      const pathCondition = evaluateTypedMemoryPathCondition(doc, targetPaths);
-      if (pathCondition.conditional && !pathCondition.matched) { filtered("path_condition_miss"); return false; }
-      return true;
-    })
-    .sort((a: any, b: any) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0) || String(a.relPath).localeCompare(String(b.relPath)))
-    .slice(0, Math.max(1, Math.min(GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES, Number(options.maxFiles || options.max_files || GROUP_TYPED_MEMORY_MANIFEST_MAX_FILES))))
-    .map((doc: any) => ({
-      filename: String(doc.relPath || ""),
-      filePath: String(doc.file || ""),
-      mtimeMs: Number(doc.mtimeMs || 0),
-      mtime: new Date(Number(doc.mtimeMs || Date.now())).toISOString(),
-      description: doc.description ? compactText(doc.description, 300) : "",
-      type: normalizeMemoryType(doc.type),
-      source: String(doc.source || ""),
-    }));
-  const manifest = candidates.map((item: any) => {
-    const tag = item.type ? `[${item.type}] ` : "";
-    return item.description
-      ? `- ${tag}${item.filename} (${item.mtime}): ${item.description}`
-      : `- ${tag}${item.filename} (${item.mtime})`;
-  }).join("\n");
-  const calibration = buildGroupTypedMemoryManifestSelectorCalibration(scopeId, text, {
-    nowMs: options.nowMs || options.now_ms,
-    generatedAt,
-    lookbackDays: options.calibrationLookbackDays || options.calibration_lookback_days,
-    halfLifeDays: options.calibrationHalfLifeDays || options.calibration_half_life_days,
-    maxHints: options.calibrationMaxHints || options.calibration_max_hints,
-    candidateRelPaths: candidates.map((item: any) => item.filename),
-  });
-  const calibrationText = (calibration.hints || []).map((hint: any) =>
-    `- ${hint.relPath}: ${hint.calibration}; strong outcomes used=${hint.usedCount}, verified=${hint.verifiedCount}, ignored=${hint.ignoredCount}`
-  ).join("\n");
-  const manifestCore = {
-    schema: "ccm-group-typed-memory-selection-manifest-v1",
-    version: 1,
-    scopeId,
-    validScope: true,
-    candidates,
-    manifest,
-    candidateCount: candidates.length,
-    sourceDocumentCount: index.docs.length,
-    filteredCount: Object.values(filterCounts).reduce((sum, count) => sum + Number(count || 0), 0),
-    filterCounts,
-    targetPaths,
-    alreadySurfacedCount: already.size,
-    calibration,
-    calibrationText,
-    generatedAt,
-  };
-  return { ...manifestCore, checksum: checksum(JSON.stringify(manifestCore), 64) };
+  return require("./group-memory-loading").buildGroupTypedMemoryManifest(scopeId, query, options);
 }
 
-function parseGroupTypedMemoryManifestSelectorOutput(value: any) {
+export function parseGroupTypedMemoryManifestSelectorOutput(value: any) {
   if (Array.isArray(value?.selected_memories)) return value.selected_memories;
   if (Array.isArray(value?.selectedMemories)) return value.selectedMemories;
   const raw = String(value?.output ?? value?.text ?? value?.content ?? value ?? "").trim();
@@ -23104,7 +15672,7 @@ function parseGroupTypedMemoryManifestSelectorOutput(value: any) {
   throw new Error("manifest_selector_output_json_invalid");
 }
 
-function finalizeGroupTypedMemoryManifestSelection(scopeId: string, input: any, options: any = {}) {
+export function finalizeGroupTypedMemoryManifestSelection(scopeId: string, input: any, options: any = {}) {
   const core = {
     schema: "ccm-group-typed-memory-manifest-selection-v1",
     version: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_VERSION,
@@ -23141,405 +15709,18 @@ function finalizeGroupTypedMemoryManifestSelection(scopeId: string, input: any, 
 }
 
 export async function selectGroupTypedMemoryManifest(scopeId: string, query: string, options: any = {}) {
-  const startedAt = now();
-  const requestId = `ms_${checksum([scopeId, query, startedAt, crypto.randomBytes(8).toString("hex")], 24)}`;
-  const queryChecksum = checksum(String(query || ""), 64);
-  const recentTools = uniqueStrings((options.recentTools || options.recent_tools || []).map(String), 20);
-  const manifest = buildGroupTypedMemoryManifest(scopeId, query, options);
-  const finish = (input: any) => {
-    const selectorRan = input.selectorRan === true;
-    const decision = finalizeGroupTypedMemoryManifestSelection(scopeId, {
-      requestId,
-      queryChecksum,
-      manifestChecksum: manifest.checksum || "",
-      candidateCount: manifest.candidateCount || 0,
-      filterCounts: manifest.filterCounts || {},
-      calibration: manifest.calibration || null,
-      calibrationChecksum: manifest.calibration?.checksum || "",
-      calibrationHintCount: Number(manifest.calibration?.hintCount || 0),
-      calibrationEvidenceCount: Number(manifest.calibration?.evidenceCount || 0),
-      recentTools,
-      startedAt,
-      completedAt: now(),
-      ...input,
-      selectorRan,
-      shapeTelemetryExpected: selectorRan && options.recordDecision !== false,
-    }, options);
-    if (selectorRan) {
-      try {
-        const shape = recordGroupTypedMemoryManifestSelectorShape(scopeId, decision, manifest.candidates || [], {
-          recordShape: options.recordDecision !== false,
-        });
-        decision.recallShapeTelemetry = shape;
-        decision.recallShapeTelemetryFile = shape.shapeFile || "";
-      } catch (error: any) {
-        decision.recallShapeTelemetryError = compactText(error?.message || error, 240);
-      }
-    }
-    return decision;
-  };
-  if (!manifest.validScope) return finish({ status: "invalid_scope", reason: "exact_group_gcs_scope_required", selectedRelPaths: [] });
-  if (shouldIgnoreGroupMemoryRequest(query, options)) return finish({ status: "ignored", reason: "user_requested_ignore_memory", selectedRelPaths: [] });
-  if (!manifest.candidateCount) return finish({ status: "no_candidates", reason: "manifest_empty_after_filters", selectedRelPaths: [] });
-  if (options.signal?.aborted) return finish({ status: "aborted", reason: "selector_aborted_before_call", selectedRelPaths: [] });
-  const executor = options.executor || configuredGroupTypedMemoryManifestSelectorExecutor;
-  if (typeof executor !== "function") return finish({ status: "unavailable", reason: "manifest_selector_executor_not_configured", selectedRelPaths: [] });
-  const toolsSection = recentTools.length ? `\n\nRecently used tools: ${recentTools.join(", ")}` : "";
-  const calibrationSection = manifest.calibrationText
-    ? `\n\nHistorical outcomes for this exact group-chat session and exact query (advisory only; do not auto-select or auto-reject):\n${manifest.calibrationText}`
-    : "";
-  try {
-    const response = await executor({
-      schema: "ccm-group-typed-memory-manifest-selector-request-v1",
-      version: 1,
-      requestId,
-      scopeId,
-      groupId: String(options.groupId || options.group_id || scopeId.slice(0, scopeId.lastIndexOf("--gcs_"))),
-      groupSessionId: String(options.groupSessionId || options.group_session_id || scopeId.slice(scopeId.lastIndexOf("--") + 2)),
-      query: compactText(query, 6000),
-      systemPrompt: GROUP_TYPED_MEMORY_MANIFEST_SELECTOR_SYSTEM_PROMPT,
-      userPrompt: `Query: ${compactText(query, 6000)}\n\nAvailable memories:\n${manifest.manifest}${toolsSection}${calibrationSection}`,
-      recentTools,
-      manifest: manifest.manifest,
-      manifestChecksum: manifest.checksum,
-      calibration: manifest.calibration,
-      calibrationChecksum: manifest.calibration?.checksum || "",
-      maxTokens: 256,
-      maxSelection: GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION,
-      outputSchema: {
-        type: "object",
-        properties: { selected_memories: { type: "array", items: { type: "string" } } },
-        required: ["selected_memories"],
-        additionalProperties: false,
-      },
-      signal: options.signal,
-    });
-    if (options.signal?.aborted) return finish({ status: "aborted", reason: "selector_aborted_after_call", selectedRelPaths: [], selectorRan: true });
-    const rawSelected = parseGroupTypedMemoryManifestSelectorOutput(response);
-    const validNames = new Set(manifest.candidates.map((item: any) => item.filename));
-    const selectedRelPaths: string[] = [];
-    const unknownFilenames: string[] = [];
-    let invalidFilenameCount = 0;
-    for (const raw of rawSelected) {
-      if (typeof raw !== "string" || path.basename(raw) !== raw || !raw.toLowerCase().endsWith(".md")) { invalidFilenameCount += 1; continue; }
-      if (!validNames.has(raw)) { unknownFilenames.push(raw); continue; }
-      if (!selectedRelPaths.includes(raw)) selectedRelPaths.push(raw);
-      if (selectedRelPaths.length >= GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION) break;
-    }
-    return finish({
-      status: selectedRelPaths.length ? "selected" : "empty",
-      reason: selectedRelPaths.length ? "selector_returned_certain_memories" : "selector_returned_empty",
-      selectedRelPaths,
-      unknownFilenames,
-      invalidFilenameCount,
-      selectorProject: response?.project || "",
-      selectorAgentType: response?.agentType || "",
-      selectorModel: response?.model || "",
-      selectorRan: true,
-    });
-  } catch (error: any) {
-    return finish({ status: "failed", reason: compactText(error?.message || error, 240), selectedRelPaths: [], selectorRan: true });
-  }
+  return require("./group-memory-loading").selectGroupTypedMemoryManifest(scopeId, query, options);
 }
 
 export function summarizeGroupTypedMemoryManifestSelectorOutcomes(scopeId: string, options: any = {}) {
-  const dir = getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId);
-  const decisions = Array.isArray(options.decisions) ? options.decisions : [];
-  const decisionsByRequestId = new Map(decisions.map((row: any) => {
-    const selection = { ...row };
-    delete selection.valid;
-    delete selection.decisionFile;
-    return [String(row.requestId || ""), selection];
-  }));
-  const rows: any[] = [];
-  let unreadableCount = 0;
-  try {
-    for (const name of fs.readdirSync(dir).filter(name => name.toLowerCase().endsWith(".json"))) {
-      const file = path.join(dir, name);
-      try {
-        const outcome = JSON.parse(fs.readFileSync(file, "utf-8"));
-        const selection = decisionsByRequestId.get(String(outcome.requestId || "")) || null;
-        const verification = verifyGroupTypedMemoryManifestSelectorOutcome(outcome, scopeId, selection);
-        rows.push({ ...outcome, outcomeFile: file, valid: verification.valid === true && !!selection });
-      } catch { unreadableCount += 1; }
-    }
-  } catch {}
-  rows.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")) || String(b.requestId || "").localeCompare(String(a.requestId || "")));
-  const attachedByRequestId = new Map(rows.filter(row => row.stage === "attached").map(row => [String(row.requestId || ""), row]));
-  for (const row of rows.filter(row => row.stage === "committed")) {
-    const attached = attachedByRequestId.get(String(row.requestId || ""));
-    if (!attached
-      || attached.valid !== true
-      || String(row.attachedOutcomeChecksum || "") !== String(attached.checksum || "")
-      || String(row.capsuleChecksum || "") !== String(attached.capsuleChecksum || "")) {
-      row.valid = false;
-      row.chainInvalid = true;
-    }
-  }
-  const validRows = rows.filter(row => row.valid === true);
-  const attachedRows = validRows.filter(row => row.stage === "attached");
-  const committedRows = validRows.filter(row => row.stage === "committed");
-  const attachedRequestIds = new Set(attachedRows.map(row => String(row.requestId || "")));
-  const committedRequestIds = new Set(committedRows.map(row => String(row.requestId || "")));
-  const selectedDecisions = decisions.filter((row: any) => row.valid === true && String(row.status || "") === "selected");
-  const nowMs = Number(options.nowMs || options.now_ms || Date.now());
-  const staleAfterMs = Math.max(1_000, Number(options.staleAfterMs || options.stale_after_ms || 5 * 60_000));
-  const staleUnattachedDecisionCount = selectedDecisions.filter((row: any) => {
-    if (attachedRequestIds.has(String(row.requestId || ""))) return false;
-    const completedMs = Date.parse(String(row.completedAt || ""));
-    return Number.isFinite(completedMs) && nowMs - completedMs >= staleAfterMs;
-  }).length;
-  const staleUncommittedAttachmentCount = attachedRows.filter(row => {
-    if (committedRequestIds.has(String(row.requestId || ""))) return false;
-    const createdMs = Date.parse(String(row.createdAt || ""));
-    return Number.isFinite(createdMs) && nowMs - createdMs >= staleAfterMs;
-  }).length;
-  const selectedAttachedDocumentCount = attachedRows.reduce((sum, row) => sum + Number(row.attachedSelectedRelPaths?.length || 0), 0);
-  const selectedCommittedDocumentCount = committedRows.reduce((sum, row) => sum + Number(row.attachedSelectedRelPaths?.length || 0), 0);
-  const selectedNotRecalledDocumentCount = attachedRows.reduce((sum, row) => sum + Number(row.selectedNotRecalledRelPaths?.length || 0), 0);
-  const recalledNotAttachedDocumentCount = attachedRows.reduce((sum, row) => sum + Number(row.recalledNotAttachedRelPaths?.length || 0), 0);
-  const invalidOutcomeCount = rows.filter(row => row.valid !== true).length + unreadableCount;
-  return {
-    schema: "ccm-group-typed-memory-manifest-selector-outcome-summary-v1",
-    version: 1,
-    scopeId,
-    dir,
-    present: rows.length > 0 || unreadableCount > 0,
-    valid: invalidOutcomeCount === 0,
-    closureValid: invalidOutcomeCount === 0 && staleUnattachedDecisionCount === 0 && staleUncommittedAttachmentCount === 0,
-    outcomeCount: rows.length + unreadableCount,
-    attachedOutcomeCount: attachedRows.length,
-    committedOutcomeCount: committedRows.length,
-    invalidOutcomeCount,
-    selectedAttachedDocumentCount,
-    selectedCommittedDocumentCount,
-    selectedNotRecalledDocumentCount,
-    recalledNotAttachedDocumentCount,
-    selectedDecisionWithoutAttachmentCount: selectedDecisions.filter((row: any) => !attachedRequestIds.has(String(row.requestId || ""))).length,
-    attachmentWithoutCommitCount: attachedRows.filter(row => !committedRequestIds.has(String(row.requestId || ""))).length,
-    staleUnattachedDecisionCount,
-    staleUncommittedAttachmentCount,
-    closureGapCount: invalidOutcomeCount + staleUnattachedDecisionCount + staleUncommittedAttachmentCount,
-    latest: rows[0] ? {
-      requestId: String(rows[0].requestId || ""),
-      stage: String(rows[0].stage || ""),
-      valid: rows[0].valid === true,
-      selectedCount: Number(rows[0].selectedRelPaths?.length || 0),
-      recalledCount: Number(rows[0].recalledSelectedRelPaths?.length || 0),
-      attachedCount: Number(rows[0].attachedSelectedRelPaths?.length || 0),
-      createdAt: String(rows[0].createdAt || ""),
-    } : null,
-    rows: options.includeRows === true ? rows : undefined,
-  };
+  return require("./group-memory-loading").summarizeGroupTypedMemoryManifestSelectorOutcomes(scopeId, options);
 }
 
 export function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId: string, options: any = {}) {
-  const dir = getGroupTypedMemoryManifestSelectorDecisionDir(scopeId);
-  const limit = Math.max(1, Math.min(200, Number(options.limit || 200)));
-  const rows: any[] = [];
-  let unreadableCount = 0;
-  try {
-    const files = fs.readdirSync(dir)
-      .filter(name => name.toLowerCase().endsWith(".json"))
-      .map(name => path.join(dir, name));
-    for (const file of files) {
-      try {
-        const decision = JSON.parse(fs.readFileSync(file, "utf-8"));
-        const verification = verifyGroupTypedMemoryManifestSelection(decision, scopeId);
-        rows.push({ ...decision, decisionFile: file, valid: verification.valid === true });
-      } catch { unreadableCount += 1; }
-    }
-  } catch {}
-  rows.sort((a, b) => String(b.completedAt || "").localeCompare(String(a.completedAt || "")) || String(b.requestId || "").localeCompare(String(a.requestId || "")));
-  const bounded = rows.slice(0, limit);
-  const validRows = bounded.filter(row => row.valid === true);
-  const calibratedRows = validRows.filter(row => row.calibration?.schema === "ccm-group-typed-memory-manifest-selector-calibration-v1");
-  const calibrationHints = calibratedRows.flatMap(row => Array.isArray(row.calibration?.hints) ? row.calibration.hints : []);
-  const statusCounts: Record<string, number> = {};
-  for (const row of validRows) statusCounts[String(row.status || "unknown")] = Number(statusCounts[String(row.status || "unknown")] || 0) + 1;
-  const selectedDocumentCount = validRows.reduce((sum, row) => sum + Number(row.selectedRelPaths?.length || 0), 0);
-  const latest = bounded[0] || null;
-  const outcomeSummary = summarizeGroupTypedMemoryManifestSelectorOutcomes(scopeId, {
-    decisions: validRows,
-    nowMs: options.nowMs || options.now_ms,
-    staleAfterMs: options.staleAfterMs || options.stale_after_ms,
-    includeRows: options.includeOutcomeRows === true || options.include_outcome_rows === true,
-  });
-  const consumptionSummary = summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId, {
-    nowMs: options.nowMs || options.now_ms,
-    staleAfterMs: options.staleAfterMs || options.stale_after_ms,
-    includeRows: options.includeConsumptionRows === true || options.include_consumption_rows === true,
-  });
-  const shapeSummary = summarizeGroupTypedMemoryManifestSelectorShapes(scopeId, {
-    decisions: validRows,
-    includeRows: true,
-  });
-  const writeShapeSummary = summarizeGroupTypedMemoryWriteShapes(scopeId, { includeRows: true });
-  const shapeDrift = buildGroupTypedMemoryShapeDrift(scopeId, shapeSummary.rows || [], writeShapeSummary.rows || [], {
-    nowMs: options.nowMs || options.now_ms,
-    recentWindowDays: options.recentWindowDays || options.recent_window_days,
-    baselineWindowDays: options.baselineWindowDays || options.baseline_window_days,
-    minimumSelectorRuns: options.minimumSelectorRuns || options.minimum_selector_runs,
-    minimumConsumptionDocuments: options.minimumConsumptionDocuments || options.minimum_consumption_documents,
-  });
-  const shapeTrend = summarizeGroupTypedMemoryShapeTrend(scopeId, {
-    nowMs: options.nowMs || options.now_ms,
-    recentWindowDays: options.recentWindowDays || options.recent_window_days,
-    baselineWindowDays: options.baselineWindowDays || options.baseline_window_days,
-    includeBuckets: options.includeTrendBuckets === true || options.include_trend_buckets === true,
-  });
-  const shapeTrendIncidents = summarizeGroupTypedMemoryShapeTrendIncidents(scopeId, {
-    includeEvents: options.includeTrendIncidentEvents === true || options.include_trend_incident_events === true,
-  });
-  const publicShapeSummary = options.includeShapeRows === true || options.include_shape_rows === true
-    ? shapeSummary
-    : { ...shapeSummary, rows: undefined };
-  const publicWriteShapeSummary = options.includeWriteShapeRows === true || options.include_write_shape_rows === true
-    ? writeShapeSummary
-    : { ...writeShapeSummary, rows: undefined };
-  return {
-    schema: "ccm-group-typed-memory-manifest-selector-summary-v1",
-    version: 1,
-    scopeId,
-    dir,
-    present: rows.length > 0 || unreadableCount > 0,
-    valid: unreadableCount === 0 && rows.every(row => row.valid === true) && outcomeSummary.valid === true && consumptionSummary.valid === true && shapeSummary.valid === true && writeShapeSummary.valid === true && verifyGroupTypedMemoryShapeDrift(shapeDrift, scopeId).valid === true && shapeTrend.valid === true && verifyGroupTypedMemoryShapeTrendSummary(shapeTrend, scopeId).valid === true && shapeTrendIncidents.valid === true && verifyGroupTypedMemoryShapeTrendIncidentSummary(shapeTrendIncidents, scopeId).valid === true,
-    closureValid: outcomeSummary.closureValid === true,
-    consumptionClosureValid: consumptionSummary.closureValid === true,
-    decisionCount: rows.length + unreadableCount,
-    validDecisionCount: rows.filter(row => row.valid === true).length,
-    invalidDecisionCount: rows.filter(row => row.valid !== true).length + unreadableCount,
-    selectedDecisionCount: Number(statusCounts.selected || 0),
-    emptyDecisionCount: Number(statusCounts.empty || 0) + Number(statusCounts.no_candidates || 0),
-    failedDecisionCount: Number(statusCounts.failed || 0) + Number(statusCounts.unavailable || 0) + Number(statusCounts.aborted || 0),
-    ignoredDecisionCount: Number(statusCounts.ignored || 0),
-    selectedDocumentCount,
-    averageSelectedDocuments: validRows.length ? Number((selectedDocumentCount / validRows.length).toFixed(3)) : 0,
-    calibrationObservedDecisionCount: calibratedRows.length,
-    calibrationHintedDecisionCount: calibratedRows.filter(row => Number(row.calibrationHintCount || row.calibration?.hintCount || 0) > 0).length,
-    calibrationEvidenceCount: calibratedRows.reduce((sum, row) => sum + Number(row.calibrationEvidenceCount || row.calibration?.evidenceCount || 0), 0),
-    calibrationHintCount: calibrationHints.length,
-    calibrationSupportHintCount: calibrationHints.filter((hint: any) => hint.calibration === "support").length,
-    calibrationCautionHintCount: calibrationHints.filter((hint: any) => hint.calibration === "caution").length,
-    calibrationMixedHintCount: calibrationHints.filter((hint: any) => hint.calibration === "mixed").length,
-    shapeSummary: publicShapeSummary,
-    shapeValid: shapeSummary.valid === true,
-    shapeCount: Number(shapeSummary.shapeCount || 0),
-    shapeInvalidCount: Number(shapeSummary.invalidShapeCount || 0),
-    shapeMissingExpectedCount: Number(shapeSummary.missingExpectedShapeCount || 0),
-    shapeSelectorRunCount: Number(shapeSummary.selectorRunCount || 0),
-    shapeEmptySelectionCount: Number(shapeSummary.emptySelectionCount || 0),
-    shapeCandidateTotal: Number(shapeSummary.candidateTotal || 0),
-    shapeSelectedTotal: Number(shapeSummary.selectedTotal || 0),
-    shapeSelectionRate: shapeSummary.selectionRate,
-    shapeAverageSelectedAgeDays: Number(shapeSummary.averageSelectedAgeDays ?? -1),
-    shapeSelectedFreshCount: Number(shapeSummary.selectedFreshCount || 0),
-    shapeSelectedStaleCount: Number(shapeSummary.selectedStaleCount || 0),
-    shapeConsumptionLinkedRunCount: Number(shapeSummary.consumptionLinkedRunCount || 0),
-    shapeConsumedDeliveredDocumentCount: Number(shapeSummary.consumedDeliveredDocumentCount || 0),
-    shapeConsumedUsedDocumentCount: Number(shapeSummary.consumedUsedDocumentCount || 0),
-    shapeConsumedVerifiedDocumentCount: Number(shapeSummary.consumedVerifiedDocumentCount || 0),
-    shapeConsumedIgnoredDocumentCount: Number(shapeSummary.consumedIgnoredDocumentCount || 0),
-    shapeConsumedUnreportedDocumentCount: Number(shapeSummary.consumedUnreportedDocumentCount || 0),
-    shapeConsumptionReceiptCoverageRate: shapeSummary.consumptionReceiptCoverageRate,
-    shapeConsumedUtilityRate: shapeSummary.consumedUtilityRate,
-    writeShapeSummary: publicWriteShapeSummary,
-    writeShapePresent: writeShapeSummary.present === true,
-    writeShapeValid: writeShapeSummary.valid === true,
-    writeShapeCount: Number(writeShapeSummary.shapeCount || 0),
-    writeShapeInvalidCount: Number(writeShapeSummary.invalidShapeCount || 0),
-    writeShapeCreateCount: Number(writeShapeSummary.createCount || 0),
-    writeShapeUpdateCount: Number(writeShapeSummary.updateCount || 0),
-    writeShapeNoopCount: Number(writeShapeSummary.noopCount || 0),
-    writeShapeChangedCount: Number(writeShapeSummary.changedCount || 0),
-    writeShapeBodyTruncatedCount: Number(writeShapeSummary.bodyTruncatedCount || 0),
-    writeShapeNearBodyLimitCount: Number(writeShapeSummary.nearBodyLimitCount || 0),
-    writeShapeTotalGrowthBytes: Number(writeShapeSummary.totalGrowthBytes || 0),
-    writeShapeAverageAfterBytes: Number(writeShapeSummary.averageAfterBytes || 0),
-    writeShapeMaxAfterBytes: Number(writeShapeSummary.maxAfterBytes || 0),
-    shapeDrift,
-    shapeDriftValid: verifyGroupTypedMemoryShapeDrift(shapeDrift, scopeId).valid === true,
-    shapeDriftStatus: String(shapeDrift.status || "unobserved"),
-    shapeDriftSignalCount: Number(shapeDrift.signalCount || 0),
-    shapeDriftWarningSignalCount: Number(shapeDrift.warningSignalCount || 0),
-    shapeTrend,
-    shapeTrendPresent: shapeTrend.ledgerPresent === true,
-    shapeTrendValid: shapeTrend.valid === true && verifyGroupTypedMemoryShapeTrendSummary(shapeTrend, scopeId).valid === true,
-    shapeTrendStatus: String(shapeTrend.status || "unobserved"),
-    shapeTrendBucketCount: Number(shapeTrend.bucketCount || 0),
-    shapeTrendMutableBucketCount: Number(shapeTrend.mutableBucketCount || 0),
-    shapeTrendSealedBucketCount: Number(shapeTrend.sealedBucketCount || 0),
-    shapeTrendGeneration: Number(shapeTrend.generation || 0),
-    shapeTrendSignalCount: Number(shapeTrend.signalCount || 0),
-    shapeTrendWarningSignalCount: Number(shapeTrend.warningSignalCount || 0),
-    shapeTrendRecoveredFromBackup: shapeTrend.recoveredFromBackup === true,
-    shapeTrendExtendsBeyondHotRetention: shapeTrend.extendsBeyondHotRetention === true,
-    shapeTrendIncidents,
-    shapeTrendIncidentPresent: shapeTrendIncidents.ledgerPresent === true,
-    shapeTrendIncidentValid: shapeTrendIncidents.valid === true && verifyGroupTypedMemoryShapeTrendIncidentSummary(shapeTrendIncidents, scopeId).valid === true,
-    shapeTrendIncidentStatus: String(shapeTrendIncidents.status || "unobserved"),
-    shapeTrendIncidentEventCount: Number(shapeTrendIncidents.eventCount || 0),
-    shapeTrendIncidentCount: Number(shapeTrendIncidents.incidentCount || 0),
-    shapeTrendIncidentPendingCount: Number(shapeTrendIncidents.pendingCount || 0),
-    shapeTrendIncidentAcknowledgedCount: Number(shapeTrendIncidents.acknowledgedCount || 0),
-    shapeTrendIncidentResolvedCount: Number(shapeTrendIncidents.resolvedCount || 0),
-    shapeTrendIncidentRecoveredFromBackup: shapeTrendIncidents.recoveredFromBackup === true,
-    shapeTrendActiveIncident: shapeTrendIncidents.activeIncident || null,
-    outcomeSummary,
-    attachedOutcomeCount: outcomeSummary.attachedOutcomeCount,
-    committedOutcomeCount: outcomeSummary.committedOutcomeCount,
-    invalidOutcomeCount: outcomeSummary.invalidOutcomeCount,
-    selectedAttachedDocumentCount: outcomeSummary.selectedAttachedDocumentCount,
-    selectedCommittedDocumentCount: outcomeSummary.selectedCommittedDocumentCount,
-    selectedNotRecalledDocumentCount: outcomeSummary.selectedNotRecalledDocumentCount,
-    recalledNotAttachedDocumentCount: outcomeSummary.recalledNotAttachedDocumentCount,
-    selectedDecisionWithoutAttachmentCount: outcomeSummary.selectedDecisionWithoutAttachmentCount,
-    attachmentWithoutCommitCount: outcomeSummary.attachmentWithoutCommitCount,
-    staleUnattachedDecisionCount: outcomeSummary.staleUnattachedDecisionCount,
-    staleUncommittedAttachmentCount: outcomeSummary.staleUncommittedAttachmentCount,
-    closureGapCount: outcomeSummary.closureGapCount,
-    consumptionSummary,
-    consumptionOutcomeCount: consumptionSummary.outcomeCount,
-    consumptionDeliveredDocumentCount: consumptionSummary.deliveredDocumentCount,
-    consumptionUsedDocumentCount: consumptionSummary.usedDocumentCount,
-    consumptionVerifiedDocumentCount: consumptionSummary.verifiedDocumentCount,
-    consumptionIgnoredDocumentCount: consumptionSummary.ignoredDocumentCount,
-    consumptionUnreportedDocumentCount: consumptionSummary.unreportedDocumentCount,
-    consumptionWeakReceiptBindingCount: consumptionSummary.weakReceiptBindingCount,
-    consumptionUnexpectedClaimCount: consumptionSummary.unexpectedClaimCount,
-    consumptionStaleCommittedWithoutConsumptionCount: consumptionSummary.staleCommittedWithoutConsumptionCount,
-    consumptionClosureGapCount: consumptionSummary.closureGapCount,
-    latest: latest ? {
-      requestId: String(latest.requestId || ""),
-      status: String(latest.status || ""),
-      valid: latest.valid === true,
-      candidateCount: Number(latest.candidateCount || 0),
-      selectedCount: Number(latest.selectedRelPaths?.length || 0),
-      selectedRelPaths: Array.isArray(latest.selectedRelPaths) ? latest.selectedRelPaths.slice(0, GROUP_TYPED_MEMORY_MANIFEST_MAX_SELECTION) : [],
-      completedAt: String(latest.completedAt || ""),
-      selectorProject: String(latest.selectorProject || ""),
-      selectorAgentType: String(latest.selectorAgentType || ""),
-      selectorModel: String(latest.selectorModel || ""),
-      calibrationChecksum: String(latest.calibrationChecksum || ""),
-      calibrationHintCount: Number(latest.calibrationHintCount || latest.calibration?.hintCount || 0),
-      calibrationEvidenceCount: Number(latest.calibrationEvidenceCount || latest.calibration?.evidenceCount || 0),
-      calibration: latest.calibration || null,
-      decisionFile: String(latest.decisionFile || ""),
-    } : null,
-    rows: options.includeRows === true ? bounded.map(row => ({
-      requestId: String(row.requestId || ""),
-      status: String(row.status || ""),
-      valid: row.valid === true,
-      candidateCount: Number(row.candidateCount || 0),
-      selectedCount: Number(row.selectedRelPaths?.length || 0),
-      calibrationHintCount: Number(row.calibrationHintCount || row.calibration?.hintCount || 0),
-      calibrationEvidenceCount: Number(row.calibrationEvidenceCount || row.calibration?.evidenceCount || 0),
-      completedAt: String(row.completedAt || ""),
-    })) : undefined,
-  };
+  return require("./group-memory-loading").summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId, options);
 }
 
-function buildGroupSessionModelExtractionTopicRecallIndex(groupId: string) {
+export function buildGroupSessionModelExtractionTopicRecallIndex(groupId: string) {
   const ledger = readGroupTypedMemoryDistillationLedger(groupId);
   const archive = ledger.modelExtractionTypedMemoryArchive || null;
   const valid = !!archive
@@ -23563,7 +15744,7 @@ function buildGroupSessionModelExtractionTopicRecallIndex(groupId: string) {
   };
 }
 
-function buildGroupTypedMemoryPendingStaleConflictIndex(groupId: string) {
+export function buildGroupTypedMemoryPendingStaleConflictIndex(groupId: string) {
   const ledger = readGroupTypedMemoryStaleCandidateLedger(groupId);
   const byRelPath = new Map<string, any[]>();
   if (ledger.ledger_checksum_valid === true) {
@@ -23582,7 +15763,7 @@ function buildGroupTypedMemoryPendingStaleConflictIndex(groupId: string) {
   };
 }
 
-function scoreGroupSessionModelExtractionTopicRecall(doc: any, topic: any, query: string, queryTokens: string[]) {
+export function scoreGroupSessionModelExtractionTopicRecall(doc: any, topic: any, query: string, queryTokens: string[]) {
   if (!topic) return null;
   const queryProfile = modelExtractionTopicConceptProfile(query);
   const similarity = modelExtractionTopicSimilarity(queryProfile.concepts, topic.concepts || []);
@@ -23623,2313 +15804,89 @@ function scoreGroupSessionModelExtractionTopicRecall(doc: any, topic: any, query
 }
 
 export function buildGroupTypedMemoryRecall(groupId: string, query: string, options: any = {}) {
-  const text = String(query || "");
-  const requestedNowMs = Number(options.nowMs || options.now_ms || Date.now());
-  const recallNowMs = Number.isFinite(requestedNowMs) ? requestedNowMs : Date.now();
-  const index = buildGroupTypedMemoryIndex(groupId);
-  if (shouldIgnoreGroupMemoryRequest(text, options)) {
-    return {
-      schema: "ccm-group-typed-memory-recall-v1",
-      ignored: true,
-      reason: "user_requested_ignore_memory",
-      indexFile: index.file,
-      memoryDir: index.dir,
-      recalled: [],
-      surfaced: [],
-    };
-  }
-  const queryTokens = tokens(text);
-  const targetPaths = deriveGroupTypedMemoryTargetPaths(text, options.targetPaths || options.target_paths || []);
-  const already = new Set<string>((options.alreadySurfaced || options.already_surfaced || []).map((item: any) => String(item || "").toLowerCase()));
-  const requiredRelPaths = new Set((options.requiredRelPaths || options.required_rel_paths || [])
-    .map((item: any) => String(item || "").trim().toLowerCase())
-    .filter(Boolean));
-  const recentTools = new Set<string>((options.recentTools || options.recent_tools || []).map((item: any) => String(item || "").toLowerCase()).filter(Boolean));
-  const postCompactUsageHints = normalizePostCompactCandidateUsageHints(options);
-  const workerContextPressureSignals = normalizeWorkerContextPressureRecallSignals(options);
-  const workerContextPressureUsageHints = normalizeWorkerContextPressureRecallUsageHints(groupId, options);
-  const pressureProvenanceDispatchFeedbackPolicy = normalizePressureProvenanceDispatchFeedbackPolicyForRecall(options);
-  const semanticStats = semanticRecallCorpusStats(index.docs, text);
-  const modelExtractionTopicIndex = buildGroupSessionModelExtractionTopicRecallIndex(groupId);
-  const pendingStaleConflictIndex = buildGroupTypedMemoryPendingStaleConflictIndex(groupId);
-  const manifestSelection = options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || options.manifestSelection || options.manifest_selection || null;
-  const manifestSelectionVerification = manifestSelection
-    ? verifyGroupTypedMemoryManifestSelection(manifestSelection, groupId)
-    : { valid: false, scopeValid: true, checksumValid: true, selectedCount: 0 };
-  const manifestSelectionQueryValid = !manifestSelection
-    || String(manifestSelection.queryChecksum || "") === checksum(text, 64);
-  const manifestSelectionApplied = !!manifestSelection;
-  const manifestSelectionValid = manifestSelectionVerification.valid === true && manifestSelectionQueryValid;
-  const manifestSelectedRelPaths = new Set<string>(manifestSelectionValid
-    ? (manifestSelection.selectedRelPaths || []).map((item: any) => String(item || "").toLowerCase())
-    : []);
-  const typedMemoryConsumptionSummary = buildGroupTypedMemoryConsumptionSummary(groupId, {
-    targetProject: options.targetProject || options.target_project || "",
-    queryFeatures: semanticStats.queryFeatures,
-    nowMs: options.nowMs || options.now_ms,
-    halfLifeDays: options.typedMemoryConsumptionHalfLifeDays || options.typed_memory_consumption_half_life_days,
-    staleAfterDays: options.typedMemoryConsumptionStaleAfterDays || options.typed_memory_consumption_stale_after_days,
-  });
-  const diagnostics: any[] = [];
-  const scored = index.docs.map(doc => {
-    const freshness = buildGroupTypedMemoryRecallFreshness(doc, recallNowMs);
-    const requiredRecall = requiredRelPaths.has(String(doc.relPath || "").toLowerCase());
-    const modelExtractionDocument = String(doc.source || "") === "auto:model-extraction-evidence-admission";
-    const modelExtractionTopic = modelExtractionTopicIndex.byRelPath.get(String(doc.relPath || "").toLowerCase()) || null;
-    const pendingStaleConflicts = pendingStaleConflictIndex.byRelPath.get(String(doc.relPath || "").toLowerCase()) || [];
-    const manifestSelected = manifestSelectedRelPaths.has(String(doc.relPath || "").toLowerCase());
-    if (modelExtractionDocument && (!modelExtractionTopicIndex.valid || !modelExtractionTopic)) {
-      diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "model_topic_archive_invalid_or_unbound", freshness });
-      return null;
-    }
-    if (pendingStaleConflicts.length > 0 && !requiredRecall) {
-      diagnostics.push({
-        relPath: doc.relPath,
-        skipped: true,
-        reason: "pending_stale_conflict_quarantined",
-        pendingStaleConflictCount: pendingStaleConflicts.length,
-        pendingStaleCandidateIds: pendingStaleConflicts.map((candidate: any) => candidate.candidate_id),
-        freshness,
-      });
-      return null;
-    }
-    if (!requiredRecall && (already.has(doc.relPath.toLowerCase()) || already.has(doc.file.toLowerCase()))) {
-      diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "already_surfaced", freshness });
-      return null;
-    }
-    const pathCondition = evaluateTypedMemoryPathCondition(doc, targetPaths);
-    if (pathCondition.conditional && !pathCondition.matched) {
-      diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "path_condition_miss", globs: pathCondition.globs, targetPaths, freshness });
-      return null;
-    }
-    if (manifestSelectionApplied && !requiredRecall && (!manifestSelectionValid || !manifestSelected)) {
-      diagnostics.push({
-        relPath: doc.relPath,
-        skipped: true,
-        reason: manifestSelectionValid ? "manifest_selector_not_selected" : "manifest_selector_selection_invalid",
-        manifestSelectionStatus: String(manifestSelection?.status || ""),
-        manifestSelectionValid,
-        manifestSelectionQueryValid,
-        freshness,
-      });
-      return null;
-    }
-    const corpus = `${doc.name}\n${doc.description}\n${doc.body}`.toLowerCase();
-    let score = 0;
-    let lexicalScore = 0;
-    for (const token of queryTokens) if (corpus.includes(token)) lexicalScore += token.length >= 5 ? 3 : 1;
-    score += lexicalScore;
-    if (doc.type === "user") score += 4;
-    if (doc.type === "feedback") score += 3;
-    if (doc.type === "project") score += 2;
-    if (doc.type === "reference") score += 1;
-    const source = String(doc.source || "").toLowerCase();
-    if (source.includes("global-claude-memory:")) score += 5;
-    if (source.includes("global-claude-memory:managed:")) score += 2;
-    if (pathCondition.conditional && pathCondition.matched) score += 64;
-    if (requiredRecall) score += 100;
-    if (manifestSelected) score += 48;
-    for (const tool of recentTools) {
-      if (!tool || !corpus.includes(tool)) continue;
-      if (/(警告|陷阱|风险|失败|阻塞|不要|禁止|warning|pitfall|risk|failed|blocked|do not|never)/i.test(corpus)) score += 2;
-      else score -= 4;
-    }
-    const postCompactUsage = scorePostCompactCandidateUsageHint(corpus, postCompactUsageHints);
-    if (postCompactUsage.adjustment) score += postCompactUsage.adjustment;
-    const workerContextPressureRecall = scoreWorkerContextPressureRecall(corpus, doc, workerContextPressureSignals, text, queryTokens);
-    if (workerContextPressureRecall.adjustment) score += workerContextPressureRecall.adjustment;
-    const workerContextPressureUsage = scoreWorkerContextPressureRecallUsageHint(doc, workerContextPressureUsageHints, workerContextPressureSignals);
-    if (workerContextPressureUsage.adjustment) score += workerContextPressureUsage.adjustment;
-    const workerContextPressureFeedbackPolicy = scoreWorkerContextPressureFeedbackPolicyRecallRisk(doc, corpus, workerContextPressureUsage, pressureProvenanceDispatchFeedbackPolicy, text, queryTokens);
-    if (workerContextPressureFeedbackPolicy.adjustment) score += workerContextPressureFeedbackPolicy.adjustment;
-    const semanticReference: any = scoreSemanticNaturalLanguageRecall(doc, semanticStats);
-    const scoreBeforeSemantic = score;
-    const queryConstraintDirective = (semanticStats.queryFeatures.polarities || []).some((polarity: string) =>
-      ["prohibit", "require", "sequence", "conditional"].includes(polarity));
-    const semanticConstraintEligible = semanticStats.queryFeatures.constraintLike === true
-      && semanticReference.constraintShapeMatched === true
-      && semanticReference.matchedConcepts.length >= 2
-      && queryConstraintDirective;
-    const semanticAdjustmentApplied = semanticReference.adjustment <= 0
-      || scoreBeforeSemantic > 0
-      || requiredRecall
-      || semanticConstraintEligible;
-    if (semanticAdjustmentApplied && semanticReference.adjustment) score += semanticReference.adjustment;
-    if (!semanticAdjustmentApplied) {
-      semanticReference.rawAdjustment = semanticReference.adjustment;
-      semanticReference.adjustment = 0;
-      semanticReference.gated = true;
-      semanticReference.gateReason = "specialized_recall_policy_non_positive";
-    }
-    const modelExtractionTopicRecall = modelExtractionDocument
-      ? scoreGroupSessionModelExtractionTopicRecall(doc, modelExtractionTopic, text, queryTokens)
-      : null;
-    if (modelExtractionTopicRecall?.adjustment) score += modelExtractionTopicRecall.adjustment;
-    const forceMemory = options.forceMemory === true || options.force_memory === true;
-    if (modelExtractionDocument
-      && !requiredRecall
-      && !manifestSelected
-      && !forceMemory
-      && modelExtractionTopicRecall?.eligible !== true) {
-      diagnostics.push({
-        relPath: doc.relPath,
-        skipped: true,
-        reason: modelExtractionTopicRecall?.unclassified ? "unclassified_topic_not_clearly_relevant" : "model_topic_not_clearly_relevant",
-        score,
-        lexicalScore,
-        modelExtractionTopicRecall,
-        semanticReference,
-        freshness,
-      });
-      return null;
-    }
-    const typedMemoryConsumption: any = scoreGroupTypedMemoryConsumptionRecall(doc, typedMemoryConsumptionSummary);
-    const consumptionAdjustmentApplied = typedMemoryConsumption.adjustment <= 0 || score > 0 || requiredRecall;
-    if (consumptionAdjustmentApplied && typedMemoryConsumption.adjustment) score += typedMemoryConsumption.adjustment;
-    if (!consumptionAdjustmentApplied) {
-      typedMemoryConsumption.raw_adjustment = typedMemoryConsumption.adjustment;
-      typedMemoryConsumption.adjustment = 0;
-      typedMemoryConsumption.gated = true;
-      typedMemoryConsumption.gate_reason = "specialized_recall_policy_non_positive";
-    }
-    if (!requiredRecall && score <= 0 && queryTokens.length && !(pathCondition.conditional && pathCondition.matched)) {
-      const reason = workerContextPressureFeedbackPolicy.active === true
-        && workerContextPressureFeedbackPolicy.risk_doc === true
-        && Number(workerContextPressureFeedbackPolicy.adjustment || 0) < 0
-        ? "pressure_feedback_policy_risk_gated"
-        : "low_score";
-      diagnostics.push({ relPath: doc.relPath, skipped: true, reason, score, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy, semanticReference, modelExtractionTopicRecall, typedMemoryConsumption, freshness });
-      return null;
-    }
-    diagnostics.push({ relPath: doc.relPath, skipped: false, score, pathCondition, manifestSelected, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy, semanticReference, modelExtractionTopicRecall, pendingStaleConflictCount: pendingStaleConflicts.length, typedMemoryConsumption, freshness });
-    return {
-      ...doc,
-      pathCondition,
-      score,
-      postCompactUsage,
-      workerContextPressureRecall,
-      workerContextPressureUsage,
-      workerContextPressureFeedbackPolicy,
-      semanticReference,
-      modelExtractionTopicRecall,
-      pendingStaleConflicts,
-      typedMemoryConsumption,
-      freshness,
-      requiredRecall,
-      manifestSelected,
-      snippet: extractSemanticRecallSnippet(doc.body, semanticStats.queryFeatures, Number(options.snippetChars || options.snippet_chars || 800)),
-    };
-  }).filter(Boolean).sort((a: any, b: any) => b.score - a.score || b.mtimeMs - a.mtimeMs);
-  const recallLimit = Math.max(1, Number(options.max || options.limit || GROUP_TYPED_MEMORY_MAX_RECALL));
-  const recalled: any[] = [];
-  let semanticDuplicateCount = 0;
-  let modelTopicDuplicateCount = 0;
-  for (const candidate of scored) {
-    if (recalled.length >= recallLimit) break;
-    const modelTopicDuplicateOf = candidate.requiredRecall
-      ? null
-      : recalled.find(item => candidate.modelExtractionTopicRecall?.topicId
-        && candidate.modelExtractionTopicRecall.topicId === item.modelExtractionTopicRecall?.topicId);
-    if (modelTopicDuplicateOf) {
-      modelTopicDuplicateCount += 1;
-      diagnostics.push({
-        relPath: candidate.relPath,
-        skipped: true,
-        reason: "model_topic_duplicate",
-        duplicateOf: modelTopicDuplicateOf.relPath,
-        topicId: candidate.modelExtractionTopicRecall.topicId,
-        score: candidate.score,
-      });
-      continue;
-    }
-    const duplicateOf = candidate.requiredRecall || (candidate.pathCondition?.conditional && candidate.pathCondition?.matched)
-      ? null
-      : semanticRecallDuplicateOf(candidate, recalled);
-    if (duplicateOf) {
-      semanticDuplicateCount += 1;
-      diagnostics.push({
-        relPath: candidate.relPath,
-        skipped: true,
-        reason: "semantic_duplicate",
-        duplicateOf: duplicateOf.relPath,
-        score: candidate.score,
-        semanticReference: candidate.semanticReference,
-      });
-      continue;
-    }
-    recalled.push(candidate);
-  }
-  return {
-    schema: "ccm-group-typed-memory-recall-v1",
-    ignored: false,
-    reason: "",
-    indexFile: index.file,
-    memoryDir: index.dir,
-    recalled,
-    surfaced: recalled.map((item: any) => item.relPath),
-    memoryFreshness: {
-      schema: "ccm-group-typed-memory-recall-freshness-summary-v1",
-      version: 1,
-      evaluated_at: new Date(recallNowMs).toISOString(),
-      recalled_count: recalled.length,
-      fresh_count: recalled.filter((item: any) => item.freshness?.stale !== true).length,
-      stale_count: recalled.filter((item: any) => item.freshness?.stale === true).length,
-      stale_after_days: 1,
-      current_source_verification_required: recalled.length > 0,
-      stale_rel_paths: recalled.filter((item: any) => item.freshness?.stale === true).map((item: any) => item.relPath),
-      checksum: checksum(recalled.map((item: any) => [item.relPath, item.checksum, item.freshness?.age_days, item.freshness?.stale]), 32),
-    },
-    candidateCount: index.docs.length,
-    targetPaths,
-    conditionalMatched: diagnostics.filter((item: any) => item.pathCondition?.conditional && item.pathCondition?.matched).length,
-    conditionalSkipped: diagnostics.filter((item: any) => item.reason === "path_condition_miss").length,
-    semanticReferenceScoring: {
-      schema: "ccm-group-typed-memory-semantic-reference-scoring-v1",
-      evaluated_count: index.docs.length,
-      boosted_count: diagnostics.filter((item: any) => Number(item.semanticReference?.adjustment || 0) > 0).length,
-      conflict_penalized_count: diagnostics.filter((item: any) => Array.isArray(item.semanticReference?.reasons)
-        && item.semanticReference.reasons.some((reason: any) => String(reason.kind || "").startsWith("polarity_conflict_"))).length,
-      semantic_duplicate_count: semanticDuplicateCount,
-      query_concepts: semanticStats.queryFeatures.concepts || [],
-      query_polarities: semanticStats.queryFeatures.polarities || [],
-      query_relations: semanticStats.queryFeatures.relations || [],
-    },
-    modelExtractionTopicScoring: {
-      schema: "ccm-group-session-model-extraction-topic-recall-scoring-v1",
-      archive_present: modelExtractionTopicIndex.archivePresent,
-      archive_valid: modelExtractionTopicIndex.valid,
-      model_document_count: index.docs.filter((item: any) => String(item.source || "") === "auto:model-extraction-evidence-admission").length,
-      archive_bound_document_count: modelExtractionTopicIndex.byRelPath.size,
-      archive_integrity_gated_count: diagnostics.filter((item: any) => item.reason === "model_topic_archive_invalid_or_unbound").length,
-      evaluated_count: diagnostics.filter((item: any) => item.modelExtractionTopicRecall).length,
-      boosted_count: diagnostics.filter((item: any) => Number(item.modelExtractionTopicRecall?.adjustment || 0) > 0).length,
-      clearly_relevant_count: diagnostics.filter((item: any) => item.modelExtractionTopicRecall?.eligible === true).length,
-      relevance_gated_count: diagnostics.filter((item: any) => ["model_topic_not_clearly_relevant", "unclassified_topic_not_clearly_relevant"].includes(item.reason)).length,
-      unclassified_matched_count: diagnostics.filter((item: any) => item.modelExtractionTopicRecall?.unclassified === true && item.modelExtractionTopicRecall?.eligible === true).length,
-      pending_stale_conflict_count: pendingStaleConflictIndex.pendingCount,
-      stale_conflict_gated_count: diagnostics.filter((item: any) => item.reason === "pending_stale_conflict_quarantined").length,
-      topic_duplicate_count: modelTopicDuplicateCount,
-    },
-    manifestSelectionScoring: {
-      schema: "ccm-group-typed-memory-manifest-selection-scoring-v1",
-      applied: manifestSelectionApplied,
-      valid: manifestSelectionValid,
-      scope_valid: manifestSelectionVerification.scopeValid !== false,
-      checksum_valid: manifestSelectionVerification.checksumValid !== false,
-      query_valid: manifestSelectionQueryValid,
-      status: String(manifestSelection?.status || ""),
-      request_id: String(manifestSelection?.requestId || ""),
-      candidate_count: Number(manifestSelection?.candidateCount || 0),
-      selected_count: manifestSelectedRelPaths.size,
-      selected_rel_paths: [...manifestSelectedRelPaths],
-      selected_recalled_count: recalled.filter((item: any) => item.manifestSelected === true).length,
-      not_selected_gated_count: diagnostics.filter((item: any) => item.reason === "manifest_selector_not_selected").length,
-      invalid_selection_gated_count: diagnostics.filter((item: any) => item.reason === "manifest_selector_selection_invalid").length,
-      unknown_filename_count: Array.isArray(manifestSelection?.unknownFilenames) ? manifestSelection.unknownFilenames.length : 0,
-      invalid_filename_count: Number(manifestSelection?.invalidFilenameCount || 0),
-      decision_file: String(manifestSelection?.decisionFile || ""),
-    },
-    typedMemoryConsumptionScoring: {
-      schema: "ccm-group-typed-memory-consumption-recall-scoring-v1",
-      ledger_checksum_valid: typedMemoryConsumptionSummary.ledger_checksum_valid === true,
-      invalid_entry_count: typedMemoryConsumptionSummary.invalid_entry_count || 0,
-      entry_count: typedMemoryConsumptionSummary.entry_count || 0,
-      relevant_entry_count: typedMemoryConsumptionSummary.relevant_entry_count || 0,
-      stale_entry_count: typedMemoryConsumptionSummary.stale_entry_count || 0,
-      proof_verified_entry_count: typedMemoryConsumptionSummary.proof_verified_entry_count || 0,
-      downgraded_verified_entry_count: typedMemoryConsumptionSummary.downgraded_verified_entry_count || 0,
-      anomaly_entry_count: typedMemoryConsumptionSummary.anomaly_entry_count || 0,
-      average_evidence_confidence: typedMemoryConsumptionSummary.average_evidence_confidence || 0,
-      matched_doc_count: diagnostics.filter((item: any) => Number(item.typedMemoryConsumption?.matched_count || 0) > 0).length,
-      boosted_count: diagnostics.filter((item: any) => Number(item.typedMemoryConsumption?.adjustment || 0) > 0).length,
-      deprioritized_count: diagnostics.filter((item: any) => Number(item.typedMemoryConsumption?.adjustment || 0) < 0).length,
-      conflict_count: diagnostics.filter((item: any) => item.typedMemoryConsumption?.conflict === true).length,
-      half_life_days: typedMemoryConsumptionSummary.half_life_days,
-      stale_after_days: typedMemoryConsumptionSummary.stale_after_days,
-    },
-    postCompactUsageScoring: {
-      schema: "ccm-group-typed-memory-post-compact-usage-scoring-v1",
-      hint_count: postCompactUsageHints.length,
-      matched_count: diagnostics.filter((item: any) => Array.isArray(item.postCompactUsage?.matched) && item.postCompactUsage.matched.length).length,
-      boosted_count: diagnostics.filter((item: any) => Number(item.postCompactUsage?.adjustment || 0) > 0).length,
-      deprioritized_count: diagnostics.filter((item: any) => Number(item.postCompactUsage?.adjustment || 0) < 0).length,
-    },
-    workerContextPressureScoring: {
-      schema: "ccm-group-typed-memory-worker-context-pressure-scoring-v1",
-      active: workerContextPressureSignals.active === true,
-      signal_count: workerContextPressureSignals.signal_count || 0,
-      active_signal_count: workerContextPressureSignals.active_signal_count || 0,
-      suppressed_signal_count: workerContextPressureSignals.suppressed_signal_count || 0,
-      pressure_status: workerContextPressureSignals.pressure_status || "",
-      max_pressure: workerContextPressureSignals.max_pressure || 0,
-      min_free_tokens: workerContextPressureSignals.min_free_tokens || 0,
-      ptl_emergency: workerContextPressureSignals.ptl_emergency === true,
-      repeated_compact_failure: workerContextPressureSignals.repeated_compact_failure === true,
-      pressure_doc_count: diagnostics.filter((item: any) => item.workerContextPressureRecall?.pressure_doc).length,
-      boosted_count: diagnostics.filter((item: any) => Number(item.workerContextPressureRecall?.adjustment || 0) > 0).length,
-      deprioritized_count: diagnostics.filter((item: any) => Number(item.workerContextPressureRecall?.adjustment || 0) < 0).length,
-      signals: workerContextPressureSignals.signals || [],
-    },
-    workerContextPressureUsageScoring: {
-      schema: "ccm-group-typed-memory-worker-context-pressure-usage-scoring-v1",
-      hint_count: workerContextPressureUsageHints.length,
-      stale_hint_count: workerContextPressureUsageHints.filter((item: any) => item.recommendation === "stale_pressure_recall_history").length,
-      cross_group_hint_count: workerContextPressureUsageHints.filter((item: any) => item.hint_scope === "cross_group_project").length,
-      matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.length).length,
-      stale_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.recommendation === "stale_pressure_recall_history")).length,
-      cross_group_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.hint_scope === "cross_group_project")).length,
-      repair_hint_count: workerContextPressureUsageHints.filter((item: any) => item.repair_open === true).length,
-      repair_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.repair_open === true)).length,
-      disputed_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.provenance_status === "disputed_under_repair")).length,
-      boosted_count: diagnostics.filter((item: any) => Number(item.workerContextPressureUsage?.adjustment || 0) > 0).length,
-      deprioritized_count: diagnostics.filter((item: any) => Number(item.workerContextPressureUsage?.adjustment || 0) < 0).length,
-    },
-    workerContextPressureFeedbackPolicyScoring: {
-      schema: "ccm-group-typed-memory-worker-context-pressure-provenance-feedback-recall-risk-scoring-v1",
-      active: pressureProvenanceDispatchFeedbackPolicy.active === true,
-      disabled: pressureProvenanceDispatchFeedbackPolicy.disabled === true,
-      agent_type: pressureProvenanceDispatchFeedbackPolicy.agentType || pressureProvenanceDispatchFeedbackPolicy.agent_type || "unknown",
-      target_project: pressureProvenanceDispatchFeedbackPolicy.targetProject || pressureProvenanceDispatchFeedbackPolicy.target_project || "",
-      action: pressureProvenanceDispatchFeedbackPolicy.action || "",
-      severity: pressureProvenanceDispatchFeedbackPolicy.severity || "",
-      policy_row_count: Array.isArray(pressureProvenanceDispatchFeedbackPolicy.policyRows) ? pressureProvenanceDispatchFeedbackPolicy.policyRows.length : 0,
-      risk_doc_count: diagnostics.filter((item: any) => item.workerContextPressureFeedbackPolicy?.risk_doc === true).length,
-      repair_first_count: diagnostics.filter((item: any) => item.workerContextPressureFeedbackPolicy?.repair_first === true).length,
-      deprioritized_count: diagnostics.filter((item: any) => Number(item.workerContextPressureFeedbackPolicy?.adjustment || 0) < 0).length,
-      risk_gated_count: diagnostics.filter((item: any) => item.reason === "pressure_feedback_policy_risk_gated").length,
-    },
-    diagnostics: diagnostics.slice(-40),
-  };
+  return require("./group-memory-loading").buildGroupTypedMemoryRecall(groupId, query, options);
 }
 
 export function renderGroupTypedMemoryRecall(recall: any) {
-  if (!recall) return "";
-  if (recall.ignored) return "类型化长期记忆：用户要求本轮忽略记忆，按空 MEMORY.md 处理。";
-  const docs = Array.isArray(recall.recalled) ? recall.recalled : [];
-  if (!docs.length) return "";
-  const feedbackScoring = recall.workerContextPressureFeedbackPolicyScoring || recall.worker_context_pressure_feedback_policy_scoring || {};
-  const feedbackHint = feedbackScoring.active
-    ? `；pressure feedback policy gating risk ${feedbackScoring.risk_doc_count || 0}/gated ${feedbackScoring.risk_gated_count || 0}/repair-first ${feedbackScoring.repair_first_count || 0}`
-    : "";
-  const semanticScoring = recall.semanticReferenceScoring || recall.semantic_reference_scoring || {};
-  const semanticHint = Number(semanticScoring.boosted_count || 0) > 0
-    ? `；语义匹配 ${semanticScoring.boosted_count || 0}、冲突降权 ${semanticScoring.conflict_penalized_count || 0}、同义去重 ${semanticScoring.semantic_duplicate_count || 0}`
-    : "";
-  const consumptionScoring = recall.typedMemoryConsumptionScoring || recall.typed_memory_consumption_scoring || {};
-  const consumptionHint = Number(consumptionScoring.entry_count || 0) > 0
-    ? `；消费反馈 +${consumptionScoring.boosted_count || 0}/-${consumptionScoring.deprioritized_count || 0}/冲突 ${consumptionScoring.conflict_count || 0}`
-    : "";
-  const topicScoring = recall.modelExtractionTopicScoring || recall.model_extraction_topic_scoring || {};
-  const topicHint = Number(topicScoring.model_document_count || 0) > 0
-    ? `；模型 Topic 明确相关 ${topicScoring.clearly_relevant_count || 0}/门禁 ${topicScoring.relevance_gated_count || 0}/同 Topic 去重 ${topicScoring.topic_duplicate_count || 0}`
-    : "";
-  const manifestScoring = recall.manifestSelectionScoring || recall.manifest_selection_scoring || {};
-  const manifestHint = manifestScoring.applied
-    ? `；manifest selector ${manifestScoring.status || "unknown"} ${manifestScoring.selected_recalled_count || 0}/${manifestScoring.selected_count || 0}`
-    : "";
-  const lines = [
-    `类型化长期记忆（MEMORY.md 索引召回，路径条件匹配 ${recall.conditionalMatched || 0}、跳过 ${recall.conditionalSkipped || 0}${semanticHint}${topicHint}${manifestHint}${consumptionHint}${recall.workerContextPressureScoring?.active ? `；上下文压力召回 ${recall.workerContextPressureScoring.boosted_count || 0}` : ""}${feedbackHint}；陈旧 ${recall.memoryFreshness?.stale_count || 0}/${docs.length}；使用前如涉及文件/函数/flag 必须再核验当前仓库）：`,
-  ];
-  for (const doc of docs) {
-    const pathHint = doc.pathCondition?.conditional ? `；paths ${doc.pathCondition.matchedPaths?.join(",") || "matched"}` : "";
-    const usageHint = Array.isArray(doc.postCompactUsage?.matched) && doc.postCompactUsage.matched.length
-      ? `；post-compact usage ${doc.postCompactUsage.adjustment > 0 ? "+" : ""}${doc.postCompactUsage.adjustment}`
-      : "";
-    const pressureHint = Array.isArray(doc.workerContextPressureRecall?.matched) && doc.workerContextPressureRecall.matched.length && Number(doc.workerContextPressureRecall.adjustment || 0) > 0
-      ? `；pressure recall +${doc.workerContextPressureRecall.adjustment}`
-      : "";
-    const pressureUsageHint = Array.isArray(doc.workerContextPressureUsage?.matched) && doc.workerContextPressureUsage.matched.length
-      ? `；pressure usage ${doc.workerContextPressureUsage.adjustment > 0 ? "+" : ""}${doc.workerContextPressureUsage.adjustment}`
-      : "";
-    const pressureRepair = Array.isArray(doc.workerContextPressureUsage?.matched)
-      ? doc.workerContextPressureUsage.matched.find((match: any) => match.repair_open === true)
-      : null;
-    const pressureRepairHint = pressureRepair
-      ? `；pressure repair ${pressureRepair.repair_gap_type || "gap"}:${pressureRepair.repair_status || "pending"}`
-      : "";
-    const feedbackPolicy = doc.workerContextPressureFeedbackPolicy || doc.worker_context_pressure_feedback_policy || {};
-    const feedbackPolicyHint = feedbackPolicy.active && feedbackPolicy.risk_doc
-      ? `；pressure feedback policy ${feedbackPolicy.repair_first ? "repair-first" : `${feedbackPolicy.adjustment > 0 ? "+" : ""}${feedbackPolicy.adjustment}`}`
-      : "";
-    const crossGroupProvenance = !pressureRepair && Array.isArray(doc.workerContextPressureUsage?.matched)
-      ? doc.workerContextPressureUsage.matched.find((match: any) => match.provenance_status === "cross_group_project_assist")
-      : null;
-    const provenanceHint = crossGroupProvenance ? "；provenance cross_group_project_assist" : "";
-    const semanticReference = doc.semanticReference || doc.semantic_reference || {};
-    const semanticConcepts = Array.isArray(semanticReference.matchedConcepts) ? semanticReference.matchedConcepts.slice(0, 6) : [];
-    const semanticConflict = Array.isArray(semanticReference.reasons)
-      && semanticReference.reasons.some((reason: any) => String(reason.kind || "").startsWith("polarity_conflict_"));
-    const semanticDocHint = Number(semanticReference.adjustment || 0) !== 0
-      ? `；semantic ${semanticReference.adjustment > 0 ? "+" : ""}${semanticReference.adjustment}${semanticConcepts.length ? ` [${semanticConcepts.join(",")}]` : ""}${semanticConflict ? " conflict" : ""}`
-      : "";
-    const consumption = doc.typedMemoryConsumption || doc.typed_memory_consumption || {};
-    const consumptionDocHint = Number(consumption.matched_count || 0) > 0
-      ? `；consumption ${consumption.adjustment > 0 ? "+" : ""}${consumption.adjustment}${consumption.conflict ? " conflict/reverify" : ""}`
-      : "";
-    const modelTopic = doc.modelExtractionTopicRecall || doc.model_extraction_topic_recall || {};
-    const modelTopicHint = modelTopic.topicId
-      ? `；topic ${modelTopic.topicId} ${modelTopic.semanticMatch ? `semantic ${modelTopic.similarity}` : `lexical ${Array.isArray(modelTopic.matchedTokens) ? modelTopic.matchedTokens.slice(0, 4).join(",") : "matched"}`}`
-      : "";
-    const pendingStaleConflicts = Array.isArray(doc.pendingStaleConflicts)
-      ? doc.pendingStaleConflicts
-      : Array.isArray(doc.pending_stale_conflicts) ? doc.pending_stale_conflicts : [];
-    const staleConflictHint = pendingStaleConflicts.length
-      ? `；PENDING STALE CONFLICT ${pendingStaleConflicts.length} / REVERIFY REQUIRED`
-      : "";
-    const manifestSelectedHint = doc.manifestSelected === true ? "；manifest selected" : "";
-    const freshness = doc.freshness || {};
-    const freshnessHint = freshness.stale === true
-      ? `；STALE ${freshness.age_days || 0} days old`
-      : `；saved ${freshness.age_label || "today"}`;
-    if (pendingStaleConflicts.length) {
-      const candidateIds = pendingStaleConflicts.map((item: any) => String(item.candidate_id || "")).filter(Boolean).slice(0, 4);
-      lines.push(`- PENDING STALE CONFLICT / REVERIFY REQUIRED ${doc.relPath}：该记忆仅因 requiredRelPath 被显式加载，当前存在待处理冲突${candidateIds.length ? `（${candidateIds.join(", ")}）` : ""}。在读取当前来源并重新验证前，不得把旧记忆当作事实或据此修改代码。`);
-    }
-    if (freshness.stale === true && freshness.warning) lines.push(`- 记忆新鲜度警告 ${doc.relPath}：${freshness.warning}`);
-    lines.push(`- [${doc.type}] ${doc.name}（score ${doc.score}，${doc.relPath}${freshnessHint}${pathHint}${semanticDocHint}${modelTopicHint}${manifestSelectedHint}${staleConflictHint}${consumptionDocHint}${usageHint}${pressureHint}${pressureUsageHint}${pressureRepairHint}${feedbackPolicyHint}${provenanceHint}）：${doc.description || ""}`);
-    if (doc.snippet) lines.push(`  ${compactText(doc.snippet, 700).replace(/\n/g, "\n  ")}`);
-  }
-  lines.push("- 回执要求：最终 CCM_AGENT_RECEIPT.typedMemoryUsage 必须逐条引用上述 relPath，声明 usageState=used/verified/ignored、currentSourceVerified 和 reason；memoryUsed/memoryIgnored 保留同一 relPath 的人类可读说明。");
-  return lines.join("\n");
+  return require("./group-memory-loading").renderGroupTypedMemoryRecall(recall);
 }
 
 export function runGroupTypedMemoryDistillationMutationCoordinatorSelfTest() {
-  const groupId = `group-phase272-reentrant-${process.pid}-${Date.now().toString(36)}--gcs_phase272_reentrant`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  try {
-    const result: any = runGroupTypedMemoryDistillationMutation(groupId, "phase272_outer", {}, outer => {
-      const nested = runGroupTypedMemoryDistillationMutation(groupId, "phase272_inner", {}, inner => {
-        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-        const ledgerState = { ...ledger };
-        delete ledgerState.file;
-        writeJsonAtomic(ledger.file, {
-          ...ledgerState,
-          schema: "ccm-group-typed-memory-distillation-ledger-v1",
-          version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
-          groupId,
-          facts: ledger.facts || {},
-          coordinatorSelfTestArchive: {
-            schema: "ccm-group-typed-memory-distillation-mutation-coordinator-selftest-v1",
-            nestedDepth: Number(inner.depth || 0),
-            sameLease: String(inner.handle?.lock?.leaseId || "") === String(outer.handle?.lock?.leaseId || ""),
-            updatedAt: now(),
-          },
-          updatedAt: now(),
-        });
-        return {
-          nestedDepth: Number(inner.depth || 0),
-          sameLease: String(inner.handle?.lock?.leaseId || "") === String(outer.handle?.lock?.leaseId || ""),
-        };
-      });
-      return { nested };
-    });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const state = readGroupTypedMemoryDistillationTransactionState(groupId);
-    let failClosed = false;
-    try {
-      writeJsonAtomic(ledger.file, { schema: "invalid-uncoordinated-selftest", groupId });
-    } catch (error: any) {
-      failClosed = String(error?.message || error).includes("uncoordinated_group_typed_memory_distillation_ledger_write");
-    }
-    const receipt = result.distillationMutation || {};
-    const commit = ledger.distillationMutation || {};
-    const mutationKinds = Array.isArray(receipt.mutationKinds) ? receipt.mutationKinds : [];
-    const checks = {
-      nestedCallReusesLease: result.nested?.sameLease === true && Number(result.nested?.nestedDepth || 0) === 2,
-      nestedKindsAreAudited: mutationKinds.includes("phase272_outer") && mutationKinds.includes("phase272_inner"),
-      oneLedgerWriteCommitted: Number(receipt.writeCount || 0) === 1 && Number(commit.writeSequence || 0) === 1,
-      receiptBindsLedgerFence: String(receipt.leaseId || "") === String(commit.leaseId || "")
-        && Number(receipt.fencingToken || 0) === Number(commit.fencingToken || 0),
-      stateBindsMutation: state.valid === true
-        && state.state?.status === "completed"
-        && state.state?.mutationKind === "phase272_outer"
-        && Number(state.state?.fencingToken || 0) === Number(receipt.fencingToken || 0),
-      lockReleased: inspectGroupTypedMemoryDistillationLock(groupId).present === false,
-      uncoordinatedWriteFailsClosed: failClosed,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      schema: "ccm-group-typed-memory-distillation-mutation-coordinator-selftest-v1",
-      groupId,
-      checks,
-      receipt,
-      commit,
-      state: state.state,
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryDistillationMutationCoordinatorSelfTest();
 }
 
 export function runGroupTypedMemoryIndexSelfTest() {
-  const groupId = `typed-memory-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  try {
-    const sync = syncGroupTypedMemoryFromGroupMemory(groupId, {
-      goal: "实现支付回调，必须保留 IDEMPOTENCY_TYPED_SENTINEL",
-      persistentRequirements: [{ messageId: "u1", text: "必须保留 IDEMPOTENCY_TYPED_SENTINEL，不能跳过验签。" }],
-      decisions: [{ decision: "使用 webhook idempotency key", reason: "避免重复入账" }],
-      blocked: [{ project: "api", reason: "验签测试失败" }],
-      factAnchors: [{ id: "f1", type: "user_requirement", messageId: "u1", text: "支付回调依赖 src/pay.ts" }],
-      compaction: { postCompactReinject: { hasCandidates: true, files: [{ value: "src/pay.ts", sourceMessageId: "a1" }], verification: [{ value: "npm run check", sourceMessageId: "a2" }] } },
-      messageDigest: "群聊会话压缩摘要：支付回调仍在进行。",
-    });
-    const recall = buildGroupTypedMemoryRecall(groupId, "支付回调 IDEMPOTENCY_TYPED_SENTINEL src/pay.ts npm run check", {});
-    const ledgerBefore = getAlreadySurfacedGroupTypedMemory(groupId, "api");
-    recordGroupTypedMemoryRecall(groupId, "api", recall, "支付回调 IDEMPOTENCY_TYPED_SENTINEL");
-    const ledgerAfter = getAlreadySurfacedGroupTypedMemory(groupId, "api");
-    const deduped = buildGroupTypedMemoryRecall(groupId, "支付回调 IDEMPOTENCY_TYPED_SENTINEL src/pay.ts npm run check", { alreadySurfaced: ledgerAfter });
-    const ignored = buildGroupTypedMemoryRecall(groupId, "本轮请忽略记忆，只看当前任务", {});
-    const rendered = renderGroupTypedMemoryRecall(recall);
-    const checks = {
-      indexCreated: fs.existsSync(sync.index.file) && fs.readFileSync(sync.index.file, "utf-8").includes("MEMORY.md"),
-      fourTypeDocsCreated: sync.index.docs.some((item: any) => item.type === "user")
-        && sync.index.docs.some((item: any) => item.type === "project")
-        && sync.index.docs.some((item: any) => item.type === "feedback")
-        && sync.index.docs.some((item: any) => item.type === "reference"),
-      recallFindsSentinel: recall.recalled.some((item: any) => `${item.name}\n${item.snippet}`.includes("IDEMPOTENCY_TYPED_SENTINEL")),
-      recallFindsFile: JSON.stringify(recall.recalled).includes("src/pay.ts"),
-      recallLedgerStartsEmpty: ledgerBefore.length === 0,
-      recallLedgerRecordsSurfaced: ledgerAfter.length >= recall.surfaced.length && ledgerAfter.length > 0,
-      alreadySurfacedDedupesRecall: deduped.recalled.length < recall.recalled.length,
-      ignoreMemoryHonored: ignored.ignored === true && ignored.recalled.length === 0,
-      renderedMentionsVerification: rendered.includes("类型化长期记忆") && rendered.includes("npm run check"),
-    };
-    return { pass: Object.values(checks).every(Boolean), checks, indexFile: sync.index.file, recalled: recall.recalled.map((item: any) => item.relPath) };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-recall-self-tests").runGroupTypedMemoryIndexSelfTest();
 }
 
 export function runGroupTypedMemoryPostCompactUsageScoringSelfTest() {
-  const groupId = `typed-memory-post-compact-usage-scoring-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  try {
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "post-compact-useful-candidate",
-      name: "Recovered useful candidate",
-      description: "恢复候选任务中多次被 used / verified 的文件。",
-      source: "selftest:post-compact-usage",
-      body: "RECOVERED_USEFUL_SENTINEL：src/recovered.ts 是压缩后恢复候选，历史回执 used/verified 后应提高 MEMORY.md 召回优先级。",
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "post-compact-ignored-candidate",
-      name: "Recovered ignored candidate",
-      description: "恢复候选任务中多次被 ignored 的旧文件。",
-      source: "selftest:post-compact-usage",
-      body: "RECOVERED_IGNORED_SENTINEL：src/ignored.ts 是历史多次 ignored 的压缩恢复候选，除非当前任务强相关，否则应被降权。",
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "project",
-      slug: "post-compact-neutral-candidate",
-      name: "Neutral project memory",
-      description: "普通恢复候选任务背景。",
-      source: "selftest:post-compact-usage",
-      body: "RECOVERED_NEUTRAL_SENTINEL：普通项目背景，不带候选使用账本信号。",
-    });
-    const recall = buildGroupTypedMemoryRecall(groupId, "继续恢复候选任务", {
-      max: 5,
-      postCompactCandidateUsage: {
-        useful_candidates: [{
-          candidate_id: "pcrc_useful",
-          value: "src/recovered.ts",
-          recommendation: "promote_recall",
-          used_count: 2,
-          verified_count: 1,
-        }],
-        ignored_candidates: [{
-          candidate_id: "pcrc_ignored",
-          value: "src/ignored.ts",
-          recommendation: "deprioritize_or_distill",
-          ignored_count: 3,
-        }],
-      },
-    });
-    const rendered = renderGroupTypedMemoryRecall(recall);
-    const useful: any = recall.recalled.find((item: any) => item.relPath.includes("post-compact-useful-candidate"));
-    const ignored: any = recall.recalled.find((item: any) => item.relPath.includes("post-compact-ignored-candidate"));
-    const checks = {
-      usefulCandidateRecalled: !!useful
-        && String(JSON.stringify(useful)).includes("RECOVERED_USEFUL_SENTINEL"),
-      usefulCandidateBoosted: Number(useful?.postCompactUsage?.adjustment || 0) > 0
-        && useful.postCompactUsage.matched?.some((item: any) => item.recommendation === "promote_recall"),
-      ignoredCandidateDeprioritized: !ignored
-        && recall.diagnostics?.some((item: any) => item.relPath.includes("post-compact-ignored-candidate")
-          && Number(item.postCompactUsage?.adjustment || 0) < 0),
-      recallSummaryCountsUsageScoring: recall.postCompactUsageScoring?.hint_count === 2
-        && recall.postCompactUsageScoring?.boosted_count >= 1
-        && recall.postCompactUsageScoring?.deprioritized_count >= 1,
-      renderedShowsUsageAdjustment: rendered.includes("post-compact usage +")
-        && rendered.includes("RECOVERED_USEFUL_SENTINEL"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      scoring: recall.postCompactUsageScoring,
-      recalled: recall.recalled.map((item: any) => ({ relPath: item.relPath, score: item.score, postCompactUsage: item.postCompactUsage })),
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-recall-self-tests").runGroupTypedMemoryPostCompactUsageScoringSelfTest();
 }
 
 export function runGroupTypedMemoryWorkerContextPressureRecallSelfTest() {
-  const groupId = `typed-memory-worker-context-pressure-recall-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  try {
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "worker-context-usage-pressure-discipline",
-      name: "WorkerContextPacket context usage pressure discipline",
-      description: "Recall only when WorkerContextPacket context pressure is active.",
-      source: "auto:context-usage-repair-distillation",
-      body: [
-        "PRESSURE_CONTEXT_USAGE_SENTINEL",
-        "When context_usage.status is compact_recommended, critical, or over_budget, keep Context usage budget visible.",
-        "Target free_tokens>=autocompact_buffer_tokens before child-Agent dispatch.",
-      ].join("\n"),
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "worker-context-compact-strategy-memory",
-      name: "WorkerContextPacket compact strategy memory",
-      description: "Recall compact strategy only under pressure.",
-      source: "auto:compact-strategy-memory-distillation",
-      body: [
-        "PRESSURE_COMPACT_STRATEGY_SENTINEL",
-        "Prefer metadata_partial_compact categories with positive free_token_delta and task_hash_unchanged=true.",
-      ].join("\n"),
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "worker-context-ptl-emergency-downgrade",
-      name: "WorkerContextPacket PTL emergency downgrade discipline",
-      description: "Recall PTL emergency budgets only for repeated compact failure.",
-      source: "auto:ptl-emergency-downgrade-distillation",
-      body: [
-        "PRESSURE_PTL_EMERGENCY_SENTINEL",
-        "PTL emergency downgrade uses maxTaskChars and maxRenderedChars when repeated compact failure blocks dispatch.",
-      ].join("\n"),
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "worker-context-old-ignore-memory",
-      name: "WorkerContextPacket stale pressure recall memory",
-      description: "Old ignored pressure recall feedback should decay before future scoring.",
-      source: "selftest",
-      body: [
-        "PRESSURE_STALE_USAGE_SENTINEL",
-        "worker-context-compact-strategy stale pressure recall feedback should not permanently suppress future typed memory recall.",
-        "metadata_partial_compact guidance can become stale when child Agent receipts stop referencing it.",
-      ].join("\n"),
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "project",
-      slug: "normal-payment-memory",
-      name: "Normal payment memory",
-      description: "Ordinary task memory should win when no WorkerContextPacket pressure exists.",
-      source: "selftest",
-      body: "NORMAL_PRESSURE_RECALL_SENTINEL：普通支付回调任务背景，不需要上下文预算修复。",
-    });
-    const query = "继续 NORMAL_PRESSURE_RECALL_SENTINEL 普通支付回调";
-    const noPressure = buildGroupTypedMemoryRecall(groupId, query, { max: 6 });
-    const pressure = buildGroupTypedMemoryRecall(groupId, query, {
-      max: 6,
-      workerContextPacketContextUsage: {
-        schema: "ccm-worker-context-usage-v1",
-        status: "over_budget",
-        pressure: 104,
-        total_tokens: 93_800,
-        max_tokens: 90_000,
-        free_tokens: -16_800,
-        autocompact_buffer_tokens: 13_000,
-        top_categories: [{ id: "typed_memory_recall", tokens: 18_000 }],
-      },
-    });
-    const ptl = buildGroupTypedMemoryRecall(groupId, query, {
-      max: 6,
-      ptlEmergency: {
-        engaged: true,
-        emergency_level: "critical",
-        blocked_outcome_count: 3,
-        task_compacted_blocked_count: 1,
-        reason: "WorkerContextPacket repeated compact failure requires PTL emergency downgrade.",
-      },
-    });
-    const usageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
-      targetProject: "api",
-      taskId: "pressure-recall-usage-task",
-      executionId: "pressure-recall-usage-exec",
-      rows: [
-        { target_project: "api", agent: "api", rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "used", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-1" },
-        { target_project: "api", agent: "api", rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "verified", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-2" },
-        { target_project: "api", agent: "api", rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-3" },
-        { target_project: "api", agent: "api", rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-4" },
-      ],
-      generatedAt: "2026-07-09T00:00:00.000Z",
-    });
-    const usageSummary: any = buildGroupTypedMemoryPressureRecallUsageSummary(groupId, { targetProject: "api" });
-    const staleUsageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
-      targetProject: "api",
-      taskId: "pressure-recall-stale-usage-task",
-      executionId: "pressure-recall-stale-usage-exec",
-      rows: [
-        { target_project: "api", agent: "api", rel_path: "worker-context-old-ignore-memory.md", name: "WorkerContextPacket stale pressure recall memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-stale-1" },
-        { target_project: "api", agent: "api", rel_path: "worker-context-old-ignore-memory.md", name: "WorkerContextPacket stale pressure recall memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-stale-2" },
-      ],
-      generatedAt: "2026-03-01T00:00:00.000Z",
-    });
-    const staleUsageSummary: any = buildGroupTypedMemoryPressureRecallUsageSummary(groupId, {
-      targetProject: "api",
-      nowMs: Date.parse("2026-07-09T00:00:00.000Z"),
-    });
-    const pressureAfterUsage = buildGroupTypedMemoryRecall(groupId, query, {
-      max: 6,
-      targetProject: "api",
-      nowMs: Date.parse("2026-07-09T00:00:00.000Z"),
-      workerContextPacketContextUsage: {
-        schema: "ccm-worker-context-usage-v1",
-        status: "over_budget",
-        pressure: 104,
-        total_tokens: 93_800,
-        max_tokens: 90_000,
-        free_tokens: -16_800,
-        autocompact_buffer_tokens: 13_000,
-      },
-    });
-    const pressureAfterStaleUsage = buildGroupTypedMemoryRecall(groupId, "PRESSURE_STALE_USAGE_SENTINEL worker context over_budget", {
-      max: 8,
-      targetProject: "api",
-      nowMs: Date.parse("2026-07-09T00:00:00.000Z"),
-      workerContextPacketContextUsage: {
-        schema: "ccm-worker-context-usage-v1",
-        status: "over_budget",
-        pressure: 104,
-        total_tokens: 93_800,
-        max_tokens: 90_000,
-        free_tokens: -16_800,
-        autocompact_buffer_tokens: 13_000,
-      },
-    });
-    const rendered = renderGroupTypedMemoryRecall(pressure);
-    const relsNoPressure = (noPressure.recalled || []).map((item: any) => item.relPath);
-    const pressureUsage: any = pressure.recalled.find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md");
-    const pressureStrategy: any = pressure.recalled.find((item: any) => item.relPath === "worker-context-compact-strategy-memory.md");
-    const pressurePtl: any = ptl.recalled.find((item: any) => item.relPath === "worker-context-ptl-emergency-downgrade.md");
-    const afterUsageDoc: any = pressureAfterUsage.recalled.find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md");
-    const afterIgnoredStrategy: any = pressureAfterUsage.recalled.find((item: any) => item.relPath === "worker-context-compact-strategy-memory.md")
-      || pressureAfterUsage.diagnostics.find((item: any) => item.relPath === "worker-context-compact-strategy-memory.md");
-    const staleIgnoredDoc: any = pressureAfterStaleUsage.diagnostics.find((item: any) => item.relPath === "worker-context-old-ignore-memory.md")
-      || pressureAfterStaleUsage.recalled.find((item: any) => item.relPath === "worker-context-old-ignore-memory.md");
-    const checks = {
-      noPressureDoesNotPolluteNormalRecall: relsNoPressure.includes("normal-payment-memory.md")
-        && !relsNoPressure.includes("worker-context-usage-pressure-discipline.md")
-        && !relsNoPressure.includes("worker-context-compact-strategy-memory.md")
-        && !relsNoPressure.includes("worker-context-ptl-emergency-downgrade.md")
-        && Number(noPressure.workerContextPressureScoring?.deprioritized_count || 0) >= 3,
-      overBudgetBoostsUsagePressureMemory: !!pressureUsage
-        && Number(pressureUsage.workerContextPressureRecall?.adjustment || 0) > 0
-        && JSON.stringify(pressureUsage).includes("PRESSURE_CONTEXT_USAGE_SENTINEL"),
-      overBudgetBoostsCompactStrategyMemory: !!pressureStrategy
-        && Number(pressureStrategy.workerContextPressureRecall?.adjustment || 0) > 0
-        && JSON.stringify(pressureStrategy).includes("PRESSURE_COMPACT_STRATEGY_SENTINEL"),
-      ptlEmergencyBoostsDowngradeMemory: !!pressurePtl
-        && Number(pressurePtl.workerContextPressureRecall?.adjustment || 0) > 0
-        && pressurePtl.workerContextPressureRecall?.ptl_emergency === true,
-      pressureScoringSummarized: pressure.workerContextPressureScoring?.active === true
-        && pressure.workerContextPressureScoring?.pressure_status === "over_budget"
-        && pressure.workerContextPressureScoring?.boosted_count >= 2,
-      usageLedgerFeedsFuturePressureRecall: usageRecord?.recorded_count === 4
-        && usageSummary.totals?.used === 1
-        && usageSummary.totals?.verified === 1
-        && usageSummary.totals?.ignored === 2
-        && Number(afterUsageDoc?.workerContextPressureUsage?.adjustment || 0) > 0
-        && Number(afterIgnoredStrategy?.workerContextPressureUsage?.adjustment || 0) < 0
-        && pressureAfterUsage.workerContextPressureUsageScoring?.boosted_count >= 1
-        && pressureAfterUsage.workerContextPressureUsageScoring?.deprioritized_count >= 1,
-      staleUsageFeedbackDecaysBeforeScoring: staleUsageRecord?.recorded_count === 2
-        && staleUsageSummary.totals?.ignored === 4
-        && Number(staleUsageSummary.weighted_totals?.ignored || 0) < Number(staleUsageSummary.totals?.ignored || 0)
-        && Number(staleUsageSummary.aging?.stale_entry_count || 0) >= 2
-        && (staleUsageSummary.stale_pressure_memories || []).some((item: any) => item.rel_path === "worker-context-old-ignore-memory.md")
-        && staleIgnoredDoc?.workerContextPressureUsage?.matched?.some((match: any) => match.recommendation === "stale_pressure_recall_history" && Number(match.delta || 0) === 0)
-        && Number(staleIgnoredDoc?.workerContextPressureUsage?.adjustment || 0) === 0
-        && Number(pressureAfterStaleUsage.workerContextPressureUsageScoring?.stale_hint_count || 0) >= 1
-        && Number(pressureAfterStaleUsage.workerContextPressureUsageScoring?.stale_matched_count || 0) >= 1,
-      renderedShowsPressureRecall: rendered.includes("上下文压力召回")
-        && rendered.includes("pressure recall +")
-        && rendered.includes("PRESSURE_CONTEXT_USAGE_SENTINEL"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      noPressure: {
-        scoring: noPressure.workerContextPressureScoring,
-        recalled: relsNoPressure,
-      },
-      pressure: {
-        scoring: pressure.workerContextPressureScoring,
-        recalled: pressure.recalled.map((item: any) => ({ relPath: item.relPath, score: item.score, workerContextPressureRecall: item.workerContextPressureRecall })),
-      },
-      ptl: {
-        scoring: ptl.workerContextPressureScoring,
-        recalled: ptl.recalled.map((item: any) => ({ relPath: item.relPath, score: item.score, workerContextPressureRecall: item.workerContextPressureRecall })),
-      },
-      usage: {
-        record: usageRecord,
-        summary: usageSummary,
-        staleRecord: staleUsageRecord,
-        staleSummary: staleUsageSummary,
-        scoring: pressureAfterUsage.workerContextPressureUsageScoring,
-        staleScoring: pressureAfterStaleUsage.workerContextPressureUsageScoring,
-      },
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-recall-self-tests").runGroupTypedMemoryWorkerContextPressureRecallSelfTest();
 }
 
 export function runGroupTypedMemoryCrossGroupPressureRecallUsageSelfTest() {
-  const sourceGroupId = `typed-memory-cross-group-pressure-source-${process.pid}-${Date.now().toString(36)}`;
-  const targetGroupId = `typed-memory-cross-group-pressure-target-${process.pid}-${Date.now().toString(36)}`;
-  const dirs = [getGroupTypedMemoryDir(sourceGroupId), getGroupTypedMemoryDir(targetGroupId)];
-  const nowMs = Date.parse("2026-07-09T23:10:00.000Z");
-  const pressureUsage = {
-    schema: "ccm-worker-context-usage-v1",
-    status: "over_budget",
-    pressure: 105,
-    total_tokens: 94_500,
-    max_tokens: 90_000,
-    free_tokens: -17_500,
-    autocompact_buffer_tokens: 13_000,
-  };
-  const findDoc = (recall: any, relPath: string) => (recall.recalled || []).find((item: any) => item.relPath === relPath)
-    || (recall.diagnostics || []).find((item: any) => item.relPath === relPath)
-    || {};
-  try {
-    upsertGroupTypedMemoryDocument(targetGroupId, {
-      type: "feedback",
-      slug: "worker-context-usage-pressure-discipline",
-      name: "WorkerContextPacket context usage pressure discipline",
-      description: "Cross-group pressure usage should promote this pressure memory only for the same project.",
-      source: "selftest:cross-group-pressure-usage",
-      body: [
-        "CROSS_GROUP_PRESSURE_USAGE_SENTINEL",
-        "When WorkerContextPacket context_usage is over_budget, keep free_tokens and autocompact_buffer_tokens visible before dispatch.",
-      ].join("\n"),
-    });
-    upsertGroupTypedMemoryDocument(targetGroupId, {
-      type: "reference",
-      slug: "worker-context-compact-strategy-memory",
-      name: "WorkerContextPacket compact strategy memory",
-      description: "Cross-group ignored pressure usage should deprioritize this memory.",
-      source: "selftest:cross-group-pressure-usage",
-      body: [
-        "CROSS_GROUP_PRESSURE_IGNORED_SENTINEL",
-        "metadata_partial_compact strategy memory can be deprioritized when child receipts repeatedly ignored it.",
-      ].join("\n"),
-    });
-    upsertGroupTypedMemoryDocument(targetGroupId, {
-      type: "project",
-      slug: "normal-cross-project-memory",
-      name: "Normal cross project memory",
-      description: "Ordinary target project task memory.",
-      source: "selftest:cross-group-pressure-usage",
-      body: "NORMAL_CROSS_GROUP_PRESSURE_SENTINEL：普通项目记忆，用来确认跨群聊压力提示只在压力路径补强。",
-    });
-    const sourceRecord = recordGroupTypedMemoryPressureRecallUsageLedger(sourceGroupId, {
-      targetProject: "api",
-      taskId: "cross-group-pressure-usage-source-task",
-      executionId: "cross-group-pressure-usage-source-exec",
-      agent: "api",
-      generatedAt: "2026-07-09T23:09:00.000Z",
-      rows: [
-        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "used", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-used" },
-        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "verified", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-verified" },
-        { rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-ignored-1" },
-        { rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-ignored-2" },
-      ],
-    });
-    const crossSummary = buildGroupTypedMemoryPressureRecallUsageProjectSummary(targetGroupId, {
-      targetProject: "api",
-      groupIds: [sourceGroupId],
-      nowMs,
-    });
-    const crossRecall = buildGroupTypedMemoryRecall(targetGroupId, "继续普通项目任务 NORMAL_CROSS_GROUP_PRESSURE_SENTINEL", {
-      max: 8,
-      targetProject: "api",
-      nowMs,
-      workerContextPacketContextUsage: pressureUsage,
-      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
-    });
-    const wrongProjectRecall = buildGroupTypedMemoryRecall(targetGroupId, "继续普通项目任务 NORMAL_CROSS_GROUP_PRESSURE_SENTINEL", {
-      max: 8,
-      targetProject: "web",
-      nowMs,
-      workerContextPacketContextUsage: pressureUsage,
-      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
-    });
-    const promotedDoc: any = findDoc(crossRecall, "worker-context-usage-pressure-discipline.md");
-    const ignoredDoc: any = findDoc(crossRecall, "worker-context-compact-strategy-memory.md");
-    const localRecord = recordGroupTypedMemoryPressureRecallUsageLedger(targetGroupId, {
-      targetProject: "api",
-      taskId: "cross-group-pressure-usage-local-task",
-      executionId: "cross-group-pressure-usage-local-exec",
-      agent: "api",
-      generatedAt: "2026-07-09T23:09:30.000Z",
-      rows: [
-        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-local-pressure-ignored-1" },
-        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-local-pressure-ignored-2" },
-        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-local-pressure-ignored-3" },
-      ],
-    });
-    const localOverrideRecall = buildGroupTypedMemoryRecall(targetGroupId, "继续普通项目任务 NORMAL_CROSS_GROUP_PRESSURE_SENTINEL", {
-      max: 8,
-      targetProject: "api",
-      nowMs,
-      workerContextPacketContextUsage: pressureUsage,
-      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
-    });
-    const localOverrideDoc: any = findDoc(localOverrideRecall, "worker-context-usage-pressure-discipline.md");
-    const localOverrideMatches = localOverrideDoc.workerContextPressureUsage?.matched || [];
-    const checks = {
-      sourceLedgerRecorded: sourceRecord?.recorded_count === 4,
-      projectSummaryReadsOnlySourceGroup: crossSummary.source === "cross_group_project_pressure_recall_usage"
-        && crossSummary.source_group_count === 1
-        && crossSummary.entry_count === 4
-        && crossSummary.target_project === "api"
-        && (crossSummary.source_groups || []).some((item: any) => item.groupId === sourceGroupId),
-      crossGroupHintsPromoteSameProjectPressureMemory: Number(crossRecall.workerContextPressureUsageScoring?.cross_group_hint_count || 0) >= 2
-        && Number(crossRecall.workerContextPressureUsageScoring?.cross_group_matched_count || 0) >= 2
-        && promotedDoc.workerContextPressureUsage?.matched?.some((match: any) => match.hint_scope === "cross_group_project"
-          && match.recommendation === "promote_pressure_recall"
-          && Number(match.delta || 0) > 0
-          && match.group_ids?.includes(sourceGroupId)),
-      crossGroupHintsCanDeprioritizeIgnoredPressureMemory: ignoredDoc.workerContextPressureUsage?.matched?.some((match: any) => match.hint_scope === "cross_group_project"
-        && match.recommendation === "deprioritize_pressure_recall"
-        && Number(match.delta || 0) < 0),
-      targetProjectIsolationBlocksWrongProjectHints: Number(wrongProjectRecall.workerContextPressureUsageScoring?.cross_group_hint_count || 0) === 0
-        && Number(wrongProjectRecall.workerContextPressureUsageScoring?.cross_group_matched_count || 0) === 0,
-      localGroupUsageOverridesSameDocCrossGroupHint: localRecord?.recorded_count === 3
-        && localOverrideMatches.some((match: any) => match.hint_scope === "local_group" && match.recommendation === "deprioritize_pressure_recall")
-        && !localOverrideMatches.some((match: any) => match.hint_scope === "cross_group_project"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      crossSummary: {
-        source_group_count: crossSummary.source_group_count || 0,
-        entry_count: crossSummary.entry_count || 0,
-        weighted_totals: crossSummary.weighted_totals || {},
-        rows: crossSummary.rows || [],
-      },
-      crossRecall: {
-        scoring: crossRecall.workerContextPressureUsageScoring,
-        promotedDoc: promotedDoc.workerContextPressureUsage || null,
-        ignoredDoc: ignoredDoc.workerContextPressureUsage || null,
-      },
-      localOverride: {
-        scoring: localOverrideRecall.workerContextPressureUsageScoring,
-        usageDocMatches: localOverrideMatches,
-      },
-    };
-  } finally {
-    for (const dir of dirs) {
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-    }
-  }
+  return require("./group-memory-recall-self-tests").runGroupTypedMemoryCrossGroupPressureRecallUsageSelfTest();
 }
 
 export function runGroupTypedMemoryPressureRecallUsageRepairProvenanceSelfTest() {
-  const groupId = `typed-memory-pressure-repair-provenance-${process.pid}-${Date.now().toString(36)}`;
-  const typedDir = getGroupTypedMemoryDir(groupId);
-  const repairFile = getGroupPressureRecallUsageRepairWorkItemsFile(groupId);
-  const nowMs = Date.parse("2026-07-09T23:58:00.000Z");
-  const targetProject = "phase131-pressure-project";
-  try {
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "worker-context-usage-pressure-discipline",
-      name: "WorkerContextPacket context usage pressure discipline",
-      description: "Repair provenance must be visible when pressure usage recommendations are disputed.",
-      source: "selftest:pressure-repair-provenance",
-      body: [
-        "PRESSURE_REPAIR_PROVENANCE_SENTINEL",
-        "When WorkerContextPacket context_usage is over_budget, check whether the pressure memory is trusted or under repair before following it.",
-      ].join("\n"),
-    });
-    const usageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
-      targetProject,
-      taskId: "pressure-repair-provenance-task",
-      executionId: "pressure-repair-provenance-execution",
-      agent: "api",
-      generatedAt: "2026-07-09T23:57:00.000Z",
-      rows: [
-        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-repair-ignored-1" },
-        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-repair-ignored-2" },
-      ],
-    });
-    writeJsonAtomic(repairFile, {
-      schema: "ccm-compact-boundary-replay-repair-work-items-v1",
-      version: 1,
-      groupId,
-      file: repairFile,
-      items: [{
-        id: "cgpru-repair-provenance-selftest",
-        work_item_id: "cgpru-repair-provenance-selftest",
-        source: "cross_group_pressure_recall_usage_repair",
-        component: "cross_group_pressure_recall_usage",
-        status: "pending",
-        priority: "high",
-        target_project: targetProject,
-        repair_target: "worker-context-usage-pressure-discipline.md",
-        cross_group_pressure_recall_usage_gap_type: "recommendation_conflict",
-        cross_group_pressure_recall_usage_rel_path: "worker-context-usage-pressure-discipline.md",
-        cross_group_pressure_recall_usage_reason: "selftest: local deprioritize_pressure_recall but cross-group promote_pressure_recall",
-        local_recommendation: "deprioritize_pressure_recall",
-        cross_group_recommendation: "promote_pressure_recall",
-        source_group_count: 1,
-        source_groups: [{ groupId: "source-pressure-repair-provenance", entry_count: 2 }],
-        shouldCreateRealTask: false,
-        updatedAt: "2026-07-09T23:57:30.000Z",
-      }],
-      stats: { total: 1, openItemCount: 1, pendingCount: 1 },
-      updatedAt: "2026-07-09T23:57:30.000Z",
-    });
-    const recall = buildGroupTypedMemoryRecall(groupId, "继续 WorkerContextPacket over_budget PRESSURE_REPAIR_PROVENANCE_SENTINEL", {
-      max: 6,
-      targetProject,
-      nowMs,
-      workerContextPacketContextUsage: {
-        schema: "ccm-worker-context-usage-v1",
-        packet_id: "wcp-pressure-repair-provenance",
-        project: targetProject,
-        status: "over_budget",
-        pressure: 112,
-        total_tokens: 101_000,
-        max_tokens: 90_000,
-        free_tokens: -24_000,
-        autocompact_buffer_tokens: 13_000,
-      },
-    });
-    const doc: any = (recall.recalled || []).find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md")
-      || (recall.diagnostics || []).find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md")
-      || {};
-    const matches = doc.workerContextPressureUsage?.matched || [];
-    const rendered = renderGroupTypedMemoryRecall(recall);
-    const repairMatch = matches.find((match: any) => match.repair_open === true);
-    const checks = {
-      usageLedgerRecorded: usageRecord?.recorded_count === 2,
-      repairHintMatchedDoc: repairMatch?.repair_work_item_id === "cgpru-repair-provenance-selftest"
-        && repairMatch.provenance_status === "disputed_under_repair"
-        && repairMatch.repair_gap_type === "recommendation_conflict"
-        && repairMatch.repair_local_recommendation === "deprioritize_pressure_recall"
-        && repairMatch.repair_cross_group_recommendation === "promote_pressure_recall",
-      scoringCountsRepair: Number(recall.workerContextPressureUsageScoring?.repair_hint_count || 0) >= 1
-        && Number(recall.workerContextPressureUsageScoring?.repair_matched_count || 0) >= 1
-        && Number(recall.workerContextPressureUsageScoring?.disputed_matched_count || 0) >= 1,
-      renderedCarriesRepairProvenance: rendered.includes("pressure repair recommendation_conflict:pending")
-        && rendered.includes("PRESSURE_REPAIR_PROVENANCE_SENTINEL"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      scoring: recall.workerContextPressureUsageScoring,
-      doc: {
-        relPath: doc.relPath || doc.rel_path || "",
-        score: doc.score || 0,
-        workerContextPressureUsage: doc.workerContextPressureUsage || null,
-      },
-      rendered,
-    };
-  } finally {
-    try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
-    for (const file of [repairFile, `${repairFile}.bak`]) {
-      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
-    }
-  }
+  return require("./group-memory-recall-self-tests").runGroupTypedMemoryPressureRecallUsageRepairProvenanceSelfTest();
 }
 
 export function runGroupTypedMemoryLoadPlanSelfTest() {
-  const groupId = `typed-memory-load-plan-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  try {
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "project",
-      slug: "aaa-main-project",
-      name: "Main project memory",
-      description: "Project memory that includes another typed memory file.",
-      source: "selftest",
-      body: [
-        "# Main Project Memory",
-        "LOAD_PLAN_MAIN_SENTINEL",
-        "@zzz-included-project.md",
-        "@missing-memory.md",
-      ].join("\n"),
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "project",
-      slug: "zzz-included-project",
-      name: "Included project memory",
-      description: "Included memory must load before its parent.",
-      source: "selftest",
-      body: "LOAD_PLAN_INCLUDE_SENTINEL",
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "cycle-a",
-      name: "Cycle A",
-      description: "Cycle source A",
-      source: "selftest",
-      body: "@cycle-b.md",
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "feedback",
-      slug: "cycle-b",
-      name: "Cycle B",
-      description: "Cycle source B",
-      source: "selftest",
-      body: "@cycle-a.md",
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "user",
-      slug: "zz-user-requirements",
-      name: "User requirements",
-      description: "Highest priority user memory.",
-      source: "selftest",
-      body: "LOAD_PLAN_USER_SENTINEL must win when memory conflicts.",
-    });
-    const plan = buildGroupTypedMemoryLoadPlan(groupId, {});
-    const rendered = renderGroupTypedMemoryLoadPlan(plan);
-    const entries = Array.isArray(plan.entries) ? plan.entries : [];
-    const byRel = new Map<string, any>(entries.map((entry: any) => [entry.relPath, entry]));
-    const included = byRel.get("zzz-included-project.md") || {};
-    const parent = byRel.get("aaa-main-project.md") || {};
-    const user = byRel.get("zz-user-requirements.md") || {};
-    const referencePriority = plan.priorityTiers.reference;
-    const projectPriority = plan.priorityTiers.project;
-    const feedbackPriority = plan.priorityTiers.feedback;
-    const userPriority = plan.priorityTiers.user;
-    const checks = {
-      schema: plan.schema === "ccm-group-typed-memory-load-plan-v1",
-      entrypointFirst: entries[0]?.relPath === GROUP_TYPED_MEMORY_ENTRYPOINT && entries[0]?.kind === "entrypoint",
-      priorityTierOrdering: referencePriority < projectPriority && projectPriority < feedbackPriority && feedbackPriority < userPriority,
-      includeLoadsBeforeParent: Number(included.loadOrder) < Number(parent.loadOrder)
-        && included.parentRelPath === "aaa-main-project.md",
-      missingIncludeAudited: plan.issues.some((issue: any) => issue.type === "missing_include" && String(issue.ref || "").includes("missing-memory.md")),
-      cycleAudited: plan.issues.some((issue: any) => issue.type === "circular_include"),
-      userMemoryHighestPriority: Number(user.priority || 0) === userPriority
-        && Number(user.loadOrder || 0) > Number(parent.loadOrder || 0),
-      boundedEntries: plan.entryCount <= plan.maxEntries && plan.totalBytes > 0 && plan.estimatedTokens > 0,
-      renderedMentionsPlan: rendered.includes("类型化 MEMORY.md 加载计划")
-        && rendered.includes("entrypoint < reference < project < feedback < user"),
-    };
-    return { pass: Object.values(checks).every(Boolean), checks, plan: { status: plan.status, entryCount: plan.entryCount, issues: plan.issues.map((issue: any) => issue.type) } };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-recall-self-tests").runGroupTypedMemoryLoadPlanSelfTest();
 }
 
 export function runGroupTypedMemoryPathConditionSelfTest() {
-  const groupId = `typed-memory-path-condition-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  try {
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "pay-path-rule",
-      name: "Payment callback path rule",
-      description: "Only applies to payment callback files.",
-      source: "selftest",
-      paths: ["src/pay.ts", "src/payment/**/*.ts"],
-      body: "PATH_CONDITION_PAY_SENTINEL: 支付回调必须验签并保留幂等键。",
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "reference",
-      slug: "search-path-rule",
-      name: "Search path rule",
-      description: "Only applies to search files.",
-      source: "selftest",
-      paths: ["src/search/**/*.ts"],
-      body: "PATH_CONDITION_SEARCH_SENTINEL: 搜索索引刷新需要单独验证。",
-    });
-    upsertGroupTypedMemoryDocument(groupId, {
-      type: "project",
-      slug: "general-project",
-      name: "General project memory",
-      description: "Unconditional memory should still be recallable by query.",
-      source: "selftest",
-      body: "PATH_CONDITION_GENERAL_SENTINEL: 通用项目记忆。",
-    });
-    const payRecall = buildGroupTypedMemoryRecall(groupId, "继续 src/pay.ts 支付回调 PATH_CONDITION_PAY_SENTINEL", { max: 8 });
-    const searchRecall = buildGroupTypedMemoryRecall(groupId, "继续 src/search/index.ts 搜索索引 PATH_CONDITION_SEARCH_SENTINEL", { max: 8 });
-    const unrelatedRecall = buildGroupTypedMemoryRecall(groupId, "继续 docs/readme.md 文档任务 PATH_CONDITION", { max: 8 });
-    const payPlan = buildGroupTypedMemoryLoadPlan(groupId, { targetPaths: ["src/pay.ts"] });
-    const unrelatedPlan = buildGroupTypedMemoryLoadPlan(groupId, { targetPaths: ["docs/readme.md"] });
-    const rendered = renderGroupTypedMemoryRecall(payRecall);
-    const payEntries = JSON.stringify(payPlan.entries || []);
-    const unrelatedEntries = JSON.stringify(unrelatedPlan.entries || []);
-    const checks = {
-      pathsPersistedInFrontmatter: fs.readFileSync(path.join(dir, "pay-path-rule.md"), "utf-8").includes("\"src/pay.ts\""),
-      payRecallIncludesPayRule: JSON.stringify(payRecall.recalled || []).includes("PATH_CONDITION_PAY_SENTINEL"),
-      payRecallSkipsSearchRule: !JSON.stringify(payRecall.recalled || []).includes("PATH_CONDITION_SEARCH_SENTINEL"),
-      searchRecallIncludesSearchRule: JSON.stringify(searchRecall.recalled || []).includes("PATH_CONDITION_SEARCH_SENTINEL"),
-      unrelatedSkipsConditionalRules: !JSON.stringify(unrelatedRecall.recalled || []).includes("PATH_CONDITION_PAY_SENTINEL")
-        && !JSON.stringify(unrelatedRecall.recalled || []).includes("PATH_CONDITION_SEARCH_SENTINEL"),
-      diagnosticsRecordPathMiss: unrelatedRecall.diagnostics.some((item: any) => item.reason === "path_condition_miss"),
-      loadPlanIncludesMatchedConditional: payEntries.includes("pay-path-rule.md") && !payEntries.includes("search-path-rule.md"),
-      loadPlanSkipsUnmatchedConditionals: !unrelatedEntries.includes("pay-path-rule.md") && !unrelatedEntries.includes("search-path-rule.md"),
-      loadPlanCountsConditionalSkips: unrelatedPlan.conditionalSkipped >= 2 && payPlan.conditionalMatched >= 1,
-      renderedMentionsPathCondition: rendered.includes("路径条件匹配") && rendered.includes("src/pay.ts"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      payRecall: { surfaced: payRecall.surfaced, conditionalMatched: payRecall.conditionalMatched, conditionalSkipped: payRecall.conditionalSkipped },
-      payPlan: { conditionalMatched: payPlan.conditionalMatched, conditionalSkipped: payPlan.conditionalSkipped },
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-recall-self-tests").runGroupTypedMemoryPathConditionSelfTest();
 }
 
 export function runGroupProjectMemoryImportSelfTest() {
-  const groupId = `project-memory-import-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const typedDir = getGroupTypedMemoryDir(groupId);
-  const projectRoot = path.join(CCM_DIR, "tmp-project-memory-import-selftest", groupId);
-  try {
-    fs.mkdirSync(path.join(projectRoot, ".claude", "rules"), { recursive: true });
-    fs.mkdirSync(path.join(projectRoot, "docs"), { recursive: true });
-    fs.writeFileSync(path.join(projectRoot, "CLAUDE.md"), [
-      "# Project Instructions",
-      "@./docs/project-extra.md",
-      "@./docs/missing-project-extra.md",
-      "<!-- @./docs/comment-hidden.md -->",
-      "PROJECT_MEMORY_IMPORT_ROOT_SENTINEL: all child Agents must preserve project instructions.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(projectRoot, "docs", "project-extra.md"), [
-      "# Project Extra Include",
-      "PROJECT_MEMORY_IMPORT_INCLUDE_SENTINEL: imported @include content must reach child Agent typed memory.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(projectRoot, "docs", "comment-hidden.md"), [
-      "# Hidden Include",
-      "PROJECT_MEMORY_IMPORT_COMMENT_HIDDEN_SENTINEL should not be imported from an HTML comment.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(projectRoot, ".claude", "CLAUDE.md"), [
-      "# Dot Claude Instructions",
-      "PROJECT_MEMORY_IMPORT_DOT_SENTINEL: dot-claude instructions are project memory.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(projectRoot, ".claude", "rules", "pay.md"), [
-      "---",
-      "name: \"Pay Rule\"",
-      "description: \"Payment callback rule\"",
-      "paths: [\"src/pay.ts\", \"src/payment/**/*.ts\"]",
-      "---",
-      "PROJECT_MEMORY_IMPORT_PAY_RULE_SENTINEL: src/pay.ts requires signature verification.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(projectRoot, "CLAUDE.local.md"), [
-      "# Local Instructions",
-      "PROJECT_MEMORY_IMPORT_LOCAL_SENTINEL: local private instruction imported for CCM context.",
-    ].join("\n"), "utf-8");
-    const discovery = discoverProjectMemoryFiles(projectRoot, {});
-    const imported = importProjectMemoryFilesToGroupTypedMemory(groupId, projectRoot, { project: "api" });
-    const recall = buildGroupTypedMemoryRecall(groupId, "继续 src/pay.ts PROJECT_MEMORY_IMPORT_PAY_RULE_SENTINEL", { max: 10 });
-    const includeRecall = buildGroupTypedMemoryRecall(groupId, "继续 PROJECT_MEMORY_IMPORT_INCLUDE_SENTINEL", { max: 10 });
-    const unrelated = buildGroupTypedMemoryRecall(groupId, "继续 docs/readme.md PROJECT_MEMORY_IMPORT_PAY_RULE_SENTINEL", { max: 10 });
-    const plan = buildGroupTypedMemoryLoadPlan(groupId, { targetPaths: ["src/pay.ts"] });
-    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const checks = {
-      discoversClaudeFiles: discovery.discoveredCount === 4
-        && discovery.files.some((item: any) => item.relPath === "CLAUDE.md")
-        && discovery.files.some((item: any) => item.relPath === ".claude/CLAUDE.md")
-        && discovery.files.some((item: any) => item.relPath === ".claude/rules/pay.md")
-        && discovery.files.some((item: any) => item.relPath === "CLAUDE.local.md"),
-      importsTypedDocs: imported.importedCount === 5
-        && docs.some(item => String(item.source || "").includes("project-memory:api:project:CLAUDE.md"))
-        && docs.some(item => String(item.source || "").includes("project-memory:api:project_rule:.claude/rules/pay.md")),
-      importsClaudeIncludes: imported.includeAudit?.schema === "ccm-claude-memory-include-audit-v1"
-        && Number(imported.includeAudit.importedIncludeCount || 0) === 1
-        && JSON.stringify(includeRecall.recalled || []).includes("PROJECT_MEMORY_IMPORT_INCLUDE_SENTINEL")
-        && !JSON.stringify(docs).includes("PROJECT_MEMORY_IMPORT_COMMENT_HIDDEN_SENTINEL"),
-      missingIncludeAudited: (imported.issues || []).some((item: any) => item.type === "missing_include" && String(item.ref || "").includes("missing-project-extra.md")),
-      preservesPathFrontmatter: docs.some(item => item.relPath.includes("pay") && (item.paths || []).includes("src/pay.ts")),
-      recallFindsPathRule: JSON.stringify(recall.recalled || []).includes("PROJECT_MEMORY_IMPORT_PAY_RULE_SENTINEL"),
-      unrelatedSkipsPathRule: !JSON.stringify(unrelated.recalled || []).includes("PROJECT_MEMORY_IMPORT_PAY_RULE_SENTINEL")
-        && unrelated.diagnostics.some((item: any) => item.reason === "path_condition_miss"),
-      loadPlanIncludesImportedRule: JSON.stringify(plan.entries || []).includes(".claude/rules/pay.md")
-        && Number(plan.conditionalMatched || 0) >= 1,
-      indexLinksImportedDocs: indexText.includes("Project Rule: .claude/rules/pay.md")
-        && indexText.includes("Project Memory: CLAUDE.md"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      discovery: { discoveredCount: discovery.discoveredCount, status: discovery.status },
-      imported: { importedCount: imported.importedCount, status: imported.status, includeAudit: imported.includeAudit },
-      recalled: recall.surfaced,
-    };
-  } finally {
-    try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
-    try { fs.rmSync(projectRoot, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-recall-self-tests").runGroupProjectMemoryImportSelfTest();
 }
 
 export function runGroupGlobalClaudeMemoryImportSelfTest() {
-  const groupId = `global-claude-memory-import-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const typedDir = getGroupTypedMemoryDir(groupId);
-  const root = path.join(CCM_DIR, "tmp-global-claude-memory-import-selftest", groupId);
-  const userRoot = path.join(root, "user-claude");
-  const managedRoot = path.join(root, "managed-claude");
-  try {
-    fs.mkdirSync(path.join(userRoot, "rules"), { recursive: true });
-    fs.mkdirSync(path.join(managedRoot, ".claude", "rules"), { recursive: true });
-    fs.writeFileSync(path.join(userRoot, "CLAUDE.md"), [
-      "# User Claude Memory",
-      "@../user-external.md",
-      "GLOBAL_CLAUDE_USER_SENTINEL: 所有项目子 Agent 都要保留用户全局偏好。",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(root, "user-external.md"), [
-      "# User External Include",
-      "GLOBAL_CLAUDE_USER_INCLUDE_SENTINEL: user Claude memory may include external text files.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(userRoot, "rules", "pay.md"), [
-      "---",
-      "name: \"User Pay Rule\"",
-      "paths: [\"src/pay.ts\"]",
-      "---",
-      "GLOBAL_CLAUDE_USER_PAY_RULE_SENTINEL: src/pay.ts 必须先检查用户级支付规则。",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(managedRoot, "CLAUDE.md"), [
-      "# Managed Claude Memory",
-      "@../managed-external.md",
-      "GLOBAL_CLAUDE_MANAGED_SENTINEL: managed policy memory imported.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(root, "managed-external.md"), [
-      "# Managed External Include",
-      "GLOBAL_CLAUDE_MANAGED_EXTERNAL_SENTINEL should be skipped unless external includes are approved.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(managedRoot, ".claude", "rules", "security.md"), [
-      "---",
-      "name: \"Managed Security Rule\"",
-      "paths: [\"src/**/*.ts\"]",
-      "---",
-      "GLOBAL_CLAUDE_MANAGED_SECURITY_SENTINEL: TypeScript files require security review.",
-    ].join("\n"), "utf-8");
-    const discovery = discoverGlobalClaudeMemoryFiles({ userRoot, managedRoot });
-    const imported = importGlobalClaudeMemoryToGroupTypedMemory(groupId, { userRoot, managedRoot });
-    const recall = buildGroupTypedMemoryRecall(groupId, "继续 src/pay.ts GLOBAL_CLAUDE_USER_PAY_RULE_SENTINEL", { max: 10 });
-    const includeRecall = buildGroupTypedMemoryRecall(groupId, "继续 GLOBAL_CLAUDE_USER_INCLUDE_SENTINEL", { max: 10 });
-    const unrelated = buildGroupTypedMemoryRecall(groupId, "继续 docs/readme.md GLOBAL_CLAUDE_USER_PAY_RULE_SENTINEL", { max: 10 });
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
-    const checks = {
-      discoversUserAndManaged: discovery.discoveredCount === 4
-        && discovery.files.some((item: any) => item.scope === "user" && item.kind === "user")
-        && discovery.files.some((item: any) => item.scope === "managed" && item.kind === "managed"),
-      importsTypedDocs: imported.importedCount === 5
-        && docs.some(item => String(item.source || "").includes("global-claude-memory:user:user:CLAUDE.md"))
-        && docs.some(item => String(item.source || "").includes("global-claude-memory:managed:managed:CLAUDE.md")),
-      importsUserExternalInclude: imported.includeAudit?.schema === "ccm-claude-memory-include-audit-v1"
-        && Number(imported.includeAudit.importedIncludeCount || 0) === 1
-        && JSON.stringify(includeRecall.recalled || []).includes("GLOBAL_CLAUDE_USER_INCLUDE_SENTINEL"),
-      skipsManagedExternalInclude: (imported.issues || []).some((item: any) => item.type === "external_include_skipped" && String(item.ref || "").includes("managed-external.md"))
-        && !JSON.stringify(docs).includes("GLOBAL_CLAUDE_MANAGED_EXTERNAL_SENTINEL"),
-      userMemoryHasHighPriorityType: docs.some(item => item.type === "user" && String(item.body || "").includes("GLOBAL_CLAUDE_USER_SENTINEL")),
-      managedMemoryIsReference: docs.some(item => item.type === "reference" && String(item.body || "").includes("GLOBAL_CLAUDE_MANAGED_SENTINEL")),
-      preservesRulePaths: docs.some(item => String(item.source || "").includes("rules/pay.md") && (item.paths || []).includes("src/pay.ts")),
-      recallFindsPathRule: JSON.stringify(recall.recalled || []).includes("GLOBAL_CLAUDE_USER_PAY_RULE_SENTINEL"),
-      unrelatedSkipsPathRule: !JSON.stringify(unrelated.recalled || []).includes("GLOBAL_CLAUDE_USER_PAY_RULE_SENTINEL")
-        && unrelated.diagnostics.some((item: any) => item.reason === "path_condition_miss"),
-      indexLinksGlobalDocs: indexText.includes("User Claude Memory: CLAUDE.md")
-        && indexText.includes("Managed Claude Memory: CLAUDE.md"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      discovery: { discoveredCount: discovery.discoveredCount, status: discovery.status },
-      imported: { importedCount: imported.importedCount, status: imported.status, includeAudit: imported.includeAudit },
-      recalled: recall.surfaced,
-    };
-  } finally {
-    try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-recall-self-tests").runGroupGlobalClaudeMemoryImportSelfTest();
 }
 
 export function runGroupClaudeMemoryExternalIncludeApprovalSelfTest() {
-  const groupId = `claude-external-include-approval-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const typedDir = getGroupTypedMemoryDir(groupId);
-  const root = path.join(CCM_DIR, "tmp-claude-external-include-approval-selftest", groupId);
-  const projectRoot = path.join(root, "project");
-  const externalFile = path.join(root, "approved-external.md");
-  try {
-    fs.mkdirSync(projectRoot, { recursive: true });
-    fs.writeFileSync(path.join(projectRoot, "CLAUDE.md"), [
-      "# Project With External Include",
-      "@../approved-external.md",
-      "EXTERNAL_INCLUDE_APPROVAL_ROOT_SENTINEL: root project memory stays imported.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(externalFile, [
-      "# Approved External Include",
-      "EXTERNAL_INCLUDE_APPROVAL_SENTINEL: approved external include reaches typed memory.",
-    ].join("\n"), "utf-8");
-    const first = importProjectMemoryFilesToGroupTypedMemory(groupId, projectRoot, { project: "api" });
-    const firstDocs = scanGroupTypedMemoryDocuments(groupId);
-    const firstApproval: any = first.includeAudit?.externalIncludeApproval || {};
-    const marked = markGroupClaudeMemoryExternalIncludeWarningShown(groupId, {
-      includes: firstApproval.pendingExternalIncludes || [],
-      actor: "selftest",
-    });
-    const afterWarning = importProjectMemoryFilesToGroupTypedMemory(groupId, projectRoot, { project: "api" });
-    const afterWarningApproval: any = afterWarning.includeAudit?.externalIncludeApproval || {};
-    const approved = approveGroupClaudeMemoryExternalInclude(groupId, {
-      includes: firstApproval.pendingExternalIncludes || [{ path: externalFile, parent: path.join(projectRoot, "CLAUDE.md"), scope: "project", kind: "project" }],
-      approvedBy: "selftest",
-    });
-    const second = importProjectMemoryFilesToGroupTypedMemory(groupId, projectRoot, { project: "api" });
-    const recall = buildGroupTypedMemoryRecall(groupId, "继续 EXTERNAL_INCLUDE_APPROVAL_SENTINEL", { max: 10 });
-    const secondDocs = scanGroupTypedMemoryDocuments(groupId);
-    const secondApproval: any = second.includeAudit?.externalIncludeApproval || {};
-    const checks = {
-      firstWarnsAndSkips: firstApproval.schema === "ccm-claude-memory-external-include-approval-v1"
-        && firstApproval.pendingCount === 1
-        && firstApproval.shouldShowWarning === true
-        && (first.issues || []).some((item: any) => item.type === "external_include_skipped" && item.approvalRequired === true)
-        && !JSON.stringify(firstDocs).includes("EXTERNAL_INCLUDE_APPROVAL_SENTINEL"),
-      warningShownSuppressesRepeatPrompt: marked.hasExternalIncludesWarningShown === true
-        && afterWarningApproval.pendingCount === 1
-        && afterWarningApproval.shouldShowWarning === false,
-      approvalLedgerPersists: approved.approved.some((item: any) => item.path === normalizeExternalIncludeApprovalPath(externalFile))
-        && fs.existsSync(getGroupClaudeMemoryExternalIncludeApprovalLedgerFile(groupId)),
-      approvedExternalImports: secondApproval.pendingCount === 0
-        && secondApproval.approvedCount === 1
-        && Number(second.includeAudit?.importedIncludeCount || 0) === 1
-        && JSON.stringify(secondDocs).includes("EXTERNAL_INCLUDE_APPROVAL_SENTINEL"),
-      recallFindsApprovedExternalInclude: JSON.stringify(recall.recalled || []).includes("EXTERNAL_INCLUDE_APPROVAL_SENTINEL"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      first: { importedCount: first.importedCount, approval: firstApproval },
-      second: { importedCount: second.importedCount, approval: secondApproval },
-      recalled: recall.surfaced,
-    };
-  } finally {
-    try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation-self-tests").runGroupClaudeMemoryExternalIncludeApprovalSelfTest();
 }
 
 export function runGroupClaudeMemorySettingSourcePolicySelfTest() {
-  const groupId = `claude-setting-source-policy-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const typedDir = getGroupTypedMemoryDir(groupId);
-  const root = path.join(CCM_DIR, "tmp-claude-setting-source-policy-selftest", groupId);
-  const projectRoot = path.join(root, "project");
-  const userRoot = path.join(root, "user-claude");
-  const managedRoot = path.join(root, "managed-claude");
-  try {
-    fs.mkdirSync(path.join(projectRoot, ".claude", "rules"), { recursive: true });
-    fs.mkdirSync(userRoot, { recursive: true });
-    fs.mkdirSync(managedRoot, { recursive: true });
-    fs.writeFileSync(path.join(projectRoot, "CLAUDE.md"), "SETTING_SOURCE_PROJECT_SENTINEL: project source enabled.\n", "utf-8");
-    fs.writeFileSync(path.join(projectRoot, ".claude", "rules", "rule.md"), "SETTING_SOURCE_PROJECT_RULE_SENTINEL: project rule enabled.\n", "utf-8");
-    fs.writeFileSync(path.join(projectRoot, "CLAUDE.local.md"), "SETTING_SOURCE_LOCAL_SENTINEL: local source enabled.\n", "utf-8");
-    fs.writeFileSync(path.join(userRoot, "CLAUDE.md"), "SETTING_SOURCE_USER_SENTINEL: user source enabled.\n", "utf-8");
-    fs.writeFileSync(path.join(managedRoot, "CLAUDE.md"), "SETTING_SOURCE_MANAGED_SENTINEL: managed policy source always enabled.\n", "utf-8");
-
-    const defaultPolicy = buildClaudeMemorySettingSourcePolicy({});
-    const isolatedPolicy = buildClaudeMemorySettingSourcePolicy({ settingSources: "" });
-    const projectDiscovery = discoverProjectMemoryFiles(projectRoot, { settingSources: "project" });
-    const localDiscovery = discoverProjectMemoryFiles(projectRoot, { settingSources: "local" });
-    const isolatedProjectDiscovery = discoverProjectMemoryFiles(projectRoot, { settingSources: "" });
-    const isolatedGlobal = importGlobalClaudeMemoryToGroupTypedMemory(groupId, { userRoot, managedRoot, settingSources: "" });
-    const isolatedRecall = buildGroupTypedMemoryRecall(groupId, "SETTING_SOURCE_MANAGED_SENTINEL SETTING_SOURCE_USER_SENTINEL", { max: 10 });
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const checks = {
-      defaultEnablesEditableAndAlwaysOn: defaultPolicy.includeUser === true
-        && defaultPolicy.includeProject === true
-        && defaultPolicy.includeLocal === true
-        && defaultPolicy.includeManaged === true
-        && defaultPolicy.includeFlagSettings === true,
-      emptySettingSourcesEnterIsolationButKeepManaged: isolatedPolicy.isolationMode === true
-        && isolatedPolicy.includeUser === false
-        && isolatedPolicy.includeProject === false
-        && isolatedPolicy.includeLocal === false
-        && isolatedPolicy.includeManaged === true,
-      projectOnlySkipsLocal: projectDiscovery.settingSourcePolicy?.enabled?.includes("projectSettings")
-        && projectDiscovery.discoveredCount === 2
-        && projectDiscovery.files.some((item: any) => item.relPath === "CLAUDE.md")
-        && projectDiscovery.files.some((item: any) => item.relPath === ".claude/rules/rule.md")
-        && !projectDiscovery.files.some((item: any) => item.relPath === "CLAUDE.local.md"),
-      localOnlySkipsProject: localDiscovery.discoveredCount === 1
-        && localDiscovery.files.some((item: any) => item.relPath === "CLAUDE.local.md")
-        && !localDiscovery.files.some((item: any) => item.relPath === "CLAUDE.md"),
-      isolatedProjectSkipsProjectAndLocal: isolatedProjectDiscovery.discoveredCount === 0
-        && isolatedProjectDiscovery.settingSourcePolicy?.isolationMode === true,
-      isolatedGlobalImportsManagedOnly: isolatedGlobal.settingSourcePolicy?.isolationMode === true
-        && isolatedGlobal.includeUser === false
-        && isolatedGlobal.includeManaged === true
-        && isolatedGlobal.importedCount === 1
-        && JSON.stringify(docs).includes("SETTING_SOURCE_MANAGED_SENTINEL")
-        && !JSON.stringify(docs).includes("SETTING_SOURCE_USER_SENTINEL"),
-      recallFindsManagedButNotUser: JSON.stringify(isolatedRecall.recalled || []).includes("SETTING_SOURCE_MANAGED_SENTINEL")
-        && !JSON.stringify(isolatedRecall.recalled || []).includes("SETTING_SOURCE_USER_SENTINEL"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      defaultPolicy,
-      isolatedPolicy,
-      projectDiscovery: { discoveredCount: projectDiscovery.discoveredCount, files: projectDiscovery.files.map((item: any) => item.relPath) },
-      isolatedGlobal: { importedCount: isolatedGlobal.importedCount, includeUser: isolatedGlobal.includeUser, includeManaged: isolatedGlobal.includeManaged },
-    };
-  } finally {
-    try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation-self-tests").runGroupClaudeMemorySettingSourcePolicySelfTest();
 }
 
 export function runGroupInstructionsLoadedHookPipelineSelfTest() {
-  const groupId = `instructions-loaded-hook-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const typedDir = getGroupTypedMemoryDir(groupId);
-  const projectRoot = path.join(CCM_DIR, "tmp-instructions-loaded-hook-selftest", groupId);
-  const seen: any[] = [];
-  const unregisterGood = registerGroupMemoryInstructionsLoadedHook((input: any) => {
-    seen.push({ ...input });
-    return { observed: input.file_path, reason: input.load_reason };
-  });
-  const unregisterFailing = registerGroupMemoryInstructionsLoadedHook(() => {
-    throw new Error("INSTRUCTIONS_LOADED_HOOK_FAILURE_SENTINEL");
-  });
-  try {
-    fs.mkdirSync(path.join(projectRoot, "docs"), { recursive: true });
-    fs.writeFileSync(path.join(projectRoot, "CLAUDE.md"), [
-      "# Hook Project Memory",
-      "@./docs/hook-include.md",
-      "INSTRUCTIONS_LOADED_HOOK_ROOT_SENTINEL: root memory imported.",
-    ].join("\n"), "utf-8");
-    fs.writeFileSync(path.join(projectRoot, "docs", "hook-include.md"), [
-      "# Hook Include",
-      "INSTRUCTIONS_LOADED_HOOK_INCLUDE_SENTINEL: include memory imported.",
-    ].join("\n"), "utf-8");
-    const imported = importProjectMemoryFilesToGroupTypedMemory(groupId, projectRoot, {
-      project: "api",
-      instructionsLoadReason: "session_start",
-    });
-    const hookSummary: any = imported.instructionsLoadedHooks || {};
-    const ledger = loadGroupClaudeInstructionsLoadedHookLedger(groupId);
-    const recall = buildGroupTypedMemoryRecall(groupId, "INSTRUCTIONS_LOADED_HOOK_INCLUDE_SENTINEL", { max: 10 });
-    const renderedPlan = renderGroupTypedMemoryLoadPlan(buildGroupTypedMemoryLoadPlan(groupId, {}));
-    const checks = {
-      hooksRegistered: hasGroupMemoryInstructionsLoadedHook() === true,
-      hookSummaryRecordsEvents: hookSummary.schema === "ccm-claude-instructions-loaded-hook-import-summary-v1"
-        && hookSummary.eventCount === 2
-        && hookSummary.firedCount === 4
-        && hookSummary.failureCount === 2
-        && fs.existsSync(hookSummary.ledgerFile),
-      goodHookSawTopLevelAndInclude: seen.length === 2
-        && seen.some(item => item.memory_type === "Project" && item.load_reason === "session_start" && String(item.file_path || "").endsWith("CLAUDE.md"))
-        && seen.some(item => item.memory_type === "Project" && item.load_reason === "include" && String(item.parent_file_path || "").endsWith("CLAUDE.md")),
-      ledgerPersistsRows: Array.isArray(ledger.entries)
-        && ledger.entries.length >= 2
-        && ledger.entries.every((entry: any) => Array.isArray(entry.rows) && entry.rows.length === 2)
-        && JSON.stringify(ledger.entries).includes("INSTRUCTIONS_LOADED_HOOK_FAILURE_SENTINEL"),
-      importContinuesAfterHookFailure: imported.importedCount === 2
-        && JSON.stringify(recall.recalled || []).includes("INSTRUCTIONS_LOADED_HOOK_INCLUDE_SENTINEL"),
-      typedLoadPlanStillWorks: renderedPlan.includes("类型化 MEMORY.md 加载计划"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      hookSummary: { eventCount: hookSummary.eventCount, firedCount: hookSummary.firedCount, failureCount: hookSummary.failureCount },
-      seen: seen.map(item => ({ memory_type: item.memory_type, load_reason: item.load_reason, parent_file_path: item.parent_file_path })),
-    };
-  } finally {
-    unregisterGood();
-    unregisterFailing();
-    try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
-    try { fs.rmSync(projectRoot, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation-self-tests").runGroupInstructionsLoadedHookPipelineSelfTest();
 }
 
 export function runGroupTypedMemoryLogDistillationSelfTest() {
-  const groupId = `typed-memory-distill-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  const messages: any[] = [
-    {
-      id: "ld-u0",
-      role: "user",
-      target: "coordinator",
-      content: "必须长期记住 LOG_DISTILL_SENTINEL_20260707，支付回调不能跳过验签。",
-    },
-    {
-      id: "ld-a1",
-      role: "assistant",
-      agent: "coordinator",
-      dispatchPolicy: { action: "delegate", reason: "使用 api-agent 修改 src/pay.ts 并运行 npm run check" },
-      assignments: [{ project: "api", task: "实现支付回调验签" }],
-      content: "未来所有支付任务采用反直觉的 webhook idempotency key 策略，因为历史重复回调事故曾导致重复入账。",
-      memoryAdmission: {
-        nonObvious: true,
-        futureApplicable: true,
-        why: "历史重复回调事故曾导致重复入账。",
-        howToApply: "未来支付回调设计先检查稳定幂等键，再核验当前实现。",
-      },
-    },
-    {
-      id: "ld-a2",
-      role: "assistant",
-      agent: "api-agent",
-      task_id: "ld-task",
-      content: "以后必须防止这个反复失败：npm run check failed 的根因是签名测试误用了生产时钟，因为固定时钟在多次回归中才暴露。Skill:typescript-audit",
-      receipt: { status: "failed", taskId: "ld-task", verification: ["npm run check failed"] },
-      memoryAdmission: {
-        nonObvious: true,
-        futureApplicable: true,
-        why: "固定时钟在多次回归中才暴露签名边界。",
-        howToApply: "未来签名测试先使用可控时钟并核验当前实现。",
-      },
-    },
-    {
-      id: "ld-a3",
-      role: "assistant",
-      agent: "api-agent",
-      task_id: "ld-task",
-      content: "修复 src/pay.ts 后 npm run check passed。",
-      receipt: { status: "done", taskId: "ld-task", summary: "支付回调验签修复", verification: ["npm run check passed"] },
-    },
-    {
-      id: "ld-a4",
-      role: "assistant",
-      agent: "coordinator",
-      content: "Grafana https://grafana.internal/d/payments 用于查看支付回调延迟，排查请求链路时从这个仪表盘进入。",
-    },
-  ];
-  const originalMessages = JSON.stringify(messages);
-  try {
-    const first = distillGroupMessagesToTypedMemory(groupId, messages, { goal: "日志蒸馏自测" }, { reason: "selftest" });
-    const second = distillGroupMessagesToTypedMemory(groupId, messages, { goal: "日志蒸馏自测" }, { reason: "selftest-repeat" });
-    const recall = buildGroupTypedMemoryRecall(groupId, "LOG_DISTILL_SENTINEL_20260707 重复回调 固定时钟 Grafana", { disableLedger: true, max: 8 });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const rendered = renderGroupTypedMemoryRecall(recall);
-    const checks = {
-      distillationCreatedFacts: first.newFactCount >= 4 && first.writeCount >= 4,
-      repeatDoesNotAddDuplicates: second.skipped === true
-        && second.reason === "no_new_messages_after_committed_cursor"
-        && second.newFactCount === 0
-        && second.updatedFactCount === 0,
-      qualityReportRecorded: first.quality?.schema === "ccm-group-typed-memory-distillation-quality-v1"
-        && typeof first.quality.score === "number",
-      ledgerPersistsFacts: Object.values(ledger.facts || {}).some((bucket: any) => Object.keys(bucket || {}).length > 0),
-      fourTypedDocsCreated: docs.some(item => item.relPath === "distilled-log-user-requirements.md")
-        && docs.some(item => item.relPath === "distilled-log-project-context.md")
-        && docs.some(item => item.relPath === "distilled-log-feedback-failures.md")
-        && docs.some(item => item.relPath === "distilled-log-reference-artifacts.md"),
-      indexLinksDistilledDocs: indexText.includes("distilled-log-user-requirements.md") && indexText.includes("distilled-log-reference-artifacts.md"),
-      recallFindsDurableAndNonObviousFacts: JSON.stringify(recall.recalled).includes("LOG_DISTILL_SENTINEL_20260707")
-        && JSON.stringify(recall.recalled).includes("重复回调")
-        && JSON.stringify(recall.recalled).includes("Grafana"),
-      activityNoiseRejected: !JSON.stringify(ledger.facts || {}).includes("completed_work")
-        && !JSON.stringify(ledger.facts || {}).includes("assignment")
-        && !JSON.stringify(ledger.facts || {}).includes("npm run check passed")
-        && Number(ledger.admission?.rejectedThisRun || 0) > 0,
-      renderedMentionsDistilledMemory: rendered.includes("类型化长期记忆") && rendered.includes("Distilled"),
-      rawTranscriptUntouched: JSON.stringify(messages) === originalMessages,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      first: { newFactCount: first.newFactCount, writeCount: first.writeCount },
-      second: { newFactCount: second.newFactCount, updatedFactCount: second.updatedFactCount },
-      recalled: recall.recalled.map((item: any) => item.relPath),
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryLogDistillationSelfTest();
 }
 
 export function runGroupTypedMemoryPostCompactUsageDistillationSelfTest() {
-  const groupId = `typed-memory-post-compact-usage-distill-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  const usage = {
-    ignored_candidates: [{
-      candidate_id: "pcrc_stale_recovered",
-      value: "src/stale-recovered.ts",
-      recommendation: "deprioritize_or_distill",
-      ignored_count: 4,
-      used_count: 0,
-      verified_count: 0,
-    }],
-    missing_usage_candidates: [{
-      candidate_id: "pcrc_missing_usage",
-      value: "npm run stale-check",
-      recommendation: "require_usage_receipt",
-      mentioned_count: 2,
-    }],
-  };
-  const messages: any[] = [{
-    id: "pcud-u0",
-    role: "user",
-    target: "coordinator",
-    content: "必须长期保留 USAGE_DISTILLATION_SENTINEL，但旧恢复候选 src/stale-recovered.ts 已经被多次忽略。",
-  }];
-  try {
-    const distillation = distillGroupMessagesToTypedMemory(groupId, messages, { goal: "usage distillation selftest" }, {
-      reason: "post-compact-usage-distillation-selftest",
-      postCompactCandidateUsage: usage,
-    });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const archive = docs.find(item => item.relPath === "post-compact-candidate-usage-archive.md");
-    const archiveText = archive ? fs.readFileSync(archive.file, "utf-8") : "";
-    const recall = buildGroupTypedMemoryRecall(groupId, "src/stale-recovered.ts stale recovered candidate", {
-      max: 8,
-      postCompactCandidateUsage: usage,
-    });
-    const checks = {
-      archiveDocWritten: !!archive
-        && archiveText.includes("Post-Compact Candidate Usage Archive")
-        && archiveText.includes("src/stale-recovered.ts")
-        && archiveText.includes("npm run stale-check"),
-      distillationReportsArchive: distillation.postCompactUsageArchive?.archived_count === 2
-        && distillation.writes?.some((item: any) => item.slug === "post-compact-candidate-usage-archive"),
-      ledgerPersistsArchive: ledger.postCompactUsageArchive?.archived_count === 2
-        && JSON.stringify(ledger.postCompactUsageArchive?.rows || []).includes("pcrc_stale_recovered"),
-      recallDeprioritizesArchive: recall.diagnostics?.some((item: any) => item.relPath === "post-compact-candidate-usage-archive.md"
-        && Number(item.postCompactUsage?.adjustment || 0) < 0),
-      recallScoringCountsArchive: recall.postCompactUsageScoring?.hint_count === 2
-        && recall.postCompactUsageScoring?.deprioritized_count >= 1,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      archive: distillation.postCompactUsageArchive,
-      recalled: recall.recalled.map((item: any) => ({ relPath: item.relPath, score: item.score, postCompactUsage: item.postCompactUsage })),
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryPostCompactUsageDistillationSelfTest();
 }
 
 export function runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTest() {
-  const groupId = `typed-memory-provider-reproof-receipt-consumption-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  const rows = [
-    {
-      groupId,
-      timeline_binding_id: "timeline-provider-reproof-consumption-used",
-      brief_id: "brief-provider-reproof-consumption-used",
-      work_item_id: "work-provider-reproof-consumption-used",
-      source: "api_microcompact_native_apply_provider_reproof",
-      project: "api",
-      task_id: "task-provider-reproof-consumption-used",
-      receipt_status: "done",
-      replay_repair_consumption_status: "used",
-      replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
-      replay_repair_consumption_reason: "PROVIDER_REPROOF_CONSUMPTION_USED_SENTINEL 使用 WorkerContextPacket provider re-proof brief 定位 request-provider-reproof-consumption-used。",
-      provider_reproof_status: "needed",
-      provider_reproof_reason: "missing_native_request_adapter_telemetry",
-      request_patch_checksum: "request-provider-reproof-consumption-used",
-      runner_request_id: "runner-provider-reproof-consumption-used",
-      task_agent_session_id: "tas-provider-reproof-consumption-used",
-      memory_context_snapshot_id: "snapshot-provider-reproof-consumption-used",
-      execution_id: "execution-provider-reproof-consumption-used",
-    },
-    {
-      groupId,
-      timeline_binding_id: "timeline-provider-reproof-consumption-strong",
-      brief_id: "brief-provider-reproof-consumption-strong",
-      work_item_id: "work-provider-reproof-consumption-strong",
-      source: "api_microcompact_native_apply_provider_reproof",
-      project: "api",
-      task_id: "task-provider-reproof-consumption-strong",
-      receipt_status: "done",
-      replay_repair_consumption_status: "strong",
-      replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
-      replay_repair_consumption_reason: "PROVIDER_REPROOF_CONSUMPTION_STRONG_CLAIM_SENTINEL 子 Agent 声称 strong，但仍需 native provider proof ledger。",
-      provider_reproof_status: "needed",
-      provider_reproof_reason: "missing_native_request_adapter_telemetry",
-      request_patch_checksum: "request-provider-reproof-consumption-strong",
-      runner_request_id: "runner-provider-reproof-consumption-strong",
-    },
-    {
-      groupId,
-      timeline_binding_id: "timeline-provider-reproof-consumption-ignored",
-      brief_id: "brief-provider-reproof-consumption-ignored",
-      work_item_id: "work-provider-reproof-consumption-ignored",
-      source: "api_microcompact_native_apply_provider_reproof",
-      project: "api",
-      task_id: "task-provider-reproof-consumption-ignored",
-      receipt_status: "done",
-      replay_repair_consumption_status: "ignored",
-      replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
-      replay_repair_consumption_reason: "PROVIDER_REPROOF_CONSUMPTION_IGNORED_SENTINEL stale provider re-proof brief 被子 Agent 忽略。",
-      provider_reproof_status: "needed",
-      provider_reproof_reason: "superseded_candidate",
-      request_patch_checksum: "request-provider-reproof-consumption-ignored",
-      runner_request_id: "runner-provider-reproof-consumption-ignored",
-    },
-  ];
-  try {
-    const first = distillProviderReproofReceiptConsumptionToTypedMemory(groupId, { rows }, {
-      reason: "provider-reproof-receipt-consumption-selftest",
-      updatedAt: "2026-07-08T12:00:00.000Z",
-    });
-    const second = distillProviderReproofReceiptConsumptionToTypedMemory(groupId, { rows }, {
-      reason: "provider-reproof-receipt-consumption-selftest-repeat",
-      updatedAt: "2026-07-08T12:01:00.000Z",
-    });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
-    const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_REPROOF_CONSUMPTION_USED_SENTINEL request-provider-reproof-consumption-used", { disableLedger: true, forceMemory: true, max: 8 });
-    const cautionRecall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_REPROOF_CONSUMPTION_IGNORED_SENTINEL request-provider-reproof-consumption-ignored", { disableLedger: true, forceMemory: true, max: 8 });
-    const recallText = JSON.stringify(recall.recalled || []);
-    const cautionText = JSON.stringify(cautionRecall.recalled || []);
-    const archiveRows = ledger.providerReproofReceiptConsumptionArchive?.rows || [];
-    const checks = {
-      archiveCountsRows: first.archivedCount === 3
-        && first.promotedCount === 2
-        && first.cautionCount === 1
-        && first.strongReceiptClaimCount === 1,
-      repeatDoesNotDuplicateRows: second.archivedCount === 3 && second.newRowCount === 0,
-      ledgerPersistsArchive: ledger.providerReproofReceiptConsumptionArchive?.archived_count === 3
-        && archiveRows.some((row: any) => row.strong_receipt_claim_only === true),
-      typedDocsWritten: docs.some(item => item.relPath === "provider-reproof-receipt-consumption-recall.md" && item.type === "reference")
-        && docs.some(item => item.relPath === "provider-reproof-receipt-consumption-cautions.md" && item.type === "feedback"),
-      indexLinksProviderDocs: indexText.includes("provider-reproof-receipt-consumption-recall.md")
-        && indexText.includes("provider-reproof-receipt-consumption-cautions.md"),
-      promotedRecallFindsUsedRow: recallText.includes("PROVIDER_REPROOF_CONSUMPTION_USED_SENTINEL")
-        && recallText.includes("request-provider-reproof-consumption-used"),
-      cautionRecallIsFeedbackMemory: cautionRecall.recalled.some((item: any) => item.relPath === "provider-reproof-receipt-consumption-cautions.md" && item.type === "feedback")
-        && cautionText.includes("PROVIDER_REPROOF_CONSUMPTION_IGNORED_SENTINEL"),
-      strongClaimWarnsNotNativeProof: fs.readFileSync(path.join(dir, "provider-reproof-receipt-consumption-recall.md"), "utf-8")
-        .includes("receipt strong is a consumption claim only"),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      first: {
-        archivedCount: first.archivedCount,
-        promotedCount: first.promotedCount,
-        cautionCount: first.cautionCount,
-        strongReceiptClaimCount: first.strongReceiptClaimCount,
-      },
-      second: { archivedCount: second.archivedCount, newRowCount: second.newRowCount, updatedRowCount: second.updatedRowCount },
-      recalled: recall.recalled.map((item: any) => item.relPath),
-      cautionRecalled: cautionRecall.recalled.map((item: any) => `${item.type}:${item.relPath}`),
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTest();
 }
 
 export function runGroupTypedMemoryProviderRankingProvenanceCompactRepairReceiptConsumptionDistillationSelfTest() {
-  const groupId = `typed-memory-provider-ranking-compact-repair-receipt-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  const row = {
-    groupId,
-    timeline_binding_id: "timeline-provider-ranking-compact-repair-receipt",
-    brief_id: "brief-provider-ranking-compact-repair-receipt",
-    work_item_id: "work-provider-ranking-compact-repair-receipt",
-    source: "worker_context_provider_ranking_provenance_compact_repair",
-    project: "api",
-    task_id: "task-provider-ranking-compact-repair-receipt",
-    receipt_status: "completed",
-    replay_repair_consumption_status: "verified",
-    replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
-    replay_repair_consumption_reason: "PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL verified provider ranking compact repair consumed typed MEMORY.md row provider-switch-execution:phase165-typed-memory.",
-    provider_switch_decision_receipt_id: "provider-switch-decision:phase165-typed-memory",
-    provider_switch_decision_receipt_checksum: "provider-switch-receipt-checksum-phase165",
-    provider_ranking_provenance_rel_paths: ["provider-switch-execution-memory.md"],
-    provider_ranking_provenance_row_ids: ["provider-switch-execution:phase165-typed-memory"],
-    provider_ranking_provenance_preserved: true,
-    provider_ranking_provenance_receipt_consumption_verified: true,
-    provider_ranking_provenance_repair_status: "completed",
-    provider_ranking_provenance_repair_gap_type: "provider_ranking_provenance_compact",
-    worker_context_packet_id: "wcp-provider-ranking-compact-repair-receipt",
-    task_agent_session_id: "tas-provider-ranking-compact-repair-receipt",
-    memory_context_snapshot_id: "snapshot-provider-ranking-compact-repair-receipt",
-    execution_id: "execution-provider-ranking-compact-repair-receipt",
-  };
-  try {
-    const first = distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row] }, {
-      reason: "provider-ranking-compact-repair-receipt-consumption-selftest",
-      updatedAt: "2026-07-10T17:40:00.000Z",
-    });
-    const second = distillProviderRankingProvenanceCompactRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row] }, {
-      reason: "provider-ranking-compact-repair-receipt-consumption-selftest-repeat",
-      updatedAt: "2026-07-10T17:41:00.000Z",
-    });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const docFile = path.join(dir, "provider-ranking-provenance-compact-repair-receipt-memory.md");
-    const docText = fs.readFileSync(docFile, "utf-8");
-    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
-    const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL provider-switch-execution:phase165-typed-memory provider-switch-decision:phase165-typed-memory", {
-      disableLedger: true,
-      forceMemory: true,
-      max: 8,
-    });
-    const recallText = JSON.stringify(recall.recalled || []);
-    const archiveRows = ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive?.rows || [];
-    const checks = {
-      archiveCountsVerifiedReceipt: first.archivedCount === 1
-        && first.verifiedCount === 1
-        && first.preservedCount === 1
-        && first.relPathCount === 1
-        && first.rowIdCount === 1,
-      repeatDoesNotDuplicateRows: second.archivedCount === 1 && second.newRowCount === 0,
-      ledgerPersistsArchive: ledger.providerRankingProvenanceCompactRepairReceiptConsumptionArchive?.archived_count === 1
-        && archiveRows.some((item: any) => item.provider_switch_decision_receipt_id === "provider-switch-decision:phase165-typed-memory"),
-      typedDocWritten: docs.some(item => item.relPath === "provider-ranking-provenance-compact-repair-receipt-memory.md" && item.type === "reference")
-        && docText.includes("PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL")
-        && docText.includes("provider-switch-execution:phase165-typed-memory"),
-      indexLinksTypedDoc: indexText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md"),
-      recallFindsVerifiedRepair: recallText.includes("provider-ranking-provenance-compact-repair-receipt-memory.md")
-        && recallText.includes("PROVIDER_RANKING_COMPACT_REPAIR_RECEIPT_SENTINEL"),
-      authorizationBoundaryPreserved: /ranking evidence only, not authorization/i.test(docText)
-        && /do not authorize provider switches|Never use this memory as provider-switch authority/i.test(docText),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      first: {
-        archivedCount: first.archivedCount,
-        verifiedCount: first.verifiedCount,
-        preservedCount: first.preservedCount,
-        relPathCount: first.relPathCount,
-        rowIdCount: first.rowIdCount,
-      },
-      second: { archivedCount: second.archivedCount, newRowCount: second.newRowCount, updatedRowCount: second.updatedRowCount },
-      recalled: recall.recalled.map((item: any) => item.relPath),
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryProviderRankingProvenanceCompactRepairReceiptConsumptionDistillationSelfTest();
 }
 
 export function runGroupTypedMemoryPostCompactReinjectionRepairReceiptConsumptionDistillationSelfTest() {
-  const groupId = `typed-memory-post-compact-reinjection-repair-receipt-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  const row = {
-    groupId,
-    timeline_binding_id: "replay-repair-brief-timeline:phase179-distillation",
-    brief_id: "replay-repair-dispatch-brief:phase179-distillation",
-    work_item_id: "post-compact-reinjection-repair:phase179-distillation",
-    source: "compact_boundary_replay_repair",
-    component: "post_compact_reinject",
-    project: "api",
-    task_id: "task-phase179-distillation",
-    assignment_id: "assignment-phase179-distillation",
-    dispatch_key: "dispatch-phase179-distillation",
-    reinjection_gate_id: "pcrg-phase179-distillation",
-    post_compact_candidate_id: "pcrc-phase179-distillation",
-    post_compact_candidate_kind: "file",
-    post_compact_candidate_value: "src/phase179-distillation-memory.ts",
-    post_compact_candidate_source_message_id: "message-phase179-distillation",
-    post_compact_reinjection_receipt_usage_state: "verified",
-    post_compact_reinjection_receipt_reason: "PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL re-read current source before accepting the recovered candidate.",
-    post_compact_reinjection_current_source_verified: true,
-    post_compact_reinjection_memory_receipt_matched: true,
-    post_compact_reinjection_task_session_matched: true,
-    post_compact_reinjection_native_session_matched: true,
-    post_compact_reinjection_receipt_verified: true,
-    receipt_status: "done",
-    replay_repair_consumption_status: "verified",
-    replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
-    worker_context_packet_id: "wcp-phase179-distillation",
-    worker_handoff_id: "handoff-phase179-distillation",
-    memory_context_snapshot_id: "snapshot-phase179-distillation",
-    memory_context_snapshot_checksum: "snapshot-checksum-phase179-distillation",
-    task_agent_session_id: "task-agent-session-phase179-distillation",
-    native_session_id: "native-session-phase179-distillation",
-    execution_id: "execution-phase179-distillation",
-    event_types: ["dispatch", "child_agent_start", "worker_handoff_ready", "task_agent_memory_context_snapshot", "child_agent_receipt"],
-    completion_source: "post_compact_reinjection_replay_repair_receipt_consumption",
-    resolution_reason: "post_compact_reinjection_repair_receipt_verified",
-    completed_at: "2026-07-10T23:20:00.000Z",
-  };
-  const ignoredRow = {
-    ...row,
-    timeline_binding_id: "replay-repair-brief-timeline:phase179-distillation-ignored",
-    brief_id: "replay-repair-dispatch-brief:phase179-distillation-ignored",
-    work_item_id: "post-compact-reinjection-repair:phase179-distillation-ignored",
-    task_id: "task-phase179-distillation-ignored",
-    assignment_id: "assignment-phase179-distillation-ignored",
-    dispatch_key: "dispatch-phase179-distillation-ignored",
-    reinjection_gate_id: "pcrg-phase179-distillation-ignored",
-    post_compact_candidate_id: "pcrc-phase179-distillation-ignored",
-    post_compact_candidate_value: "src/phase179-distillation-ignored.ts",
-    post_compact_candidate_source_message_id: "message-phase179-distillation-ignored",
-    post_compact_reinjection_receipt_usage_state: "ignored",
-    post_compact_reinjection_receipt_reason: "PHASE179_POST_COMPACT_REINJECTION_IGNORED_SENTINEL candidate was unrelated to the bound task.",
-    post_compact_reinjection_current_source_verified: false,
-    worker_context_packet_id: "wcp-phase179-distillation-ignored",
-    worker_handoff_id: "handoff-phase179-distillation-ignored",
-    memory_context_snapshot_id: "snapshot-phase179-distillation-ignored",
-    memory_context_snapshot_checksum: "snapshot-checksum-phase179-distillation-ignored",
-    task_agent_session_id: "task-agent-session-phase179-distillation-ignored",
-    native_session_id: "native-session-phase179-distillation-ignored",
-    execution_id: "execution-phase179-distillation-ignored",
-  };
-  try {
-    const first = distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row, ignoredRow] }, {
-      reason: "post-compact-reinjection-repair-receipt-consumption-selftest",
-      updatedAt: "2026-07-10T23:20:00.000Z",
-    });
-    const second = distillPostCompactReinjectionRepairReceiptConsumptionToTypedMemory(groupId, { rows: [row, ignoredRow] }, {
-      reason: "post-compact-reinjection-repair-receipt-consumption-selftest-repeat",
-      updatedAt: "2026-07-10T23:20:00.000Z",
-    });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const docs = scanGroupTypedMemoryDocuments(groupId);
-    const docFile = path.join(dir, "post-compact-reinjection-repair-receipt-memory.md");
-    const docText = fs.readFileSync(docFile, "utf-8");
-    const cautionFile = path.join(dir, "post-compact-reinjection-repair-receipt-cautions.md");
-    const cautionText = fs.readFileSync(cautionFile, "utf-8");
-    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
-    const recall = buildGroupTypedMemoryRecall(groupId, [
-      "PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL",
-      "pcrg-phase179-distillation",
-      "pcrc-phase179-distillation",
-      "native-session-phase179-distillation",
-    ].join(" "), {
-      disableLedger: true,
-      forceMemory: true,
-      max: 8,
-    });
-    const recallText = JSON.stringify(recall.recalled || []);
-    const archive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
-    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
-    const checks = {
-      archiveCountsVerifiedCompletion: first.archivedCount === 2
-        && first.restoredCount === 1
-        && first.cautionCount === 1
-        && first.verifiedCount === 1
-        && first.ignoredCount === 1
-        && first.currentSourceVerifiedCount === 1
-        && first.taskSessionCount === 2
-        && first.nativeSessionCount === 2,
-      repeatIsIdempotent: second.archivedCount === 2
-        && second.newRowCount === 0
-        && second.updatedRowCount === 2,
-      ledgerPersistsExactIdentity: archive.archived_count === 2
-        && archiveRows.some((item: any) => item.reinjection_gate_id === "pcrg-phase179-distillation"
-          && item.post_compact_candidate_id === "pcrc-phase179-distillation"
-          && item.task_agent_session_id === "task-agent-session-phase179-distillation"
-          && item.native_session_id === "native-session-phase179-distillation"),
-      typedReferenceWritten: docs.some(item => item.relPath === "post-compact-reinjection-repair-receipt-memory.md" && item.type === "reference")
-        && docText.includes("PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL")
-        && docText.includes("post_compact_reinjection_replay_repair_receipt_consumption")
-        && docText.includes("post_compact_reinjection_repair_receipt_verified"),
-      ignoredCompletionStaysFeedback: docs.some(item => item.relPath === "post-compact-reinjection-repair-receipt-cautions.md" && item.type === "feedback")
-        && cautionText.includes("PHASE179_POST_COMPACT_REINJECTION_IGNORED_SENTINEL")
-        && cautionText.includes("[ignored]")
-        && !docText.includes("PHASE179_POST_COMPACT_REINJECTION_IGNORED_SENTINEL"),
-      indexLinksTypedMemory: indexText.includes("post-compact-reinjection-repair-receipt-memory.md"),
-      recallFindsVerifiedCompletion: recallText.includes("post-compact-reinjection-repair-receipt-memory.md")
-        && recallText.includes("PHASE179_POST_COMPACT_REINJECTION_TYPED_MEMORY_SENTINEL"),
-      freshnessBoundaryPreserved: /historical repair completion is recovery evidence, not permanent repository truth/i.test(docText)
-        && /Future use must reverify the current source/i.test(docText)
-        && /historical repair completion is recovery evidence, not permanent repository truth/i.test(cautionText),
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      first: {
-        archivedCount: first.archivedCount,
-        restoredCount: first.restoredCount,
-        cautionCount: first.cautionCount,
-        verifiedCount: first.verifiedCount,
-        ignoredCount: first.ignoredCount,
-        taskSessionCount: first.taskSessionCount,
-        nativeSessionCount: first.nativeSessionCount,
-      },
-      second: {
-        archivedCount: second.archivedCount,
-        newRowCount: second.newRowCount,
-        updatedRowCount: second.updatedRowCount,
-      },
-      recalled: recall.recalled.map((item: any) => item.relPath),
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryPostCompactReinjectionRepairReceiptConsumptionDistillationSelfTest();
 }
 
 export function runGroupTypedMemoryPostCompactCompletionMemoryPreservationRepairClosureDistillationSelfTest() {
-  const suffix = `${process.pid}-${Date.now().toString(36)}`;
-  const groupId = `typed-memory-completion-preservation-closure-${suffix}`;
-  const otherGroupId = `${groupId}-other`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  const otherDir = getGroupTypedMemoryDir(otherGroupId);
-  const item = {
-    group_id: groupId,
-    source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_repair",
-    component: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation",
-    target_project: "api",
-    work_item_id: "post-compact-completion-preservation-repair:PHASE186",
-    assignment_id: "phase186-assignment",
-    dispatch_key: "phase186-dispatch",
-    worker_context_packet_id: "phase186-failed-packet",
-    binding_id: "phase186-failed-binding",
-    compact_retry_id: "phase186-failed-retry",
-    compact_outcome_id: "phase186-failed-outcome",
-    compact_hook_run_id: "phase186-failed-hook",
-    corrected_compact_retry_id: "phase186-corrected-retry",
-    corrected_compact_outcome_id: "phase186-corrected-outcome",
-    corrected_compact_hook_run_id: "phase186-corrected-hook",
-    completion_preservation_completion_doc_rel_paths: ["post-compact-receipt-memory-usage-repair-completions.md"],
-    completion_preservation_required_doc_rel_paths: ["post-compact-reinjection-repair-receipt-memory.md"],
-    completion_preservation_work_item_ids: ["post-compact-receipt-memory-usage-repair:PHASE186"],
-    completion_preservation_timeline_binding_ids: ["replay-repair-brief-timeline:PHASE186"],
-    completion_preservation_historical_task_agent_session_ids: ["phase186-original-task-session"],
-    completion_preservation_historical_native_session_ids: ["phase186-original-native-session"],
-    completion_preservation_current_session_binding_id: "phase186-closure-binding",
-    completion_preservation_current_task_agent_session_id: "phase186-closure-task-session",
-    completion_preservation_current_native_session_id: "phase186-closure-native-session",
-    completion_preservation_gap_codes: ["completion_work_item_ids_missing_after_compact"],
-    status: "completed",
-    completion_source: "post_compact_receipt_memory_usage_repair_completion_compaction_preservation_corrected_retry",
-    resolutionReason: "completion_memory_compaction_preservation_corrected_retry_verified",
-    corrected_retry_proof: {
-      schema: "ccm-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair-closure-v1",
-      failed_retry_id: "phase186-failed-retry",
-      failed_outcome_id: "phase186-failed-outcome",
-      corrected_retry_id: "phase186-corrected-retry",
-      corrected_outcome_id: "phase186-corrected-outcome",
-      exact_identity_restored: true,
-      current_session_boundary_restored: true,
-      historical_sessions_remain_evidence_only: true,
-      verified_at: "2026-07-12T06:50:00.000Z",
-    },
-    completedAt: "2026-07-12T06:50:00.000Z",
-  };
-  try {
-    const first = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [item] }, {
-      reason: "phase186-distillation-selftest",
-      updatedAt: "2026-07-12T06:51:00.000Z",
-    });
-    const second = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId, { rows: [item] }, {
-      reason: "phase186-distillation-selftest-repeat",
-      updatedAt: "2026-07-12T06:52:00.000Z",
-    });
-    const crossGroup = distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(otherGroupId, { rows: [item] }, {
-      reason: "phase186-cross-group-isolation-selftest",
-      updatedAt: "2026-07-12T06:53:00.000Z",
-    });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const otherLedger = readGroupTypedMemoryDistillationLedger(otherGroupId);
-    const docFile = path.join(dir, "post-compact-completion-memory-preservation-repair-closures.md");
-    const docText = fs.readFileSync(docFile, "utf-8");
-    const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
-    const recall = buildGroupTypedMemoryRecall(groupId, "phase186-failed-outcome phase186-corrected-outcome completion memory preservation authority boundary", {
-      disableLedger: true,
-      forceMemory: true,
-      max: 8,
-    });
-    const recallText = JSON.stringify(recall.recalled || []);
-    const rows = ledger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || [];
-    const otherRows = otherLedger.postCompactCompletionMemoryPreservationRepairClosureArchive?.rows || [];
-    const checks = {
-      archiveStoresVerifiedClosure: first.archivedCount === 1
-        && first.verifiedCount === 1
-        && first.failedOutcomeCount === 1
-        && first.correctedOutcomeCount === 1,
-      repeatIsIdempotent: second.archivedCount === 1 && second.newRowCount === 0 && second.updatedRowCount === 1,
-      ledgerKeepsExactIdentity: rows.length === 1
-        && rows[0].failed_outcome_id === "phase186-failed-outcome"
-        && rows[0].corrected_outcome_id === "phase186-corrected-outcome"
-        && rows[0].completion_work_item_ids.includes("post-compact-receipt-memory-usage-repair:PHASE186")
-        && rows[0].completion_timeline_binding_ids.includes("replay-repair-brief-timeline:PHASE186"),
-      typedDocAndIndexWritten: fs.existsSync(docFile)
-        && indexText.includes("post-compact-completion-memory-preservation-repair-closures.md")
-        && docText.includes("phase186-failed-outcome")
-        && docText.includes("phase186-corrected-outcome"),
-      freshnessAndAuthorityBoundaryPersisted: /historical repair completion is recovery evidence, not permanent repository truth/i.test(docText)
-        && /never authorize that future session|Never use this history as current repository truth/i.test(docText)
-        && /current-source|current source/i.test(docText),
-      recallFindsClosure: recallText.includes("post-compact-completion-memory-preservation-repair-closures.md")
-        && recallText.includes("phase186-corrected-outcome"),
-      crossGroupIsolation: crossGroup.archivedCount === 0 && otherRows.length === 0,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      first: { archivedCount: first.archivedCount, verifiedCount: first.verifiedCount, newRowCount: first.newRowCount },
-      second: { archivedCount: second.archivedCount, newRowCount: second.newRowCount, updatedRowCount: second.updatedRowCount },
-      crossGroup: { archivedCount: crossGroup.archivedCount },
-      recalled: (recall.recalled || []).map((row: any) => row.relPath),
-    };
-  } finally {
-    for (const target of [dir, otherDir]) {
-      try { fs.rmSync(target, { recursive: true, force: true }); } catch {}
-    }
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryPostCompactCompletionMemoryPreservationRepairClosureDistillationSelfTest();
 }
 
 export function runGroupTypedMemoryDistillationQualitySelfTest() {
-  const groupId = `typed-memory-quality-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const dir = getGroupTypedMemoryDir(groupId);
-  const missingPath = "src/missing-distillation-quality.ts";
-  const messages: any[] = [
-    {
-      id: "dq-u0",
-      role: "user",
-      target: "coordinator",
-      content: "必须长期保留 DISTILL_QUALITY_SENTINEL_20260707，并核验 package.json 与 src/missing-distillation-quality.ts。",
-    },
-    {
-      id: "dq-a1",
-      role: "assistant",
-      agent: "quality-agent",
-      task_id: "quality-task",
-      content: "完成 quality-task，已查看 package.json。",
-      receipt: { status: "done", taskId: "quality-task", summary: "完成 package.json 检查" },
-    },
-    {
-      id: "dq-a2",
-      role: "assistant",
-      agent: "quality-agent",
-      task_id: "quality-task",
-      content: `执行失败：quality-task blocked，${missingPath} 不存在，需要继续修复。`,
-      receipt: { status: "failed", taskId: "quality-task", summary: "missing path" },
-    },
-  ];
-  try {
-    const distillation = distillGroupMessagesToTypedMemory(groupId, messages, {}, { reason: "quality-selftest", projectRoot: process.cwd() });
-    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
-    const quality: any = distillation.quality || {};
-    const fileCheck = (quality.checks || []).find((check: any) => check.id === "file_path_claims_checked") || {};
-    const contradictionCheck = (quality.checks || []).find((check: any) => check.id === "no_unresolved_status_contradictions") || {};
-    const sourceCheck = (quality.checks || []).find((check: any) => check.id === "source_message_links_preserved") || {};
-    const checks = {
-      qualityReportCreated: quality.schema === "ccm-group-typed-memory-distillation-quality-v1",
-      qualityStoredInLedger: ledger.quality?.schema === "ccm-group-typed-memory-distillation-quality-v1",
-      stalePathDetected: quality.stalePathCount > 0 && fileCheck.pass === false && JSON.stringify(fileCheck.gaps || []).includes(missingPath),
-      existingPathNotFlagged: !JSON.stringify(fileCheck.gaps || []).includes("package.json ->"),
-      taskActivityRejectedBeforeContradiction: quality.contradictionCount === 0 && contradictionCheck.pass === true
-        && Number(ledger.admission?.rejectedThisRun || 0) > 0,
-      sourceLinksPreserved: sourceCheck.pass === true,
-      writeAdmissionPasses: (quality.checks || []).some((check: any) => check.id === "long_term_write_admission" && check.pass === true),
-      qualityKeepsStalePathAsCurrentSourceWarning: quality.status === "pass" && quality.score < 100 && quality.stalePathCount > 0,
-    };
-    return {
-      pass: Object.values(checks).every(Boolean),
-      checks,
-      quality: {
-        score: quality.score,
-        status: quality.status,
-        stalePathCount: quality.stalePathCount,
-        contradictionCount: quality.contradictionCount,
-      },
-    };
-  } finally {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
+  return require("./group-memory-distillation").runGroupTypedMemoryDistillationQualitySelfTest();
 }

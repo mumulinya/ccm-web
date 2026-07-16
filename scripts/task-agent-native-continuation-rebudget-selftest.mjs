@@ -16,6 +16,7 @@ const lineage = require(path.join(root, "ccm-package", "dist", "tasks", "task-ag
 const continuation = require(path.join(root, "ccm-package", "dist", "agents", "native-continuation.js"));
 const runtime = require(path.join(root, "ccm-package", "dist", "agents", "runtime.js"));
 const spool = require(path.join(root, "ccm-package", "dist", "agents", "direct-dispatch-spool.js"));
+const lifecycle = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-session-lifecycle-head.js"));
 
 const nonce = `${process.pid}-${Date.now().toString(36)}`;
 let checks = 0;
@@ -28,6 +29,7 @@ function prepared(label, options = {}) {
   const taskId = options.taskId || `task-phase257-${label}-${nonce}`;
   const taskAgentSessionId = options.taskAgentSessionId || `tas_phase257_${label}_${nonce}`;
   const runnerRequestId = options.runnerRequestId || `adr_phase257_${label}_${nonce}`;
+  const lifecycleHead = lifecycle.ensureGroupSessionLifecycleHead(groupId, groupSessionId, { reason: "phase257_native_continuation_fixture" }).head;
   let edge = lineage.prepareTaskAgentInvocationEdge({
     groupId,
     groupSessionId,
@@ -46,6 +48,13 @@ function prepared(label, options = {}) {
     memoryContextSnapshotId: `tams_${label}_${nonce}`,
     memoryContextSnapshotChecksum: crypto.createHash("sha256").update(label).digest("hex"),
     renderedPrompt: `phase257 ${label} prompt`,
+    groupSessionMemoryBinding: {
+      sessionLifecycleFenceRequired: true,
+      sessionLifecycleHeadId: lifecycleHead.lifecycle_head_id,
+      sessionLifecycleGeneration: lifecycleHead.generation,
+      sessionLifecycleStatus: lifecycleHead.status,
+      sessionLifecycleHeadChecksum: lifecycleHead.head_checksum,
+    },
     typedMemoryDeliveryCapsule: {
       schema: "ccm-child-typed-memory-delivery-capsule-v1",
       version: 2,
@@ -182,8 +191,9 @@ try {
   equal(driftReport.rows.every(row => row.group_id === drift.groupId && row.group_session_id === drift.groupSessionId), true, "lineage report must preserve group-session isolation");
 
   const collaborationSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration.ts"), "utf-8");
+  const collaborationRoutesSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-routes.ts"), "utf-8");
   ok((collaborationSource.match(/nativeContinuationEvidence:/g) || []).length >= 3, "all three real dispatch paths must persist native continuation evidence");
-  ok((collaborationSource.match(/typedMemoryDeliveryCapsule:/g) || []).length >= 3, "all three real dispatch paths must bind the dispatched capsule budget");
+  ok((`${collaborationSource}\n${collaborationRoutesSource}`.match(/typedMemoryDeliveryCapsule:/g) || []).length >= 3, "all real dispatch paths must bind the dispatched capsule budget");
   const serverSource = fs.readFileSync(path.join(root, "backend", "server.ts"), "utf-8");
   const continuationSource = fs.readFileSync(path.join(root, "backend", "agents", "native-continuation.ts"), "utf-8");
   ok(serverSource.includes("returnedNativeSessionId") && continuationSource.includes("provider_resume_exit_success"), "runner callback must distinguish returned id from resume exit evidence");

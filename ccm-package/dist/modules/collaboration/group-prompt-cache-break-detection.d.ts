@@ -1,4 +1,26 @@
 export declare function getGroupPromptCacheBreakDetectionFile(groupId: string, groupSessionId: string): string;
+export declare function verifyGroupPromptCacheStateSnapshot(snapshot: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+};
+export declare function recordGroupPromptCacheState(input?: any): {
+    recorded: boolean;
+    reason: string;
+    ledger: any;
+    snapshot?: undefined;
+    changes?: undefined;
+    event?: undefined;
+} | {
+    recorded: boolean;
+    snapshot: any;
+    changes: any;
+    event: any;
+    ledger: any;
+    reason?: undefined;
+} | {
+    recorded: boolean;
+    reason: string;
+};
 export declare function readGroupPromptCacheBreakDetection(groupId: string, groupSessionId: string): any;
 export declare function verifyGroupPromptCacheCompactionNotification(receipt: any, expected?: any): {
     valid: boolean;

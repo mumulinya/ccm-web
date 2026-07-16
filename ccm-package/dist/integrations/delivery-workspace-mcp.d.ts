@@ -5,6 +5,7 @@ export declare function buildDeliveryWorkspaceMcpServerConfig(context: Omit<Inte
     args: string[];
     env: {
         CCM_INTERNAL_MCP_CONTEXT: string;
+        CCM_INTERNAL_MCP_SECRET_FILE: string;
     };
 };
 export declare function runDeliveryWorkspaceMcpServer(): void;

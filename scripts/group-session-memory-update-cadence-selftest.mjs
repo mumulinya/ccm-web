@@ -123,7 +123,11 @@ try {
     twoToolCallsDoNotUpdateAtBusyTurn: twoToolsAtDelta.shouldExtract === false && twoToolsAtDelta.status === "waiting_tool_calls_or_natural_break" && twoToolsAtDelta.lastAssistantTurnHasToolCalls === true,
     threeToolCallsUpdateAtTokenDelta: threeToolsAtDelta.shouldExtract === true && threeToolsAtDelta.toolCallThresholdMet === true && threeToolsAtDelta.tokenThresholdMet === true,
     naturalBreakUpdatesWithoutThreeTools: naturalBreakAtDelta.shouldExtract === true && naturalBreakAtDelta.toolCallsSinceLastExtraction === 0 && naturalBreakAtDelta.naturalBreak === true,
-    secondExtractionAdvancesDurableState: extractedTwice.modelExtracted === true && extractedTwice.updateCadence?.extractionCount === 2 && extractedTwice.updateCadence?.lastExtractionMessageId === "cadence-assistant-4",
+    secondExtractionPreservesToolBoundary: extractedTwice.modelExtracted === true
+      && extractedTwice.updateCadence?.extractionCount === 2
+      && extractedTwice.updateCadence?.tokensAtLastExtraction === 15000
+      && extractedTwice.updateCadence?.lastExtractionMessageId === "cadence-assistant-1"
+      && extractedTwice.updateCadence?.cursorAdvanceStatus === "held_tool_use_boundary",
     sessionBCadenceIsIndependent: snapshotB.updateCadence?.initialized === false && snapshotB.updateCadence?.currentContextTokens === 3200 && snapshotB.updateCadence?.extractionCount === 0,
     fleetReportsCadencePerSession: report.overall?.sessionCount === 2 && report.overall?.cadenceInitializedSessionCount === 1 && report.overall?.cadenceWaitingInitializationCount === 1 && report.overall?.totalSessionMemoryExtractionCount === 2 && report.overall?.modelReceiptVerifiedCount === 1 && rowA?.cadenceExtractionCount === 2 && rowB?.cadenceCurrentTokens === 3200,
     noLegacyDefaultScopeCreated: report.overall?.legacyDefaultSessionCount === 0 && !fs.existsSync(memory.getGroupMemoryFile(groupId, "default")),

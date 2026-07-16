@@ -1,0 +1,63 @@
+{
+  "schema": "ccm-group-typed-memory-shape-trend-ledger-v1",
+  "version": 1,
+  "scopeId": "phase310-closure-feedback-group--gcs_phase310_b",
+  "bodyFree": true,
+  "retentionDays": 180,
+  "mutableDays": 35,
+  "maxKeysPerBucket": 1200,
+  "generation": 4,
+  "headBucketChecksum": "e75141cd2f17ab238fcae5c615cf797e0c89f55b1f1c028cac56f4c79fa2ec32",
+  "buckets": [
+    {
+      "date": "2026-07-14",
+      "sealed": false,
+      "sealedAt": "",
+      "selector": {
+        "runCount": 0,
+        "candidateTotal": 0,
+        "selectedTotal": 0,
+        "emptyCount": 0,
+        "selectedAgeWeightedDays": 0,
+        "selectedAgeDocumentCount": 0,
+        "freshCount": 0,
+        "staleCount": 0,
+        "candidateCapacityRunCount": 0,
+        "selectionCapacityRunCount": 0
+      },
+      "write": {
+        "eventCount": 4,
+        "changedCount": 4,
+        "createCount": 2,
+        "updateCount": 2,
+        "noopCount": 0,
+        "growthBytes": 3038,
+        "afterBytesTotal": 3758,
+        "maxAfterBytes": 2678,
+        "nearBodyLimitCount": 0,
+        "truncatedBodyCount": 0
+      },
+      "consumption": {
+        "outcomeCount": 0,
+        "deliveredDocumentCount": 0,
+        "usedDocumentCount": 0,
+        "verifiedDocumentCount": 0,
+        "ignoredDocumentCount": 0,
+        "unreportedDocumentCount": 0,
+        "strongReceiptOutcomeCount": 0,
+        "unexpectedClaimCount": 0
+      },
+      "contributionKeys": [
+        "63c85f9671c4535ae45bb5a79c321b0a",
+        "559d5ff2494053402afcd6acab8a19b8",
+        "83c37aa06dd1f8ec7d688a76b6971d08",
+        "9623d6ba1edbb758ce86339f6dde368d"
+      ],
+      "previousBucketChecksum": "",
+      "updatedAt": "2026-07-14T23:58:33.700Z",
+      "checksum": "e75141cd2f17ab238fcae5c615cf797e0c89f55b1f1c028cac56f4c79fa2ec32"
+    }
+  ],
+  "updatedAt": "2026-07-14T23:58:33.700Z",
+  "checksum": "f1f453ff4a9bb94637883fb4118435ae162cbd6747fb0195705737810081ccba"
+}

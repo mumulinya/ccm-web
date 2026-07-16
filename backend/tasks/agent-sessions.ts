@@ -4,6 +4,20 @@ import * as path from "path";
 import { AGENT_RUNTIMES, getAgentRuntime, normalizeAgentRuntimeId } from "../agents/runtime";
 import { verifyFinalWorkerDispatchPayloadGate } from "../agents/final-dispatch-payload-gate";
 import { verifyFinalDispatchReactiveCompactReceipt } from "../agents/final-dispatch-reactive-compact";
+import { verifyNativeSessionContinuationEvidence } from "../agents/native-continuation";
+import {
+  trustedMemorySourceChecksum,
+  verifyTrustedMemoryPromptEnvelope,
+} from "../agents/trusted-memory-prompt-envelope";
+import { verifyProviderMemoryChannelEvidence } from "../agents/provider-memory-channel";
+import {
+  readMemoryContextConsumptionReceipt,
+  removeMemoryContextConsumptionReceiptIfUnreferenced,
+} from "../integrations/memory-context-consumption-receipt";
+import {
+  removeMemoryContextConsumptionRecoveryIfUnreferenced,
+  verifyMemoryContextConsumptionRecovery,
+} from "../integrations/memory-context-consumption-recovery";
 import { CCM_DIR } from "../core/utils";
 import {
   extractGroupPostTurnSummaryDeliveryCapsule,
@@ -17,6 +31,21 @@ import {
 } from "../modules/collaboration/group-session-lifecycle-head";
 import { readTaskAgentInvocationLineage } from "./task-agent-invocation-lineage";
 import { tryRecordTaskAgentContinuationSoakEvent } from "./task-agent-continuation-soak";
+import {
+  buildTaskAgentMemoryTransportUsageReceipt,
+  verifyTaskAgentMemoryTransportUsageReceipt,
+} from "./task-agent-memory-transport-usage";
+import {
+  attachTaskAgentMemoryEntrySyncPlan,
+  buildTaskAgentMemoryEntryManifest,
+  buildTaskAgentMemoryEntrySyncPlan,
+  stripTaskAgentMemoryEntrySync,
+  taskAgentMemoryEntrySyncPlan,
+  taskAgentMemorySemanticChecksum,
+  taskAgentMemoryTransport,
+  verifyTaskAgentMemoryEntryManifest,
+  verifyTaskAgentMemoryEntrySyncPlan,
+} from "./task-agent-memory-entry-sync";
 
 const STORE_FILE = path.join(CCM_DIR, "task-agent-sessions.json");
 const STORE_BACKUP_FILE = `${STORE_FILE}.bak`;
@@ -28,9 +57,19 @@ const MEMORY_CONTEXT_SNAPSHOT_DIR = path.join(CCM_DIR, "task-agent-memory-contex
 const MAX_SESSION_RECORDS = 500;
 const MAX_MEMORY_CONTEXT_SNAPSHOTS_PER_SESSION = 20;
 const TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SCHEMA = "ccm-task-agent-memory-context-snapshot-v1";
+const TASK_AGENT_MEMORY_SNAPSHOT_SYNC_SCHEMA = "ccm-task-agent-memory-snapshot-sync-v1";
+const TASK_AGENT_MEMORY_SNAPSHOT_SYNC_COMMIT_SCHEMA = "ccm-task-agent-memory-snapshot-sync-commit-v1";
+const TASK_AGENT_MEMORY_PROMPT_INJECTION_PROOF_SCHEMA = "ccm-task-agent-memory-prompt-injection-proof-v1";
 const DEFAULT_MEMORY_CONTEXT_SNAPSHOT_STALE_DAYS = 30;
 const DEFAULT_MEMORY_CONTEXT_SNAPSHOT_RETENTION_DAYS = 45;
 const DEFAULT_MEMORY_CONTEXT_SNAPSHOT_KEEP_LATEST_PER_SESSION = 5;
+const MEMORY_ENTRY_RENDER_LEASE_TTL_MS = 120_000;
+const MEMORY_ENTRY_RENDER_LEASE_HISTORY_LIMIT = 20;
+const MEMORY_ENTRY_RENDER_CONFLICT_MAX_RETRIES = 2;
+const MEMORY_ENTRY_RENDER_CONFLICT_BASE_DELAY_MS = 80;
+const MEMORY_ENTRY_RENDER_CONFLICT_MAX_DELAY_MS = 240;
+const MEMORY_ENTRY_RENDER_CONFLICT_JITTER_MS = 40;
+const MEMORY_ENTRY_RENDER_CONTENTION_SCHEMA = "ccm-task-agent-memory-entry-render-contention-v1";
 export const FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES = 3;
 
 export type TaskAgentMemoryContextSnapshotRef = {
@@ -45,9 +84,21 @@ export type TaskAgentMemoryContextSnapshotRef = {
   deliveryReceiptChecksum?: string;
   deliveryStatus?: string;
   deliveredAt?: string;
+  latestDeliveryAttemptReceiptId?: string;
+  latestDeliveryAttemptReceiptPath?: string;
+  latestDeliveryAttemptReceiptChecksum?: string;
+  latestDeliveryAttemptStatus?: string;
+  latestDeliveryAttemptAt?: string;
   generatedAt: string;
   invocationEdgeId?: string;
   branchId?: string;
+  memorySnapshotSyncAction?: "initialize" | "prompt_update" | "none";
+  memorySnapshotSyncChecksum?: string;
+  memorySnapshotSyncedFromId?: string;
+  memorySnapshotSyncCommitPath?: string;
+  memorySnapshotSyncCommitChecksum?: string;
+  memorySnapshotSyncCommitStatus?: "committed" | "rejected";
+  memorySnapshotSyncCommittedAt?: string;
 };
 
 export type TaskAgentSession = {
@@ -55,6 +106,7 @@ export type TaskAgentSession = {
   scopeId: string;
   taskId: string;
   groupId: string;
+  groupSessionId?: string;
   project: string;
   agentType: string;
   nativeSessionId: string;
@@ -90,6 +142,15 @@ export type TaskAgentSession = {
   memoryContextDeliveryReceiptChecksum?: string;
   memoryContextDeliveryStatus?: string;
   memoryContextDeliveredAt?: string;
+  latestMemoryContextDeliveryAttemptReceiptId?: string;
+  latestMemoryContextDeliveryAttemptReceiptPath?: string;
+  latestMemoryContextDeliveryAttemptReceiptChecksum?: string;
+  latestMemoryContextDeliveryAttemptStatus?: string;
+  latestMemoryContextDeliveryAttemptAt?: string;
+  memorySnapshotSyncCommitPath?: string;
+  memorySnapshotSyncCommitChecksum?: string;
+  memorySnapshotSyncCommitStatus?: string;
+  memorySnapshotSyncCommittedAt?: string;
   modelContextWindow?: number;
   capacityEvidenceChecksum?: string;
   capacityRevalidationRequired?: boolean;
@@ -107,6 +168,16 @@ export type TaskAgentSession = {
   providerContractHistory?: any[];
   lastProviderContractTransitionAt?: string;
   finalDispatchReactiveCompactCircuitBreaker?: any;
+  memoryEntrySyncRenderLease?: any;
+  memoryEntrySyncRenderLeaseHistory?: any[];
+  memoryEntrySyncRenderFencingToken?: number;
+  memoryEntrySyncRenderLeaseTakeoverCount?: number;
+  memoryEntrySyncRenderContentionCount?: number;
+  memoryEntrySyncRenderWaitResolvedCount?: number;
+  memoryEntrySyncRenderWaitTimeoutCount?: number;
+  memoryEntrySyncRenderSameProcessConflictCount?: number;
+  memoryEntrySyncRenderWaitTotalMs?: number;
+  memoryEntrySyncRenderLastContention?: any;
 };
 
 function emptyStore() {
@@ -296,6 +367,10 @@ function getMemoryContextSnapshotDir(sessionId: string) {
   return path.join(MEMORY_CONTEXT_SNAPSHOT_DIR, safeFileSegment(sessionId, "session"));
 }
 
+function getMemorySnapshotSyncCommitFile(sessionId: string, snapshotId: string) {
+  return path.join(getMemoryContextSnapshotDir(sessionId), `${safeFileSegment(snapshotId, "snapshot")}.sync.json`);
+}
+
 function collectMemoryContextGateIds(value: any, out = new Set<string>()) {
   if (!value || typeof value !== "object") return out;
   const candidates = [
@@ -363,15 +438,44 @@ function normalizeMemorySnapshotRefs(value: any): TaskAgentMemoryContextSnapshot
     deliveryReceiptChecksum: String(item?.deliveryReceiptChecksum || item?.delivery_receipt_checksum || "").trim(),
     deliveryStatus: String(item?.deliveryStatus || item?.delivery_status || "").trim(),
     deliveredAt: String(item?.deliveredAt || item?.delivered_at || "").trim(),
+    latestDeliveryAttemptReceiptId: String(item?.latestDeliveryAttemptReceiptId || item?.latest_delivery_attempt_receipt_id || "").trim(),
+    latestDeliveryAttemptReceiptPath: String(item?.latestDeliveryAttemptReceiptPath || item?.latest_delivery_attempt_receipt_path || "").trim(),
+    latestDeliveryAttemptReceiptChecksum: String(item?.latestDeliveryAttemptReceiptChecksum || item?.latest_delivery_attempt_receipt_checksum || "").trim(),
+    latestDeliveryAttemptStatus: String(item?.latestDeliveryAttemptStatus || item?.latest_delivery_attempt_status || "").trim(),
+    latestDeliveryAttemptAt: String(item?.latestDeliveryAttemptAt || item?.latest_delivery_attempt_at || "").trim(),
     generatedAt: String(item?.generatedAt || item?.generated_at || "").trim(),
+    memorySnapshotSyncAction: String(item?.memorySnapshotSyncAction || item?.memory_snapshot_sync_action || "").trim() as TaskAgentMemoryContextSnapshotRef["memorySnapshotSyncAction"],
+    memorySnapshotSyncChecksum: String(item?.memorySnapshotSyncChecksum || item?.memory_snapshot_sync_checksum || "").trim(),
+    memorySnapshotSyncedFromId: String(item?.memorySnapshotSyncedFromId || item?.memory_snapshot_synced_from_id || "").trim(),
+    memorySnapshotSyncCommitPath: String(item?.memorySnapshotSyncCommitPath || item?.memory_snapshot_sync_commit_path || "").trim(),
+    memorySnapshotSyncCommitChecksum: String(item?.memorySnapshotSyncCommitChecksum || item?.memory_snapshot_sync_commit_checksum || "").trim(),
+    memorySnapshotSyncCommitStatus: String(item?.memorySnapshotSyncCommitStatus || item?.memory_snapshot_sync_commit_status || "").trim() as TaskAgentMemoryContextSnapshotRef["memorySnapshotSyncCommitStatus"],
+    memorySnapshotSyncCommittedAt: String(item?.memorySnapshotSyncCommittedAt || item?.memory_snapshot_sync_committed_at || "").trim(),
   })).filter((item: TaskAgentMemoryContextSnapshotRef) => item.snapshotId || item.snapshotPath);
 }
 
 function purgeMemoryContextSnapshotsForSession(sessionId: string) {
   const dir = getMemoryContextSnapshotDir(sessionId);
+  const challengeIds = collectMemoryContextConsumptionChallengeIdsFromSnapshotDir(dir);
   try {
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
   } catch {}
+  for (const challengeId of challengeIds) removeMemoryContextConsumptionReceiptIfUnreferenced(challengeId);
+  for (const challengeId of challengeIds) removeMemoryContextConsumptionRecoveryIfUnreferenced(challengeId);
+}
+
+function collectMemoryContextConsumptionChallengeIdsFromSnapshotDir(dir: string) {
+  const ids = new Set<string>();
+  try {
+    if (!pathIsInsideMemorySnapshotDir(dir) || !fs.existsSync(dir)) return ids;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json") || entry.name.endsWith(".delivery.json") || entry.name.endsWith(".sync.json")) continue;
+      const snapshot = safeReadJson(path.join(dir, entry.name), null);
+      const challengeId = String(snapshot?.context?.memory_context_consumption_challenge?.challenge_id || "");
+      if (/^mcrc_[a-f0-9]{28}$/.test(challengeId)) ids.add(challengeId);
+    }
+  } catch {}
+  return ids;
 }
 
 function normalizeSnapshotFileKey(file: any) {
@@ -396,7 +500,7 @@ function listMemoryContextSnapshotFilesOnDisk() {
       if (!entry.isDirectory()) continue;
       const sessionDir = path.join(MEMORY_CONTEXT_SNAPSHOT_DIR, entry.name);
       for (const fileEntry of fs.readdirSync(sessionDir, { withFileTypes: true })) {
-        if (fileEntry.isFile() && fileEntry.name.endsWith(".json") && !fileEntry.name.endsWith(".delivery.json")) {
+        if (fileEntry.isFile() && fileEntry.name.endsWith(".json") && !fileEntry.name.endsWith(".delivery.json") && !fileEntry.name.endsWith(".sync.json")) {
           files.push({ file: path.join(sessionDir, fileEntry.name), sessionId: entry.name });
         }
       }
@@ -419,6 +523,478 @@ function verifyMemoryContextSnapshotChecksum(snapshot: any) {
     if (hashValue(aliasPayload) === expected) return true;
   }
   return false;
+}
+
+function memorySnapshotSyncChecksum(value: any) {
+  const payload = { ...(value || {}) };
+  delete payload.sync_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return hashValue(payload, 64);
+}
+
+export function verifyTaskAgentMemorySnapshotSyncDecision(decision: any, expected: {
+  groupId?: string;
+  groupSessionId?: string;
+  taskId?: string;
+  taskAgentSessionId?: string;
+  targetProject?: string;
+  currentMemoryContextChecksum?: string;
+} = {}) {
+  const issues: string[] = [];
+  const action = String(decision?.action || "");
+  if (decision?.schema !== TASK_AGENT_MEMORY_SNAPSHOT_SYNC_SCHEMA) issues.push("schema_invalid");
+  if (!Number.isFinite(Number(decision?.version)) || Number(decision.version) !== 1) issues.push("version_invalid");
+  if (!["initialize", "prompt_update", "none"].includes(action)) issues.push("action_invalid");
+  if (!String(decision?.sync_checksum || "") || memorySnapshotSyncChecksum(decision) !== String(decision.sync_checksum || "")) issues.push("checksum_invalid");
+  const expectedBindings: Array<[string, any, any]> = [
+    ["group_id", expected.groupId, decision?.group_id],
+    ["group_session_id", expected.groupSessionId, decision?.group_session_id],
+    ["task_id", expected.taskId, decision?.task_id],
+    ["task_agent_session_id", expected.taskAgentSessionId, decision?.task_agent_session_id],
+    ["target_project", expected.targetProject, decision?.target_project],
+    ["current_memory_context_checksum", expected.currentMemoryContextChecksum, decision?.current_memory_context_checksum],
+  ];
+  for (const [field, wanted, actual] of expectedBindings) {
+    if (wanted !== undefined && String(wanted || "") !== String(actual || "")) issues.push(`${field}_mismatch`);
+  }
+  const previousId = String(decision?.previous_snapshot_id || "");
+  const previousChecksum = String(decision?.previous_memory_context_checksum || "");
+  const currentChecksum = String(decision?.current_memory_context_checksum || "");
+  if (!currentChecksum) issues.push("current_memory_context_checksum_missing");
+  if (action === "initialize" && previousId) issues.push("initialize_previous_snapshot_present");
+  if (action === "none" && (!previousId || decision?.previous_snapshot_trusted !== true || !previousChecksum || previousChecksum !== currentChecksum)) {
+    issues.push("none_without_trusted_equal_snapshot");
+  }
+  if (action === "none" && (decision?.previous_snapshot_committed !== true || !String(decision?.previous_sync_commit_checksum || ""))) {
+    issues.push("none_without_committed_snapshot");
+  }
+  const continuationBaselineRequired = decision?.continuation_baseline_required === true;
+  if (action === "none" && decision?.enforcement_required === true
+    && decision?.full_memory_projection_injected !== true && !continuationBaselineRequired) {
+    issues.push("none_without_injection_or_continuation");
+  }
+  if (action === "none" && continuationBaselineRequired && decision?.continuation_baseline_eligible !== true) issues.push("none_without_continuation_baseline");
+  if (action === "none" && continuationBaselineRequired && (!String(decision?.continuation_native_session_id || "") || !String(decision?.continuation_provider || ""))) {
+    issues.push("continuation_baseline_identity_missing");
+  }
+  if (action === "none" && continuationBaselineRequired && (!String(decision?.continuation_delivery_receipt_id || "") || !String(decision?.continuation_delivery_receipt_checksum || ""))) {
+    issues.push("continuation_baseline_receipt_missing");
+  }
+  if (action === "prompt_update" && previousId && decision?.previous_snapshot_trusted === true && previousChecksum === currentChecksum
+    && String(decision?.reason || "") !== "continuation_baseline_unavailable") {
+    issues.push("prompt_update_without_change");
+  }
+  const previousGroupSessionId = String(decision?.previous_group_session_id || "");
+  const currentGroupSessionId = String(decision?.group_session_id || "");
+  if (previousGroupSessionId.startsWith("gcs_") && currentGroupSessionId.startsWith("gcs_") && previousGroupSessionId !== currentGroupSessionId) {
+    issues.push("group_session_mismatch");
+  }
+  return { valid: issues.length === 0, issues, action };
+}
+
+function memoryPromptInjectionProofChecksum(value: any) {
+  const payload = { ...(value || {}) };
+  delete payload.proof_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return hashValue(payload, 64);
+}
+
+function renderedMemoryProjection(memoryContext: any, explicit: any = undefined) {
+  if (explicit !== undefined) return { text: String(explicit || ""), source: "explicit_rendered_memory_context" };
+  const groupMemory = memoryContext?.schema === "ccm-group-memory-context-v1"
+    ? memoryContext
+    : memoryContext?.group_memory?.schema === "ccm-group-memory-context-v1"
+      ? memoryContext.group_memory
+      : null;
+  const rendered = String(groupMemory?.rendered_text || groupMemory?.renderedText || "");
+  return { text: rendered, source: rendered ? "group_memory_rendered_text" : "unavailable" };
+}
+
+export function verifyTaskAgentMemoryPromptInjectionProof(proof: any, expected: {
+  groupId?: string;
+  groupSessionId?: string;
+  taskId?: string;
+  taskAgentSessionId?: string;
+  targetProject?: string;
+  memoryContextChecksum?: string;
+  syncChecksum?: string;
+  renderedPromptChecksum?: string;
+} = {}) {
+  const issues: string[] = [];
+  if (proof?.schema !== TASK_AGENT_MEMORY_PROMPT_INJECTION_PROOF_SCHEMA) issues.push("schema_invalid");
+  if (Number(proof?.version || 0) !== 1) issues.push("version_invalid");
+  if (!String(proof?.proof_checksum || "") || memoryPromptInjectionProofChecksum(proof) !== String(proof.proof_checksum || "")) issues.push("checksum_invalid");
+  const bindings: Array<[string, any, any]> = [
+    ["group_id", expected.groupId, proof?.group_id],
+    ["group_session_id", expected.groupSessionId, proof?.group_session_id],
+    ["task_id", expected.taskId, proof?.task_id],
+    ["task_agent_session_id", expected.taskAgentSessionId, proof?.task_agent_session_id],
+    ["target_project", expected.targetProject, proof?.target_project],
+    ["memory_context_checksum", expected.memoryContextChecksum, proof?.memory_context_checksum],
+    ["sync_checksum", expected.syncChecksum, proof?.sync_checksum],
+    ["rendered_prompt_checksum", expected.renderedPromptChecksum, proof?.rendered_prompt_checksum],
+  ];
+  for (const [field, wanted, actual] of bindings) {
+    if (wanted !== undefined && String(wanted || "") !== String(actual || "")) issues.push(`${field}_mismatch`);
+  }
+  const projectionPresent = proof?.projection_present === true;
+  const promptBound = proof?.prompt_bound === true;
+  const injectionRequired = proof?.memory_injection_required === true;
+  const enforcementRequired = proof?.enforcement_required === true;
+  const trustedEnvelopeRequired = proof?.trusted_envelope_required === true;
+  const trustedEnvelopePresent = proof?.trusted_envelope_present === true;
+  const trustedEnvelopeValid = proof?.trusted_envelope_valid === true;
+  const trustedEnvelopeBound = proof?.trusted_envelope_bound === true;
+  if (promptBound && !projectionPresent) issues.push("prompt_bound_without_projection");
+  if (projectionPresent && (!String(proof?.rendered_memory_checksum || "") || Number(proof?.rendered_memory_chars || 0) <= 0)) issues.push("projection_evidence_missing");
+  if (trustedEnvelopeValid && !trustedEnvelopePresent) issues.push("trusted_envelope_valid_without_presence");
+  if (trustedEnvelopeBound && (!trustedEnvelopeValid || !projectionPresent)) issues.push("trusted_envelope_bound_without_valid_projection");
+  if (trustedEnvelopePresent && (!String(proof?.trusted_envelope_checksum || "") || !String(proof?.trusted_envelope_source_checksum || "") || Number(proof?.trusted_envelope_chars || 0) <= 0)) {
+    issues.push("trusted_envelope_evidence_missing");
+  }
+  if (trustedEnvelopeRequired && trustedEnvelopePresent && !trustedEnvelopeValid) issues.push("trusted_envelope_invalid");
+  if (trustedEnvelopeRequired && injectionRequired && !trustedEnvelopeBound) issues.push("required_trusted_envelope_unbound");
+  if (trustedEnvelopeRequired && promptBound !== trustedEnvelopeBound) issues.push("prompt_binding_not_trusted_envelope_bound");
+  if (enforcementRequired && injectionRequired && !promptBound) issues.push("required_projection_unbound");
+  if (!String(proof?.sync_checksum || "") || !String(proof?.memory_context_checksum || "") || !String(proof?.rendered_prompt_checksum || "")) issues.push("binding_missing");
+  return {
+    valid: issues.length === 0,
+    issues,
+    promptBound,
+    projectionPresent,
+    injectionRequired,
+    enforcementRequired,
+    trustedEnvelopeRequired,
+    trustedEnvelopePresent,
+    trustedEnvelopeValid,
+    trustedEnvelopeBound,
+    deliveryReady: !enforcementRequired || !injectionRequired || (promptBound && (!trustedEnvelopeRequired || trustedEnvelopeBound)),
+    status: String(proof?.status || ""),
+  };
+}
+
+function createTaskAgentMemoryPromptInjectionProof(input: {
+  session: TaskAgentSession;
+  groupSessionMemoryBinding: any;
+  memoryContext: any;
+  memoryContextChecksum: string;
+  memorySnapshotSync: any;
+  renderedPrompt: string;
+  renderedMemoryContext?: string;
+  enforcementRequired?: boolean;
+  trustedEnvelopeRequired?: boolean;
+  generatedAt: string;
+}) {
+  const projection = renderedMemoryProjection(input.memoryContext, input.renderedMemoryContext);
+  const projectionPresent = !!projection.text;
+  const expectedSourceChecksum = trustedMemorySourceChecksum(input.memoryContext || {});
+  const trustedEnvelope = verifyTrustedMemoryPromptEnvelope(String(input.renderedPrompt || ""), {
+    ...(projectionPresent ? { projection: projection.text } : {}),
+    sourceChecksum: expectedSourceChecksum,
+  });
+  const trustedEnvelopeRequired = input.trustedEnvelopeRequired === true;
+  const trustedEnvelopeBound = projectionPresent && trustedEnvelope.valid;
+  const promptBound = projectionPresent && (trustedEnvelopeRequired
+    ? trustedEnvelopeBound
+    : String(input.renderedPrompt || "").includes(projection.text));
+  const injectionRequired = input.memorySnapshotSync?.memory_injection_required === true;
+  const enforcementRequired = input.enforcementRequired === true;
+  const status = !projectionPresent
+    ? injectionRequired ? "projection_unavailable" : "continuation_baseline"
+    : promptBound
+      ? injectionRequired ? "injected" : "redundant_full_injection"
+      : injectionRequired ? "projection_missing_from_prompt" : "continuation_baseline";
+  const payload = {
+    schema: TASK_AGENT_MEMORY_PROMPT_INJECTION_PROOF_SCHEMA,
+    version: 1,
+    status,
+    group_id: input.session.groupId,
+    group_session_id: String(input.groupSessionMemoryBinding?.groupSessionId || ""),
+    task_id: input.session.taskId,
+    task_agent_session_id: input.session.id,
+    target_project: input.session.project,
+    sync_checksum: String(input.memorySnapshotSync?.sync_checksum || ""),
+    sync_action: String(input.memorySnapshotSync?.action || ""),
+    memory_context_checksum: input.memoryContextChecksum,
+    memory_injection_required: injectionRequired,
+    enforcement_required: enforcementRequired,
+    trusted_envelope_required: trustedEnvelopeRequired,
+    trusted_envelope_present: trustedEnvelope.present,
+    trusted_envelope_valid: trustedEnvelope.valid,
+    trusted_envelope_bound: trustedEnvelopeBound,
+    trusted_envelope_checksum: trustedEnvelope.contentChecksum,
+    trusted_envelope_source_checksum: trustedEnvelope.sourceChecksum,
+    trusted_envelope_chars: trustedEnvelope.contentChars,
+    trusted_envelope_issues: trustedEnvelope.issues,
+    projection_source: projection.source,
+    projection_present: projectionPresent,
+    rendered_memory_checksum: projectionPresent ? hashValue(projection.text, 64) : "",
+    rendered_memory_chars: projection.text.length,
+    rendered_prompt_checksum: hashValue(String(input.renderedPrompt || "")),
+    prompt_bound: promptBound,
+    checked_at: input.generatedAt,
+  };
+  const proof = { ...payload, proof_checksum: memoryPromptInjectionProofChecksum(payload) };
+  const verification = verifyTaskAgentMemoryPromptInjectionProof(proof, {
+    groupId: input.session.groupId,
+    groupSessionId: String(input.groupSessionMemoryBinding?.groupSessionId || ""),
+    taskId: input.session.taskId,
+    taskAgentSessionId: input.session.id,
+    targetProject: input.session.project,
+    memoryContextChecksum: input.memoryContextChecksum,
+    syncChecksum: String(input.memorySnapshotSync?.sync_checksum || ""),
+    renderedPromptChecksum: hashValue(String(input.renderedPrompt || "")),
+  });
+  if (!verification.valid) {
+    const error: any = new Error(`task Agent memory prompt injection proof invalid: ${verification.issues.join(",")}`);
+    error.code = "TASK_AGENT_MEMORY_PROMPT_INJECTION_REQUIRED";
+    error.issues = verification.issues;
+    throw error;
+  }
+  return proof;
+}
+
+function memorySnapshotSyncCommitChecksum(value: any) {
+  const payload = { ...(value || {}) };
+  delete payload.commit_checksum;
+  delete payload.commit_file;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return hashValue(payload, 64);
+}
+
+export function verifyTaskAgentMemorySnapshotSyncCommit(commit: any, expected: {
+  groupId?: string;
+  groupSessionId?: string;
+  taskId?: string;
+  taskAgentSessionId?: string;
+  targetProject?: string;
+  snapshotId?: string;
+  snapshotChecksum?: string;
+  syncChecksum?: string;
+  syncAction?: string;
+  memoryPromptInjectionProofChecksum?: string;
+  deliveryReceiptId?: string;
+  deliveryReceiptChecksum?: string;
+} = {}) {
+  const issues: string[] = [];
+  if (commit?.schema !== TASK_AGENT_MEMORY_SNAPSHOT_SYNC_COMMIT_SCHEMA) issues.push("schema_invalid");
+  if (Number(commit?.version || 0) !== 1) issues.push("version_invalid");
+  if (!String(commit?.commit_checksum || "") || memorySnapshotSyncCommitChecksum(commit) !== String(commit.commit_checksum || "")) issues.push("checksum_invalid");
+  const bindings: Array<[string, any, any]> = [
+    ["group_id", expected.groupId, commit?.group_id],
+    ["group_session_id", expected.groupSessionId, commit?.group_session_id],
+    ["task_id", expected.taskId, commit?.task_id],
+    ["task_agent_session_id", expected.taskAgentSessionId, commit?.task_agent_session_id],
+    ["target_project", expected.targetProject, commit?.target_project],
+    ["snapshot_id", expected.snapshotId, commit?.snapshot_id],
+    ["snapshot_checksum", expected.snapshotChecksum, commit?.snapshot_checksum],
+    ["sync_checksum", expected.syncChecksum, commit?.sync_checksum],
+    ["sync_action", expected.syncAction, commit?.sync_action],
+    ["memory_prompt_injection_proof_checksum", expected.memoryPromptInjectionProofChecksum, commit?.memory_prompt_injection_proof_checksum],
+    ["delivery_receipt_id", expected.deliveryReceiptId, commit?.delivery_receipt_id],
+    ["delivery_receipt_checksum", expected.deliveryReceiptChecksum, commit?.delivery_receipt_checksum],
+  ];
+  for (const [field, wanted, actual] of bindings) {
+    if (wanted !== undefined && String(wanted || "") !== String(actual || "")) issues.push(`${field}_mismatch`);
+  }
+  const status = String(commit?.status || "");
+  if (!["committed", "rejected"].includes(status)) issues.push("status_invalid");
+  if (status === "committed" && commit?.committed !== true) issues.push("committed_flag_missing");
+  if (status === "rejected" && commit?.committed === true) issues.push("rejected_marked_committed");
+  if (commit?.committed === true && String(commit?.delivery_status || "") !== "delivered") issues.push("delivery_not_committed");
+  if (commit?.committed === true && (!String(commit?.delivery_receipt_id || "") || !String(commit?.delivery_receipt_checksum || ""))) issues.push("delivery_receipt_missing");
+  if (commit?.committed === true && !String(commit?.memory_prompt_injection_proof_checksum || "")) issues.push("memory_prompt_injection_proof_missing");
+  if (!String(commit?.snapshot_id || "") || !String(commit?.snapshot_checksum || "") || !String(commit?.sync_checksum || "")) issues.push("snapshot_binding_missing");
+  return { valid: issues.length === 0, issues, committed: commit?.committed === true, status };
+}
+
+function createTaskAgentMemorySnapshotSyncDecision(input: {
+  session: TaskAgentSession;
+  refs: TaskAgentMemoryContextSnapshotRef[];
+  groupSessionMemoryBinding: any;
+  currentMemoryContextChecksum: string;
+  generatedAt: string;
+  turn: number;
+  fullMemoryProjectionInjected?: boolean;
+  enforcementRequired?: boolean;
+}) {
+  const groupSessionId = String(input.groupSessionMemoryBinding?.groupSessionId || "").trim();
+  const boundGroupSessionId = String(input.session.groupSessionId || "").trim();
+  if (boundGroupSessionId.startsWith("gcs_") && groupSessionId.startsWith("gcs_") && boundGroupSessionId !== groupSessionId) {
+    const error: any = new Error(`task Agent memory snapshot cannot cross group sessions: ${boundGroupSessionId} -> ${groupSessionId}`);
+    error.code = "TASK_AGENT_MEMORY_SNAPSHOT_CROSS_SESSION_REJECTED";
+    throw error;
+  }
+
+  const previousRef = input.refs.length ? input.refs[input.refs.length - 1] : null;
+  const previousSnapshot = previousRef?.snapshotPath ? safeReadJson(previousRef.snapshotPath, null) : null;
+  const previousSnapshotOuterTrusted = !!previousSnapshot
+    && previousSnapshot.schema === TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SCHEMA
+    && verifyMemoryContextSnapshotChecksum(previousSnapshot)
+    && String(previousSnapshot?.session?.id || "") === input.session.id
+    && String(previousSnapshot?.session?.group_id || "") === input.session.groupId
+    && String(previousSnapshot?.session?.task_id || "") === input.session.taskId
+    && String(previousSnapshot?.session?.project || "") === input.session.project;
+  const previousSnapshotSync = previousSnapshot?.context?.memory_snapshot_sync || null;
+  const previousSnapshotSyncVerification = previousSnapshotOuterTrusted
+    ? verifyTaskAgentMemorySnapshotSyncDecision(previousSnapshotSync, {
+      groupId: input.session.groupId,
+      groupSessionId: String(previousSnapshot?.context?.group_session_memory_binding?.groupSessionId || ""),
+      taskId: input.session.taskId,
+      taskAgentSessionId: input.session.id,
+      targetProject: input.session.project,
+      currentMemoryContextChecksum: String(previousSnapshot?.context?.memory_context_checksum || ""),
+    })
+    : { valid: false };
+  const previousMemoryPromptInjectionProof = previousSnapshot?.context?.memory_prompt_injection_proof || null;
+  const previousMemoryPromptInjectionVerification = previousSnapshotOuterTrusted && previousSnapshotSyncVerification.valid === true
+    ? verifyTaskAgentMemoryPromptInjectionProof(previousMemoryPromptInjectionProof, {
+      groupId: input.session.groupId,
+      groupSessionId: String(previousSnapshot?.context?.group_session_memory_binding?.groupSessionId || ""),
+      taskId: input.session.taskId,
+      taskAgentSessionId: input.session.id,
+      targetProject: input.session.project,
+      memoryContextChecksum: String(previousSnapshot?.context?.memory_context_checksum || ""),
+      syncChecksum: String(previousSnapshotSync?.sync_checksum || ""),
+      renderedPromptChecksum: String(previousSnapshot?.context?.rendered_prompt_checksum || ""),
+    })
+    : { valid: false, deliveryReady: false };
+  const previousGroupSessionId = previousSnapshotOuterTrusted
+    ? String(previousSnapshot?.context?.group_session_memory_binding?.groupSessionId || "").trim()
+    : "";
+  if (previousGroupSessionId.startsWith("gcs_") && groupSessionId.startsWith("gcs_") && previousGroupSessionId !== groupSessionId) {
+    const error: any = new Error(`task Agent memory snapshot history belongs to another group session: ${previousGroupSessionId} -> ${groupSessionId}`);
+    error.code = "TASK_AGENT_MEMORY_SNAPSHOT_CROSS_SESSION_REJECTED";
+    throw error;
+  }
+
+  const previousDeliveryReceipt = previousRef?.deliveryReceiptPath
+    ? safeReadJson(previousRef.deliveryReceiptPath, null)
+    : null;
+  const previousDeliveryReceiptTrusted = !!previousDeliveryReceipt
+    && verifyMemoryContextDeliveryReceiptChecksum(previousDeliveryReceipt)
+    && previousDeliveryReceipt.delivered === true
+    && String(previousDeliveryReceipt.status || "") === "delivered"
+    && String(previousDeliveryReceipt.receiptId || "") === String(previousRef?.deliveryReceiptId || "")
+    && String(previousDeliveryReceipt.checksum || "") === String(previousRef?.deliveryReceiptChecksum || "")
+    && String(previousDeliveryReceipt.taskAgentSessionId || "") === input.session.id
+    && String(previousDeliveryReceipt.memoryContextSnapshotId || "") === String(previousSnapshot?.snapshot_id || "")
+    && String(previousDeliveryReceipt.memoryContextSnapshotChecksum || "") === String(previousSnapshot?.checksum || "");
+  const previousSyncCommitFile = String(
+    previousRef?.memorySnapshotSyncCommitPath
+    || (previousRef?.snapshotId ? getMemorySnapshotSyncCommitFile(input.session.id, previousRef.snapshotId) : "")
+  ).trim();
+  const previousSyncCommit = previousSyncCommitFile ? safeReadJson(previousSyncCommitFile, null) : null;
+  const previousSyncCommitVerification = previousSnapshotOuterTrusted
+    && previousSnapshotSyncVerification.valid === true
+    && previousMemoryPromptInjectionVerification.valid === true
+    && previousMemoryPromptInjectionVerification.deliveryReady === true
+    && previousDeliveryReceiptTrusted
+    ? verifyTaskAgentMemorySnapshotSyncCommit(previousSyncCommit, {
+      groupId: input.session.groupId,
+      groupSessionId: previousGroupSessionId,
+      taskId: input.session.taskId,
+      taskAgentSessionId: input.session.id,
+      targetProject: input.session.project,
+      snapshotId: String(previousSnapshot?.snapshot_id || ""),
+      snapshotChecksum: String(previousSnapshot?.checksum || ""),
+      syncChecksum: String(previousSnapshotSync?.sync_checksum || ""),
+      syncAction: String(previousSnapshotSync?.action || ""),
+      memoryPromptInjectionProofChecksum: String(previousMemoryPromptInjectionProof?.proof_checksum || ""),
+      deliveryReceiptId: String(previousDeliveryReceipt?.receiptId || ""),
+      deliveryReceiptChecksum: String(previousDeliveryReceipt?.checksum || ""),
+    })
+    : { valid: false, committed: false, status: "" };
+  const previousSnapshotCommitted = previousSyncCommitVerification.valid === true
+    && previousSyncCommitVerification.committed === true;
+  const previousSnapshotTrusted = previousSnapshotOuterTrusted
+    && previousSnapshotSyncVerification.valid === true
+    && previousMemoryPromptInjectionVerification.valid === true
+    && previousMemoryPromptInjectionVerification.deliveryReady === true
+    && previousDeliveryReceiptTrusted
+    && previousSnapshotCommitted;
+
+  const previousMemoryContextChecksum = previousSnapshotTrusted
+    ? String(previousSnapshot?.context?.memory_context_checksum || "")
+    : "";
+  const continuationNativeSessionId = String(input.session.nativeSessionId || "").trim();
+  const continuationProvider = normalizeAgentRuntimeId(input.session.agentType || "");
+  const continuationBaselineEligible = previousSnapshotTrusted
+    && previousMemoryContextChecksum === input.currentMemoryContextChecksum
+    && input.session.resumeMode === "native"
+    && Number(input.session.turnCount || 0) > 0
+    && !!continuationNativeSessionId
+    && getAgentRuntime(input.session.agentType).capabilities.sessionResume === true
+    && normalizeAgentRuntimeId(previousDeliveryReceipt?.runtime || "") === continuationProvider
+    && String(previousDeliveryReceipt?.nativeSessionId || "") === continuationNativeSessionId;
+  const memoryContextUnchanged = previousSnapshotTrusted
+    && previousMemoryContextChecksum === input.currentMemoryContextChecksum;
+  const unchangedBaselineReusable = memoryContextUnchanged
+    && (input.enforcementRequired !== true || input.fullMemoryProjectionInjected === true || continuationBaselineEligible);
+  const action = !previousRef
+    ? "initialize"
+    : unchangedBaselineReusable
+      ? "none"
+      : "prompt_update";
+  const reason = action === "initialize"
+    ? "first_task_agent_memory_snapshot"
+    : action === "none"
+      ? "memory_context_unchanged"
+      : previousSnapshotTrusted && previousMemoryContextChecksum === input.currentMemoryContextChecksum
+        ? "continuation_baseline_unavailable"
+      : previousSnapshotTrusted
+        ? "memory_context_changed"
+        : previousSnapshotOuterTrusted
+          && previousSnapshotSyncVerification.valid === true
+          && previousMemoryPromptInjectionVerification.valid === true
+          && previousMemoryPromptInjectionVerification.deliveryReady === true
+          ? "previous_snapshot_uncommitted"
+          : "previous_snapshot_untrusted";
+  const payload: any = {
+    schema: TASK_AGENT_MEMORY_SNAPSHOT_SYNC_SCHEMA,
+    version: 1,
+    action,
+    reason,
+    group_id: input.session.groupId,
+    group_session_id: groupSessionId,
+    task_id: input.session.taskId,
+    task_agent_session_id: input.session.id,
+    target_project: input.session.project,
+    turn: input.turn,
+    checked_at: input.generatedAt,
+    current_memory_context_checksum: input.currentMemoryContextChecksum,
+    previous_snapshot_id: String(previousSnapshotTrusted ? previousSnapshot?.snapshot_id : previousRef?.snapshotId || ""),
+    previous_snapshot_checksum: String(previousSnapshotTrusted ? previousSnapshot?.checksum : previousRef?.checksum || ""),
+    previous_memory_context_checksum: previousMemoryContextChecksum,
+    previous_group_session_id: previousGroupSessionId,
+    previous_snapshot_trusted: previousSnapshotTrusted,
+    previous_snapshot_committed: previousSnapshotCommitted,
+    previous_sync_commit_checksum: String(previousSyncCommitVerification.valid ? previousSyncCommit?.commit_checksum || "" : ""),
+    enforcement_required: input.enforcementRequired === true,
+    full_memory_projection_injected: input.fullMemoryProjectionInjected === true,
+    continuation_baseline_required: action === "none" && input.enforcementRequired === true && input.fullMemoryProjectionInjected !== true,
+    continuation_baseline_eligible: continuationBaselineEligible,
+    continuation_native_session_id: continuationBaselineEligible ? continuationNativeSessionId : "",
+    continuation_provider: continuationBaselineEligible ? continuationProvider : "",
+    continuation_provider_contract_id: continuationBaselineEligible ? String(input.session.providerContractId || "") : "",
+    continuation_delivery_receipt_id: continuationBaselineEligible ? String(previousDeliveryReceipt?.receiptId || "") : "",
+    continuation_delivery_receipt_checksum: continuationBaselineEligible ? String(previousDeliveryReceipt?.checksum || "") : "",
+    memory_injection_required: action !== "none",
+  };
+  const decision = { ...payload, sync_checksum: memorySnapshotSyncChecksum(payload) };
+  const verification = verifyTaskAgentMemorySnapshotSyncDecision(decision, {
+    groupId: input.session.groupId,
+    groupSessionId,
+    taskId: input.session.taskId,
+    taskAgentSessionId: input.session.id,
+    targetProject: input.session.project,
+    currentMemoryContextChecksum: input.currentMemoryContextChecksum,
+  });
+  if (!verification.valid) throw new Error(`task Agent memory snapshot sync decision invalid: ${verification.issues.join(",")}`);
+  return decision;
 }
 
 function hasMeaningfulMemoryContext(value: any) {
@@ -808,6 +1384,325 @@ export function recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(sessio
   });
 }
 
+export function prepareTaskAgentMemoryEntrySyncContext(sessionId: string, memoryContextInput: any) {
+  const id = String(sessionId || "").trim();
+  if (!id || !memoryContextInput || typeof memoryContextInput !== "object") return { memoryContext: memoryContextInput, plan: null, prepared: false };
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const session = store.sessions.find((item: TaskAgentSession) => item.id === id);
+    if (!session) return { memoryContext: memoryContextInput, plan: null, prepared: false };
+    const binding = extractGroupSessionMemoryBinding(memoryContextInput || {});
+    const groupSessionId = String(binding?.groupSessionId || "");
+    if (!groupSessionId.startsWith("gcs_")) return { memoryContext: memoryContextInput, plan: null, prepared: false };
+    if (session.groupSessionId?.startsWith("gcs_") && session.groupSessionId !== groupSessionId) {
+      const error: any = new Error(`task Agent memory entry sync belongs to another group session: ${session.groupSessionId} -> ${groupSessionId}`);
+      error.code = "TASK_AGENT_MEMORY_SNAPSHOT_CROSS_SESSION_REJECTED";
+      throw error;
+    }
+    const preparedAtMs = Date.now();
+    const sourceMemoryContextChecksum = taskAgentMemorySemanticChecksum(memoryContextInput);
+    const existingRenderLease = session.memoryEntrySyncRenderLease || null;
+    const existingLeaseExpiresMs = Date.parse(String(existingRenderLease?.expires_at || ""));
+    const existingLeaseActive = existingRenderLease?.status === "prepared"
+      && Number.isFinite(existingLeaseExpiresMs)
+      && existingLeaseExpiresMs > preparedAtMs
+      && processIsAlive(Number(existingRenderLease?.owner_pid || 0));
+    if (existingLeaseActive
+      && (Number(existingRenderLease.owner_pid || 0) !== process.pid
+        || String(existingRenderLease.source_memory_context_checksum || "") !== sourceMemoryContextChecksum)) {
+      const error: any = new Error(`task Agent memory entry render lease is busy: ${existingRenderLease.lease_id || "unknown"}`);
+      error.code = "TASK_AGENT_MEMORY_ENTRY_SYNC_RENDER_BUSY";
+      error.leaseId = String(existingRenderLease.lease_id || "");
+      error.fencingToken = Number(existingRenderLease.fencing_token || 0);
+      error.ownerPid = Number(existingRenderLease.owner_pid || 0);
+      error.leaseExpiresAt = String(existingRenderLease.expires_at || "");
+      throw error;
+    }
+    const refs = normalizeMemorySnapshotRefs(session.memoryContextSnapshots);
+    const previousRef = refs.length ? refs[refs.length - 1] : null;
+    const previousSnapshot = previousRef?.snapshotPath ? safeReadJson(previousRef.snapshotPath, null) : null;
+    const previousOuterTrusted = !!previousSnapshot
+      && previousSnapshot.schema === TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SCHEMA
+      && verifyMemoryContextSnapshotChecksum(previousSnapshot)
+      && String(previousSnapshot?.session?.id || "") === session.id
+      && String(previousSnapshot?.session?.group_id || "") === session.groupId
+      && String(previousSnapshot?.session?.task_id || "") === session.taskId
+      && String(previousSnapshot?.session?.project || "") === session.project
+      && String(previousSnapshot?.context?.group_session_memory_binding?.groupSessionId || "") === groupSessionId;
+    const previousMemoryContext = previousSnapshot?.context?.memory_context || null;
+    const previousSemanticChecksum = previousOuterTrusted ? taskAgentMemorySemanticChecksum(previousMemoryContext) : "";
+    const previousSync = previousSnapshot?.context?.memory_snapshot_sync || null;
+    const previousSyncVerification = previousOuterTrusted ? verifyTaskAgentMemorySnapshotSyncDecision(previousSync, {
+      groupId: session.groupId,
+      groupSessionId,
+      taskId: session.taskId,
+      taskAgentSessionId: session.id,
+      targetProject: session.project,
+      currentMemoryContextChecksum: previousSemanticChecksum,
+    }) : { valid: false };
+    const previousProof = previousSnapshot?.context?.memory_prompt_injection_proof || null;
+    const previousProofVerification = previousOuterTrusted && previousSyncVerification.valid === true
+      ? verifyTaskAgentMemoryPromptInjectionProof(previousProof, {
+        groupId: session.groupId,
+        groupSessionId,
+        taskId: session.taskId,
+        taskAgentSessionId: session.id,
+        targetProject: session.project,
+        memoryContextChecksum: previousSemanticChecksum,
+        syncChecksum: String(previousSync?.sync_checksum || ""),
+        renderedPromptChecksum: String(previousSnapshot?.context?.rendered_prompt_checksum || ""),
+      })
+      : { valid: false, deliveryReady: false };
+    const previousReceipt = previousRef?.deliveryReceiptPath ? safeReadJson(previousRef.deliveryReceiptPath, null) : null;
+    const previousReceiptTrusted = !!previousReceipt
+      && verifyMemoryContextDeliveryReceiptChecksum(previousReceipt)
+      && previousReceipt.delivered === true
+      && String(previousReceipt.status || "") === "delivered"
+      && String(previousReceipt.receiptId || "") === String(previousRef?.deliveryReceiptId || "")
+      && String(previousReceipt.checksum || "") === String(previousRef?.deliveryReceiptChecksum || "")
+      && String(previousReceipt.taskAgentSessionId || "") === session.id
+      && String(previousReceipt.memoryContextSnapshotId || "") === String(previousSnapshot?.snapshot_id || "")
+      && String(previousReceipt.memoryContextSnapshotChecksum || "") === String(previousSnapshot?.checksum || "");
+    const previousCommitFile = String(previousRef?.memorySnapshotSyncCommitPath || (previousRef?.snapshotId ? getMemorySnapshotSyncCommitFile(session.id, previousRef.snapshotId) : ""));
+    const previousCommit = previousCommitFile ? safeReadJson(previousCommitFile, null) : null;
+    const previousCommitVerification = previousReceiptTrusted && previousProofVerification.valid === true && previousProofVerification.deliveryReady === true
+      ? verifyTaskAgentMemorySnapshotSyncCommit(previousCommit, {
+        groupId: session.groupId,
+        groupSessionId,
+        taskId: session.taskId,
+        taskAgentSessionId: session.id,
+        targetProject: session.project,
+        snapshotId: String(previousSnapshot?.snapshot_id || ""),
+        snapshotChecksum: String(previousSnapshot?.checksum || ""),
+        syncChecksum: String(previousSync?.sync_checksum || ""),
+        syncAction: String(previousSync?.action || ""),
+        memoryPromptInjectionProofChecksum: String(previousProof?.proof_checksum || ""),
+        deliveryReceiptId: String(previousReceipt?.receiptId || ""),
+        deliveryReceiptChecksum: String(previousReceipt?.checksum || ""),
+      })
+      : { valid: false, committed: false };
+    const previousEntryPlan = previousSnapshot?.context?.memory_entry_sync || taskAgentMemoryEntrySyncPlan(previousMemoryContext);
+    const previousManifest = previousEntryPlan?.current_manifest || null;
+    const previousManifestVerification = previousManifest ? verifyTaskAgentMemoryEntryManifest(previousManifest, {
+      groupId: session.groupId,
+      groupSessionId,
+      sourceMemoryContextChecksum: previousSemanticChecksum,
+    }) : { valid: false };
+    const previousTrusted = previousOuterTrusted
+      && previousSyncVerification.valid === true
+      && previousProofVerification.valid === true
+      && previousProofVerification.deliveryReady === true
+      && previousReceiptTrusted
+      && previousCommitVerification.valid === true
+      && previousCommitVerification.committed === true
+      && previousManifestVerification.valid === true;
+    const reuseRenderLease = existingLeaseActive
+      && Number(existingRenderLease.owner_pid || 0) === process.pid
+      && String(existingRenderLease.source_memory_context_checksum || "") === sourceMemoryContextChecksum
+      && String(existingRenderLease.base_snapshot_id || "") === String(previousSnapshot?.snapshot_id || previousRef?.snapshotId || "")
+      && String(existingRenderLease.base_snapshot_checksum || "") === String(previousSnapshot?.checksum || previousRef?.checksum || "");
+    const staleRenderLeaseRecovered = !!existingRenderLease
+      && existingRenderLease.status === "prepared"
+      && !reuseRenderLease;
+    const renderFencingToken = reuseRenderLease
+      ? Number(existingRenderLease.fencing_token || 0)
+      : Math.max(Number(session.memoryEntrySyncRenderFencingToken || 0), Number(existingRenderLease?.fencing_token || 0)) + 1;
+    const renderLease = reuseRenderLease ? existingRenderLease : {
+      schema: "ccm-task-agent-memory-entry-render-lease-v1",
+      version: 1,
+      lease_id: `tamerl_${crypto.randomBytes(12).toString("hex")}`,
+      fencing_token: renderFencingToken,
+      owner_pid: process.pid,
+      status: "prepared",
+      group_id: session.groupId,
+      group_session_id: groupSessionId,
+      task_id: session.taskId,
+      task_agent_session_id: session.id,
+      target_project: session.project,
+      source_memory_context_checksum: sourceMemoryContextChecksum,
+      base_snapshot_id: String(previousSnapshot?.snapshot_id || previousRef?.snapshotId || ""),
+      base_snapshot_checksum: String(previousSnapshot?.checksum || previousRef?.checksum || ""),
+      base_manifest_checksum: previousTrusted ? String(previousManifest?.manifest_checksum || "") : "",
+      acquired_at: new Date(preparedAtMs).toISOString(),
+      expires_at: new Date(preparedAtMs + MEMORY_ENTRY_RENDER_LEASE_TTL_MS).toISOString(),
+      recovered_stale_lease_id: staleRenderLeaseRecovered ? String(existingRenderLease?.lease_id || "") : "",
+    };
+    const plan = buildTaskAgentMemoryEntrySyncPlan({
+      memory: memoryContextInput,
+      groupId: session.groupId,
+      groupSessionId,
+      taskId: session.taskId,
+      taskAgentSessionId: session.id,
+      targetProject: session.project,
+      previousSnapshotId: String(previousSnapshot?.snapshot_id || previousRef?.snapshotId || ""),
+      previousSnapshotChecksum: String(previousSnapshot?.checksum || previousRef?.checksum || ""),
+      previousManifest,
+      previousTrusted,
+      renderLease,
+    });
+    const sealedRenderLease = {
+      ...renderLease,
+      plan_checksum: plan.plan_checksum,
+      manifest_checksum: String(plan.current_manifest?.manifest_checksum || ""),
+      transport_mode: plan.transport_mode,
+    };
+    const previousHistory = Array.isArray(session.memoryEntrySyncRenderLeaseHistory) ? session.memoryEntrySyncRenderLeaseHistory : [];
+    if (!reuseRenderLease && existingRenderLease?.lease_id) {
+      session.memoryEntrySyncRenderLeaseHistory = [...previousHistory, existingRenderLease].slice(-MEMORY_ENTRY_RENDER_LEASE_HISTORY_LIMIT);
+    }
+    if (!session.groupSessionId && groupSessionId.startsWith("gcs_")) session.groupSessionId = groupSessionId;
+    session.memoryEntrySyncRenderLease = sealedRenderLease;
+    session.memoryEntrySyncRenderFencingToken = renderFencingToken;
+    session.memoryEntrySyncRenderLeaseTakeoverCount = Number(session.memoryEntrySyncRenderLeaseTakeoverCount || 0) + (staleRenderLeaseRecovered ? 1 : 0);
+    session.lastUsedAt = new Date(preparedAtMs).toISOString();
+    saveStore(store);
+    return {
+      memoryContext: attachTaskAgentMemoryEntrySyncPlan(memoryContextInput, plan),
+      plan,
+      prepared: true,
+      previousBaselineTrusted: previousTrusted,
+      renderLease: sealedRenderLease,
+      renderLeaseReused: reuseRenderLease,
+      staleRenderLeaseRecovered,
+    };
+  });
+}
+
+function memoryEntryRenderContentionChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.contention_checksum;
+  return hashValue(payload, 64);
+}
+
+export function verifyTaskAgentMemoryEntryRenderContentionReceipt(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== MEMORY_ENTRY_RENDER_CONTENTION_SCHEMA) issues.push("render_contention_schema_invalid");
+  if (Number(receipt?.version || 0) !== 1) issues.push("render_contention_version_invalid");
+  if (!new Set(["resolved", "timeout", "same_process"]).has(String(receipt?.status || ""))) issues.push("render_contention_status_invalid");
+  if (String(receipt?.contention_checksum || "") !== memoryEntryRenderContentionChecksum(receipt)) issues.push("render_contention_checksum_invalid");
+  const bindings: Array<[string, any, any]> = [
+    ["group_id", expected.groupId, receipt?.group_id],
+    ["group_session_id", expected.groupSessionId, receipt?.group_session_id],
+    ["task_id", expected.taskId, receipt?.task_id],
+    ["task_agent_session_id", expected.taskAgentSessionId, receipt?.task_agent_session_id],
+    ["target_project", expected.targetProject, receipt?.target_project],
+  ];
+  for (const [field, wanted, actual] of bindings) if (wanted !== undefined && String(wanted || "") !== String(actual || "")) issues.push(`render_contention_${field}_mismatch`);
+  if (!Number.isInteger(Number(receipt?.contender_pid || 0)) || Number(receipt?.contender_pid || 0) <= 0) issues.push("render_contention_contender_pid_invalid");
+  if (!/^tamerl_[a-f0-9]{24}$/.test(String(receipt?.blocked_lease_id || ""))) issues.push("render_contention_blocked_lease_invalid");
+  if (!Number.isInteger(Number(receipt?.blocked_fencing_token || 0)) || Number(receipt?.blocked_fencing_token || 0) <= 0) issues.push("render_contention_fencing_token_invalid");
+  if (!Number.isInteger(Number(receipt?.blocked_owner_pid || 0)) || Number(receipt?.blocked_owner_pid || 0) <= 0) issues.push("render_contention_owner_pid_invalid");
+  if (!Number.isInteger(Number(receipt?.retries ?? -1)) || Number(receipt?.retries ?? -1) < 0 || Number(receipt?.retries || 0) > 5) issues.push("render_contention_retries_invalid");
+  if (!Number.isInteger(Number(receipt?.waited_ms ?? -1)) || Number(receipt?.waited_ms ?? -1) < 0) issues.push("render_contention_wait_invalid");
+  if (!/^[a-f0-9]{64}$/.test(String(receipt?.source_memory_context_checksum || ""))) issues.push("render_contention_source_checksum_invalid");
+  if (!Number.isFinite(Date.parse(String(receipt?.observed_at || "")))) issues.push("render_contention_observed_at_invalid");
+  if (receipt?.status === "same_process" && (Number(receipt?.retries || 0) !== 0 || Number(receipt?.waited_ms || 0) !== 0)) issues.push("render_contention_same_process_wait_invalid");
+  return { valid: issues.length === 0, issues: [...new Set(issues)], status: String(receipt?.status || "") };
+}
+
+function recordTaskAgentMemoryEntryRenderContention(sessionId: string, input: {
+  status: "resolved" | "timeout" | "same_process";
+  retries: number;
+  waitedMs: number;
+  blockedLeaseId?: string;
+  blockedFencingToken?: number;
+  blockedOwnerPid?: number;
+  sourceMemoryContextChecksum?: string;
+}) {
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const session = store.sessions.find((item: TaskAgentSession) => item.id === sessionId);
+    if (!session) return null;
+    const observedAt = new Date().toISOString();
+    const payload = {
+      schema: MEMORY_ENTRY_RENDER_CONTENTION_SCHEMA,
+      version: 1,
+      status: input.status,
+      group_id: session.groupId,
+      group_session_id: session.groupSessionId || "",
+      task_id: session.taskId,
+      task_agent_session_id: session.id,
+      target_project: session.project,
+      contender_pid: process.pid,
+      blocked_lease_id: String(input.blockedLeaseId || ""),
+      blocked_fencing_token: Number(input.blockedFencingToken || 0),
+      blocked_owner_pid: Number(input.blockedOwnerPid || 0),
+      retries: Math.max(0, Number(input.retries || 0)),
+      waited_ms: Math.max(0, Number(input.waitedMs || 0)),
+      source_memory_context_checksum: String(input.sourceMemoryContextChecksum || ""),
+      observed_at: observedAt,
+    };
+    const receipt = { ...payload, contention_checksum: memoryEntryRenderContentionChecksum(payload) };
+    session.memoryEntrySyncRenderContentionCount = Number(session.memoryEntrySyncRenderContentionCount || 0) + 1;
+    session.memoryEntrySyncRenderWaitResolvedCount = Number(session.memoryEntrySyncRenderWaitResolvedCount || 0) + (input.status === "resolved" ? 1 : 0);
+    session.memoryEntrySyncRenderWaitTimeoutCount = Number(session.memoryEntrySyncRenderWaitTimeoutCount || 0) + (input.status === "timeout" ? 1 : 0);
+    session.memoryEntrySyncRenderSameProcessConflictCount = Number(session.memoryEntrySyncRenderSameProcessConflictCount || 0) + (input.status === "same_process" ? 1 : 0);
+    session.memoryEntrySyncRenderWaitTotalMs = Number(session.memoryEntrySyncRenderWaitTotalMs || 0) + payload.waited_ms;
+    session.memoryEntrySyncRenderLastContention = receipt;
+    session.lastUsedAt = observedAt;
+    saveStore(store);
+    return receipt;
+  });
+}
+
+export function prepareTaskAgentMemoryEntrySyncContextWithRetry(sessionId: string, memoryContextInput: any, options: {
+  maxConflictRetries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  jitterMs?: number;
+} = {}) {
+  const maxConflictRetries = Math.min(5, Math.max(0, Math.floor(Number(options.maxConflictRetries ?? MEMORY_ENTRY_RENDER_CONFLICT_MAX_RETRIES))));
+  const baseDelayMs = Math.min(1_000, Math.max(1, Math.floor(Number(options.baseDelayMs ?? MEMORY_ENTRY_RENDER_CONFLICT_BASE_DELAY_MS))));
+  const maxDelayMs = Math.min(2_000, Math.max(baseDelayMs, Math.floor(Number(options.maxDelayMs ?? MEMORY_ENTRY_RENDER_CONFLICT_MAX_DELAY_MS))));
+  const jitterMs = Math.min(500, Math.max(0, Math.floor(Number(options.jitterMs ?? MEMORY_ENTRY_RENDER_CONFLICT_JITTER_MS))));
+  const sourceMemoryContextChecksum = taskAgentMemorySemanticChecksum(memoryContextInput || {});
+  let retries = 0;
+  let waitedMs = 0;
+  let firstConflict: any = null;
+  while (true) {
+    try {
+      const prepared = prepareTaskAgentMemoryEntrySyncContext(sessionId, memoryContextInput);
+      if (!firstConflict) return prepared;
+      const contention = recordTaskAgentMemoryEntryRenderContention(sessionId, {
+        status: "resolved",
+        retries,
+        waitedMs,
+        blockedLeaseId: firstConflict.leaseId,
+        blockedFencingToken: firstConflict.fencingToken,
+        blockedOwnerPid: firstConflict.ownerPid,
+        sourceMemoryContextChecksum,
+      });
+      return { ...prepared, renderContention: contention };
+    } catch (error: any) {
+      if (error?.code !== "TASK_AGENT_MEMORY_ENTRY_SYNC_RENDER_BUSY") throw error;
+      firstConflict ||= error;
+      const sameProcess = Number(error.ownerPid || 0) === process.pid;
+      if (sameProcess || retries >= maxConflictRetries) {
+        const status = sameProcess ? "same_process" : "timeout";
+        const contention = recordTaskAgentMemoryEntryRenderContention(sessionId, {
+          status,
+          retries,
+          waitedMs,
+          blockedLeaseId: firstConflict.leaseId,
+          blockedFencingToken: firstConflict.fencingToken,
+          blockedOwnerPid: firstConflict.ownerPid,
+          sourceMemoryContextChecksum,
+        });
+        error.renderContentionStatus = status;
+        error.renderContentionRetries = retries;
+        error.renderContentionWaitedMs = waitedMs;
+        error.renderContentionReceipt = contention;
+        throw error;
+      }
+      const exponentialDelay = Math.min(maxDelayMs, baseDelayMs * (2 ** retries));
+      const delayMs = exponentialDelay + (jitterMs > 0 ? crypto.randomInt(0, jitterMs + 1) : 0);
+      sleepForStoreLock(delayMs);
+      waitedMs += delayMs;
+      retries += 1;
+    }
+  }
+}
+
 export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
   taskId?: string;
   groupId?: string;
@@ -823,6 +1718,12 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
   memoryContext?: any;
   renderedHandoff?: string;
   renderedPrompt?: string;
+  renderedMemoryContext?: string;
+  requireMemoryPromptInjectionProof?: boolean;
+  requireTrustedMemoryPromptEnvelope?: boolean;
+  requireProviderMemoryChannelAcknowledgement?: boolean;
+  requireMemoryContextConsumptionReceipt?: boolean;
+  memoryContextConsumptionChallenge?: any;
   runtimeToolSnapshot?: any;
   invocationLineage?: any;
 } = {}) {
@@ -834,11 +1735,113 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
     if (index < 0) return null;
     const current = store.sessions[index];
   const packet = input.workerContextPacket || input.workerHandoff?.worker_context_packet || input.workerHandoff?.workerContextPacket || {};
-  const memoryContext = input.memoryContext || packet.memory || input.workerHandoff?.references?.memory_context || input.workerHandoff?.references?.memoryContext || null;
+  const packetMemory = packet.memory || input.workerHandoff?.references?.memory_context || input.workerHandoff?.references?.memoryContext || null;
+  const memoryContext = taskAgentMemoryEntrySyncPlan(packetMemory)
+    ? packetMemory
+    : input.memoryContext || packetMemory || null;
   const groupSessionMemoryBinding = extractGroupSessionMemoryBinding(memoryContext || {});
   const workerHandoffId = String(input.workerHandoff?.handoff_id || input.workerHandoff?.handoffId || input.workerHandoffSummary?.handoff_id || input.workerHandoffSummary?.handoffId || "").trim();
   const workerContextPacketId = String(packet?.packet_id || packet?.packetId || input.workerHandoffSummary?.packet_id || input.workerHandoffSummary?.packetId || "").trim();
   const generatedAt = new Date().toISOString();
+  const turn = Number(input.turn || current.turnCount + 1 || 0);
+  const memoryContextChecksum = taskAgentMemorySemanticChecksum(memoryContext || {});
+  const refs = normalizeMemorySnapshotRefs(current.memoryContextSnapshots);
+  const memoryEntrySync = taskAgentMemoryEntrySyncPlan(memoryContext);
+  const memoryEntryTransport = taskAgentMemoryTransport(memoryContext);
+  const rejectCurrentMemoryEntryRenderLease = (reason: string) => {
+    const lease = current.memoryEntrySyncRenderLease || null;
+    if (!lease || String(lease.lease_id || "") !== String(memoryEntrySync?.render_lease_id || "")
+      || Number(lease.fencing_token || 0) !== Number(memoryEntrySync?.render_fencing_token || 0)) return;
+    current.memoryEntrySyncRenderLease = {
+      ...lease,
+      status: "rejected",
+      rejected_at: new Date().toISOString(),
+      rejection_reason: reason,
+    };
+    current.lastUsedAt = new Date().toISOString();
+    store.sessions[index] = current;
+    saveStore(store);
+  };
+  if (memoryEntrySync && !memoryEntryTransport.valid) {
+    rejectCurrentMemoryEntryRenderLease(`plan_invalid:${memoryEntryTransport.issues.join(",")}`);
+    const error: any = new Error(`task Agent memory entry sync plan invalid: ${memoryEntryTransport.issues.join(",")}`);
+    error.code = "TASK_AGENT_MEMORY_ENTRY_SYNC_INVALID";
+    throw error;
+  }
+  const effectiveRenderedMemoryContext = memoryEntryTransport.mode === "delta"
+    ? memoryEntryTransport.text
+    : memoryEntryTransport.mode === "continuation"
+      ? ""
+      : String(input.renderedMemoryContext || "");
+  const renderedProjection = renderedMemoryProjection(memoryContext, effectiveRenderedMemoryContext);
+  const trustedEnvelopeRequired = input.requireTrustedMemoryPromptEnvelope === true;
+  const trustedEnvelope = verifyTrustedMemoryPromptEnvelope(String(input.renderedPrompt || ""), {
+    ...(renderedProjection.text ? { projection: renderedProjection.text } : {}),
+    sourceChecksum: trustedMemorySourceChecksum(memoryContext || {}),
+  });
+  const fullMemoryProjectionInjected = !!renderedProjection.text
+    && (trustedEnvelopeRequired
+      ? trustedEnvelope.valid
+      : String(input.renderedPrompt || "").includes(renderedProjection.text));
+  const memorySnapshotSync = createTaskAgentMemorySnapshotSyncDecision({
+    session: current,
+    refs,
+    groupSessionMemoryBinding,
+    currentMemoryContextChecksum: memoryContextChecksum,
+    generatedAt,
+    turn,
+    fullMemoryProjectionInjected: memoryEntryTransport.mode === "delta" ? false : fullMemoryProjectionInjected,
+    enforcementRequired: input.requireMemoryPromptInjectionProof === true,
+  });
+  if (memoryEntrySync) {
+    const currentManifest = buildTaskAgentMemoryEntryManifest(stripTaskAgentMemoryEntrySync(memoryContext));
+    const entryVerification = verifyTaskAgentMemoryEntrySyncPlan(memoryEntrySync, {
+      groupId: current.groupId,
+      groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+      taskId: current.taskId,
+      taskAgentSessionId: current.id,
+      targetProject: current.project,
+      sourceMemoryContextChecksum: memoryContextChecksum,
+    });
+    const entryIssues = [...entryVerification.issues];
+    const currentRenderLease = current.memoryEntrySyncRenderLease || null;
+    const renderLeaseExpiresMs = Date.parse(String(currentRenderLease?.expires_at || ""));
+    if (currentRenderLease?.schema !== "ccm-task-agent-memory-entry-render-lease-v1") entryIssues.push("entry_sync_render_lease_missing");
+    if (String(currentRenderLease?.status || "") !== "prepared") entryIssues.push("entry_sync_render_lease_not_prepared");
+    if (String(currentRenderLease?.lease_id || "") !== String(memoryEntrySync?.render_lease_id || "")) entryIssues.push("entry_sync_render_lease_id_stale");
+    if (Number(currentRenderLease?.fencing_token || 0) !== Number(memoryEntrySync?.render_fencing_token || 0)) entryIssues.push("entry_sync_render_fencing_token_stale");
+    if (Number(memoryEntrySync?.render_lease_owner_pid || 0) !== process.pid || Number(currentRenderLease?.owner_pid || 0) !== process.pid) entryIssues.push("entry_sync_render_lease_owner_mismatch");
+    if (!Number.isFinite(renderLeaseExpiresMs) || renderLeaseExpiresMs <= Date.now()) entryIssues.push("entry_sync_render_lease_expired");
+    if (String(currentRenderLease?.source_memory_context_checksum || "") !== memoryContextChecksum) entryIssues.push("entry_sync_render_lease_source_mismatch");
+    if (String(currentRenderLease?.plan_checksum || "") !== String(memoryEntrySync?.plan_checksum || "")) entryIssues.push("entry_sync_render_lease_plan_mismatch");
+    if (String(currentRenderLease?.manifest_checksum || "") !== String(memoryEntrySync?.current_manifest?.manifest_checksum || "")) entryIssues.push("entry_sync_render_lease_manifest_mismatch");
+    if (String(currentRenderLease?.base_snapshot_id || "") !== String(memoryEntrySync?.previous_snapshot_id || "")) entryIssues.push("entry_sync_render_lease_base_snapshot_mismatch");
+    if (String(currentRenderLease?.base_manifest_checksum || "") !== String(memoryEntrySync?.previous_manifest_checksum || "")) entryIssues.push("entry_sync_render_lease_base_manifest_mismatch");
+    if (String(memoryEntrySync?.current_manifest?.manifest_checksum || "") !== String(currentManifest.manifest_checksum || "")) entryIssues.push("entry_sync_current_manifest_stale");
+    if (memoryEntryTransport.mode !== "full" && String(memoryEntrySync?.previous_snapshot_id || "") !== String(memorySnapshotSync?.previous_snapshot_id || "")) entryIssues.push("entry_sync_previous_snapshot_stale");
+    const compatible = (memorySnapshotSync.action === "initialize" && memoryEntryTransport.mode === "full")
+      || (memorySnapshotSync.action === "none" && memoryEntryTransport.mode === "continuation")
+      || (memorySnapshotSync.action === "prompt_update" && ["full", "delta"].includes(memoryEntryTransport.mode));
+    if (!compatible) entryIssues.push("entry_sync_snapshot_action_mismatch");
+    if (entryIssues.length) {
+      rejectCurrentMemoryEntryRenderLease(`bind_stale:${[...new Set(entryIssues)].join(",")}`);
+      const error: any = new Error(`task Agent memory entry sync changed before snapshot bind: ${[...new Set(entryIssues)].join(",")}`);
+      error.code = "TASK_AGENT_MEMORY_ENTRY_SYNC_STALE";
+      throw error;
+    }
+  }
+  const memoryPromptInjectionProof = createTaskAgentMemoryPromptInjectionProof({
+    session: current,
+    groupSessionMemoryBinding,
+    memoryContext,
+    memoryContextChecksum,
+    memorySnapshotSync,
+    renderedPrompt: String(input.renderedPrompt || ""),
+    renderedMemoryContext: effectiveRenderedMemoryContext,
+    enforcementRequired: input.requireMemoryPromptInjectionProof === true,
+    trustedEnvelopeRequired,
+    generatedAt,
+  });
   const gateIds = Array.from(collectMemoryContextGateIds({
     worker_context_packet: packet,
     worker_handoff: input.workerHandoff || null,
@@ -855,8 +1858,8 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
       task_agent_session_id: current.id,
       native_session_id: String(input.nativeSessionId || current.nativeSessionId || ""),
       execution_id: String(input.executionId || ""),
-      attempt_sequence: Number(input.turn || current.turnCount + 1 || 0),
-      invocation_kind: Number(input.turn || current.turnCount + 1 || 0) > 1 ? "resume" : "spawn",
+      attempt_sequence: turn,
+      invocation_kind: turn > 1 ? "resume" : "spawn",
       ...(input.invocationLineage?.invocation_edge_id ? {
         invocation_edge_id: input.invocationLineage.invocation_edge_id,
         parent_invocation_edge_id: input.invocationLineage.parent_invocation_edge_id || "",
@@ -876,7 +1879,7 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
     input.project || current.project,
     input.executionId || "",
     workerContextPacketId,
-    Number(input.turn || current.turnCount + 1 || 0),
+    turn,
     generatedAt,
   ].join("\0");
   const snapshotId = `tams_${hashValue(snapshotSeed, 18)}`;
@@ -893,7 +1896,7 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
       project: String(input.project || current.project || "").trim(),
       agent_type: normalizeAgentRuntimeId(input.agentType || current.agentType || ""),
       native_session_id: String(input.nativeSessionId || current.nativeSessionId || "").trim(),
-      turn: Number(input.turn || current.turnCount + 1 || 0),
+      turn,
       resume_mode: current.resumeMode,
     },
     context: {
@@ -904,8 +1907,14 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
       worker_context_packet: packet || null,
       worker_handoff_summary: input.workerHandoffSummary || null,
       memory_context: memoryContext || null,
-      memory_context_checksum: hashValue(memoryContext || {}),
+      memory_context_checksum: memoryContextChecksum,
+      memory_entry_sync: memoryEntrySync || null,
       group_session_memory_binding: groupSessionMemoryBinding,
+      memory_snapshot_sync: memorySnapshotSync,
+      memory_prompt_injection_proof: memoryPromptInjectionProof,
+      provider_memory_channel_acknowledgement_required: input.requireProviderMemoryChannelAcknowledgement === true,
+      memory_context_consumption_receipt_required: input.requireMemoryContextConsumptionReceipt === true,
+      memory_context_consumption_challenge: input.memoryContextConsumptionChallenge || null,
       post_turn_summary_delivery_capsule: postTurnSummaryCapsule,
       post_turn_summary_capsule_checksum: String(postTurnSummaryCapsule?.capsule_checksum || ""),
       post_turn_summary_capsule_prompt_bound: postTurnSummaryCapsule?.prompt_bound === true,
@@ -938,16 +1947,40 @@ export function bindTaskAgentMemoryContextSnapshot(sessionId: string, input: {
     generatedAt,
     invocationEdgeId: String(input.invocationLineage?.invocation_edge_id || packet?.task_agent_invocation_lineage?.invocation_edge_id || ""),
     branchId: String(input.invocationLineage?.branch_id || packet?.task_agent_invocation_lineage?.branch_id || ""),
+    memorySnapshotSyncAction: memorySnapshotSync.action,
+    memorySnapshotSyncChecksum: memorySnapshotSync.sync_checksum,
+    memorySnapshotSyncedFromId: memorySnapshotSync.previous_snapshot_id,
   };
-  const refs = normalizeMemorySnapshotRefs(current.memoryContextSnapshots);
   refs.push(ref);
   const next: TaskAgentSession = {
     ...current,
+    groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || current.groupSessionId || ""),
     memoryContextSnapshotId: snapshotId,
     memoryContextSnapshotPath: snapshotFile,
     memoryContextSnapshotChecksum: checksum,
     memoryContextPacketId: workerContextPacketId,
     memoryContextSnapshotAt: generatedAt,
+    memoryContextDeliveryReceiptId: "",
+    memoryContextDeliveryReceiptPath: "",
+    memoryContextDeliveryReceiptChecksum: "",
+    memoryContextDeliveryStatus: "pending",
+    memoryContextDeliveredAt: "",
+    latestMemoryContextDeliveryAttemptReceiptId: "",
+    latestMemoryContextDeliveryAttemptReceiptPath: "",
+    latestMemoryContextDeliveryAttemptReceiptChecksum: "",
+    latestMemoryContextDeliveryAttemptStatus: "pending",
+    latestMemoryContextDeliveryAttemptAt: "",
+    memorySnapshotSyncCommitPath: "",
+    memorySnapshotSyncCommitChecksum: "",
+    memorySnapshotSyncCommitStatus: "pending",
+    memorySnapshotSyncCommittedAt: "",
+    memoryEntrySyncRenderLease: memoryEntrySync ? {
+      ...current.memoryEntrySyncRenderLease,
+      status: "bound",
+      bound_at: generatedAt,
+      bound_snapshot_id: snapshotId,
+      bound_snapshot_checksum: checksum,
+    } : current.memoryEntrySyncRenderLease,
     memoryContextSnapshots: refs.slice(-MAX_MEMORY_CONTEXT_SNAPSHOTS_PER_SESSION),
     lastUsedAt: generatedAt,
   };
@@ -1002,6 +2035,22 @@ export function attachTaskAgentFinalDispatchPayloadGate(sessionId: string, input
       workerContextPacketId: context.worker_context_packet_id || packet.packet_id || current.memoryContextPacketId,
     }) : { valid: true, issues: [] };
     if (!reactiveCompactVerification.valid) return { updated: false, reason: "final_dispatch_reactive_compact_invalid", issues: reactiveCompactVerification.issues };
+    let memoryPromptInjectionProof: any = null;
+    try {
+      memoryPromptInjectionProof = createTaskAgentMemoryPromptInjectionProof({
+        session: current,
+        groupSessionMemoryBinding: context.group_session_memory_binding || extractGroupSessionMemoryBinding(context.memory_context || {}),
+        memoryContext: context.memory_context || null,
+        memoryContextChecksum: String(context.memory_context_checksum || ""),
+        memorySnapshotSync: context.memory_snapshot_sync || null,
+        renderedPrompt,
+        enforcementRequired: context.memory_prompt_injection_proof?.enforcement_required === true,
+        trustedEnvelopeRequired: context.memory_prompt_injection_proof?.trusted_envelope_required === true,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      return { updated: false, reason: "memory_prompt_injection_required", issues: error?.issues || [error?.message || String(error)] };
+    }
     const nextWithoutChecksum = {
       ...snapshot,
       context: {
@@ -1019,6 +2068,7 @@ export function attachTaskAgentFinalDispatchPayloadGate(sessionId: string, input
         final_dispatch_gate_attached_at: new Date().toISOString(),
         rendered_prompt_checksum: hashValue(renderedPrompt),
         rendered_prompt_excerpt: renderedPrompt.slice(0, 4000),
+        memory_prompt_injection_proof: memoryPromptInjectionProof,
       },
     };
     delete nextWithoutChecksum.checksum;
@@ -1040,6 +2090,61 @@ export function attachTaskAgentFinalDispatchPayloadGate(sessionId: string, input
   });
 }
 
+function verifyTaskAgentMemoryContinuationBaselineDelivery(snapshot: any, input: {
+  runtime?: string;
+  nativeSessionId?: string;
+  runnerRequestId?: string;
+  nativeContinuationEvidence?: any;
+} = {}) {
+  const sync = snapshot?.context?.memory_snapshot_sync || null;
+  const injectionProof = snapshot?.context?.memory_prompt_injection_proof || null;
+  const required = String(sync?.action || "") === "none"
+    && sync?.continuation_baseline_required === true
+    && injectionProof?.prompt_bound !== true;
+  if (!required) {
+    return {
+      required: false,
+      valid: true,
+      status: injectionProof?.prompt_bound === true ? "full_prompt_injection" : "not_required",
+      issues: [] as string[],
+      evidenceChecksum: "",
+    };
+  }
+  const issues: string[] = [];
+  const evidence = input.nativeContinuationEvidence || null;
+  const expectedNativeSessionId = String(sync?.continuation_native_session_id || "").trim();
+  const expectedProvider = normalizeAgentRuntimeId(sync?.continuation_provider || input.runtime || "");
+  const expectedProviderContractId = String(sync?.continuation_provider_contract_id || "").trim();
+  const runnerRequestId = String(input.runnerRequestId || "").trim();
+  if (sync?.continuation_baseline_eligible !== true) issues.push("continuation_baseline_not_eligible");
+  if (!expectedNativeSessionId) issues.push("continuation_native_session_missing");
+  if (!expectedProvider) issues.push("continuation_provider_missing");
+  if (!runnerRequestId) issues.push("continuation_runner_request_missing");
+  const verification = evidence ? verifyNativeSessionContinuationEvidence(evidence, {
+    provider: expectedProvider,
+    runnerRequestId,
+    requestedNativeSessionId: expectedNativeSessionId,
+    ...(expectedProviderContractId ? { expectedProviderContractId } : {}),
+  }) : { valid: false, issues: ["native_continuation_evidence_missing"] };
+  if (!verification.valid) issues.push(...verification.issues);
+  if (evidence?.nativeResumeRequested !== true) issues.push("native_resume_not_requested");
+  if (evidence?.nativeContinuationAcknowledged !== true) issues.push("native_continuation_not_acknowledged");
+  if (evidence?.nativeSessionReusable !== true) issues.push("native_session_not_reusable");
+  if (evidence?.providerContractContinuityVerified !== true) issues.push("provider_contract_continuity_unverified");
+  if (evidence?.runnerSuccess !== true) issues.push("continuation_runner_failed");
+  if (evidence?.nativeForkRequested === true) issues.push("native_fork_not_continuation");
+  if (String(evidence?.requestedNativeSessionId || "") !== expectedNativeSessionId) issues.push("requested_native_session_mismatch");
+  if (String(evidence?.effectiveNativeSessionId || "") !== expectedNativeSessionId) issues.push("effective_native_session_mismatch");
+  if (String(input.nativeSessionId || expectedNativeSessionId) !== expectedNativeSessionId) issues.push("delivered_native_session_mismatch");
+  return {
+    required: true,
+    valid: issues.length === 0,
+    status: issues.length === 0 ? "acknowledged" : "unverified",
+    issues: [...new Set(issues)],
+    evidenceChecksum: String(evidence?.evidenceChecksum || ""),
+  };
+}
+
 export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
   snapshotId?: string;
   renderedPrompt?: string;
@@ -1058,6 +2163,10 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
   runnerStarted?: boolean;
   recoveryOutcome?: string;
   invocationEdgeId?: string;
+  providerMemoryChannelEvidence?: any;
+  memoryContextConsumptionReceipt?: any;
+  memoryContextConsumptionRecovery?: any;
+  providerUsage?: any;
 } = {}) {
   const id = String(sessionId || "").trim();
   if (!id) return null;
@@ -1119,6 +2228,69 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
   const memoryEvidenceReady = (!groupSessionMemoryBinding || groupSessionMemoryBinding.deliveryReady !== false)
     && compactHeadFenceValid
     && sessionLifecycleFenceValid;
+  const continuationBaseline = verifyTaskAgentMemoryContinuationBaselineDelivery(snapshot, input);
+  const memoryPromptInjectionProof = snapshot.context?.memory_prompt_injection_proof || null;
+  const providerMemoryChannelRequired = memoryPromptInjectionProof?.trusted_envelope_bound === true;
+  const providerMemoryChannelAcknowledgementRequired = providerMemoryChannelRequired
+    && snapshot.context?.provider_memory_channel_acknowledgement_required === true;
+  const memoryContextConsumptionReceiptRequired = providerMemoryChannelRequired
+    && snapshot.context?.memory_context_consumption_receipt_required === true;
+  const memoryContextConsumptionChallenge = snapshot.context?.memory_context_consumption_challenge || null;
+  const memoryContextConsumptionVerification = memoryContextConsumptionReceiptRequired
+    ? readMemoryContextConsumptionReceipt(memoryContextConsumptionChallenge, {
+        groupId: snapshot.session?.group_id || current.groupId || "",
+        groupSessionId: groupSessionMemoryBinding?.groupSessionId || "",
+        taskId: snapshot.session?.task_id || current.taskId || "",
+        executionId: snapshot.context?.execution_id || "",
+        project: snapshot.session?.project || current.project || "",
+        taskAgentSessionId: id,
+      })
+    : { valid: true, issues: [], receipt: null, receiptSignature: "" };
+  if (memoryContextConsumptionReceiptRequired
+    && String(input.memoryContextConsumptionReceipt?.receipt_signature || "") !== String(memoryContextConsumptionVerification.receiptSignature || "")) {
+    memoryContextConsumptionVerification.valid = false;
+    memoryContextConsumptionVerification.issues = [...new Set([...(memoryContextConsumptionVerification.issues || []), "receipt_attempt_binding_mismatch"])];
+  }
+  const memoryContextConsumptionRecoveryVerification = input.memoryContextConsumptionRecovery
+    ? verifyMemoryContextConsumptionRecovery(input.memoryContextConsumptionRecovery, {
+        challengeId: memoryContextConsumptionChallenge?.challenge_id || "",
+        runnerRequestId: input.runnerRequestId || "",
+        groupId: snapshot.session?.group_id || current.groupId || "",
+        groupSessionId: groupSessionMemoryBinding?.groupSessionId || "",
+        taskId: snapshot.session?.task_id || current.taskId || "",
+        executionId: snapshot.context?.execution_id || "",
+        project: snapshot.session?.project || current.project || "",
+        taskAgentSessionId: id,
+        provider: input.runtime || current.agentType || "",
+      })
+    : { valid: true, issues: [] };
+  if (memoryContextConsumptionReceiptRequired && input.memoryContextConsumptionRecovery
+    && (!memoryContextConsumptionRecoveryVerification.valid || input.memoryContextConsumptionRecovery.status !== "recovered")) {
+    memoryContextConsumptionVerification.valid = false;
+    memoryContextConsumptionVerification.issues = [...new Set([
+      ...(memoryContextConsumptionVerification.issues || []),
+      ...memoryContextConsumptionRecoveryVerification.issues,
+      ...(input.memoryContextConsumptionRecovery.status === "recovered" ? [] : ["memory_context_consumption_recovery_unresolved"]),
+    ])];
+  }
+  const providerMemoryChannelVerification = providerMemoryChannelRequired
+    ? verifyProviderMemoryChannelEvidence(input.providerMemoryChannelEvidence, {
+        provider: input.runtime || current.agentType || "",
+        originalPrompt: actualPrompt,
+        envelopeChecksum: String(memoryPromptInjectionProof?.trusted_envelope_checksum || ""),
+        sourceChecksum: String(memoryPromptInjectionProof?.trusted_envelope_source_checksum || ""),
+        runnerRequestId: String(input.runnerRequestId || ""),
+        required: true,
+        requireAcknowledgement: providerMemoryChannelAcknowledgementRequired,
+        providerOutputContractEvidence: input.nativeContinuationEvidence?.providerOutputContractEvidence || null,
+        nativeContinuationEvidence: input.nativeContinuationEvidence || null,
+        executionSucceeded: input.executionSucceeded !== false,
+      })
+    : { valid: true, issues: [], required: false, status: "not_required", channel: "none", authorityRole: "none", nativeSystemPrompt: false, nativeDeveloperInstructions: false, fallbackUserPrompt: false, acknowledgementRequired: false, acknowledgementStatus: "not_required", acknowledged: false, acknowledgementPolicy: "" };
+  const memoryDeliveryEvidenceReady = memoryEvidenceReady
+    && continuationBaseline.valid
+    && providerMemoryChannelVerification.valid
+    && memoryContextConsumptionVerification.valid;
   const fileChangeRows = (Array.isArray(input.fileChanges?.files)
     ? input.fileChanges.files
     : Array.isArray(input.fileChanges) ? input.fileChanges : [])
@@ -1132,8 +2304,49 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
   const fileChangeChecksum = fileChangeRows.length ? hashValue(fileChangeRows, 64) : "";
   const outputChecksum = input.output ? hashValue(String(input.output)) : "";
   const runnerStarted = input.runnerStarted !== undefined ? input.runnerStarted === true : input.dispatched !== false;
+  const memoryEntryPlan = snapshot.context?.memory_entry_sync || taskAgentMemoryEntrySyncPlan(snapshot.context?.memory_context || null);
+  const memoryTransportMode = String(memoryEntryPlan?.transport_mode || "legacy");
+  const providerMemoryTransportUsage = deliveryGroupSessionId.startsWith("gcs_") ? buildTaskAgentMemoryTransportUsageReceipt({
+    usage: input.providerUsage,
+    executionSucceeded: input.executionSucceeded !== false,
+    groupId: String(snapshot.session?.group_id || current.groupId || ""),
+    groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+    taskId: String(snapshot.session?.task_id || current.taskId || ""),
+    taskAgentSessionId: id,
+    targetProject: String(snapshot.session?.project || current.project || ""),
+    snapshotId,
+    snapshotChecksum: String(snapshot.checksum || ""),
+    runnerRequestId: String(input.runnerRequestId || ""),
+    nativeSessionId: String(input.nativeSessionId || current.nativeSessionId || ""),
+    provider: input.runtime || current.agentType || "",
+    model: current.modelId || "",
+    providerContractId: String(input.nativeContinuationEvidence?.providerContractId || current.providerContractId || ""),
+    providerRuntimeVersion: String(input.nativeContinuationEvidence?.providerRuntimeVersion || current.providerRuntimeVersion || ""),
+    transportMode: memoryTransportMode,
+    planChecksum: String(memoryEntryPlan?.plan_checksum || ""),
+    manifestChecksum: String(memoryEntryPlan?.current_manifest?.manifest_checksum || ""),
+    finalPromptEstimatedTokens: Math.ceil(actualPrompt.length / 4),
+    memoryTransportEstimatedTokens: Math.ceil(Number(memoryPromptInjectionProof?.rendered_memory_chars || 0) / 4),
+    observedAt: deliveredAt,
+  }) : null;
+  const providerMemoryTransportUsageVerification = providerMemoryTransportUsage ? verifyTaskAgentMemoryTransportUsageReceipt(providerMemoryTransportUsage, {
+    groupId: String(snapshot.session?.group_id || current.groupId || ""),
+    groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+    taskId: String(snapshot.session?.task_id || current.taskId || ""),
+    taskAgentSessionId: id,
+    targetProject: String(snapshot.session?.project || current.project || ""),
+    snapshotId,
+    snapshotChecksum: String(snapshot.checksum || ""),
+    runnerRequestId: String(input.runnerRequestId || ""),
+    provider: input.runtime || current.agentType || "",
+    nativeSessionId: String(input.nativeSessionId || current.nativeSessionId || ""),
+    transportMode: memoryTransportMode,
+  }) : { valid: true, issues: [] };
+  if (!providerMemoryTransportUsageVerification.valid) {
+    throw new Error(`task Agent memory transport usage receipt invalid: ${providerMemoryTransportUsageVerification.issues.join(",")}`);
+  }
   const taskArtifactProven = delivered
-    && memoryEvidenceReady
+    && memoryDeliveryEvidenceReady
     && input.executionSucceeded !== false
     && runnerStarted
     && !!String(input.runnerRequestId || "").trim()
@@ -1144,10 +2357,20 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
     version: 2,
     receiptId,
     source: "ccm_runner_dispatch_witness",
-    status: delivered && memoryEvidenceReady
+    status: delivered && memoryDeliveryEvidenceReady
       ? "delivered"
-      : !sessionLifecycleFenceValid ? "session_lifecycle_stale" : !compactHeadFenceValid ? "compact_head_stale" : "binding_failed",
-    delivered: delivered && memoryEvidenceReady,
+      : !sessionLifecycleFenceValid
+        ? "session_lifecycle_stale"
+        : !compactHeadFenceValid
+          ? "compact_head_stale"
+          : !continuationBaseline.valid
+            ? "continuation_baseline_unverified"
+            : !providerMemoryChannelVerification.valid
+              ? "provider_memory_channel_unverified"
+            : !memoryContextConsumptionVerification.valid
+              ? "memory_context_consumption_unverified"
+            : "binding_failed",
+    delivered: delivered && memoryDeliveryEvidenceReady,
     deliveredAt,
     taskAgentSessionId: id,
     taskId: String(snapshot.session?.task_id || current.taskId || "").trim(),
@@ -1201,9 +2424,153 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
     taskArtifactProven,
     providerContractId: String(input.nativeContinuationEvidence?.providerContractId || ""),
     providerRuntimeVersion: String(input.nativeContinuationEvidence?.providerRuntimeVersion || ""),
+    providerMemoryTransportUsage,
+    providerMemoryTransportUsageChecksum: String(providerMemoryTransportUsage?.usage_checksum || ""),
+    memoryContinuationBaselineRequired: continuationBaseline.required,
+    memoryContinuationBaselineValid: continuationBaseline.valid,
+    memoryContinuationBaselineStatus: continuationBaseline.status,
+    memoryContinuationBaselineIssues: continuationBaseline.issues,
+    memoryContinuationEvidenceChecksum: continuationBaseline.evidenceChecksum,
+    nativeContinuationEvidence: continuationBaseline.required ? input.nativeContinuationEvidence || null : null,
+    providerMemoryChannelRequired,
+    providerMemoryChannelAcknowledgementRequired,
+    providerMemoryChannelAcknowledged: providerMemoryChannelVerification.acknowledged,
+    providerMemoryChannelAcknowledgementStatus: providerMemoryChannelVerification.acknowledgementStatus,
+    providerMemoryChannelAcknowledgementPolicy: providerMemoryChannelVerification.acknowledgementPolicy,
+    providerMemoryChannelValid: providerMemoryChannelVerification.valid,
+    providerMemoryChannelStatus: providerMemoryChannelVerification.status,
+    providerMemoryChannel: providerMemoryChannelVerification.channel,
+    providerMemoryAuthorityRole: providerMemoryChannelVerification.authorityRole,
+    providerMemoryNativeSystemPrompt: providerMemoryChannelVerification.nativeSystemPrompt,
+    providerMemoryNativeDeveloperInstructions: providerMemoryChannelVerification.nativeDeveloperInstructions,
+    providerMemoryUserPromptFallback: providerMemoryChannelVerification.fallbackUserPrompt,
+    providerMemoryChannelIssues: providerMemoryChannelVerification.issues,
+    providerMemoryChannelEvidenceChecksum: String(input.providerMemoryChannelEvidence?.evidence_checksum || ""),
+    providerMemoryChannelEvidence: providerMemoryChannelRequired ? input.providerMemoryChannelEvidence || null : null,
+    memoryContextConsumptionReceiptRequired,
+    memoryContextConsumptionReceiptValid: memoryContextConsumptionVerification.valid,
+    memoryContextConsumptionReceiptStatus: memoryContextConsumptionVerification.valid ? (memoryContextConsumptionReceiptRequired ? "loaded" : "not_required") : "unverified",
+    memoryContextConsumptionReceiptIssues: memoryContextConsumptionVerification.issues || [],
+    memoryContextConsumptionChallengeId: String(memoryContextConsumptionChallenge?.challenge_id || ""),
+    memoryContextConsumptionReceiptSignature: String(memoryContextConsumptionVerification.receiptSignature || ""),
+    memoryContextConsumptionReceipt: memoryContextConsumptionReceiptRequired ? memoryContextConsumptionVerification.receipt || null : null,
+    memoryContextConsumptionRecoveryPresent: !!input.memoryContextConsumptionRecovery,
+    memoryContextConsumptionRecoveryValid: memoryContextConsumptionRecoveryVerification.valid,
+    memoryContextConsumptionRecoveryStatus: String(input.memoryContextConsumptionRecovery?.status || "not_needed"),
+    memoryContextConsumptionRecoveryId: String(input.memoryContextConsumptionRecovery?.recovery_id || ""),
+    memoryContextConsumptionRecoveryIssues: memoryContextConsumptionRecoveryVerification.issues || [],
+    memoryContextConsumptionRecovery: input.memoryContextConsumptionRecovery || null,
   };
   const receipt = { ...payload, checksum: hashValue(payload, 64), receiptFile };
   writeJsonAtomic(receiptFile, receipt);
+  const memorySnapshotSync = snapshot.context?.memory_snapshot_sync || null;
+  const memorySnapshotSyncVerification = verifyTaskAgentMemorySnapshotSyncDecision(memorySnapshotSync, {
+    groupId: String(snapshot.session?.group_id || current.groupId || ""),
+    groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+    taskId: String(snapshot.session?.task_id || current.taskId || ""),
+    taskAgentSessionId: id,
+    targetProject: String(snapshot.session?.project || current.project || ""),
+    currentMemoryContextChecksum: String(snapshot.context?.memory_context_checksum || ""),
+  });
+  const memoryPromptInjectionVerification = verifyTaskAgentMemoryPromptInjectionProof(memoryPromptInjectionProof, {
+    groupId: String(snapshot.session?.group_id || current.groupId || ""),
+    groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+    taskId: String(snapshot.session?.task_id || current.taskId || ""),
+    taskAgentSessionId: id,
+    targetProject: String(snapshot.session?.project || current.project || ""),
+    memoryContextChecksum: String(snapshot.context?.memory_context_checksum || ""),
+    syncChecksum: String(memorySnapshotSync?.sync_checksum || ""),
+    renderedPromptChecksum: String(snapshot.context?.rendered_prompt_checksum || ""),
+  });
+  const syncCommitted = receipt.delivered === true
+    && memorySnapshotSyncVerification.valid === true
+    && memoryPromptInjectionVerification.valid === true
+    && memoryPromptInjectionVerification.deliveryReady === true;
+  const syncCommitFile = getMemorySnapshotSyncCommitFile(id, snapshotId);
+  const existingCanonicalReceipt = ref?.deliveryReceiptPath
+    ? safeReadJson(ref.deliveryReceiptPath, null)
+    : null;
+  const existingCanonicalReceiptValid = !!existingCanonicalReceipt
+    && verifyMemoryContextDeliveryReceiptChecksum(existingCanonicalReceipt)
+    && existingCanonicalReceipt.delivered === true
+    && String(existingCanonicalReceipt.status || "") === "delivered"
+    && String(existingCanonicalReceipt.receiptId || "") === String(ref?.deliveryReceiptId || "")
+    && String(existingCanonicalReceipt.checksum || "") === String(ref?.deliveryReceiptChecksum || "")
+    && String(existingCanonicalReceipt.taskAgentSessionId || "") === id
+    && String(existingCanonicalReceipt.taskId || "") === String(snapshot.session?.task_id || current.taskId || "")
+    && String(existingCanonicalReceipt.groupId || "") === String(snapshot.session?.group_id || current.groupId || "")
+    && String(existingCanonicalReceipt.project || "") === String(snapshot.session?.project || current.project || "")
+    && String(existingCanonicalReceipt.memoryContextSnapshotId || "") === snapshotId
+    && String(existingCanonicalReceipt.memoryContextSnapshotChecksum || "") === String(snapshot.checksum || "");
+  const existingSyncCommit = fs.existsSync(syncCommitFile) ? safeReadJson(syncCommitFile, null) : null;
+  const existingSyncCommitVerification = existingCanonicalReceiptValid
+    ? verifyTaskAgentMemorySnapshotSyncCommit(existingSyncCommit, {
+      groupId: String(snapshot.session?.group_id || current.groupId || ""),
+      groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+      taskId: String(snapshot.session?.task_id || current.taskId || ""),
+      taskAgentSessionId: id,
+      targetProject: String(snapshot.session?.project || current.project || ""),
+      snapshotId,
+      snapshotChecksum: String(snapshot.checksum || ""),
+      syncChecksum: String(memorySnapshotSync?.sync_checksum || ""),
+      syncAction: String(memorySnapshotSync?.action || ""),
+      memoryPromptInjectionProofChecksum: String(memoryPromptInjectionProof?.proof_checksum || ""),
+      deliveryReceiptId: String(existingCanonicalReceipt?.receiptId || ""),
+      deliveryReceiptChecksum: String(existingCanonicalReceipt?.checksum || ""),
+    })
+    : { valid: false, committed: false };
+  const preserveExistingCommittedBaseline = existingSyncCommitVerification.valid === true
+    && existingSyncCommitVerification.committed === true
+    && String(ref?.memorySnapshotSyncCommitChecksum || "") === String(existingSyncCommit?.commit_checksum || "");
+  const syncCommitPayload = {
+    schema: TASK_AGENT_MEMORY_SNAPSHOT_SYNC_COMMIT_SCHEMA,
+    version: 1,
+    status: syncCommitted ? "committed" : "rejected",
+    committed: syncCommitted,
+    group_id: String(snapshot.session?.group_id || current.groupId || ""),
+    group_session_id: String(groupSessionMemoryBinding?.groupSessionId || ""),
+    task_id: String(snapshot.session?.task_id || current.taskId || ""),
+    task_agent_session_id: id,
+    target_project: String(snapshot.session?.project || current.project || ""),
+    snapshot_id: snapshotId,
+    snapshot_checksum: String(snapshot.checksum || ""),
+    sync_checksum: String(memorySnapshotSync?.sync_checksum || ""),
+    sync_action: String(memorySnapshotSync?.action || ""),
+    memory_prompt_injection_proof_checksum: String(memoryPromptInjectionProof?.proof_checksum || ""),
+    delivery_receipt_id: receiptId,
+    delivery_receipt_checksum: receipt.checksum,
+    delivery_status: receipt.status,
+    committed_at: syncCommitted ? deliveredAt : "",
+    rejected_at: syncCommitted ? "" : deliveredAt,
+  };
+  const syncCommitCandidate = {
+    ...syncCommitPayload,
+    commit_checksum: memorySnapshotSyncCommitChecksum(syncCommitPayload),
+    commit_file: syncCommitFile,
+  };
+  const syncCommitVerification = verifyTaskAgentMemorySnapshotSyncCommit(syncCommitCandidate, {
+    groupId: syncCommitCandidate.group_id,
+    groupSessionId: syncCommitCandidate.group_session_id,
+    taskId: syncCommitCandidate.task_id,
+    taskAgentSessionId: id,
+    targetProject: syncCommitCandidate.target_project,
+    snapshotId,
+    snapshotChecksum: syncCommitCandidate.snapshot_checksum,
+    syncChecksum: syncCommitCandidate.sync_checksum,
+    syncAction: syncCommitCandidate.sync_action,
+    memoryPromptInjectionProofChecksum: syncCommitCandidate.memory_prompt_injection_proof_checksum,
+    deliveryReceiptId: receiptId,
+    deliveryReceiptChecksum: receipt.checksum,
+  });
+  if (!syncCommitVerification.valid) {
+    throw new Error(`task Agent memory snapshot sync commit invalid: ${syncCommitVerification.issues.join(",")}`);
+  }
+  const syncCommit = preserveExistingCommittedBaseline ? existingSyncCommit : syncCommitCandidate;
+  const syncCommitDisposition = preserveExistingCommittedBaseline
+    ? "preserved_committed"
+    : syncCommitted ? "committed" : "rejected";
+  if (!preserveExistingCommittedBaseline) writeJsonAtomic(syncCommitFile, syncCommitCandidate);
+  const canonicalReceipt = preserveExistingCommittedBaseline ? existingCanonicalReceipt : receipt;
   const nextRef = {
     ...(ref || {
       snapshotId,
@@ -1211,21 +2578,39 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
       checksum: String(snapshot.checksum || ""),
       generatedAt: String(snapshot.generated_at || ""),
     }),
-    deliveryReceiptId: receiptId,
-    deliveryReceiptPath: receiptFile,
-    deliveryReceiptChecksum: receipt.checksum,
-    deliveryStatus: receipt.status,
-    deliveredAt,
+    deliveryReceiptId: String(canonicalReceipt?.receiptId || ""),
+    deliveryReceiptPath: String(canonicalReceipt?.receiptFile || ""),
+    deliveryReceiptChecksum: String(canonicalReceipt?.checksum || ""),
+    deliveryStatus: String(canonicalReceipt?.status || ""),
+    deliveredAt: String(canonicalReceipt?.deliveredAt || ""),
+    latestDeliveryAttemptReceiptId: receiptId,
+    latestDeliveryAttemptReceiptPath: receiptFile,
+    latestDeliveryAttemptReceiptChecksum: receipt.checksum,
+    latestDeliveryAttemptStatus: receipt.status,
+    latestDeliveryAttemptAt: deliveredAt,
+    memorySnapshotSyncCommitPath: syncCommitFile,
+    memorySnapshotSyncCommitChecksum: syncCommit.commit_checksum,
+    memorySnapshotSyncCommitStatus: syncCommit.status as "committed" | "rejected",
+    memorySnapshotSyncCommittedAt: String(syncCommit?.committed_at || syncCommit?.rejected_at || ""),
   };
   if (refIndex >= 0) refs[refIndex] = nextRef;
   else refs.push(nextRef);
   const next: TaskAgentSession = {
     ...current,
-    memoryContextDeliveryReceiptId: receiptId,
-    memoryContextDeliveryReceiptPath: receiptFile,
-    memoryContextDeliveryReceiptChecksum: receipt.checksum,
-    memoryContextDeliveryStatus: receipt.status,
-    memoryContextDeliveredAt: deliveredAt,
+    memoryContextDeliveryReceiptId: String(canonicalReceipt?.receiptId || ""),
+    memoryContextDeliveryReceiptPath: String(canonicalReceipt?.receiptFile || ""),
+    memoryContextDeliveryReceiptChecksum: String(canonicalReceipt?.checksum || ""),
+    memoryContextDeliveryStatus: String(canonicalReceipt?.status || ""),
+    memoryContextDeliveredAt: String(canonicalReceipt?.deliveredAt || ""),
+    latestMemoryContextDeliveryAttemptReceiptId: receiptId,
+    latestMemoryContextDeliveryAttemptReceiptPath: receiptFile,
+    latestMemoryContextDeliveryAttemptReceiptChecksum: receipt.checksum,
+    latestMemoryContextDeliveryAttemptStatus: receipt.status,
+    latestMemoryContextDeliveryAttemptAt: deliveredAt,
+    memorySnapshotSyncCommitPath: syncCommitFile,
+    memorySnapshotSyncCommitChecksum: syncCommit.commit_checksum,
+    memorySnapshotSyncCommitStatus: syncCommit.status,
+    memorySnapshotSyncCommittedAt: String(syncCommit?.committed_at || syncCommit?.rejected_at || ""),
     memoryContextSnapshots: refs.slice(-MAX_MEMORY_CONTEXT_SNAPSHOTS_PER_SESSION),
     lastUsedAt: deliveredAt,
   };
@@ -1275,7 +2660,7 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
     },
     source: "task_agent_memory_delivery",
   });
-    return { session: next, receipt, ref: nextRef };
+    return { session: next, receipt, ref: nextRef, syncCommit, syncCommitDisposition };
   });
 }
 
@@ -1963,6 +3348,61 @@ function buildTaskAgentMemorySnapshotRow(input: {
     && invocationEdge.task_id === String(loadedSession.task_id || input.session?.taskId || "")
     && invocationEdge.target_project === String(loadedSession.project || input.session?.project || "");
   const groupSessionMemoryBinding = context.group_session_memory_binding || extractGroupSessionMemoryBinding(memoryContext || {});
+  const memorySnapshotSync = context.memory_snapshot_sync || null;
+  const memorySnapshotSyncPresent = memorySnapshotSync?.schema === TASK_AGENT_MEMORY_SNAPSHOT_SYNC_SCHEMA;
+  const memorySnapshotSyncVerification = memorySnapshotSyncPresent
+    ? verifyTaskAgentMemorySnapshotSyncDecision(memorySnapshotSync, {
+      groupId: String(loadedSession.group_id || session?.groupId || ""),
+      groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+      taskId: String(loadedSession.task_id || session?.taskId || ""),
+      taskAgentSessionId: String(loadedSession.id || session?.id || ""),
+      targetProject: String(loadedSession.project || session?.project || ""),
+      currentMemoryContextChecksum: String(context.memory_context_checksum || ""),
+    })
+    : { valid: false, issues: ["memory_snapshot_sync_missing"], action: "" };
+  const memoryEntrySync = context.memory_entry_sync || taskAgentMemoryEntrySyncPlan(memoryContext);
+  const memoryEntrySyncPresent = !!memoryEntrySync?.schema;
+  const memoryEntrySyncVerification = memoryEntrySyncPresent
+    ? verifyTaskAgentMemoryEntrySyncPlan(memoryEntrySync, {
+      groupId: String(loadedSession.group_id || session?.groupId || ""),
+      groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+      taskId: String(loadedSession.task_id || session?.taskId || ""),
+      taskAgentSessionId: String(loadedSession.id || session?.id || ""),
+      targetProject: String(loadedSession.project || session?.project || ""),
+      sourceMemoryContextChecksum: taskAgentMemorySemanticChecksum(memoryContext),
+    })
+    : { valid: false, issues: ["memory_entry_sync_missing"], mode: "" };
+  const memoryEntryManifest = memoryEntrySync?.current_manifest || null;
+  const rebuiltMemoryEntryManifest = memoryEntrySyncPresent ? buildTaskAgentMemoryEntryManifest(stripTaskAgentMemoryEntrySync(memoryContext)) : null;
+  const memoryEntryManifestCurrent = memoryEntrySyncPresent
+    && String(memoryEntryManifest?.manifest_checksum || "") === String(rebuiltMemoryEntryManifest?.manifest_checksum || "");
+  const memoryPromptInjectionProof = context.memory_prompt_injection_proof || null;
+  const memoryPromptInjectionProofPresent = memoryPromptInjectionProof?.schema === TASK_AGENT_MEMORY_PROMPT_INJECTION_PROOF_SCHEMA;
+  const memoryPromptInjectionVerification = memoryPromptInjectionProofPresent
+    ? verifyTaskAgentMemoryPromptInjectionProof(memoryPromptInjectionProof, {
+      groupId: String(loadedSession.group_id || session?.groupId || ""),
+      groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+      taskId: String(loadedSession.task_id || session?.taskId || ""),
+      taskAgentSessionId: String(loadedSession.id || session?.id || ""),
+      targetProject: String(loadedSession.project || session?.project || ""),
+      memoryContextChecksum: String(context.memory_context_checksum || ""),
+      syncChecksum: String(memorySnapshotSync?.sync_checksum || ""),
+      renderedPromptChecksum: String(context.rendered_prompt_checksum || ""),
+    })
+    : {
+      valid: false,
+      issues: ["memory_prompt_injection_proof_missing"],
+      deliveryReady: false,
+      promptBound: false,
+      projectionPresent: false,
+      injectionRequired: false,
+      enforcementRequired: false,
+      trustedEnvelopeRequired: false,
+      trustedEnvelopePresent: false,
+      trustedEnvelopeValid: false,
+      trustedEnvelopeBound: false,
+      status: "missing",
+    };
   const finalDispatchPayloadGate = context.final_dispatch_payload_gate
     || context.worker_context_packet?.final_dispatch_payload_gate
     || null;
@@ -2032,6 +3472,39 @@ function buildTaskAgentMemorySnapshotRow(input: {
   ).trim();
   const deliveryReceipt = deliveryReceiptFile ? safeReadJson(deliveryReceiptFile, null) : null;
   const deliveryReceiptChecksumValid = !!deliveryReceipt && verifyMemoryContextDeliveryReceiptChecksum(deliveryReceipt);
+  const providerMemoryTransportUsage = deliveryReceipt?.providerMemoryTransportUsage || null;
+  const providerMemoryTransportUsagePresent = !!providerMemoryTransportUsage?.schema;
+  const providerMemoryTransportUsageVerification = providerMemoryTransportUsagePresent
+    ? verifyTaskAgentMemoryTransportUsageReceipt(providerMemoryTransportUsage, {
+      groupId: String(loadedSession.group_id || session?.groupId || ""),
+      groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+      taskId: String(loadedSession.task_id || session?.taskId || ""),
+      taskAgentSessionId: sessionId,
+      targetProject: String(loadedSession.project || session?.project || ""),
+      snapshotId,
+      snapshotChecksum: String(loaded?.checksum || input.ref?.checksum || ""),
+      runnerRequestId: String(deliveryReceipt?.runnerRequestId || ""),
+      provider: String(deliveryReceipt?.runtime || session?.agentType || ""),
+      nativeSessionId: String(deliveryReceipt?.nativeSessionId || ""),
+      transportMode: String(memoryEntrySync?.transport_mode || "legacy"),
+    })
+    : { valid: false, issues: ["memory_transport_usage_missing"] };
+  const memoryContinuationBaselineVerification = deliveryReceipt
+    ? verifyTaskAgentMemoryContinuationBaselineDelivery(loaded, {
+      runtime: deliveryReceipt.runtime,
+      nativeSessionId: deliveryReceipt.nativeSessionId,
+      runnerRequestId: deliveryReceipt.runnerRequestId,
+      nativeContinuationEvidence: deliveryReceipt.nativeContinuationEvidence,
+    })
+    : {
+      required: String(memorySnapshotSync?.action || "") === "none"
+        && memorySnapshotSync?.continuation_baseline_required === true
+        && memoryPromptInjectionVerification.promptBound !== true,
+      valid: false,
+      status: "missing_delivery_receipt",
+      issues: ["delivery_receipt_missing"],
+      evidenceChecksum: "",
+    };
   const deliverySnapshotBound = !!deliveryReceipt
     && String(deliveryReceipt.memoryContextSnapshotId || "") === snapshotId
     && String(deliveryReceipt.memoryContextSnapshotChecksum || "") === String(loaded?.checksum || input.ref?.checksum || "")
@@ -2044,6 +3517,59 @@ function buildTaskAgentMemorySnapshotRow(input: {
     && deliveryReceiptChecksumValid
     && deliverySnapshotBound
     && deliveryGroupSessionBound;
+  const latestDeliveryAttemptReceiptFile = String(
+    input.ref?.latestDeliveryAttemptReceiptPath
+    || (input.ref?.snapshotId && input.ref.snapshotId === session?.memoryContextSnapshotId ? session?.latestMemoryContextDeliveryAttemptReceiptPath : "")
+    || ""
+  ).trim();
+  const latestDeliveryAttemptReceipt = latestDeliveryAttemptReceiptFile
+    ? safeReadJson(latestDeliveryAttemptReceiptFile, null)
+    : null;
+  const latestDeliveryAttemptPresent = !!latestDeliveryAttemptReceiptFile;
+  const latestDeliveryAttemptValid = !!latestDeliveryAttemptReceipt
+    && verifyMemoryContextDeliveryReceiptChecksum(latestDeliveryAttemptReceipt)
+    && String(latestDeliveryAttemptReceipt.receiptId || "") === String(input.ref?.latestDeliveryAttemptReceiptId || latestDeliveryAttemptReceipt.receiptId || "")
+    && String(latestDeliveryAttemptReceipt.checksum || "") === String(input.ref?.latestDeliveryAttemptReceiptChecksum || latestDeliveryAttemptReceipt.checksum || "")
+    && String(latestDeliveryAttemptReceipt.taskAgentSessionId || "") === sessionId
+    && String(latestDeliveryAttemptReceipt.memoryContextSnapshotId || "") === snapshotId
+    && String(latestDeliveryAttemptReceipt.memoryContextSnapshotChecksum || "") === String(loaded?.checksum || input.ref?.checksum || "");
+  const memorySnapshotSyncCommitFile = String(
+    input.ref?.memorySnapshotSyncCommitPath
+    || (input.ref?.snapshotId && input.ref.snapshotId === session?.memoryContextSnapshotId ? session?.memorySnapshotSyncCommitPath : "")
+    || (sessionId && snapshotId ? getMemorySnapshotSyncCommitFile(sessionId, snapshotId) : "")
+  ).trim();
+  const memorySnapshotSyncCommitPresent = !!memorySnapshotSyncCommitFile && fs.existsSync(memorySnapshotSyncCommitFile);
+  const memorySnapshotSyncCommit = memorySnapshotSyncCommitPresent
+    ? safeReadJson(memorySnapshotSyncCommitFile, null)
+    : null;
+  const memorySnapshotSyncCommitVerification = memorySnapshotSyncCommitPresent
+    ? verifyTaskAgentMemorySnapshotSyncCommit(memorySnapshotSyncCommit, {
+      groupId: String(loadedSession.group_id || session?.groupId || ""),
+      groupSessionId: String(groupSessionMemoryBinding?.groupSessionId || ""),
+      taskId: String(loadedSession.task_id || session?.taskId || ""),
+      taskAgentSessionId: sessionId,
+      targetProject: String(loadedSession.project || session?.project || ""),
+      snapshotId,
+      snapshotChecksum: String(loaded?.checksum || input.ref?.checksum || ""),
+      syncChecksum: String(memorySnapshotSync?.sync_checksum || ""),
+      syncAction: String(memorySnapshotSync?.action || ""),
+      memoryPromptInjectionProofChecksum: String(memoryPromptInjectionProof?.proof_checksum || ""),
+      deliveryReceiptId: String(deliveryReceipt?.receiptId || ""),
+      deliveryReceiptChecksum: String(deliveryReceipt?.checksum || ""),
+    })
+    : { valid: false, issues: ["sync_commit_missing"], committed: false, status: "pending" };
+  const memorySnapshotSyncCommitRefBound = !input.ref?.memorySnapshotSyncCommitChecksum
+    || String(input.ref.memorySnapshotSyncCommitChecksum) === String(memorySnapshotSyncCommit?.commit_checksum || "");
+  const memorySnapshotSyncCommitValid = memorySnapshotSyncCommitPresent
+    && memorySnapshotSyncCommitVerification.valid === true
+    && memorySnapshotSyncCommitRefBound;
+  const memorySnapshotSyncCommitted = memorySnapshotSyncCommitValid
+    && memorySnapshotSyncCommitVerification.committed === true
+    && memoryContextDelivered;
+  const memorySnapshotSyncLateFailurePreserved = memorySnapshotSyncCommitted
+    && latestDeliveryAttemptValid
+    && String(latestDeliveryAttemptReceipt?.receiptId || "") !== String(deliveryReceipt?.receiptId || "")
+    && latestDeliveryAttemptReceipt?.delivered !== true;
   const compactHeadFenceRequired = groupSessionMemoryBinding?.compactHeadFenceRequired === true;
   const compactHeadFenceValid = deliveryReceipt
     ? deliveryReceipt.compactHeadFenceValid === true
@@ -2091,13 +3617,29 @@ function buildTaskAgentMemorySnapshotRow(input: {
   if (loaded && finalDispatchReactiveCompactPresent && (!finalDispatchReactiveCompactVerification.valid || !finalDispatchReactiveCompactBound)) hardGaps.push({ reason: `最终 prompt reactive compact receipt 无效：${finalDispatchReactiveCompactVerification.issues.join(",") || "gate_binding_mismatch"}` });
   if (loaded && finalDispatchReactiveCompactCircuitBreakerPresent && !finalDispatchReactiveCompactCircuitBreakerVerification.valid) hardGaps.push({ reason: `最终 prompt reactive compact 断路器无效：${finalDispatchReactiveCompactCircuitBreakerVerification.issues.join(",") || "unknown"}` });
   if (loaded && finalDispatchLineageProofRequired && !finalDispatchLineageProofValid) hardGaps.push({ reason: "最终 prompt 容量 gate 缺少 lineage 派发前验证证明" });
+  if (loaded && memorySnapshotSyncPresent && !memorySnapshotSyncVerification.valid) hardGaps.push({ reason: `task Agent memory snapshot sync 无效：${memorySnapshotSyncVerification.issues.join(",") || "unknown"}` });
+  if (loaded && memoryEntrySyncPresent && (!memoryEntrySyncVerification.valid || !memoryEntryManifestCurrent)) hardGaps.push({ reason: `task Agent memory entry sync 无效：${[...memoryEntrySyncVerification.issues, ...(!memoryEntryManifestCurrent ? ["current_manifest_stale"] : [])].join(",") || "unknown"}` });
+  if (loaded && memoryPromptInjectionProofPresent && !memoryPromptInjectionVerification.valid) hardGaps.push({ reason: `task Agent memory prompt injection proof 无效：${memoryPromptInjectionVerification.issues.join(",") || "unknown"}` });
+  if (loaded && memorySnapshotSyncPresent && memorySnapshotSyncCommitPresent && !memorySnapshotSyncCommitValid) hardGaps.push({ reason: `task Agent memory snapshot sync commit 无效：${[...memorySnapshotSyncCommitVerification.issues, ...(!memorySnapshotSyncCommitRefBound ? ["session_ref_checksum_mismatch"] : [])].join(",") || "unknown"}` });
+  if (loaded && memorySnapshotSyncPresent && memorySnapshotSyncCommitValid && !memorySnapshotSyncCommitted) hardGaps.push({ reason: `task Agent memory snapshot sync commit 被拒绝：${memorySnapshotSyncCommit?.delivery_status || memorySnapshotSyncCommit?.status || "unknown"}` });
   if (deliveryReceipt && !deliveryReceiptChecksumValid) hardGaps.push({ reason: "runner memory delivery receipt checksum 不匹配" });
+  if (deliveryReceipt && providerMemoryTransportUsagePresent && !providerMemoryTransportUsageVerification.valid) hardGaps.push({ reason: `Provider memory transport usage 无效：${providerMemoryTransportUsageVerification.issues.join(",") || "unknown"}` });
   if (deliveryReceipt && !deliverySnapshotBound) hardGaps.push({ reason: "runner memory delivery receipt 未绑定当前 task Agent snapshot/session" });
   if (deliveryReceipt && !deliveryGroupSessionBound) hardGaps.push({ reason: "runner memory delivery receipt 群聊会话 scope/checksum 不匹配" });
+  if (deliveryReceipt && memoryContinuationBaselineVerification.required && !memoryContinuationBaselineVerification.valid) {
+    hardGaps.push({ reason: `runner memory continuation baseline 未经原生续接证明：${memoryContinuationBaselineVerification.issues.join(",") || "unknown"}` });
+  }
   if (deliveryReceipt && compactHeadFenceRequired && !compactHeadFenceValid) hardGaps.push({ reason: `runner compact head 已过期：${(deliveryReceipt.compactHeadFenceIssues || []).join(",") || deliveryReceipt.compactHeadFenceStatus || "stale"}` });
   if (sessionLifecycleFenceRequired && !sessionLifecycleFenceValid) hardGaps.push({ reason: `群聊会话生命周期已变化：${(sessionLifecycleValidation.issues || []).join(",") || sessionLifecycleValidation.status || "stale"}` });
   if (deliveryReceipt && deliveryReceipt.delivered !== true) hardGaps.push({ reason: `runner memory delivery 失败：${deliveryReceipt.promptBindingMode || deliveryReceipt.status || "unknown"}` });
+  if (latestDeliveryAttemptPresent && !latestDeliveryAttemptValid) hardGaps.push({ reason: "最新 runner memory delivery attempt 证据无效" });
   if (input.source === "session_ref" && !deliveryReceipt) warningGaps.push({ reason: "快照尚无 runner memory delivery receipt" });
+  if (deliveryReceipt && !providerMemoryTransportUsagePresent) warningGaps.push({ reason: "runner memory delivery receipt 缺少 Provider transport usage（旧回执兼容）" });
+  if (loaded && !memoryPromptInjectionProofPresent) warningGaps.push({ reason: "快照缺少 memory prompt injection proof（旧快照兼容）" });
+  if (loaded && !memoryEntrySyncPresent) warningGaps.push({ reason: "快照缺少 per-entry memory sync manifest（旧快照兼容）" });
+  if (loaded && memoryPromptInjectionProofPresent && memoryPromptInjectionVerification.injectionRequired && !memoryPromptInjectionVerification.projectionPresent) warningGaps.push({ reason: "memory injection projection 未提供，无法证明最终 prompt 包含群聊记忆" });
+  if (loaded && memorySnapshotSyncPresent && !memorySnapshotSyncCommitPresent) warningGaps.push({ reason: "task Agent memory snapshot sync 已准备，等待 delivery commit" });
+  if (memorySnapshotSyncLateFailurePreserved) warningGaps.push({ reason: `已保留成功记忆基线；后续 Provider 重试失败：${latestDeliveryAttemptReceipt?.status || "unknown"}` });
   if (loaded && !gateIds.length) warningGaps.push({ reason: "快照未捕获 memory gate ids" });
   if (loaded && !finalDispatchPayloadGatePresent) warningGaps.push({ reason: "快照缺少最终 Provider prompt 容量 gate（旧快照兼容）" });
   if (loaded && finalDispatchStatus === "recompact_required") warningGaps.push({ reason: "最终 Provider prompt 已被容量 gate 拦截，必须重建或重新压缩" });
@@ -2143,6 +3685,112 @@ function buildTaskAgentMemorySnapshotRow(input: {
     groupSessionScopeId: String(groupSessionMemoryBinding?.scopeId || (finalDispatchPayloadGate?.group_session_id ? `${String(loadedSession.group_id || session?.groupId || "")}::${String(finalDispatchPayloadGate.group_session_id)}` : "")),
     sessionMemoryChecksum: String(groupSessionMemoryBinding?.sessionMemoryChecksum || ""),
     sessionMemoryHasSummary: groupSessionMemoryBinding?.sessionMemoryHasSummary === true,
+    memorySnapshotSyncPresent,
+    memorySnapshotSyncValid: memorySnapshotSyncPresent && memorySnapshotSyncVerification.valid === true,
+    memorySnapshotSyncAction: String(memorySnapshotSync?.action || "legacy"),
+    memorySnapshotSyncReason: String(memorySnapshotSync?.reason || "legacy_snapshot"),
+    memorySnapshotSyncChecksum: String(memorySnapshotSync?.sync_checksum || ""),
+    memorySnapshotSyncPreviousSnapshotId: String(memorySnapshotSync?.previous_snapshot_id || ""),
+    memorySnapshotSyncPreviousTrusted: memorySnapshotSync?.previous_snapshot_trusted === true,
+    memorySnapshotSyncMemoryInjectionRequired: memorySnapshotSync?.memory_injection_required === true,
+    memorySnapshotSyncIssues: memorySnapshotSyncVerification.issues,
+    memoryEntrySyncPresent,
+    memoryEntrySyncValid: memoryEntrySyncPresent && memoryEntrySyncVerification.valid === true && memoryEntryManifestCurrent,
+    memoryEntrySyncMode: String(memoryEntrySync?.transport_mode || "legacy"),
+    memoryEntrySyncPlanChecksum: String(memoryEntrySync?.plan_checksum || ""),
+    memoryEntryManifestChecksum: String(memoryEntryManifest?.manifest_checksum || ""),
+    memoryEntryPreviousManifestChecksum: String(memoryEntrySync?.previous_manifest_checksum || ""),
+    memoryEntryChangedCount: Number(memoryEntrySync?.changed_entry_count || 0),
+    memoryEntryRemovedCount: Number(memoryEntrySync?.removed_entry_count || 0),
+    memoryEntryRenderLeaseId: String(memoryEntrySync?.render_lease_id || ""),
+    memoryEntryRenderFencingToken: Number(memoryEntrySync?.render_fencing_token || 0),
+    memoryEntryRenderLeaseOwnerPid: Number(memoryEntrySync?.render_lease_owner_pid || 0),
+    memoryEntryRenderLeaseAcquiredAt: String(memoryEntrySync?.render_lease_acquired_at || ""),
+    memoryEntryRenderLeaseExpiresAt: String(memoryEntrySync?.render_lease_expires_at || ""),
+    memoryEntryRecoveredStaleLeaseId: String(memoryEntrySync?.recovered_stale_lease_id || ""),
+    memoryEntrySyncIssues: [...memoryEntrySyncVerification.issues, ...(!memoryEntryManifestCurrent && memoryEntrySyncPresent ? ["current_manifest_stale"] : [])],
+    memoryPromptInjectionProofPresent,
+    memoryPromptInjectionProofValid: memoryPromptInjectionProofPresent && memoryPromptInjectionVerification.valid === true,
+    memoryPromptInjectionProofStatus: String(memoryPromptInjectionProof?.status || "legacy"),
+    memoryPromptInjectionProofChecksum: String(memoryPromptInjectionProof?.proof_checksum || ""),
+    memoryPromptInjectionEnforced: memoryPromptInjectionProof?.enforcement_required === true,
+    memoryPromptInjectionRequired: memoryPromptInjectionProof?.memory_injection_required === true,
+    memoryPromptInjectionProjectionPresent: memoryPromptInjectionVerification.projectionPresent === true,
+    memoryPromptInjectionPromptBound: memoryPromptInjectionVerification.promptBound === true,
+    memoryPromptInjectionDeliveryReady: memoryPromptInjectionVerification.deliveryReady === true,
+    memoryPromptInjectionIssues: memoryPromptInjectionVerification.issues,
+    memoryTrustedEnvelopeRequired: memoryPromptInjectionVerification.trustedEnvelopeRequired === true,
+    memoryTrustedEnvelopePresent: memoryPromptInjectionVerification.trustedEnvelopePresent === true,
+    memoryTrustedEnvelopeValid: memoryPromptInjectionVerification.trustedEnvelopeValid === true,
+    memoryTrustedEnvelopeBound: memoryPromptInjectionVerification.trustedEnvelopeBound === true,
+    memoryTrustedEnvelopeChecksum: String(memoryPromptInjectionProof?.trusted_envelope_checksum || ""),
+    memoryTrustedEnvelopeSourceChecksum: String(memoryPromptInjectionProof?.trusted_envelope_source_checksum || ""),
+    memoryTrustedEnvelopeIssues: Array.isArray(memoryPromptInjectionProof?.trusted_envelope_issues) ? memoryPromptInjectionProof.trusted_envelope_issues : [],
+    memoryContinuationBaselineRequired: memoryContinuationBaselineVerification.required === true,
+    memoryContinuationBaselineValid: memoryContinuationBaselineVerification.valid === true,
+    memoryContinuationBaselineStatus: String(memoryContinuationBaselineVerification.status || ""),
+    memoryContinuationBaselineIssues: memoryContinuationBaselineVerification.issues,
+    memoryContinuationEvidenceChecksum: String(memoryContinuationBaselineVerification.evidenceChecksum || ""),
+    providerMemoryChannelRequired: deliveryReceipt?.providerMemoryChannelRequired === true,
+    providerMemoryChannelAcknowledgementRequired: deliveryReceipt?.providerMemoryChannelAcknowledgementRequired === true,
+    providerMemoryChannelAcknowledged: deliveryReceipt?.providerMemoryChannelAcknowledged === true,
+    providerMemoryChannelAcknowledgementStatus: String(deliveryReceipt?.providerMemoryChannelAcknowledgementStatus || ""),
+    providerMemoryChannelAcknowledgementPolicy: String(deliveryReceipt?.providerMemoryChannelAcknowledgementPolicy || ""),
+    providerMemoryChannelValid: deliveryReceipt?.providerMemoryChannelValid === true,
+    providerMemoryChannelStatus: String(deliveryReceipt?.providerMemoryChannelStatus || ""),
+    providerMemoryChannel: String(deliveryReceipt?.providerMemoryChannel || "none"),
+    providerMemoryAuthorityRole: String(deliveryReceipt?.providerMemoryAuthorityRole || "none"),
+    providerMemoryNativeSystemPrompt: deliveryReceipt?.providerMemoryNativeSystemPrompt === true,
+    providerMemoryNativeDeveloperInstructions: deliveryReceipt?.providerMemoryNativeDeveloperInstructions === true,
+    providerMemoryUserPromptFallback: deliveryReceipt?.providerMemoryUserPromptFallback === true,
+    providerMemoryChannelEvidenceChecksum: String(deliveryReceipt?.providerMemoryChannelEvidenceChecksum || ""),
+    providerMemoryChannelIssues: Array.isArray(deliveryReceipt?.providerMemoryChannelIssues) ? deliveryReceipt.providerMemoryChannelIssues : [],
+    memoryContextConsumptionReceiptRequired: deliveryReceipt?.memoryContextConsumptionReceiptRequired === true,
+    memoryContextConsumptionReceiptValid: deliveryReceipt?.memoryContextConsumptionReceiptValid === true,
+    memoryContextConsumptionReceiptStatus: String(deliveryReceipt?.memoryContextConsumptionReceiptStatus || ""),
+    memoryContextConsumptionChallengeId: String(deliveryReceipt?.memoryContextConsumptionChallengeId || loaded?.context?.memory_context_consumption_challenge?.challenge_id || ""),
+    memoryContextConsumptionReceiptSignature: String(deliveryReceipt?.memoryContextConsumptionReceiptSignature || ""),
+    memoryContextConsumptionReceiptIssues: Array.isArray(deliveryReceipt?.memoryContextConsumptionReceiptIssues) ? deliveryReceipt.memoryContextConsumptionReceiptIssues : [],
+    memoryContextConsumptionRecoveryPresent: deliveryReceipt?.memoryContextConsumptionRecoveryPresent === true,
+    memoryContextConsumptionRecoveryValid: deliveryReceipt?.memoryContextConsumptionRecoveryValid === true,
+    memoryContextConsumptionRecoveryStatus: String(deliveryReceipt?.memoryContextConsumptionRecoveryStatus || "not_needed"),
+    memoryContextConsumptionRecoveryId: String(deliveryReceipt?.memoryContextConsumptionRecoveryId || ""),
+    memoryContextConsumptionRecoveryIssues: Array.isArray(deliveryReceipt?.memoryContextConsumptionRecoveryIssues) ? deliveryReceipt.memoryContextConsumptionRecoveryIssues : [],
+    providerMemoryTransportUsagePresent,
+    providerMemoryTransportUsageValid: providerMemoryTransportUsagePresent && providerMemoryTransportUsageVerification.valid === true,
+    providerMemoryTransportUsageStatus: String(providerMemoryTransportUsage?.status || "missing"),
+    providerMemoryTransportUsageReported: providerMemoryTransportUsage?.reported === true,
+    providerMemoryTransportUsageChecksum: String(providerMemoryTransportUsage?.usage_checksum || ""),
+    providerMemoryTransportUsageIssues: providerMemoryTransportUsageVerification.issues,
+    providerMemoryTransportInputTokens: Number(providerMemoryTransportUsage?.input_tokens || 0),
+    providerMemoryTransportDirectInputTokens: Number(providerMemoryTransportUsage?.direct_input_tokens || 0),
+    providerMemoryTransportOutputTokens: Number(providerMemoryTransportUsage?.output_tokens || 0),
+    providerMemoryTransportCacheReadTokens: Number(providerMemoryTransportUsage?.cache_read_input_tokens || 0),
+    providerMemoryTransportCacheCreationTokens: Number(providerMemoryTransportUsage?.cache_creation_input_tokens || 0),
+    providerMemoryTransportAccountedTotalTokens: Number(providerMemoryTransportUsage?.accounted_total_tokens || 0),
+    providerMemoryTransportCacheHitRatio: providerMemoryTransportUsage?.cache_hit_ratio ?? null,
+    providerMemoryTransportEstimatedTokens: Number(providerMemoryTransportUsage?.memory_transport_estimated_tokens || 0),
+    providerMemoryTransportFinalPromptEstimatedTokens: Number(providerMemoryTransportUsage?.final_prompt_estimated_tokens || 0),
+    providerMemoryTransportMode: String(providerMemoryTransportUsage?.transport_mode || memoryEntrySync?.transport_mode || "legacy"),
+    providerMemoryTransportProvider: String(providerMemoryTransportUsage?.provider || deliveryReceipt?.runtime || ""),
+    providerMemoryTransportModel: String(providerMemoryTransportUsage?.model || ""),
+    memorySnapshotSyncCommitPath: memorySnapshotSyncCommitFile,
+    memorySnapshotSyncCommitPresent,
+    memorySnapshotSyncCommitValid,
+    memorySnapshotSyncCommitted,
+    memorySnapshotSyncCommitStatus: String(memorySnapshotSyncCommit?.status || (memorySnapshotSyncCommitPresent ? "invalid" : "pending")),
+    memorySnapshotSyncCommitChecksum: String(memorySnapshotSyncCommit?.commit_checksum || ""),
+    memorySnapshotSyncCommitIssues: [
+      ...memorySnapshotSyncCommitVerification.issues,
+      ...(!memorySnapshotSyncCommitRefBound ? ["session_ref_checksum_mismatch"] : []),
+    ],
+    latestDeliveryAttemptReceiptId: String(latestDeliveryAttemptReceipt?.receiptId || input.ref?.latestDeliveryAttemptReceiptId || ""),
+    latestDeliveryAttemptReceiptFile,
+    latestDeliveryAttemptStatus: String(latestDeliveryAttemptReceipt?.status || input.ref?.latestDeliveryAttemptStatus || ""),
+    latestDeliveryAttemptAt: String(latestDeliveryAttemptReceipt?.deliveredAt || input.ref?.latestDeliveryAttemptAt || ""),
+    latestDeliveryAttemptPresent,
+    latestDeliveryAttemptValid,
+    memorySnapshotSyncLateFailurePreserved,
     postTurnSummaryExpected,
     postTurnSummaryCapsulePresent,
     postTurnSummaryCapsuleValid,
@@ -2252,7 +3900,43 @@ export function buildTaskAgentMemoryContextSnapshotInventory(filter: {
     && (!filter.status || item.status === filter.status)
   );
   const allSessionsById = new Map<string, TaskAgentSession>(store.sessions.map((session: TaskAgentSession) => [session.id, session]));
-  const policy = { staleDays, retentionDays, keepLatestPerSession };
+  const policy = {
+    staleDays,
+    retentionDays,
+    keepLatestPerSession,
+    memoryEntryRenderLeaseTtlMs: MEMORY_ENTRY_RENDER_LEASE_TTL_MS,
+    memoryEntryRenderConflictMaxRetries: MEMORY_ENTRY_RENDER_CONFLICT_MAX_RETRIES,
+    memoryEntryRenderConflictBaseDelayMs: MEMORY_ENTRY_RENDER_CONFLICT_BASE_DELAY_MS,
+    memoryEntryRenderConflictMaxDelayMs: MEMORY_ENTRY_RENDER_CONFLICT_MAX_DELAY_MS,
+    memoryEntryRenderConflictJitterMs: MEMORY_ENTRY_RENDER_CONFLICT_JITTER_MS,
+  };
+  const memoryEntryRenderLeases = sessions.map((session: TaskAgentSession) => {
+    const lastContention = session.memoryEntrySyncRenderLastContention || null;
+    const lastContentionVerification = lastContention ? verifyTaskAgentMemoryEntryRenderContentionReceipt(lastContention, {
+      groupId: session.groupId,
+      groupSessionId: session.groupSessionId || "",
+      taskId: session.taskId,
+      taskAgentSessionId: session.id,
+      targetProject: session.project,
+    }) : { valid: true, issues: [] };
+    return {
+      sessionId: session.id,
+      groupId: session.groupId,
+      project: session.project,
+      lease: session.memoryEntrySyncRenderLease || null,
+      historyCount: Array.isArray(session.memoryEntrySyncRenderLeaseHistory) ? session.memoryEntrySyncRenderLeaseHistory.length : 0,
+      takeoverCount: Number(session.memoryEntrySyncRenderLeaseTakeoverCount || 0),
+      maxFencingToken: Number(session.memoryEntrySyncRenderFencingToken || 0),
+      contentionCount: Number(session.memoryEntrySyncRenderContentionCount || 0),
+      waitResolvedCount: Number(session.memoryEntrySyncRenderWaitResolvedCount || 0),
+      waitTimeoutCount: Number(session.memoryEntrySyncRenderWaitTimeoutCount || 0),
+      sameProcessConflictCount: Number(session.memoryEntrySyncRenderSameProcessConflictCount || 0),
+      waitTotalMs: Number(session.memoryEntrySyncRenderWaitTotalMs || 0),
+      lastContention,
+      lastContentionValid: lastContentionVerification.valid,
+      lastContentionIssues: lastContentionVerification.issues,
+    };
+  });
   const rows: any[] = [];
   const referencedFileKeys = new Set<string>();
   const referencedSnapshotIds = new Set<string>();
@@ -2327,10 +4011,98 @@ export function buildTaskAgentMemoryContextSnapshotInventory(filter: {
   for (const row of rows) {
     const groupId = row.groupId || "unknown";
     const current = byGroup.get(groupId) || { groupId, snapshotCount: 0, okCount: 0, warnCount: 0, failCount: 0, prunableCount: 0, staleCount: 0, deliveredCount: 0, deliveryMissingCount: 0, deliveryFailedCount: 0, compactHeadFenceRequiredCount: 0, compactHeadFenceValidCount: 0, compactHeadFenceStaleCount: 0, sessionLifecycleFenceRequiredCount: 0, sessionLifecycleFenceValidCount: 0, sessionLifecycleFenceStaleCount: 0, postTurnSummaryCapsuleCount: 0, postTurnSummaryCapsuleValidCount: 0, postTurnSummaryCapsuleMissingCount: 0, postTurnSummaryCapsuleInvalidCount: 0, postTurnSummaryCapsulePromptBoundCount: 0, postTurnSummaryCapsuleCompactEpochMismatchCount: 0, postTurnSummaryCapsuleLedgerHeadMismatchCount: 0, invocationEdgeCount: 0, invocationLineageBoundCount: 0, invocationLedgerMissingCount: 0, finalDispatchGateReadyCount: 0, finalDispatchGateBlockedCount: 0, finalDispatchGateMissingCount: 0, finalDispatchGateInvalidCount: 0, finalDispatchPromptBoundCount: 0, finalDispatchLineageProofCount: 0, finalDispatchReactiveCompactRecoveredCount: 0, finalDispatchReactiveCompactBlockedCount: 0, finalDispatchReactiveCompactInvalidCount: 0, finalDispatchReactiveCompactCircuitOpenCount: 0, finalDispatchReactiveCompactCircuitFailureCount: 0, finalDispatchReactiveCompactCircuitInvalidCount: 0, invocationBranchIds: new Set<string>(), projects: new Set<string>() };
+    current.memorySnapshotSyncInitializeCount = Number(current.memorySnapshotSyncInitializeCount || 0);
+    current.memorySnapshotSyncPromptUpdateCount = Number(current.memorySnapshotSyncPromptUpdateCount || 0);
+    current.memorySnapshotSyncUnchangedCount = Number(current.memorySnapshotSyncUnchangedCount || 0);
+    current.memorySnapshotSyncInvalidCount = Number(current.memorySnapshotSyncInvalidCount || 0);
+    current.memorySnapshotSyncLegacyCount = Number(current.memorySnapshotSyncLegacyCount || 0);
+    current.memorySnapshotSyncCommittedCount = Number(current.memorySnapshotSyncCommittedCount || 0);
+    current.memorySnapshotSyncCommitPendingCount = Number(current.memorySnapshotSyncCommitPendingCount || 0);
+    current.memorySnapshotSyncCommitRejectedCount = Number(current.memorySnapshotSyncCommitRejectedCount || 0);
+    current.memorySnapshotSyncCommitInvalidCount = Number(current.memorySnapshotSyncCommitInvalidCount || 0);
+    current.memorySnapshotSyncLateFailurePreservedCount = Number(current.memorySnapshotSyncLateFailurePreservedCount || 0);
+    current.memoryEntrySyncFullCount = Number(current.memoryEntrySyncFullCount || 0);
+    current.memoryEntrySyncDeltaCount = Number(current.memoryEntrySyncDeltaCount || 0);
+    current.memoryEntrySyncContinuationCount = Number(current.memoryEntrySyncContinuationCount || 0);
+    current.memoryEntrySyncInvalidCount = Number(current.memoryEntrySyncInvalidCount || 0);
+    current.memoryEntryChangedCount = Number(current.memoryEntryChangedCount || 0);
+    current.memoryEntryRemovedCount = Number(current.memoryEntryRemovedCount || 0);
+    current.memoryPromptInjectionProofCount = Number(current.memoryPromptInjectionProofCount || 0);
+    current.memoryPromptInjectionEnforcedCount = Number(current.memoryPromptInjectionEnforcedCount || 0);
+    current.memoryPromptInjectionPromptBoundCount = Number(current.memoryPromptInjectionPromptBoundCount || 0);
+    current.memoryPromptInjectionMissingCount = Number(current.memoryPromptInjectionMissingCount || 0);
+    current.memoryPromptInjectionInvalidCount = Number(current.memoryPromptInjectionInvalidCount || 0);
+    current.memoryTrustedEnvelopeRequiredCount = Number(current.memoryTrustedEnvelopeRequiredCount || 0);
+    current.memoryTrustedEnvelopeValidCount = Number(current.memoryTrustedEnvelopeValidCount || 0);
+    current.memoryTrustedEnvelopeUnverifiedCount = Number(current.memoryTrustedEnvelopeUnverifiedCount || 0);
+    current.memoryContinuationBaselineRequiredCount = Number(current.memoryContinuationBaselineRequiredCount || 0);
+    current.memoryContinuationBaselineValidCount = Number(current.memoryContinuationBaselineValidCount || 0);
+    current.memoryContinuationBaselineUnverifiedCount = Number(current.memoryContinuationBaselineUnverifiedCount || 0);
+    current.providerMemoryChannelRequiredCount = Number(current.providerMemoryChannelRequiredCount || 0);
+    current.providerMemoryAcknowledgementRequiredCount = Number(current.providerMemoryAcknowledgementRequiredCount || 0);
+    current.providerMemoryAcknowledgedCount = Number(current.providerMemoryAcknowledgedCount || 0);
+    current.providerMemoryAcknowledgementUnverifiedCount = Number(current.providerMemoryAcknowledgementUnverifiedCount || 0);
+    current.providerMemoryStructuredAcknowledgedCount = Number(current.providerMemoryStructuredAcknowledgedCount || 0);
+    current.providerMemoryExitSuccessAcknowledgedCount = Number(current.providerMemoryExitSuccessAcknowledgedCount || 0);
+    current.providerMemoryNativeSystemCount = Number(current.providerMemoryNativeSystemCount || 0);
+    current.providerMemoryNativeDeveloperCount = Number(current.providerMemoryNativeDeveloperCount || 0);
+    current.providerMemoryUserFallbackCount = Number(current.providerMemoryUserFallbackCount || 0);
+    current.providerMemoryChannelUnverifiedCount = Number(current.providerMemoryChannelUnverifiedCount || 0);
+    current.memoryContextConsumptionReceiptRequiredCount = Number(current.memoryContextConsumptionReceiptRequiredCount || 0);
+    current.memoryContextConsumptionReceiptValidCount = Number(current.memoryContextConsumptionReceiptValidCount || 0);
+    current.memoryContextConsumptionReceiptMissingCount = Number(current.memoryContextConsumptionReceiptMissingCount || 0);
+    current.memoryContextConsumptionRecoveryCount = Number(current.memoryContextConsumptionRecoveryCount || 0);
+    current.memoryContextConsumptionRecoveredCount = Number(current.memoryContextConsumptionRecoveredCount || 0);
+    current.memoryContextConsumptionRecoveryBlockedCount = Number(current.memoryContextConsumptionRecoveryBlockedCount || 0);
+    current.memoryContextConsumptionRecoveryInvalidCount = Number(current.memoryContextConsumptionRecoveryInvalidCount || 0);
     current.snapshotCount += 1;
     if (row.status === "ok") current.okCount += 1;
     if (row.status === "warn") current.warnCount += 1;
     if (row.status === "fail") current.failCount += 1;
+    if (row.memorySnapshotSyncAction === "initialize" && row.memorySnapshotSyncValid) current.memorySnapshotSyncInitializeCount += 1;
+    if (row.memorySnapshotSyncAction === "prompt_update" && row.memorySnapshotSyncValid) current.memorySnapshotSyncPromptUpdateCount += 1;
+    if (row.memorySnapshotSyncAction === "none" && row.memorySnapshotSyncValid) current.memorySnapshotSyncUnchangedCount += 1;
+    if (row.memorySnapshotSyncPresent && !row.memorySnapshotSyncValid) current.memorySnapshotSyncInvalidCount += 1;
+    if (!row.memorySnapshotSyncPresent) current.memorySnapshotSyncLegacyCount += 1;
+    if (row.memorySnapshotSyncCommitted) current.memorySnapshotSyncCommittedCount += 1;
+    if (row.memorySnapshotSyncPresent && !row.memorySnapshotSyncCommitPresent) current.memorySnapshotSyncCommitPendingCount += 1;
+    if (row.memorySnapshotSyncCommitValid && row.memorySnapshotSyncCommitStatus === "rejected") current.memorySnapshotSyncCommitRejectedCount += 1;
+    if (row.memorySnapshotSyncCommitPresent && !row.memorySnapshotSyncCommitValid) current.memorySnapshotSyncCommitInvalidCount += 1;
+    if (row.memorySnapshotSyncLateFailurePreserved) current.memorySnapshotSyncLateFailurePreservedCount += 1;
+    if (row.memoryEntrySyncValid && row.memoryEntrySyncMode === "full") current.memoryEntrySyncFullCount += 1;
+    if (row.memoryEntrySyncValid && row.memoryEntrySyncMode === "delta") current.memoryEntrySyncDeltaCount += 1;
+    if (row.memoryEntrySyncValid && row.memoryEntrySyncMode === "continuation") current.memoryEntrySyncContinuationCount += 1;
+    if (row.memoryEntrySyncPresent && !row.memoryEntrySyncValid) current.memoryEntrySyncInvalidCount += 1;
+    current.memoryEntryChangedCount += Number(row.memoryEntryChangedCount || 0);
+    current.memoryEntryRemovedCount += Number(row.memoryEntryRemovedCount || 0);
+    if (row.memoryPromptInjectionProofPresent) current.memoryPromptInjectionProofCount += 1;
+    if (row.memoryPromptInjectionEnforced) current.memoryPromptInjectionEnforcedCount += 1;
+    if (row.memoryPromptInjectionPromptBound) current.memoryPromptInjectionPromptBoundCount += 1;
+    if (!row.memoryPromptInjectionProofPresent) current.memoryPromptInjectionMissingCount += 1;
+    if (row.memoryPromptInjectionProofPresent && !row.memoryPromptInjectionProofValid) current.memoryPromptInjectionInvalidCount += 1;
+    if (row.memoryTrustedEnvelopeRequired) current.memoryTrustedEnvelopeRequiredCount += 1;
+    if (row.memoryTrustedEnvelopeRequired && row.memoryTrustedEnvelopeValid && row.memoryTrustedEnvelopeBound) current.memoryTrustedEnvelopeValidCount += 1;
+    if (row.memoryTrustedEnvelopeRequired && row.memoryPromptInjectionRequired && (!row.memoryTrustedEnvelopeValid || !row.memoryTrustedEnvelopeBound)) current.memoryTrustedEnvelopeUnverifiedCount += 1;
+    if (row.memoryContinuationBaselineRequired) current.memoryContinuationBaselineRequiredCount += 1;
+    if (row.memoryContinuationBaselineRequired && row.memoryContinuationBaselineValid) current.memoryContinuationBaselineValidCount += 1;
+    if (row.memoryContinuationBaselineRequired && !row.memoryContinuationBaselineValid) current.memoryContinuationBaselineUnverifiedCount += 1;
+    if (row.providerMemoryChannelRequired) current.providerMemoryChannelRequiredCount += 1;
+    if (row.providerMemoryChannelAcknowledgementRequired) current.providerMemoryAcknowledgementRequiredCount += 1;
+    if (row.providerMemoryChannelAcknowledgementRequired && row.providerMemoryChannelAcknowledged) current.providerMemoryAcknowledgedCount += 1;
+    if (row.providerMemoryChannelAcknowledgementRequired && !row.providerMemoryChannelAcknowledged) current.providerMemoryAcknowledgementUnverifiedCount += 1;
+    if (row.providerMemoryChannelAcknowledged && ["structured_thread_started", "structured_session_event"].includes(row.providerMemoryChannelAcknowledgementPolicy)) current.providerMemoryStructuredAcknowledgedCount += 1;
+    if (row.providerMemoryChannelAcknowledged && row.providerMemoryChannelAcknowledgementPolicy === "process_exit_success") current.providerMemoryExitSuccessAcknowledgedCount += 1;
+    if (row.providerMemoryChannelRequired && row.providerMemoryChannelValid && row.providerMemoryNativeSystemPrompt) current.providerMemoryNativeSystemCount += 1;
+    if (row.providerMemoryChannelRequired && row.providerMemoryChannelValid && row.providerMemoryNativeDeveloperInstructions) current.providerMemoryNativeDeveloperCount += 1;
+    if (row.providerMemoryChannelRequired && row.providerMemoryChannelValid && row.providerMemoryUserPromptFallback) current.providerMemoryUserFallbackCount += 1;
+    if (row.providerMemoryChannelRequired && !row.providerMemoryChannelValid) current.providerMemoryChannelUnverifiedCount += 1;
+    if (row.memoryContextConsumptionReceiptRequired) current.memoryContextConsumptionReceiptRequiredCount += 1;
+    if (row.memoryContextConsumptionReceiptRequired && row.memoryContextConsumptionReceiptValid) current.memoryContextConsumptionReceiptValidCount += 1;
+    if (row.memoryContextConsumptionReceiptRequired && !row.memoryContextConsumptionReceiptValid) current.memoryContextConsumptionReceiptMissingCount += 1;
+    if (row.memoryContextConsumptionRecoveryPresent) current.memoryContextConsumptionRecoveryCount += 1;
+    if (row.memoryContextConsumptionRecoveryPresent && row.memoryContextConsumptionRecoveryValid && row.memoryContextConsumptionRecoveryStatus === "recovered") current.memoryContextConsumptionRecoveredCount += 1;
+    if (row.memoryContextConsumptionRecoveryStatus === "blocked") current.memoryContextConsumptionRecoveryBlockedCount += 1;
+    if (row.memoryContextConsumptionRecoveryPresent && !row.memoryContextConsumptionRecoveryValid) current.memoryContextConsumptionRecoveryInvalidCount += 1;
     if (row.prunable) current.prunableCount += 1;
     if (row.stale) current.staleCount += 1;
     if (row.memoryContextDelivered) current.deliveredCount += 1;
@@ -2368,6 +4140,40 @@ export function buildTaskAgentMemoryContextSnapshotInventory(filter: {
     if (row.project) current.projects.add(row.project);
     byGroup.set(groupId, current);
   }
+  for (const row of memoryEntryRenderLeases) {
+    const groupId = row.groupId || "unknown";
+    const current = byGroup.get(groupId) || {
+      groupId,
+      snapshotCount: 0,
+      okCount: 0,
+      warnCount: 0,
+      failCount: 0,
+      prunableCount: 0,
+      staleCount: 0,
+      invocationBranchIds: new Set<string>(),
+      projects: new Set<string>(),
+    };
+    const leaseActive = row.lease?.status === "prepared"
+      && Date.parse(String(row.lease?.expires_at || "")) > nowMs
+      && processIsAlive(Number(row.lease?.owner_pid || 0));
+    current.memoryEntryRenderLeasePreparedCount = Number(current.memoryEntryRenderLeasePreparedCount || 0) + (row.lease?.status === "prepared" ? 1 : 0);
+    current.memoryEntryRenderLeaseActiveCount = Number(current.memoryEntryRenderLeaseActiveCount || 0) + (leaseActive ? 1 : 0);
+    current.memoryEntryRenderLeaseBoundCount = Number(current.memoryEntryRenderLeaseBoundCount || 0) + (row.lease?.status === "bound" ? 1 : 0);
+    current.memoryEntryRenderLeaseRejectedCount = Number(current.memoryEntryRenderLeaseRejectedCount || 0) + (row.lease?.status === "rejected" ? 1 : 0);
+    current.memoryEntryRenderLeaseStaleCount = Number(current.memoryEntryRenderLeaseStaleCount || 0) + (row.lease?.status === "prepared" && !leaseActive ? 1 : 0);
+    current.memoryEntryRenderLeaseTakeoverCount = Number(current.memoryEntryRenderLeaseTakeoverCount || 0) + row.takeoverCount;
+    current.memoryEntryRenderLeaseHistoryCount = Number(current.memoryEntryRenderLeaseHistoryCount || 0) + row.historyCount;
+    current.memoryEntryRenderLeaseMaxFencingToken = Math.max(Number(current.memoryEntryRenderLeaseMaxFencingToken || 0), row.maxFencingToken);
+    current.memoryEntryRenderContentionCount = Number(current.memoryEntryRenderContentionCount || 0) + row.contentionCount;
+    current.memoryEntryRenderWaitResolvedCount = Number(current.memoryEntryRenderWaitResolvedCount || 0) + row.waitResolvedCount;
+    current.memoryEntryRenderWaitTimeoutCount = Number(current.memoryEntryRenderWaitTimeoutCount || 0) + row.waitTimeoutCount;
+    current.memoryEntryRenderSameProcessConflictCount = Number(current.memoryEntryRenderSameProcessConflictCount || 0) + row.sameProcessConflictCount;
+    current.memoryEntryRenderWaitTotalMs = Number(current.memoryEntryRenderWaitTotalMs || 0) + row.waitTotalMs;
+    current.memoryEntryRenderContentionReceiptValidCount = Number(current.memoryEntryRenderContentionReceiptValidCount || 0) + (row.lastContention && row.lastContentionValid ? 1 : 0);
+    current.memoryEntryRenderContentionReceiptInvalidCount = Number(current.memoryEntryRenderContentionReceiptInvalidCount || 0) + (row.lastContention && !row.lastContentionValid ? 1 : 0);
+    if (row.project) current.projects.add(row.project);
+    byGroup.set(groupId, current);
+  }
   const groups = Array.from(byGroup.values()).map(group => ({
     ...group,
     invocationBranchCount: group.invocationBranchIds.size,
@@ -2401,6 +4207,66 @@ export function buildTaskAgentMemoryContextSnapshotInventory(filter: {
       missingPacketCount: rows.filter(row => row.readable && !row.workerContextPacketId).length,
       missingGateCount: rows.filter(row => row.readable && !row.gateCount).length,
       groupSessionBoundCount: rows.filter(row => !!row.groupSessionScopeId).length,
+      memorySnapshotSyncInitializeCount: rows.filter(row => row.memorySnapshotSyncAction === "initialize" && row.memorySnapshotSyncValid).length,
+      memorySnapshotSyncPromptUpdateCount: rows.filter(row => row.memorySnapshotSyncAction === "prompt_update" && row.memorySnapshotSyncValid).length,
+      memorySnapshotSyncUnchangedCount: rows.filter(row => row.memorySnapshotSyncAction === "none" && row.memorySnapshotSyncValid).length,
+      memorySnapshotSyncInvalidCount: rows.filter(row => row.memorySnapshotSyncPresent && !row.memorySnapshotSyncValid).length,
+      memorySnapshotSyncLegacyCount: rows.filter(row => !row.memorySnapshotSyncPresent).length,
+      memorySnapshotSyncCommittedCount: rows.filter(row => row.memorySnapshotSyncCommitted).length,
+      memorySnapshotSyncCommitPendingCount: rows.filter(row => row.memorySnapshotSyncPresent && !row.memorySnapshotSyncCommitPresent).length,
+      memorySnapshotSyncCommitRejectedCount: rows.filter(row => row.memorySnapshotSyncCommitValid && row.memorySnapshotSyncCommitStatus === "rejected").length,
+      memorySnapshotSyncCommitInvalidCount: rows.filter(row => row.memorySnapshotSyncCommitPresent && !row.memorySnapshotSyncCommitValid).length,
+      memorySnapshotSyncLateFailurePreservedCount: rows.filter(row => row.memorySnapshotSyncLateFailurePreserved).length,
+      memoryEntrySyncFullCount: rows.filter(row => row.memoryEntrySyncValid && row.memoryEntrySyncMode === "full").length,
+      memoryEntrySyncDeltaCount: rows.filter(row => row.memoryEntrySyncValid && row.memoryEntrySyncMode === "delta").length,
+      memoryEntrySyncContinuationCount: rows.filter(row => row.memoryEntrySyncValid && row.memoryEntrySyncMode === "continuation").length,
+      memoryEntrySyncInvalidCount: rows.filter(row => row.memoryEntrySyncPresent && !row.memoryEntrySyncValid).length,
+      memoryEntrySyncLegacyCount: rows.filter(row => !row.memoryEntrySyncPresent).length,
+      memoryEntryChangedCount: rows.reduce((sum, row) => sum + Number(row.memoryEntryChangedCount || 0), 0),
+      memoryEntryRemovedCount: rows.reduce((sum, row) => sum + Number(row.memoryEntryRemovedCount || 0), 0),
+      memoryEntryRenderLeasePreparedCount: memoryEntryRenderLeases.filter(row => row.lease?.status === "prepared").length,
+      memoryEntryRenderLeaseActiveCount: memoryEntryRenderLeases.filter(row => row.lease?.status === "prepared" && Date.parse(String(row.lease?.expires_at || "")) > nowMs && processIsAlive(Number(row.lease?.owner_pid || 0))).length,
+      memoryEntryRenderLeaseBoundCount: memoryEntryRenderLeases.filter(row => row.lease?.status === "bound").length,
+      memoryEntryRenderLeaseRejectedCount: memoryEntryRenderLeases.filter(row => row.lease?.status === "rejected").length,
+      memoryEntryRenderLeaseStaleCount: memoryEntryRenderLeases.filter(row => row.lease?.status === "prepared" && !(Date.parse(String(row.lease?.expires_at || "")) > nowMs && processIsAlive(Number(row.lease?.owner_pid || 0)))).length,
+      memoryEntryRenderLeaseTakeoverCount: memoryEntryRenderLeases.reduce((sum, row) => sum + row.takeoverCount, 0),
+      memoryEntryRenderLeaseHistoryCount: memoryEntryRenderLeases.reduce((sum, row) => sum + row.historyCount, 0),
+      memoryEntryRenderLeaseMaxFencingToken: Math.max(0, ...memoryEntryRenderLeases.map(row => row.maxFencingToken)),
+      memoryEntryRenderContentionCount: memoryEntryRenderLeases.reduce((sum, row) => sum + row.contentionCount, 0),
+      memoryEntryRenderWaitResolvedCount: memoryEntryRenderLeases.reduce((sum, row) => sum + row.waitResolvedCount, 0),
+      memoryEntryRenderWaitTimeoutCount: memoryEntryRenderLeases.reduce((sum, row) => sum + row.waitTimeoutCount, 0),
+      memoryEntryRenderSameProcessConflictCount: memoryEntryRenderLeases.reduce((sum, row) => sum + row.sameProcessConflictCount, 0),
+      memoryEntryRenderWaitTotalMs: memoryEntryRenderLeases.reduce((sum, row) => sum + row.waitTotalMs, 0),
+      memoryEntryRenderContentionReceiptValidCount: memoryEntryRenderLeases.filter(row => row.lastContention && row.lastContentionValid).length,
+      memoryEntryRenderContentionReceiptInvalidCount: memoryEntryRenderLeases.filter(row => row.lastContention && !row.lastContentionValid).length,
+      memoryPromptInjectionProofCount: rows.filter(row => row.memoryPromptInjectionProofPresent).length,
+      memoryPromptInjectionEnforcedCount: rows.filter(row => row.memoryPromptInjectionEnforced).length,
+      memoryPromptInjectionPromptBoundCount: rows.filter(row => row.memoryPromptInjectionPromptBound).length,
+      memoryPromptInjectionMissingCount: rows.filter(row => !row.memoryPromptInjectionProofPresent).length,
+      memoryPromptInjectionInvalidCount: rows.filter(row => row.memoryPromptInjectionProofPresent && !row.memoryPromptInjectionProofValid).length,
+      memoryTrustedEnvelopeRequiredCount: rows.filter(row => row.memoryTrustedEnvelopeRequired).length,
+      memoryTrustedEnvelopeValidCount: rows.filter(row => row.memoryTrustedEnvelopeRequired && row.memoryTrustedEnvelopeValid && row.memoryTrustedEnvelopeBound).length,
+      memoryTrustedEnvelopeUnverifiedCount: rows.filter(row => row.memoryTrustedEnvelopeRequired && row.memoryPromptInjectionRequired && (!row.memoryTrustedEnvelopeValid || !row.memoryTrustedEnvelopeBound)).length,
+      memoryContinuationBaselineRequiredCount: rows.filter(row => row.memoryContinuationBaselineRequired).length,
+      memoryContinuationBaselineValidCount: rows.filter(row => row.memoryContinuationBaselineRequired && row.memoryContinuationBaselineValid).length,
+      memoryContinuationBaselineUnverifiedCount: rows.filter(row => row.memoryContinuationBaselineRequired && !row.memoryContinuationBaselineValid).length,
+      providerMemoryChannelRequiredCount: rows.filter(row => row.providerMemoryChannelRequired).length,
+      providerMemoryAcknowledgementRequiredCount: rows.filter(row => row.providerMemoryChannelAcknowledgementRequired).length,
+      providerMemoryAcknowledgedCount: rows.filter(row => row.providerMemoryChannelAcknowledgementRequired && row.providerMemoryChannelAcknowledged).length,
+      providerMemoryAcknowledgementUnverifiedCount: rows.filter(row => row.providerMemoryChannelAcknowledgementRequired && !row.providerMemoryChannelAcknowledged).length,
+      providerMemoryStructuredAcknowledgedCount: rows.filter(row => row.providerMemoryChannelAcknowledged && ["structured_thread_started", "structured_session_event"].includes(row.providerMemoryChannelAcknowledgementPolicy)).length,
+      providerMemoryExitSuccessAcknowledgedCount: rows.filter(row => row.providerMemoryChannelAcknowledged && row.providerMemoryChannelAcknowledgementPolicy === "process_exit_success").length,
+      providerMemoryNativeSystemCount: rows.filter(row => row.providerMemoryChannelRequired && row.providerMemoryChannelValid && row.providerMemoryNativeSystemPrompt).length,
+      providerMemoryNativeDeveloperCount: rows.filter(row => row.providerMemoryChannelRequired && row.providerMemoryChannelValid && row.providerMemoryNativeDeveloperInstructions).length,
+      providerMemoryUserFallbackCount: rows.filter(row => row.providerMemoryChannelRequired && row.providerMemoryChannelValid && row.providerMemoryUserPromptFallback).length,
+      providerMemoryChannelUnverifiedCount: rows.filter(row => row.providerMemoryChannelRequired && !row.providerMemoryChannelValid).length,
+      memoryContextConsumptionReceiptRequiredCount: rows.filter(row => row.memoryContextConsumptionReceiptRequired).length,
+      memoryContextConsumptionReceiptValidCount: rows.filter(row => row.memoryContextConsumptionReceiptRequired && row.memoryContextConsumptionReceiptValid).length,
+      memoryContextConsumptionReceiptMissingCount: rows.filter(row => row.memoryContextConsumptionReceiptRequired && !row.memoryContextConsumptionReceiptValid).length,
+      memoryContextConsumptionRecoveryCount: rows.filter(row => row.memoryContextConsumptionRecoveryPresent).length,
+      memoryContextConsumptionRecoveredCount: rows.filter(row => row.memoryContextConsumptionRecoveryPresent && row.memoryContextConsumptionRecoveryValid && row.memoryContextConsumptionRecoveryStatus === "recovered").length,
+      memoryContextConsumptionRecoveryBlockedCount: rows.filter(row => row.memoryContextConsumptionRecoveryStatus === "blocked").length,
+      memoryContextConsumptionRecoveryInvalidCount: rows.filter(row => row.memoryContextConsumptionRecoveryPresent && !row.memoryContextConsumptionRecoveryValid).length,
       deliveredCount: rows.filter(row => row.memoryContextDelivered).length,
       deliveryMissingCount: rows.filter(row => !row.deliveryReceiptId).length,
       deliveryFailedCount: rows.filter(row => row.deliveryReceiptId && !row.memoryContextDelivered).length,
@@ -2457,15 +4323,21 @@ export function pruneTaskAgentMemoryContextSnapshots(options: any = {}) {
   const candidates = (inventory.prunableRows || []).filter((row: any) => row.fileExists && row.snapshotFile && pathIsInsideMemorySnapshotDir(row.snapshotFile));
   const pruned: any[] = [];
   const skipped: any[] = [];
+  const prunedMemoryReceiptChallengeIds = new Set<string>();
   for (const row of candidates) {
     if (dryRun) {
-      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, deliveryReceiptFile: row.deliveryReceiptFile || "", sessionId: row.sessionId, dryRun: true, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
+      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, deliveryReceiptFile: row.deliveryReceiptFile || "", latestDeliveryAttemptReceiptFile: row.latestDeliveryAttemptReceiptFile || "", syncCommitFile: row.memorySnapshotSyncCommitPath || "", sessionId: row.sessionId, dryRun: true, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
       continue;
     }
     try {
+      if (/^mcrc_[a-f0-9]{28}$/.test(String(row.memoryContextConsumptionChallengeId || ""))) {
+        prunedMemoryReceiptChallengeIds.add(String(row.memoryContextConsumptionChallengeId));
+      }
       fs.rmSync(row.snapshotFile, { force: true });
       if (row.deliveryReceiptFile && pathIsInsideMemorySnapshotDir(row.deliveryReceiptFile)) fs.rmSync(row.deliveryReceiptFile, { force: true });
-      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, deliveryReceiptFile: row.deliveryReceiptFile || "", sessionId: row.sessionId, dryRun: false, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
+      if (row.latestDeliveryAttemptReceiptFile && pathIsInsideMemorySnapshotDir(row.latestDeliveryAttemptReceiptFile)) fs.rmSync(row.latestDeliveryAttemptReceiptFile, { force: true });
+      if (row.memorySnapshotSyncCommitPath && pathIsInsideMemorySnapshotDir(row.memorySnapshotSyncCommitPath)) fs.rmSync(row.memorySnapshotSyncCommitPath, { force: true });
+      pruned.push({ snapshotId: row.snapshotId, snapshotFile: row.snapshotFile, deliveryReceiptFile: row.deliveryReceiptFile || "", latestDeliveryAttemptReceiptFile: row.latestDeliveryAttemptReceiptFile || "", syncCommitFile: row.memorySnapshotSyncCommitPath || "", sessionId: row.sessionId, dryRun: false, reason: row.source === "orphan_file" ? "orphan_file" : "retention_expired" });
       try {
         const dir = path.dirname(row.snapshotFile);
         if (pathIsInsideMemorySnapshotDir(dir) && fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
@@ -2500,11 +4372,22 @@ export function pruneTaskAgentMemoryContextSnapshots(options: any = {}) {
           memoryContextDeliveryReceiptChecksum: latest?.deliveryReceiptChecksum || "",
           memoryContextDeliveryStatus: latest?.deliveryStatus || "",
           memoryContextDeliveredAt: latest?.deliveredAt || "",
+          latestMemoryContextDeliveryAttemptReceiptId: latest?.latestDeliveryAttemptReceiptId || "",
+          latestMemoryContextDeliveryAttemptReceiptPath: latest?.latestDeliveryAttemptReceiptPath || "",
+          latestMemoryContextDeliveryAttemptReceiptChecksum: latest?.latestDeliveryAttemptReceiptChecksum || "",
+          latestMemoryContextDeliveryAttemptStatus: latest?.latestDeliveryAttemptStatus || "",
+          latestMemoryContextDeliveryAttemptAt: latest?.latestDeliveryAttemptAt || "",
+          memorySnapshotSyncCommitPath: latest?.memorySnapshotSyncCommitPath || "",
+          memorySnapshotSyncCommitChecksum: latest?.memorySnapshotSyncCommitChecksum || "",
+          memorySnapshotSyncCommitStatus: latest?.memorySnapshotSyncCommitStatus || "",
+          memorySnapshotSyncCommittedAt: latest?.memorySnapshotSyncCommittedAt || "",
           memoryContextSnapshots: refs,
         };
       });
       saveStore(store);
     });
+    for (const challengeId of prunedMemoryReceiptChallengeIds) removeMemoryContextConsumptionReceiptIfUnreferenced(challengeId);
+    for (const challengeId of prunedMemoryReceiptChallengeIds) removeMemoryContextConsumptionRecoveryIfUnreferenced(challengeId);
   }
   return {
     schema: "ccm-task-agent-memory-context-snapshot-retention-result-v1",

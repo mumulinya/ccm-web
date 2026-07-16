@@ -18,6 +18,8 @@ export type TaskBoundInternalMcpInput = {
   workDir: string;
   baseWorkDir?: string;
   projects?: InternalMcpProjectBinding[];
+  memoryReceiptChallenge?: any;
+  memoryReceiptFile?: string;
 };
 
 export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInput) {
@@ -34,6 +36,8 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
     workDir: input.workDir,
     baseWorkDir: input.baseWorkDir || input.workDir,
     projects: input.projects || [],
+    memoryReceiptChallenge: input.memoryReceiptChallenge || null,
+    memoryReceiptFile: input.memoryReceiptFile || "",
   };
   const servers: Record<string, any> = {
     [TASK_RUNTIME_MCP_SERVER_NAME]: buildTaskRuntimeMcpServerConfig(context),

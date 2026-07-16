@@ -70,5 +70,8 @@ export declare function runPetGenerationContractSelfTest(): {
         generated_skin_targets_system_agents: boolean;
         reference_path_is_workspace_scoped: boolean;
         all_terminal_states_supported: boolean;
+        semantic_version_prefers_newer_runtime: boolean;
+        launch_command_preserves_ephemeral_full_access: boolean;
+        catalog_incompatibility_is_actionable: boolean;
     };
 };

@@ -7,4 +7,4 @@
 - [feishu](./feishu/)：飞书需求接入、任务通知和命名边界。
 - [requirements-and-attachments](./requirements-and-attachments/)：图片、文档、链接与附件需求解析。
 - [product-navigation](./product-navigation/)：页面下线、菜单调整与底层能力保留。
-
+- [data-storage](./data-storage/)：任务、任务日志和群聊日志的持久化、迁移、备份与恢复。

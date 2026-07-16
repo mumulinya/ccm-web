@@ -211,7 +211,7 @@ export function runInternalMcpRegistrySelfTest(packageRoot = findCcmPackageRoot(
   const feishu = configured.items.find((item: any) => item.name === FEISHU_INTERNAL_MCP);
   const workflowMcps = new Map([
     ["ccm__task_runtime", 5],
-    ["ccm__knowledge_context", 4],
+    ["ccm__knowledge_context", 5],
     ["ccm__test_acceptance", 6],
     ["ccm__delivery_workspace", 6],
     ["ccm__task_evidence", 4],
@@ -219,7 +219,7 @@ export function runInternalMcpRegistrySelfTest(packageRoot = findCcmPackageRoot(
   const workflowItems = [...workflowMcps].map(([name, tools]) => ({ item: configured.items.find((row: any) => row.name === name), name, tools }));
   const hiddenSecrets = !JSON.stringify(configured).includes("secret") && !JSON.stringify(configured).includes("cli_test");
   const checks = {
-    bundledCatalogDiscovered: configured.items.length === 7 && configured.summary.tools === 33,
+    bundledCatalogDiscovered: configured.items.length === 7 && configured.summary.tools === 34,
     coordinatorProtectedAndReady: coordinator?.protected === true && coordinator?.state === "ready" && coordinator?.tools?.length === 4,
     feishuBundledAndReady: feishu?.bundled === true && feishu?.state === "ready" && feishu?.tools?.length === 4,
     workflowMcpsProtectedAndReady: workflowItems.every(({ item, tools }) => item?.bundled === true && item?.protected === true && item?.immutable === true && item?.state === "ready" && item?.lifecycle === "task_scoped" && item?.tools?.length === tools),

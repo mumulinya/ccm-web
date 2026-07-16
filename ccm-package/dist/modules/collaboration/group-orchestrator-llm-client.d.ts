@@ -23,6 +23,8 @@ type LlmCallOptions = {
     api_microcompact_native_apply_plan?: any;
     apiMicrocompactNativeApplyTelemetry?: any;
     api_microcompact_native_apply_telemetry?: any;
+    promptCacheTracking?: any;
+    prompt_cache_tracking?: any;
     onUsage?: (usage: LlmTokenUsage) => void;
 };
 export declare function normalizeLlmTokenUsage(value: any, provider?: "openai" | "anthropic"): LlmTokenUsage;

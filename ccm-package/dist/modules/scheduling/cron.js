@@ -48,6 +48,7 @@ const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
 const utils_2 = require("../../core/utils");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
+const live_provider_memory_endurance_1 = require("../../integrations/live-provider-memory-endurance");
 const collaboration_1 = require("../collaboration/collaboration");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const cron_job_store_1 = require("./cron-job-store");
@@ -1283,6 +1284,12 @@ async function tickCronScheduler(ctx) {
     catch (error) {
         console.error("[Cron][MemoryMaintenance]", error?.message || error);
     }
+    try {
+        (0, live_provider_memory_endurance_1.runLiveProviderMemoryEnduranceSchedulerTick)({ at: now.toISOString() });
+    }
+    catch (error) {
+        console.error("[Cron][MemoryEndurance]", error?.message || error);
+    }
 }
 function startCronScheduler(ctx) {
     if (schedulerTimer)
@@ -1326,6 +1333,7 @@ function schedulerStatus() {
             createdTaskCount: 0,
             createdApprovalReceiptCount: 0,
         },
+        live_provider_memory_endurance: (0, live_provider_memory_endurance_1.getLiveProviderMemoryEnduranceSchedulerStatus)(),
     };
 }
 function readJsonBody(req, onDone, onError) {

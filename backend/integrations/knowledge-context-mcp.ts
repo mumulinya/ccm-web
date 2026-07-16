@@ -13,6 +13,7 @@ import {
   runInternalMcpServer,
 } from "./internal-mcp-runtime";
 import { getBoundInternalMcpTask, internalMcpTaskPayload } from "./internal-mcp-task-store";
+import { recordMemoryContextConsumptionReceipt } from "./memory-context-consumption-receipt";
 
 export const KNOWLEDGE_CONTEXT_MCP_SERVER_NAME = "ccm__knowledge_context";
 
@@ -42,6 +43,22 @@ const tools: InternalMcpToolDefinition[] = [
     inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 100 } }, additionalProperties: false },
   },
 ];
+
+const memoryReceiptTool: InternalMcpToolDefinition = {
+  name: "acknowledge_memory_context",
+  description: "确认当前模型已加载本轮 CCM 受信记忆上下文。仅接受签名任务上下文中的一次性 challenge；此回执不代表采纳每条记忆。",
+  inputSchema: {
+    type: "object",
+    required: ["challenge_id"],
+    properties: { challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" } },
+    additionalProperties: false,
+  },
+  roles: ["project-child-agent"],
+};
+
+function toolsForContext(context: InternalMcpTaskContext) {
+  return context.memoryReceiptChallenge?.challenge_id ? [...tools, memoryReceiptTool] : tools;
+}
 
 let indexReady: Promise<any> | null = null;
 function ensureIndex() {
@@ -95,6 +112,9 @@ async function scopedSearch(context: InternalMcpTaskContext, query: string, limi
 }
 
 async function callTool(context: InternalMcpTaskContext, name: string, args: any) {
+  if (name === "acknowledge_memory_context") {
+    return { success: true, state: "loaded", receipt: recordMemoryContextConsumptionReceipt(context, args) };
+  }
   if (name === "get_project_context") {
     const task = getBoundInternalMcpTask(context);
     const focus = internalMcpTaskPayload.cleanText(args?.focus, 1200);
@@ -138,7 +158,7 @@ async function callTool(context: InternalMcpTaskContext, name: string, args: any
 }
 
 export function runKnowledgeContextMcpServer() {
-  runInternalMcpServer({ name: KNOWLEDGE_CONTEXT_MCP_SERVER_NAME, tools, callTool });
+  runInternalMcpServer({ name: KNOWLEDGE_CONTEXT_MCP_SERVER_NAME, tools: toolsForContext, callTool });
 }
 
 if (require.main === module) runKnowledgeContextMcpServer();

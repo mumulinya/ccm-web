@@ -230,5 +230,10 @@ try {
     lineage: lineageReport.overall,
   }, null, 2));
 } finally {
-  fs.rmSync(tempRoot, { recursive: true, force: true });
+  try {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  } catch (error) {
+    if (error?.code !== "EBUSY") throw error;
+    console.warn(`phase265 cleanup deferred because SQLite is still closing: ${error.path || tempRoot}`);
+  }
 }

@@ -1,0 +1,24 @@
+{
+  "schema": "ccm-group-typed-memory-distillation-transaction-state-v1",
+  "version": 1,
+  "groupId": "phase309-provider-ranking-memory-usage-group--gcs_phase309_b",
+  "status": "completed",
+  "mutationKind": "provider_ranking_memory_usage_repair",
+  "mutationKinds": [
+    "provider_ranking_memory_usage_repair"
+  ],
+  "lastMutationKind": "provider_ranking_memory_usage_repair",
+  "leaseId": "gtmdl_237c4d6b296af8fb9cfde7f6d862c25b",
+  "fencingToken": 1784072408783776,
+  "lastFencingToken": 1784072408783776,
+  "lastCommittedFencingToken": 1784072408783776,
+  "recoveredLeaseCount": 0,
+  "waitedMs": 0,
+  "writeCount": 1,
+  "startedAt": "2026-07-14T23:40:08.782Z",
+  "completedAt": "2026-07-14T23:40:08.896Z",
+  "failedAt": "",
+  "error": "",
+  "updatedAt": "2026-07-14T23:40:08.896Z",
+  "stateChecksum": "810adb66ae80320d5dc081d30a8e64a0e29db36b3cfcc1c7dd6a96e28f22cd95"
+}

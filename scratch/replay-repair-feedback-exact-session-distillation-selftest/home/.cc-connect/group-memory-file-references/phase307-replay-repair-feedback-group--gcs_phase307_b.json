@@ -1,0 +1,501 @@
+{
+  "schema": "ccm-group-compact-file-reference-ledger-v1",
+  "version": 1,
+  "groupId": "phase307-replay-repair-feedback-group--gcs_phase307_b",
+  "entries": [
+    {
+      "entry_id": "file-ref:aee28cb64c49e8",
+      "generated_at": "2026-07-14T23:40:09.731Z",
+      "scope": "child:api",
+      "target_project": "api",
+      "task_id": "provider-ranking-recall-b-e513fc8e73",
+      "trace_id": "",
+      "task_agent_session_id": "provider-ranking-task-session-b-e513fc8e73",
+      "native_session_id": "provider-ranking-native-session-b-e513fc8e73",
+      "session_binding": {
+        "schema": "ccm-child-agent-memory-session-binding-v1",
+        "binding_id": "csm:493807b313f4a2",
+        "group_id": "phase307-replay-repair-feedback-group",
+        "target_project": "api",
+        "task_id": "provider-ranking-recall-b-e513fc8e73",
+        "trace_id": "",
+        "execution_id": "provider-ranking-execution-b-e513fc8e73",
+        "parent_run_id": "",
+        "task_agent_session_id": "provider-ranking-task-session-b-e513fc8e73",
+        "native_session_id": "provider-ranking-native-session-b-e513fc8e73",
+        "agent_type": "",
+        "turn": 0,
+        "binding_required": true,
+        "scope": "child:api"
+      },
+      "task_query_hash": "ee324109c003",
+      "reference_count": 14,
+      "missing_count": 7,
+      "read_plan_count": 10,
+      "reference_fingerprint": "2438aa152c9b5779",
+      "references": [
+        {
+          "reference_id": "compact-file:9d75ed49387687",
+          "type": "group_session_memory",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-session-memory\\phase307-replay-repair-feedback-group--gcs_phase307_b\\summary.md",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:4e53121c0f0855",
+          "type": "group_session_memory_snapshot",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-session-memory\\phase307-replay-repair-feedback-group--gcs_phase307_b\\snapshot.json",
+          "checksum": "",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:2ded7e542e78a6",
+          "type": "tool_continuity_summary",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-tool-continuity\\phase307-replay-repair-feedback-group--gcs_phase307_b\\summary.md",
+          "checksum": "e6cd77da2b5330e61a127312",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:09f709cc9937b6",
+          "type": "tool_continuity_snapshot",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-tool-continuity\\phase307-replay-repair-feedback-group--gcs_phase307_b\\snapshot.json",
+          "checksum": "b28c94b2195c8ed259f0b415",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:b5d7ae559e6975",
+          "type": "typed_memory_index",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b\\MEMORY.md",
+          "checksum": "8a44a024ac593c75a4f0324f",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:d68a2ac2a574a1",
+          "type": "typed_memory_dir",
+          "kind": "directory",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b",
+          "checksum": "629a938b10a21fc38d9c0e61",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:3d739493914a3a",
+          "type": "group_memory_json",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-sessions\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+          "checksum": "9bf6ee4f14d7b2a689c24c63",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:bf75ac6597ad3b",
+          "type": "raw_group_messages_json",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-messages\\sessions\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:a81568fa82c46b",
+          "type": "global_agent_memory_json",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\global-agent-memory\\memory.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:b0afb488521515",
+          "type": "typed_memory_recall_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b\\.recall-ledger.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:b1bd2b76871b5f",
+          "type": "typed_memory_distillation_ledger",
+          "kind": "file",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b\\.distillation-ledger.json",
+          "checksum": "8fd3a69ec3142f48a47bfc5e",
+          "exists": true
+        },
+        {
+          "reference_id": "compact-file:bc783dc032e1e4",
+          "type": "post_compact_candidate_usage_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-post-compact-candidate-usage\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:501b5085a049d3",
+          "type": "post_compact_dispatch_ledger",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-post-compact-dispatch\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+          "checksum": "",
+          "exists": false
+        },
+        {
+          "reference_id": "compact-file:a2ffbf44327399",
+          "type": "replay_repair_work_items",
+          "kind": "missing",
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-replay-repair-work-items\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+          "checksum": "",
+          "exists": false
+        }
+      ],
+      "read_plan_entries": [
+        {
+          "read_plan_id": "cfr-read:b071d80c1fce",
+          "reference_id": "compact-file:b5d7ae559e6975",
+          "type": "typed_memory_index",
+          "action": "read_index_before_specific_memory_docs",
+          "priority": 30,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b\\MEMORY.md",
+          "exists": true,
+          "sourceChecksum": "8a44a024ac593c75a4f0324f",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409638,
+          "sourceBytes": 1306
+        },
+        {
+          "read_plan_id": "cfr-read:519343ca48d6",
+          "reference_id": "compact-file:d68a2ac2a574a1",
+          "type": "typed_memory_dir",
+          "action": "list_or_open_index_only",
+          "priority": 35,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b",
+          "exists": true,
+          "sourceChecksum": "629a938b10a21fc38d9c0e61",
+          "sourceChecksumMode": "directory_listing",
+          "sourceMtimeMs": 1784072409778,
+          "sourceBytes": 0
+        },
+        {
+          "read_plan_id": "cfr-read:84208c7bf18a",
+          "reference_id": "compact-file:3d739493914a3a",
+          "type": "group_memory_json",
+          "action": "read_for_structured_state",
+          "priority": 40,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-sessions\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+          "exists": true,
+          "sourceChecksum": "9bf6ee4f14d7b2a689c24c63",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409745,
+          "sourceBytes": 15961
+        },
+        {
+          "read_plan_id": "cfr-read:f403b38a6d65",
+          "reference_id": "compact-file:4e53121c0f0855",
+          "type": "group_session_memory_snapshot",
+          "action": "read_to_verify_summary_checksum",
+          "priority": 45,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-session-memory\\phase307-replay-repair-feedback-group--gcs_phase307_b\\snapshot.json",
+          "exists": true,
+          "sourceChecksum": "049323346fbc49035d5f9513",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409735,
+          "sourceBytes": 1651
+        },
+        {
+          "read_plan_id": "cfr-read:d41b08fff640",
+          "reference_id": "compact-file:2ded7e542e78a6",
+          "type": "tool_continuity_summary",
+          "action": "read_if_tool_or_skill_context_matters",
+          "priority": 50,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-tool-continuity\\phase307-replay-repair-feedback-group--gcs_phase307_b\\summary.md",
+          "exists": true,
+          "sourceChecksum": "e6cd77da2b5330e61a127312",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409739,
+          "sourceBytes": 571
+        },
+        {
+          "read_plan_id": "cfr-read:2d809cbef9c7",
+          "reference_id": "compact-file:09f709cc9937b6",
+          "type": "tool_continuity_snapshot",
+          "action": "read_to_verify_tool_context_only",
+          "priority": 55,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-tool-continuity\\phase307-replay-repair-feedback-group--gcs_phase307_b\\snapshot.json",
+          "exists": true,
+          "sourceChecksum": "9de5161b79fd99bbedb76dca",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072409741,
+          "sourceBytes": 2971
+        },
+        {
+          "read_plan_id": "cfr-read:4d49d227554c",
+          "reference_id": "compact-file:b1bd2b76871b5f",
+          "type": "typed_memory_distillation_ledger",
+          "action": "read_for_distillation_archive",
+          "priority": 75,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b\\.distillation-ledger.json",
+          "exists": true,
+          "sourceChecksum": "8fd3a69ec3142f48a47bfc5e",
+          "sourceChecksumMode": "full",
+          "sourceMtimeMs": 1784072408932,
+          "sourceBytes": 14964
+        },
+        {
+          "read_plan_id": "cfr-read:7d5f0a384884",
+          "reference_id": "compact-file:a81568fa82c46b",
+          "type": "global_agent_memory_json",
+          "action": "skip_missing",
+          "priority": 900,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\global-agent-memory\\memory.json",
+          "exists": false,
+          "sourceChecksum": "",
+          "sourceChecksumMode": "",
+          "sourceMtimeMs": 0,
+          "sourceBytes": 0
+        },
+        {
+          "read_plan_id": "cfr-read:fa932784e79b",
+          "reference_id": "compact-file:9d75ed49387687",
+          "type": "group_session_memory",
+          "action": "skip_missing",
+          "priority": 900,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-session-memory\\phase307-replay-repair-feedback-group--gcs_phase307_b\\summary.md",
+          "exists": false,
+          "sourceChecksum": "",
+          "sourceChecksumMode": "",
+          "sourceMtimeMs": 0,
+          "sourceBytes": 0
+        },
+        {
+          "read_plan_id": "cfr-read:dbd8121bdf66",
+          "reference_id": "compact-file:bc783dc032e1e4",
+          "type": "post_compact_candidate_usage_ledger",
+          "action": "skip_missing",
+          "priority": 900,
+          "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-post-compact-candidate-usage\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+          "exists": false,
+          "sourceChecksum": "",
+          "sourceChecksumMode": "",
+          "sourceMtimeMs": 0,
+          "sourceBytes": 0
+        }
+      ],
+      "read_plan_revalidation_gate": {
+        "schema": "ccm-group-compact-file-reference-read-plan-revalidation-gate-v1",
+        "version": 1,
+        "revalidation_gate_id": "cfr-rvg:dbd8729d193a1f",
+        "group_id": "phase307-replay-repair-feedback-group--gcs_phase307_b",
+        "target_project": "api",
+        "scope": "child:api",
+        "generated_at": "2026-07-14T23:40:09.731Z",
+        "status": "required",
+        "action": "re_read_changed_sources_before_using_compact_memory",
+        "required_count": 5,
+        "verification_count": 0,
+        "checked_count": 7,
+        "required_read_plan_ids": [
+          "cfr-read:519343ca48d6",
+          "cfr-read:84208c7bf18a",
+          "cfr-read:f403b38a6d65",
+          "cfr-read:d41b08fff640",
+          "cfr-read:2d809cbef9c7"
+        ],
+        "verification_read_plan_ids": [],
+        "required_entries": [
+          {
+            "read_plan_id": "cfr-read:519343ca48d6",
+            "reference_id": "compact-file:d68a2ac2a574a1",
+            "type": "typed_memory_dir",
+            "action": "list_or_open_index_only",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 35,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-md\\phase307-replay-repair-feedback-group--gcs_phase307_b",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/replay-repair-feedback-exact-session-distillation-selftest/home/.cc-connect/group-memory-md/phase307-replay-repair-feedback-group--gcs_phase307_b",
+            "freshness_status": "changed",
+            "changes": [
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "629a938b10a21fc38d9c0e61",
+              "checksumMode": "directory_listing",
+              "mtimeMs": 1784072409639,
+              "bytes": 0
+            },
+            "current": {
+              "checksum": "629a938b10a21fc38d9c0e61",
+              "checksumMode": "directory_listing",
+              "mtimeMs": 1784072409778,
+              "bytes": 0,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:84208c7bf18a",
+            "reference_id": "compact-file:3d739493914a3a",
+            "type": "group_memory_json",
+            "action": "read_for_structured_state",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 40,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-memory-sessions\\phase307-replay-repair-feedback-group\\gcs_phase307_b.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/replay-repair-feedback-exact-session-distillation-selftest/home/.cc-connect/group-memory-sessions/phase307-replay-repair-feedback-group/gcs_phase307_b.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "e5e22c86c75724b64577bf55",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409591,
+              "bytes": 15961
+            },
+            "current": {
+              "checksum": "9bf6ee4f14d7b2a689c24c63",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409745,
+              "bytes": 15961,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:f403b38a6d65",
+            "reference_id": "compact-file:4e53121c0f0855",
+            "type": "group_session_memory_snapshot",
+            "action": "read_to_verify_summary_checksum",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 45,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-session-memory\\phase307-replay-repair-feedback-group--gcs_phase307_b\\snapshot.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/replay-repair-feedback-exact-session-distillation-selftest/home/.cc-connect/group-session-memory/phase307-replay-repair-feedback-group--gcs_phase307_b/snapshot.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "5d3b6f94605754db6aa869e6",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409578,
+              "bytes": 1651
+            },
+            "current": {
+              "checksum": "049323346fbc49035d5f9513",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409735,
+              "bytes": 1651,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:d41b08fff640",
+            "reference_id": "compact-file:2ded7e542e78a6",
+            "type": "tool_continuity_summary",
+            "action": "read_if_tool_or_skill_context_matters",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 50,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-tool-continuity\\phase307-replay-repair-feedback-group--gcs_phase307_b\\summary.md",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/replay-repair-feedback-exact-session-distillation-selftest/home/.cc-connect/group-tool-continuity/phase307-replay-repair-feedback-group--gcs_phase307_b/summary.md",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "b40484625b78a64ff0d7a809",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409584,
+              "bytes": 571
+            },
+            "current": {
+              "checksum": "e6cd77da2b5330e61a127312",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409739,
+              "bytes": 571,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          },
+          {
+            "read_plan_id": "cfr-read:2d809cbef9c7",
+            "reference_id": "compact-file:09f709cc9937b6",
+            "type": "tool_continuity_snapshot",
+            "action": "read_to_verify_tool_context_only",
+            "revalidation_action": "must_re_read_current_source_before_use",
+            "priority": 55,
+            "path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\replay-repair-feedback-exact-session-distillation-selftest\\home\\.cc-connect\\group-tool-continuity\\phase307-replay-repair-feedback-group--gcs_phase307_b\\snapshot.json",
+            "displayPath": "C:/Users/admin/.cc-connect/ccm/scratch/replay-repair-feedback-exact-session-distillation-selftest/home/.cc-connect/group-tool-continuity/phase307-replay-repair-feedback-group--gcs_phase307_b/snapshot.json",
+            "freshness_status": "changed",
+            "changes": [
+              "checksum",
+              "mtimeMs"
+            ],
+            "expected": {
+              "checksum": "0a785c819cfab36ba1f6770e",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409587,
+              "bytes": 2971
+            },
+            "current": {
+              "checksum": "9de5161b79fd99bbedb76dca",
+              "checksumMode": "full",
+              "mtimeMs": 1784072409741,
+              "bytes": 2971,
+              "status": "present"
+            },
+            "reason": "read plan source changed after surfacing; re-read and verify current source before using this memory"
+          }
+        ],
+        "verification_entries": [],
+        "receipt_contract": {
+          "required_receipt_fields": [
+            "memoryUsed",
+            "memoryIgnored"
+          ],
+          "required_reference": "cfr-rvg:dbd8729d193a1f",
+          "required_read_plan_ids": [
+            "cfr-read:519343ca48d6",
+            "cfr-read:84208c7bf18a",
+            "cfr-read:f403b38a6d65",
+            "cfr-read:d41b08fff640",
+            "cfr-read:2d809cbef9c7"
+          ],
+          "required_task_agent_session_id": "provider-ranking-task-session-b-e513fc8e73",
+          "required_native_session_id": "provider-ranking-native-session-b-e513fc8e73",
+          "memory_used_must_reference_gate": true,
+          "memory_ignored_must_reference_gate": true,
+          "receipt_should_match_session": true,
+          "require_current_source_verification": true,
+          "required_receipt_signal": "read_plan_id plus re-read/current source verified, or memoryIgnored explaining the read_plan_id was not used",
+          "note": "changed read plan entries must be re-read from the current source before applying compact memory; the receipt must mention the read_plan_id and gate id."
+        },
+        "session_binding": {
+          "schema": "ccm-child-agent-memory-session-binding-v1",
+          "binding_id": "csm:493807b313f4a2",
+          "group_id": "phase307-replay-repair-feedback-group",
+          "target_project": "api",
+          "task_id": "provider-ranking-recall-b-e513fc8e73",
+          "trace_id": "",
+          "execution_id": "provider-ranking-execution-b-e513fc8e73",
+          "parent_run_id": "",
+          "task_agent_session_id": "provider-ranking-task-session-b-e513fc8e73",
+          "native_session_id": "provider-ranking-native-session-b-e513fc8e73",
+          "agent_type": "",
+          "turn": 0,
+          "binding_required": true,
+          "scope": "child:api"
+        }
+      }
+    }
+  ],
+  "stats": {
+    "entryCount": 1,
+    "latestReferenceCount": 14,
+    "latestMissingCount": 7,
+    "latestReadPlanCount": 10,
+    "targetProjects": [
+      "api"
+    ]
+  },
+  "updatedAt": "2026-07-14T23:40:09.731Z"
+}

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "trace_id": "conflict-resolution-memory-maintenance_mrlbb2qx_6c1dbec4b8be",
+  "created_at": "2026-07-14T23:58:35.437Z",
+  "events": [
+    {
+      "id": "op_0160150957d2dfd3:attempt:1",
+      "at": "2026-07-14T23:58:35.437Z",
+      "type": "idempotency.acquired",
+      "status": "info",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "conflict-resolution-memory-maintenance 操作已认领",
+      "data": {
+        "scope": "conflict-resolution-memory-maintenance",
+        "attempt": 1,
+        "recovered_from_stale": false
+      }
+    },
+    {
+      "id": "op_0160150957d2dfd3:completed:1",
+      "at": "2026-07-14T23:58:35.469Z",
+      "type": "idempotency.completed",
+      "status": "ok",
+      "task_id": "",
+      "group_id": "",
+      "agent": "",
+      "runtime": "",
+      "message": "conflict-resolution-memory-maintenance 操作完成",
+      "data": {
+        "scope": "conflict-resolution-memory-maintenance",
+        "attempt": 1
+      }
+    }
+  ],
+  "updated_at": "2026-07-14T23:58:35.469Z"
+}

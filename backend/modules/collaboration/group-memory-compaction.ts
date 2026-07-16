@@ -10,6 +10,8 @@ import {
   readGroupSessionMemoryExtractionState,
   waitForGroupSessionMemoryExtraction,
 } from "./group-session-memory-extraction";
+import { inspectGroupSessionMemoryTemplateState } from "./group-session-memory-customization";
+import { recordGroupPromptCacheState, recordGroupPromptCacheUsage } from "./group-prompt-cache-break-detection";
 
 export const GROUP_MEMORY_COMPACTION_VERSION = 3;
 export const GROUP_COMPACT_TRIGGER_TOKENS = 167_000;
@@ -72,7 +74,10 @@ export const GROUP_COMPACT_TRANSACTION_RECEIPT_VERSION = 3;
 export const GROUP_POST_COMPACT_MESSAGE_ORDER_VERSION = 1;
 export const GROUP_COMPACT_LINEAGE_VERSION = 1;
 export const GROUP_COMPACTION_MODEL_USAGE_VERSION = 1;
-export const GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION = 1;
+export const GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION = 2;
+export const GROUP_SESSION_MEMORY_COMPACT_PROJECTION_VERSION = 1;
+export const GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_SECTION_TOKENS = 2_000;
+export const GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_TOTAL_TOKENS = 12_000;
 export const GROUP_SESSION_MEMORY_API_INVARIANT_CLOSURE_VERSION = 1;
 export const GROUP_POST_COMPACT_SESSION_STATE_RESET_VERSION = 1;
 export const GROUP_TRUE_POST_COMPACT_PAYLOAD_VERSION = 1;
@@ -1700,6 +1705,163 @@ function groupSessionMemoryCompactSelectionChecksum(receipt: any) {
   return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+function groupSessionMemoryCompactProjectionChecksum(receipt: any) {
+  const payload = { ...(receipt || {}) };
+  delete payload.projection_checksum;
+  delete payload.checksum_valid;
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function splitGroupSessionMemoryMarkdownSections(markdown: string) {
+  const lines = String(markdown || "").replace(/\r\n?/g, "\n").trim().split("\n");
+  if (!lines.length || (lines.length === 1 && !lines[0])) return [];
+  const sections: string[][] = [];
+  let current: string[] = [];
+  for (const line of lines) {
+    if (/^#\s+/.test(line) && current.length) {
+      sections.push(current);
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length) sections.push(current);
+  return sections.map(section => section.join("\n").trim()).filter(Boolean);
+}
+
+function truncateGroupSessionMemorySectionAtLineBoundary(section: string, maxTokens: number) {
+  const text = String(section || "").trim();
+  const originalTokens = estimateGroupTextTokens(text);
+  if (originalTokens <= maxTokens) return { text, originalTokens, projectedTokens: originalTokens, truncated: false };
+  const marker = "[... section truncated for length ...]";
+  const lines = text.split("\n");
+  const selected: string[] = [];
+  if (/^#\s+/.test(lines[0] || "")) selected.push(lines.shift()!);
+  for (const line of lines) {
+    const candidate = [...selected, line, marker].join("\n").trim();
+    if (estimateGroupTextTokens(candidate) > maxTokens) break;
+    selected.push(line);
+  }
+  let projected = [...selected, marker].join("\n").trim();
+  if (estimateGroupTextTokens(projected) > maxTokens) projected = marker;
+  return {
+    text: projected,
+    originalTokens,
+    projectedTokens: estimateGroupTextTokens(projected),
+    truncated: true,
+  };
+}
+
+export function buildGroupSessionMemoryCompactProjection(input: any = {}) {
+  const groupId = String(input.groupId || input.group_id || "").trim();
+  const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+  const scopeId = String(input.scopeId || input.scope_id || `${groupId}--${groupSessionId}`);
+  const summaryFile = String(input.summaryFile || input.summary_file || "");
+  const markdown = String(input.markdown || "").replace(/\r\n?/g, "\n").trim();
+  const maxSectionTokens = Math.max(250, Math.floor(Number(
+    input.maxSectionTokens || input.max_section_tokens || GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_SECTION_TOKENS
+  )));
+  const maxTotalTokens = Math.max(maxSectionTokens, Math.floor(Number(
+    input.maxTotalTokens || input.max_total_tokens || GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_TOTAL_TOKENS
+  )));
+  const sections = splitGroupSessionMemoryMarkdownSections(markdown);
+  const projectedSections = sections.map(section => truncateGroupSessionMemorySectionAtLineBoundary(section, maxSectionTokens));
+  const truncatedIndexes = new Set<number>();
+  projectedSections.forEach((section, index) => { if (section.truncated) truncatedIndexes.add(index); });
+  const initiallyProjected = projectedSections.map(section => section.text).join("\n\n").trim();
+  const needsTotalTruncation = estimateGroupTextTokens(initiallyProjected) > maxTotalTokens;
+  const needsSourceReference = truncatedIndexes.size > 0 || needsTotalTruncation;
+  const sourceReference = needsSourceReference ? `> Full Session Memory: ${summaryFile}` : "";
+  const sourceReferenceTokens = estimateGroupTextTokens(sourceReference);
+  const contentBudget = Math.max(250, maxTotalTokens - sourceReferenceTokens);
+  const selectedSections: string[] = [];
+  let usedTokens = 0;
+  let omittedSectionCount = 0;
+  for (let index = 0; index < projectedSections.length; index += 1) {
+    const section = projectedSections[index];
+    const separatorTokens = selectedSections.length ? estimateGroupTextTokens("\n\n") : 0;
+    if (usedTokens + separatorTokens + section.projectedTokens <= contentBudget) {
+      selectedSections.push(section.text);
+      usedTokens += separatorTokens + section.projectedTokens;
+      continue;
+    }
+    const remainingTokens = Math.max(0, contentBudget - usedTokens - separatorTokens);
+    if (remainingTokens >= 250) {
+      const totalProjection = truncateGroupSessionMemorySectionAtLineBoundary(section.text, remainingTokens);
+      selectedSections.push(totalProjection.text);
+      truncatedIndexes.add(index);
+    } else {
+      omittedSectionCount += 1;
+      truncatedIndexes.add(index);
+    }
+    for (let rest = index + 1; rest < projectedSections.length; rest += 1) {
+      omittedSectionCount += 1;
+      truncatedIndexes.add(rest);
+    }
+    break;
+  }
+  let projectedMarkdown = [sourceReference, selectedSections.join("\n\n")].filter(Boolean).join("\n\n").trim();
+  if (estimateGroupTextTokens(projectedMarkdown) > maxTotalTokens) {
+    const finalProjection = truncateGroupSessionMemorySectionAtLineBoundary(projectedMarkdown, maxTotalTokens);
+    projectedMarkdown = finalProjection.text;
+  }
+  const originalChecksum = String(input.originalMarkdownChecksum || input.original_markdown_checksum
+    || crypto.createHash("sha256").update(markdown).digest("hex").slice(0, 24));
+  const projectedChecksum = crypto.createHash("sha256").update(projectedMarkdown).digest("hex").slice(0, 24);
+  const payload: any = {
+    schema: "ccm-group-session-memory-compact-projection-v1",
+    version: GROUP_SESSION_MEMORY_COMPACT_PROJECTION_VERSION,
+    group_id: groupId,
+    group_session_id: groupSessionId,
+    scope_id: scopeId,
+    summary_file: summaryFile,
+    original_markdown_checksum: originalChecksum,
+    projected_markdown_checksum: projectedChecksum,
+    section_count: sections.length,
+    truncated_section_count: truncatedIndexes.size,
+    omitted_section_count: omittedSectionCount,
+    original_token_estimate: estimateGroupTextTokens(markdown),
+    projected_token_estimate: estimateGroupTextTokens(projectedMarkdown),
+    max_section_tokens: maxSectionTokens,
+    max_total_tokens: maxTotalTokens,
+    source_reference_included: needsSourceReference,
+    original_source_unchanged: true,
+    body_free: true,
+    created_at: String(input.createdAt || input.created_at || new Date().toISOString()),
+  };
+  return {
+    markdown: projectedMarkdown,
+    receipt: { ...payload, projection_checksum: groupSessionMemoryCompactProjectionChecksum(payload) },
+  };
+}
+
+export function verifyGroupSessionMemoryCompactProjection(receipt: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (receipt?.schema !== "ccm-group-session-memory-compact-projection-v1"
+    || Number(receipt?.version || 0) !== GROUP_SESSION_MEMORY_COMPACT_PROJECTION_VERSION) issues.push("session_memory_projection_schema_invalid");
+  if (!String(receipt?.group_id || "")) issues.push("session_memory_projection_group_missing");
+  if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("session_memory_projection_exact_session_missing");
+  if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}--${String(receipt?.group_session_id || "")}`) issues.push("session_memory_projection_scope_invalid");
+  if (!String(receipt?.summary_file || "")) issues.push("session_memory_projection_summary_file_missing");
+  if (!String(receipt?.original_markdown_checksum || "")) issues.push("session_memory_projection_original_checksum_missing");
+  if (!String(receipt?.projected_markdown_checksum || "")) issues.push("session_memory_projection_projected_checksum_missing");
+  if (Number(receipt?.max_section_tokens || 0) < 250) issues.push("session_memory_projection_section_budget_invalid");
+  if (Number(receipt?.max_total_tokens || 0) < Number(receipt?.max_section_tokens || 0)) issues.push("session_memory_projection_total_budget_invalid");
+  if (Number(receipt?.projected_token_estimate || 0) > Number(receipt?.max_total_tokens || 0)) issues.push("session_memory_projection_budget_exceeded");
+  if (Number(receipt?.truncated_section_count || 0) > Number(receipt?.section_count || 0)) issues.push("session_memory_projection_section_count_invalid");
+  if (Number(receipt?.truncated_section_count || 0) > 0 && receipt?.source_reference_included !== true) issues.push("session_memory_projection_source_reference_missing");
+  if (receipt?.original_source_unchanged !== true || receipt?.body_free !== true) issues.push("session_memory_projection_body_free_boundary_invalid");
+  if (String(receipt?.projection_checksum || "") !== groupSessionMemoryCompactProjectionChecksum(receipt)) issues.push("session_memory_projection_checksum_invalid");
+  if (expected.groupId && String(receipt?.group_id || "") !== String(expected.groupId)) issues.push("session_memory_projection_group_mismatch");
+  if (expected.groupSessionId && String(receipt?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("session_memory_projection_session_mismatch");
+  if (expected.summaryFile && path.resolve(String(receipt?.summary_file || "")) !== path.resolve(String(expected.summaryFile))) issues.push("session_memory_projection_summary_file_mismatch");
+  if (expected.originalMarkdownChecksum && String(receipt?.original_markdown_checksum || "") !== String(expected.originalMarkdownChecksum)) issues.push("session_memory_projection_original_checksum_mismatch");
+  if (expected.projectedMarkdown) {
+    const checksum = crypto.createHash("sha256").update(String(expected.projectedMarkdown)).digest("hex").slice(0, 24);
+    if (checksum !== String(receipt?.projected_markdown_checksum || "")) issues.push("session_memory_projection_projected_checksum_mismatch");
+  }
+  return { valid: issues.length === 0, issues };
+}
+
 export function buildGroupSessionMemoryCompactSelectionReceipt(input: any = {}) {
   const selected = input.selected === true;
   const payload: any = {
@@ -1722,12 +1884,23 @@ export function buildGroupSessionMemoryCompactSelectionReceipt(input: any = {}) 
     markdown_checksum_matches: input.markdownChecksumMatches === true || input.markdown_checksum_matches === true,
     declared_markdown_checksum: String(input.declaredMarkdownChecksum || input.declared_markdown_checksum || ""),
     actual_markdown_checksum: String(input.actualMarkdownChecksum || input.actual_markdown_checksum || ""),
+    template_empty_checked: input.templateEmptyChecked === true || input.template_empty_checked === true,
+    template_only: input.templateOnly === true || input.template_only === true,
+    template_scope_id: String(input.templateScopeId || input.template_scope_id || ""),
+    template_source: String(input.templateSource || input.template_source || ""),
+    template_checksum: String(input.templateChecksum || input.template_checksum || ""),
+    template_section_count: Math.max(0, Number(input.templateSectionCount || input.template_section_count || 0)),
     last_summarized_message_id: String(input.lastSummarizedMessageId || input.last_summarized_message_id || ""),
     cursor_status: String(input.cursorStatus || input.cursor_status || "unknown"),
+    cursor_mode: String(input.cursorMode || input.cursor_mode
+      || (String(input.cursorStatus || input.cursor_status || "") === "resolved" ? "snapshot_cursor" : "unknown")),
+    resumed_without_cursor: input.resumedWithoutCursor === true || input.resumed_without_cursor === true,
+    resume_seed_message_id: String(input.resumeSeedMessageId || input.resume_seed_message_id || ""),
     keep_index: Math.max(0, Number(input.keepIndex || input.keep_index || 0)),
     preserved_message_count: Math.max(0, Number(input.preservedMessageCount || input.preserved_message_count || 0)),
     preserved_token_estimate: Math.max(0, Number(input.preservedTokenEstimate || input.preserved_token_estimate || 0)),
     api_invariant_closure: input.apiInvariantClosure || input.api_invariant_closure || null,
+    compact_projection: input.compactProjection || input.compact_projection || null,
     projected_post_compact_tokens: Math.max(0, Number(input.projectedPostCompactTokens || input.projected_post_compact_tokens || 0)),
     auto_compact_threshold: Math.max(0, Number(input.autoCompactThreshold || input.auto_compact_threshold || 0)),
     compaction_api_called: selected ? false : input.compactionApiCalled === true || input.compaction_api_called === true,
@@ -1744,15 +1917,40 @@ export function buildGroupSessionMemoryCompactSelectionReceipt(input: any = {}) 
 
 export function verifyGroupSessionMemoryCompactSelectionReceipt(receipt: any, expected: any = {}) {
   const issues: string[] = [];
+  const version = Number(receipt?.version || 0);
   if (receipt?.schema !== "ccm-group-session-memory-compact-selection-v1"
-    || Number(receipt?.version || 0) !== GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION) issues.push("session_memory_selection_schema_invalid");
+    || ![1, GROUP_SESSION_MEMORY_COMPACT_SELECTION_VERSION].includes(version)) issues.push("session_memory_selection_schema_invalid");
   if (!String(receipt?.group_id || "")) issues.push("session_memory_selection_group_missing");
   if (!String(receipt?.group_session_id || "").startsWith("gcs_")) issues.push("session_memory_selection_exact_session_missing");
   if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}--${String(receipt?.group_session_id || "")}`) issues.push("session_memory_selection_scope_invalid");
   if (!['selected', 'fallback'].includes(String(receipt?.status || ""))) issues.push("session_memory_selection_status_invalid");
   if (receipt?.selected === true && String(receipt?.status || "") !== "selected") issues.push("session_memory_selection_selected_status_invalid");
-  if (receipt?.selected === true && (!receipt?.markdown_checksum_matches || receipt?.cursor_status !== "resolved")) issues.push("session_memory_selection_unverified_source");
+  if (receipt?.selected === true && (!receipt?.markdown_checksum_matches
+    || !["resolved", "resumed_without_cursor"].includes(String(receipt?.cursor_status || "")))) issues.push("session_memory_selection_unverified_source");
+  if (receipt?.selected === true && version >= 2) {
+    if (receipt?.template_empty_checked !== true || receipt?.template_only === true) issues.push("session_memory_selection_template_empty_state_invalid");
+    if (String(receipt?.template_scope_id || "") !== String(receipt?.scope_id || "")) issues.push("session_memory_selection_template_scope_invalid");
+    if (!["default", "global", "exact_session"].includes(String(receipt?.template_source || ""))) issues.push("session_memory_selection_template_source_invalid");
+    if (!String(receipt?.template_checksum || "") || Number(receipt?.template_section_count || 0) < 1) issues.push("session_memory_selection_template_contract_missing");
+  }
+  if (version >= 2 && String(receipt?.fallback_reason || "") === "session_memory_empty_template"
+    && (receipt?.template_empty_checked !== true || receipt?.template_only !== true)) issues.push("session_memory_selection_empty_template_evidence_invalid");
+  if (receipt?.selected === true && receipt?.cursor_status === "resumed_without_cursor") {
+    if (receipt?.resumed_without_cursor !== true
+      || String(receipt?.cursor_mode || "") !== "resumed_session_tail"
+      || String(receipt?.last_summarized_message_id || "")
+      || !String(receipt?.resume_seed_message_id || "")) issues.push("session_memory_selection_resumed_cursor_contract_invalid");
+  }
+  if (receipt?.selected === true && receipt?.cursor_status === "resolved"
+    && receipt?.cursor_mode && receipt?.cursor_mode !== "snapshot_cursor") issues.push("session_memory_selection_cursor_mode_invalid");
   if (receipt?.selected === true && !verifyGroupSessionMemoryApiInvariantClosure(receipt?.api_invariant_closure).valid) issues.push("session_memory_selection_api_invariant_closure_invalid");
+  if (receipt?.selected === true && receipt?.compact_projection?.schema
+    && !verifyGroupSessionMemoryCompactProjection(receipt?.compact_projection, {
+      groupId: receipt?.group_id,
+      groupSessionId: receipt?.group_session_id,
+      summaryFile: receipt?.summary_file,
+      originalMarkdownChecksum: receipt?.actual_markdown_checksum,
+    }).valid) issues.push("session_memory_selection_compact_projection_invalid");
   if (receipt?.selected === true && receipt?.compaction_api_called !== false) issues.push("session_memory_selection_api_call_invalid");
   if (receipt?.body_free !== true) issues.push("session_memory_selection_body_free_missing");
   if (String(receipt?.selection_checksum || "") !== groupSessionMemoryCompactSelectionChecksum(receipt)) issues.push("session_memory_selection_checksum_invalid");
@@ -1812,6 +2010,7 @@ async function selectGroupSessionMemoryForCompact(input: any = {}) {
   let markdown = "";
   try { snapshot = JSON.parse(fs.readFileSync(snapshotFile, "utf-8")); } catch {}
   try { markdown = fs.readFileSync(summaryFile, "utf-8").trim(); } catch {}
+  const templateState = inspectGroupSessionMemoryTemplateState(scopeId, markdown);
   const declaredChecksum = String(snapshot?.markdownChecksum || "");
   const actualChecksum = markdown ? crypto.createHash("sha256").update(markdown).digest("hex").slice(0, 24) : "";
   const snapshotScopeMatches = String(snapshot?.groupId || "") === scopeId
@@ -1824,13 +2023,20 @@ async function selectGroupSessionMemoryForCompact(input: any = {}) {
     markdownChecksumMatches: !!markdown && !!declaredChecksum && declaredChecksum === actualChecksum,
     declaredMarkdownChecksum: declaredChecksum,
     actualMarkdownChecksum: actualChecksum,
+    templateEmptyChecked: templateState.checked,
+    templateOnly: templateState.templateOnly,
+    templateScopeId: templateState.scopeId,
+    templateSource: templateState.source,
+    templateChecksum: templateState.checksum,
+    templateSectionCount: templateState.sectionCount,
     lastSummarizedMessageId: snapshot?.lastSummarizedMessageId || "",
   };
   if (!snapshot) return fallback("snapshot_missing_or_invalid", sourceFields);
   if (!snapshotScopeMatches) return fallback("snapshot_scope_mismatch", sourceFields);
   if (!markdown) return fallback("summary_markdown_missing_or_empty", sourceFields);
-  if (snapshot.hasSummary !== true) return fallback("session_memory_empty_template", sourceFields);
   if (!sourceFields.markdownChecksumMatches) return fallback("summary_markdown_checksum_mismatch", sourceFields);
+  if (templateState.templateOnly) return fallback("session_memory_empty_template", sourceFields);
+  if (snapshot.hasSummary !== true) return fallback("session_memory_snapshot_has_no_summary", sourceFields);
   const currentPostCompactReset = input.memory?.compaction?.postCompactSessionStateReset
     || input.memory?.messageCompression?.postCompactSessionStateReset
     || input.memory?.compactBoundary?.postCompactSessionStateReset
@@ -1859,12 +2065,34 @@ async function selectGroupSessionMemoryForCompact(input: any = {}) {
     if (!resetMatches) return fallback("post_compact_session_state_reset_mismatch", sourceFields);
   }
   const cursor = String(snapshot.lastSummarizedMessageId || "").trim();
-  if (!cursor) return fallback("last_summarized_cursor_missing", { ...sourceFields, cursorStatus: "missing" });
-  const candidateKeepIndex = calculateGroupSessionMemoryMessagesToKeepIndex(input.messages || [], cursor, {
+  const resumedWithoutCursor = !cursor;
+  const resumeSeedMessageId = resumedWithoutCursor && (input.messages || []).length
+    ? messageIdentity((input.messages || [])[(input.messages || []).length - 1], (input.messages || []).length - 1)
+    : "";
+  if (resumedWithoutCursor && !resumeSeedMessageId) {
+    return fallback("last_summarized_cursor_missing_and_no_resume_tail", {
+      ...sourceFields,
+      cursorStatus: "missing",
+      cursorMode: "unavailable",
+    });
+  }
+  const candidateKeepIndex = calculateGroupSessionMemoryMessagesToKeepIndex(input.messages || [], cursor || resumeSeedMessageId, {
     ...(input.keepWindowOptions || {}),
     skipInvariantClosure: true,
   });
-  if (candidateKeepIndex < 0) return fallback("last_summarized_cursor_not_found", { ...sourceFields, cursorStatus: "not_found" });
+  if (candidateKeepIndex < 0) return fallback("last_summarized_cursor_not_found", {
+    ...sourceFields,
+    cursorStatus: "not_found",
+    cursorMode: cursor ? "snapshot_cursor" : "resumed_session_tail",
+    resumedWithoutCursor,
+    resumeSeedMessageId,
+  });
+  const cursorFields = {
+    cursorStatus: resumedWithoutCursor ? "resumed_without_cursor" : "resolved",
+    cursorMode: resumedWithoutCursor ? "resumed_session_tail" : "snapshot_cursor",
+    resumedWithoutCursor,
+    resumeSeedMessageId,
+  };
   const invariantClosure = adjustGroupSessionMemoryKeepIndexToPreserveApiInvariants(
     input.messages || [],
     candidateKeepIndex,
@@ -1874,17 +2102,48 @@ async function selectGroupSessionMemoryForCompact(input: any = {}) {
   if (!verifyGroupSessionMemoryApiInvariantClosure(invariantClosure.receipt).valid) {
     return fallback("api_invariant_closure_unresolved", {
       ...sourceFields,
-      cursorStatus: "resolved",
+      ...cursorFields,
       keepIndex,
       apiInvariantClosure: invariantClosure.receipt,
     });
   }
   const keptMessages = (input.messages || []).slice(keepIndex);
+  const compactProjection = buildGroupSessionMemoryCompactProjection({
+    groupId,
+    groupSessionId,
+    scopeId,
+    summaryFile,
+    markdown,
+    originalMarkdownChecksum: actualChecksum,
+    maxSectionTokens: config.sessionMemoryCompactMaxSectionTokens
+      || config.session_memory_compact_max_section_tokens
+      || GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_SECTION_TOKENS,
+    maxTotalTokens: config.sessionMemoryCompactMaxTotalTokens
+      || config.session_memory_compact_max_total_tokens
+      || GROUP_SESSION_MEMORY_COMPACT_DEFAULT_MAX_TOTAL_TOKENS,
+    createdAt: input.now,
+  });
+  const compactProjectionVerification = verifyGroupSessionMemoryCompactProjection(compactProjection.receipt, {
+    groupId,
+    groupSessionId,
+    summaryFile,
+    originalMarkdownChecksum: actualChecksum,
+    projectedMarkdown: compactProjection.markdown,
+  });
+  if (!compactProjectionVerification.valid) {
+    return fallback("compact_projection_invalid", {
+      ...sourceFields,
+      ...cursorFields,
+      keepIndex,
+      apiInvariantClosure: invariantClosure.receipt,
+      compactProjection: compactProjection.receipt,
+    });
+  }
   const projected = buildGroupTruePostCompactPayloadBudget({
     groupId,
     groupSessionId,
     triggerTokens: input.triggerTokens,
-    summaryText: markdown,
+    summaryText: compactProjection.markdown,
     keptMessages,
     postCompactReinject: input.memory?.compaction?.postCompactReinject || null,
     persistentRequirements: input.memory?.persistentRequirements || [],
@@ -1895,17 +2154,18 @@ async function selectGroupSessionMemoryForCompact(input: any = {}) {
   const projectedTokens = Number(projected.true_post_compact_token_count || 0);
   const selectedFields = {
     ...sourceFields,
-    cursorStatus: "resolved",
+    ...cursorFields,
     keepIndex,
     preservedMessageCount: keptMessages.length,
     preservedTokenEstimate: keptMessages.reduce((sum: number, message: any) => sum + estimateGroupMessageTokens(message), 0),
     apiInvariantClosure: invariantClosure.receipt,
+    compactProjection: compactProjection.receipt,
     projectedPostCompactTokens: projectedTokens,
   };
   if (projected.will_retrigger_next_turn === true) return fallback("projected_payload_reaches_auto_compact_threshold", selectedFields);
   return {
     selected: true,
-    markdown,
+    markdown: compactProjection.markdown,
     keepIndex,
     snapshot,
     receipt: buildGroupSessionMemoryCompactSelectionReceipt({ ...base, ...selectedFields, selected: true }),
@@ -5468,6 +5728,23 @@ async function callCompactionModel(config: any, system: string, user: string, ma
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(10_000, Math.min(Number(config.timeoutMs) || 90_000, 120_000)));
   try {
+    const groupId = String(config.groupId || config.group_id || "").trim();
+    const groupSessionId = String(config.groupSessionId || config.group_session_id || "").trim();
+    if (anthropic && groupId && groupSessionId.startsWith("gcs_")) {
+      try {
+        recordGroupPromptCacheState({
+          groupId,
+          groupSessionId,
+          source: "group_main_compact",
+          provider: "anthropic",
+          model: config.model,
+          system,
+          toolSchemas: [],
+          betaHeaders: [],
+          cachedMicrocompactEnabled: false,
+        });
+      } catch {}
+    }
     const response = await fetch(anthropic ? normalizeAnthropicUrl(config.apiUrl) : normalizeOpenAiUrl(config.apiUrl), {
       method: "POST",
       headers: anthropic
@@ -5493,6 +5770,24 @@ async function callCompactionModel(config: any, system: string, user: string, ma
     const content = anthropic
       ? (data?.content || []).map((part: any) => part?.type === "text" ? part.text : "").join("")
       : data?.choices?.[0]?.message?.content || "";
+    if (groupId && groupSessionId.startsWith("gcs_")) {
+      const usage = data?.usage || {};
+      try {
+        recordGroupPromptCacheUsage({
+          groupId,
+          groupSessionId,
+          source: "group_main_compact",
+          provider: anthropic ? "anthropic" : "openai",
+          model: String(data?.model || config.model || ""),
+          requestId: String(data?.id || response.headers.get("request-id") || response.headers.get("x-request-id") || ""),
+          usage: {
+            directInputTokens: Number(usage.input_tokens || usage.prompt_tokens || 0),
+            cacheCreationInputTokens: Number(usage.cache_creation_input_tokens || 0),
+            cacheReadInputTokens: Number(usage.cache_read_input_tokens || 0),
+          },
+        });
+      } catch {}
+    }
     return {
       summary: extractJsonObject(content),
       usage: data?.usage || null,

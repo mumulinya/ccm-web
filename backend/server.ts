@@ -18,10 +18,25 @@ import {
   normalizeAgentRuntimeId,
   resolveAvailableAgentRuntime,
 } from "./agents/runtime";
+import { extractProviderToolAccessEvidence } from "./agents/provider-tool-access-evidence";
 import {
   buildNativeSessionContinuationEvidence,
   verifyNativeSessionContinuationEvidence,
 } from "./agents/native-continuation";
+import {
+  acknowledgeProviderMemoryChannelLaunch,
+  bindProviderMemoryChannelLaunch,
+  prepareProviderMemoryChannel,
+  verifyProviderMemoryChannelEvidence,
+} from "./agents/provider-memory-channel";
+import {
+  readMemoryContextConsumptionReceipt,
+  reconcileMemoryContextConsumptionReceipts,
+} from "./integrations/memory-context-consumption-receipt";
+import {
+  reconcileMemoryContextConsumptionRecoveries,
+  recoverMemoryContextConsumptionReceipt,
+} from "./integrations/memory-context-consumption-recovery";
 import { recordModelCapabilityRefreshOutcome, recordVerifiedNativeModelCapabilityReceipt, startModelCapabilityRefreshScheduler, stopModelCapabilityRefreshScheduler } from "./modules/collaboration/model-capability-cache";
 import {
   getTaskAgentSessionOptions,
@@ -109,6 +124,8 @@ import {
   saveFeishuConfig,
   recordMetric
 } from "./core/db";
+import { acquireCcmServerInstanceLock, releaseCcmServerInstanceLock } from "./core/server-instance-lock";
+import { closeSqliteTaskStore } from "./core/task-store";
 
 // 导入子模块控制器
 import { handleProjectsApi, startControlBotConnection } from "./modules/projects/projects";
@@ -968,6 +985,12 @@ function createAgentRunnerRequest(projectName: string, message: string, workDir:
     taskAgentSessionId: String(executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || ""),
     groupId,
     groupSessionId,
+    trustedMemoryProviderChannelRequired: executionInfo?.trustedMemoryProviderChannelRequired === true,
+    trustedMemoryProviderAcknowledgementRequired: executionInfo?.trustedMemoryProviderAcknowledgementRequired === true,
+    memoryContextConsumptionReceiptRequired: executionInfo?.memoryContextConsumptionReceiptRequired === true,
+    memoryContextConsumptionChallenge: executionInfo?.memoryContextConsumptionChallenge || null,
+    trustedMemoryEnvelopeChecksum: String(executionInfo?.trustedMemoryEnvelopeChecksum || ""),
+    trustedMemoryEnvelopeSourceChecksum: String(executionInfo?.trustedMemoryEnvelopeSourceChecksum || ""),
     sessionLifecycleFence,
     toolScope: {
       schema: "ccm-agent-runner-tool-scope-v1",
@@ -980,7 +1003,12 @@ function createAgentRunnerRequest(projectName: string, message: string, workDir:
     runtimeToolSnapshotPath: runtimeToolPayload.runtimeToolSnapshotPath,
     runtimeToolSnapshotRequired: runtimeToolPayload.runtimeToolSnapshotRequired,
     skipVerification: executionInfo?.skipVerification === true,
-    cliAllowedTools: buildAgentCliAllowedTools(projectName, message),
+    cliAllowedTools: Array.from(new Set([
+      ...buildAgentCliAllowedTools(projectName, message),
+      ...(executionInfo?.memoryContextConsumptionReceiptRequired === true
+        ? ["mcp__ccm__knowledge_context__acknowledge_memory_context"]
+        : []),
+    ])),
     message,
     status: "pending",
     created_at: new Date().toISOString(),
@@ -1034,6 +1062,7 @@ async function callAgentViaExternalRunnerRaw(projectName: string, message: strin
     throw Object.assign(new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`), {
       runnerRequestId: request.id,
       runnerStarted: !!persistedRequest?.started_at && result?.runtimeToolDispatchBlocked !== true,
+      memoryContextConsumptionRecovery: result?.memoryContextConsumptionRecovery || result?.memory_context_consumption_recovery || null,
     });
   }
   const persistedContinuationEvidence = result.nativeContinuationEvidence || null;
@@ -1087,6 +1116,10 @@ async function callAgentViaExternalRunnerRaw(projectName: string, message: strin
     nativeModelCapabilityReceipt: result.nativeModelCapabilityReceipt || null,
     nativeModelCapabilityRecord,
     modelCapabilityRefreshOutcome,
+    providerToolAccessEvidence: result.providerToolAccessEvidence || result.provider_tool_access_evidence || null,
+    providerMemoryChannelEvidence: result.providerMemoryChannelEvidence || result.provider_memory_channel_evidence || null,
+    memoryContextConsumptionReceipt: result.memoryContextConsumptionReceipt || result.memory_context_consumption_receipt || null,
+    memoryContextConsumptionRecovery: result.memoryContextConsumptionRecovery || result.memory_context_consumption_recovery || null,
   };
 }
 
@@ -1261,12 +1294,12 @@ async function callAgent(projectName: string, message: string, workDir: string, 
   const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
   const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
   const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
+  const memorySystemPromptFile = `${tmpMsg}.memory-system.txt`;
+  const memoryDeveloperInstructionsFile = `${tmpMsg}.memory-developer.txt`;
+  const memoryReceiptRecoveryPromptFile = `${tmpMsg}.memory-receipt-recovery.txt`;
   if (!fs.existsSync(UPLOAD_DIR)) {
     fs.mkdirSync(UPLOAD_DIR, { recursive: true });
   }
-  fs.writeFileSync(tmpMsg, message, "utf-8");
-
-  const cmd = buildAgentCommand(agentType, tmpMsg, { mcpConfigPath: workspaceTarget?.mcpConfigPath, ...(workspaceTarget?.agentSession || {}) });
   const taskId = String(workspaceTarget?.taskId || workspaceTarget?.executionId || `standalone-${projectName}-${Date.now()}`);
   const executionId = String(workspaceTarget?.executionId || workspaceTarget?.taskId || "");
   const metricGroupId = String(workspaceTarget?.groupId || workspaceTarget?.group_id || "");
@@ -1294,16 +1327,53 @@ async function callAgent(projectName: string, message: string, workDir: string, 
         groupId: metricGroupId,
         requestedNativeSessionId: workspaceTarget?.agentSession?.sessionId || "",
         nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
+        trustedMemoryProviderChannelRequired: workspaceTarget?.trustedMemoryProviderChannelRequired === true,
+        trustedMemoryProviderAcknowledgementRequired: workspaceTarget?.trustedMemoryProviderAcknowledgementRequired === true,
+        memoryContextConsumptionReceiptRequired: workspaceTarget?.memoryContextConsumptionReceiptRequired === true,
+        memoryContextConsumptionChallenge: workspaceTarget?.memoryContextConsumptionChallenge || null,
+        trustedMemoryEnvelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
+        trustedMemoryEnvelopeSourceChecksum: workspaceTarget?.trustedMemoryEnvelopeSourceChecksum || "",
       })
     : null;
   let durableDirectDispatchStarted = false;
   let durableDirectDispatchCompleted = false;
+  let providerMemoryChannelEvidence: any = null;
+  let memoryContextConsumptionReceipt: any = null;
+  let memoryContextConsumptionRecovery: any = null;
+  let memoryReceiptRecoveryProviderOutput = "";
   if (durableDirectDispatch) {
     if (executionId) registerExternalRunnerRequest(executionId, durableDirectDispatch.id);
     workspaceTarget?.onRunnerRequestCreated?.(durableDirectDispatch.id);
   }
 
   try {
+    const runtimeVersionSnapshot = captureAgentRuntimeVersionSnapshot(agentType);
+    const providerMemoryChannel = prepareProviderMemoryChannel(agentType, message, {
+      required: workspaceTarget?.trustedMemoryProviderChannelRequired === true,
+      envelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
+      sourceChecksum: workspaceTarget?.trustedMemoryEnvelopeSourceChecksum || "",
+      runtimeVersionSnapshot,
+    });
+    if (!providerMemoryChannel.ready) throw new Error(`Provider memory channel blocked: ${providerMemoryChannel.issues.join(",")}`);
+    fs.writeFileSync(tmpMsg, providerMemoryChannel.userPrompt, "utf-8");
+    if (providerMemoryChannel.systemPrompt) fs.writeFileSync(memorySystemPromptFile, providerMemoryChannel.systemPrompt, "utf-8");
+    if (providerMemoryChannel.developerPrompt) fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
+    const cmd = buildAgentCommand(agentType, tmpMsg, {
+      mcpConfigPath: workspaceTarget?.mcpConfigPath,
+      appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
+      developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
+      ...(workspaceTarget?.agentSession || {}),
+    });
+    providerMemoryChannelEvidence = bindProviderMemoryChannelLaunch(providerMemoryChannel, {
+      command: cmd,
+      systemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
+      developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
+      runnerRequestId: durableDirectDispatch?.id || "",
+      runtimeVersionSnapshot,
+    });
+    if (workspaceTarget?.trustedMemoryProviderChannelRequired === true && providerMemoryChannelEvidence.status !== "ready") {
+      throw new Error(`Provider memory channel launch unverified: ${providerMemoryChannelEvidence.issues.join(",")}`);
+    }
     const managed = await runManagedCommand({
       taskId,
       executionId,
@@ -1329,7 +1399,8 @@ async function callAgent(projectName: string, message: string, workDir: string, 
       },
     });
     try { fs.unlinkSync(tmpMsg); } catch {}
-    const runtimeVersionSnapshot = captureAgentRuntimeVersionSnapshot(agentType);
+    try { fs.unlinkSync(memorySystemPromptFile); } catch {}
+    try { fs.unlinkSync(memoryDeveloperInstructionsFile); } catch {}
     const normalized = normalizeAgentCommandOutput(agentType, managed.stdout, { runtimeVersionSnapshot });
     const nativeContinuationEvidence = buildNativeSessionContinuationEvidence({
       provider: normalizeAgentRuntimeId(agentType),
@@ -1341,6 +1412,120 @@ async function callAgent(projectName: string, message: string, workDir: string, 
       expectedProviderContractId: workspaceTarget?.agentSession?.expectedProviderContractId || workspaceTarget?.agentSession?.providerContractId || "",
       nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
       runnerSuccess: true,
+    });
+    providerMemoryChannelEvidence = acknowledgeProviderMemoryChannelLaunch(providerMemoryChannelEvidence, {
+      executionSucceeded: true,
+      runnerStarted: durableDirectDispatch ? durableDirectDispatchStarted : true,
+      exitCode: managed.exitCode,
+      providerOutputContractEvidence: normalized.providerOutputContractEvidence || null,
+      nativeContinuationEvidence,
+      required: workspaceTarget?.trustedMemoryProviderAcknowledgementRequired === true,
+    });
+    if (workspaceTarget?.trustedMemoryProviderAcknowledgementRequired === true) {
+      const acknowledgement = verifyProviderMemoryChannelEvidence(providerMemoryChannelEvidence, {
+        provider: agentType,
+        originalPrompt: message,
+        envelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
+        sourceChecksum: workspaceTarget?.trustedMemoryEnvelopeSourceChecksum || "",
+        runnerRequestId: durableDirectDispatch?.id || "",
+        required: true,
+        requireAcknowledgement: true,
+        providerOutputContractEvidence: normalized.providerOutputContractEvidence || null,
+        nativeContinuationEvidence,
+        executionSucceeded: true,
+      });
+      if (!acknowledgement.valid) throw new Error(`Provider memory acknowledgement blocked: ${acknowledgement.issues.join(",")}`);
+    }
+    if (workspaceTarget?.memoryContextConsumptionReceiptRequired === true) {
+      let memoryReceipt = readMemoryContextConsumptionReceipt(workspaceTarget?.memoryContextConsumptionChallenge, {
+        groupId: workspaceTarget?.groupId || workspaceTarget?.group_id || "",
+        groupSessionId: workspaceTarget?.groupSessionId || workspaceTarget?.group_session_id || "",
+        taskId,
+        executionId,
+        project: projectName,
+        taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+      });
+      if (!memoryReceipt.valid) {
+        const recovery = await recoverMemoryContextConsumptionReceipt({
+          challenge: workspaceTarget?.memoryContextConsumptionChallenge,
+          provider: agentType,
+          runnerRequestId: durableDirectDispatch?.id || `direct-${taskId}`,
+          groupId: workspaceTarget?.groupId || workspaceTarget?.group_id || "",
+          groupSessionId: workspaceTarget?.groupSessionId || workspaceTarget?.group_session_id || "",
+          taskId,
+          executionId,
+          project: projectName,
+          taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+          nativeContinuationEvidence,
+          providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+          trustedMemoryEnvelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
+          trustedMemoryEnvelopeSourceChecksum: workspaceTarget?.trustedMemoryEnvelopeSourceChecksum || "",
+          providerWorkCompleted: true,
+        }, async recoveryRequest => {
+          fs.writeFileSync(memoryReceiptRecoveryPromptFile, recoveryRequest.prompt, "utf-8");
+          if (durableDirectDispatch) appendDirectAgentDispatchTranscript(durableDirectDispatch.id, "memory_receipt_recovery_started", { recoveryId: recoveryRequest.recoveryId, nativeSessionId: recoveryRequest.nativeSessionId });
+          const recoveryCommand = buildAgentCommand(agentType, memoryReceiptRecoveryPromptFile, {
+            cliAllowedTools: Array.from(new Set([
+              ...buildAgentCliAllowedTools(projectName, message),
+              "mcp__ccm__knowledge_context__acknowledge_memory_context",
+            ])),
+            mcpConfigPath: workspaceTarget?.mcpConfigPath,
+            persistSession: true,
+            resumeSession: true,
+            sessionId: recoveryRequest.nativeSessionId,
+          });
+          const recoveryRun = await runManagedCommand({
+            taskId: `${taskId}:memory-receipt-recovery`,
+            command: recoveryCommand,
+            cwd: safeCwd,
+            timeoutMs: Math.min(60_000, Math.max(15_000, timeoutMs || 300_000)),
+            maxOutputBytes: 512 * 1024,
+            env: sanitizeExecutionEnv(getRuntimeExecutionEnv(agentType), workspaceTarget?.envAllowlist || []),
+            project: projectName,
+            agentType,
+            source: "memory-receipt-recovery",
+            commandLabel: getAgentCommandLabel(agentType),
+            title: "Memory receipt recovery",
+          });
+          memoryReceiptRecoveryProviderOutput = String(recoveryRun.stdout || "");
+          const recoveryOutput = normalizeAgentCommandOutput(agentType, memoryReceiptRecoveryProviderOutput, { runtimeVersionSnapshot });
+          return {
+            success: true,
+            exitCode: recoveryRun.exitCode,
+            output: recoveryOutput.output,
+            nativeSessionId: recoveryOutput.rawSessionId || recoveryOutput.sessionId || "",
+            returnedNativeSessionId: recoveryOutput.rawSessionId || recoveryOutput.sessionId || "",
+            providerOutputContractEvidence: recoveryOutput.providerOutputContractEvidence || null,
+            providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+          };
+        });
+        memoryContextConsumptionRecovery = recovery.record;
+        if (durableDirectDispatch) appendDirectAgentDispatchTranscript(durableDirectDispatch.id, recovery.recovered ? "memory_receipt_recovery_completed" : "memory_receipt_recovery_blocked", { recoveryId: recovery.record?.recovery_id || "", status: recovery.record?.status || "blocked" });
+        if (!recovery.recovered) {
+          const error: any = new Error(`Memory context consumption receipt recovery blocked: ${(recovery.record?.issues || memoryReceipt.issues).join(",")}`);
+          error.code = "CCM_MEMORY_CONTEXT_CONSUMPTION_RECEIPT_RECOVERY_BLOCKED";
+          error.memoryContextConsumptionRecovery = recovery.record;
+          throw error;
+        }
+        memoryReceipt = readMemoryContextConsumptionReceipt(workspaceTarget?.memoryContextConsumptionChallenge, {
+          groupId: workspaceTarget?.groupId || workspaceTarget?.group_id || "",
+          groupSessionId: workspaceTarget?.groupSessionId || workspaceTarget?.group_session_id || "",
+          taskId,
+          executionId,
+          project: projectName,
+          taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+        });
+      }
+      memoryContextConsumptionReceipt = memoryReceipt.receipt;
+    }
+    const providerToolAccessEvidence = extractProviderToolAccessEvidence(agentType, [String(managed.stdout || ""), memoryReceiptRecoveryProviderOutput].filter(Boolean).join("\n"), {
+      runnerRequestId: durableDirectDispatch?.id || "",
+      groupId: workspaceTarget?.groupId || workspaceTarget?.group_id || "",
+      groupSessionId: workspaceTarget?.groupSessionId || workspaceTarget?.group_session_id || "",
+      taskId,
+      executionId,
+      taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+      nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
     });
     const nativeModelCapabilityReceipt = extractNativeModelCapabilityReceipt(agentType, managed.stdout, {
       runner: "direct-cli",
@@ -1408,6 +1593,11 @@ async function callAgent(projectName: string, message: string, workDir: string, 
         nativeContinuationEvidence,
         nativeModelCapabilityReceipt,
         nativeModelCapabilityRecord,
+        providerToolAccessEvidence,
+        providerMemoryChannelEvidence,
+        memoryContextConsumptionReceipt,
+        memoryContextConsumptionRecovery,
+        usage: normalized.usage || null,
         exitCode: managed.exitCode,
         signal: managed.signal,
       });
@@ -1420,9 +1610,14 @@ async function callAgent(projectName: string, message: string, workDir: string, 
       nativeModelCapabilityReceipt,
       nativeModelCapabilityRecord,
       modelCapabilityRefreshOutcome,
+      providerToolAccessEvidence,
+      providerMemoryChannelEvidence,
+      memoryContextConsumptionReceipt,
+      memoryContextConsumptionRecovery,
       isError: false,
       runnerStarted: durableDirectDispatch ? durableDirectDispatchStarted : true,
       fileChanges,
+      usage: normalized.usage || null,
     });
     recordMetric(projectName, {
       ...metricContext,
@@ -1436,9 +1631,13 @@ async function callAgent(projectName: string, message: string, workDir: string, 
       setAgentActivity(projectName, "happy", "任务完成");
       setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
     }
+    try { fs.unlinkSync(memoryReceiptRecoveryPromptFile); } catch {}
     return output;
   } catch (e: any) {
     try { fs.unlinkSync(tmpMsg); } catch {}
+    try { fs.unlinkSync(memorySystemPromptFile); } catch {}
+    try { fs.unlinkSync(memoryDeveloperInstructionsFile); } catch {}
+    try { fs.unlinkSync(memoryReceiptRecoveryPromptFile); } catch {}
     const failedDirectContinuationEvidence = buildNativeSessionContinuationEvidence({
       provider: normalizeAgentRuntimeId(agentType),
       runnerRequestId: durableDirectDispatch?.id || "",
@@ -1454,10 +1653,12 @@ async function callAgent(projectName: string, message: string, workDir: string, 
         exitCode: e?.exitCode,
         signal: e?.signal,
         nativeContinuationEvidence: failedDirectContinuationEvidence,
+        providerMemoryChannelEvidence,
+        memoryContextConsumptionRecovery: e?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery,
       });
       durableDirectDispatchCompleted = true;
     }
-    if (isSpawnPermissionError(e)) {
+    if (isSpawnPermissionError(e) && (e?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery)?.suppress_task_replay !== true) {
       try {
         const runner = await callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, workspaceTarget?.allowedTools, workspaceTarget?.mcpConfigPath, workspaceTarget?.agentSession, {
           taskId,
@@ -1469,6 +1670,12 @@ async function callAgent(projectName: string, message: string, workDir: string, 
           model: workspaceTarget?.model || workspaceTarget?.modelId || "",
           runtimeToolSnapshot: workspaceTarget?.runtimeToolSnapshot || workspaceTarget?.runtime_tool_snapshot || null,
           runtimeToolDispatchGate: workspaceTarget?.runtimeToolDispatchGate || workspaceTarget?.runtime_tool_dispatch_gate || workspaceTarget?.dispatchGate || null,
+          trustedMemoryProviderChannelRequired: workspaceTarget?.trustedMemoryProviderChannelRequired === true,
+          trustedMemoryProviderAcknowledgementRequired: workspaceTarget?.trustedMemoryProviderAcknowledgementRequired === true,
+          memoryContextConsumptionReceiptRequired: workspaceTarget?.memoryContextConsumptionReceiptRequired === true,
+          memoryContextConsumptionChallenge: workspaceTarget?.memoryContextConsumptionChallenge || null,
+          trustedMemoryEnvelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
+          trustedMemoryEnvelopeSourceChecksum: workspaceTarget?.trustedMemoryEnvelopeSourceChecksum || "",
           onRunnerRequestCreated: workspaceTarget?.onRunnerRequestCreated,
         });
         const fileChanges = runner.fileChanges || getFileChanges(projectName, changeSnapshot);
@@ -1479,9 +1686,13 @@ async function callAgent(projectName: string, message: string, workDir: string, 
           nativeModelCapabilityReceipt: runner.nativeModelCapabilityReceipt || null,
           nativeModelCapabilityRecord: runner.nativeModelCapabilityRecord || null,
           modelCapabilityRefreshOutcome: runner.modelCapabilityRefreshOutcome || null,
+          providerMemoryChannelEvidence: runner.providerMemoryChannelEvidence || null,
+          memoryContextConsumptionReceipt: runner.memoryContextConsumptionReceipt || null,
+          memoryContextConsumptionRecovery: runner.memoryContextConsumptionRecovery || null,
           isError: false,
           runnerStarted: true,
           fileChanges,
+          usage: runner.usage || null,
         });
         recordMetric(projectName, {
           ...metricContext,
@@ -1504,7 +1715,7 @@ async function callAgent(projectName: string, message: string, workDir: string, 
           nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
           runnerSuccess: false,
         });
-        workspaceTarget?.onDone?.({ runnerRequestId: runnerError?.runnerRequestId || "", runnerStarted: runnerError?.runnerStarted === true, nativeSessionId: failedContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedContinuationEvidence), isError: true, error: runnerError?.message || String(runnerError) });
+        workspaceTarget?.onDone?.({ runnerRequestId: runnerError?.runnerRequestId || "", runnerStarted: runnerError?.runnerStarted === true, nativeSessionId: failedContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedContinuationEvidence), memoryContextConsumptionRecovery: runnerError?.memoryContextConsumptionRecovery || null, isError: true, error: runnerError?.message || String(runnerError) });
         const output = `[${projectName}] Agent Runner 错误: ${runnerError.message || runnerError}`;
         recordMetric(projectName, {
           ...metricContext,
@@ -1523,7 +1734,7 @@ async function callAgent(projectName: string, message: string, workDir: string, 
     const output = e.killed || e.signal === "SIGTERM"
       ? `[${projectName}] Agent 响应超时，请稍后重试`
       : `[${projectName}] Agent 错误: ${(e.stderr || e.message || "").substring(0, 200)}`;
-    workspaceTarget?.onDone?.({ runnerRequestId: durableDirectDispatch?.id || "", runnerStarted: durableDirectDispatchStarted, nativeSessionId: failedDirectContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedDirectContinuationEvidence), isError: true, error: e?.message || String(e) });
+    workspaceTarget?.onDone?.({ runnerRequestId: durableDirectDispatch?.id || "", runnerStarted: durableDirectDispatchStarted, nativeSessionId: failedDirectContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedDirectContinuationEvidence), memoryContextConsumptionRecovery: e?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery, isError: true, error: e?.message || String(e) });
     recordMetric(projectName, {
       ...metricContext,
       success: false,
@@ -1675,7 +1886,7 @@ function callAgentForGroupStream(projectName: string, message: string, workDir: 
           try {
             if (typeof options.onDone === "function") {
               pushWorkEvent("done", "外部 Runner 执行完成", { final: true, fileChanges });
-              options.onDone({ text: runner.output, fileChanges, isError: false, runnerStarted: true, runnerRequestId: runner.runnerRequestId, nativeSessionId: runner.nativeSessionId || "", ...nativeContinuationDoneFields(runner.nativeContinuationEvidence), nativeModelCapabilityReceipt: runner.nativeModelCapabilityReceipt || null, nativeModelCapabilityRecord: runner.nativeModelCapabilityRecord || null, modelCapabilityRefreshOutcome: runner.modelCapabilityRefreshOutcome || null, workEvents });
+              options.onDone({ text: runner.output, fileChanges, isError: false, runnerStarted: true, runnerRequestId: runner.runnerRequestId, nativeSessionId: runner.nativeSessionId || "", ...nativeContinuationDoneFields(runner.nativeContinuationEvidence), nativeModelCapabilityReceipt: runner.nativeModelCapabilityReceipt || null, nativeModelCapabilityRecord: runner.nativeModelCapabilityRecord || null, modelCapabilityRefreshOutcome: runner.modelCapabilityRefreshOutcome || null, providerToolAccessEvidence: runner.providerToolAccessEvidence || null, providerMemoryChannelEvidence: runner.providerMemoryChannelEvidence || null, memoryContextConsumptionReceipt: runner.memoryContextConsumptionReceipt || null, memoryContextConsumptionRecovery: runner.memoryContextConsumptionRecovery || null, usage: runner.usage || null, workEvents });
             }
           } catch {}
           writeSse(streamRes, { type: "agent_done", agent: projectName, text: runner.output, fileChanges, messageId: options.messageId, workEvents });
@@ -1744,6 +1955,15 @@ function callAgentForGroupStream(projectName: string, message: string, workDir: 
         expectedProviderContractId: options.agentSession?.expectedProviderContractId || options.agentSession?.providerContractId || "",
         nativeResumeRequested: options.agentSession?.resumeSession === true,
         runnerSuccess: !isError,
+      });
+      const providerToolAccessEvidence = extractProviderToolAccessEvidence(agentType, output, {
+        runnerRequestId: durableGroupDispatch?.id || "",
+        groupId: options.groupId || options.group_id || "",
+        groupSessionId: options.groupSessionId || options.group_session_id || "",
+        taskId,
+        executionId,
+        taskAgentSessionId: options.taskAgentSessionId || options.task_agent_session_id || "",
+        nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
       });
       const nativeModelCapabilityReceipt = isError ? null : extractNativeModelCapabilityReceipt(agentType, output, {
         runner: "direct-cli",
@@ -1821,6 +2041,8 @@ function callAgentForGroupStream(projectName: string, message: string, workDir: 
           nativeContinuationEvidence,
           nativeModelCapabilityReceipt,
           nativeModelCapabilityRecord,
+          providerToolAccessEvidence,
+          usage: (normalized as any).usage || null,
         });
         durableGroupDispatchCompleted = true;
       }
@@ -1835,7 +2057,7 @@ function callAgentForGroupStream(projectName: string, message: string, workDir: 
       try {
         if (typeof options.onDone === "function") {
           pushWorkEvent(isError ? "error" : "done", isError ? finalText : "执行完成", { final: true, fileChanges });
-          options.onDone({ text: finalText, fileChanges, isError, runnerRequestId: durableGroupDispatch?.id || "", runnerStarted: durableGroupDispatch ? durableGroupDispatchStarted : true, nativeSessionId: durableNativeSessionId, ...nativeContinuationDoneFields(nativeContinuationEvidence), nativeModelCapabilityReceipt, nativeModelCapabilityRecord, modelCapabilityRefreshOutcome, workEvents });
+          options.onDone({ text: finalText, fileChanges, isError, runnerRequestId: durableGroupDispatch?.id || "", runnerStarted: durableGroupDispatch ? durableGroupDispatchStarted : true, nativeSessionId: durableNativeSessionId, ...nativeContinuationDoneFields(nativeContinuationEvidence), nativeModelCapabilityReceipt, nativeModelCapabilityRecord, modelCapabilityRefreshOutcome, providerToolAccessEvidence, providerMemoryChannelEvidence, memoryContextConsumptionReceipt, memoryContextConsumptionRecovery, usage: (normalized as any).usage || null, workEvents });
         }
       } catch {}
       writeSse(streamRes, { type: "agent_done", agent: projectName, text: finalText, fileChanges, messageId: options.messageId, workEvents });
@@ -2846,6 +3068,16 @@ function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
   if (continuationSoakRecovery.checked > 0) {
     console.log(`[续接 Soak] 检查 ${continuationSoakRecovery.checked} 条：补录 ${continuationSoakRecovery.recorded}，幂等 ${continuationSoakRecovery.idempotent}，失败 ${continuationSoakRecovery.failed}`);
   }
+  const memoryReceiptReconciliation = reconcileMemoryContextConsumptionReceipts({ prune: true });
+  if (memoryReceiptReconciliation.summary.receiptFileCount > 0 || memoryReceiptReconciliation.summary.referencedMissingCount > 0) {
+    const summary = memoryReceiptReconciliation.summary;
+    console.log(`[模型记忆加载回执] 对账 ${summary.receiptFileCount} 个文件：有效引用 ${summary.referencedValidCount}，缺失 ${summary.referencedMissingCount}，无效 ${summary.referencedInvalidCount}，孤儿 ${summary.orphanCount}，清理 ${summary.prunedCount}，跳过 ${summary.skippedCount}`);
+  }
+  const memoryReceiptRecoveryInventory = reconcileMemoryContextConsumptionRecoveries({ prune: true, reconcileInterrupted: true });
+  if (memoryReceiptRecoveryInventory.summary.count > 0) {
+    const summary = memoryReceiptRecoveryInventory.summary;
+    console.log(`[模型记忆加载补救] 恢复 ${summary.recoveredCount}，阻断 ${summary.blockedCount}，运行 ${summary.runningCount}，中断 ${summary.interruptedCount}，孤儿 ${summary.orphanCount}，清理 ${summary.prunedCount}，无效 ${summary.invalidCount}，禁止整任务重放 ${summary.replaySuppressedCount}`);
+  }
   const soakResume = resumeSoakTest();
   if (soakResume.resumed) console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
   const resumeResult = resumeTaskQueues(startupCollabCtx);
@@ -2861,8 +3093,10 @@ function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
 
 function startServer(port: number) {
   PORT = port;
+  const instanceLock = acquireCcmServerInstanceLock(port);
   const startupCollabCtx = createCollabCtx();
   const server = http.createServer(handleRequest);
+  server.on("error", () => releaseCcmServerInstanceLock(instanceLock));
   server.on("close", () => {
     stopAllTerminalRuns();
     stopCronScheduler();
@@ -2876,10 +3110,12 @@ function startServer(port: number) {
     stopModelCapabilityRefreshScheduler();
     stopRuntimeToolRealCliMatrixScheduler();
     shutdownSoakMonitor();
+    closeSqliteTaskStore();
+    releaseCcmServerInstanceLock(instanceLock);
   });
   server.listen(port, () => {
-    // Port ownership is the fail-closed singleton gate. No schedulers, queue
-    // recovery, soak resume, or mutable startup work may run before it succeeds.
+    // Port ownership and the data-directory lock are the fail-closed singleton
+    // gates. No mutable startup work may run before both have succeeded.
     bootstrapServerRuntime(startupCollabCtx, port);
     startModelCapabilityRefreshScheduler();
     startRuntimeToolRealCliMatrixScheduler();
@@ -2905,6 +3141,7 @@ function startServer(port: number) {
       console.warn(`[飞书控制机器人] 自动启动失败：${error?.message || error}`);
     }
   });
+  process.once("exit", () => releaseCcmServerInstanceLock(instanceLock));
   return server;
 }
 

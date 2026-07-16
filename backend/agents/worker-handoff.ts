@@ -7,6 +7,9 @@ import {
   renderWorkerContextPacket,
 } from "./runtime-kernel";
 import { resolveTrustedModelContextCapacity } from "../modules/collaboration/model-capability-cache";
+import { renderTrustedMemoryPromptEnvelope } from "./trusted-memory-prompt-envelope";
+import { prepareTaskAgentMemoryEntrySyncContextWithRetry } from "../tasks/agent-sessions";
+import { taskAgentMemoryTransport } from "../tasks/task-agent-memory-entry-sync";
 
 function compact(value: any, max = 900) {
   const text = typeof value === "string" ? value : JSON.stringify(value || "");
@@ -91,6 +94,27 @@ function extractDynamicContextDeltaText(value: any): string {
   if (value.groupMemory) return extractDynamicContextDeltaText(value.groupMemory);
   if (value.memory) return extractDynamicContextDeltaText(value.memory);
   return "";
+}
+
+function extractMemoryConsumptionChallenge(value: any): any {
+  if (!value || typeof value !== "object") return null;
+  const direct = value.memory_consumption_challenge || value.memoryConsumptionChallenge || null;
+  if (direct?.schema === "ccm-memory-context-consumption-challenge-v1") return direct;
+  if (value.group_memory) return extractMemoryConsumptionChallenge(value.group_memory);
+  if (value.groupMemory) return extractMemoryConsumptionChallenge(value.groupMemory);
+  if (value.memory) return extractMemoryConsumptionChallenge(value.memory);
+  return null;
+}
+
+function renderMemoryConsumptionChallenge(challenge: any) {
+  if (!challenge?.challenge_id) return "";
+  return [
+    "[CCM 模型侧记忆加载回执]",
+    "- 开始执行任务前，必须调用内部 MCP server `ccm__knowledge_context` 的 `acknowledge_memory_context` 工具。",
+    `- 工具参数：challenge_id=${challenge.challenge_id}`,
+    "- 该调用只确认你已加载本轮受信记忆，不表示你同意或采用其中每一条；后续仍需在结构化回执中分别声明 used/ignored/verified。",
+    "- 不得只在最终文本中复述 challenge；缺少真实 MCP tool receipt 时本轮交付不会提交。",
+  ].join("\n");
 }
 
 function normalizeMemoryContext(value: any) {
@@ -269,13 +293,18 @@ function renderApiMicrocompactNativeApplyPlan(plan: any) {
   ].filter(Boolean).join("；");
 }
 
-function renderMemoryContextForWorker(memory: any) {
+export function renderMemoryContextForWorker(memory: any) {
   if (!memory) return "";
+  const transport = taskAgentMemoryTransport(memory);
+  if (transport.present && !transport.valid) return `[CCM task-Agent memory entry sync invalid: ${transport.issues.join(",")}]`;
+  if (transport.mode === "continuation") return "";
+  if (transport.mode === "delta") return transport.text;
   const text = extractMemoryText(memory, 10_000);
   const invokedSkillAttachmentText = extractInvokedSkillAttachmentText(memory);
   const planAttachmentText = extractPlanAttachmentText(memory);
   const dynamicContextDeltaText = extractDynamicContextDeltaText(memory);
-  if (!text && !invokedSkillAttachmentText && !planAttachmentText && !dynamicContextDeltaText) return "";
+  const memoryConsumptionChallengeText = renderMemoryConsumptionChallenge(extractMemoryConsumptionChallenge(memory));
+  if (!text && !invokedSkillAttachmentText && !planAttachmentText && !dynamicContextDeltaText && !memoryConsumptionChallengeText) return "";
   const schema = typeof memory === "object" ? String(memory.schema || "ccm-memory-context") : "ccm-memory-text";
   return [
     `schema: ${schema}`,
@@ -285,6 +314,7 @@ function renderMemoryContextForWorker(memory: any) {
     invokedSkillAttachmentText && !text.includes(invokedSkillAttachmentText) ? invokedSkillAttachmentText : "",
     planAttachmentText && !text.includes(planAttachmentText) ? planAttachmentText : "",
     dynamicContextDeltaText && !text.includes(dynamicContextDeltaText) ? dynamicContextDeltaText : "",
+    memoryConsumptionChallengeText,
     text,
   ].filter(Boolean).join("\n");
 }
@@ -325,6 +355,7 @@ export interface SelfContainedWorkerHandoffInput {
   model?: string;
   traceId?: string;
   taskId?: string;
+  taskAgentSessionId?: string;
   analysis?: any;
   workerContextPacket?: any;
   dependencies?: any[];
@@ -365,6 +396,11 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
   const modelContextCapacity = resolveTrustedModelContextCapacity({ provider: input.agentType || "unknown", model: input.model || "" });
   const typedMemoryCapacityRebudget = rebuildWorkerTypedMemoryDeliveryForModelContext(memoryContext, modelContextCapacity.contextWindow);
   if (typedMemoryCapacityRebudget.rebuilt === true) memoryContext = typedMemoryCapacityRebudget.memory;
+  if (input.taskAgentSessionId && memoryContext) {
+    const entrySync = prepareTaskAgentMemoryEntrySyncContextWithRetry(input.taskAgentSessionId, memoryContext);
+    if (entrySync.prepared === true) memoryContext = entrySync.memoryContext;
+  }
+  const memoryEntryTransport = taskAgentMemoryTransport(memoryContext);
   const contextUsageOptions = {
     maxTokens: modelContextCapacity.effectiveContextWindow,
     reservedOutputTokens: modelContextCapacity.reservedOutputTokens,
@@ -506,7 +542,11 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
       document_findings: documentFindings,
       constraints,
       memory_context: memoryContext,
-      memory_summary: memoryContext ? extractMemoryText(memoryContext, 1000) : "",
+      memory_summary: memoryEntryTransport.mode === "delta"
+        ? `per-entry delta: changed=${memoryEntryTransport.plan?.changed_entry_count || 0}; removed=${memoryEntryTransport.plan?.removed_entry_count || 0}; manifest=${memoryEntryTransport.plan?.current_manifest?.manifest_checksum || ""}`
+        : memoryEntryTransport.mode === "continuation"
+          ? `native continuation baseline: manifest=${memoryEntryTransport.plan?.current_manifest?.manifest_checksum || ""}`
+          : memoryContext ? extractMemoryText(memoryContext, 1000) : "",
       contract_injections: Array.isArray(workerContextPacket?.contract_injections) ? workerContextPacket.contract_injections : [],
       memory_freshness_gate: memoryFreshnessGate,
       post_compact_reinjection_gate: postCompactReinjectionGate,
@@ -748,7 +788,9 @@ export function renderSelfContainedWorkerHandoff(handoff: any) {
   const contractInjections = Array.isArray(handoff?.references?.contract_injections) && handoff.references.contract_injections.length
     ? handoff.references.contract_injections.map((item: any) => `- injection_id=${item.injection_id}；${item.endpoint || "contract"}；${item.summary || ""}`).join("\n")
     : "- 无 contract injection。";
-  const memoryContext = renderMemoryContextForWorker(handoff?.references?.memory_context || handoff?.worker_context_packet?.memory || null);
+  const sourceMemoryContext = handoff?.references?.memory_context || handoff?.worker_context_packet?.memory || null;
+  const memoryContext = renderMemoryContextForWorker(sourceMemoryContext);
+  const trustedMemoryEnvelope = renderTrustedMemoryPromptEnvelope(memoryContext, sourceMemoryContext);
   const memoryFreshnessGate = renderMemoryFreshnessGate(handoff?.references?.memory_freshness_gate || extractMemoryFreshnessGate(handoff?.worker_context_packet?.memory || null));
   const postCompactReinjectionGate = renderPostCompactReinjectionGate(handoff?.references?.post_compact_reinjection_gate || extractPostCompactReinjectionGate(handoff?.worker_context_packet?.memory || null));
   const postCompactDispatchMarker = renderPostCompactDispatchMarker(handoff?.references?.post_compact_dispatch_marker || extractPostCompactDispatchMarker(handoff?.worker_context_packet?.memory || null));
@@ -800,7 +842,7 @@ export function renderSelfContainedWorkerHandoff(handoff: any) {
     postCompactReinjectionGate,
     postCompactDispatchMarker,
     readPlanRevalidationGate,
-    memoryContext || "- 无平台记忆；只依据本工作单、文件和当前上下文执行。",
+    trustedMemoryEnvelope || "- 无平台记忆；只依据本工作单、文件和当前上下文执行。",
     "",
     "完成判定：",
     ...(handoff?.done_criteria || []).map((item: string) => `- ${item}`),

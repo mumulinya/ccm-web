@@ -5,6 +5,8 @@ export interface AgentCommandOptions {
     sessionId?: string;
     resumeSession?: boolean;
     persistSession?: boolean;
+    appendSystemPromptFile?: string;
+    developerInstructionsFile?: string;
 }
 export interface AgentRuntimeDescriptor {
     id: AgentRuntimeId;
@@ -72,11 +74,18 @@ export declare function resolveAvailableAgentRuntime(preferred?: string): {
     chain: AgentRuntimeId[];
     switched: boolean;
 };
-export declare function extractAgentCommandUsage(rawOutput: string): {
+export declare function extractAgentCommandUsage(rawOutput: string, agentType?: string): {
     inputTokens: number;
+    directInputTokens: number;
+    cacheCreationInputTokens: number;
+    cacheReadInputTokens: number;
+    cacheReadIncludedInInput: boolean;
     outputTokens: number;
+    providerTotalTokens: number;
+    totalTokens: number;
     totalCostUsd: number;
     reported: boolean;
+    provider: AgentRuntimeId;
 };
 export declare function extractProviderOutputContractEvidence(agentType: string, rawOutput: string, options?: any): {
     schema: string;
@@ -123,9 +132,16 @@ export declare function normalizeAgentCommandOutput(agentType: string, rawOutput
     rawSessionId: string;
     usage: {
         inputTokens: number;
+        directInputTokens: number;
+        cacheCreationInputTokens: number;
+        cacheReadInputTokens: number;
+        cacheReadIncludedInInput: boolean;
         outputTokens: number;
+        providerTotalTokens: number;
+        totalTokens: number;
         totalCostUsd: number;
         reported: boolean;
+        provider: AgentRuntimeId;
     };
     providerOutputContractEvidence: {
         schema: string;
@@ -196,7 +212,7 @@ export declare function runAgentRuntimeSessionSelfTest(): {
         claudeCreatesNamedSession: boolean;
         claudeResumesSameSession: boolean;
         codexInitialIsPersistent: boolean;
-        codexResumesSameSession: boolean;
+        codexResumesSameSession: any;
         codexCapturesNativeSession: boolean;
         cursorInitialCapturesSession: boolean;
         cursorTrustsHeadlessWorkspace: any;

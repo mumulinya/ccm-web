@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildLiveProviderMultiGroupMemoryFleetSummary = buildLiveProviderMultiGroupMemoryFleetSummary;
 exports.getMemoryItemId = getMemoryItemId;
 exports.applyMemoryControls = applyMemoryControls;
 exports.updateMemoryControl = updateMemoryControl;
@@ -221,6 +222,10 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const context_budget_1 = require("../../system/context-budget");
 const utils_1 = require("../../core/utils");
+const live_provider_memory_soak_retention_1 = require("../../integrations/live-provider-memory-soak-retention");
+const live_provider_memory_endurance_1 = require("../../integrations/live-provider-memory-endurance");
+const live_provider_memory_wave_approval_1 = require("../../integrations/live-provider-memory-wave-approval");
+const live_provider_memory_version_transition_ledger_1 = require("../../integrations/live-provider-memory-version-transition-ledger");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const db_1 = require("../../core/db");
 const group_session_memory_extraction_1 = require("../collaboration/group-session-memory-extraction");
@@ -256,6 +261,7 @@ const GROUP_COMPACT_FILE_REFERENCE_DIR = path.join(utils_1.CCM_DIR, "group-memor
 const GROUP_GLOBAL_MEMORY_ARBITRATION_DIR = path.join(utils_1.CCM_DIR, "group-global-memory-arbitration");
 const GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_DIR = path.join(utils_1.CCM_DIR, "group-api-microcompact-native-apply-proof");
 const GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_DIR = path.join(utils_1.CCM_DIR, "group-api-microcompact-native-apply-request-telemetry");
+const LIVE_PROVIDER_MULTI_GROUP_FLEET_DIR = path.join(utils_1.CCM_DIR, "reliability", "live-provider-multi-group-soak");
 const API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 function now() { return new Date().toISOString(); }
 function ensureDir() {
@@ -277,6 +283,66 @@ function writeJsonAtomic(file, value) {
 }
 function hash(value, length = 16) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, length);
+}
+function canonicalFleetValue(value) {
+    if (Array.isArray(value))
+        return value.map(canonicalFleetValue);
+    if (!value || typeof value !== "object")
+        return value;
+    return Object.keys(value).sort().reduce((result, key) => {
+        if (value[key] !== undefined)
+            result[key] = canonicalFleetValue(value[key]);
+        return result;
+    }, {});
+}
+function buildLiveProviderMultiGroupMemoryFleetSummary() {
+    const candidates = [];
+    try {
+        if (fs.existsSync(LIVE_PROVIDER_MULTI_GROUP_FLEET_DIR)) {
+            for (const entry of fs.readdirSync(LIVE_PROVIDER_MULTI_GROUP_FLEET_DIR, { withFileTypes: true })) {
+                if (!entry.isFile() || !/^fleet-.*\.json$/.test(entry.name))
+                    continue;
+                const file = path.join(LIVE_PROVIDER_MULTI_GROUP_FLEET_DIR, entry.name);
+                const report = readJson(file, null);
+                if (report?.schema !== "ccm-live-provider-multi-group-memory-fleet-report-v1" || Number(report?.version || 0) !== 1)
+                    continue;
+                const { reportChecksum, reportFile: _reportFile, ...unsigned } = report;
+                const expected = crypto.createHash("sha256").update(JSON.stringify(canonicalFleetValue(unsigned))).digest("hex");
+                if (!reportChecksum || reportChecksum !== expected)
+                    continue;
+                candidates.push({ ...report, file, reportChecksumValid: true });
+            }
+        }
+    }
+    catch { }
+    candidates.sort((left, right) => Date.parse(String(right.generatedAt || "")) - Date.parse(String(left.generatedAt || "")));
+    const latest = candidates[0] || null;
+    return {
+        schema: "ccm-memory-center-live-provider-multi-group-fleet-summary-v1",
+        generatedAt: now(),
+        present: !!latest,
+        reportChecksumValid: latest?.reportChecksumValid === true,
+        reportChecksum: String(latest?.reportChecksum || ""),
+        sourceGeneratedAt: String(latest?.generatedAt || ""),
+        minimumPassingGroups: Number(latest?.minimumPassingGroups || 0),
+        sourceReportCount: Number(latest?.sourceReportCount || 0),
+        observedGroupCount: Number(latest?.observedGroupCount || 0),
+        passingGroupCount: Number(latest?.passingGroupCount || 0),
+        failedObservationCount: Number(latest?.failedObservationCount || 0),
+        staleOrInvalidCount: Number(latest?.staleOrInvalidCount || 0),
+        passingIsolationValid: latest?.passingIsolationValid === true,
+        gatePassed: latest?.gatePassed === true,
+        groups: (Array.isArray(latest?.groups) ? latest.groups : []).slice(0, 40).map((row) => ({
+            groupId: memoryCenterDiagnosticId(row?.groupId || "", 160),
+            groupSessionId: memoryCenterDiagnosticId(row?.groupSessionId || "", 200),
+            status: String(row?.status || ""),
+            currentValid: row?.currentValid === true,
+            sourceReportChecksum: String(row?.sourceReportChecksum || ""),
+            sentinelChecksum: String(row?.sentinelChecksum || ""),
+            challengeChecksum: String(row?.challengeChecksum || ""),
+            receiptRecoveryPassedCount: Number(row?.receiptRecoveryPassedCount || 0),
+        })),
+    };
 }
 function cleanId(value) {
     return String(value || "").trim().replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 120);
@@ -1020,6 +1086,12 @@ function buildGroupPostCompactUsageDiagnostics(groupId, memory = {}, sessionId =
                 entryId: String(entry.entry_id || ""),
                 relPath,
                 usageState: String(entry.usage_state || "mentioned"),
+                lifecycleState: String(entry.lifecycle_state || (entry.usage_state === "mentioned" ? "delivered_unreported" : entry.usage_state || "mentioned")),
+                deliveryState: String(entry.delivery_state || "delivered"),
+                accessState: String(entry.access_state || "capture_missing"),
+                accessEventCount: Math.max(0, Number(entry.access_event_count || 0)),
+                accessCaptureStatus: String(entry.access_capture_status || "capture_missing"),
+                accessEvidenceValid: entry.access_evidence_valid === true,
                 claimedUsageState: String(entry.claimed_usage_state || entry.usage_state || "mentioned"),
                 targetProject: String(entry.target_project || ""),
                 agentType: String(entry.agent_type || ""),
@@ -1040,8 +1112,16 @@ function buildGroupPostCompactUsageDiagnostics(groupId, memory = {}, sessionId =
             const state = ["used", "verified", "ignored", "mentioned"].includes(row.usageState) ? row.usageState : "mentioned";
             totals[state] += 1;
             totals.total += 1;
+            if (row.lifecycleState === "delivered_unreported")
+                totals.deliveredUnreported += 1;
+            if (row.lifecycleState === "loaded_unreported")
+                totals.loadedUnreported += 1;
+            if (row.accessState === "read_observed")
+                totals.readObserved += 1;
+            if (["capture_missing", "capture_unavailable", "unstructured_output"].includes(row.accessCaptureStatus))
+                totals.captureUnavailable += 1;
             return totals;
-        }, { used: 0, verified: 0, ignored: 0, mentioned: 0, total: 0 });
+        }, { used: 0, verified: 0, ignored: 0, mentioned: 0, deliveredUnreported: 0, loadedUnreported: 0, readObserved: 0, captureUnavailable: 0, total: 0 });
         const timeline = buildGroupCompactBoundaryTimeline(id, memory, {
             usageSummary,
             discipline: disciplineDiagnostics,
@@ -1743,6 +1823,10 @@ function buildGroupPostCompactUsageDiagnostics(groupId, memory = {}, sessionId =
                     proofVerifiedEntryCount: typedMemoryConsumptionRows.filter((row) => row.usageState === "verified" && row.currentSourceProofValid).length,
                     downgradedVerifiedEntryCount: typedMemoryConsumptionRows.filter((row) => row.claimedUsageState === "verified" && row.usageState !== "verified").length,
                     anomalyEntryCount: typedMemoryConsumptionRows.filter((row) => row.anomalyCodes.length > 0).length,
+                    deliveredUnreportedEntryCount: typedMemoryConsumptionRows.filter((row) => row.lifecycleState === "delivered_unreported").length,
+                    loadedUnreportedEntryCount: typedMemoryConsumptionRows.filter((row) => row.lifecycleState === "loaded_unreported").length,
+                    readObservedEntryCount: typedMemoryConsumptionRows.filter((row) => row.accessState === "read_observed").length,
+                    captureUnavailableEntryCount: typedMemoryConsumptionRows.filter((row) => ["capture_missing", "capture_unavailable", "unstructured_output"].includes(row.accessCaptureStatus)).length,
                     averageEvidenceConfidence: typedMemoryConsumptionRows.length
                         ? Math.round(typedMemoryConsumptionRows.reduce((sum, row) => sum + row.evidenceConfidence, 0) / typedMemoryConsumptionRows.length * 1000) / 1000
                         : 0,
@@ -30544,6 +30628,9 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             && (0, group_session_memory_model_extraction_1.verifyGroupSessionMemoryModelExtractionReceipt)(modelReceipt)
             && String(modelReceipt.scopeId || "") === typedScopeId
             && String(modelReceipt.markdownChecksum || "") === String(snapshot.markdownChecksum || "")
+            && String(modelReceipt.cursorAfter?.lastExtractionMessageId || "") === String(cadence.lastExtractionMessageId || "")
+            && String(modelReceipt.cursorAdvanceStatus || "legacy") === String(cadence.cursorAdvanceStatus || "legacy")
+            && (modelReceipt.cursorAdvanceSafe === true) === (cadence.cursorAdvanceSafe === true)
             && (!snapshot.sectionEvidence?.checksum
                 || String(modelReceipt.sectionEvidenceChecksum || "") === String(snapshot.sectionEvidence.checksum || ""));
         const factSupersessionGraph = snapshot.factSupersessionGraph
@@ -30774,7 +30861,15 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             cadenceTokensAtLastExtraction: Number(cadence.tokensAtLastExtraction || 0),
             cadenceTokensSinceLastExtraction: Number(cadence.tokensSinceLastExtraction || 0),
             cadenceToolCallsSinceLastExtraction: Number(cadence.toolCallsSinceLastExtraction || 0),
+            cadenceLastExtractionCursorStatus: String(cadence.lastExtractionCursorStatus || "legacy"),
+            cadenceLastExtractionCursorIndex: Number(cadence.lastExtractionCursorIndex ?? -1),
+            cadenceToolCallScanMessageCount: Number(cadence.toolCallScanMessageCount || 0),
             cadenceLastAssistantTurnHasToolCalls: cadence.lastAssistantTurnHasToolCalls === true,
+            cadenceCursorAdvanceStatus: String(cadence.cursorAdvanceStatus || "legacy"),
+            cadenceCursorAdvanceSafe: cadence.cursorAdvanceSafe === true,
+            cadenceCursorBefore: String(cadence.cursorBefore || ""),
+            cadenceCursorAfter: String(cadence.cursorAfter || cadence.lastExtractionMessageId || ""),
+            cadenceCursorHeldReason: String(cadence.cursorHeldReason || ""),
             cadenceExtractionCount: Number(cadence.extractionCount || 0),
             cadenceLastExtractedAt: String(cadence.lastExtractedAt || ""),
             cadenceOverdue,
@@ -30812,6 +30907,15 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             modelReceiptFile,
             modelReceiptPresent: !!modelReceipt,
             modelReceiptChecksumValid,
+            modelReceiptVersion: Number(modelReceipt?.version || 0),
+            modelReceiptTrigger: String(modelReceipt?.trigger || "legacy"),
+            modelReceiptModelInvoked: modelReceipt?.modelInvoked === true,
+            modelReceiptSourceRangeMode: String(modelReceipt?.sourceRangeMode || "legacy"),
+            modelManualRefreshWithoutNewMessages: modelReceipt?.trigger === "manual" && modelReceipt?.manualRefreshWithoutNewMessages === true,
+            modelManualIncrementalSourceMessageCount: Number(modelReceipt?.incrementalSourceMessageCount || 0),
+            modelManualSuppressionEligible: modelReceipt?.trigger === "manual" && modelReceipt?.directMemorySuppressionEligible === true,
+            modelManualSuppressionBypassed: modelReceipt?.trigger === "manual" && modelReceipt?.directMemorySuppressionBypassedForManualExtraction === true,
+            modelManualSuppressionProofCount: Number(modelReceipt?.directMemoryProofCount || 0),
             modelFailureReceiptFile,
             modelFailureReceiptPresent: !!modelFailureReceipt,
             modelFailureReceiptChecksumValid,
@@ -30819,6 +30923,10 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             modelMergeQualityStatus: String(snapshot.modelMergeQuality?.status || modelReceipt?.mergeQuality?.status || "unobserved"),
             modelMergeQualityScore: Number(snapshot.modelMergeQuality?.score || modelReceipt?.mergeQuality?.score || 0),
             modelMergeAnchorRetentionPercent: Number(snapshot.modelMergeQuality?.anchorRetentionPercent || modelReceipt?.mergeQuality?.anchorRetentionPercent || 0),
+            modelMergeQualityInputCanonicalization: String(modelReceipt?.mergeQualityInput?.canonicalization || "legacy"),
+            modelMergeQualityReplayInputMode: String(modelExtractionReplay?.mergeQualityInput?.mode || "unobserved"),
+            modelMergeQualityInputChecksumValid: modelExtractionReplay?.checks?.mergeQualityInputChecksumMatchesReceipt === true,
+            modelMergeQualityInputLegacyCompatible: modelExtractionReplay?.mergeQualityInput?.legacyCompatible === true,
             factSupersessionGraphPresent,
             factSupersessionGraphValid,
             factSupersessionGraphChecksum: String(factSupersessionGraph?.checksum || ""),
@@ -30889,6 +30997,29 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             modelInputClipped: latestModelExtractionHistoryEvent?.requestAudit
                 ? latestModelExtractionHistoryEvent.requestAudit.clipped === true
                 : modelReceipt?.requestAudit?.clipped === true,
+            modelInputContentMode: String(latestModelExtractionHistoryEvent?.requestAudit?.sourceContentMode || modelReceipt?.requestAudit?.sourceContentMode || "legacy_flat_text"),
+            modelInputStructuredMessageCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.sourceStructuredMessageCount ?? modelReceipt?.requestAudit?.sourceStructuredMessageCount ?? 0),
+            modelInputStructuredBlockCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.sourceStructuredBlockCount ?? modelReceipt?.requestAudit?.sourceStructuredBlockCount ?? 0),
+            modelInputToolUseBlockCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.sourceToolUseBlockCount ?? modelReceipt?.requestAudit?.sourceToolUseBlockCount ?? 0),
+            modelInputToolResultBlockCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.sourceToolResultBlockCount ?? modelReceipt?.requestAudit?.sourceToolResultBlockCount ?? 0),
+            modelInputOrphanToolResultCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.sourceOrphanToolResultCount ?? modelReceipt?.requestAudit?.sourceOrphanToolResultCount ?? 0),
+            modelInputPendingToolUseCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.sourcePendingToolUseCount ?? modelReceipt?.requestAudit?.sourcePendingToolUseCount ?? 0),
+            modelInputToolBoundaryStatus: String(latestModelExtractionHistoryEvent?.requestAudit?.sourceToolBoundaryStatus || modelReceipt?.requestAudit?.sourceToolBoundaryStatus || "unobserved"),
+            modelInputApiRoundCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.apiRoundCount ?? modelReceipt?.requestAudit?.apiRoundCount ?? 0),
+            modelInputSelectedApiRoundCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.selectedApiRoundCount ?? modelReceipt?.requestAudit?.selectedApiRoundCount ?? 0),
+            modelInputOmittedApiRoundCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.omittedApiRoundCount ?? modelReceipt?.requestAudit?.omittedApiRoundCount ?? 0),
+            modelCustomPromptConfigured: latestModelExtractionHistoryEvent?.requestAudit
+                ? latestModelExtractionHistoryEvent.requestAudit.customPromptConfigured === true
+                : modelReceipt?.requestAudit?.customPromptConfigured === true,
+            modelCustomPromptSource: String(latestModelExtractionHistoryEvent?.requestAudit?.customPromptSource || modelReceipt?.requestAudit?.customPromptSource || "default"),
+            modelCustomPromptChecksum: String(latestModelExtractionHistoryEvent?.requestAudit?.customPromptChecksum || modelReceipt?.requestAudit?.customPromptChecksum || ""),
+            modelCustomPromptChars: Number(latestModelExtractionHistoryEvent?.requestAudit?.customPromptChars ?? modelReceipt?.requestAudit?.customPromptChars ?? 0),
+            modelCustomTemplateConfigured: latestModelExtractionHistoryEvent?.requestAudit
+                ? latestModelExtractionHistoryEvent.requestAudit.customTemplateConfigured === true
+                : modelReceipt?.requestAudit?.customTemplateConfigured === true,
+            modelCustomTemplateSource: String(latestModelExtractionHistoryEvent?.requestAudit?.customTemplateSource || modelReceipt?.requestAudit?.customTemplateSource || "default"),
+            modelCustomTemplateChecksum: String(latestModelExtractionHistoryEvent?.requestAudit?.customTemplateChecksum || modelReceipt?.requestAudit?.customTemplateChecksum || ""),
+            modelCustomTemplateSectionCount: Number(latestModelExtractionHistoryEvent?.requestAudit?.customTemplateSectionCount ?? modelReceipt?.requestAudit?.customTemplateSectionCount ?? 0),
             modelInputDegradedEventCount: modelInputAuditEvents.filter((event) => event?.requestAudit?.inputBudgetStatus === "degraded_bounded").length,
             modelInputOverBudgetEventCount: modelInputAuditEvents.filter((event) => event?.requestAudit?.inputBudgetStatus === "over_budget").length,
             modelExecutionId: String(modelReceipt?.executionId || ""),
@@ -31054,7 +31185,9 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             budgetNearLimitCount: checkedRows.filter(row => row.budgetNearLimit).length,
             cadenceInitializedSessionCount: rows.filter(row => row.cadenceInitialized).length,
             cadenceWaitingInitializationCount: rows.filter(row => row.cadenceStatus === "waiting_initialization_tokens").length,
-            cadenceWaitingUpdateCount: rows.filter(row => row.cadenceStatus === "waiting_update_tokens" || row.cadenceStatus === "waiting_tool_calls_or_natural_break").length,
+            cadenceWaitingUpdateCount: rows.filter(row => ["waiting_update_tokens", "waiting_tool_calls_or_natural_break", "waiting_natural_break_after_cursor_miss"].includes(row.cadenceStatus)).length,
+            cadenceCursorMissCount: rows.filter(row => row.cadenceLastExtractionCursorStatus === "not_found").length,
+            cadenceCursorHeldToolBoundaryCount: rows.filter(row => row.cadenceCursorAdvanceStatus === "held_tool_use_boundary").length,
             cadenceOverdueCount: rows.filter(row => row.cadenceOverdue).length,
             totalSessionMemoryExtractionCount: rows.reduce((sum, row) => sum + Number(row.cadenceExtractionCount || 0), 0),
             activeExtractionCount: rows.filter(row => row.extractionActive).length,
@@ -31064,6 +31197,12 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             extractionAttemptCount: rows.reduce((sum, row) => sum + Number(row.extractionAttempts || 0), 0),
             modelExtractedSessionCount: rows.filter(row => row.modelExtracted).length,
             modelReceiptVerifiedCount: rows.filter(row => row.modelReceiptChecksumValid).length,
+            modelManualExtractionCount: rows.filter(row => row.modelReceiptTrigger === "manual").length,
+            modelManualModelInvokedCount: rows.filter(row => row.modelReceiptTrigger === "manual" && row.modelReceiptModelInvoked).length,
+            modelManualFullSessionRefreshCount: rows.filter(row => row.modelReceiptTrigger === "manual" && row.modelReceiptSourceRangeMode === "full_session_refresh").length,
+            modelManualNoNewMessageRefreshCount: rows.filter(row => row.modelManualRefreshWithoutNewMessages).length,
+            modelManualSuppressionEligibleCount: rows.filter(row => row.modelManualSuppressionEligible).length,
+            modelManualSuppressionBypassCount: rows.filter(row => row.modelManualSuppressionBypassed).length,
             modelExtractionPendingCount: rows.filter(row => row.modelExtractionPending).length,
             modelExtractionBackoffCount: rows.filter(row => row.modelExtractionBackoff).length,
             directMemorySuppressionCount: rows.reduce((sum, row) => sum + Number(row.directMemorySuppressionCount || 0), 0),
@@ -31077,6 +31216,8 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             modelFailureReceiptInvalidCount: rows.filter(row => row.modelFailureReceiptPresent && !row.modelFailureReceiptChecksumValid).length,
             modelMergeQualityObservedCount: rows.filter(row => row.modelMergeQualityStatus !== "unobserved").length,
             modelMergeQualityFailedCount: rows.filter(row => row.modelMergeQualityStatus === "fail").length,
+            modelMergeQualityInputVerifiedCount: rows.filter(row => row.modelMergeQualityInputChecksumValid).length,
+            modelMergeQualityInputLegacyCompatibleCount: rows.filter(row => row.modelMergeQualityInputLegacyCompatible).length,
             factSupersessionGraphObservedCount: rows.filter(row => row.factSupersessionGraphPresent).length,
             factSupersessionGraphInvalidCount: rows.filter(row => row.factSupersessionGraphPresent && !row.factSupersessionGraphValid).length,
             factSupersessionEdgeCount: rows.reduce((sum, row) => sum + Number(row.factSupersessionEdgeCount || 0), 0),
@@ -31097,6 +31238,19 @@ function buildGroupSessionMemorySnapshotReport(options = {}) {
             modelExtractionArtifactCapacityExceededCount: rows.filter(row => row.modelExtractionArtifactCapacityExceeded).length,
             modelInputDegradedCount: rows.reduce((sum, row) => sum + Number(row.modelInputDegradedEventCount || 0), 0),
             modelInputOverBudgetCount: rows.reduce((sum, row) => sum + Number(row.modelInputOverBudgetEventCount || 0), 0),
+            modelInputStructuredSessionCount: rows.filter(row => row.modelInputContentMode === "structured_blocks_v1").length,
+            modelInputToolUseBlockCount: rows.reduce((sum, row) => sum + Number(row.modelInputToolUseBlockCount || 0), 0),
+            modelInputToolResultBlockCount: rows.reduce((sum, row) => sum + Number(row.modelInputToolResultBlockCount || 0), 0),
+            modelInputCompleteToolBoundaryCount: rows.filter(row => row.modelInputToolBoundaryStatus === "complete").length,
+            modelInputPendingToolBoundaryCount: rows.filter(row => row.modelInputToolBoundaryStatus === "pending_results").length,
+            modelInputOrphanToolBoundaryCount: rows.filter(row => row.modelInputToolBoundaryStatus === "orphan_results").length,
+            modelInputClippedToolBoundaryCount: rows.filter(row => row.modelInputToolBoundaryStatus === "clipped").length,
+            modelCustomPromptConfiguredSessionCount: rows.filter(row => row.modelCustomPromptConfigured).length,
+            modelCustomPromptExactSessionCount: rows.filter(row => row.modelCustomPromptSource === "exact_session").length,
+            modelCustomPromptGlobalCount: rows.filter(row => row.modelCustomPromptSource === "global").length,
+            modelCustomTemplateConfiguredSessionCount: rows.filter(row => row.modelCustomTemplateConfigured).length,
+            modelCustomTemplateExactSessionCount: rows.filter(row => row.modelCustomTemplateSource === "exact_session").length,
+            modelCustomTemplateGlobalCount: rows.filter(row => row.modelCustomTemplateSource === "global").length,
             modelExtractionTypedMemoryArchiveCount: rows.filter(row => row.modelExtractionTypedMemoryArchivePresent).length,
             modelExtractionTypedMemoryArchiveInvalidCount: rows.filter(row => row.modelExtractionTypedMemoryArchivePresent && !row.modelExtractionTypedMemoryArchiveValid).length,
             modelExtractionTypedMemoryActiveFactCount: rows.reduce((sum, row) => sum + Number(row.modelExtractionTypedMemoryActiveFactCount || 0), 0),
@@ -31814,10 +31968,25 @@ function buildTaskAgentMemoryContextSnapshotReport(options = {}) {
         const { buildTaskAgentInvocationLineageReport } = require("../../tasks/task-agent-invocation-lineage");
         const { buildTaskAgentContinuationSoakReport } = require("../../tasks/task-agent-continuation-soak");
         const { captureAgentRuntimeVersionSnapshot } = require("../../agents/runtime");
+        const { reconcileMemoryContextConsumptionReceipts } = require("../../integrations/memory-context-consumption-receipt");
+        const { buildMemoryContextConsumptionRecoveryInventory } = require("../../integrations/memory-context-consumption-recovery");
         const inventory = buildTaskAgentMemoryContextSnapshotInventory(options);
         const retention = pruneTaskAgentMemoryContextSnapshots({ ...options, dryRun: true });
+        const modelMemoryReceiptLifecycle = reconcileMemoryContextConsumptionReceipts({ ...options, prune: false });
+        const modelMemoryReceiptRecovery = buildMemoryContextConsumptionRecoveryInventory(options);
         const invocationLineage = buildTaskAgentInvocationLineageReport(options);
         const continuationSoak = buildTaskAgentContinuationSoakReport(options);
+        const liveProviderMultiGroupFleet = buildLiveProviderMultiGroupMemoryFleetSummary();
+        const liveProviderReportRetention = (0, live_provider_memory_soak_retention_1.buildLiveProviderMemorySoakRetentionInventory)();
+        const liveProviderMemoryEndurance = (0, live_provider_memory_endurance_1.readLatestLiveProviderMemoryEnduranceSummary)();
+        const liveProviderMemoryEnduranceScheduler = (0, live_provider_memory_endurance_1.getLiveProviderMemoryEnduranceSchedulerStatus)();
+        const liveProviderMemoryWaveApprovalPreview = (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryWaveApprovalPreview)();
+        const liveProviderMemoryVersionTransitionCanaryPreview = (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryVersionTransitionCanaryPreview)();
+        const liveProviderMemoryWaveApprovalProviderPreviews = ["claudecode", "codex", "cursor"].map(provider => (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryWaveApprovalPreview)({ provider }));
+        const liveProviderMemoryVersionTransitionCanaryProviderPreviews = ["claudecode", "codex", "cursor"].map(provider => (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryVersionTransitionCanaryPreview)({ provider }));
+        const liveProviderInitialMemoryBaselineCanaryProviderPreviews = ["claudecode", "codex", "cursor"].map(provider => (0, live_provider_memory_wave_approval_1.buildLiveProviderInitialMemoryBaselineCanaryPreview)({ provider }));
+        const liveProviderMemoryWaveApprovalInventory = (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)();
+        const liveProviderMemoryVersionTransitionLedger = (0, live_provider_memory_version_transition_ledger_1.readLiveProviderMemoryVersionTransitionLedger)();
         const invocationOverall = invocationLineage.overall || {};
         const continuationSoakOverall = continuationSoak.overall || {};
         const providerRuntimeContractRows = ["claudecode", "codex", "cursor"].map(provider => {
@@ -31858,11 +32027,19 @@ function buildTaskAgentMemoryContextSnapshotReport(options = {}) {
         const invocationChecked = Number(invocationOverall.edgeCount || 0);
         const invocationFailed = Number(invocationOverall.invalidCount || 0) > 0 || Number(invocationRecoveryOverall.quarantined_count || 0) > 0;
         const invocationWarned = Number(invocationOverall.uncertainCount || 0) > 0 || Number(invocationRecoveryOverall.uncertain_count || 0) > 0;
-        const status = checked === 0 && invocationChecked === 0 && capacityPreparedSessions.length === 0 && capacityPendingSessions.length === 0 && Number(continuationSoakOverall.chainCount || 0) === 0
+        const modelReceiptSummary = modelMemoryReceiptLifecycle.summary || {};
+        const modelReceiptFailed = Number(modelReceiptSummary.referencedMissingCount || 0) > 0 || Number(modelReceiptSummary.referencedInvalidCount || 0) > 0;
+        const modelReceiptWarned = modelMemoryReceiptLifecycle.pruningBlocked === true || Number(modelReceiptSummary.orphanInvalidCount || 0) > 0 || Number(modelReceiptSummary.prunableCount || 0) > 0;
+        const modelReceiptRecoveryFailed = Number(modelMemoryReceiptRecovery.summary?.invalidCount || 0) > 0;
+        const modelReceiptRecoveryWarned = Number(modelMemoryReceiptRecovery.summary?.blockedCount || 0) > 0
+            || Number(modelMemoryReceiptRecovery.summary?.runningCount || 0) > 0
+            || Number(modelMemoryReceiptRecovery.summary?.interruptedCount || 0) > 0
+            || Number(modelMemoryReceiptRecovery.summary?.prunableCount || 0) > 0;
+        const status = checked === 0 && invocationChecked === 0 && capacityPreparedSessions.length === 0 && capacityPendingSessions.length === 0 && Number(continuationSoakOverall.chainCount || 0) === 0 && Number(modelReceiptSummary.receiptFileCount || 0) === 0 && Number(modelReceiptSummary.referencedChallengeCount || 0) === 0
             ? "empty"
-            : failed > 0 || invocationFailed || capacityInvalidSessions.length > 0 || Number(continuationSoakOverall.invalidChainCount || 0) > 0
+            : failed > 0 || invocationFailed || modelReceiptFailed || modelReceiptRecoveryFailed || capacityInvalidSessions.length > 0 || Number(continuationSoakOverall.invalidChainCount || 0) > 0
                 ? "fail"
-                : warned > 0 || invocationWarned || capacityPendingSessions.length > 0 || continuationSoakOverall.status === "warn" ? "warn" : "ok";
+                : warned > 0 || invocationWarned || modelReceiptWarned || modelReceiptRecoveryWarned || capacityPendingSessions.length > 0 || continuationSoakOverall.status === "warn" ? "warn" : "ok";
         return {
             schema: "ccm-task-agent-memory-context-snapshot-quality-report-v1",
             generatedAt: now(),
@@ -31882,6 +32059,79 @@ function buildTaskAgentMemoryContextSnapshotReport(options = {}) {
                 missingPacketCount: Number(summary.missingPacketCount || 0),
                 missingGateCount: Number(summary.missingGateCount || 0),
                 groupSessionBoundCount: Number(summary.groupSessionBoundCount || 0),
+                memorySnapshotSyncInitializeCount: Number(summary.memorySnapshotSyncInitializeCount || 0),
+                memorySnapshotSyncPromptUpdateCount: Number(summary.memorySnapshotSyncPromptUpdateCount || 0),
+                memorySnapshotSyncUnchangedCount: Number(summary.memorySnapshotSyncUnchangedCount || 0),
+                memorySnapshotSyncInvalidCount: Number(summary.memorySnapshotSyncInvalidCount || 0),
+                memorySnapshotSyncLegacyCount: Number(summary.memorySnapshotSyncLegacyCount || 0),
+                memorySnapshotSyncCommittedCount: Number(summary.memorySnapshotSyncCommittedCount || 0),
+                memorySnapshotSyncCommitPendingCount: Number(summary.memorySnapshotSyncCommitPendingCount || 0),
+                memorySnapshotSyncCommitRejectedCount: Number(summary.memorySnapshotSyncCommitRejectedCount || 0),
+                memorySnapshotSyncCommitInvalidCount: Number(summary.memorySnapshotSyncCommitInvalidCount || 0),
+                memorySnapshotSyncLateFailurePreservedCount: Number(summary.memorySnapshotSyncLateFailurePreservedCount || 0),
+                memoryEntrySyncFullCount: Number(summary.memoryEntrySyncFullCount || 0),
+                memoryEntrySyncDeltaCount: Number(summary.memoryEntrySyncDeltaCount || 0),
+                memoryEntrySyncContinuationCount: Number(summary.memoryEntrySyncContinuationCount || 0),
+                memoryEntrySyncInvalidCount: Number(summary.memoryEntrySyncInvalidCount || 0),
+                memoryEntrySyncLegacyCount: Number(summary.memoryEntrySyncLegacyCount || 0),
+                memoryEntryChangedCount: Number(summary.memoryEntryChangedCount || 0),
+                memoryEntryRemovedCount: Number(summary.memoryEntryRemovedCount || 0),
+                memoryEntryRenderLeasePreparedCount: Number(summary.memoryEntryRenderLeasePreparedCount || 0),
+                memoryEntryRenderLeaseActiveCount: Number(summary.memoryEntryRenderLeaseActiveCount || 0),
+                memoryEntryRenderLeaseBoundCount: Number(summary.memoryEntryRenderLeaseBoundCount || 0),
+                memoryEntryRenderLeaseRejectedCount: Number(summary.memoryEntryRenderLeaseRejectedCount || 0),
+                memoryEntryRenderLeaseStaleCount: Number(summary.memoryEntryRenderLeaseStaleCount || 0),
+                memoryEntryRenderLeaseTakeoverCount: Number(summary.memoryEntryRenderLeaseTakeoverCount || 0),
+                memoryEntryRenderLeaseHistoryCount: Number(summary.memoryEntryRenderLeaseHistoryCount || 0),
+                memoryEntryRenderLeaseMaxFencingToken: Number(summary.memoryEntryRenderLeaseMaxFencingToken || 0),
+                memoryEntryRenderContentionCount: Number(summary.memoryEntryRenderContentionCount || 0),
+                memoryEntryRenderWaitResolvedCount: Number(summary.memoryEntryRenderWaitResolvedCount || 0),
+                memoryEntryRenderWaitTimeoutCount: Number(summary.memoryEntryRenderWaitTimeoutCount || 0),
+                memoryEntryRenderSameProcessConflictCount: Number(summary.memoryEntryRenderSameProcessConflictCount || 0),
+                memoryEntryRenderWaitTotalMs: Number(summary.memoryEntryRenderWaitTotalMs || 0),
+                memoryEntryRenderContentionReceiptValidCount: Number(summary.memoryEntryRenderContentionReceiptValidCount || 0),
+                memoryEntryRenderContentionReceiptInvalidCount: Number(summary.memoryEntryRenderContentionReceiptInvalidCount || 0),
+                memoryPromptInjectionProofCount: Number(summary.memoryPromptInjectionProofCount || 0),
+                memoryPromptInjectionEnforcedCount: Number(summary.memoryPromptInjectionEnforcedCount || 0),
+                memoryPromptInjectionPromptBoundCount: Number(summary.memoryPromptInjectionPromptBoundCount || 0),
+                memoryPromptInjectionMissingCount: Number(summary.memoryPromptInjectionMissingCount || 0),
+                memoryPromptInjectionInvalidCount: Number(summary.memoryPromptInjectionInvalidCount || 0),
+                memoryTrustedEnvelopeRequiredCount: Number(summary.memoryTrustedEnvelopeRequiredCount || 0),
+                memoryTrustedEnvelopeValidCount: Number(summary.memoryTrustedEnvelopeValidCount || 0),
+                memoryTrustedEnvelopeUnverifiedCount: Number(summary.memoryTrustedEnvelopeUnverifiedCount || 0),
+                memoryContinuationBaselineRequiredCount: Number(summary.memoryContinuationBaselineRequiredCount || 0),
+                memoryContinuationBaselineValidCount: Number(summary.memoryContinuationBaselineValidCount || 0),
+                memoryContinuationBaselineUnverifiedCount: Number(summary.memoryContinuationBaselineUnverifiedCount || 0),
+                providerMemoryChannelRequiredCount: Number(summary.providerMemoryChannelRequiredCount || 0),
+                providerMemoryAcknowledgementRequiredCount: Number(summary.providerMemoryAcknowledgementRequiredCount || 0),
+                providerMemoryAcknowledgedCount: Number(summary.providerMemoryAcknowledgedCount || 0),
+                providerMemoryAcknowledgementUnverifiedCount: Number(summary.providerMemoryAcknowledgementUnverifiedCount || 0),
+                providerMemoryStructuredAcknowledgedCount: Number(summary.providerMemoryStructuredAcknowledgedCount || 0),
+                providerMemoryExitSuccessAcknowledgedCount: Number(summary.providerMemoryExitSuccessAcknowledgedCount || 0),
+                providerMemoryNativeSystemCount: Number(summary.providerMemoryNativeSystemCount || 0),
+                providerMemoryNativeDeveloperCount: Number(summary.providerMemoryNativeDeveloperCount || 0),
+                providerMemoryUserFallbackCount: Number(summary.providerMemoryUserFallbackCount || 0),
+                providerMemoryChannelUnverifiedCount: Number(summary.providerMemoryChannelUnverifiedCount || 0),
+                memoryContextConsumptionReceiptRequiredCount: Number(summary.memoryContextConsumptionReceiptRequiredCount || 0),
+                memoryContextConsumptionReceiptValidCount: Number(summary.memoryContextConsumptionReceiptValidCount || 0),
+                memoryContextConsumptionReceiptMissingCount: Number(summary.memoryContextConsumptionReceiptMissingCount || 0),
+                modelMemoryReceiptReferencedValidCount: Number(modelMemoryReceiptLifecycle.summary?.referencedValidCount || 0),
+                modelMemoryReceiptReferencedMissingCount: Number(modelMemoryReceiptLifecycle.summary?.referencedMissingCount || 0),
+                modelMemoryReceiptReferencedInvalidCount: Number(modelMemoryReceiptLifecycle.summary?.referencedInvalidCount || 0),
+                modelMemoryReceiptOrphanCount: Number(modelMemoryReceiptLifecycle.summary?.orphanCount || 0),
+                modelMemoryReceiptPrunableCount: Number(modelMemoryReceiptLifecycle.summary?.prunableCount || 0),
+                modelMemoryReceiptPruningBlocked: modelMemoryReceiptLifecycle.pruningBlocked === true,
+                modelMemoryReceiptRecoveryCount: Number(modelMemoryReceiptRecovery.summary?.count || 0),
+                modelMemoryReceiptRecoveredCount: Number(modelMemoryReceiptRecovery.summary?.recoveredCount || 0),
+                modelMemoryReceiptRecoveryBlockedCount: Number(modelMemoryReceiptRecovery.summary?.blockedCount || 0),
+                modelMemoryReceiptRecoveryRunningCount: Number(modelMemoryReceiptRecovery.summary?.runningCount || 0),
+                modelMemoryReceiptRecoveryInvalidCount: Number(modelMemoryReceiptRecovery.summary?.invalidCount || 0),
+                modelMemoryReceiptReplaySuppressedCount: Number(modelMemoryReceiptRecovery.summary?.replaySuppressedCount || 0),
+                modelMemoryReceiptRecoveryReferencedCount: Number(modelMemoryReceiptRecovery.summary?.referencedCount || 0),
+                modelMemoryReceiptRecoveryOrphanCount: Number(modelMemoryReceiptRecovery.summary?.orphanCount || 0),
+                modelMemoryReceiptRecoveryInterruptedCount: Number(modelMemoryReceiptRecovery.summary?.interruptedCount || 0),
+                modelMemoryReceiptRecoveryPrunableCount: Number(modelMemoryReceiptRecovery.summary?.prunableCount || 0),
+                modelMemoryReceiptRecoveryPrunedCount: Number(modelMemoryReceiptRecovery.summary?.prunedCount || 0),
                 deliveredCount: Number(summary.deliveredCount || 0),
                 deliveryMissingCount: Number(summary.deliveryMissingCount || 0),
                 deliveryFailedCount: Number(summary.deliveryFailedCount || 0),
@@ -31971,6 +32221,99 @@ function buildTaskAgentMemoryContextSnapshotReport(options = {}) {
                 continuationSoakMultiTurnChainCount: Number(continuationSoakOverall.multiTurnChainCount || 0),
                 continuationSoakRestartObservedChainCount: Number(continuationSoakOverall.restartObservedChainCount || 0),
                 continuationSoakRecoveredEventCount: Number(continuationSoakOverall.recoveredEventCount || 0),
+                continuationSoakMemoryRecoveryEventCount: Number(continuationSoakOverall.memoryRecoveryEventCount || 0),
+                continuationSoakMemoryRecoveryCommittedCount: Number(continuationSoakOverall.memoryRecoveryCommittedCount || 0),
+                continuationSoakMemoryRecoveryBlockedCount: Number(continuationSoakOverall.memoryRecoveryBlockedCount || 0),
+                continuationSoakMemoryRecoveryFaultInjectedCount: Number(continuationSoakOverall.memoryRecoveryFaultInjectedCount || 0),
+                continuationSoakMemoryRecoveryRestartReconciledCount: Number(continuationSoakOverall.memoryRecoveryRestartReconciledCount || 0),
+                continuationSoakMemoryRecoveryReplaySuppressedCount: Number(continuationSoakOverall.memoryRecoveryReplaySuppressedCount || 0),
+                continuationSoakMemoryRecoveryNativeAcknowledgedCount: Number(continuationSoakOverall.memoryRecoveryNativeAcknowledgedCount || 0),
+                continuationSoakMemoryRecoveryProviderCount: Number(continuationSoakOverall.memoryRecoveryProviderCount || 0),
+                continuationSoakMemoryRecoveryProviderVersionCount: Number(continuationSoakOverall.memoryRecoveryProviderVersionCount || 0),
+                continuationSoakLiveProviderMemoryProbeEventCount: Number(continuationSoakOverall.liveProviderMemoryProbeEventCount || 0),
+                continuationSoakLiveProviderMemoryProbeTerminalCount: Number(continuationSoakOverall.liveProviderMemoryProbeTerminalCount || 0),
+                continuationSoakLiveProviderMemoryProbePassedCount: Number(continuationSoakOverall.liveProviderMemoryProbePassedCount || 0),
+                continuationSoakLiveProviderMemoryProbeTimeoutCount: Number(continuationSoakOverall.liveProviderMemoryProbeTimeoutCount || 0),
+                continuationSoakLiveProviderMemoryProbeUnavailableCount: Number(continuationSoakOverall.liveProviderMemoryProbeUnavailableCount || 0),
+                continuationSoakLiveProviderMemoryProbeFailedCount: Number(continuationSoakOverall.liveProviderMemoryProbeFailedCount || 0),
+                continuationSoakLiveProviderMemoryProbeProviderCount: Number(continuationSoakOverall.liveProviderMemoryProbeProviderCount || 0),
+                continuationSoakLiveProviderMemoryProbeProviderVersionCount: Number(continuationSoakOverall.liveProviderMemoryProbeProviderVersionCount || 0),
+                continuationSoakLiveProviderMemoryProbeModelCount: Number(continuationSoakOverall.liveProviderMemoryProbeModelCount || 0),
+                continuationSoakLiveProviderMemoryProbeSessionEstablishedCount: Number(continuationSoakOverall.liveProviderMemoryProbeSessionEstablishedCount || 0),
+                continuationSoakLiveProviderMemoryProbeTurnStartedCount: Number(continuationSoakOverall.liveProviderMemoryProbeTurnStartedCount || 0),
+                continuationSoakLiveProviderMemoryProbeFirstOutputCount: Number(continuationSoakOverall.liveProviderMemoryProbeFirstOutputCount || 0),
+                continuationSoakLiveProviderMemoryProbeTerminalObservedCount: Number(continuationSoakOverall.liveProviderMemoryProbeTerminalObservedCount || 0),
+                continuationSoakLiveProviderMemoryProbeModelOutputCount: Number(continuationSoakOverall.liveProviderMemoryProbeModelOutputCount || 0),
+                continuationSoakLiveProviderMemoryProbeApiRetryEventCount: Number(continuationSoakOverall.liveProviderMemoryProbeApiRetryEventCount || 0),
+                continuationSoakLiveProviderMemoryProbeStartupTimeoutCount: Number(continuationSoakOverall.liveProviderMemoryProbeStartupTimeoutCount || 0),
+                continuationSoakLiveProviderMemoryProbeApiRetryTimeoutCount: Number(continuationSoakOverall.liveProviderMemoryProbeApiRetryTimeoutCount || 0),
+                continuationSoakLiveProviderMemoryProbeTurnTimeoutCount: Number(continuationSoakOverall.liveProviderMemoryProbeTurnTimeoutCount || 0),
+                continuationSoakLiveProviderMemoryProbeReceiptRecoveryRequiredCount: Number(continuationSoakOverall.liveProviderMemoryProbeReceiptRecoveryRequiredCount || 0),
+                continuationSoakLiveProviderMemoryProbeReceiptRecoveryPassedCount: Number(continuationSoakOverall.liveProviderMemoryProbeReceiptRecoveryPassedCount || 0),
+                continuationSoakLiveProviderMemoryProbeWorkspaceChangedCount: Number(continuationSoakOverall.liveProviderMemoryProbeWorkspaceChangedCount || 0),
+                liveProviderMultiGroupFleetObservedGroupCount: Number(liveProviderMultiGroupFleet.observedGroupCount || 0),
+                liveProviderMultiGroupFleetPassingGroupCount: Number(liveProviderMultiGroupFleet.passingGroupCount || 0),
+                liveProviderMultiGroupFleetFailedObservationCount: Number(liveProviderMultiGroupFleet.failedObservationCount || 0),
+                liveProviderMultiGroupFleetStaleOrInvalidCount: Number(liveProviderMultiGroupFleet.staleOrInvalidCount || 0),
+                liveProviderMultiGroupFleetIsolationValid: liveProviderMultiGroupFleet.passingIsolationValid === true,
+                liveProviderMultiGroupFleetGatePassed: liveProviderMultiGroupFleet.gatePassed === true,
+                liveProviderReportRetentionReportCount: Number(liveProviderReportRetention.summary?.reportCount || 0),
+                liveProviderReportRetentionInvalidCount: Number(liveProviderReportRetention.summary?.invalidCount || 0),
+                liveProviderReportRetentionReferencedSingleCount: Number(liveProviderReportRetention.summary?.referencedSingleCount || 0),
+                liveProviderReportRetentionReferencedMultiCount: Number(liveProviderReportRetention.summary?.referencedMultiCount || 0),
+                liveProviderReportRetentionApprovalReferencedEnduranceCount: Number(liveProviderReportRetention.summary?.approvalReferencedEnduranceCount || 0),
+                liveProviderReportRetentionApprovalReferencedMultiCount: Number(liveProviderReportRetention.summary?.approvalReferencedMultiCount || 0),
+                liveProviderReportRetentionTransitionReferencedEnduranceCount: Number(liveProviderReportRetention.summary?.transitionReferencedEnduranceCount || 0),
+                liveProviderReportRetentionTransitionLedgerValid: liveProviderReportRetention.summary?.transitionLedgerValid === true,
+                liveProviderReportRetentionPrunableCount: Number(liveProviderReportRetention.summary?.prunableCount || 0),
+                liveProviderReportRetentionOverflowCount: Number(liveProviderReportRetention.summary?.overflowCount || 0),
+                liveProviderReportRetentionCoordinated: liveProviderReportRetention.coordination?.sharedReportSetLock === true
+                    && liveProviderReportRetention.coordination?.executeUsesSharedLock === true
+                    && Number(liveProviderReportRetention.coordination?.coordinatedWriterKinds?.length || 0) === 4,
+                liveProviderMemoryEnduranceWaveCount: Number(liveProviderMemoryEndurance.waveCount || 0),
+                liveProviderMemoryEnduranceObservedGroupCount: Number(liveProviderMemoryEndurance.observedGroupCount || 0),
+                liveProviderMemoryEndurancePassedGroupCount: Number(liveProviderMemoryEndurance.passedGroupCount || 0),
+                liveProviderMemoryEnduranceProviderLatencyTimeoutCount: Number(liveProviderMemoryEndurance.providerLatencyTimeoutCount || 0),
+                liveProviderMemoryEnduranceMemoryReceiptFailureCount: Number(liveProviderMemoryEndurance.memoryReceiptFailureCount || 0),
+                liveProviderMemoryEnduranceCcmEvidenceFailureCount: Number(liveProviderMemoryEndurance.ccmEvidenceFailureCount || 0),
+                liveProviderMemoryEnduranceReplaySuppressedCount: Number(liveProviderMemoryEndurance.replaySuppressedCount || 0),
+                liveProviderMemoryEnduranceLatencySaturationObserved: liveProviderMemoryEndurance.providerLatencySaturationObserved === true,
+                liveProviderMemoryEnduranceGatePassed: liveProviderMemoryEndurance.gatePassed === true,
+                liveProviderMemoryEnduranceVersionEpochCount: Number(liveProviderMemoryEndurance.providerVersionEpochCount || 0),
+                liveProviderMemoryEnduranceVersionTransitionCount: Number(liveProviderMemoryEndurance.providerVersionTransitionCount || 0),
+                liveProviderMemoryEnduranceVersionTransitionVerifiedCount: Number(liveProviderMemoryEndurance.providerVersionTransitionVerifiedCount || 0),
+                liveProviderMemoryEnduranceVersionTransitionDegradedCount: Number(liveProviderMemoryEndurance.providerVersionTransitionDegradedCount || 0),
+                liveProviderMemoryEnduranceVersionTransitionInsufficientCount: Number(liveProviderMemoryEndurance.providerVersionTransitionInsufficientCount || 0),
+                liveProviderMemoryEnduranceLatestVersionTransitionGatePassed: liveProviderMemoryEndurance.latestVersionTransitionGatePassed === true,
+                liveProviderMemoryEnduranceRecommendedConcurrencyCeiling: Number(liveProviderMemoryEndurance.recommendedConcurrencyCeiling || 0),
+                liveProviderMemoryEnduranceRecommendedProviderTimeoutMs: Number(liveProviderMemoryEndurance.recommendedProviderTimeoutMs || 0),
+                liveProviderMemoryEnduranceAdvisoryOnly: liveProviderMemoryEndurance.advisoryOnly === true
+                    && liveProviderMemoryEndurance.policyMutationApplied === false,
+                liveProviderMemoryEnduranceSchedulerPresent: liveProviderMemoryEnduranceScheduler.present === true,
+                liveProviderMemoryEnduranceSchedulerSafe: liveProviderMemoryEnduranceScheduler.safe === true,
+                liveProviderMemoryWaveApprovable: liveProviderMemoryWaveApprovalPreview.approvable === true,
+                liveProviderMemoryTransitionCanaryApprovable: liveProviderMemoryVersionTransitionCanaryPreview.approvable === true,
+                liveProviderMemoryWaveApprovedCount: Number(liveProviderMemoryWaveApprovalInventory.approvedCount || 0),
+                liveProviderMemoryWaveCompletedCount: Number(liveProviderMemoryWaveApprovalInventory.completedCount || 0),
+                liveProviderMemoryWaveFailedCount: Number(liveProviderMemoryWaveApprovalInventory.failedCount || 0),
+                liveProviderMemoryWaveRevokedCount: Number(liveProviderMemoryWaveApprovalInventory.revokedCount || 0),
+                liveProviderMemoryWaveExpiredCount: Number(liveProviderMemoryWaveApprovalInventory.expiredCount || 0),
+                liveProviderMemoryWaveTerminalCount: Number(liveProviderMemoryWaveApprovalInventory.terminalCount || 0),
+                liveProviderMemoryWavePrunableCount: Number(liveProviderMemoryWaveApprovalInventory.prunableCount || 0),
+                liveProviderMemoryWaveInvalidApprovalCount: Number(liveProviderMemoryWaveApprovalInventory.invalidCount || 0),
+                liveProviderMemoryTransitionCanaryCount: Number(liveProviderMemoryWaveApprovalInventory.transitionCanaryCount || 0),
+                liveProviderMemoryTransitionCanaryPromotedCount: Number(liveProviderMemoryWaveApprovalInventory.transitionCanaryPromotedCount || 0),
+                liveProviderMemoryTransitionCanaryPromotionFailedCount: Number(liveProviderMemoryWaveApprovalInventory.transitionCanaryPromotionFailedCount || 0),
+                liveProviderInitialMemoryBaselineCanaryApprovableCount: liveProviderInitialMemoryBaselineCanaryProviderPreviews.filter(row => row.approvable === true).length,
+                liveProviderInitialMemoryBaselineCanaryCount: Number(liveProviderMemoryWaveApprovalInventory.initialBaselineCanaryCount || 0),
+                liveProviderInitialMemoryBaselineCanaryPromotedCount: Number(liveProviderMemoryWaveApprovalInventory.initialBaselineCanaryPromotedCount || 0),
+                liveProviderInitialMemoryBaselineCanaryPromotionFailedCount: Number(liveProviderMemoryWaveApprovalInventory.initialBaselineCanaryPromotionFailedCount || 0),
+                liveProviderMemoryVersionTransitionLedgerEntryCount: Number(liveProviderMemoryVersionTransitionLedger.entryCount || 0),
+                liveProviderMemoryVersionTransitionLedgerTransitionCount: Number(liveProviderMemoryVersionTransitionLedger.transitionCount || 0),
+                liveProviderMemoryVersionTransitionLedgerVerifiedCount: Number(liveProviderMemoryVersionTransitionLedger.verifiedCount || 0),
+                liveProviderMemoryVersionTransitionLedgerDegradedCount: Number(liveProviderMemoryVersionTransitionLedger.degradedCount || 0),
+                liveProviderMemoryVersionTransitionLedgerRollbackCount: Number(liveProviderMemoryVersionTransitionLedger.rollbackCount || 0),
+                liveProviderMemoryVersionTransitionLedgerValid: liveProviderMemoryVersionTransitionLedger.valid === true,
                 continuationSoakOutputFormatDriftCount: Number(continuationSoakOverall.providerOutputFormatDriftCount || 0),
                 continuationSoakProviderContractEpochCount: Number(continuationSoakOverall.providerContractEpochCount || 0),
                 continuationSoakProviderContractTransitionCount: Number(continuationSoakOverall.providerContractTransitionCount || 0),
@@ -32018,8 +32361,29 @@ function buildTaskAgentMemoryContextSnapshotReport(options = {}) {
                 skippedCount: Number(retention.skippedCount || 0),
                 rows: (retention.pruned || []).slice(0, 40),
             },
+            modelMemoryReceiptLifecycle: {
+                schema: modelMemoryReceiptLifecycle.schema,
+                directory: modelMemoryReceiptLifecycle.directory,
+                policy: modelMemoryReceiptLifecycle.policy,
+                pruningBlocked: modelMemoryReceiptLifecycle.pruningBlocked === true,
+                summary: modelMemoryReceiptLifecycle.summary || {},
+                referencedRows: (modelMemoryReceiptLifecycle.referencedRows || []).slice(0, 40),
+                orphanRows: (modelMemoryReceiptLifecycle.orphanRows || []).slice(0, 40),
+            },
+            modelMemoryReceiptRecovery,
             invocationLineage,
             continuationSoak,
+            liveProviderMultiGroupFleet,
+            liveProviderReportRetention,
+            liveProviderMemoryEndurance,
+            liveProviderMemoryEnduranceScheduler,
+            liveProviderMemoryWaveApprovalPreview,
+            liveProviderMemoryVersionTransitionCanaryPreview,
+            liveProviderMemoryWaveApprovalProviderPreviews,
+            liveProviderMemoryVersionTransitionCanaryProviderPreviews,
+            liveProviderInitialMemoryBaselineCanaryProviderPreviews,
+            liveProviderMemoryWaveApprovalInventory,
+            liveProviderMemoryVersionTransitionLedger,
             providerRuntimeContracts: {
                 schema: "ccm-memory-center-provider-runtime-contract-inventory-v1",
                 generatedAt: now(),
@@ -32088,8 +32452,8 @@ function buildGroupTaskAgentMemoryContextSnapshotOverview(groupId) {
     return {
         schema: "ccm-group-task-agent-memory-context-snapshot-overview-v1",
         groupId: id,
-        status: group
-            ? Number(group.failCount || 0) > 0 ? "fail" : Number(group.warnCount || 0) > 0 ? "warn" : "ok"
+        status: group || Number(report.overall?.modelMemoryReceiptReferencedMissingCount || 0) > 0 || Number(report.overall?.modelMemoryReceiptReferencedInvalidCount || 0) > 0
+            ? Number(group?.failCount || 0) > 0 || Number(report.overall?.modelMemoryReceiptReferencedMissingCount || 0) > 0 || Number(report.overall?.modelMemoryReceiptReferencedInvalidCount || 0) > 0 ? "fail" : Number(group?.warnCount || 0) > 0 ? "warn" : "ok"
             : "empty",
         directory: report.inventory?.directory || "",
         policy: report.inventory?.policy || {},
@@ -32099,6 +32463,72 @@ function buildGroupTaskAgentMemoryContextSnapshotOverview(groupId) {
         failCount: Number(group?.failCount || rows.filter((row) => row.status === "fail").length || 0),
         staleCount: Number(group?.staleCount || rows.filter((row) => row.stale).length || 0),
         prunableCount: Number(group?.prunableCount || prunableRows.length || 0),
+        memorySnapshotSyncInitializeCount: Number(group?.memorySnapshotSyncInitializeCount || 0),
+        memorySnapshotSyncPromptUpdateCount: Number(group?.memorySnapshotSyncPromptUpdateCount || 0),
+        memorySnapshotSyncUnchangedCount: Number(group?.memorySnapshotSyncUnchangedCount || 0),
+        memorySnapshotSyncInvalidCount: Number(group?.memorySnapshotSyncInvalidCount || 0),
+        memorySnapshotSyncLegacyCount: Number(group?.memorySnapshotSyncLegacyCount || 0),
+        memorySnapshotSyncCommittedCount: Number(group?.memorySnapshotSyncCommittedCount || 0),
+        memorySnapshotSyncCommitPendingCount: Number(group?.memorySnapshotSyncCommitPendingCount || 0),
+        memorySnapshotSyncCommitRejectedCount: Number(group?.memorySnapshotSyncCommitRejectedCount || 0),
+        memorySnapshotSyncCommitInvalidCount: Number(group?.memorySnapshotSyncCommitInvalidCount || 0),
+        memorySnapshotSyncLateFailurePreservedCount: Number(group?.memorySnapshotSyncLateFailurePreservedCount || 0),
+        memoryEntrySyncFullCount: Number(group?.memoryEntrySyncFullCount || 0),
+        memoryEntrySyncDeltaCount: Number(group?.memoryEntrySyncDeltaCount || 0),
+        memoryEntrySyncContinuationCount: Number(group?.memoryEntrySyncContinuationCount || 0),
+        memoryEntrySyncInvalidCount: Number(group?.memoryEntrySyncInvalidCount || 0),
+        memoryEntryChangedCount: Number(group?.memoryEntryChangedCount || 0),
+        memoryEntryRemovedCount: Number(group?.memoryEntryRemovedCount || 0),
+        memoryEntryRenderLeasePreparedCount: Number(group?.memoryEntryRenderLeasePreparedCount || 0),
+        memoryEntryRenderLeaseActiveCount: Number(group?.memoryEntryRenderLeaseActiveCount || 0),
+        memoryEntryRenderLeaseBoundCount: Number(group?.memoryEntryRenderLeaseBoundCount || 0),
+        memoryEntryRenderLeaseRejectedCount: Number(group?.memoryEntryRenderLeaseRejectedCount || 0),
+        memoryEntryRenderLeaseStaleCount: Number(group?.memoryEntryRenderLeaseStaleCount || 0),
+        memoryEntryRenderLeaseTakeoverCount: Number(group?.memoryEntryRenderLeaseTakeoverCount || 0),
+        memoryEntryRenderLeaseHistoryCount: Number(group?.memoryEntryRenderLeaseHistoryCount || 0),
+        memoryEntryRenderLeaseMaxFencingToken: Number(group?.memoryEntryRenderLeaseMaxFencingToken || 0),
+        memoryEntryRenderContentionCount: Number(group?.memoryEntryRenderContentionCount || 0),
+        memoryEntryRenderWaitResolvedCount: Number(group?.memoryEntryRenderWaitResolvedCount || 0),
+        memoryEntryRenderWaitTimeoutCount: Number(group?.memoryEntryRenderWaitTimeoutCount || 0),
+        memoryEntryRenderSameProcessConflictCount: Number(group?.memoryEntryRenderSameProcessConflictCount || 0),
+        memoryEntryRenderWaitTotalMs: Number(group?.memoryEntryRenderWaitTotalMs || 0),
+        memoryEntryRenderContentionReceiptValidCount: Number(group?.memoryEntryRenderContentionReceiptValidCount || 0),
+        memoryEntryRenderContentionReceiptInvalidCount: Number(group?.memoryEntryRenderContentionReceiptInvalidCount || 0),
+        memoryPromptInjectionProofCount: Number(group?.memoryPromptInjectionProofCount || 0),
+        memoryPromptInjectionEnforcedCount: Number(group?.memoryPromptInjectionEnforcedCount || 0),
+        memoryPromptInjectionPromptBoundCount: Number(group?.memoryPromptInjectionPromptBoundCount || 0),
+        memoryPromptInjectionMissingCount: Number(group?.memoryPromptInjectionMissingCount || 0),
+        memoryPromptInjectionInvalidCount: Number(group?.memoryPromptInjectionInvalidCount || 0),
+        memoryTrustedEnvelopeRequiredCount: Number(group?.memoryTrustedEnvelopeRequiredCount || 0),
+        memoryTrustedEnvelopeValidCount: Number(group?.memoryTrustedEnvelopeValidCount || 0),
+        memoryTrustedEnvelopeUnverifiedCount: Number(group?.memoryTrustedEnvelopeUnverifiedCount || 0),
+        memoryContinuationBaselineRequiredCount: Number(group?.memoryContinuationBaselineRequiredCount || 0),
+        memoryContinuationBaselineValidCount: Number(group?.memoryContinuationBaselineValidCount || 0),
+        memoryContinuationBaselineUnverifiedCount: Number(group?.memoryContinuationBaselineUnverifiedCount || 0),
+        providerMemoryChannelRequiredCount: Number(group?.providerMemoryChannelRequiredCount || 0),
+        providerMemoryAcknowledgementRequiredCount: Number(group?.providerMemoryAcknowledgementRequiredCount || 0),
+        providerMemoryAcknowledgedCount: Number(group?.providerMemoryAcknowledgedCount || 0),
+        providerMemoryAcknowledgementUnverifiedCount: Number(group?.providerMemoryAcknowledgementUnverifiedCount || 0),
+        providerMemoryStructuredAcknowledgedCount: Number(group?.providerMemoryStructuredAcknowledgedCount || 0),
+        providerMemoryExitSuccessAcknowledgedCount: Number(group?.providerMemoryExitSuccessAcknowledgedCount || 0),
+        providerMemoryNativeSystemCount: Number(group?.providerMemoryNativeSystemCount || 0),
+        providerMemoryNativeDeveloperCount: Number(group?.providerMemoryNativeDeveloperCount || 0),
+        providerMemoryUserFallbackCount: Number(group?.providerMemoryUserFallbackCount || 0),
+        providerMemoryChannelUnverifiedCount: Number(group?.providerMemoryChannelUnverifiedCount || 0),
+        memoryContextConsumptionReceiptRequiredCount: Number(group?.memoryContextConsumptionReceiptRequiredCount || 0),
+        memoryContextConsumptionReceiptValidCount: Number(group?.memoryContextConsumptionReceiptValidCount || 0),
+        memoryContextConsumptionReceiptMissingCount: Number(group?.memoryContextConsumptionReceiptMissingCount || 0),
+        memoryContextConsumptionRecoveryCount: Number(group?.memoryContextConsumptionRecoveryCount || 0),
+        memoryContextConsumptionRecoveredCount: Number(group?.memoryContextConsumptionRecoveredCount || 0),
+        memoryContextConsumptionRecoveryBlockedCount: Number(group?.memoryContextConsumptionRecoveryBlockedCount || 0),
+        memoryContextConsumptionRecoveryInvalidCount: Number(group?.memoryContextConsumptionRecoveryInvalidCount || 0),
+        modelMemoryReceiptRecoveryCount: Number(report.overall?.modelMemoryReceiptRecoveryCount || 0),
+        modelMemoryReceiptRecoveredCount: Number(report.overall?.modelMemoryReceiptRecoveredCount || 0),
+        modelMemoryReceiptRecoveryBlockedCount: Number(report.overall?.modelMemoryReceiptRecoveryBlockedCount || 0),
+        modelMemoryReceiptReplaySuppressedCount: Number(report.overall?.modelMemoryReceiptReplaySuppressedCount || 0),
+        modelMemoryReceiptReferencedValidCount: Number(report.overall?.modelMemoryReceiptReferencedValidCount || 0),
+        modelMemoryReceiptReferencedMissingCount: Number(report.overall?.modelMemoryReceiptReferencedMissingCount || 0),
+        modelMemoryReceiptReferencedInvalidCount: Number(report.overall?.modelMemoryReceiptReferencedInvalidCount || 0),
         postTurnSummaryCapsuleCount: Number(group?.postTurnSummaryCapsuleCount || 0),
         postTurnSummaryCapsuleValidCount: Number(group?.postTurnSummaryCapsuleValidCount || 0),
         postTurnSummaryCapsuleMissingCount: Number(group?.postTurnSummaryCapsuleMissingCount || 0),
@@ -32144,6 +32574,9 @@ function evaluateTaskAgentMemoryContextSnapshots(options = {}) {
         groupSessionId: row.groupSessionId,
         deliveryReceiptId: row.deliveryReceiptId,
         deliveryStatus: row.deliveryStatus,
+        memorySnapshotSyncAction: row.memorySnapshotSyncAction,
+        memorySnapshotSyncChecksum: row.memorySnapshotSyncChecksum,
+        memorySnapshotSyncPreviousSnapshotId: row.memorySnapshotSyncPreviousSnapshotId,
         postTurnSummaryCapsuleChecksum: row.postTurnSummaryCapsuleChecksum,
         postTurnSummaryCapsuleSelectedCount: row.postTurnSummaryCapsuleSelectedCount,
         postTurnSummaryCapsulePromptBound: row.postTurnSummaryCapsulePromptBound,
@@ -34366,7 +34799,7 @@ function buildMemoryCenterOverview() {
         addSystemAlert("critical", "group_session_lifecycle_integrity", `群聊会话生命周期完整性失败关闭 ${groupSessionLifecycleIntegrityReport.overall.failClosedCount} 个；journal 异常 ${groupSessionLifecycleIntegrityReport.overall.journalInvalidCount}，commit 异常 ${groupSessionLifecycleIntegrityReport.overall.commitInvalidCount}`);
     }
     if (taskAgentMemoryContextSnapshotReport.overall?.status === "fail" || taskAgentMemoryContextSnapshotReport.overall?.status === "warn") {
-        addSystemAlert(taskAgentMemoryContextSnapshotReport.overall.status === "fail" ? "critical" : "warning", "task_agent_memory_context_snapshots", `项目子 Agent 记忆上下文快照 ${taskAgentMemoryContextSnapshotReport.overall.score ?? "待采样"}%，失败 ${taskAgentMemoryContextSnapshotReport.overall.failCount || 0} 个，可清理 ${taskAgentMemoryContextSnapshotReport.overall.prunableCount || 0} 个`);
+        addSystemAlert(taskAgentMemoryContextSnapshotReport.overall.status === "fail" ? "critical" : "warning", "task_agent_memory_context_snapshots", `项目子 Agent 记忆上下文快照 ${taskAgentMemoryContextSnapshotReport.overall.score ?? "待采样"}%，失败 ${taskAgentMemoryContextSnapshotReport.overall.failCount || 0} 个；模型加载回执缺失 ${taskAgentMemoryContextSnapshotReport.overall.modelMemoryReceiptReferencedMissingCount || 0}、无效 ${taskAgentMemoryContextSnapshotReport.overall.modelMemoryReceiptReferencedInvalidCount || 0}；可清理 ${taskAgentMemoryContextSnapshotReport.overall.prunableCount || 0} 个`);
     }
     for (const group of taskAgentMemoryContextSnapshotReport.groups || []) {
         if (group.failCount <= 0 && group.warnCount <= 0)
@@ -62399,6 +62832,262 @@ function handleMemoryCenterApi(pathname, req, res, parsed) {
         sendJson(res, buildMemoryCenterOverview());
         return true;
     }
+    if (pathname === "/api/memory-center/live-endurance-wave-approval" && req.method === "GET") {
+        try {
+            sendJson(res, {
+                success: true,
+                preview: (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryWaveApprovalPreview)(),
+                transitionCanaryPreview: (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryVersionTransitionCanaryPreview)(),
+                providerPreviews: ["claudecode", "codex", "cursor"].map(provider => (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryWaveApprovalPreview)({ provider })),
+                transitionCanaryProviderPreviews: ["claudecode", "codex", "cursor"].map(provider => (0, live_provider_memory_wave_approval_1.buildLiveProviderMemoryVersionTransitionCanaryPreview)({ provider })),
+                initialBaselineCanaryProviderPreviews: ["claudecode", "codex", "cursor"].map(provider => (0, live_provider_memory_wave_approval_1.buildLiveProviderInitialMemoryBaselineCanaryPreview)({ provider })),
+                inventory: (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)(),
+            });
+        }
+        catch (e) {
+            sendJson(res, { success: false, error: String(e?.message || e) }, 500);
+        }
+        return true;
+    }
+    if (pathname === "/api/memory-center/live-endurance-wave-approval" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                if (String(data.action || "") === "approve_initial_baseline_canary") {
+                    const receipt = (0, live_provider_memory_wave_approval_1.createLiveProviderInitialMemoryBaselineCanaryApproval)({
+                        ...data,
+                        explicitApproval: data.explicitApproval === true || data.explicit_approval === true,
+                        riskAccepted: data.riskAccepted === true || data.risk_accepted === true,
+                        initialBaselineAcknowledged: data.initialBaselineAcknowledged === true || data.initial_baseline_acknowledged === true,
+                        approvedBy: data.approvedBy || data.approved_by || "",
+                        baselineAbsenceChecksum: data.baselineAbsenceChecksum || data.baseline_absence_checksum || "",
+                        planChecksum: data.planChecksum || data.plan_checksum || "",
+                        provider: data.provider || "",
+                        model: data.model || "",
+                    });
+                    appendAudit({
+                        type: "live_provider_initial_memory_baseline_canary_approval_created",
+                        action: "approve_initial_baseline_canary_once",
+                        scope: "global",
+                        scopeId: "live-provider-memory-endurance",
+                        actor: receipt.approvedBy,
+                        reasonChecksum: receipt.reasonChecksum,
+                        receiptId: receipt.receiptId,
+                        receiptChecksum: receipt.receiptChecksum,
+                        baselineAbsenceChecksum: receipt.baselineAbsenceChecksum,
+                        providerVersionKey: receipt.providerVersionKey,
+                        planChecksum: receipt.planChecksum,
+                        liveExecutionStarted: false,
+                        schedulerCreated: false,
+                    });
+                    sendJson(res, { success: true, receipt, inventory: (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)() });
+                    return;
+                }
+                if (String(data.action || "") === "approve_transition_canary") {
+                    const receipt = (0, live_provider_memory_wave_approval_1.createLiveProviderMemoryVersionTransitionCanaryApproval)({
+                        ...data,
+                        explicitApproval: data.explicitApproval === true || data.explicit_approval === true,
+                        riskAccepted: data.riskAccepted === true || data.risk_accepted === true,
+                        transitionAcknowledged: data.transitionAcknowledged === true || data.transition_acknowledged === true,
+                        approvedBy: data.approvedBy || data.approved_by || "",
+                        enduranceReportChecksum: data.enduranceReportChecksum || data.endurance_report_checksum || "",
+                        planChecksum: data.planChecksum || data.plan_checksum || "",
+                        provider: data.provider || "",
+                    });
+                    appendAudit({
+                        type: "live_provider_memory_transition_canary_approval_created",
+                        action: "approve_transition_canary_once",
+                        scope: "global",
+                        scopeId: "live-provider-memory-endurance",
+                        actor: receipt.approvedBy,
+                        reasonChecksum: receipt.reasonChecksum,
+                        receiptId: receipt.receiptId,
+                        receiptChecksum: receipt.receiptChecksum,
+                        enduranceReportChecksum: receipt.enduranceReportChecksum,
+                        fromProviderVersionKey: receipt.fromProviderVersionKey,
+                        toProviderVersionKey: receipt.toProviderVersionKey,
+                        planChecksum: receipt.planChecksum,
+                        liveExecutionStarted: false,
+                        schedulerCreated: false,
+                    });
+                    sendJson(res, { success: true, receipt, inventory: (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)() });
+                    return;
+                }
+                if (String(data.action || "") === "revoke") {
+                    const receipt = (0, live_provider_memory_wave_approval_1.revokeLiveProviderMemoryWaveApproval)({
+                        ...data,
+                        explicitRevocation: data.explicitRevocation === true || data.explicit_revocation === true,
+                        receiptId: data.receiptId || data.receipt_id || "",
+                        receiptChecksum: data.receiptChecksum || data.receipt_checksum || "",
+                        revokedBy: data.revokedBy || data.revoked_by || "",
+                    });
+                    appendAudit({
+                        type: "live_provider_memory_wave_approval_revoked",
+                        action: "revoke",
+                        scope: "global",
+                        scopeId: "live-provider-memory-endurance",
+                        actor: receipt.revokedBy,
+                        reasonChecksum: receipt.revocationReasonChecksum,
+                        receiptId: receipt.receiptId,
+                        receiptChecksum: receipt.receiptChecksum,
+                        liveExecutionStarted: false,
+                    });
+                    sendJson(res, { success: true, receipt, inventory: (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)() });
+                    return;
+                }
+                const receipt = (0, live_provider_memory_wave_approval_1.createLiveProviderMemoryWaveApproval)({
+                    ...data,
+                    explicitApproval: data.explicitApproval === true || data.explicit_approval === true,
+                    riskAccepted: data.riskAccepted === true || data.risk_accepted === true,
+                    approvedBy: data.approvedBy || data.approved_by || "",
+                    enduranceReportChecksum: data.enduranceReportChecksum || data.endurance_report_checksum || "",
+                    planChecksum: data.planChecksum || data.plan_checksum || "",
+                    provider: data.provider || "",
+                });
+                appendAudit({
+                    type: "live_provider_memory_wave_approval_created",
+                    action: "approve_once",
+                    scope: "global",
+                    scopeId: "live-provider-memory-endurance",
+                    actor: receipt.approvedBy,
+                    reasonChecksum: receipt.reasonChecksum,
+                    receiptId: receipt.receiptId,
+                    receiptChecksum: receipt.receiptChecksum,
+                    enduranceReportChecksum: receipt.enduranceReportChecksum,
+                    planChecksum: receipt.planChecksum,
+                    liveExecutionStarted: false,
+                    schedulerCreated: false,
+                });
+                sendJson(res, { success: true, receipt, inventory: (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)() });
+            }
+            catch (e) {
+                sendJson(res, { success: false, error: String(e?.message || e) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/memory-center/live-endurance-wave-approval-retention" && req.method === "GET") {
+        try {
+            sendJson(res, { success: true, result: (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)() });
+        }
+        catch (e) {
+            sendJson(res, { success: false, error: String(e?.message || e) }, 500);
+        }
+        return true;
+    }
+    if (pathname === "/api/memory-center/live-endurance-wave-approval-retention" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                const execute = data.execute === true || data.prune === true;
+                if (execute && data.explicitPrune !== true && data.explicit_prune !== true)
+                    throw new Error("live memory wave approval pruning requires explicitPrune=true");
+                const result = (0, live_provider_memory_wave_approval_1.reconcileLiveProviderMemoryWaveApprovals)({
+                    maintenance: true,
+                    dryRun: !execute,
+                    prune: execute,
+                });
+                appendAudit({
+                    type: "live_provider_memory_wave_approval_retention",
+                    action: execute ? "prune_terminal_approval_receipts" : "preview_terminal_approval_retention",
+                    scope: "global",
+                    scopeId: "live-provider-memory-endurance",
+                    actor: String(data.actor || "memory-center-local-user"),
+                    reasonChecksum: crypto.createHash("sha256").update(String(data.reason || "live memory wave approval retention")).digest("hex"),
+                    candidateCount: result.prunableCount,
+                    prunedCount: result.prunedCount,
+                    skippedCount: result.skippedCount,
+                    liveExecutionStarted: false,
+                });
+                sendJson(res, { success: true, result });
+            }
+            catch (e) {
+                sendJson(res, { success: false, error: String(e?.message || e) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/memory-center/session-memory-custom-prompt" && req.method === "GET") {
+        try {
+            const scopeId = String(parsed.query.scopeId || parsed.query.scope_id || "").trim();
+            sendJson(res, { success: true, profile: (0, group_session_memory_model_extraction_1.readGroupSessionMemoryCustomPromptProfile)(scopeId) });
+        }
+        catch (e) {
+            sendJson(res, { success: false, error: String(e?.message || e) }, 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/memory-center/session-memory-custom-prompt" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                const scopeId = String(data.scopeId || data.scope_id || "").trim();
+                const profile = (0, group_session_memory_model_extraction_1.saveGroupSessionMemoryCustomPrompt)(scopeId, data.content, { reset: data.reset === true });
+                appendAudit({
+                    type: "session_memory_custom_prompt_updated",
+                    action: data.reset === true ? "reset" : "save",
+                    scope: "group",
+                    scopeId: scopeId || "global-default",
+                    actor: data.actor || "local-user",
+                    reason: data.reason || "memory_center_custom_prompt",
+                    contentStored: false,
+                    resolvedSource: profile.source,
+                    resolvedChecksum: profile.checksum,
+                    exactSessionOverride: !!scopeId,
+                });
+                sendJson(res, { success: true, profile });
+            }
+            catch (e) {
+                sendJson(res, { success: false, error: String(e?.message || e) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/memory-center/session-memory-custom-template" && req.method === "GET") {
+        try {
+            const scopeId = String(parsed.query.scopeId || parsed.query.scope_id || "").trim();
+            sendJson(res, { success: true, profile: (0, group_session_memory_model_extraction_1.readGroupSessionMemoryCustomTemplateProfile)(scopeId) });
+        }
+        catch (e) {
+            sendJson(res, { success: false, error: String(e?.message || e) }, 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/memory-center/session-memory-custom-template" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                const scopeId = String(data.scopeId || data.scope_id || "").trim();
+                const profile = (0, group_session_memory_model_extraction_1.saveGroupSessionMemoryCustomTemplate)(scopeId, data.content, { reset: data.reset === true });
+                appendAudit({
+                    type: "session_memory_custom_template_updated",
+                    action: data.reset === true ? "reset" : "save",
+                    scope: "group",
+                    scopeId: scopeId || "global-default",
+                    actor: data.actor || "local-user",
+                    reason: data.reason || "memory_center_custom_template",
+                    contentStored: false,
+                    resolvedSource: profile.source,
+                    resolvedChecksum: profile.checksum,
+                    resolvedSectionCount: profile.sectionCount,
+                    exactSessionOverride: !!scopeId,
+                });
+                sendJson(res, { success: true, profile });
+            }
+            catch (e) {
+                sendJson(res, { success: false, error: String(e?.message || e) }, 400);
+            }
+        });
+        return true;
+    }
     if (pathname === "/api/memory-center/scope" && req.method === "GET") {
         sendJson(res, getMemoryCenterScope(parsed.query.scope, parsed.query.id));
         return true;
@@ -62651,6 +63340,9 @@ function handleMemoryCenterApi(pathname, req, res, parsed) {
                 const operation = String(data.operation || "");
                 if (!String(data.reason || "").trim())
                     throw new Error("维护操作必须填写原因");
+                if (operation === "extract_session_memory_now" && scope !== "group") {
+                    throw new Error("立即抽取 Session Memory 不支持 Global Agent 或项目 scope");
+                }
                 let result = null;
                 if (operation === "rollback")
                     result = rollbackMemory(scope, scopeId, data.reason, data.actor || "local-user");
@@ -62674,6 +63366,46 @@ function handleMemoryCenterApi(pathname, req, res, parsed) {
                         candidateCount: result.candidateCount || 0,
                         prunedCount: result.prunedCount || 0,
                         skippedCount: result.skippedCount || 0,
+                    });
+                }
+                else if (operation === "reconcile_memory_context_consumption_receipts") {
+                    const { reconcileMemoryContextConsumptionReceipts } = require("../../integrations/memory-context-consumption-receipt");
+                    result = reconcileMemoryContextConsumptionReceipts({
+                        ...data,
+                        prune: data.dryRun === false || data.dry_run === false,
+                    });
+                    appendAudit({
+                        type: "memory_operation",
+                        action: operation,
+                        scope,
+                        scopeId,
+                        actor: data.actor || "local-user",
+                        reason: data.reason,
+                        dryRun: result.prune !== true,
+                        candidateCount: result.summary?.prunableCount || 0,
+                        prunedCount: result.summary?.prunedCount || 0,
+                        skippedCount: result.summary?.skippedCount || 0,
+                    });
+                }
+                else if (operation === "reconcile_memory_context_consumption_recoveries") {
+                    const { reconcileMemoryContextConsumptionRecoveries } = require("../../integrations/memory-context-consumption-recovery");
+                    result = reconcileMemoryContextConsumptionRecoveries({
+                        ...data,
+                        prune: data.dryRun === false || data.dry_run === false,
+                        reconcileInterrupted: data.dryRun === false || data.dry_run === false,
+                    });
+                    appendAudit({
+                        type: "memory_operation",
+                        action: operation,
+                        scope,
+                        scopeId,
+                        actor: data.actor || "local-user",
+                        reason: data.reason,
+                        dryRun: result.prune !== true,
+                        candidateCount: result.summary?.prunableCount || 0,
+                        interruptedCount: result.summary?.interruptedCount || 0,
+                        prunedCount: result.summary?.prunedCount || 0,
+                        skippedCount: result.summary?.skippedCount || 0,
                     });
                 }
                 else if (scope === "group" && operation === "retain_model_extraction_artifacts") {
@@ -62749,6 +63481,49 @@ function handleMemoryCenterApi(pathname, req, res, parsed) {
                         failedCount: result.failedCount,
                         modelInvoked: false,
                     });
+                }
+                else if (scope === "group" && operation === "extract_session_memory_now") {
+                    if (!groupId || !groupSessionId || groupSessionId === "default" || !groupSessionId.startsWith("gcs_")) {
+                        throw new Error("立即抽取只支持精确的 group::gcs_* 群聊会话");
+                    }
+                    if (data.explicitExecution !== true && data.explicit_execution !== true) {
+                        throw new Error("立即抽取 Session Memory 需要显式确认");
+                    }
+                    const fleet = buildGroupSessionMemorySnapshotReport({ groupIds: [groupId], groupSessionId });
+                    const fleetScope = (fleet.groups || []).find((row) => row.groupId === groupId && row.groupSessionId === groupSessionId);
+                    if (!fleetScope || String(fleetScope.modelExtractionScopeId || "") !== `${groupId}--${groupSessionId}`) {
+                        throw new Error("群聊会话记忆 scope 不存在或身份不匹配");
+                    }
+                    result = await (0, group_session_memory_model_extraction_1.runGroupSessionMemoryModelExtractionNow)(groupId, {
+                        groupSessionId,
+                        force: true,
+                        manual: true,
+                        respectBackoff: false,
+                        reason: `memory_center_manual_extraction:${data.reason}`,
+                    });
+                    appendAudit({
+                        type: "memory_operation",
+                        action: operation,
+                        scope,
+                        scopeId,
+                        groupId,
+                        groupSessionId,
+                        actor: data.actor || "local-user",
+                        reason: data.reason,
+                        committed: result.committed === true,
+                        status: String(result.status || ""),
+                        executionId: String(result.executionId || ""),
+                        modelInvoked: result.modelInvoked === true,
+                        globalContextUsed: false,
+                    });
+                    if (result.committed !== true || result.modelInvoked !== true) {
+                        const status = result.committed === true && result.modelInvoked !== true
+                            ? "manual_extraction_model_not_invoked"
+                            : String(result.status || "manual_extraction_failed");
+                        const error = new Error(status);
+                        error.statusCode = ["extraction_in_progress", "lease_busy", "lease_contended", "lease_unavailable", "active_lease_present"].includes(status) ? 409 : 400;
+                        throw error;
+                    }
                 }
                 else if (scope === "group" && (operation === "compact" || operation === "rebuild")) {
                     const { runGroupMemoryAutoCompactionNow } = require("../collaboration/memory");
@@ -62948,7 +63723,7 @@ function handleMemoryCenterApi(pathname, req, res, parsed) {
                 sendJson(res, { success: true, result });
             }
             catch (e) {
-                sendJson(res, { error: e.message }, 400);
+                sendJson(res, { error: e.message }, Number(e?.statusCode || 400));
             }
         });
         return true;

@@ -78,6 +78,7 @@ const credential_store_1 = require("./credential-store");
 const tool_catalog_management_1 = require("../tools/tool-catalog-management");
 const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 const internal_mcp_registry_1 = require("../tools/internal-mcp-registry");
+const task_store_1 = require("./task-store");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -564,25 +565,10 @@ function runMetricsAggregationSelfTest() {
 }
 // === Tasks ===
 function loadTasks() {
-    if (!fs.existsSync(TASKS_FILE))
-        return [];
-    try {
-        return JSON.parse(fs.readFileSync(TASKS_FILE, "utf-8"));
-    }
-    catch {
-        try {
-            const recovered = JSON.parse(fs.readFileSync(`${TASKS_FILE}.bak`, "utf-8"));
-            if (Array.isArray(recovered)) {
-                saveTasks(recovered);
-                return recovered;
-            }
-        }
-        catch { }
-        return [];
-    }
+    return (0, task_store_1.loadTasksFromSqlite)();
 }
 function saveTasks(tasks) {
-    writeJsonAtomic(TASKS_FILE, tasks);
+    return (0, task_store_1.saveTasksToSqlite)(tasks);
 }
 // === Dialogue Templates ===
 function loadTemplates() {

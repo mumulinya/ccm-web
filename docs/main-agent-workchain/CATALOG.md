@@ -1,6 +1,6 @@
 # Main Agent Workchain 文档总目录
 
-> 共 300 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
+> 共 308 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
 
 ## global-agent/conversation-and-ui (21)
 
@@ -163,6 +163,10 @@
 
 - [代码变更工作台生产化升级 v1](./operations-and-integrations/code-changes/2026-07-14-production-code-change-workbench-v1.md)
 
+## operations-and-integrations/data-storage (1)
+
+- [SQLite WAL 任务数据存储 v1](./operations-and-integrations/data-storage/2026-07-15-sqlite-wal-task-store-v1.md)
+
 ## operations-and-integrations/feishu (3)
 
 - [飞书控制机器人可靠性 v2](./operations-and-integrations/feishu/2026-07-14-feishu-control-bot-reliability-v2.md)
@@ -178,8 +182,9 @@
 - [Music Production Workflow v1](./operations-and-integrations/music/2026-07-14-music-production-workflow-v1.md)
 - [音乐 Agent 对话可靠性升级](./operations-and-integrations/music/2026-07-13-music-agent-chat-reliability.md)
 
-## operations-and-integrations/pets (1)
+## operations-and-integrations/pets (2)
 
+- [全局 Agent 宠物生成运行时修复 v1](./operations-and-integrations/pets/2026-07-16-global-agent-pet-generation-runtime-fix-v1.md)
 - [全局工作伴侣与参考图宠物生成 v1](./operations-and-integrations/pets/2026-07-14-global-workspace-companion-and-image-generation-v1.md)
 
 ## operations-and-integrations/product-navigation (2)
@@ -216,8 +221,14 @@
 - [主 Agent 内部工作流 MCP 套件 v1](./operations-and-integrations/tool-configuration/2026-07-15-internal-workflow-mcp-suite-v1.md)
 - [内部 MCP 随包注册与只读管理 v1](./operations-and-integrations/tool-configuration/2026-07-15-internal-mcp-readonly-catalog-v1.md)
 
-## shared-workchain/architecture-and-validation (7)
+## shared-workchain/architecture-and-validation (13)
 
+- [统一大模型消费者链路审计 v1](./shared-workchain/architecture-and-validation/2026-07-16-unified-model-consumer-audit-v1.md)
+- [Project Module Splitting Audit V1](./shared-workchain/architecture-and-validation/2026-07-16-project-module-splitting-audit-v1.md)
+- [全局 Agent 统一模型客户端修复 v1](./shared-workchain/architecture-and-validation/2026-07-16-global-agent-unified-model-client-fix-v1.md)
+- [Global Agent Transport Runtime API Modularization V1](./shared-workchain/architecture-and-validation/2026-07-16-global-agent-transport-runtime-api-modularization-v1.md)
+- [Global Agent Execution Layer Modularization V1](./shared-workchain/architecture-and-validation/2026-07-16-global-agent-execution-layer-modularization-v1.md)
+- [Large Module Responsibility Refactor V1](./shared-workchain/architecture-and-validation/2026-07-15-large-module-responsibility-refactor-v1.md)
 - [第三方 Agent MCP / Skill 生产闭环验收 v1](./shared-workchain/architecture-and-validation/2026-07-13-third-party-agent-runtime-tool-production-closure-v1.md)
 - [任务派发体验生产闭环 v1](./shared-workchain/architecture-and-validation/2026-07-13-task-dispatch-experience-production-closure-v1.md)
 - [Main Agent 文档分类体系 V1](./shared-workchain/architecture-and-validation/2026-07-13-main-agent-documentation-taxonomy-v1.md)

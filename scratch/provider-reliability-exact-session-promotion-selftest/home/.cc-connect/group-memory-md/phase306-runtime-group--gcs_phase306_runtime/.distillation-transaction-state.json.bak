@@ -1,0 +1,23 @@
+{
+  "schema": "ccm-group-typed-memory-distillation-transaction-state-v1",
+  "version": 1,
+  "groupId": "phase306-runtime-group--gcs_phase306_runtime",
+  "status": "in_progress",
+  "mutationKind": "provider_dispatch_override_followup_validation",
+  "mutationKinds": [
+    "provider_dispatch_override_followup_validation"
+  ],
+  "leaseId": "gtmdl_bf86b067303a61c521f29b91aa6e8392",
+  "fencingToken": 1784071370341072,
+  "lastFencingToken": 1784071370341072,
+  "lastCommittedFencingToken": 0,
+  "recoveredLeaseCount": 0,
+  "waitedMs": 0,
+  "writeCount": 0,
+  "startedAt": "2026-07-14T23:22:50.341Z",
+  "completedAt": "",
+  "failedAt": "",
+  "error": "",
+  "updatedAt": "2026-07-14T23:22:50.341Z",
+  "stateChecksum": "147a2f6f4088592cb5206b191dea8975a952ff82e5d3d0fcac112b1bfc3bc19e"
+}

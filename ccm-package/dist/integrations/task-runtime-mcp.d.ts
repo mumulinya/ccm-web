@@ -5,6 +5,7 @@ export declare function buildTaskRuntimeMcpServerConfig(context: Omit<InternalMc
     args: string[];
     env: {
         CCM_INTERNAL_MCP_CONTEXT: string;
+        CCM_INTERNAL_MCP_SECRET_FILE: string;
     };
 };
 export declare function runTaskRuntimeMcpServer(): void;

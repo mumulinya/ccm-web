@@ -252,9 +252,19 @@ export declare function evaluateGroupSessionMemoryUpdateCadence(messages: any[],
     naturalBreak: boolean;
     lastObservedMessageId: string;
     lastExtractionMessageId: string;
+    lastExtractionCursorStatus: string;
+    lastExtractionCursorIndex: number;
+    toolCallScanMessageCount: number;
     extractionCount: number;
     lastExtractedAt: string;
     observedAt: string;
+};
+export declare function resolveGroupSessionMemoryExtractionCursor(cadenceDecision?: any): {
+    cursorAdvanceStatus: string;
+    cursorAdvanceSafe: boolean;
+    cursorBefore: string;
+    cursorAfter: string;
+    cursorHeldReason: string;
 };
 export declare function enforceGroupSessionMemoryBudget(markdown: string): {
     markdown: string;
@@ -685,23 +695,7 @@ export declare function deleteGroupSessionMemoryArtifacts(groupId: string, sessi
     } | {
         deleted: number;
     };
-    workerContextCompactSessionArtifacts: {
-        deleted: number;
-        status: string;
-        schema?: undefined;
-        groupId?: undefined;
-        groupSessionId?: undefined;
-        scopeId?: undefined;
-    } | {
-        schema: string;
-        status: string;
-        groupId: string;
-        groupSessionId: string;
-        scopeId: string;
-        deleted: number;
-    } | {
-        deleted: number;
-    };
+    workerContextCompactSessionArtifacts: any;
     conflictResolutionMaintenanceSchedulerArtifacts: any;
     deletedAt: string;
 };

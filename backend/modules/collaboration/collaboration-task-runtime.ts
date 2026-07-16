@@ -1,0 +1,1111 @@
+// Extracted functional module. The original entry remains a compatibility facade.
+
+import * as fs from "fs";
+
+import * as path from "path";
+
+import * as crypto from "crypto";
+
+import { spawnSync } from "child_process";
+
+import * as os from "os";
+
+import {
+  sendJson,
+  calculateTokensAndCost,
+  collectRequestBuffer,
+  getMultipartBoundary,
+  parseMultipart,
+  UPLOAD_DIR,
+  SHARED_DIR,
+  CCM_DIR,
+} from "../../core/utils";
+
+import { ingestRequirementSources, requirementToIntakeDraft } from "../requirements/source-ingestion";
+
+import {
+  loadCronJobs,
+  saveCronJobs,
+  loadTasks,
+  saveTasks,
+  getConfigs,
+  getConfigInfo,
+  loadProjectConfigs,
+  AGENTS
+} from "../../core/db";
+
+import { buildSelectedSkillUsageDirective, selectRoleSkills } from "../../skills/role-skills";
+
+import {
+  buildCodedCoordinatorSummary,
+  buildCoordinatorCollaborationInstructions,
+  buildMemberCollaborationInstructions,
+  decomposeRequirementWithCodedCoordinator,
+  getCoordinatorMember,
+  getRoutableMembers,
+  loadOrchestratorConfig,
+  normalizeGroupOrchestrator,
+  publicOrchestratorConfig,
+  resolveMemberRuntime,
+  runCodedGroupOrchestrator,
+  runCoordinatorProtocolSelfTest,
+  runGroupOrchestrator,
+  runLlmCoordinatorReview,
+  runLlmCoordinatorSummary,
+  sanitizeCoordinatorUserText,
+  saveOrchestratorConfig,
+  selectGroupTargets,
+  recordWorkerContextProviderSwitchExecutionReceiptForCoordinator,
+  recordWorkerContextProviderSwitchSessionBindingForCoordinator,
+  recordReplayRepairDispatchBriefTimelineBinding,
+} from "./group-orchestrator";
+
+import { buildMainAgentDisplayStream, sanitizeMainAgentUserText } from "./display";
+
+import {
+  buildProjectCodeReadOnlySnapshot as buildProjectCodeReadOnlySnapshotBase,
+  buildGroupProjectAnalysisContext as buildGroupProjectAnalysisContextBase,
+} from "./project-analysis";
+
+import {
+  appendWorkerLedger,
+  buildAgentMemoryContextBundle,
+  buildAgentMemoryContextBundleWithManifestSelection,
+  buildAgentMemoryPacket,
+  buildGroupContextPacket,
+  buildGroupMemoryContext,
+  admitChildTypedMemoryDelivery,
+  commitChildTypedMemoryDelivery,
+  createChildTypedMemoryDispatchWal,
+  compactMemoryText,
+  compactPreserveLines,
+  createEmptyGroupMemory,
+  deleteGroupSessionMemoryArtifacts,
+  findLatestWorkerLedger,
+  getGroupMemoryFile,
+  getGroupSessionMemoryScopeId,
+  loadGroupMemory,
+  markChildTypedMemoryDispatchCommitted,
+  markChildTypedMemoryDispatchStarted,
+  markChildTypedMemoryRunnerReturned,
+  recordGroupApiMicrocompactNativeApplyProofLedger,
+  recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger,
+  recordGroupPostCompactCandidateUsageLedger,
+  renderGroupPostCompactInvokedSkillAttachments,
+  renderGroupPostCompactPlanAttachment,
+  renderGroupPostCompactDynamicContextDelta,
+  saveGroupMemory,
+  uniqueByKey,
+  updateGroupMemory,
+} from "./memory";
+
+import {
+  configureGroupSessionMemoryModelExecutor,
+} from "./group-session-memory-model-extraction";
+
+import {
+  configureGroupTypedMemoryManifestSelector,
+  recordGroupTypedMemoryManifestSelectorConsumptionOutcomes,
+  recordGroupTypedMemoryConsumptionLedger,
+  recordGroupTypedMemoryStaleCandidates,
+  readGroupTypedMemoryPressureRecallUsageLedger,
+  recordGroupTypedMemoryPressureRecallUsageLedger,
+} from "./group-memory-index";
+
+import {
+  sendFeishuReportMessage,
+} from "./feishu";
+
+import { hasFeishuTaskBinding } from "./feishu-channel";
+
+import { handleFeishuRoutes } from "./feishu-routes";
+
+import { handleAgentQaRoutes } from "./agent-qa-routes";
+
+import { GROUP_COORDINATION_MCP_SERVER_NAME } from "../../integrations/group-coordination-mcp";
+
+import { buildTaskBoundInternalMcpServers } from "../../integrations/agent-internal-mcp";
+
+import {
+  claimSubmittedGroupCoordinationRequests,
+  listGroupCoordinationRequests,
+  submitGroupCoordinationRequest,
+  updateGroupCoordinationRequest,
+} from "./group-coordination-store";
+
+import { handleGroupLiveRoutes } from "./group-live-routes";
+
+import {
+  AGENT_QA_TIMEOUT_MS,
+  appendAgentQaTrace,
+  buildAgentQaMessage,
+  buildAgentQaUserPreview,
+  configureAgentQaService,
+  emitAgentQaEvent,
+  getAgentQaItemsForGroup,
+  loadAgentQaItems,
+  markExpiredAgentQaItems,
+  setAgentQaArbitration,
+  setAgentQaManualTakeover,
+  upsertAgentQaItem,
+  writeAcceptedAgentQaToProjectMemory,
+} from "./agent-qa-service";
+
+import {
+  buildTaskDeliveryReport,
+  buildTaskGroupReportMessage,
+  buildUserDeliveryReport,
+} from "./task-delivery-report";
+
+import { buildTestAgentVerdict } from "../../test-agent/verdict";
+
+import type { TestAgentReport, TestAgentVerdict } from "../../test-agent/types";
+
+import {
+  compactTestAgentBrowserAuthenticationSummary,
+  summarizeTestAgentAdversarialEvidence,
+  summarizeTestAgentBrowserActionEffects,
+  summarizeTestAgentBrowserAuthentication,
+  summarizeTestAgentBrowserFlows,
+  summarizeTestAgentBrowserRecovery,
+  summarizeTestAgentMultiSessionBrowser,
+} from "../../agents/test-agent-review-bridge";
+
+import {
+  buildPostReviewSpotCheckGate,
+  buildPostReviewSpotCheckSummary,
+  runMainAgentPostReviewSpotCheck,
+  runPostReviewSpotCheckContractSelfTest,
+} from "../../agents/post-review-spot-check";
+
+import {
+  checkTaskCompletion,
+  checkTaskFailure,
+  extractAgentReceipt,
+  extractRunnerVerificationEvidence,
+  getReceiptAssignmentStatus,
+} from "./agent-receipts";
+
+import {
+  extractTaskNotificationTag,
+  formatCollectedAgentOutput,
+  getCollectedOutputAgent,
+  getCollectedOutputReceiptStatus,
+  parseTaskNotificationsFromText,
+  runTaskNotificationDisplaySelfTest,
+} from "./agent-notifications";
+
+import {
+  getGlobalMissionChildDeliveryEvidence as getGlobalMissionChildDeliveryEvidenceBase,
+  globalMissionChildGatePassed as globalMissionChildGatePassedBase,
+  refreshGlobalMissionParentInTaskList as refreshGlobalMissionParentInTaskListBase,
+} from "./global-mission";
+
+import {
+  addGroupLog,
+  addTaskLog,
+  appendTaskTimelineEvent,
+  clearTaskLogs,
+  getTaskLogs,
+  getTaskTimeline,
+  safeAddGroupLog,
+} from "./logs";
+
+import { handleBasicGroupRoutes } from "./group-routes";
+
+import { handleOrchestratorRoutes } from "./orchestrator-routes";
+
+import { handleTaskGovernanceRoutes } from "./task-governance-routes";
+
+import {
+  buildStartupTaskRecoveryPlan,
+  runStartupTaskRecoveryDecisionSelfTest,
+} from "./startup-task-recovery";
+
+import {
+  cancelTestAgentRunsForTask,
+  purgeTestAgentRunnerRecordsForTask,
+  reconcileTestAgentRunnerRecords,
+  runTestAgentCliJob,
+  runTestAgentRunnerSelfTest,
+} from "./test-agent-runner";
+
+import { purgeTestAgentArtifactsForTask } from "../../test-agent/artifact-retention";
+
+import {
+  buildCompleteTaskReplay,
+  buildTaskReplayIndex,
+  resolveTaskReplayArtifact,
+  runTaskReplayContractSelfTest,
+} from "./task-replay";
+
+import {
+  appendGroupMessage,
+  findGroupChatSessionContainingMessage,
+  getGroupMessages,
+  loadGroups,
+  resolveWritableGroupChatSession,
+  saveGroupMessages,
+  saveGroups,
+} from "./storage";
+
+import {
+  buildDailyDevTaskDescription,
+  claimReadyDailyDevBacklog,
+  configureDailyDevBacklogRuntime,
+  dispatchDailyDevBacklog,
+  dispatchReadyDailyDevBacklogs,
+  ensureDailyDevAutopilotCronJobs,
+  evaluateDailyDevIntakeQuality,
+  importSharedDocsToDailyDevBacklog,
+  isDailyDevBacklogFile,
+  listDailyDevBacklogs,
+  markDailyDevBacklogStatus,
+  persistDailyDevBacklogFile,
+  readDailyDevBacklogStatus,
+  runDailyDevAutopilotOnce,
+} from "./daily-dev-backlog";
+
+import { getAgentCommandLabel, getPublicAgentRuntimes, normalizeAgentRuntimeId } from "../../agents/runtime";
+
+import { buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, detectInvokedSkillsFromText, recordRuntimeToolSyncAudit, syncRuntimeTools } from "../../tools/runtime-tool-sync";
+
+import { buildAuthorizationReadiness, buildToolAuthorizationPayload, normalizeToolAuthorization } from "../../tools/tool-authorization";
+
+import {
+  buildChildAgentWorktreeNotice,
+  normalizeChildAgentIsolationMode,
+  prepareChildAgentWorkDir,
+} from "../../agents/worktree";
+
+import {
+  attachExecutionWorkspace,
+  cancelActiveAgentRun,
+  classifyExecutionFailure,
+  cleanupExecutionWorktree,
+  clearTaskCancellation,
+  createExecutionCheckpoint,
+  ensureExecution,
+  evaluateGreenContract,
+  inspectBranchFreshness,
+  isTaskCancellationRequested,
+  listExecutions,
+  loadExecution,
+  mergeExecutionWorktree,
+  purgeTaskExecutionArtifacts,
+  requestTaskCancellation,
+  rollbackExecutionCheckpoint,
+  runExecutionKernelSelfTest,
+  transitionExecution,
+} from "../../agents/execution-kernel";
+
+import {
+  attachTaskAgentFinalDispatchPayloadGate,
+  commitTaskAgentSessionCapacityRevalidation,
+  bindTaskAgentMemoryContextSnapshot,
+  closeTaskAgentSessions,
+  getTaskAgentSessionOptions,
+  getTaskAgentSessionContinuity,
+  inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker,
+  listTaskAgentMemoryContextSnapshots,
+  listTaskAgentSessions,
+  openTaskAgentSession,
+  prepareTaskAgentSessionCapacityRevalidation,
+  purgeTaskAgentSessions,
+  recordTaskAgentMemoryContextDelivery,
+  recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome,
+  recordTaskAgentSessionTurn,
+  reopenTaskAgentSessions,
+} from "../../tasks/agent-sessions";
+
+import {
+  bindTaskAgentInvocationContext,
+  bindTaskAgentInvocationMemoryDelivery,
+  bindTaskAgentInvocationRunnerRequest,
+  completeTaskAgentInvocationEdge,
+  dispatchTaskAgentInvocationEdge,
+  prepareTaskAgentInvocationEdge,
+} from "../../tasks/task-agent-invocation-lineage";
+
+import {
+  buildCollaborationConflictPlan,
+  buildRuntimeRecoveryCandidates,
+  buildRuntimeRecoveryPrompt,
+  isRuntimeCommandAvailable,
+  runCollaborationResilienceSelfTest,
+  shouldSwitchRuntime,
+} from "./collaboration-resilience";
+
+import {
+  acquireIdempotency,
+  acquireTaskLease,
+  appendTraceEvent,
+  completeIdempotency,
+  createTraceId,
+  ensureTraceId,
+  failIdempotency,
+  getTrace,
+  listTraces,
+  releaseTaskLease,
+  renewTaskLease,
+  runReliabilityLedgerSelfTest,
+  settleIdempotencyByTrace,
+} from "../../system/reliability-ledger";
+
+import { getReliabilityDrillStatus, runScheduledProductionReliabilityDrill } from "../../system/reliability-drills";
+
+import { getSoakReport, getSoakTestStatus, inspectReliabilityDebt, reconcileStabilityDebt, runSoakTestSelfTest, sampleSoakTestNow, startSoakTest, stopSoakTest } from "../../system/soak-test";
+
+import { getProcessLifecycleSnapshot, registerRestartIntent, runProcessLifecycleSelfTest } from "../../system/process-lifecycle";
+
+import { purgeTaskReplayJournalForTask } from "../../system/task-replay-journal";
+
+import {
+  buildTaskReasoningState,
+  captureReasoningFacts,
+  createAgentReasoningState,
+  explainReasoningDecision,
+  normalizeAgentReasoningState,
+  recordReasoningDeviation,
+  recordReasoningRecoveryCheck,
+  setReasoningAssertion,
+  updateReasoningPlan,
+} from "../../agents/reasoning-loop";
+
+import { buildProjectExecutionBrief, buildProjectMemoryPacket } from "../../projects/memory";
+
+import { recordGlobalDirectDispatchMemory, recordGlobalDirectDispatchRollbackMemory } from "../../agents/global/memory";
+
+import { createDispatchRecord, normalizeDispatchBatch } from "./dispatch-records";
+
+import {
+  buildCollaborationQuestionContract,
+  evaluateAdvisoryPermissionBoundary,
+  evaluateCollaborationAnswer,
+  evaluateCollaborationQuestionAdmission,
+  runAgentCollaborationProtocolSelfTest,
+  selectCollaborationTarget,
+} from "../../agents/collaboration-protocol";
+
+import {
+  buildAckPreflightReview,
+  buildContractTransferPlan,
+  evaluateContractInjectionGate,
+  extractContractSyncHints,
+  getTaskAckRewriteRows,
+  getTaskContractInjectionRows,
+} from "./protocol-gates";
+
+import {
+  buildContractInjectionEvent,
+  buildTraceReplaySuite,
+  recordAgentRuntimeLifecycle,
+  replayAgentTrace,
+  runAgentRuntimeKernelSelfTest,
+} from "../../agents/runtime-kernel";
+
+import {
+  buildSelfContainedWorkerHandoff,
+  renderSelfContainedWorkerHandoff,
+  runWorkerHandoffSelfTest,
+  summarizeWorkerHandoffForUser,
+} from "../../agents/worker-handoff";
+
+import {
+  buildFinalWorkerDispatchPayloadGate,
+  verifyFinalWorkerDispatchPayloadGate,
+} from "../../agents/final-dispatch-payload-gate";
+
+import {
+  isProviderPromptTooLongFailure,
+  recoverFinalWorkerDispatchPayload,
+} from "../../agents/final-dispatch-reactive-compact";
+
+import {
+  buildMainAgentWorkItems,
+  buildMainAgentWorkItemClaimSummary,
+  buildMainAgentWorkItemSummary,
+  buildMainAgentWorkItemUnlockSummary,
+  claimMainAgentWorkItem,
+  normalizeMainAgentWorkItemStatus,
+  requeueStaleMainAgentWorkItems,
+  runMainAgentWorkItemSelfTest,
+  updateMainAgentWorkItem,
+} from "../../agents/work-items";
+
+import {
+  AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS,
+  AGENT_RECOVERY_PROBE_INTERVAL_MS,
+  AGENT_RECOVERY_PROBE_TIMEOUT_MS,
+  CollabCtx,
+  PRIORITY_WEIGHT,
+  TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS,
+  TASK_WATCHDOG_GAP_REWORK_MAX,
+  TASK_WATCHDOG_INTERVAL_MS,
+  TASK_WATCHDOG_STALE_MS,
+  agentRecoveryMonitorTimer,
+  agentRecoveryProbeInFlight,
+  setAgentRecoveryMonitorTimer,
+  setAgentRecoveryProbeInFlight,
+  aggregateBlockedRecovery,
+  aggregateRuntimeRecovery,
+  backfillTaskTraceIds,
+  buildTaskGapContinuationDraft,
+  buildTaskPreflightReasoning,
+  continueTaskWithMessage,
+  createTask,
+  doesProbeTargetMatchRequired,
+  getAgentExecutionReadiness,
+  getAgentProbeHealth,
+  getAgentProbeTargetStatusKey,
+  getAgentRecoveryProbeGroups,
+  getAgentRecoveryProbePayload,
+  getAgentRecoveryWorkSummary,
+  getQueueStatus,
+  getTaskAgeMs,
+  getTaskAgentExecutionReadiness,
+  getTaskFailureText,
+  getTaskRequiredProbeTarget,
+  getTaskTargetKey,
+  getTaskTargetKeyFromTask,
+  isAgentExecutionBlockedPendingTask,
+  isRecoverableRuntimeFailure,
+  isTaskPaused,
+  isTaskQueuedInMemory,
+  isWatchdogGapReworkCandidate,
+  processTargetQueue,
+  readAgentProbeStatus,
+  recoverAgentExecutionBlockedTasks,
+  recoverGroupCoordinationDependencies,
+  requeueTaskWorkItemsForWatchdog,
+  retryRuntimeFailedTasks,
+  runAgentCliProbe,
+  runningTaskIds,
+  taskQueues,
+  taskWatchdogTimer,
+  setTaskWatchdogTimer,
+  updateTask,
+} from "./collaboration";
+
+export function enqueueTask(taskId: string, ctx: CollabCtx) {
+  const tasks = loadTasks();
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) {
+    console.log(`[任务队列] 任务 ${taskId} 不存在`);
+    return { queued: false, message: "任务不存在" };
+  }
+
+  if (task.status === "done") {
+    addTaskLog(taskId, "info", "任务已完成，跳过入队");
+    return { queued: false, message: "任务已完成，跳过入队" };
+  }
+  if (isTaskPaused(task)) {
+    addTaskLog(taskId, "info", "任务已暂停，跳过入队");
+    return { queued: false, message: "任务已暂停，跳过入队" };
+  }
+
+  const readiness = getTaskAgentExecutionReadiness(task);
+  if (!readiness.ready) {
+    const message = readiness.message || "Agent CLI 执行通道不可用，任务暂不入队";
+    const fixActions = Array.isArray(readiness.fix_actions) ? readiness.fix_actions : [];
+    const firstFixAction = fixActions[0] ? `；建议：${fixActions[0]}` : "";
+    const lastBlockedAt = Date.parse(task.last_queue_blocked_at || 0);
+    const sameReason = String(task.status_detail || "") === message.slice(0, 500);
+    const recentlyRecorded = Number.isFinite(lastBlockedAt) && Date.now() - lastBlockedAt < AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS;
+    if (!sameReason || !recentlyRecorded) {
+      updateTask(taskId, {
+        status: "pending",
+        status_detail: message.slice(0, 500),
+        last_queue_blocked_at: new Date().toISOString(),
+        execution_readiness: readiness,
+      });
+      addTaskLog(taskId, "warning", `任务暂不入队：${message}${firstFixAction}`);
+    }
+    return { queued: false, blocked: true, duplicate_block_suppressed: sameReason && recentlyRecorded, reason: "agent_process", message, readiness };
+  }
+
+  const targetKey = getTaskTargetKey(task);
+
+  if (!taskQueues.has(targetKey)) {
+    taskQueues.set(targetKey, []);
+  }
+
+  const queue = taskQueues.get(targetKey)!;
+
+  if (queue.includes(taskId) || runningTaskIds.has(taskId)) {
+    addTaskLog(taskId, "info", "任务已在队列中或正在执行，跳过重复入队");
+    return { queued: false, message: "任务已在队列中或正在执行" };
+  }
+
+  const newPriority = PRIORITY_WEIGHT[task.priority] || 2;
+  let insertIndex = queue.length;
+
+  for (let i = 0; i < queue.length; i++) {
+    const queuedTask = tasks.find(t => t.id === queue[i]);
+    if (!queuedTask) continue;
+    const queuedPriority = PRIORITY_WEIGHT[queuedTask.priority] || 2;
+    if (newPriority > queuedPriority) {
+      insertIndex = i;
+      break;
+    }
+  }
+
+  queue.splice(insertIndex, 0, taskId);
+  console.log(`[任务队列] 任务 ${taskId} (${task.priority}) 已加入队列 [${targetKey}]，位置: ${insertIndex + 1}/${queue.length}`);
+  updateTask(taskId, { queued_at: new Date().toISOString() });
+  addTaskLog(taskId, "info", `任务已加入队列 [${targetKey}]，位置 ${insertIndex + 1}/${queue.length}`);
+
+  processTargetQueue(targetKey, ctx);
+  return { queued: true, message: "任务已加入队列", targetKey, position: insertIndex + 1 };
+}
+
+export function createAndQueueTask(task: any, ctx: CollabCtx) {
+  const newTask = createTask({ ...task, auto_execute: true });
+  const queueResult = enqueueTask(newTask.id, ctx);
+  return { task: newTask, queueResult };
+}
+
+export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
+  const testAgentRunnerRecovery = reconcileTestAgentRunnerRecords();
+  const traceBackfilled = backfillTaskTraceIds();
+  const tasks = loadTasks();
+  const forceAuto = options.force === true
+    || options.manual === true
+    || /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_STARTUP_TASK_RECOVERY || ""));
+  const recoveryPlan = buildStartupTaskRecoveryPlan(tasks, forceAuto);
+  const candidates = recoveryPlan.entries.filter((entry: any) => entry.decision.candidate);
+  const results: any[] = [];
+
+  for (const entry of candidates) {
+    const task = entry.task;
+    const recoveryDecision = entry.decision;
+    if (recoveryDecision.mode === "skip") {
+      results.push({
+        task_id: task.id,
+        queued: false,
+        skipped: true,
+        reason_code: recoveryDecision.reason_code,
+        message: recoveryDecision.reason,
+      });
+      continue;
+    }
+    if (recoveryDecision.mode === "manual") {
+      const alreadyHeld = task?.recovery_pending === true
+        || isTaskPaused(task)
+        || task?.status === "needs_user"
+        || task?.intake_state === "awaiting_confirmation";
+      if (!alreadyHeld) {
+        const traceId = ensureTraceId(task.trace_id, "task");
+        const recoveryReasoning = buildTaskPreflightReasoning(task, `服务启动恢复需等待确认：${recoveryDecision.reason}`, true);
+        const now = new Date().toISOString();
+        const patch: any = {
+          trace_id: traceId,
+          status: task.status === "in_progress" ? "needs_user" : task.status,
+          is_paused: true,
+          paused: true,
+          recovery_pending: true,
+          recovery: {
+            ...(task.recovery || {}),
+            pending_since: now,
+            previous_status: task.status,
+            mode: "manual_startup_recovery",
+            decision_code: recoveryDecision.reason_code,
+            decision_reason: recoveryDecision.reason,
+            authorization_preserved: false,
+            authorization_evidence: recoveryDecision.authorization_evidence,
+            requires_user: true,
+            user_headline: recoveryDecision.user_headline,
+            user_next_action: recoveryDecision.user_next_action,
+          },
+          reasoning_loop: recoveryReasoning,
+          collaboration_state: {
+            ...(task.collaboration_state || {}),
+            phase: "needs_user",
+            needs_user: true,
+            updated_at: now,
+          },
+          status_detail: recoveryDecision.user_headline,
+        };
+        updateTask(task.id, patch);
+        addTaskLog(task.id, "warning", recoveryDecision.reason);
+        appendTaskTimelineEvent(task.id, {
+          type: "startup_manual_recovery",
+          title: "服务重启后仍在等待确认",
+          detail: recoveryDecision.user_headline,
+          status: "warn",
+          phase: "needs_user",
+          data: { previous_status: task.status, decision: recoveryDecision },
+        });
+      }
+      results.push({
+        task_id: task.id,
+        queued: false,
+        manual_recovery_required: true,
+        reason_code: recoveryDecision.reason_code,
+        message: recoveryDecision.user_headline || recoveryDecision.reason,
+      });
+      continue;
+    }
+
+    const traceId = ensureTraceId(task.trace_id, "task");
+    const recoveryLease = acquireTaskLease(task.id, traceId, 45_000);
+    if (!recoveryLease.acquired) {
+      addTaskLog(task.id, "info", `启动恢复跳过：另一个存活实例仍持有任务租约（owner=${recoveryLease.lease?.owner_id || "unknown"}）`);
+      results.push({ task_id: task.id, queued: false, active_elsewhere: true, message: "另一个实例仍在执行" });
+      continue;
+    }
+    const recoveryReasoning = buildTaskPreflightReasoning(task, "服务启动恢复：重新核对原始目标、当前代码状态、剩余缺口与验收条件", true);
+    const recoveredAt = new Date().toISOString();
+    const recoveryRecord = {
+      ...(task.recovery || {}),
+      recovered_at: recoveredAt,
+      revalidated_at: recoveredAt,
+      lease_recovery_count: recoveryLease.lease.recovery_count,
+      previous_status: task.status,
+      mode: "startup_auto_recovery",
+      decision_code: recoveryDecision.reason_code,
+      decision_reason: recoveryDecision.reason,
+      authorization_preserved: recoveryDecision.authorization_preserved,
+      authorization_evidence: recoveryDecision.authorization_evidence,
+      requires_user: false,
+      user_headline: recoveryDecision.user_headline,
+      user_next_action: recoveryDecision.user_next_action,
+    };
+    if (task.status === "in_progress") {
+      updateTask(task.id, {
+        status: "pending",
+        trace_id: traceId,
+        is_paused: false,
+        paused: false,
+        recovery_pending: false,
+        result: "服务重启后已自动接上未完成执行",
+        status_detail: "服务重启后已自动接上，正在重新进入执行队列",
+        recovery: recoveryRecord,
+        reasoning_loop: recoveryReasoning,
+        collaboration_state: {
+          ...(task.collaboration_state || {}),
+          phase: "planning",
+          needs_user: false,
+          updated_at: recoveredAt,
+        },
+      });
+      addTaskLog(task.id, "warning", "服务重启后已接上未完成任务，重新核对后恢复排队");
+    } else {
+      updateTask(task.id, {
+        status: task.status === "needs_user" ? "pending" : task.status,
+        is_paused: false,
+        paused: false,
+        recovery_pending: false,
+        reasoning_loop: recoveryReasoning,
+        recovery: recoveryRecord,
+        status_detail: "服务重启后已自动接上，正在重新进入执行队列",
+        collaboration_state: {
+          ...(task.collaboration_state || {}),
+          phase: "planning",
+          needs_user: false,
+          updated_at: recoveredAt,
+        },
+      });
+      addTaskLog(task.id, "info", "服务重启后自动接上已授权任务，重新加入队列");
+    }
+    appendTaskTimelineEvent(task.id, {
+      type: "startup_auto_recovery",
+      title: "服务重启后已自动接上",
+      detail: "已保留原任务授权，并重新核对目标、当前状态和验收条件。",
+      status: "active",
+      phase: "planning",
+      data: { decision: recoveryDecision, recovery_check: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1] || {} },
+    });
+    appendTaskTimelineEvent(task.id, { type: "reasoning_recovery_check", title: "恢复前已重新核对任务", detail: `原始目标、当前状态与验收条件已复核；剩余 ${recoveryReasoning.assertions.filter(item => item.status !== "passed").length} 项待证明`, status: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1]?.acceptance_revalidated ? "ok" : "warn", phase: "planning", data: recoveryReasoning.recovery_checks[recoveryReasoning.recovery_checks.length - 1] || {} });
+    const queued = enqueueTask(task.id, ctx);
+    if (!queued.queued) releaseTaskLease(task.id, "recovery_not_queued");
+    results.push({
+      task_id: task.id,
+      ...queued,
+      auto_recovered: true,
+      authorization_preserved: true,
+      reason_code: recoveryDecision.reason_code,
+    });
+  }
+
+  const resumed = results.filter(item => item.queued).length;
+  const manualPending = results.filter(item => item.manual_recovery_required).length;
+  const skipped = results.filter(item => item.skipped || item.active_elsewhere).length;
+  void recoverGroupCoordinationDependencies(ctx).catch((error: any) => {
+    console.error("[群聊协作恢复]", error?.message || error);
+  });
+  return {
+    resumed,
+    auto_resumed: resumed,
+    manual_pending: manualPending,
+    skipped,
+    total: candidates.length,
+    trace_backfilled: traceBackfilled,
+    manual_recovery: resumed === 0 && manualPending > 0,
+    mixed_recovery: resumed > 0 && manualPending > 0,
+    recovery_policy: "risk_tiered_authorization_preserving",
+    test_agent_runner_recovery: testAgentRunnerRecovery,
+    results,
+    queue_status: getQueueStatus(),
+  };
+}
+
+export function getTaskWatchdogStatus(staleMs = TASK_WATCHDOG_STALE_MS, gapCooldownMs = TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot?: any[]) {
+  const now = Date.now();
+  const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : loadTasks();
+  const stalePending: any[] = [];
+  const stalledInProgress: any[] = [];
+  const runningLong: any[] = [];
+  const runtimeFailed: any[] = [];
+  const gapRework: any[] = [];
+  const workItemStalled: any[] = [];
+
+  for (const task of tasks) {
+    if (!task?.auto_execute || task.status === "done" || isTaskPaused(task)) continue;
+    const ageMs = getTaskAgeMs(task, now);
+    const base = {
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      target_key: getTaskTargetKeyFromTask(task),
+      age_ms: ageMs,
+      updated_at: task.updated_at || null,
+      started_at: task.started_at || null,
+      queued_at: task.queued_at || null,
+    };
+    const workItems = buildMainAgentWorkItems(task, { executions: listExecutions({ taskId: task.id }) });
+    for (const item of workItems) {
+      if (item.status !== "in_progress") continue;
+      const itemAgeMs = Math.max(0, now - Date.parse(item.updatedAt || item.startedAt || item.createdAt || task.updated_at || ""));
+      if (Number.isFinite(itemAgeMs) && itemAgeMs >= staleMs) {
+        workItemStalled.push({
+          ...base,
+          work_item_id: item.id,
+          target: item.target || item.owner,
+          owner: item.owner || "",
+          subject: item.subject,
+          item_age_ms: itemAgeMs,
+          item_updated_at: item.updatedAt || null,
+          reason: item.requeueReason || "子 Agent 工作项长时间无进展",
+        });
+      }
+    }
+    if (isRecoverableRuntimeFailure(task)) {
+      runtimeFailed.push({
+        ...base,
+        reason: getTaskFailureText(task).slice(0, 500),
+        retry_count: Number(task.retry_count || 0),
+      });
+    } else if (isWatchdogGapReworkCandidate(task, now, gapCooldownMs, gapMaxCount)) {
+      const summary = task.delivery_summary || {};
+      gapRework.push({
+        ...base,
+        reason: [
+          Number(summary.coordination_plan_count || 0) <= 0 ? "缺少主 Agent 协调计划证据" : "",
+          Number(summary.assignment_count || 0) <= 0 ? "缺少主 Agent 派发证据" : "",
+          Number(summary.worker_notification_count || 0) <= 0 ? "缺少子 Agent 执行结果" : "",
+          ...(Array.isArray(summary.blockers) ? summary.blockers : []),
+          ...(Array.isArray(summary.needs) ? summary.needs : []),
+          ...(Array.isArray(summary.verification_required_missing) ? summary.verification_required_missing.map((item: any) => `${item?.agent || "Agent"} 缺少验证命令证据`) : []),
+          ...(Array.isArray(summary.verification_failed) ? summary.verification_failed : []),
+          ...(Array.isArray(summary.verification_suggested) ? summary.verification_suggested : []),
+        ].filter(Boolean).join("；").slice(0, 500) || task.status_detail || "存在交付缺口",
+        auto_gap_continue_count: Number(task.auto_gap_continue_count || 0),
+      });
+    } else if (task.status === "pending" && !isTaskQueuedInMemory(task.id) && ageMs >= staleMs) {
+      stalePending.push(base);
+    } else if (task.status === "in_progress" && !runningTaskIds.has(task.id) && ageMs >= staleMs) {
+      stalledInProgress.push(base);
+    } else if (task.status === "in_progress" && runningTaskIds.has(task.id) && ageMs >= staleMs) {
+      runningLong.push(base);
+    }
+  }
+
+  return {
+    stale_ms: staleMs,
+    checked_at: new Date().toISOString(),
+    stale_pending: stalePending,
+    stalled_in_progress: stalledInProgress,
+    running_long: runningLong,
+    runtime_failed: runtimeFailed,
+    gap_rework: gapRework,
+    work_item_stalled: workItemStalled,
+    queue_status: getQueueStatus(tasks),
+  };
+}
+
+export function runTaskWatchdog(ctx: CollabCtx, options: any = {}) {
+  const staleMs = Number(options.staleMs || options.stale_ms || TASK_WATCHDOG_STALE_MS);
+  const gapCooldownMs = Number(options.gapCooldownMs || options.gap_cooldown_ms || TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS);
+  const gapMaxCount = Math.max(1, Math.min(20, Number(options.gapMaxCount || options.gap_max_count || TASK_WATCHDOG_GAP_REWORK_MAX)));
+  const taskSnapshot = loadTasks();
+  const status = getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount, taskSnapshot);
+  const recoverable = [...status.stale_pending, ...status.stalled_in_progress];
+  const results: any[] = [];
+  const gapResults: any[] = [];
+  const workItemResults: any[] = [];
+  const executionReadiness = getAgentExecutionReadiness();
+  const freshRecoveryProbeGroups = getAgentRecoveryProbeGroups(taskSnapshot)
+    .filter((group: any) => getAgentProbeHealth(readAgentProbeStatus(group.probe_target)).successFresh);
+  const dailyDevExecutionReadiness = executionReadiness;
+  const canAutoRetryRuntimeFailures = executionReadiness.ready && freshRecoveryProbeGroups.length > 0;
+  const canAutoContinueGaps = executionReadiness.ready === true;
+  let blockedRecovery: any = null;
+  let runtimeRetry: any = null;
+
+  for (const item of recoverable) {
+    const task = taskSnapshot.find(t => t.id === item.id);
+    if (!task || task.status === "done" || isTaskPaused(task) || runningTaskIds.has(task.id)) continue;
+    const patch: any = {
+      status: "pending",
+      status_detail: task.status === "in_progress"
+        ? "任务看门狗检测到执行中断，已恢复排队"
+        : "任务看门狗检测到待处理任务未入队，已恢复排队",
+      watchdog_recovered_at: new Date().toISOString(),
+      watchdog_recoveries: Number(task.watchdog_recoveries || 0) + 1,
+    };
+    if (task.status === "in_progress") {
+      patch.result = "任务看门狗检测到执行中断，已恢复为待执行并重新入队";
+    }
+    updateTask(task.id, patch);
+    addTaskLog(task.id, "warning", patch.status_detail);
+    results.push({ task_id: task.id, ...enqueueTask(task.id, ctx) });
+  }
+
+  const stalledByTask = new Map<string, any[]>();
+  for (const item of status.work_item_stalled || []) {
+    stalledByTask.set(item.id, [...(stalledByTask.get(item.id) || []), item]);
+  }
+  for (const [taskId, items] of stalledByTask.entries()) {
+    const task = loadTasks().find((entry: any) => entry.id === taskId);
+    if (!task || task.status === "done" || isTaskPaused(task)) continue;
+    const reason = `任务看门狗检测到 ${items.length} 个子 Agent 工作项长时间无进展`;
+    const requeue = requeueTaskWorkItemsForWatchdog(task, staleMs, reason);
+    if (!requeue.requeued.length) continue;
+    const shouldQueue = !runningTaskIds.has(task.id) && !isTaskQueuedInMemory(task.id);
+    const queueResult = shouldQueue
+      ? enqueueTask(task.id, ctx)
+      : { queued: false, message: runningTaskIds.has(task.id) ? "任务仍在运行，工作项已释放，等待本轮调度接管" : "任务已在队列中" };
+    workItemResults.push({
+      task_id: task.id,
+      requeued: requeue.requeued.length,
+      work_item_ids: requeue.requeued.map((entry: any) => entry.id),
+      queue_result: queueResult,
+    });
+  }
+
+  if (options.recover_agent_blocked !== false && options.recoverAgentBlocked !== false && freshRecoveryProbeGroups.length > 0) {
+    blockedRecovery = aggregateBlockedRecovery(freshRecoveryProbeGroups.map((group: any) =>
+      recoverAgentExecutionBlockedTasks(ctx, "目标项目 Agent CLI 探针通过后立即恢复任务", { probeTarget: group.probe_target, taskSnapshot })
+    ));
+  }
+
+  if (options.continue_gaps !== false && options.continueGaps !== false && canAutoContinueGaps) {
+    for (const item of status.gap_rework) {
+      const task = taskSnapshot.find(t => t.id === item.id);
+      if (!task || !isWatchdogGapReworkCandidate(task, Date.now(), gapCooldownMs, gapMaxCount)) continue;
+      const message = buildTaskGapContinuationDraft(task);
+      const result = continueTaskWithMessage(task.id, message, ctx, {
+        source: "watchdog_gap_rework",
+        auto_execute: true,
+        status_detail: "任务看门狗已按交付缺口生成返工说明，等待主 Agent 继续执行",
+      });
+      addTaskLog(task.id, result.success ? "info" : "warning", result.success
+        ? "任务看门狗已按交付缺口自动续跑"
+        : `任务看门狗续跑缺口失败：${result.error || "未知错误"}`);
+      gapResults.push({ task_id: task.id, ...result, task: undefined });
+    }
+  }
+
+  if (options.retry_runtime_failures !== false && canAutoRetryRuntimeFailures && status.runtime_failed.length > 0) {
+    runtimeRetry = aggregateRuntimeRecovery(freshRecoveryProbeGroups.map((group: any) =>
+      retryRuntimeFailedTasks(ctx, {
+        reason: "目标执行通道恢复后看门狗自动重试",
+        limit: status.runtime_failed.length,
+        probeTarget: group.probe_target,
+      })
+    ));
+  }
+
+  const stateChanged = results.length > 0 || workItemResults.length > 0 || gapResults.length > 0 || Number(blockedRecovery?.recovered || 0) > 0 || Number(runtimeRetry?.queued || 0) > 0;
+  return {
+    success: true,
+    recovered: results.filter(item => item.queued).length + Number(blockedRecovery?.recovered || 0),
+    total_recoverable: recoverable.length + Number(blockedRecovery?.total_blocked || 0),
+    stale_recovered: results.filter(item => item.queued).length,
+    stale_recoverable: recoverable.length,
+    work_item_stalled_total: status.work_item_stalled.length,
+    work_item_requeued: workItemResults.reduce((sum: number, item: any) => sum + Number(item.requeued || 0), 0),
+    work_item_results: workItemResults,
+    blocked_recovery: blockedRecovery,
+    runtime_failed_total: status.runtime_failed.length,
+    runtime_retried: runtimeRetry?.retried || 0,
+    runtime_queued: runtimeRetry?.queued || 0,
+    gap_rework_total: status.gap_rework.length,
+    gap_continued: gapResults.filter(item => item.success).length,
+    gap_queued: gapResults.filter(item => item.queued).length,
+    gap_results: gapResults,
+    gap_continue_skipped_reason: status.gap_rework.length > 0 && !canAutoContinueGaps ? dailyDevExecutionReadiness.message : "",
+    runtime_retry: runtimeRetry,
+    runtime_retry_skipped_reason: status.runtime_failed.length > 0 && !canAutoRetryRuntimeFailures
+      ? (executionReadiness.ready ? "等待目标项目 Agent CLI 探针通过后再自动重试" : executionReadiness.message)
+      : "",
+    execution_readiness: executionReadiness,
+    daily_dev_execution_readiness: dailyDevExecutionReadiness,
+    results,
+    status: stateChanged ? getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount) : status,
+  };
+}
+
+export function taskMatchesAgentProbeTarget(task: any, target: any = null) {
+  if (!target) return true;
+  const required = getTaskRequiredProbeTarget(task);
+  const hasRequired = !!(required.groupId || required.project || required.agentType);
+  if (!hasRequired) return false;
+  return doesProbeTargetMatchRequired(target, required);
+}
+
+export function buildAgentRecoveryProbeGroups(tasks: any[]) {
+  const groups = new Map<string, any>();
+  for (const task of tasks) {
+    const probeTarget = getTaskRequiredProbeTarget(task);
+    const key = getAgentProbeTargetStatusKey(probeTarget) || "default";
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        probe_target: key === "default" ? null : probeTarget,
+        probe_payload: key === "default" ? {} : getAgentRecoveryProbePayload(probeTarget),
+        task_ids: [],
+        blocked_pending: 0,
+        runtime_failed: 0,
+      });
+    }
+    const group = groups.get(key);
+    group.task_ids.push(task.id);
+    if (isAgentExecutionBlockedPendingTask(task)) group.blocked_pending += 1;
+    if (isRecoverableRuntimeFailure(task)) group.runtime_failed += 1;
+  }
+  return Array.from(groups.values());
+}
+
+export function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options: any = {}) {
+  const work = getAgentRecoveryWorkSummary();
+  if (work.total === 0) {
+    return Promise.resolve({ success: true, skipped: true, reason: "没有等待执行通道恢复的自动任务", work });
+  }
+  if (agentRecoveryProbeInFlight) {
+    return Promise.resolve({ success: true, skipped: true, reason: "执行通道探针正在运行", work });
+  }
+
+  setAgentRecoveryProbeInFlight(true);
+  const timeoutMs = Number(options.timeout_ms || options.timeoutMs || AGENT_RECOVERY_PROBE_TIMEOUT_MS);
+  const probeGroups = getAgentRecoveryProbeGroups();
+  return Promise.all(probeGroups.map(async (group: any) => {
+    const probe = await runAgentCliProbe({
+      ...options,
+      ...group.probe_payload,
+      timeout_ms: timeoutMs,
+      source: "agent-recovery-monitor",
+    }, ctx);
+    if (!probe?.success) {
+      return {
+        success: false,
+        group,
+        probe,
+        message: probe?.message || "执行通道探针未通过",
+      };
+    }
+    const blockedRecovery = recoverAgentExecutionBlockedTasks(ctx, "执行通道自动探针通过后恢复目标任务", { probeTarget: group.probe_target });
+    const runtimeRecovery = retryRuntimeFailedTasks(ctx, {
+      reason: "执行通道自动探针通过后重试",
+      limit: group.runtime_failed || 100,
+      probeTarget: group.probe_target,
+    });
+    return {
+      success: true,
+      group,
+      probe,
+      blocked_recovery: blockedRecovery,
+      runtime_recovery: runtimeRecovery,
+    };
+  }))
+    .then((target_results: any[]) => {
+      const successes = target_results.filter((item: any) => item.success);
+      const failures = target_results.filter((item: any) => !item.success);
+      const blockedRecoveries = successes.map((item: any) => item.blocked_recovery);
+      const runtimeRecoveries = successes.map((item: any) => item.runtime_recovery);
+      const blockedRecovery = aggregateBlockedRecovery(blockedRecoveries);
+      const runtimeRecovery = aggregateRuntimeRecovery(runtimeRecoveries);
+      return {
+        success: successes.length > 0,
+        skipped: false,
+        work,
+        probe_groups: probeGroups,
+        target_results,
+        failures,
+        message: successes.length > 0 ? "目标执行通道探针通过，已按项目 Agent 恢复任务" : (failures[0]?.message || "执行通道探针未通过"),
+        probe: target_results[0]?.probe || null,
+        blocked_recovery: blockedRecovery,
+        runtime_recovery: runtimeRecovery,
+      };
+    })
+    .finally(() => {
+      setAgentRecoveryProbeInFlight(false);
+    });
+}
+
+export function startAgentRecoveryMonitor(ctx: CollabCtx) {
+  if (agentRecoveryMonitorTimer) clearInterval(agentRecoveryMonitorTimer);
+  const tick = () => {
+    runAgentRecoveryMonitorOnce(ctx)
+      .then((result: any) => {
+        if (result?.skipped) return;
+        if (result?.success) {
+          const recovered = Number(result.blocked_recovery?.recovered || 0);
+          const retried = Number(result.runtime_recovery?.queued || 0);
+          console.log(`[执行通道恢复监控] 探针通过，自动恢复 ${recovered} 个阻塞任务，重试 ${retried} 个执行失败任务`);
+        } else {
+          console.log(`[执行通道恢复监控] 探针未通过：${result?.message || "未知原因"}`);
+        }
+      })
+      .catch((e: any) => console.error("[执行通道恢复监控]", e.message));
+  };
+  setAgentRecoveryMonitorTimer(setInterval(tick, AGENT_RECOVERY_PROBE_INTERVAL_MS));
+  setTimeout(tick, 10 * 1000);
+  console.log("[执行通道恢复监控] 已启动");
+}
+
+export function stopAgentRecoveryMonitor() {
+  if (agentRecoveryMonitorTimer) clearInterval(agentRecoveryMonitorTimer);
+  setAgentRecoveryMonitorTimer(null);
+}
+
+export function startTaskWatchdog(ctx: CollabCtx) {
+  if (taskWatchdogTimer) clearInterval(taskWatchdogTimer);
+  const autoRecover = /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_TASK_WATCHDOG_RECOVERY || ""));
+  const tick = () => {
+    try {
+      const expiredQa = markExpiredAgentQaItems();
+      if (expiredQa.length) console.log(`[Agent 问答看门狗] ${expiredQa.length} 个问答已超时`);
+      const status = getTaskWatchdogStatus();
+      const recoverable = status.stale_pending.length + status.stalled_in_progress.length + status.runtime_failed.length + status.gap_rework.length;
+      if (!autoRecover) {
+        if (recoverable > 0) console.log(`[任务看门狗] 手动恢复模式：发现 ${recoverable} 个需要处理的任务，等待用户点击恢复`);
+        return;
+      }
+      const result = runTaskWatchdog(ctx);
+      if (result.total_recoverable > 0 || result.runtime_failed_total > 0 || result.gap_rework_total > 0) {
+        console.log(`[任务看门狗] 自动恢复 ${result.recovered}/${result.total_recoverable} 个任务，运行时重试 ${result.runtime_queued || 0}，缺口续跑 ${result.gap_queued || 0}`);
+      }
+    } catch (e: any) {
+      console.error("[任务看门狗]", e.message);
+    }
+  };
+  setTaskWatchdogTimer(setInterval(tick, TASK_WATCHDOG_INTERVAL_MS));
+  console.log(`[任务看门狗] 已启动（${autoRecover ? "自动恢复模式" : "手动恢复模式"}）`);
+}
+
+export function stopTaskWatchdog() {
+  if (taskWatchdogTimer) clearInterval(taskWatchdogTimer);
+  setTaskWatchdogTimer(null);
+}

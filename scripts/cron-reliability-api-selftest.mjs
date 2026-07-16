@@ -46,6 +46,7 @@ fs.writeFileSync(path.join(ccmDir, 'cron-jobs.json'), JSON.stringify(jobs, null,
 
 const require = createRequire(import.meta.url)
 const { startServer } = require('../ccm-package/dist/server.js')
+const { loadTasks } = require('../ccm-package/dist/core/db.js')
 const server = startServer(0)
 
 const request = async (port, pathname, body) => {
@@ -91,7 +92,7 @@ try {
   assert.equal(cancelled.response.ok, true)
   assert.equal(cancelled.data.run.status, 'cancelled')
   await new Promise(resolve => setTimeout(resolve, 100))
-  const savedTasks = JSON.parse(fs.readFileSync(path.join(ccmDir, 'tasks.json'), 'utf8'))
+  const savedTasks = loadTasks()
   assert.equal(savedTasks.find(task => task.id === 'task-active').status, 'cancelled')
 
   list = (await request(port, '/api/cron')).data

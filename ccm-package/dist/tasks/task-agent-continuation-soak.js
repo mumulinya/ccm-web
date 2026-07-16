@@ -170,6 +170,8 @@ function readTaskAgentContinuationSoakFile(file) {
 function compactEvidence(input = {}) {
     const evidence = input.evidence || input;
     const continuation = evidence.nativeContinuationEvidence || evidence.native_continuation_evidence || evidence.native_continuation_receipt || null;
+    const memoryRecovery = evidence.memoryContextConsumptionRecovery || evidence.memory_context_consumption_recovery || null;
+    const memoryRecoveryContinuation = memoryRecovery?.recovery_native_continuation_evidence || null;
     const reinjection = evidence.reinjectionProof || evidence.reinjection_proof || null;
     const capacityProof = evidence.capacityRevalidationProof || evidence.capacity_revalidation_proof || null;
     const capacityCommit = evidence.capacityRevalidationCommitReceipt || evidence.capacity_revalidation_commit_receipt || null;
@@ -193,6 +195,18 @@ function compactEvidence(input = {}) {
         invocation_edge_id: String(evidence.invocationEdgeId || evidence.invocation_edge_id || ""),
         runner_request_id: String(evidence.runnerRequestId || evidence.runner_request_id || continuation?.runnerRequestId || continuation?.runner_request_id || ""),
         provider: String(evidence.provider || continuation?.provider || ""),
+        memory_context_consumption_recovery_id: String(memoryRecovery?.recovery_id || ""),
+        memory_context_consumption_recovery_status: String(memoryRecovery?.status || ""),
+        memory_context_consumption_recovery_policy: String(memoryRecovery?.policy || ""),
+        memory_context_consumption_recovery_attempt: Number(memoryRecovery?.attempt || 0),
+        memory_context_consumption_recovery_challenge_id: String(memoryRecovery?.challenge_id || ""),
+        memory_context_consumption_recovery_receipt_signature: String(memoryRecovery?.receipt_signature || ""),
+        memory_context_consumption_recovery_suppress_task_replay: memoryRecovery?.suppress_task_replay === true,
+        memory_context_consumption_recovery_native_evidence_checksum: String(memoryRecoveryContinuation?.evidenceChecksum || ""),
+        memory_context_consumption_recovery_native_acknowledged: memoryRecoveryContinuation?.nativeContinuationAcknowledged === true,
+        memory_context_consumption_recovery_provider_version: String(memoryRecoveryContinuation?.providerRuntimeVersion || memoryRecoveryContinuation?.providerRuntimeVersionSnapshot?.semanticVersion || memoryRecoveryContinuation?.providerRuntimeVersionSnapshot?.versionText || evidence.providerRuntimeVersion || ""),
+        memory_context_consumption_recovery_provider_identity_checksum: String(memoryRecoveryContinuation?.providerRuntimeIdentityChecksum || memoryRecoveryContinuation?.providerRuntimeVersionSnapshot?.executableIdentityChecksum || evidence.providerRuntimeIdentityChecksum || ""),
+        memory_context_consumption_recovery_fault_point: String(evidence.faultPoint || evidence.fault_point || ""),
         compact_epoch: String(evidence.compactEpoch || evidence.compact_epoch || reinjection?.compact_epoch || ""),
         worker_context_packet_id: String(evidence.workerContextPacketId || evidence.worker_context_packet_id || capacityProof?.worker_context_packet_id || ""),
         memory_context_snapshot_id: String(evidence.memoryContextSnapshotId || evidence.memory_context_snapshot_id || reinjection?.memory_context_snapshot_id || ""),
@@ -206,8 +220,37 @@ function compactEvidence(input = {}) {
         expected_provider_contract_id: String(continuation?.expectedProviderContractId || continuation?.expected_provider_contract_id || ""),
         provider_contract_transition: continuation?.providerContractTransition === true || continuation?.provider_contract_transition === true,
         provider_contract_continuity_verified: continuation?.providerContractContinuityVerified === true || continuation?.provider_contract_continuity_verified === true,
-        provider_runtime_version: String(continuation?.providerRuntimeVersion || continuation?.provider_runtime_version || continuation?.providerRuntimeVersionSnapshot?.semanticVersion || continuation?.providerRuntimeVersionSnapshot?.versionText || ""),
-        provider_runtime_identity_checksum: String(continuation?.providerRuntimeIdentityChecksum || continuation?.provider_runtime_identity_checksum || continuation?.providerRuntimeVersionSnapshot?.executableIdentityChecksum || ""),
+        provider_runtime_version: String(continuation?.providerRuntimeVersion || continuation?.provider_runtime_version || continuation?.providerRuntimeVersionSnapshot?.semanticVersion || continuation?.providerRuntimeVersionSnapshot?.versionText || evidence.providerRuntimeVersion || evidence.provider_runtime_version || ""),
+        provider_runtime_identity_checksum: String(continuation?.providerRuntimeIdentityChecksum || continuation?.provider_runtime_identity_checksum || continuation?.providerRuntimeVersionSnapshot?.executableIdentityChecksum || evidence.providerRuntimeIdentityChecksum || evidence.provider_runtime_identity_checksum || ""),
+        live_provider_memory_probe_run_id: String(evidence.liveProviderMemoryProbeRunId || evidence.live_provider_memory_probe_run_id || ""),
+        live_provider_memory_probe_stage: String(evidence.liveProviderMemoryProbeStage || evidence.live_provider_memory_probe_stage || ""),
+        live_provider_memory_probe_sentinel_checksum: String(evidence.liveProviderMemoryProbeSentinelChecksum || evidence.live_provider_memory_probe_sentinel_checksum || ""),
+        live_provider_memory_probe_session_checksum: String(evidence.liveProviderMemoryProbeSessionChecksum || evidence.live_provider_memory_probe_session_checksum || ""),
+        live_provider_memory_probe_output_checksum: String(evidence.liveProviderMemoryProbeOutputChecksum || evidence.live_provider_memory_probe_output_checksum || ""),
+        live_provider_memory_probe_account_backed: evidence.liveProviderMemoryProbeAccountBacked === true || evidence.live_provider_memory_probe_account_backed === true,
+        live_provider_memory_probe_workspace_unchanged: evidence.liveProviderMemoryProbeWorkspaceUnchanged === true || evidence.live_provider_memory_probe_workspace_unchanged === true,
+        live_provider_memory_probe_timed_out: evidence.liveProviderMemoryProbeTimedOut === true || evidence.live_provider_memory_probe_timed_out === true,
+        live_provider_memory_probe_duration_ms: Math.max(0, Number(evidence.liveProviderMemoryProbeDurationMs || evidence.live_provider_memory_probe_duration_ms || 0)),
+        live_provider_memory_probe_issue: String(evidence.liveProviderMemoryProbeIssue || evidence.live_provider_memory_probe_issue || "").slice(0, 160),
+        live_provider_memory_probe_model: String(evidence.liveProviderMemoryProbeModel || evidence.live_provider_memory_probe_model || "").slice(0, 120),
+        live_provider_memory_probe_parsed_event_count: Math.max(0, Number(evidence.liveProviderMemoryProbeParsedEventCount || evidence.live_provider_memory_probe_parsed_event_count || 0)),
+        live_provider_memory_probe_event_types: (Array.isArray(evidence.liveProviderMemoryProbeEventTypes || evidence.live_provider_memory_probe_event_types)
+            ? (evidence.liveProviderMemoryProbeEventTypes || evidence.live_provider_memory_probe_event_types) : [])
+            .map((item) => String(item || "").slice(0, 80)).filter(Boolean).slice(0, 20),
+        live_provider_memory_probe_session_established: evidence.liveProviderMemoryProbeSessionEstablished === true || evidence.live_provider_memory_probe_session_established === true,
+        live_provider_memory_probe_turn_started: evidence.liveProviderMemoryProbeTurnStarted === true || evidence.live_provider_memory_probe_turn_started === true,
+        live_provider_memory_probe_terminal_observed: evidence.liveProviderMemoryProbeTerminalObserved === true || evidence.live_provider_memory_probe_terminal_observed === true,
+        live_provider_memory_probe_model_output_observed: evidence.liveProviderMemoryProbeModelOutputObserved === true || evidence.live_provider_memory_probe_model_output_observed === true,
+        live_provider_memory_probe_api_retry_count: Math.max(0, Number(evidence.liveProviderMemoryProbeApiRetryCount || evidence.live_provider_memory_probe_api_retry_count || 0)),
+        live_provider_memory_probe_last_api_retry_attempt: Math.max(0, Number(evidence.liveProviderMemoryProbeLastApiRetryAttempt || evidence.live_provider_memory_probe_last_api_retry_attempt || 0)),
+        live_provider_memory_probe_progress_stage: String(evidence.liveProviderMemoryProbeProgressStage || evidence.live_provider_memory_probe_progress_stage || "").slice(0, 80),
+        live_provider_memory_probe_first_output_observed: evidence.liveProviderMemoryProbeFirstOutputObserved === true || evidence.live_provider_memory_probe_first_output_observed === true,
+        live_provider_memory_probe_first_output_ms: Math.max(0, Number(evidence.liveProviderMemoryProbeFirstOutputMs || evidence.live_provider_memory_probe_first_output_ms || 0)),
+        live_provider_memory_probe_stdout_bytes: Math.max(0, Number(evidence.liveProviderMemoryProbeStdoutBytes || evidence.live_provider_memory_probe_stdout_bytes || 0)),
+        live_provider_memory_probe_stderr_bytes: Math.max(0, Number(evidence.liveProviderMemoryProbeStderrBytes || evidence.live_provider_memory_probe_stderr_bytes || 0)),
+        live_provider_memory_probe_receipt_recovery_required: evidence.liveProviderMemoryProbeReceiptRecoveryRequired === true || evidence.live_provider_memory_probe_receipt_recovery_required === true,
+        live_provider_memory_probe_receipt_recovery_status: String(evidence.liveProviderMemoryProbeReceiptRecoveryStatus || evidence.live_provider_memory_probe_receipt_recovery_status || "").slice(0, 80),
+        live_provider_memory_probe_receipt_valid: evidence.liveProviderMemoryProbeReceiptValid === true || evidence.live_provider_memory_probe_receipt_valid === true,
         capacity_revalidation_proof_checksum: String(capacityProof?.proof_checksum || evidence.capacityRevalidationProofChecksum || evidence.capacity_revalidation_proof_checksum || ""),
         capacity_revalidation_commit_checksum: String(capacityCommit?.receipt_checksum || evidence.capacityRevalidationCommitChecksum || evidence.capacity_revalidation_commit_checksum || ""),
         reinjection_proof_checksum: reinjectionProofChecksum,
@@ -534,6 +577,18 @@ function buildTaskAgentContinuationSoakReport(filter = {}) {
             && verifiedProviderContractTransitions.length >= 1
             && (unverifiedProviderContractTransitions.length === 0 || postCompactRecoveryClosures.length >= 1);
         const serviceEpochs = new Set(events.map((event) => event.service_epoch).filter(Boolean));
+        const memoryRecoveryEvents = uniqueEvents(events.filter((event) => event.phase.startsWith("memory_receipt_recovery_")), event => `${event.phase}:${event.evidence?.memory_context_consumption_recovery_id || event.event_checksum}`);
+        const memoryRecoveryCommitted = memoryRecoveryEvents.filter((event) => event.phase === "memory_receipt_recovery_committed" && event.status === "recovered");
+        const memoryRecoveryBlocked = memoryRecoveryEvents.filter((event) => event.phase === "memory_receipt_recovery_blocked" || event.status === "blocked");
+        const memoryRecoveryFaults = memoryRecoveryEvents.filter((event) => event.phase === "memory_receipt_recovery_fault_injected");
+        const memoryRecoveryRestartReconciled = memoryRecoveryEvents.filter((event) => event.phase === "memory_receipt_recovery_restart_reconciled");
+        const memoryRecoveryProviders = Array.from(new Set(memoryRecoveryEvents.map((event) => event.evidence?.provider).filter(Boolean)));
+        const memoryRecoveryProviderVersions = Array.from(new Set(memoryRecoveryEvents.map((event) => event.evidence?.memory_context_consumption_recovery_provider_version).filter(Boolean)));
+        const liveProviderMemoryProbeEvents = uniqueEvents(events.filter((event) => event.phase.startsWith("live_provider_memory_probe_")), event => `${event.evidence?.live_provider_memory_probe_run_id || ""}:${event.phase}:${event.status}`);
+        const liveProviderMemoryProbeTerminal = liveProviderMemoryProbeEvents.filter((event) => event.phase === "live_provider_memory_probe_terminal");
+        const liveProviderMemoryProbeProviders = Array.from(new Set(liveProviderMemoryProbeEvents.map((event) => event.evidence?.provider).filter(Boolean)));
+        const liveProviderMemoryProbeVersions = Array.from(new Set(liveProviderMemoryProbeEvents.map((event) => event.evidence?.provider_runtime_version).filter(Boolean)));
+        const liveProviderMemoryProbeModels = Array.from(new Set(liveProviderMemoryProbeEvents.map((event) => event.evidence?.live_provider_memory_probe_model).filter(Boolean)));
         const gaps = [...ledger.issues];
         if (unverifiedContinuations.length)
             gaps.push("native_continuation_unverified");
@@ -547,6 +602,8 @@ function buildTaskAgentContinuationSoakReport(filter = {}) {
             gaps.push("post_compact_artifact_closure_unproven");
         if (capacityPrepared.length > capacityCommitted.length)
             gaps.push("capacity_revalidation_commit_pending");
+        if (liveProviderMemoryProbeTerminal.some((event) => event.status !== "passed"))
+            gaps.push("live_provider_memory_probe_unproven");
         return {
             groupId: String(first.group_id || ""),
             groupSessionId: String(first.group_session_id || ""),
@@ -598,6 +655,36 @@ function buildTaskAgentContinuationSoakReport(filter = {}) {
             serviceEpochCount: serviceEpochs.size,
             restartObserved: serviceEpochs.size >= 2,
             recoveredEventCount: events.filter((event) => event.recovered_after_restart === true).length,
+            memoryRecoveryEventCount: memoryRecoveryEvents.length,
+            memoryRecoveryCommittedCount: memoryRecoveryCommitted.length,
+            memoryRecoveryBlockedCount: memoryRecoveryBlocked.length,
+            memoryRecoveryFaultInjectedCount: memoryRecoveryFaults.length,
+            memoryRecoveryRestartReconciledCount: memoryRecoveryRestartReconciled.length,
+            memoryRecoveryReplaySuppressedCount: memoryRecoveryEvents.filter((event) => event.evidence?.memory_context_consumption_recovery_suppress_task_replay === true).length,
+            memoryRecoveryNativeAcknowledgedCount: memoryRecoveryEvents.filter((event) => event.evidence?.memory_context_consumption_recovery_native_acknowledged === true).length,
+            memoryRecoveryProviders,
+            memoryRecoveryProviderVersions,
+            liveProviderMemoryProbeEventCount: liveProviderMemoryProbeEvents.length,
+            liveProviderMemoryProbeTerminalCount: liveProviderMemoryProbeTerminal.length,
+            liveProviderMemoryProbePassedCount: liveProviderMemoryProbeTerminal.filter((event) => event.status === "passed").length,
+            liveProviderMemoryProbeTimeoutCount: liveProviderMemoryProbeTerminal.filter((event) => event.status === "timeout" || event.evidence?.live_provider_memory_probe_timed_out === true).length,
+            liveProviderMemoryProbeUnavailableCount: liveProviderMemoryProbeTerminal.filter((event) => event.status === "unavailable").length,
+            liveProviderMemoryProbeFailedCount: liveProviderMemoryProbeTerminal.filter((event) => !["passed", "timeout", "unavailable"].includes(String(event.status || ""))).length,
+            liveProviderMemoryProbeProviders,
+            liveProviderMemoryProbeVersions,
+            liveProviderMemoryProbeModels,
+            liveProviderMemoryProbeSessionEstablishedCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_session_established === true).length,
+            liveProviderMemoryProbeTurnStartedCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_turn_started === true).length,
+            liveProviderMemoryProbeFirstOutputCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_first_output_observed === true).length,
+            liveProviderMemoryProbeTerminalObservedCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_terminal_observed === true).length,
+            liveProviderMemoryProbeModelOutputCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_model_output_observed === true).length,
+            liveProviderMemoryProbeApiRetryEventCount: liveProviderMemoryProbeTerminal.reduce((sum, event) => sum + Number(event.evidence?.live_provider_memory_probe_api_retry_count || 0), 0),
+            liveProviderMemoryProbeStartupTimeoutCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_issue === "provider_startup_timeout").length,
+            liveProviderMemoryProbeApiRetryTimeoutCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_issue === "provider_api_retry_timeout").length,
+            liveProviderMemoryProbeTurnTimeoutCount: liveProviderMemoryProbeTerminal.filter((event) => ["provider_turn_timeout", "provider_terminal_timeout"].includes(String(event.evidence?.live_provider_memory_probe_issue || ""))).length,
+            liveProviderMemoryProbeReceiptRecoveryRequiredCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_receipt_recovery_required === true).length,
+            liveProviderMemoryProbeReceiptRecoveryPassedCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_receipt_recovery_status === "recovered" && event.evidence?.live_provider_memory_probe_receipt_valid === true).length,
+            liveProviderMemoryProbeWorkspaceChangedCount: liveProviderMemoryProbeTerminal.filter((event) => event.evidence?.live_provider_memory_probe_workspace_unchanged !== true).length,
             headChecksum: ledger.headChecksum,
             gaps: Array.from(new Set(gaps)),
             latestAt: String(events[events.length - 1]?.recorded_at || ""),
@@ -619,6 +706,36 @@ function buildTaskAgentContinuationSoakReport(filter = {}) {
             multiTurnChainCount: rows.filter(row => row.multiTurn).length,
             restartObservedChainCount: rows.filter(row => row.restartObserved).length,
             recoveredEventCount: rows.reduce((sum, row) => sum + row.recoveredEventCount, 0),
+            memoryRecoveryEventCount: rows.reduce((sum, row) => sum + row.memoryRecoveryEventCount, 0),
+            memoryRecoveryCommittedCount: rows.reduce((sum, row) => sum + row.memoryRecoveryCommittedCount, 0),
+            memoryRecoveryBlockedCount: rows.reduce((sum, row) => sum + row.memoryRecoveryBlockedCount, 0),
+            memoryRecoveryFaultInjectedCount: rows.reduce((sum, row) => sum + row.memoryRecoveryFaultInjectedCount, 0),
+            memoryRecoveryRestartReconciledCount: rows.reduce((sum, row) => sum + row.memoryRecoveryRestartReconciledCount, 0),
+            memoryRecoveryReplaySuppressedCount: rows.reduce((sum, row) => sum + row.memoryRecoveryReplaySuppressedCount, 0),
+            memoryRecoveryNativeAcknowledgedCount: rows.reduce((sum, row) => sum + row.memoryRecoveryNativeAcknowledgedCount, 0),
+            memoryRecoveryProviderCount: new Set(rows.flatMap(row => row.memoryRecoveryProviders || [])).size,
+            memoryRecoveryProviderVersionCount: new Set(rows.flatMap(row => row.memoryRecoveryProviderVersions || [])).size,
+            liveProviderMemoryProbeEventCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeEventCount, 0),
+            liveProviderMemoryProbeTerminalCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeTerminalCount, 0),
+            liveProviderMemoryProbePassedCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbePassedCount, 0),
+            liveProviderMemoryProbeTimeoutCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeTimeoutCount, 0),
+            liveProviderMemoryProbeUnavailableCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeUnavailableCount, 0),
+            liveProviderMemoryProbeFailedCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeFailedCount, 0),
+            liveProviderMemoryProbeProviderCount: new Set(rows.flatMap(row => row.liveProviderMemoryProbeProviders || [])).size,
+            liveProviderMemoryProbeProviderVersionCount: new Set(rows.flatMap(row => row.liveProviderMemoryProbeVersions || [])).size,
+            liveProviderMemoryProbeModelCount: new Set(rows.flatMap(row => row.liveProviderMemoryProbeModels || [])).size,
+            liveProviderMemoryProbeSessionEstablishedCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeSessionEstablishedCount, 0),
+            liveProviderMemoryProbeTurnStartedCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeTurnStartedCount, 0),
+            liveProviderMemoryProbeFirstOutputCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeFirstOutputCount, 0),
+            liveProviderMemoryProbeTerminalObservedCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeTerminalObservedCount, 0),
+            liveProviderMemoryProbeModelOutputCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeModelOutputCount, 0),
+            liveProviderMemoryProbeApiRetryEventCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeApiRetryEventCount, 0),
+            liveProviderMemoryProbeStartupTimeoutCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeStartupTimeoutCount, 0),
+            liveProviderMemoryProbeApiRetryTimeoutCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeApiRetryTimeoutCount, 0),
+            liveProviderMemoryProbeTurnTimeoutCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeTurnTimeoutCount, 0),
+            liveProviderMemoryProbeReceiptRecoveryRequiredCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeReceiptRecoveryRequiredCount, 0),
+            liveProviderMemoryProbeReceiptRecoveryPassedCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeReceiptRecoveryPassedCount, 0),
+            liveProviderMemoryProbeWorkspaceChangedCount: rows.reduce((sum, row) => sum + row.liveProviderMemoryProbeWorkspaceChangedCount, 0),
             continuationAcknowledgedCount: rows.reduce((sum, row) => sum + row.continuationAcknowledgedCount, 0),
             continuationUnverifiedCount: rows.reduce((sum, row) => sum + row.continuationUnverifiedCount, 0),
             providerOutputFormatDriftCount: rows.reduce((sum, row) => sum + row.formatDriftCount, 0),

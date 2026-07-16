@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import { taskAgentMemoryTransport } from "../tasks/task-agent-memory-entry-sync";
 import {
   DEFAULT_AUTO_COMPACT_BUFFER_TOKENS,
   DEFAULT_RESERVED_OUTPUT_TOKENS,
@@ -92,6 +93,10 @@ function uniqueRuntimeStrings(values: any[] = [], limit = 24) {
 
 function renderWorkerPacketMemory(memory: any) {
   if (!memory) return "";
+  const transport = taskAgentMemoryTransport(memory);
+  if (transport.present && !transport.valid) return `[CCM task-Agent memory entry sync invalid: ${transport.issues.join(",")}]`;
+  if (transport.mode === "continuation") return "";
+  if (transport.mode === "delta") return transport.text;
   const compactMemory = (value: any, max = 5000) => {
     const text = typeof value === "string" ? value : JSON.stringify(value || {});
     return text.length <= max ? text : `${text.slice(0, Math.ceil(max * 0.68))}\n...[memory truncated ${text.length - max} chars]...\n${text.slice(-Math.floor(max * 0.2))}`;
@@ -2383,12 +2388,15 @@ export function renderWorkerContextPacket(packet: any) {
   const memoryText = renderWorkerPacketMemory(packet?.memory || null);
   const memoryPolicyText = renderWorkerMemoryPolicy(packet?.memory_policy || packet?.memoryPolicy || null);
   const typedMemoryDeliveryExpectedBinding = buildWorkerTypedMemoryDeliveryExpectedBinding(packet, packet?.memory || null);
-  const typedMemoryDeliveryCapsuleText = renderWorkerTypedMemoryDeliveryCapsule(
-    packet?.typed_memory_delivery_capsule
-    || packet?.typedMemoryDeliveryCapsule
-    || extractWorkerTypedMemoryDeliveryCapsule(packet?.memory || null),
-    typedMemoryDeliveryExpectedBinding
-  );
+  const memoryEntryTransport = taskAgentMemoryTransport(packet?.memory || null);
+  const typedMemoryDeliveryCapsuleText = ["delta", "continuation"].includes(memoryEntryTransport.mode)
+    ? ""
+    : renderWorkerTypedMemoryDeliveryCapsule(
+      packet?.typed_memory_delivery_capsule
+      || packet?.typedMemoryDeliveryCapsule
+      || extractWorkerTypedMemoryDeliveryCapsule(packet?.memory || null),
+      typedMemoryDeliveryExpectedBinding
+    );
   const postTurnSummaryDeliveryCapsule = packet?.post_turn_summary_delivery_capsule
     || packet?.postTurnSummaryDeliveryCapsule
     || extractGroupPostTurnSummaryDeliveryCapsule(packet?.memory || null);

@@ -1,30 +1,25 @@
-import * as fs from "fs";
-import * as path from "path";
 import * as crypto from "crypto";
-import {
-  CCM_DIR,
-  GROUP_LOGS_FILE,
-  GROUP_LOGS_FILE_SHARED,
-} from "../../core/utils";
 import { loadTasks, saveTasks } from "../../core/db";
+import {
+  appendGroupLogRecord,
+  appendTaskLogRecord,
+  clearTaskLogRecords,
+  getTaskLogRecords,
+  loadGroupLogsFromSqlite,
+  replaceGroupLogsInSqlite,
+} from "../../core/task-store";
 import { appendTraceEvent, ensureTraceId } from "../../system/reliability-ledger";
 
 // === 群聊日志管理 ===
 export function safeAddGroupLog(groupId: string, level: string, category: string, message: string, details: any = null) {
   try {
-    const logs = fs.existsSync(GROUP_LOGS_FILE_SHARED)
-      ? JSON.parse(fs.readFileSync(GROUP_LOGS_FILE_SHARED, "utf-8"))
-      : {};
-    if (!logs[groupId]) logs[groupId] = [];
-    logs[groupId].push({
+    appendGroupLogRecord(groupId, {
       timestamp: new Date().toISOString(),
       level,
       category,
       message,
       details
-    });
-    if (logs[groupId].length > 500) logs[groupId] = logs[groupId].slice(-500);
-    fs.writeFileSync(GROUP_LOGS_FILE_SHARED, JSON.stringify(logs, null, 2));
+    }, 500);
   } catch (e: any) {
     console.error("保存群聊日志失败:", e.message);
   }
@@ -32,9 +27,7 @@ export function safeAddGroupLog(groupId: string, level: string, category: string
 
 export function loadGroupLogs() {
   try {
-    if (fs.existsSync(GROUP_LOGS_FILE)) {
-      return JSON.parse(fs.readFileSync(GROUP_LOGS_FILE, "utf-8"));
-    }
+    return loadGroupLogsFromSqlite();
   } catch (e: any) {
     console.error("加载群聊日志失败:", e.message);
   }
@@ -43,68 +36,29 @@ export function loadGroupLogs() {
 
 export function saveGroupLogs(logs: any) {
   try {
-    fs.writeFileSync(GROUP_LOGS_FILE, JSON.stringify(logs, null, 2));
+    replaceGroupLogsInSqlite(logs);
   } catch (e: any) {
     console.error("保存群聊日志失败:", e.message);
   }
 }
 
 export function addGroupLog(groupId: string, level: string, category: string, message: string, details: any = null) {
-  const logs = loadGroupLogs();
-  if (!logs[groupId]) logs[groupId] = [];
-
-  logs[groupId].push({
+  appendGroupLogRecord(groupId, {
     timestamp: new Date().toISOString(),
     level,
     category,
     message,
     details
-  });
-
-  if (logs[groupId].length > 500) {
-    logs[groupId] = logs[groupId].slice(-500);
-  }
-
-  saveGroupLogs(logs);
+  }, 500);
 }
 
 // === 任务日志系统 ===
-const TASK_LOGS_FILE = path.join(CCM_DIR, "task-logs.json");
-
-function loadTaskLogs() {
-  try {
-    if (fs.existsSync(TASK_LOGS_FILE)) {
-      return JSON.parse(fs.readFileSync(TASK_LOGS_FILE, "utf-8"));
-    }
-  } catch (e: any) {
-    console.error("加载任务日志失败:", e.message);
-  }
-  return {};
-}
-
-function saveTaskLogs(logs: any): void {
-  try {
-    fs.writeFileSync(TASK_LOGS_FILE, JSON.stringify(logs, null, 2));
-  } catch (e: any) {
-    console.error("保存任务日志失败:", e.message);
-  }
-}
-
 export function addTaskLog(taskId: string, level: string, message: string): void {
-  const logs = loadTaskLogs();
-  if (!logs[taskId]) logs[taskId] = [];
-
-  logs[taskId].push({
+  appendTaskLogRecord(taskId, {
     timestamp: new Date().toISOString(),
     level,
     message
-  });
-
-  if (logs[taskId].length > 100) {
-    logs[taskId] = logs[taskId].slice(-100);
-  }
-
-  saveTaskLogs(logs);
+  }, 100);
   console.log(`[任务日志] [${taskId}] [${level}] ${message.substring(0, 100)}`);
 }
 
@@ -154,13 +108,9 @@ export function getTaskTimeline(task: any, execution: any = {}) {
 }
 
 export function getTaskLogs(taskId: string, limit = 50) {
-  const logs = loadTaskLogs();
-  const taskLogs = logs[taskId] || [];
-  return taskLogs.slice(-limit);
+  return getTaskLogRecords(taskId, limit);
 }
 
 export function clearTaskLogs(taskId: string) {
-  const logs = loadTaskLogs();
-  delete logs[taskId];
-  saveTaskLogs(logs);
+  return clearTaskLogRecords(taskId);
 }

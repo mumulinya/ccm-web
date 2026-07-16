@@ -11,6 +11,8 @@ export interface AgentCommandOptions {
   sessionId?: string;
   resumeSession?: boolean;
   persistSession?: boolean;
+  appendSystemPromptFile?: string;
+  developerInstructionsFile?: string;
 }
 
 export interface AgentRuntimeDescriptor {
@@ -168,6 +170,11 @@ function formatStrictMcpConfigArg(options: AgentCommandOptions = {}) {
   return configPath ? ` --mcp-config ${quoteCmdArg(configPath)} --strict-mcp-config` : "";
 }
 
+function formatAppendSystemPromptFileArg(options: AgentCommandOptions = {}) {
+  const file = String(options.appendSystemPromptFile || "").trim();
+  return file ? ` --append-system-prompt-file ${quoteCmdArg(file)}` : "";
+}
+
 interface RuntimeLaunchMetadata {
   runtime?: string;
   runtimeHomePath?: string;
@@ -237,11 +244,16 @@ function buildCodexExecCommand(msgFile: string, options: AgentCommandOptions = {
   const homePrefix = runtimeHome ? formatWindowsEnvPrefix(buildIsolatedHomeEnv(runtimeHome, "codex")) : "";
   const sessionId = String(options.sessionId || "").trim();
   const flags = formatCodexExecSafetyFlags();
+  const sandboxMode = getCodexSandboxMode();
+  const developerInstructionsFile = String(options.developerInstructionsFile || "").trim();
+  const helper = path.join(__dirname, "codex-prompt-runner.js");
   if (options.persistSession && options.resumeSession && sessionId) {
-    return `${homePrefix}type "${msgFile}" | codex exec resume ${flags} --skip-git-repo-check --json ${quoteCmdArg(sessionId)} -`;
+    const args = ["exec", "resume", "-c", `sandbox_mode=${JSON.stringify(sandboxMode)}`, "--skip-git-repo-check", "--json", sessionId, "-"];
+    return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(developerInstructionsFile)} ${quoteCmdArg(encodeCliArgs(args))}`;
   }
   const persistence = options.persistSession ? " --json" : " --ephemeral";
-  return `${homePrefix}type "${msgFile}" | codex exec ${flags}${persistence} --skip-git-repo-check -`;
+  const args = ["exec", ...flags.split(" "), persistence.trim(), "--skip-git-repo-check", "-"].filter(Boolean);
+  return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(developerInstructionsFile)} ${quoteCmdArg(encodeCliArgs(args))}`;
 }
 
 function getCodexSandboxMode() {
@@ -296,7 +308,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
         ? (options.resumeSession ? ` --resume ${quoteCmdArg(sessionId)}` : ` --session-id ${quoteCmdArg(sessionId)}`)
         : "";
       const metadata = readRuntimeLaunchMetadata(options);
-      return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${sessionArg} -p`;
+      return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${formatAppendSystemPromptFileArg(options)}${sessionArg} -p`;
     },
   },
   {
@@ -430,8 +442,21 @@ export function resolveAvailableAgentRuntime(preferred = "claudecode") {
   };
 }
 
-export function extractAgentCommandUsage(rawOutput: string) {
-  const usage = { inputTokens: 0, outputTokens: 0, totalCostUsd: 0, reported: false };
+export function extractAgentCommandUsage(rawOutput: string, agentType = "") {
+  const provider = normalizeAgentRuntimeId(agentType || "");
+  const usage = {
+    inputTokens: 0,
+    directInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheReadIncludedInInput: false,
+    outputTokens: 0,
+    providerTotalTokens: 0,
+    totalTokens: 0,
+    totalCostUsd: 0,
+    reported: false,
+    provider,
+  };
   const takeMax = (current: number, ...values: any[]) => values.reduce((max, value) => {
     const number = Number(value || 0);
     return Number.isFinite(number) && number > max ? number : max;
@@ -451,13 +476,30 @@ export function extractAgentCommandUsage(rawOutput: string) {
       for (const candidate of candidates) {
         const directInputTokens = takeMax(0, candidate.input_tokens, candidate.inputTokens, candidate.prompt_tokens, candidate.promptTokens);
         const cacheCreationTokens = takeMax(0, candidate.cache_creation_input_tokens, candidate.cacheCreationInputTokens);
-        const cacheReadTokens = takeMax(0, candidate.cache_read_input_tokens, candidate.cacheReadInputTokens);
-        const inputTokens = directInputTokens + cacheCreationTokens + cacheReadTokens;
+        const anthropicCacheReadTokens = takeMax(0, candidate.cache_read_input_tokens, candidate.cacheReadInputTokens);
+        const includedCacheReadTokens = takeMax(0,
+          candidate.cached_input_tokens,
+          candidate.cachedInputTokens,
+          candidate.prompt_tokens_details?.cached_tokens,
+          candidate.promptTokensDetails?.cachedTokens,
+          candidate.input_tokens_details?.cached_tokens,
+          candidate.inputTokensDetails?.cachedTokens,
+        );
+        const cacheReadTokens = Math.max(anthropicCacheReadTokens, includedCacheReadTokens);
+        const cacheReadIncludedInInput = includedCacheReadTokens > 0 && anthropicCacheReadTokens === 0;
+        const inputTokens = directInputTokens + cacheCreationTokens + (cacheReadIncludedInInput ? 0 : cacheReadTokens);
         const outputTokens = takeMax(0, candidate.output_tokens, candidate.outputTokens, candidate.completion_tokens, candidate.completionTokens);
+        const providerTotalTokens = takeMax(0, candidate.total_tokens, candidate.totalTokens);
         const costUsd = takeMax(0, candidate.total_cost_usd, candidate.totalCostUsd, candidate.cost_usd, candidate.costUsd);
-        if (inputTokens > 0 || outputTokens > 0 || costUsd > 0) usage.reported = true;
+        if (inputTokens > 0 || outputTokens > 0 || providerTotalTokens > 0 || costUsd > 0) usage.reported = true;
         usage.inputTokens = Math.max(usage.inputTokens, inputTokens);
+        usage.directInputTokens = Math.max(usage.directInputTokens, directInputTokens);
+        usage.cacheCreationInputTokens = Math.max(usage.cacheCreationInputTokens, cacheCreationTokens);
+        usage.cacheReadInputTokens = Math.max(usage.cacheReadInputTokens, cacheReadTokens);
+        usage.cacheReadIncludedInInput ||= cacheReadIncludedInInput;
         usage.outputTokens = Math.max(usage.outputTokens, outputTokens);
+        usage.providerTotalTokens = Math.max(usage.providerTotalTokens, providerTotalTokens);
+        usage.totalTokens = Math.max(usage.totalTokens, providerTotalTokens || inputTokens + outputTokens);
         usage.totalCostUsd = Math.max(usage.totalCostUsd, costUsd);
       }
       const eventCost = takeMax(0, event.total_cost_usd, event.totalCostUsd, event.cost_usd, event.costUsd);
@@ -564,7 +606,7 @@ export function extractProviderOutputContractEvidence(agentType: string, rawOutp
 export function normalizeAgentCommandOutput(agentType: string, rawOutput: string, options: any = {}) {
   const runtime = normalizeAgentRuntimeId(agentType);
   const raw = String(rawOutput || "").trim();
-  const usage = extractAgentCommandUsage(raw);
+  const usage = extractAgentCommandUsage(raw, runtime);
   const providerOutputContractEvidence = extractProviderOutputContractEvidence(runtime, raw, options);
   if (!raw || !["codex", "cursor"].includes(runtime)) return { output: raw, sessionId: "", rawSessionId: "", usage, providerOutputContractEvidence };
 
@@ -816,6 +858,8 @@ export function runAgentRuntimeSessionSelfTest() {
   };
   const cursorInitialArgs = decodePromptRunnerArgs(cursorInitial);
   const cursorResumeArgs = decodePromptRunnerArgs(cursorResume);
+  const codexInitialArgs = decodePromptRunnerArgs(codexInitial);
+  const codexResumeArgs = decodePromptRunnerArgs(codexResume);
   const parsed = normalizeAgentCommandOutput("codex", [
     JSON.stringify({ type: "thread.started", thread_id: sessionId }),
     JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "任务完成" } }),
@@ -840,8 +884,8 @@ export function runAgentRuntimeSessionSelfTest() {
     claudeAutomatedModeAllowsProjectVerification: claudeInitial.includes("--permission-mode auto"),
     claudeCreatesNamedSession: claudeInitial.includes("--session-id") && claudeInitial.includes(sessionId),
     claudeResumesSameSession: claudeResume.includes("--resume") && claudeResume.includes(sessionId),
-    codexInitialIsPersistent: codexInitial.includes("--json") && !codexInitial.includes("--ephemeral"),
-    codexResumesSameSession: codexResume.includes("codex exec resume") && codexResume.includes(sessionId),
+    codexInitialIsPersistent: codexInitial.includes("codex-prompt-runner.js") && codexInitialArgs.includes("--json") && !codexInitialArgs.includes("--ephemeral"),
+    codexResumesSameSession: codexResume.includes("codex-prompt-runner.js") && codexResumeArgs.includes("resume") && codexResumeArgs.includes(sessionId),
     codexCapturesNativeSession: parsed.sessionId === sessionId && parsed.output === "任务完成",
     cursorInitialCapturesSession: cursorInitial.includes("cli-prompt-runner.js") && cursorInitialArgs.includes("--output-format") && cursorInitialArgs.includes("json") && !cursorInitialArgs.includes("--resume"),
     cursorTrustsHeadlessWorkspace: cursorInitialArgs.includes("--trust"),

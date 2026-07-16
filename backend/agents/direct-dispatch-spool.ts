@@ -2,6 +2,9 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../core/utils";
+import { verifyProviderMemoryChannelEvidence } from "./provider-memory-channel";
+import { readMemoryContextConsumptionReceipt } from "../integrations/memory-context-consumption-receipt";
+import { verifyMemoryContextConsumptionRecovery } from "../integrations/memory-context-consumption-recovery";
 
 const ROOT = path.join(CCM_DIR, "agent-runner");
 const REQUESTS_DIR = path.join(ROOT, "requests");
@@ -221,6 +224,12 @@ export function createDirectAgentDispatchRequest(input: any = {}) {
     groupId: String(input.groupId || ""),
     requestedNativeSessionId: String(input.requestedNativeSessionId || input.requested_native_session_id || ""),
     nativeResumeRequested: input.nativeResumeRequested === true || input.native_resume_requested === true,
+    trustedMemoryProviderChannelRequired: input.trustedMemoryProviderChannelRequired === true,
+    trustedMemoryProviderAcknowledgementRequired: input.trustedMemoryProviderAcknowledgementRequired === true,
+    memoryContextConsumptionReceiptRequired: input.memoryContextConsumptionReceiptRequired === true,
+    memoryContextConsumptionChallenge: input.memoryContextConsumptionChallenge || null,
+    trustedMemoryEnvelopeChecksum: String(input.trustedMemoryEnvelopeChecksum || ""),
+    trustedMemoryEnvelopeSourceChecksum: String(input.trustedMemoryEnvelopeSourceChecksum || ""),
     message,
     prompt_checksum: crypto.createHash("sha256").update(message).digest("hex").slice(0, 32),
     created_at: createdAt,
@@ -280,6 +289,11 @@ export function completeDirectAgentDispatch(id: string, input: any = {}) {
     nativeContinuationEvidence: input.nativeContinuationEvidence || input.native_continuation_evidence || null,
     nativeModelCapabilityReceipt: input.nativeModelCapabilityReceipt || input.native_model_capability_receipt || null,
     nativeModelCapabilityRecord: input.nativeModelCapabilityRecord || input.native_model_capability_record || null,
+    providerToolAccessEvidence: input.providerToolAccessEvidence || input.provider_tool_access_evidence || null,
+    providerMemoryChannelEvidence: input.providerMemoryChannelEvidence || input.provider_memory_channel_evidence || null,
+    memoryContextConsumptionReceipt: input.memoryContextConsumptionReceipt || input.memory_context_consumption_receipt || null,
+    memoryContextConsumptionRecovery: input.memoryContextConsumptionRecovery || input.memory_context_consumption_recovery || null,
+    usage: input.usage && typeof input.usage === "object" ? input.usage : null,
     exitCode: input.exitCode ?? input.exit_code ?? null,
     signal: String(input.signal || ""),
     taskId: String(current.taskId || ""),
@@ -328,6 +342,48 @@ export function validateDirectAgentDispatchPair(request: any, result: any) {
   if (String(request?.prompt_checksum || "") !== String(result?.prompt_checksum || "")) issues.push("prompt_checksum_mismatch");
   if (String(request?.taskAgentSessionId || "") !== String(result?.taskAgentSessionId || "")) issues.push("task_agent_session_mismatch");
   if (String(request?.groupId || "") !== String(result?.groupId || "")) issues.push("group_mismatch");
+  if (request?.trustedMemoryProviderChannelRequired === true) {
+    const channel = verifyProviderMemoryChannelEvidence(result?.providerMemoryChannelEvidence, {
+      provider: request.agentType,
+      originalPrompt: request.message,
+      envelopeChecksum: request.trustedMemoryEnvelopeChecksum,
+      sourceChecksum: request.trustedMemoryEnvelopeSourceChecksum,
+      runnerRequestId: request.id,
+      required: true,
+      requireAcknowledgement: request.trustedMemoryProviderAcknowledgementRequired === true,
+      providerOutputContractEvidence: result?.nativeContinuationEvidence?.providerOutputContractEvidence || null,
+      nativeContinuationEvidence: result?.nativeContinuationEvidence || null,
+      executionSucceeded: result?.success === true,
+    });
+    if (!channel.valid) issues.push(...channel.issues);
+  }
+  if (request?.memoryContextConsumptionReceiptRequired === true) {
+    const receipt = readMemoryContextConsumptionReceipt(request.memoryContextConsumptionChallenge, {
+      groupId: request.groupId,
+      taskId: request.taskId,
+      executionId: request.executionId,
+      project: request.projectName,
+      taskAgentSessionId: request.taskAgentSessionId,
+    });
+    if (!receipt.valid) issues.push(...receipt.issues);
+    if (String(result?.memoryContextConsumptionReceipt?.receipt_signature || "") !== String(receipt.receiptSignature || "")) {
+      issues.push("memory_context_consumption_receipt_mismatch");
+    }
+    if (result?.memoryContextConsumptionRecovery) {
+      const recovery = verifyMemoryContextConsumptionRecovery(result.memoryContextConsumptionRecovery, {
+        challengeId: request.memoryContextConsumptionChallenge?.challenge_id || "",
+        runnerRequestId: request.id,
+        groupId: request.groupId,
+        taskId: request.taskId,
+        executionId: request.executionId,
+        project: request.projectName,
+        taskAgentSessionId: request.taskAgentSessionId,
+        provider: request.agentType,
+      });
+      if (!recovery.valid) issues.push(...recovery.issues);
+      if (result.success === true && result.memoryContextConsumptionRecovery.status !== "recovered") issues.push("memory_context_consumption_recovery_not_recovered");
+    }
+  }
   return { valid: issues.length === 0, issues };
 }
 

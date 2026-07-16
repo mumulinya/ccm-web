@@ -34,6 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getGroupPromptCacheBreakDetectionFile = getGroupPromptCacheBreakDetectionFile;
+exports.verifyGroupPromptCacheStateSnapshot = verifyGroupPromptCacheStateSnapshot;
+exports.recordGroupPromptCacheState = recordGroupPromptCacheState;
 exports.readGroupPromptCacheBreakDetection = readGroupPromptCacheBreakDetection;
 exports.verifyGroupPromptCacheCompactionNotification = verifyGroupPromptCacheCompactionNotification;
 exports.notifyGroupPromptCacheCompaction = notifyGroupPromptCacheCompaction;
@@ -53,6 +55,8 @@ const NOTIFICATION_SCHEMA = "ccm-group-prompt-cache-compaction-notification-v1";
 const CACHE_DELETION_NOTIFICATION_SCHEMA = "ccm-group-prompt-cache-deletion-notification-v1";
 const VERSION = 1;
 const MIN_CACHE_MISS_TOKENS = 2_000;
+const CACHE_TTL_5MIN_MS = 5 * 60 * 1000;
+const CACHE_TTL_1HOUR_MS = 60 * 60 * 1000;
 const MAX_EVENTS = 64;
 function clean(value) {
     return String(value || "").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 160) || "unknown";
@@ -83,6 +87,61 @@ function eventChecksum(value) {
     delete payload.event_checksum;
     return sha(payload);
 }
+function stableValue(value) {
+    if (Array.isArray(value))
+        return value.map(stableValue);
+    if (!value || typeof value !== "object")
+        return value;
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, stableValue(value[key])]));
+}
+function stripCacheControl(value) {
+    if (Array.isArray(value))
+        return value.map(stripCacheControl);
+    if (!value || typeof value !== "object")
+        return value;
+    return Object.fromEntries(Object.keys(value).sort()
+        .filter(key => key !== "cache_control" && key !== "cacheControl")
+        .map(key => [key, stripCacheControl(value[key])]));
+}
+function collectCacheControl(value, pathParts = [], output = []) {
+    if (Array.isArray(value)) {
+        value.forEach((item, index) => collectCacheControl(item, [...pathParts, String(index)], output));
+        return output;
+    }
+    if (!value || typeof value !== "object")
+        return output;
+    for (const key of Object.keys(value).sort()) {
+        if (key === "cache_control" || key === "cacheControl")
+            output.push({ path: [...pathParts, key].join("."), value: stableValue(value[key]) });
+        else
+            collectCacheControl(value[key], [...pathParts, key], output);
+    }
+    return output;
+}
+function textLength(value) {
+    if (typeof value === "string")
+        return value.length;
+    if (Array.isArray(value))
+        return value.reduce((sum, item) => sum + textLength(item), 0);
+    if (!value || typeof value !== "object")
+        return 0;
+    return Object.entries(value).reduce((sum, [key, item]) => sum + (["text", "content", "thinking"].includes(key) ? textLength(item) : 0), 0);
+}
+function sanitizeToolName(value) {
+    const name = String(value || "unknown");
+    return name.startsWith("mcp__") ? "mcp" : clean(name).slice(0, 80);
+}
+function promptStateChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.snapshot_checksum;
+    delete payload.checksum_valid;
+    return sha(stableValue(payload));
+}
+function promptChangeChecksum(value) {
+    const payload = { ...(value || {}) };
+    delete payload.changes_checksum;
+    return sha(stableValue(payload));
+}
 function getGroupPromptCacheBreakDetectionFile(groupId, groupSessionId) {
     return path.join(ROOT, clean(groupId), `${clean(groupSessionId)}.json`);
 }
@@ -104,6 +163,12 @@ function emptyLedger(groupId, groupSessionId) {
         cache_deletion_notification_count: 0,
         cache_deletion_consumed_count: 0,
         recent_cache_deletion_notifications: [],
+        prompt_state_call_count: 0,
+        prompt_state_baseline: null,
+        pending_prompt_changes: null,
+        last_prompt_state_event: null,
+        recent_prompt_state_events: [],
+        last_api_success_at: "",
         last_event: null,
         recent_events: [],
         updated_at: "",
@@ -137,10 +202,147 @@ function persistLedger(file, value) {
     const core = {
         ...value,
         recent_events: (Array.isArray(value?.recent_events) ? value.recent_events : []).slice(-MAX_EVENTS),
+        recent_prompt_state_events: (Array.isArray(value?.recent_prompt_state_events) ? value.recent_prompt_state_events : []).slice(-MAX_EVENTS),
+        recent_cache_deletion_notifications: (Array.isArray(value?.recent_cache_deletion_notifications) ? value.recent_cache_deletion_notifications : []).slice(-MAX_EVENTS),
     };
     const stored = { ...core, ledger_checksum: ledgerChecksum(core) };
     (0, atomic_json_file_1.writeJsonAtomic)(file, stored);
     return { ...stored, file, checksum_valid: true };
+}
+function verifyGroupPromptCacheStateSnapshot(snapshot, expected = {}) {
+    const issues = [];
+    if (snapshot?.schema !== "ccm-group-prompt-cache-state-snapshot-v1" || Number(snapshot?.version || 0) !== VERSION)
+        issues.push("prompt_state_schema_invalid");
+    if (!String(snapshot?.group_id || ""))
+        issues.push("prompt_state_group_missing");
+    if (!String(snapshot?.group_session_id || "").startsWith("gcs_"))
+        issues.push("prompt_state_exact_session_missing");
+    if (String(snapshot?.scope_id || "") !== `${String(snapshot?.group_id || "")}--${String(snapshot?.group_session_id || "")}`)
+        issues.push("prompt_state_scope_invalid");
+    if (!String(snapshot?.snapshot_id || "") || !String(snapshot?.system_hash || "") || !String(snapshot?.tool_schemas_hash || ""))
+        issues.push("prompt_state_identity_missing");
+    if (snapshot?.body_free !== true)
+        issues.push("prompt_state_body_free_missing");
+    if (String(snapshot?.snapshot_checksum || "") !== promptStateChecksum(snapshot))
+        issues.push("prompt_state_checksum_invalid");
+    if (expected.groupId && String(snapshot?.group_id || "") !== String(expected.groupId))
+        issues.push("prompt_state_group_mismatch");
+    if (expected.groupSessionId && String(snapshot?.group_session_id || "") !== String(expected.groupSessionId))
+        issues.push("prompt_state_session_mismatch");
+    return { valid: issues.length === 0, issues };
+}
+function recordGroupPromptCacheState(input = {}) {
+    const groupId = String(input.groupId || input.group_id || "").trim();
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+    if (!groupId || !groupSessionId.startsWith("gcs_"))
+        return { recorded: false, reason: "exact_group_session_required" };
+    const file = getGroupPromptCacheBreakDetectionFile(groupId, groupSessionId);
+    return (0, atomic_json_file_1.withFileLock)(file, () => {
+        const current = readGroupPromptCacheBreakDetection(groupId, groupSessionId);
+        if (current.checksum_valid !== true)
+            return { recorded: false, reason: "prompt_cache_ledger_fail_closed", ledger: current };
+        const system = input.system ?? input.systemPrompt ?? input.system_prompt ?? [];
+        const tools = Array.isArray(input.toolSchemas || input.tool_schemas || input.tools) ? (input.toolSchemas || input.tool_schemas || input.tools) : [];
+        const toolRows = tools.map((tool, index) => ({
+            name: sanitizeToolName(tool?.name || `tool_${index}`),
+            hash: sha(stableValue(stripCacheControl(tool)), 24),
+        })).sort((a, b) => `${a.name}:${a.hash}`.localeCompare(`${b.name}:${b.hash}`));
+        const betas = (Array.isArray(input.betas || input.betaHeaders || input.beta_headers) ? (input.betas || input.betaHeaders || input.beta_headers) : [])
+            .map((value) => clean(value).slice(0, 120)).filter(Boolean).sort();
+        const at = String(input.at || input.recordedAt || input.recorded_at || new Date().toISOString());
+        const callNumber = Math.max(0, Number(current.prompt_state_call_count || 0)) + 1;
+        const core = {
+            schema: "ccm-group-prompt-cache-state-snapshot-v1",
+            version: VERSION,
+            snapshot_id: `gpcs_${sha(`${groupId}\0${groupSessionId}\0${callNumber}\0${at}`, 24)}`,
+            group_id: groupId,
+            group_session_id: groupSessionId,
+            scope_id: `${groupId}--${groupSessionId}`,
+            source: String(input.source || "group_main"),
+            provider: String(input.provider || "anthropic").toLowerCase(),
+            model: String(input.model || ""),
+            system_hash: sha(stableValue(stripCacheControl(system)), 24),
+            cache_control_hash: sha(stableValue(collectCacheControl(system)), 24),
+            tool_schemas_hash: sha(stableValue(toolRows), 24),
+            tool_schema_hashes: toolRows,
+            tool_names: toolRows.map((row) => row.name),
+            system_char_count: textLength(system),
+            fast_mode: input.fastMode === true || input.fast_mode === true,
+            global_cache_strategy: String(input.globalCacheStrategy || input.global_cache_strategy || ""),
+            betas,
+            cached_microcompact_enabled: input.cachedMicrocompactEnabled === true || input.cached_microcompact_enabled === true,
+            effort_value: String(input.effortValue ?? input.effort_value ?? ""),
+            extra_body_hash: sha(stableValue(input.extraBodyParams ?? input.extra_body_params ?? {}), 24),
+            body_free: true,
+            recorded_at: at,
+        };
+        const snapshot = { ...core, snapshot_checksum: promptStateChecksum(core) };
+        const previous = current.prompt_state_baseline || null;
+        const flags = previous ? {
+            system_prompt_changed: snapshot.system_hash !== previous.system_hash,
+            tool_schemas_changed: snapshot.tool_schemas_hash !== previous.tool_schemas_hash,
+            model_changed: snapshot.model !== previous.model,
+            provider_changed: snapshot.provider !== previous.provider,
+            fast_mode_changed: snapshot.fast_mode !== previous.fast_mode,
+            cache_control_changed: snapshot.cache_control_hash !== previous.cache_control_hash,
+            global_cache_strategy_changed: snapshot.global_cache_strategy !== previous.global_cache_strategy,
+            betas_changed: JSON.stringify(snapshot.betas) !== JSON.stringify(previous.betas || []),
+            cached_microcompact_changed: snapshot.cached_microcompact_enabled !== previous.cached_microcompact_enabled,
+            effort_changed: snapshot.effort_value !== previous.effort_value,
+            extra_body_changed: snapshot.extra_body_hash !== previous.extra_body_hash,
+        } : {};
+        const causes = Object.entries(flags).filter(([, changed]) => changed === true).map(([key]) => key);
+        const previousTools = Array.isArray(previous?.tool_schema_hashes) ? previous.tool_schema_hashes : [];
+        const previousNames = new Set(previousTools.map((row) => row.name));
+        const currentNames = new Set(toolRows.map((row) => row.name));
+        const changesCore = previous && causes.length ? {
+            schema: "ccm-group-prompt-cache-pending-changes-v1",
+            version: VERSION,
+            previous_snapshot_id: String(previous.snapshot_id || ""),
+            current_snapshot_id: snapshot.snapshot_id,
+            causes,
+            flags,
+            previous_model: String(previous.model || ""),
+            new_model: snapshot.model,
+            system_char_delta: Number(snapshot.system_char_count || 0) - Number(previous.system_char_count || 0),
+            added_tools: [...currentNames].filter(name => !previousNames.has(name)).slice(0, 32),
+            removed_tools: [...previousNames].filter(name => !currentNames.has(name)).slice(0, 32),
+            changed_tool_schemas: toolRows.filter((row, index) => previousTools[index]?.name === row.name && previousTools[index]?.hash !== row.hash).map((row) => row.name).slice(0, 32),
+            added_betas: snapshot.betas.filter((value) => !(previous.betas || []).includes(value)).slice(0, 16),
+            removed_betas: (previous.betas || []).filter((value) => !snapshot.betas.includes(value)).slice(0, 16),
+            body_free: true,
+            recorded_at: at,
+        } : null;
+        const changes = changesCore ? { ...changesCore, changes_checksum: promptChangeChecksum(changesCore) } : null;
+        const eventCore = {
+            schema: "ccm-group-prompt-cache-state-event-v1",
+            version: VERSION,
+            event_id: `gpcse_${sha(`${snapshot.snapshot_id}\0${callNumber}`, 24)}`,
+            group_id: groupId,
+            group_session_id: groupSessionId,
+            source: snapshot.source,
+            snapshot_id: snapshot.snapshot_id,
+            snapshot_checksum: snapshot.snapshot_checksum,
+            call_number: callNumber,
+            changed: causes.length > 0,
+            causes,
+            body_free: true,
+            recorded_at: at,
+        };
+        const event = { ...eventCore, event_checksum: eventChecksum(eventCore) };
+        const stored = persistLedger(file, {
+            ...current,
+            status: "prompt_state_recorded",
+            revision: Math.max(0, Number(current.revision || 0)) + 1,
+            prompt_state_call_count: callNumber,
+            prompt_state_baseline: snapshot,
+            pending_prompt_changes: changes,
+            last_prompt_state_event: event,
+            recent_prompt_state_events: [...(Array.isArray(current.recent_prompt_state_events) ? current.recent_prompt_state_events : []), event],
+            updated_at: at,
+        });
+        return { recorded: true, snapshot, changes, event, ledger: stored };
+    });
 }
 function readGroupPromptCacheBreakDetection(groupId, groupSessionId) {
     const id = String(groupId || "").trim();
@@ -369,9 +571,20 @@ function recordGroupPromptCacheUsage(input = {}) {
         const deletionNotification = deletionPending?.notification || null;
         const isPostCompaction = !!pending?.boundary_id;
         const isCacheDeletion = !!deletionNotification?.execution_receipt_id;
+        const promptChanges = current.pending_prompt_changes || null;
+        const promptSnapshot = current.prompt_state_baseline || null;
+        const model = String(input.model || promptSnapshot?.model || "");
+        const excludedModel = provider === "anthropic" && model.toLowerCase().includes("haiku");
+        const previousSuccessAtMs = Date.parse(String(current.last_api_success_at || "")) || 0;
+        const at = String(input.at || new Date().toISOString());
+        const atMs = Date.parse(at) || Date.now();
+        const timeSinceLastApiSuccessMs = previousSuccessAtMs > 0 ? Math.max(0, atMs - previousSuccessAtMs) : null;
+        const over5Minutes = timeSinceLastApiSuccessMs !== null && timeSinceLastApiSuccessMs > CACHE_TTL_5MIN_MS;
+        const over1Hour = timeSinceLastApiSuccessMs !== null && timeSinceLastApiSuccessMs > CACHE_TTL_1HOUR_MS;
         const tokenDrop = previous === null ? 0 : Math.max(0, previous - cacheRead);
         const dropRatio = previous && tokenDrop > 0 ? tokenDrop / previous : 0;
         const cacheBreak = provider === "anthropic"
+            && !excludedModel
             && !isPostCompaction
             && !isCacheDeletion
             && previous !== null
@@ -379,14 +592,29 @@ function recordGroupPromptCacheUsage(input = {}) {
             && tokenDrop >= MIN_CACHE_MISS_TOKENS;
         const classification = provider !== "anthropic"
             ? "unsupported_provider"
-            : isPostCompaction
-                ? "post_compaction_baseline_reset"
-                : isCacheDeletion
-                    ? "expected_microcompact_cache_deletion"
-                    : previous === null
-                        ? "baseline_initialized"
-                        : cacheBreak ? "cache_break" : "cache_stable";
-        const at = String(input.at || new Date().toISOString());
+            : excludedModel
+                ? "excluded_model"
+                : isPostCompaction
+                    ? "post_compaction_baseline_reset"
+                    : isCacheDeletion
+                        ? "expected_microcompact_cache_deletion"
+                        : previous === null
+                            ? "baseline_initialized"
+                            : cacheBreak ? "cache_break" : "cache_stable";
+        const cacheBreakReason = !cacheBreak
+            ? isPostCompaction ? "post_compaction"
+                : isCacheDeletion ? "expected_cache_deletion"
+                    : excludedModel ? "model_excluded"
+                        : ""
+            : Array.isArray(promptChanges?.causes) && promptChanges.causes.length
+                ? "client_prompt_changed"
+                : over1Hour
+                    ? "possible_1h_ttl_expiry"
+                    : over5Minutes
+                        ? "possible_5min_ttl_expiry"
+                        : timeSinceLastApiSuccessMs !== null
+                            ? "likely_server_side"
+                            : "unknown_cause";
         const eventCore = {
             schema: "ccm-group-prompt-cache-usage-event-v1",
             version: VERSION,
@@ -395,7 +623,7 @@ function recordGroupPromptCacheUsage(input = {}) {
             group_session_id: groupSessionId,
             source: String(input.source || "group_main"),
             provider,
-            model: String(input.model || ""),
+            model,
             call_number: Number(current.call_count || 0) + 1,
             baseline_generation: Math.max(0, Number(current.baseline_generation || 0)),
             previous_cache_read_tokens: previous,
@@ -414,6 +642,16 @@ function recordGroupPromptCacheUsage(input = {}) {
             microcompact_execution_receipt_id: String(deletionNotification?.execution_receipt_id || ""),
             microcompact_execution_receipt_checksum: String(deletionNotification?.execution_receipt_checksum || ""),
             microcompact_cleared_input_tokens: Number(deletionNotification?.cleared_input_tokens || 0),
+            prompt_state_snapshot_id: String(promptSnapshot?.snapshot_id || ""),
+            prompt_state_snapshot_checksum: String(promptSnapshot?.snapshot_checksum || ""),
+            prompt_changed: Array.isArray(promptChanges?.causes) && promptChanges.causes.length > 0,
+            prompt_change_causes: Array.isArray(promptChanges?.causes) ? promptChanges.causes.slice(0, 16) : [],
+            prompt_changes_checksum: String(promptChanges?.changes_checksum || ""),
+            cache_break_reason: cacheBreakReason,
+            time_since_last_api_success_ms: timeSinceLastApiSuccessMs,
+            last_api_success_over_5min: over5Minutes,
+            last_api_success_over_1h: over1Hour,
+            excluded_model: excludedModel,
             request_id: String(input.requestId || input.request_id || ""),
             body_free: true,
             recorded_at: at,
@@ -425,10 +663,12 @@ function recordGroupPromptCacheUsage(input = {}) {
             revision: Math.max(0, Number(current.revision || 0)) + 1,
             call_count: event.call_number,
             cache_break_count: Math.max(0, Number(current.cache_break_count || 0)) + (cacheBreak ? 1 : 0),
-            previous_cache_read_tokens: provider === "anthropic" ? cacheRead : current.previous_cache_read_tokens,
+            previous_cache_read_tokens: provider === "anthropic" && !excludedModel ? cacheRead : current.previous_cache_read_tokens,
             pending_post_compaction: null,
             pending_cache_deletion: null,
+            pending_prompt_changes: excludedModel ? current.pending_prompt_changes : null,
             cache_deletion_consumed_count: Math.max(0, Number(current.cache_deletion_consumed_count || 0)) + (isCacheDeletion ? 1 : 0),
+            last_api_success_at: provider === "anthropic" && !excludedModel ? at : current.last_api_success_at,
             last_event: event,
             recent_events: [...(Array.isArray(current.recent_events) ? current.recent_events : []), event],
             updated_at: at,

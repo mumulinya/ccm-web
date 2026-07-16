@@ -63,6 +63,7 @@ exports.recordGroupGlobalMemoryArbitrationLedger = recordGroupGlobalMemoryArbitr
 exports.distillGroupGlobalMemoryArbitrationToTypedMemory = distillGroupGlobalMemoryArbitrationToTypedMemory;
 exports.analyzeGroupSessionMemoryBudget = analyzeGroupSessionMemoryBudget;
 exports.evaluateGroupSessionMemoryUpdateCadence = evaluateGroupSessionMemoryUpdateCadence;
+exports.resolveGroupSessionMemoryExtractionCursor = resolveGroupSessionMemoryExtractionCursor;
 exports.enforceGroupSessionMemoryBudget = enforceGroupSessionMemoryBudget;
 exports.buildGroupSessionMemorySectionEvidence = buildGroupSessionMemorySectionEvidence;
 exports.buildGroupSessionMemorySnapshot = buildGroupSessionMemorySnapshot;
@@ -2149,12 +2150,26 @@ function groupSessionMemoryToolCallCount(message = {}) {
         : Array.isArray(message?.message?.content) ? message.message.content : [];
     return direct + content.filter((block) => String(block?.type || "").toLowerCase() === "tool_use").length;
 }
-function groupSessionMemoryToolCallsSince(messages, sinceMessageId = "") {
+function inspectGroupSessionMemoryToolCallsSince(messages, sinceMessageId = "") {
     const rows = Array.isArray(messages) ? messages : [];
     const start = sinceMessageId
         ? rows.findIndex((message, index) => getMemoryMessageIdentity(message, index) === sinceMessageId)
         : -1;
-    return rows.slice(Math.max(0, start + 1)).reduce((sum, message) => sum + groupSessionMemoryToolCallCount(message), 0);
+    if (sinceMessageId && start < 0) {
+        return {
+            count: 0,
+            cursorStatus: "not_found",
+            cursorIndex: -1,
+            scannedMessageCount: 0,
+        };
+    }
+    const scanned = rows.slice(Math.max(0, start + 1));
+    return {
+        count: scanned.reduce((sum, message) => sum + groupSessionMemoryToolCallCount(message), 0),
+        cursorStatus: sinceMessageId ? "resolved" : "not_set",
+        cursorIndex: start,
+        scannedMessageCount: scanned.length,
+    };
 }
 function groupSessionMemoryLastAssistantTurnHasToolCalls(messages) {
     const rows = Array.isArray(messages) ? messages : [];
@@ -2176,7 +2191,8 @@ function evaluateGroupSessionMemoryUpdateCadence(messages, previousSnapshot = {}
     const tokensAtLastExtraction = Math.max(0, Number(previous.tokensAtLastExtraction || 0));
     const tokensSinceLastExtraction = currentContextTokens - tokensAtLastExtraction;
     const lastExtractionMessageId = String(previous.lastExtractionMessageId || previous.last_extraction_message_id || "");
-    const toolCallsSinceLastExtraction = groupSessionMemoryToolCallsSince(rows, lastExtractionMessageId);
+    const toolCallScan = inspectGroupSessionMemoryToolCallsSince(rows, lastExtractionMessageId);
+    const toolCallsSinceLastExtraction = toolCallScan.count;
     const lastAssistantTurnHasToolCalls = groupSessionMemoryLastAssistantTurnHasToolCalls(rows);
     const tokenThresholdMet = initialized && tokensSinceLastExtraction >= minimumTokensBetweenUpdate;
     const toolCallThresholdMet = toolCallsSinceLastExtraction >= toolCallsBetweenUpdates;
@@ -2187,7 +2203,8 @@ function evaluateGroupSessionMemoryUpdateCadence(messages, previousSnapshot = {}
         ? "extraction_due"
         : !initialized ? "waiting_initialization_tokens"
             : !tokenThresholdMet ? "waiting_update_tokens"
-                : "waiting_tool_calls_or_natural_break";
+                : toolCallScan.cursorStatus === "not_found" ? "waiting_natural_break_after_cursor_miss"
+                    : "waiting_tool_calls_or_natural_break";
     return {
         schema: "ccm-group-session-memory-update-cadence-v1",
         version: 1,
@@ -2208,9 +2225,32 @@ function evaluateGroupSessionMemoryUpdateCadence(messages, previousSnapshot = {}
         naturalBreak,
         lastObservedMessageId: lastMessageId,
         lastExtractionMessageId,
+        lastExtractionCursorStatus: toolCallScan.cursorStatus,
+        lastExtractionCursorIndex: toolCallScan.cursorIndex,
+        toolCallScanMessageCount: toolCallScan.scannedMessageCount,
         extractionCount: Math.max(0, Number(previous.extractionCount || 0)),
         lastExtractedAt: String(previous.lastExtractedAt || ""),
         observedAt: String(options.now || new Date().toISOString()),
+    };
+}
+function resolveGroupSessionMemoryExtractionCursor(cadenceDecision = {}) {
+    const shouldExtract = cadenceDecision.shouldExtract === true;
+    const cursorBefore = String(cadenceDecision.lastExtractionMessageId || cadenceDecision.last_extraction_message_id || "");
+    const cursorAdvanceSafe = cadenceDecision.lastAssistantTurnHasToolCalls !== true;
+    const cursorAfter = shouldExtract && cursorAdvanceSafe
+        ? String(cadenceDecision.lastObservedMessageId || cadenceDecision.last_observed_message_id || cursorBefore)
+        : cursorBefore;
+    const cursorAdvanceStatus = !shouldExtract
+        ? "not_extracted"
+        : cursorAdvanceSafe ? "advanced" : "held_tool_use_boundary";
+    return {
+        cursorAdvanceStatus,
+        cursorAdvanceSafe,
+        cursorBefore,
+        cursorAfter,
+        cursorHeldReason: cursorAdvanceStatus === "held_tool_use_boundary"
+            ? "last_assistant_turn_has_tool_calls"
+            : "",
     };
 }
 function enforceGroupSessionMemoryBudget(markdown) {
@@ -2347,14 +2387,16 @@ function buildGroupSessionMemorySnapshot(groupId, memory = {}, options = {}) {
     const semanticSummaryChecksum = hashSessionMemoryText(JSON.stringify(semanticSummary), 24);
     const generatedAt = String(options.generatedAt || options.generated_at || new Date().toISOString());
     const cadenceInput = options.cadenceDecision || options.cadence_decision || memory?.sessionMemory?.updateCadence || {};
+    const cursorAdvance = resolveGroupSessionMemoryExtractionCursor(cadenceInput);
     const updateCadence = cadenceInput?.schema
         ? {
             ...cadenceInput,
+            ...cursorAdvance,
             status: cadenceInput.shouldExtract === true ? "extracted" : cadenceInput.status,
             shouldExtract: false,
             extractedThisObservation: cadenceInput.shouldExtract === true,
             tokensAtLastExtraction: cadenceInput.shouldExtract === true ? Number(cadenceInput.currentContextTokens || 0) : Number(cadenceInput.tokensAtLastExtraction || 0),
-            lastExtractionMessageId: cadenceInput.shouldExtract === true ? String(cadenceInput.lastObservedMessageId || "") : String(cadenceInput.lastExtractionMessageId || ""),
+            lastExtractionMessageId: cursorAdvance.cursorAfter,
             extractionCount: Math.max(0, Number(cadenceInput.extractionCount || 0)) + (cadenceInput.shouldExtract === true ? 1 : 0),
             lastExtractedAt: cadenceInput.shouldExtract === true ? generatedAt : String(cadenceInput.lastExtractedAt || ""),
         }
@@ -4004,6 +4046,12 @@ function buildGroupMemoryContext(memory) {
     const sessionMemory = memory.sessionMemory?.schema ? memory.sessionMemory : readGroupSessionMemorySnapshotSummary(memory.groupId || "");
     if (sessionMemory?.schema && (sessionMemory.hasSummary || sessionMemory.markdownExists)) {
         lines.push(`- CC 风格 Session Memory：summary=${sessionMemory.summaryFile || "未记录"}；checksum=${sessionMemory.markdownChecksum || "unknown"}；last=${sessionMemory.lastSummarizedMessageId || "recent-window"}；该文件是压缩后主/子 Agent 可重注入的会话级短记忆。`);
+        const cadence = sessionMemory.updateCadence || sessionMemory.update_cadence || {};
+        if (cadence.schema) {
+            lines.push(`- Session Memory 更新节奏：${cadence.status || "unknown"}；cursor=${cadence.lastExtractionCursorStatus || "legacy"}；advance=${cadence.cursorAdvanceStatus || "legacy"}；delta=${cadence.tokensSinceLastExtraction || 0} tokens；toolCalls=${cadence.toolCallsSinceLastExtraction || 0}；scan=${cadence.toolCallScanMessageCount || 0} messages。`);
+            if (cadence.cursorAdvanceStatus === "held_tool_use_boundary")
+                lines.push(`- 本轮 Session Memory 已更新，但抽取游标保持在 ${cadence.cursorAfter || cadence.cursorBefore || "session-start"}，原因：最后一个 assistant turn 仍含工具调用；后续项目子 Agent 必须保留完整 tool_use/tool_result 边界。`);
+        }
     }
     const sessionMemorySelection = memory.compaction?.sessionMemoryCompactSelection
         || memory.compactBoundary?.sessionMemoryCompactSelection
@@ -4011,6 +4059,9 @@ function buildGroupMemoryContext(memory) {
     if (sessionMemorySelection?.schema === "ccm-group-session-memory-compact-selection-v1") {
         const closure = sessionMemorySelection.api_invariant_closure || {};
         lines.push(`- Session Memory 压缩选择：${sessionMemorySelection.status || "unknown"}；cursor=${sessionMemorySelection.cursor_status || "unknown"}；保留 ${sessionMemorySelection.preserved_message_count || 0} 条 / 约 ${sessionMemorySelection.preserved_token_estimate || 0} tokens；API invariant closure=${closure.pass === true ? `pass(+${closure.expanded_message_count || 0})` : closure.schema ? "fail" : "unknown"}；compaction API called=${sessionMemorySelection.compaction_api_called === true}${sessionMemorySelection.fallback_reason ? `；fallback=${sessionMemorySelection.fallback_reason}` : ""}。`);
+        if (sessionMemorySelection.template_empty_checked === true) {
+            lines.push(`- Session Memory 模板空状态：scope=${sessionMemorySelection.template_scope_id || "unknown"}；source=${sessionMemorySelection.template_source || "unknown"}；sections=${sessionMemorySelection.template_section_count || 0}；templateOnly=${sessionMemorySelection.template_only === true}；checksum=${sessionMemorySelection.template_checksum || "unknown"}。只有包含模板之外的实际内容时才允许 compact 复用。`);
+        }
     }
     const toolContinuity = memory.toolContinuity?.schema ? memory.toolContinuity : readGroupToolContinuitySnapshotSummary(memory.groupId || "");
     if (toolContinuity?.schema && (hasToolGrantSet(toolContinuity.allowedTools) || hasToolGrantSet(toolContinuity.requested) || (toolContinuity.invokedSkills || []).length || toolContinuity.markdownExists)) {
@@ -10332,7 +10383,7 @@ function renderGroupMemoryContextBundle(bundle) {
     if (promptCacheBreakDetection.schema) {
         const event = promptCacheBreakDetection.last_event || {};
         const deletion = promptCacheBreakDetection.pending_cache_deletion?.notification || {};
-        lines.push(`- Prompt cache 运行时：status=${promptCacheBreakDetection.status || "unknown"}；calls=${promptCacheBreakDetection.call_count || 0}；breaks=${promptCacheBreakDetection.cache_break_count || 0}；generation=${promptCacheBreakDetection.baseline_generation || 0}；last=${event.classification || (promptCacheBreakDetection.pending_post_compaction ? "post_compaction_pending" : deletion.schema ? "cache_deletion_pending" : "none")}；postCompact=${event.is_post_compaction === true}；microcompactDeletion=${deletion.schema ? "pending" : event.cache_deletion_applied === true ? "consumed" : "none"}；executionReceipt=${deletion.execution_receipt_id || event.microcompact_execution_receipt_id || "none"}。`);
+        lines.push(`- Prompt cache 运行时：status=${promptCacheBreakDetection.status || "unknown"}；calls=${promptCacheBreakDetection.call_count || 0}；breaks=${promptCacheBreakDetection.cache_break_count || 0}；promptStates=${promptCacheBreakDetection.prompt_state_call_count || 0}；generation=${promptCacheBreakDetection.baseline_generation || 0}；last=${event.classification || (promptCacheBreakDetection.pending_post_compaction ? "post_compaction_pending" : deletion.schema ? "cache_deletion_pending" : "none")}；reason=${event.cache_break_reason || "none"}；promptChanged=${event.prompt_changed === true}；promptCauses=${Array.isArray(event.prompt_change_causes) && event.prompt_change_causes.length ? event.prompt_change_causes.join(",") : "none"}；postCompact=${event.is_post_compaction === true}；microcompactDeletion=${deletion.schema ? "pending" : event.cache_deletion_applied === true ? "consumed" : "none"}；executionReceipt=${deletion.execution_receipt_id || event.microcompact_execution_receipt_id || "none"}。`);
     }
     const criticalPostCompactTaskStatuses = (Array.isArray(reinjectionGate.candidates) ? reinjectionGate.candidates : [])
         .filter((candidate) => candidate.kind === "task_status")
@@ -10585,6 +10636,12 @@ function renderGroupMemoryContextBundle(bundle) {
     }
     if (sessionMemory.schema) {
         lines.push(`- CC 风格 Session Memory：summary=${sessionMemory.summaryFile || "未记录"}；snapshot=${sessionMemory.snapshotFile || "未记录"}；checksum=${sessionMemory.markdownChecksum || "unknown"}；last=${sessionMemory.lastSummarizedMessageId || "recent-window"}；hasSummary=${sessionMemory.hasSummary !== false}。`);
+        const cadence = sessionMemory.updateCadence || sessionMemory.update_cadence || {};
+        if (cadence.schema) {
+            lines.push(`- Session Memory 更新节奏：${cadence.status || "unknown"}；lastExtractionCursor=${cadence.lastExtractionCursorStatus || "legacy"}；advance=${cadence.cursorAdvanceStatus || "legacy"}；delta=${cadence.tokensSinceLastExtraction || 0} tokens；toolCalls=${cadence.toolCallsSinceLastExtraction || 0}；扫描消息=${cadence.toolCallScanMessageCount || 0}。游标缺失时不得把整段历史工具调用误算为新增量。`);
+            if (cadence.cursorAdvanceStatus === "held_tool_use_boundary")
+                lines.push(`- 本轮 Session Memory 已完成更新，但游标因最后一个 assistant turn 含工具调用而保持在 ${cadence.cursorAfter || cadence.cursorBefore || "session-start"}；项目子 Agent 继续接收完整工具调用边界。`);
+        }
         if (sessionMemory.markdownExcerpt) {
             lines.push(`  - Session Memory 摘要片段：${compactMemoryText(sessionMemory.markdownExcerpt, 620)}`);
         }
@@ -11511,7 +11568,10 @@ function renderGlobalGroupMemoryContextBundle(bundle) {
         if (compaction.session_memory_compact_selection?.schema) {
             const selection = compaction.session_memory_compact_selection;
             const closure = selection.api_invariant_closure || {};
-            lines.push(`  - Session Memory compact selection：status=${selection.status || "unknown"}；cursor=${selection.cursor_status || "unknown"}；kept=${selection.preserved_message_count || 0}/${selection.preserved_token_estimate || 0} tokens；API closure=${closure.pass === true ? `pass(+${closure.expanded_message_count || 0})` : closure.schema ? "fail" : "unknown"}；API called=${selection.compaction_api_called === true}${selection.fallback_reason ? `；fallback=${selection.fallback_reason}` : ""}。`);
+            lines.push(`  - Session Memory compact selection：status=${selection.status || "unknown"}；cursor=${selection.cursor_status || "unknown"}/${selection.cursor_mode || "legacy"}；kept=${selection.preserved_message_count || 0}/${selection.preserved_token_estimate || 0} tokens；API closure=${closure.pass === true ? `pass(+${closure.expanded_message_count || 0})` : closure.schema ? "fail" : "unknown"}；API called=${selection.compaction_api_called === true}${selection.fallback_reason ? `；fallback=${selection.fallback_reason}` : ""}。`);
+            const projection = selection.compact_projection || {};
+            if (projection.schema)
+                lines.push(`  - Session Memory compact 投影：${projection.original_token_estimate || 0} -> ${projection.projected_token_estimate || 0} tokens；截断 ${projection.truncated_section_count || 0}/${projection.section_count || 0} 节；预算 section=${projection.max_section_tokens || 0}/total=${projection.max_total_tokens || 0}；完整原文=${projection.summary_file || "unknown"}；原始文件保持不变。`);
         }
         if (compaction.post_compact_session_state_reset?.schema) {
             const reset = compaction.post_compact_session_state_reset;

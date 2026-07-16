@@ -90,7 +90,7 @@ export declare function runGlobalAgentIntentSelfTest(): {
         globalFeishuTaskDispatchHidesIds: boolean;
         projectInternalWorkOrderSelfContained: boolean;
         directDispatchHandoffSummary: boolean;
-        verificationOnlyCanAvoidCodeChanges: boolean;
+        verificationOnlyCanAvoidCodeChanges: any;
         singleProjectDispatchUsesPersistentMission: boolean;
         singleProjectDispatchCarriesReviewAcceptance: boolean;
         dispatchLaunchUiFriendly: boolean;
@@ -142,20 +142,8 @@ export declare function buildGlobalAgentGroupMemoryModelContext(bundle: any, opt
     };
 };
 export declare function buildAgenticContext(query?: string, sessionId?: string, options?: any): any;
-export declare function resumeGlobalAgentLoopsForServer(ctx: CollabCtx, port: number): Promise<{
-    total: number;
-    resumed: number;
-    results: any[];
-}>;
-export declare function startGlobalMissionSupervisionForServer(ctx: CollabCtx): {
-    started: boolean;
-    active: boolean;
-    resumed?: undefined;
-} | {
-    started: boolean;
-    active: boolean;
-    resumed: number;
-};
+export declare function resumeGlobalAgentLoopsForServer(ctx: CollabCtx, port: number): Promise<any>;
+export declare function startGlobalMissionSupervisionForServer(ctx: CollabCtx): any;
 export declare function bootstrapGlobalAgentMemoryForServer(): {
     total: any;
     migrated: number;
@@ -186,6 +174,8 @@ export declare function runGlobalModelRetrySelfTest(): Promise<{
     checks: {
         transientFailureRetriesOnce: boolean;
         permanentClientErrorDoesNotRetry: boolean;
+        openAiBaseUrlUsesV1Endpoint: boolean;
+        anthropicBaseUrlUsesV1Endpoint: boolean;
     };
 }>;
 export {};

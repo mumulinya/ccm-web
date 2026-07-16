@@ -43,12 +43,16 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const utils_1 = require("../core/utils");
 const runtime_1 = require("./runtime");
+const provider_tool_access_evidence_1 = require("./provider-tool-access-evidence");
 const native_continuation_1 = require("./native-continuation");
 const runtime_tool_sync_1 = require("../tools/runtime-tool-sync");
 const db_1 = require("../core/db");
 const storage_1 = require("../modules/collaboration/storage");
 const execution_kernel_1 = require("./execution-kernel");
 const group_session_lifecycle_head_1 = require("../modules/collaboration/group-session-lifecycle-head");
+const provider_memory_channel_1 = require("./provider-memory-channel");
+const memory_context_consumption_receipt_1 = require("../integrations/memory-context-consumption-receipt");
+const memory_context_consumption_recovery_1 = require("../integrations/memory-context-consumption-recovery");
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
 const REQUESTS_DIR = path.join(AGENT_RUNNER_DIR, "requests");
 const RESULTS_DIR = path.join(AGENT_RUNNER_DIR, "results");
@@ -570,6 +574,9 @@ async function runRequest(file) {
     markRequest(file, { status: "running", runner_pid: process.pid, started_at: new Date().toISOString() });
     writeHeartbeat("running", `${request.projectName || "agent"} ${request.id}`);
     const msgFile = path.join(utils_1.UPLOAD_DIR, `_runner_${request.id}.txt`);
+    const memorySystemPromptFile = path.join(utils_1.UPLOAD_DIR, `_runner_${request.id}.memory-system.txt`);
+    const memoryDeveloperInstructionsFile = path.join(utils_1.UPLOAD_DIR, `_runner_${request.id}.memory-developer.txt`);
+    const memoryReceiptRecoveryPromptFile = path.join(utils_1.UPLOAD_DIR, `_runner_${request.id}.memory-receipt-recovery.txt`);
     const workDir = request.workDir || process.cwd();
     const agentType = (0, runtime_1.normalizeAgentRuntimeId)(request.agentType || "claudecode");
     const command = (0, runtime_1.getAgentCommandLabel)(agentType);
@@ -578,6 +585,10 @@ async function runRequest(file) {
     const cliAllowedTools = buildCliAllowedTools(request);
     const effectiveMcpConfigPath = resolveRunnerMcpConfigPath(request, runtimeToolValidation);
     const runtimeVersionSnapshot = (0, runtime_1.captureAgentRuntimeVersionSnapshot)(agentType);
+    let providerMemoryChannelEvidence = null;
+    let memoryContextConsumptionReceipt = null;
+    let memoryContextConsumptionRecovery = null;
+    let memoryReceiptRecoveryProviderOutput = "";
     let runtimeSessionLifecycleValidation = null;
     const lifecycleMonitor = initialSessionLifecycleValidation.required
         ? setInterval(() => {
@@ -593,15 +604,45 @@ async function runRequest(file) {
         }, 100)
         : null;
     try {
-        fs.writeFileSync(msgFile, String(request.message || ""), "utf-8");
+        const providerMemoryChannel = (0, provider_memory_channel_1.prepareProviderMemoryChannel)(agentType, String(request.message || ""), {
+            required: request.trustedMemoryProviderChannelRequired === true,
+            envelopeChecksum: request.trustedMemoryEnvelopeChecksum || "",
+            sourceChecksum: request.trustedMemoryEnvelopeSourceChecksum || "",
+            runtimeVersionSnapshot,
+        });
+        if (!providerMemoryChannel.ready) {
+            const error = new Error(`Provider memory channel blocked: ${providerMemoryChannel.issues.join(",")}`);
+            error.code = "CCM_PROVIDER_MEMORY_CHANNEL_BLOCKED";
+            throw error;
+        }
+        fs.writeFileSync(msgFile, providerMemoryChannel.userPrompt, "utf-8");
+        if (providerMemoryChannel.systemPrompt)
+            fs.writeFileSync(memorySystemPromptFile, providerMemoryChannel.systemPrompt, "utf-8");
+        if (providerMemoryChannel.developerPrompt)
+            fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
+        const providerCommand = (0, runtime_1.buildAgentCommand)(agentType, msgFile, {
+            cliAllowedTools,
+            mcpConfigPath: effectiveMcpConfigPath,
+            appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
+            developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
+            ...(request.agentSession || {}),
+        });
+        providerMemoryChannelEvidence = (0, provider_memory_channel_1.bindProviderMemoryChannelLaunch)(providerMemoryChannel, {
+            command: providerCommand,
+            systemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
+            developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
+            runnerRequestId: request.id,
+            runtimeVersionSnapshot,
+        });
+        if (request.trustedMemoryProviderChannelRequired === true && providerMemoryChannelEvidence.status !== "ready") {
+            const error = new Error(`Provider memory channel launch unverified: ${providerMemoryChannelEvidence.issues.join(",")}`);
+            error.code = "CCM_PROVIDER_MEMORY_CHANNEL_BLOCKED";
+            throw error;
+        }
         const managed = await (0, execution_kernel_1.runManagedCommand)({
             taskId,
             executionId,
-            command: (0, runtime_1.buildAgentCommand)(agentType, msgFile, {
-                cliAllowedTools,
-                mcpConfigPath: effectiveMcpConfigPath,
-                ...(request.agentSession || {}),
-            }),
+            command: providerCommand,
             cwd: workDir,
             timeoutMs,
             maxOutputBytes: Number(request.maxOutputBytes || 2 * 1024 * 1024),
@@ -619,6 +660,114 @@ async function runRequest(file) {
             nativeResumeRequested: request.agentSession?.resumeSession === true,
             runnerSuccess: true,
         });
+        providerMemoryChannelEvidence = (0, provider_memory_channel_1.acknowledgeProviderMemoryChannelLaunch)(providerMemoryChannelEvidence, {
+            executionSucceeded: true,
+            runnerStarted: true,
+            exitCode: managed.exitCode,
+            providerOutputContractEvidence: normalizedOutput.providerOutputContractEvidence || null,
+            nativeContinuationEvidence,
+            required: request.trustedMemoryProviderAcknowledgementRequired === true,
+        });
+        if (request.trustedMemoryProviderAcknowledgementRequired === true) {
+            const acknowledgement = (0, provider_memory_channel_1.verifyProviderMemoryChannelEvidence)(providerMemoryChannelEvidence, {
+                provider: agentType,
+                originalPrompt: String(request.message || ""),
+                envelopeChecksum: request.trustedMemoryEnvelopeChecksum || "",
+                sourceChecksum: request.trustedMemoryEnvelopeSourceChecksum || "",
+                runnerRequestId: request.id,
+                required: true,
+                requireAcknowledgement: true,
+                providerOutputContractEvidence: normalizedOutput.providerOutputContractEvidence || null,
+                nativeContinuationEvidence,
+                executionSucceeded: true,
+            });
+            if (!acknowledgement.valid) {
+                const error = new Error(`Provider memory acknowledgement blocked: ${acknowledgement.issues.join(",")}`);
+                error.code = "CCM_PROVIDER_MEMORY_ACKNOWLEDGEMENT_BLOCKED";
+                throw error;
+            }
+        }
+        if (request.memoryContextConsumptionReceiptRequired === true) {
+            let memoryReceipt = (0, memory_context_consumption_receipt_1.readMemoryContextConsumptionReceipt)(request.memoryContextConsumptionChallenge, {
+                groupId: request.groupId || "",
+                groupSessionId: request.groupSessionId || request.group_session_id || "",
+                taskId: request.taskId || "",
+                executionId: request.executionId || "",
+                project: request.projectName || "",
+                taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id || "",
+            });
+            if (!memoryReceipt.valid) {
+                const recovery = await (0, memory_context_consumption_recovery_1.recoverMemoryContextConsumptionReceipt)({
+                    challenge: request.memoryContextConsumptionChallenge,
+                    provider: agentType,
+                    runnerRequestId: request.id,
+                    groupId: request.groupId || "",
+                    groupSessionId: request.groupSessionId || request.group_session_id || "",
+                    taskId: request.taskId || "",
+                    executionId: request.executionId || "",
+                    project: request.projectName || "",
+                    taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id || "",
+                    nativeContinuationEvidence,
+                    providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+                    trustedMemoryEnvelopeChecksum: request.trustedMemoryEnvelopeChecksum || "",
+                    trustedMemoryEnvelopeSourceChecksum: request.trustedMemoryEnvelopeSourceChecksum || "",
+                    providerWorkCompleted: true,
+                }, async (recoveryRequest) => {
+                    fs.writeFileSync(memoryReceiptRecoveryPromptFile, recoveryRequest.prompt, "utf-8");
+                    const recoveryCommand = (0, runtime_1.buildAgentCommand)(agentType, memoryReceiptRecoveryPromptFile, {
+                        cliAllowedTools,
+                        mcpConfigPath: effectiveMcpConfigPath,
+                        persistSession: true,
+                        resumeSession: true,
+                        sessionId: recoveryRequest.nativeSessionId,
+                    });
+                    const recoveryRun = await (0, execution_kernel_1.runManagedCommand)({
+                        taskId: `${taskId}:memory-receipt-recovery`,
+                        command: recoveryCommand,
+                        cwd: workDir,
+                        timeoutMs: Math.min(60_000, Math.max(15_000, timeoutMs)),
+                        maxOutputBytes: 512 * 1024,
+                        env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), request.envAllowlist || []),
+                    });
+                    memoryReceiptRecoveryProviderOutput = String(recoveryRun.stdout || "");
+                    const recoveryOutput = (0, runtime_1.normalizeAgentCommandOutput)(agentType, memoryReceiptRecoveryProviderOutput, { runtimeVersionSnapshot });
+                    return {
+                        success: true,
+                        exitCode: recoveryRun.exitCode,
+                        output: recoveryOutput.output,
+                        nativeSessionId: recoveryOutput.rawSessionId || recoveryOutput.sessionId || "",
+                        returnedNativeSessionId: recoveryOutput.rawSessionId || recoveryOutput.sessionId || "",
+                        providerOutputContractEvidence: recoveryOutput.providerOutputContractEvidence || null,
+                        providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
+                    };
+                });
+                memoryContextConsumptionRecovery = recovery.record;
+                if (!recovery.recovered) {
+                    const error = new Error(`Memory context consumption receipt recovery blocked: ${(recovery.record?.issues || memoryReceipt.issues).join(",")}`);
+                    error.code = "CCM_MEMORY_CONTEXT_CONSUMPTION_RECEIPT_RECOVERY_BLOCKED";
+                    error.memoryContextConsumptionRecovery = recovery.record;
+                    throw error;
+                }
+                memoryReceipt = (0, memory_context_consumption_receipt_1.readMemoryContextConsumptionReceipt)(request.memoryContextConsumptionChallenge, {
+                    groupId: request.groupId || "",
+                    groupSessionId: request.groupSessionId || request.group_session_id || "",
+                    taskId: request.taskId || "",
+                    executionId: request.executionId || "",
+                    project: request.projectName || "",
+                    taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id || "",
+                });
+            }
+            memoryContextConsumptionReceipt = memoryReceipt.receipt;
+        }
+        const providerToolAccessEvidence = (0, provider_tool_access_evidence_1.extractProviderToolAccessEvidence)(agentType, [String(managed.stdout || ""), memoryReceiptRecoveryProviderOutput].filter(Boolean).join("\n"), {
+            runnerRequestId: request.id,
+            groupId: request.groupId || "",
+            groupSessionId: request.groupSessionId || request.group_session_id || "",
+            taskId: request.taskId || "",
+            executionId: request.executionId || "",
+            taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id || "",
+            nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+        });
         const nativeModelCapabilityReceipt = (0, runtime_1.extractNativeModelCapabilityReceipt)(agentType, String(managed.stdout || ""), {
             runner: "node",
             runnerRequestId: request.id,
@@ -635,6 +784,7 @@ async function runRequest(file) {
             nativeResumeRequested: nativeContinuationEvidence.nativeResumeRequested,
             nativeContinuationAcknowledged: nativeContinuationEvidence.nativeContinuationAcknowledged,
             nativeContinuationEvidence,
+            providerToolAccessEvidence,
             providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
             providerOutputContractEvidence: normalizedOutput.providerOutputContractEvidence || null,
             providerContractId: nativeContinuationEvidence.providerContractId || "",
@@ -668,6 +818,9 @@ async function runRequest(file) {
             nativeContinuationEvidence,
             usage: normalizedOutput.usage || null,
             nativeModelCapabilityReceipt,
+            providerMemoryChannelEvidence,
+            memoryContextConsumptionReceipt,
+            memoryContextConsumptionRecovery,
             fileChanges,
             agentType,
             command: cliAllowedTools.length ? `${command} --allowed-tools ${cliAllowedTools.join(",")}` : command,
@@ -701,6 +854,9 @@ async function runRequest(file) {
             command: cliAllowedTools.length ? `${command} --allowed-tools ${cliAllowedTools.join(",")}` : command,
             mcpConfigPath: effectiveMcpConfigPath,
             runtimeToolSnapshot: runtimeToolValidation.runtimeToolSnapshot || null,
+            providerMemoryChannelEvidence,
+            memoryContextConsumptionReceipt,
+            memoryContextConsumptionRecovery: error?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery,
             cliAllowedTools,
             effectiveCliAllowedTools: cliAllowedTools.join(","),
             exitCode: error?.status ?? null,
@@ -716,6 +872,18 @@ async function runRequest(file) {
             clearInterval(lifecycleMonitor);
         try {
             fs.unlinkSync(msgFile);
+        }
+        catch { }
+        try {
+            fs.unlinkSync(memorySystemPromptFile);
+        }
+        catch { }
+        try {
+            fs.unlinkSync(memoryDeveloperInstructionsFile);
+        }
+        catch { }
+        try {
+            fs.unlinkSync(memoryReceiptRecoveryPromptFile);
         }
         catch { }
         writeHeartbeat("idle", "");

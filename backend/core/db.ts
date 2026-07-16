@@ -5,6 +5,7 @@ import { isCredentialReference, protectCredential, protectObjectSecrets, resolve
 import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
 import { assertCcmInternalSkillMutable, isCcmInternalSkillName } from "../skills/internal-skill-catalog";
 import { buildBundledFeishuMcpTool } from "../tools/internal-mcp-registry";
+import { loadTasksFromSqlite, saveTasksToSqlite } from "./task-store";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -471,23 +472,11 @@ export function runMetricsAggregationSelfTest() {
 
 // === Tasks ===
 export function loadTasks(): any[] {
-  if (!fs.existsSync(TASKS_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(TASKS_FILE, "utf-8"));
-  } catch {
-    try {
-      const recovered = JSON.parse(fs.readFileSync(`${TASKS_FILE}.bak`, "utf-8"));
-      if (Array.isArray(recovered)) {
-        saveTasks(recovered);
-        return recovered;
-      }
-    } catch {}
-    return [];
-  }
+  return loadTasksFromSqlite();
 }
 
 export function saveTasks(tasks: any[]) {
-  writeJsonAtomic(TASKS_FILE, tasks);
+  return saveTasksToSqlite(tasks);
 }
 
 // === Dialogue Templates ===

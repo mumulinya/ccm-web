@@ -20,6 +20,7 @@ const soak = require(path.join(root, "ccm-package", "dist", "tasks", "task-agent
 const spool = require(path.join(root, "ccm-package", "dist", "agents", "direct-dispatch-spool.js"));
 const memory = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "memory.js"));
 const memoryCenter = require(path.join(root, "ccm-package", "dist", "modules", "knowledge", "memory-control-center.js"));
+const lifecycle = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-session-lifecycle-head.js"));
 
 const nonce = `${process.pid}-${Date.now().toString(36)}`;
 let checks = 0;
@@ -38,12 +39,20 @@ function contract(provider, sessionId, drift = false) {
 }
 
 function bindAndDispatch(edge, label, compactEpoch) {
+  const lifecycleHead = lifecycle.ensureGroupSessionLifecycleHead(edge.group_id, edge.group_session_id, { reason: "phase259_continuation_soak_fixture" }).head;
   let next = lineage.bindTaskAgentInvocationContext(edge, {
     workerContextPacketId: `wcp_phase259_${label}_${nonce}`,
     memoryContextSnapshotId: `tams_phase259_${label}_${nonce}`,
     memoryContextSnapshotChecksum: `snapshot-checksum-${label}`,
     renderedPrompt: `phase259 ${label} prompt`,
     compactEpoch,
+    groupSessionMemoryBinding: {
+      sessionLifecycleFenceRequired: true,
+      sessionLifecycleHeadId: lifecycleHead.lifecycle_head_id,
+      sessionLifecycleGeneration: lifecycleHead.generation,
+      sessionLifecycleStatus: lifecycleHead.status,
+      sessionLifecycleHeadChecksum: lifecycleHead.head_checksum,
+    },
   });
   next = lineage.dispatchTaskAgentInvocationEdge(next, { transport: "codex" });
   return next;

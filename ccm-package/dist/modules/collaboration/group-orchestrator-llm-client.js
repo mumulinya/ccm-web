@@ -276,6 +276,31 @@ function providerRequestId(response) {
         || responseHeader(response, "anthropic-request-id")
         || responseHeader(response, "x-anthropic-request-id");
 }
+function recordAnthropicPromptCacheState(config, options, body, headers) {
+    const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
+    const groupId = String(tracking?.groupId || tracking?.group_id || "").trim();
+    const groupSessionId = String(tracking?.groupSessionId || tracking?.group_session_id || "").trim();
+    if (!groupId || !groupSessionId.startsWith("gcs_"))
+        return null;
+    const betaHeader = Object.entries(headers || {}).find(([key]) => key.toLowerCase() === "anthropic-beta")?.[1] || "";
+    try {
+        return (0, group_prompt_cache_break_detection_1.recordGroupPromptCacheState)({
+            ...tracking,
+            groupId,
+            groupSessionId,
+            provider: "anthropic",
+            model: config.model,
+            system: body?.system || "",
+            toolSchemas: body?.tools || tracking?.toolSchemas || tracking?.tool_schemas || [],
+            betaHeaders: String(betaHeader).split(",").map(value => value.trim()).filter(Boolean),
+            cachedMicrocompactEnabled: !!body?.context_management,
+            extraBodyParams: tracking?.extraBodyParams || tracking?.extra_body_params || {},
+        });
+    }
+    catch {
+        return null;
+    }
+}
 function recordApiMicrocompactNativeAdapterTelemetry(options, input = {}) {
     const plan = getApiMicrocompactNativeApplyPlan(options);
     if (!plan?.schema)
@@ -371,6 +396,7 @@ async function callAnthropicCompatibleChat(config, options) {
             "x-api-key": config.apiKey,
             "anthropic-version": "2023-06-01",
         }, options);
+        recordAnthropicPromptCacheState(config, options, patched.body, patched.headers);
         const sentAt = new Date().toISOString();
         let response = null;
         try {

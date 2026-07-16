@@ -120,8 +120,56 @@ const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), 
 })
 
 const originalFetch = window.fetch.bind(window)
+const fixtureConversationTurns = []
+
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input?.url || ''
+  const parsedUrl = new URL(url, window.location.origin)
+  if (parsedUrl.pathname.startsWith('/api/conversation-turns')) {
+    const payload = init?.body ? JSON.parse(String(init.body)) : {}
+    if (parsedUrl.pathname === '/api/conversation-turns' && String(init?.method || 'GET').toUpperCase() === 'GET') {
+      const statuses = String(parsedUrl.searchParams.get('statuses') || '').split(',').filter(Boolean)
+      return jsonResponse({
+        success: true,
+        turns: fixtureConversationTurns.filter(turn =>
+          (!parsedUrl.searchParams.get('scope') || turn.scope === parsedUrl.searchParams.get('scope'))
+          && (!parsedUrl.searchParams.get('conversation_id') || turn.conversation_id === parsedUrl.searchParams.get('conversation_id'))
+          && (!statuses.length || statuses.includes(turn.status))
+        ),
+      })
+    }
+    if (parsedUrl.pathname === '/api/conversation-turns/enqueue') {
+      const turn = {
+        id: `fixture-turn-${fixtureConversationTurns.length + 1}`,
+        scope: payload.scope || 'global',
+        conversation_id: payload.conversation_id || 'global-stream-fixture',
+        mode: payload.mode || 'queue',
+        message: payload.message || '',
+        active_run_id: payload.active_run_id || '',
+        metadata: payload.metadata || {},
+        status: 'queued',
+        created_at: new Date().toISOString(),
+      }
+      fixtureConversationTurns.push(turn)
+      return jsonResponse({ success: true, turn })
+    }
+    if (parsedUrl.pathname === '/api/conversation-turns/claim') {
+      const turn = fixtureConversationTurns.find(item => item.status === 'queued'
+        && (!payload.scope || item.scope === payload.scope)
+        && (!payload.conversation_id || item.conversation_id === payload.conversation_id)) || null
+      if (turn) turn.status = 'sending'
+      return jsonResponse({ success: true, turn })
+    }
+    const turn = fixtureConversationTurns.find(item => item.id === payload.id) || null
+    if (parsedUrl.pathname === '/api/conversation-turns/settle' && turn) {
+      turn.status = payload.status || 'completed'
+      turn.result = payload.result || null
+      turn.error = payload.error || ''
+    }
+    if (parsedUrl.pathname === '/api/conversation-turns/cancel' && turn) turn.status = 'cancelled'
+    if (parsedUrl.pathname === '/api/conversation-turns/retry' && turn) turn.status = 'queued'
+    return jsonResponse({ success: true, turn })
+  }
   if (url.includes('/api/global-agent/quality')) {
     return jsonResponse({
       success: true,

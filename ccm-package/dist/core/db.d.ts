@@ -31,7 +31,12 @@ export declare function runMetricsAggregationSelfTest(): {
     };
 };
 export declare function loadTasks(): any[];
-export declare function saveTasks(tasks: any[]): void;
+export declare function saveTasks(tasks: any[]): {
+    total: number;
+    inserted: number;
+    updated: number;
+    deleted: number;
+};
 export declare function loadTemplates(): any[];
 export declare function saveTemplates(templates: any[]): void;
 export declare function loadProjectConfigs(): any;

@@ -1,0 +1,189 @@
+{
+  "schema": "ccm-worker-context-compact-outcome-ledger-v1",
+  "version": 1,
+  "groupId": "phase308-completion-preservation-group",
+  "groupSessionId": "gcs_phase308_b",
+  "scopeId": "phase308-completion-preservation-group::gcs_phase308_b",
+  "file": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\post-compact-completion-preservation-exact-session-closure-selftest\\home\\.cc-connect\\group-memory-worker-context-compact-outcomes\\phase308-completion-preservation-group\\gcs_phase308_b.json",
+  "entries": [
+    {
+      "schema": "ccm-worker-context-compact-outcome-entry-v1",
+      "group_id": "phase308-completion-preservation-group",
+      "group_session_id": "gcs_phase308_b",
+      "assignment_id": "phase308-shared-assignment",
+      "dispatch_key": "phase308-shared-dispatch",
+      "project": "api",
+      "method": "memory_first_deterministic_context_compaction",
+      "outcome_id": "phase308-shared-failed-outcome",
+      "hook_run_id": "phase308-shared-failed-hook",
+      "retry_id": "phase308-shared-failed-retry",
+      "status": "blocked",
+      "dispatch_ready": false,
+      "post_compact_receipt_memory_usage_repair_completion_preservation": {
+        "schema": "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+        "required": true,
+        "preserved": false,
+        "source": "worker_context_packet_compaction_retry",
+        "retry_id": "phase308-shared-failed-retry",
+        "before": {
+          "schema": "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+          "present": true,
+          "completion_doc_rel_paths": [
+            "post-compact-receipt-memory-usage-repair-completions.md"
+          ],
+          "required_doc_rel_paths": [
+            "post-compact-receipt-memory-usage-repair-completions.md"
+          ],
+          "work_item_ids": [
+            "post-compact-receipt-memory-usage-repair:PHASE308_SESSION_B_SENTINEL"
+          ],
+          "timeline_binding_ids": [
+            "replay-repair-brief-timeline:PHASE308_SESSION_B_SENTINEL"
+          ],
+          "historical_task_agent_session_ids": [
+            "historical-task-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "historical_native_session_ids": [
+            "historical-native-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "current_session_binding_id": "current-binding-PHASE308_SESSION_B_SENTINEL",
+          "current_task_agent_session_id": "current-task-PHASE308_SESSION_B_SENTINEL",
+          "current_native_session_id": "current-native-PHASE308_SESSION_B_SENTINEL",
+          "usage_acceptance_required": true,
+          "current_session_acceptance_required": true,
+          "authority_boundary_valid": true
+        },
+        "after": {
+          "schema": "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+          "present": true,
+          "completion_doc_rel_paths": [],
+          "required_doc_rel_paths": [
+            "post-compact-receipt-memory-usage-repair-completions.md"
+          ],
+          "work_item_ids": [],
+          "timeline_binding_ids": [],
+          "historical_task_agent_session_ids": [
+            "historical-task-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "historical_native_session_ids": [
+            "historical-native-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "current_session_binding_id": "current-binding-PHASE308_SESSION_B_SENTINEL",
+          "current_task_agent_session_id": "historical-task-PHASE308_SESSION_B_SENTINEL",
+          "current_native_session_id": "current-native-PHASE308_SESSION_B_SENTINEL",
+          "usage_acceptance_required": true,
+          "current_session_acceptance_required": true,
+          "authority_boundary_valid": false
+        },
+        "missing_completion_doc_rel_paths": [
+          "post-compact-receipt-memory-usage-repair-completions.md"
+        ],
+        "missing_required_doc_rel_paths": [],
+        "missing_work_item_ids": [
+          "post-compact-receipt-memory-usage-repair:PHASE308_SESSION_B_SENTINEL"
+        ],
+        "missing_timeline_binding_ids": [
+          "replay-repair-brief-timeline:PHASE308_SESSION_B_SENTINEL"
+        ],
+        "missing_historical_task_agent_session_ids": [],
+        "missing_historical_native_session_ids": [],
+        "gaps": [
+          "completion_doc_rel_paths_missing_after_compact",
+          "completion_work_item_ids_missing_after_compact",
+          "completion_timeline_binding_ids_missing_after_compact",
+          "current_task_agent_session_changed_after_compact",
+          "historical_session_promoted_to_current_authority"
+        ]
+      },
+      "post_compact_receipt_memory_usage_repair_completion_preserved": false,
+      "at": "2026-07-15T14:00:00.000Z"
+    },
+    {
+      "schema": "ccm-worker-context-compact-outcome-entry-v1",
+      "group_id": "phase308-completion-preservation-group",
+      "group_session_id": "gcs_phase308_b",
+      "assignment_id": "phase308-shared-assignment",
+      "dispatch_key": "phase308-shared-dispatch",
+      "project": "api",
+      "method": "memory_first_deterministic_context_compaction",
+      "outcome_id": "phase308-shared-corrected-outcome",
+      "hook_run_id": "phase308-shared-corrected-hook",
+      "retry_id": "phase308-shared-corrected-retry",
+      "status": "recovered",
+      "dispatch_ready": true,
+      "post_compact_receipt_memory_usage_repair_completion_preservation": {
+        "schema": "ccm-post-compact-receipt-memory-usage-repair-completion-preservation-v1",
+        "required": true,
+        "preserved": true,
+        "source": "worker_context_packet_compaction_retry",
+        "retry_id": "phase308-shared-corrected-retry",
+        "before": {
+          "schema": "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+          "present": true,
+          "completion_doc_rel_paths": [
+            "post-compact-receipt-memory-usage-repair-completions.md"
+          ],
+          "required_doc_rel_paths": [
+            "post-compact-receipt-memory-usage-repair-completions.md"
+          ],
+          "work_item_ids": [
+            "post-compact-receipt-memory-usage-repair:PHASE308_SESSION_B_SENTINEL"
+          ],
+          "timeline_binding_ids": [
+            "replay-repair-brief-timeline:PHASE308_SESSION_B_SENTINEL"
+          ],
+          "historical_task_agent_session_ids": [
+            "historical-task-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "historical_native_session_ids": [
+            "historical-native-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "current_session_binding_id": "current-binding-PHASE308_SESSION_B_SENTINEL",
+          "current_task_agent_session_id": "current-task-PHASE308_SESSION_B_SENTINEL",
+          "current_native_session_id": "current-native-PHASE308_SESSION_B_SENTINEL",
+          "usage_acceptance_required": true,
+          "current_session_acceptance_required": true,
+          "authority_boundary_valid": true
+        },
+        "after": {
+          "schema": "ccm-post-compact-receipt-memory-usage-repair-completion-packet-summary-v1",
+          "present": true,
+          "completion_doc_rel_paths": [
+            "post-compact-receipt-memory-usage-repair-completions.md"
+          ],
+          "required_doc_rel_paths": [
+            "post-compact-receipt-memory-usage-repair-completions.md"
+          ],
+          "work_item_ids": [
+            "post-compact-receipt-memory-usage-repair:PHASE308_SESSION_B_SENTINEL"
+          ],
+          "timeline_binding_ids": [
+            "replay-repair-brief-timeline:PHASE308_SESSION_B_SENTINEL"
+          ],
+          "historical_task_agent_session_ids": [
+            "historical-task-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "historical_native_session_ids": [
+            "historical-native-PHASE308_SESSION_B_SENTINEL"
+          ],
+          "current_session_binding_id": "current-binding-PHASE308_SESSION_B_SENTINEL",
+          "current_task_agent_session_id": "current-task-PHASE308_SESSION_B_SENTINEL",
+          "current_native_session_id": "current-native-PHASE308_SESSION_B_SENTINEL",
+          "usage_acceptance_required": true,
+          "current_session_acceptance_required": true,
+          "authority_boundary_valid": true
+        },
+        "missing_completion_doc_rel_paths": [],
+        "missing_required_doc_rel_paths": [],
+        "missing_work_item_ids": [],
+        "missing_timeline_binding_ids": [],
+        "missing_historical_task_agent_session_ids": [],
+        "missing_historical_native_session_ids": [],
+        "gaps": []
+      },
+      "post_compact_receipt_memory_usage_repair_completion_preserved": true,
+      "at": "2026-07-15T14:01:00.000Z"
+    }
+  ],
+  "updatedAt": "2026-07-15T14:01:00.000Z"
+}

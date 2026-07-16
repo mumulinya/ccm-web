@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Download } from '@lucide/vue'
+import { Download, ShieldCheck, Sparkles } from '@lucide/vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 
 const loading = ref(false)
@@ -24,6 +24,10 @@ const selftestResidueArchiveLoading = ref(false)
 const selftestResidueArchiveResult = ref(null)
 const taskAgentSnapshotRetentionLoading = ref(false)
 const taskAgentSnapshotRetentionResult = ref(null)
+const liveMemoryWaveApprovalLoading = ref(false)
+const liveMemoryWaveApprovalRetentionLoading = ref(false)
+const liveMemoryWaveApprovalRetentionResult = ref(null)
+const liveMemoryWaveProvider = ref('codex')
 const contextSettingsLoading = ref(false)
 const contextSettingsSaving = ref(false)
 const modelCapacityStatus = ref(null)
@@ -43,9 +47,20 @@ const sessionMemoryReplayLoading = ref('')
 const sessionMemoryReplayResult = ref(null)
 const sessionMemoryArtifactRetentionRunning = ref('')
 const sessionMemoryTypedRetryRunning = ref('')
+const sessionMemoryManualExtractionRunning = ref('')
 const sessionMemoryTrendAckLoading = ref('')
 const sessionMemoryDiagnosticExportLoading = ref('')
 const sessionMemoryArtifactRetentionResult = ref(null)
+const sessionMemoryPromptLoading = ref(false)
+const sessionMemoryPromptSaving = ref(false)
+const sessionMemoryPromptTarget = ref('')
+const sessionMemoryPromptProfile = ref(null)
+const sessionMemoryPromptContent = ref('')
+const sessionMemoryCustomizationMode = ref('prompt')
+const sessionMemoryTemplateLoading = ref(false)
+const sessionMemoryTemplateSaving = ref(false)
+const sessionMemoryTemplateProfile = ref(null)
+const sessionMemoryTemplateContent = ref('')
 const dispatchRecovery = ref({ summary: {}, rows: [] })
 const dispatchRecoveryLoading = ref(false)
 const dispatchResolveLoading = ref(false)
@@ -64,6 +79,8 @@ const contextSettings = ref({
   typedMemoryDeliveryMaxLinesPerDocument: 200,
   typedMemoryDeliveryMaxSessionBytes: 61440,
   typedMemoryDeliveryMaxTokens: 5000,
+  sessionMemoryCompactMaxSectionTokens: 2000,
+  sessionMemoryCompactMaxTotalTokens: 12000,
   groupSessionRetentionDays: 30,
   groupSessionMaxArchived: 20,
   groupSessionAutoPruneEnabled: false,
@@ -138,7 +155,9 @@ const sessionMemoryFleetCards = computed(() => {
     { label: 'turn archives', value: overall.postTurnSummaryArchiveCount || 0, note: 'hash-chain files' },
     { label: 'initialized', value: overall.cadenceInitializedSessionCount || 0, note: `waiting ${overall.cadenceWaitingInitializationCount || 0}` },
     { label: 'extractions', value: overall.totalSessionMemoryExtractionCount || 0, note: `active ${overall.activeExtractionCount || 0} · failed ${overall.failedExtractionSessionCount || 0}` },
-    { label: 'model extracted', value: overall.modelExtractedSessionCount || 0, note: `verified ${overall.modelReceiptVerifiedCount || 0}` },
+    { label: 'model extracted', value: overall.modelExtractedSessionCount || 0, note: `verified ${overall.modelReceiptVerifiedCount || 0} · manual ${overall.modelManualExtractionCount || 0}` },
+    { label: 'manual refresh', value: overall.modelManualFullSessionRefreshCount || 0, note: `model ${overall.modelManualModelInvokedCount || 0} · no-new ${overall.modelManualNoNewMessageRefreshCount || 0}` },
+    { label: 'manual bypass', value: overall.modelManualSuppressionBypassCount || 0, note: `eligible ${overall.modelManualSuppressionEligibleCount || 0}` },
     { label: 'model pending', value: overall.modelExtractionPendingCount || 0, note: `backoff ${overall.modelExtractionBackoffCount || 0}` },
     { label: 'direct skips', value: overall.directMemorySuppressionCount || 0, note: `active ${overall.directMemorySuppressionActiveCount || 0} · invalid ${overall.directMemorySuppressionInvalidCount || 0}` },
     { label: 'invalid receipt', value: overall.modelReceiptInvalidCount || 0, note: 'expected 0' },
@@ -150,6 +169,8 @@ const sessionMemoryFleetCards = computed(() => {
     { label: 'artifact archive', value: overall.modelExtractionArtifactArchivedCount || 0, note: formatBytes(overall.modelExtractionArtifactArchivedBytes || 0) },
     { label: 'archive due', value: overall.modelExtractionArtifactCandidateExecutionCount || 0, note: `invalid ${overall.modelExtractionArtifactInvalidCount || 0}` },
     { label: 'input bounded', value: overall.modelInputDegradedCount || 0, note: `over ${overall.modelInputOverBudgetCount || 0}` },
+    { label: 'custom prompts', value: overall.modelCustomPromptConfiguredSessionCount || 0, note: `exact ${overall.modelCustomPromptExactSessionCount || 0} · global ${overall.modelCustomPromptGlobalCount || 0}` },
+    { label: 'custom templates', value: overall.modelCustomTemplateConfiguredSessionCount || 0, note: `exact ${overall.modelCustomTemplateExactSessionCount || 0} · global ${overall.modelCustomTemplateGlobalCount || 0}` },
     { label: 'merge quality', value: overall.modelMergeQualityObservedCount || 0, note: `failed ${overall.modelMergeQualityFailedCount || 0}` },
     { label: 'supersession', value: overall.factSupersessionEdgeCount || 0, note: `graphs ${overall.factSupersessionGraphObservedCount || 0}` },
     { label: 'typed proposals', value: overall.modelExtractionTypedMemoryProposalCount || 0, note: `admitted ${overall.modelExtractionTypedMemoryAdmittedCount || 0} · rejected ${overall.modelExtractionTypedMemoryRejectedCount || 0}` },
@@ -176,6 +197,12 @@ const sessionMemoryFleetRows = computed(() => {
   const weak = report.weakGroups || []
   return (weak.length ? weak : report.groups || []).slice(0, 8)
 })
+const sessionMemoryPromptTargets = computed(() => (sessionMemoryFleetReport.value?.groups || [])
+  .filter(row => row.groupSessionId && row.groupSessionId !== 'default')
+  .map(row => ({
+    scopeId: row.modelExtractionScopeId || `${row.groupId}--${row.groupSessionId}`,
+    label: `${row.groupId} / ${row.groupSessionId}`
+  })))
 const sessionMemoryHistoryRows = computed(() => (sessionMemoryFleetReport.value?.groups || [])
   .flatMap((row) => (row.modelExtractionHistory?.rows || []).map((event) => ({
     ...event,
@@ -273,6 +300,43 @@ const crossProjectPressureUsageReport = computed(() => crossProjectPressureUsage
 const globalSelftestContaminationCheck = computed(() => qualityCheckById('global_memory_selftest_contamination'))
 const taskAgentMemoryContextSnapshotCheck = computed(() => qualityCheckById('task_agent_memory_context_snapshots'))
 const taskAgentSnapshotReport = computed(() => overview.value.taskAgentMemoryContextSnapshotReport || taskAgentMemoryContextSnapshotCheck.value?.report || {})
+const liveMemoryWaveApprovalProviderPreviews = computed(() => taskAgentSnapshotReport.value?.liveProviderMemoryWaveApprovalProviderPreviews || [])
+const liveMemoryTransitionCanaryProviderPreviews = computed(() => taskAgentSnapshotReport.value?.liveProviderMemoryVersionTransitionCanaryProviderPreviews || [])
+const liveMemoryInitialBaselineCanaryProviderPreviews = computed(() => taskAgentSnapshotReport.value?.liveProviderInitialMemoryBaselineCanaryProviderPreviews || [])
+const selectedLiveMemoryProviderPreview = (rows, fallback = {}) => rows.find(row => (row.requestedProvider || row.plan?.provider) === liveMemoryWaveProvider.value) || fallback
+const liveMemoryWaveApprovalPreview = computed(() => selectedLiveMemoryProviderPreview(liveMemoryWaveApprovalProviderPreviews.value, taskAgentSnapshotReport.value?.liveProviderMemoryWaveApprovalPreview || {}))
+const liveMemoryTransitionCanaryPreview = computed(() => selectedLiveMemoryProviderPreview(liveMemoryTransitionCanaryProviderPreviews.value, taskAgentSnapshotReport.value?.liveProviderMemoryVersionTransitionCanaryPreview || {}))
+const liveMemoryInitialBaselineCanaryPreview = computed(() => selectedLiveMemoryProviderPreview(liveMemoryInitialBaselineCanaryProviderPreviews.value))
+const liveMemoryWaveApprovalInventory = computed(() => taskAgentSnapshotReport.value?.liveProviderMemoryWaveApprovalInventory || {})
+const liveMemoryVersionTransitionLedger = computed(() => taskAgentSnapshotReport.value?.liveProviderMemoryVersionTransitionLedger || {})
+const liveMemoryWaveHasActiveApproval = computed(() => Number(liveMemoryWaveApprovalInventory.value?.approvedCount || 0) > 0)
+const liveMemoryWaveActiveApproval = computed(() => (liveMemoryWaveApprovalInventory.value?.rows || []).find(row => row.status === 'approved') || null)
+const liveMemoryWaveApprovalAction = computed(() => liveMemoryWaveHasActiveApproval.value
+  ? 'revoke_live_memory_wave'
+  : liveMemoryWaveApprovalPreview.value?.approvable
+    ? 'approve_live_memory_wave'
+    : liveMemoryTransitionCanaryPreview.value?.approvable
+      ? 'approve_live_memory_transition_canary'
+      : liveMemoryInitialBaselineCanaryPreview.value?.approvable
+        ? 'approve_live_memory_initial_baseline_canary'
+        : '')
+const liveMemoryWaveApprovalLabel = computed(() => liveMemoryWaveHasActiveApproval.value
+  ? '撤销波次批准'
+  : liveMemoryWaveApprovalAction.value === 'approve_live_memory_transition_canary'
+    ? '批准迁移 Canary'
+    : liveMemoryWaveApprovalAction.value === 'approve_live_memory_initial_baseline_canary'
+      ? '批准首次基线'
+      : '批准建议波次')
+const liveMemoryWaveApprovalTitle = computed(() => liveMemoryWaveHasActiveApproval.value
+  ? '撤销当前单次执行凭据'
+  : liveMemoryWaveApprovalAction.value === 'approve_live_memory_transition_canary'
+    ? '创建绑定新 Provider 身份的最小 canary 凭据'
+    : liveMemoryWaveApprovalAction.value === 'approve_live_memory_initial_baseline_canary'
+      ? '创建选定 Provider 的首份记忆基线 canary 凭据'
+      : '创建绑定当前建议的单次执行凭据')
+const liveMemoryWaveHasPrunableApprovals = computed(() => Number(liveMemoryWaveApprovalInventory.value?.prunableCount || 0) > 0)
+const taskAgentModelReceiptLifecycle = computed(() => taskAgentSnapshotReport.value?.modelMemoryReceiptLifecycle || {})
+const taskAgentModelReceiptRecovery = computed(() => taskAgentSnapshotReport.value?.modelMemoryReceiptRecovery || {})
 const taskAgentDiagnosticFleet = computed(() => taskAgentSnapshotReport.value?.diagnosticExportFleet || {})
 const taskAgentSnapshotState = computed(() => taskAgentSnapshotReport.value?.overall?.status || taskAgentMemoryContextSnapshotCheck.value?.status || 'empty')
 const taskAgentSnapshotCards = computed(() => {
@@ -284,6 +348,16 @@ const taskAgentSnapshotCards = computed(() => {
     { label: 'snapshots', value: overall.snapshotCount || 0, note: `${overall.sessionCount || 0} sessions` },
     { label: 'healthy', value: overall.okCount || 0, note: `warn ${overall.warnCount || 0} / fail ${overall.failCount || 0}` },
     { label: 'delivered', value: overall.deliveredCount || 0, note: `missing ${overall.deliveryMissingCount || 0} · failed ${overall.deliveryFailedCount || 0}` },
+    { label: 'model loaded', value: overall.modelMemoryReceiptReferencedValidCount || 0, note: `required ${overall.memoryContextConsumptionReceiptRequiredCount || 0}` },
+    { label: 'load receipt gaps', value: (overall.modelMemoryReceiptReferencedMissingCount || 0) + (overall.modelMemoryReceiptReferencedInvalidCount || 0), note: `missing ${overall.modelMemoryReceiptReferencedMissingCount || 0} · invalid ${overall.modelMemoryReceiptReferencedInvalidCount || 0}` },
+    { label: 'receipt retention', value: overall.modelMemoryReceiptOrphanCount || 0, note: `prunable ${overall.modelMemoryReceiptPrunableCount || 0}${overall.modelMemoryReceiptPruningBlocked ? ' · blocked' : ''}` },
+    { label: 'load recovery', value: overall.modelMemoryReceiptRecoveredCount || 0, note: `blocked ${overall.modelMemoryReceiptRecoveryBlockedCount || 0} · interrupted ${overall.modelMemoryReceiptRecoveryInterruptedCount || 0}` },
+    { label: 'recovery retention', value: overall.modelMemoryReceiptRecoveryOrphanCount || 0, note: `prunable ${overall.modelMemoryReceiptRecoveryPrunableCount || 0} · replay held ${overall.modelMemoryReceiptReplaySuppressedCount || 0}` },
+    { label: 'recovery soak', value: overall.continuationSoakMemoryRecoveryCommittedCount || 0, note: `providers ${overall.continuationSoakMemoryRecoveryProviderCount || 0} · faults ${overall.continuationSoakMemoryRecoveryFaultInjectedCount || 0}` },
+    { label: 'live memory probe', value: overall.continuationSoakLiveProviderMemoryProbePassedCount || 0, note: `providers ${overall.continuationSoakLiveProviderMemoryProbeProviderCount || 0} · receipt ${overall.continuationSoakLiveProviderMemoryProbeReceiptRecoveryPassedCount || 0}/${overall.continuationSoakLiveProviderMemoryProbeReceiptRecoveryRequiredCount || 0} · timeout start ${overall.continuationSoakLiveProviderMemoryProbeStartupTimeoutCount || 0} / api ${overall.continuationSoakLiveProviderMemoryProbeApiRetryTimeoutCount || 0} / turn ${overall.continuationSoakLiveProviderMemoryProbeTurnTimeoutCount || 0}` },
+    { label: 'multi-group live', value: overall.liveProviderMultiGroupFleetPassingGroupCount || 0, note: `observed ${overall.liveProviderMultiGroupFleetObservedGroupCount || 0} · failed ${overall.liveProviderMultiGroupFleetFailedObservationCount || 0} · stale ${overall.liveProviderMultiGroupFleetStaleOrInvalidCount || 0} · ${overall.liveProviderMultiGroupFleetIsolationValid ? 'isolated' : 'unverified'}` },
+    { label: 'live report retention', value: overall.liveProviderReportRetentionPrunableCount || 0, note: `reports ${overall.liveProviderReportRetentionReportCount || 0} · referenced child ${overall.liveProviderReportRetentionReferencedSingleCount || 0} / multi ${overall.liveProviderReportRetentionReferencedMultiCount || 0} · invalid ${overall.liveProviderReportRetentionInvalidCount || 0} · ${overall.liveProviderReportRetentionCoordinated ? 'coordinated' : 'uncoordinated'}` },
+    { label: 'live endurance', value: overall.liveProviderMemoryEndurancePassedGroupCount || 0, note: `waves ${overall.liveProviderMemoryEnduranceWaveCount || 0} · observed ${overall.liveProviderMemoryEnduranceObservedGroupCount || 0} · timeout ${overall.liveProviderMemoryEnduranceProviderLatencyTimeoutCount || 0} · CCM ${overall.liveProviderMemoryEnduranceCcmEvidenceFailureCount || 0} · versions ${overall.liveProviderMemoryEnduranceVersionEpochCount || 0}/${overall.liveProviderMemoryEnduranceVersionTransitionCount || 0} · suggest c${overall.liveProviderMemoryEnduranceRecommendedConcurrencyCeiling || 0} / ${Math.round((overall.liveProviderMemoryEnduranceRecommendedProviderTimeoutMs || 0) / 1000)}s · ${overall.liveProviderMemoryEnduranceAdvisoryOnly ? 'advisory' : 'policy check'}` },
     { label: 'invocation edges', value: overall.invocationEdgeCount || 0, note: `valid ${overall.invocationValidCount || 0} · invalid ${overall.invocationInvalidCount || 0}` },
     { label: 'branches', value: overall.invocationBranchCount || 0, note: `retry ${overall.invocationRetryCount || 0} · switch ${overall.invocationProviderSwitchCount || 0}` },
     { label: 'recovered', value: overall.invocationRecoveredCount || 0, note: `uncertain ${overall.invocationUncertainCount || 0} · quarantine ${overall.invocationRecoveryQuarantinedCount || 0}` },
@@ -310,6 +384,13 @@ const taskAgentSnapshotCards = computed(() => {
     { label: 'unbound evidence', value: overall.diagnosticVersionUnboundEvidenceCount || 0, note: 'provider + model + runtime + contract' },
     { label: 'recovery fence', value: overall.invocationRecoveryMaxFencingToken || 0, note: `leases ${overall.invocationRecoveryLeasedCount || 0} · takeover ${overall.invocationRecoveryLeaseTakeoverCount || 0}` },
     { label: 'session bound', value: overall.groupSessionBoundCount || 0, note: `scope mismatch ${overall.deliveryScopeMismatchCount || 0}` },
+    { label: 'snapshot sync', value: overall.memorySnapshotSyncCommittedCount || 0, note: `update ${overall.memorySnapshotSyncPromptUpdateCount || 0} · pending ${overall.memorySnapshotSyncCommitPendingCount || 0} · rejected ${overall.memorySnapshotSyncCommitRejectedCount || 0} · preserved ${overall.memorySnapshotSyncLateFailurePreservedCount || 0} · invalid ${overall.memorySnapshotSyncCommitInvalidCount || 0}` },
+    { label: 'memory delta', value: overall.memoryEntrySyncDeltaCount || 0, note: `full ${overall.memoryEntrySyncFullCount || 0} · continuation ${overall.memoryEntrySyncContinuationCount || 0} · changed ${overall.memoryEntryChangedCount || 0} · lease ${overall.memoryEntryRenderLeaseActiveCount || 0}/${overall.memoryEntryRenderLeaseTakeoverCount || 0} · invalid ${overall.memoryEntrySyncInvalidCount || 0}` },
+    { label: 'render wait', value: overall.memoryEntryRenderWaitResolvedCount || 0, note: `contention ${overall.memoryEntryRenderContentionCount || 0} · timeout ${overall.memoryEntryRenderWaitTimeoutCount || 0} · same PID ${overall.memoryEntryRenderSameProcessConflictCount || 0} · receipt ${overall.memoryEntryRenderContentionReceiptValidCount || 0}/${overall.memoryEntryRenderContentionReceiptInvalidCount || 0} · ${overall.memoryEntryRenderWaitTotalMs || 0}ms` },
+    { label: 'memory prompt proof', value: overall.memoryPromptInjectionPromptBoundCount || 0, note: `enforced ${overall.memoryPromptInjectionEnforcedCount || 0} · missing ${overall.memoryPromptInjectionMissingCount || 0} · invalid ${overall.memoryPromptInjectionInvalidCount || 0}` },
+    { label: 'trusted envelope', value: overall.memoryTrustedEnvelopeValidCount || 0, note: `required ${overall.memoryTrustedEnvelopeRequiredCount || 0} · unverified ${overall.memoryTrustedEnvelopeUnverifiedCount || 0}` },
+    { label: 'provider memory role', value: overall.providerMemoryNativeSystemCount || 0, note: `required ${overall.providerMemoryChannelRequiredCount || 0} · user fallback ${overall.providerMemoryUserFallbackCount || 0} · unverified ${overall.providerMemoryChannelUnverifiedCount || 0}` },
+    { label: 'continuation baseline', value: overall.memoryContinuationBaselineValidCount || 0, note: `required ${overall.memoryContinuationBaselineRequiredCount || 0} · unverified ${overall.memoryContinuationBaselineUnverifiedCount || 0}` },
     { label: 'orphan', value: overall.orphanFileCount || 0, note: `missing ${overall.missingFileCount || 0}` },
     { label: 'packet gaps', value: overall.missingPacketCount || 0, note: `gate gaps ${overall.missingGateCount || 0}` },
     { label: 'prunable', value: overall.prunableCount ?? retention.candidateCount ?? 0, note: `stale ${overall.staleCount || 0}` },
@@ -321,6 +402,14 @@ const taskAgentSnapshotRows = computed(() => {
   const rows = report.weakRows?.length ? report.weakRows : report.rows || []
   return rows.slice(0, 8)
 })
+const taskAgentModelReceiptRows = computed(() => {
+  const lifecycle = taskAgentModelReceiptLifecycle.value || {}
+  return [
+    ...(lifecycle.referencedRows || []).filter(row => row.status !== 'referenced_valid'),
+    ...(lifecycle.orphanRows || []).filter(row => row.prunable || !row.valid)
+  ].slice(0, 8)
+})
+const taskAgentModelReceiptRecoveryRows = computed(() => (taskAgentModelReceiptRecovery.value?.rows || []).filter(row => row.status !== 'recovered' || !row.valid).slice(0, 8))
 const taskAgentInvocationRows = computed(() => {
   const rows = taskAgentSnapshotReport.value?.invocationLineage?.rows || []
   return [...rows].sort((a, b) => {
@@ -893,6 +982,13 @@ const taskAgentMemoryContextSnapshotCards = computed(() => {
     { label: 'prompt proof', value: snapshots.finalDispatchPromptBoundCount || 0, note: `lineage ${snapshots.finalDispatchLineageProofCount || 0} · invalid ${snapshots.finalDispatchGateInvalidCount || 0}` },
     { label: 'reactive compact', value: snapshots.finalDispatchReactiveCompactRecoveredCount || 0, note: `blocked ${snapshots.finalDispatchReactiveCompactBlockedCount || 0} · invalid ${snapshots.finalDispatchReactiveCompactInvalidCount || 0}` },
     { label: 'compact circuit', value: snapshots.finalDispatchReactiveCompactCircuitOpenCount || 0, note: `failures ${snapshots.finalDispatchReactiveCompactCircuitFailureCount || 0} · invalid ${snapshots.finalDispatchReactiveCompactCircuitInvalidCount || 0}` },
+    { label: 'snapshot sync', value: snapshots.memorySnapshotSyncCommittedCount || 0, note: `update ${snapshots.memorySnapshotSyncPromptUpdateCount || 0} · pending ${snapshots.memorySnapshotSyncCommitPendingCount || 0} · rejected ${snapshots.memorySnapshotSyncCommitRejectedCount || 0} · preserved ${snapshots.memorySnapshotSyncLateFailurePreservedCount || 0} · invalid ${snapshots.memorySnapshotSyncCommitInvalidCount || 0}` },
+    { label: 'memory delta', value: snapshots.memoryEntrySyncDeltaCount || 0, note: `full ${snapshots.memoryEntrySyncFullCount || 0} · continuation ${snapshots.memoryEntrySyncContinuationCount || 0} · changed ${snapshots.memoryEntryChangedCount || 0} · lease ${snapshots.memoryEntryRenderLeaseActiveCount || 0}/${snapshots.memoryEntryRenderLeaseTakeoverCount || 0} · invalid ${snapshots.memoryEntrySyncInvalidCount || 0}` },
+    { label: 'render wait', value: snapshots.memoryEntryRenderWaitResolvedCount || 0, note: `contention ${snapshots.memoryEntryRenderContentionCount || 0} · timeout ${snapshots.memoryEntryRenderWaitTimeoutCount || 0} · same PID ${snapshots.memoryEntryRenderSameProcessConflictCount || 0} · receipt ${snapshots.memoryEntryRenderContentionReceiptValidCount || 0}/${snapshots.memoryEntryRenderContentionReceiptInvalidCount || 0} · ${snapshots.memoryEntryRenderWaitTotalMs || 0}ms` },
+    { label: 'memory prompt proof', value: snapshots.memoryPromptInjectionPromptBoundCount || 0, note: `enforced ${snapshots.memoryPromptInjectionEnforcedCount || 0} · missing ${snapshots.memoryPromptInjectionMissingCount || 0} · invalid ${snapshots.memoryPromptInjectionInvalidCount || 0}` },
+    { label: 'trusted envelope', value: snapshots.memoryTrustedEnvelopeValidCount || 0, note: `required ${snapshots.memoryTrustedEnvelopeRequiredCount || 0} · unverified ${snapshots.memoryTrustedEnvelopeUnverifiedCount || 0}` },
+    { label: 'provider memory role', value: snapshots.providerMemoryNativeSystemCount || 0, note: `required ${snapshots.providerMemoryChannelRequiredCount || 0} · user fallback ${snapshots.providerMemoryUserFallbackCount || 0} · unverified ${snapshots.providerMemoryChannelUnverifiedCount || 0}` },
+    { label: 'continuation baseline', value: snapshots.memoryContinuationBaselineValidCount || 0, note: `required ${snapshots.memoryContinuationBaselineRequiredCount || 0} · unverified ${snapshots.memoryContinuationBaselineUnverifiedCount || 0}` },
     { label: 'summary capsules', value: snapshots.postTurnSummaryCapsuleCount || 0, note: `valid ${snapshots.postTurnSummaryCapsuleValidCount || 0}` },
     { label: 'capsule gaps', value: Number(snapshots.postTurnSummaryCapsuleMissingCount || 0) + Number(snapshots.postTurnSummaryCapsuleInvalidCount || 0), note: `prompt ${snapshots.postTurnSummaryCapsulePromptBoundCount || 0} · epoch drift ${snapshots.postTurnSummaryCapsuleCompactEpochMismatchCount || 0}` },
     { label: 'failed / stale', value: snapshots.failCount || 0, note: `stale ${snapshots.staleCount || 0} · prunable ${snapshots.prunableCount || 0}` }
@@ -1176,10 +1272,11 @@ const promptCacheBreakDetectionCards = computed(() => {
   const deletion = cache.pending_cache_deletion?.notification || {}
   return [
     { label: 'status', value: cache.status || '—', note: cache.group_session_id || 'exact session' },
-    { label: 'calls', value: cache.call_count || 0, note: `${cache.cache_break_count || 0} breaks` },
+    { label: 'calls', value: cache.call_count || 0, note: `${cache.cache_break_count || 0} breaks · ${cache.prompt_state_call_count || 0} states` },
     { label: 'generation', value: cache.baseline_generation || 0, note: notification.baseline_status || 'runtime baseline' },
     { label: 'cache read', value: event.cache_read_input_tokens || cache.previous_cache_read_tokens || 0, note: `previous ${event.previous_cache_read_tokens ?? 'none'}` },
-    { label: 'classification', value: event.classification || (cache.pending_post_compaction ? 'post_compaction_pending' : (deletion.schema ? 'cache_deletion_pending' : '—')), note: event.source || 'group main' },
+    { label: 'classification', value: event.classification || (cache.pending_post_compaction ? 'post_compaction_pending' : (deletion.schema ? 'cache_deletion_pending' : '—')), note: event.cache_break_reason || event.source || 'group main' },
+    { label: 'prompt state', value: event.prompt_changed ? 'changed' : (cache.prompt_state_baseline?.schema ? 'tracked' : 'waiting'), note: (event.prompt_change_causes || []).join(', ') || cache.prompt_state_baseline?.snapshot_id || 'no snapshot' },
     { label: 'post compact', value: event.is_post_compaction ? 'yes' : (cache.pending_post_compaction ? 'pending' : 'no'), note: event.post_compact_boundary_id || cache.pending_post_compaction?.boundary_id || 'no boundary' },
     { label: 'microcompact', value: deletion.schema ? 'pending' : (event.cache_deletion_applied ? 'consumed' : 'no'), note: deletion.execution_receipt_id || event.microcompact_execution_receipt_id || `${cache.cache_deletion_consumed_count || 0} consumed` },
     { label: 'drop', value: event.token_drop || 0, note: `${Math.round(Number(event.drop_ratio || 0) * 1000) / 10}%` },
@@ -1497,6 +1594,9 @@ const typedMemoryConsumptionCards = computed(() => {
     { label: 'used', value: totals.used || 0, note: '已用于子 Agent 任务' },
     { label: 'verified', value: totals.verified || 0, note: '服务端复算当前源' },
     { label: 'ignored', value: totals.ignored || 0, note: '明确未采用' },
+    { label: '仅投递', value: totals.deliveredUnreported || 0, note: '无有效使用回执' },
+    { label: '读访问', value: totals.readObserved || 0, note: 'Provider 工具事件' },
+    { label: '不可观测', value: totals.captureUnavailable || 0, note: '执行器未提供工具流' },
     { label: '当前源证明', value: ledger.proofVerifiedEntryCount || 0, note: `降级 ${ledger.downgradedVerifiedEntryCount || 0}` },
     { label: '异常声明', value: ledger.anomalyEntryCount || 0, note: `平均置信度 ${Number(ledger.averageEvidenceConfidence || 0).toFixed(2)}` },
     { label: 'stale', value: ledger.staleEntryCount || 0, note: `${scoring.stale_after_days || 90} 天后失效` },
@@ -1659,6 +1759,8 @@ const loadContextSettings = async () => {
       typedMemoryDeliveryMaxLinesPerDocument: Number(config.typedMemoryDeliveryMaxLinesPerDocument || 200),
       typedMemoryDeliveryMaxSessionBytes: Number(config.typedMemoryDeliveryMaxSessionBytes || 61440),
       typedMemoryDeliveryMaxTokens: Number(config.typedMemoryDeliveryMaxTokens || 5000),
+      sessionMemoryCompactMaxSectionTokens: Number(config.sessionMemoryCompactMaxSectionTokens || 2000),
+      sessionMemoryCompactMaxTotalTokens: Number(config.sessionMemoryCompactMaxTotalTokens || 12000),
       groupSessionRetentionDays: Number(config.groupSessionRetentionDays || 30),
       groupSessionMaxArchived: Number(config.groupSessionMaxArchived || 20),
       groupSessionAutoPruneEnabled: config.groupSessionAutoPruneEnabled === true,
@@ -1670,6 +1772,105 @@ const loadContextSettings = async () => {
     }
   } finally {
     contextSettingsLoading.value = false
+  }
+}
+
+const loadSessionMemoryCustomPrompt = async () => {
+  sessionMemoryPromptLoading.value = true
+  try {
+    const scopeId = sessionMemoryPromptTarget.value
+    const data = await requestJson(`/api/memory-center/session-memory-custom-prompt?scope_id=${encodeURIComponent(scopeId)}`)
+    sessionMemoryPromptProfile.value = data.profile || null
+    const direct = scopeId ? data.profile?.exactSession : data.profile?.global
+    sessionMemoryPromptContent.value = direct?.present ? direct.content : (scopeId ? data.profile?.content || '' : '')
+  } catch (error) {
+    toast.error(error.message || '读取 Session Memory 提示词失败')
+  } finally {
+    sessionMemoryPromptLoading.value = false
+  }
+}
+
+const loadSessionMemoryCustomTemplate = async () => {
+  sessionMemoryTemplateLoading.value = true
+  try {
+    const scopeId = sessionMemoryPromptTarget.value
+    const data = await requestJson(`/api/memory-center/session-memory-custom-template?scope_id=${encodeURIComponent(scopeId)}`)
+    sessionMemoryTemplateProfile.value = data.profile || null
+    const direct = scopeId ? data.profile?.exactSession : data.profile?.global
+    sessionMemoryTemplateContent.value = direct?.present ? direct.content : data.profile?.content || ''
+  } catch (error) {
+    toast.error(error.message || '读取 Session Memory 模板失败')
+  } finally {
+    sessionMemoryTemplateLoading.value = false
+  }
+}
+
+const loadSessionMemoryCustomization = async () => {
+  await Promise.all([loadSessionMemoryCustomPrompt(), loadSessionMemoryCustomTemplate()])
+}
+
+const saveSessionMemoryCustomPrompt = async reset => {
+  if (sessionMemoryPromptSaving.value) return
+  const content = String(sessionMemoryPromptContent.value || '').trim()
+  if (!reset && !content) return toast.error('提示词不能为空；需要恢复继承时请使用重置')
+  if (content.length > 32000) return toast.error('提示词不能超过 32,000 个字符')
+  sessionMemoryPromptSaving.value = true
+  try {
+    const data = await requestJson('/api/memory-center/session-memory-custom-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scopeId: sessionMemoryPromptTarget.value,
+        content,
+        reset: reset === true,
+        actor: 'memory-center',
+        reason: reset ? 'reset_custom_session_memory_prompt' : 'save_custom_session_memory_prompt'
+      })
+    })
+    sessionMemoryPromptProfile.value = data.profile || null
+    await loadSessionMemoryCustomPrompt()
+    await loadOverview(true)
+    toast.success(reset ? 'Session Memory 提示词已恢复继承' : 'Session Memory 提示词已保存')
+  } catch (error) {
+    toast.error(error.message || '保存 Session Memory 提示词失败')
+  } finally {
+    sessionMemoryPromptSaving.value = false
+  }
+}
+
+const saveSessionMemoryCustomTemplate = async reset => {
+  if (sessionMemoryTemplateSaving.value) return
+  const content = String(sessionMemoryTemplateContent.value || '').trim()
+  if (!reset && !content) return toast.error('模板不能为空；需要恢复继承时请使用重置')
+  if (content.length > 48000) return toast.error('模板不能超过 48,000 个字符')
+  if (!reset) {
+    const lines = content.replace(/\r\n/g, '\n').split('\n')
+    const headerIndexes = lines.map((line, index) => /^#\s+\S/.test(line) ? index : -1).filter(index => index >= 0)
+    if (!headerIndexes.length || headerIndexes.length > 20) return toast.error('模板必须包含 1 到 20 个一级章节')
+    if (headerIndexes.some(index => !/^_[^\r\n]+_$/.test(String(lines[index + 1] || '')))) return toast.error('每个一级章节下一行必须是下划线包围的描述')
+    if (lines.some(line => /^#{2,6}\s+/.test(line))) return toast.error('模板不支持嵌套标题')
+  }
+  sessionMemoryTemplateSaving.value = true
+  try {
+    const data = await requestJson('/api/memory-center/session-memory-custom-template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scopeId: sessionMemoryPromptTarget.value,
+        content,
+        reset: reset === true,
+        actor: 'memory-center',
+        reason: reset ? 'reset_custom_session_memory_template' : 'save_custom_session_memory_template'
+      })
+    })
+    sessionMemoryTemplateProfile.value = data.profile || null
+    await loadSessionMemoryCustomTemplate()
+    await loadOverview(true)
+    toast.success(reset ? 'Session Memory 模板已恢复继承' : 'Session Memory 模板已保存')
+  } catch (error) {
+    toast.error(error.message || '保存 Session Memory 模板失败')
+  } finally {
+    sessionMemoryTemplateSaving.value = false
   }
 }
 
@@ -1784,6 +1985,9 @@ const saveContextSettings = async () => {
   if (Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 0) < 10 || Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 0) > 200) return toast.error('单份记忆行数必须介于 10 和 200 行')
   if (Number(settings.typedMemoryDeliveryMaxSessionBytes || 0) < 4096 || Number(settings.typedMemoryDeliveryMaxSessionBytes || 0) > 61440) return toast.error('单个压缩周期容量必须介于 4096 和 61440 bytes')
   if (Number(settings.typedMemoryDeliveryMaxTokens || 0) < 500 || Number(settings.typedMemoryDeliveryMaxTokens || 0) > 20000) return toast.error('记忆投递 token 必须介于 500 和 20000')
+  if (Number(settings.sessionMemoryCompactMaxSectionTokens || 0) < 250 || Number(settings.sessionMemoryCompactMaxSectionTokens || 0) > 20000) return toast.error('Session Memory 单章节投影必须介于 250 和 20000 token')
+  if (Number(settings.sessionMemoryCompactMaxTotalTokens || 0) < 1000 || Number(settings.sessionMemoryCompactMaxTotalTokens || 0) > 100000) return toast.error('Session Memory 总投影必须介于 1000 和 100000 token')
+  if (Number(settings.sessionMemoryCompactMaxTotalTokens || 0) < Number(settings.sessionMemoryCompactMaxSectionTokens || 0)) return toast.error('Session Memory 总投影不能小于单章节投影')
   if (Number(settings.timeBasedMicrocompactGapMinutes || 0) < 1 || Number(settings.timeBasedMicrocompactGapMinutes || 0) > 10080) return toast.error('时间触发间隔必须介于 1 和 10080 分钟')
   if (Number(settings.timeBasedMicrocompactKeepRecent || 0) < 1 || Number(settings.timeBasedMicrocompactKeepRecent || 0) > 100) return toast.error('保留工具结果数必须介于 1 和 100')
   contextSettingsSaving.value = true
@@ -1804,6 +2008,8 @@ const saveContextSettings = async () => {
         typedMemoryDeliveryMaxLinesPerDocument: Number(settings.typedMemoryDeliveryMaxLinesPerDocument || 200),
         typedMemoryDeliveryMaxSessionBytes: Number(settings.typedMemoryDeliveryMaxSessionBytes || 61440),
         typedMemoryDeliveryMaxTokens: Number(settings.typedMemoryDeliveryMaxTokens || 5000),
+        sessionMemoryCompactMaxSectionTokens: Number(settings.sessionMemoryCompactMaxSectionTokens || 2000),
+        sessionMemoryCompactMaxTotalTokens: Number(settings.sessionMemoryCompactMaxTotalTokens || 12000),
         groupSessionRetentionDays: Number(settings.groupSessionRetentionDays || 30),
         groupSessionMaxArchived: Number(settings.groupSessionMaxArchived || 20),
         groupSessionAutoPruneEnabled: settings.groupSessionAutoPruneEnabled === true,
@@ -1828,6 +2034,8 @@ const saveContextSettings = async () => {
       typedMemoryDeliveryMaxLinesPerDocument: Number(config.typedMemoryDeliveryMaxLinesPerDocument || 200),
       typedMemoryDeliveryMaxSessionBytes: Number(config.typedMemoryDeliveryMaxSessionBytes || 61440),
       typedMemoryDeliveryMaxTokens: Number(config.typedMemoryDeliveryMaxTokens || 5000),
+      sessionMemoryCompactMaxSectionTokens: Number(config.sessionMemoryCompactMaxSectionTokens || 2000),
+      sessionMemoryCompactMaxTotalTokens: Number(config.sessionMemoryCompactMaxTotalTokens || 12000),
       groupSessionRetentionDays: Number(config.groupSessionRetentionDays || 30),
       groupSessionMaxArchived: Number(config.groupSessionMaxArchived || 20),
       groupSessionAutoPruneEnabled: config.groupSessionAutoPruneEnabled === true,
@@ -1918,6 +2126,37 @@ const retrySessionMemoryTypedCommit = async row => {
     toast.error(error.message || 'typed-memory 提交重试失败')
   } finally {
     sessionMemoryTypedRetryRunning.value = ''
+  }
+}
+
+const extractSessionMemoryNow = async row => {
+  const scopeId = `${row.groupId}::${row.groupSessionId}`
+  if (sessionMemoryManualExtractionRunning.value) return
+  if (!await confirmDialog(`立即使用会话 ${row.groupSessionId} 的完整当前记录重新提炼 Session Memory？`)) return
+  sessionMemoryManualExtractionRunning.value = scopeId
+  try {
+    const data = await requestJson('/api/memory-center/operation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: 'group',
+        scope_id: scopeId,
+        operation: 'extract_session_memory_now',
+        reason: '用户在记忆中心手动立即抽取当前群聊会话记忆',
+        explicitExecution: true
+      })
+    })
+    toast.success(`Session Memory 已更新 · ${data.result?.executionId || 'receipt committed'}`)
+    await loadOverview(true)
+  } catch (error) {
+    const labels = {
+      manual_extraction_empty_transcript: '当前会话没有可抽取的消息',
+      manual_extraction_model_not_invoked: '手动抽取未实际调用模型，已拒绝假成功',
+      model_executor_unavailable: 'Session Memory 模型执行器当前不可用'
+    }
+    toast.error(labels[error.message] || error.message || 'Session Memory 立即抽取失败')
+  } finally {
+    sessionMemoryManualExtractionRunning.value = ''
   }
 }
 
@@ -2191,6 +2430,11 @@ const operationTitle = operation => {
   if (operation === 'block_pattern') return '添加禁记规则'
   if (operation === 'archive_selftest_residue') return '归档自测残留'
   if (operation === 'prune_task_agent_memory_context_snapshots') return '清理子 Agent 记忆快照'
+  if (operation === 'approve_live_memory_wave') return '批准一次耐久波次'
+  if (operation === 'approve_live_memory_transition_canary') return '批准一次版本迁移 Canary'
+  if (operation === 'approve_live_memory_initial_baseline_canary') return '批准首次 Provider 记忆基线'
+  if (operation === 'revoke_live_memory_wave') return '撤销耐久波次批准'
+  if (operation === 'prune_live_memory_wave_approvals') return '清理耐久波次审批回执'
   return '从备份回滚'
 }
 
@@ -2202,6 +2446,11 @@ const operationNote = operation => {
   if (operation === 'block_pattern') return '匹配此文本或正则表达式的内容不会进入长期记忆。'
   if (operation === 'archive_selftest_residue') return '只移动 Global Agent memory 目录里的历史自测残留，不处理 active memory 或 active backup。'
   if (operation === 'prune_task_agent_memory_context_snapshots') return '按 retention 预案清理过期或孤儿 task Agent 记忆上下文快照，不触碰最新会话快照。'
+  if (operation === 'approve_live_memory_wave') return '创建一张绑定当前 endurance 报告、Provider 版本、并发和 timeout 的 30 分钟单次凭据。批准本身不执行，但后续显式执行可能产生 Provider 费用。'
+  if (operation === 'approve_live_memory_transition_canary') return '当前 Provider 身份已变化。创建仅允许 2 个隔离群聊、并发 1 的 15 分钟单次 canary 凭据；执行可能产生 Provider 费用，成功后仍须通过新版本记忆连续性晋升门禁。'
+  if (operation === 'approve_live_memory_initial_baseline_canary') return '当前 Provider 已安装但尚无可信 endurance 基线。创建仅允许 2 个隔离群聊、并发 1 的 15 分钟单次凭据；执行可能产生 Provider 费用，成功证据必须晋升为首份 Provider 专属基线。'
+  if (operation === 'revoke_live_memory_wave') return '立即消费并撤销当前未执行的单次凭据。撤销后不能恢复，也不能用于启动 Provider 波次。'
+  if (operation === 'prune_live_memory_wave_approvals') return '只清理超过终态保留期或数量上限的有效审批回执。active、claimed、篡改记录和被引用报告均会保留。'
   return '使用最近有效备份替换主记忆，并保留回滚前快照。'
 }
 
@@ -2212,6 +2461,16 @@ const openOperation = operation => {
       ? 'Memory Center 归档 Global Agent 自测残留'
       : operation === 'prune_task_agent_memory_context_snapshots'
         ? 'Memory Center 清理过期 task Agent 记忆上下文快照'
+        : operation === 'approve_live_memory_wave'
+          ? 'Memory Center 用户显式批准当前建议耐久波次'
+          : operation === 'approve_live_memory_transition_canary'
+            ? 'Memory Center 用户显式确认 Provider 身份变化并批准最小记忆连续性 canary'
+          : operation === 'approve_live_memory_initial_baseline_canary'
+            ? 'Memory Center 用户显式确认当前 Provider 尚无基线并批准最小首次基线 canary'
+          : operation === 'revoke_live_memory_wave'
+            ? 'Memory Center 用户显式撤销当前耐久波次批准'
+            : operation === 'prune_live_memory_wave_approvals'
+              ? 'Memory Center 清理已超过保留策略的终态耐久波次审批回执'
         : '',
     pattern: ''
   }
@@ -2284,6 +2543,153 @@ const runTaskAgentSnapshotRetention = async (dryRun = true, reason = '') => {
   }
 }
 
+const approveLiveMemoryWave = async reason => {
+  if (liveMemoryWaveApprovalLoading.value) return
+  const preview = liveMemoryWaveApprovalPreview.value || {}
+  if (!preview.approvable) return toast.error('当前耐久波次不满足批准门禁')
+  liveMemoryWaveApprovalLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/live-endurance-wave-approval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        explicitApproval: true,
+        riskAccepted: true,
+        approvedBy: 'memory-center-local-user',
+        reason,
+        enduranceReportChecksum: preview.enduranceReportChecksum,
+        planChecksum: preview.planChecksum,
+        provider: preview.plan?.provider || ''
+      })
+    })
+    operationState.value = null
+    toast.success(`单次批准已创建：${data.receipt?.receiptId || 'receipt'}`)
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || '耐久波次批准失败')
+  } finally {
+    liveMemoryWaveApprovalLoading.value = false
+  }
+}
+
+const approveLiveMemoryTransitionCanary = async reason => {
+  if (liveMemoryWaveApprovalLoading.value) return
+  const preview = liveMemoryTransitionCanaryPreview.value || {}
+  if (!preview.approvable) return toast.error('当前版本迁移不满足 canary 批准门禁')
+  liveMemoryWaveApprovalLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/live-endurance-wave-approval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'approve_transition_canary',
+        explicitApproval: true,
+        riskAccepted: true,
+        transitionAcknowledged: true,
+        approvedBy: 'memory-center-local-user',
+        reason,
+        enduranceReportChecksum: preview.enduranceReportChecksum,
+        planChecksum: preview.planChecksum,
+        provider: preview.plan?.provider || ''
+      })
+    })
+    operationState.value = null
+    toast.success(`版本迁移 canary 批准已创建：${data.receipt?.receiptId || 'receipt'}`)
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || '版本迁移 canary 批准失败')
+  } finally {
+    liveMemoryWaveApprovalLoading.value = false
+  }
+}
+
+const approveLiveMemoryInitialBaselineCanary = async reason => {
+  if (liveMemoryWaveApprovalLoading.value) return
+  const preview = liveMemoryInitialBaselineCanaryPreview.value || {}
+  if (!preview.approvable) return toast.error('当前 Provider 不满足首次基线批准门禁')
+  liveMemoryWaveApprovalLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/live-endurance-wave-approval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'approve_initial_baseline_canary',
+        explicitApproval: true,
+        riskAccepted: true,
+        initialBaselineAcknowledged: true,
+        approvedBy: 'memory-center-local-user',
+        reason,
+        baselineAbsenceChecksum: preview.baselineAbsenceChecksum,
+        planChecksum: preview.planChecksum,
+        provider: preview.plan?.provider || '',
+        model: preview.plan?.model || ''
+      })
+    })
+    operationState.value = null
+    toast.success(`首次基线 canary 批准已创建：${data.receipt?.receiptId || 'receipt'}`)
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || '首次基线 canary 批准失败')
+  } finally {
+    liveMemoryWaveApprovalLoading.value = false
+  }
+}
+
+const revokeLiveMemoryWave = async reason => {
+  if (liveMemoryWaveApprovalLoading.value) return
+  const receipt = liveMemoryWaveActiveApproval.value
+  if (!receipt) return toast.error('没有可撤销的耐久波次批准')
+  liveMemoryWaveApprovalLoading.value = true
+  try {
+    await requestJson('/api/memory-center/live-endurance-wave-approval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'revoke',
+        explicitRevocation: true,
+        revokedBy: 'memory-center-local-user',
+        reason,
+        receiptId: receipt.receiptId,
+        receiptChecksum: receipt.receiptChecksum
+      })
+    })
+    operationState.value = null
+    toast.success('耐久波次批准已撤销')
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || '撤销耐久波次批准失败')
+  } finally {
+    liveMemoryWaveApprovalLoading.value = false
+  }
+}
+
+const runLiveMemoryWaveApprovalRetention = async (dryRun = true, reason = '') => {
+  if (liveMemoryWaveApprovalRetentionLoading.value) return
+  liveMemoryWaveApprovalRetentionLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/live-endurance-wave-approval-retention', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        execute: !dryRun,
+        explicitPrune: !dryRun,
+        actor: 'memory-center-local-user',
+        reason: reason || (dryRun ? 'Memory Center 预演耐久波次审批回执保留' : 'Memory Center 清理终态耐久波次审批回执')
+      })
+    })
+    liveMemoryWaveApprovalRetentionResult.value = data.result || null
+    if (!dryRun) operationState.value = null
+    toast.success(dryRun
+      ? `预演完成：可清理 ${data.result?.prunableCount || 0} 张终态回执`
+      : `清理完成：已删除 ${data.result?.prunedCount || 0} 张终态回执`)
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || '耐久波次审批回执维护失败')
+  } finally {
+    liveMemoryWaveApprovalRetentionLoading.value = false
+  }
+}
+
 const runOperation = async () => {
   const state = operationState.value
   if (!state) return
@@ -2297,6 +2703,26 @@ const runOperation = async () => {
   }
   if (state.operation === 'prune_task_agent_memory_context_snapshots') {
     await runTaskAgentSnapshotRetention(false, state.reason)
+    return
+  }
+  if (state.operation === 'approve_live_memory_wave') {
+    await approveLiveMemoryWave(state.reason)
+    return
+  }
+  if (state.operation === 'approve_live_memory_transition_canary') {
+    await approveLiveMemoryTransitionCanary(state.reason)
+    return
+  }
+  if (state.operation === 'approve_live_memory_initial_baseline_canary') {
+    await approveLiveMemoryInitialBaselineCanary(state.reason)
+    return
+  }
+  if (state.operation === 'revoke_live_memory_wave') {
+    await revokeLiveMemoryWave(state.reason)
+    return
+  }
+  if (state.operation === 'prune_live_memory_wave_approvals') {
+    await runLiveMemoryWaveApprovalRetention(false, state.reason)
     return
   }
   loading.value = true
@@ -2420,7 +2846,10 @@ const runAcceptance = async () => {
   }
 }
 
-onMounted(() => loadOverview(false))
+onMounted(async () => {
+  await loadOverview(false)
+  await loadSessionMemoryCustomization()
+})
 </script>
 
 <template>
@@ -2462,6 +2891,57 @@ onMounted(() => loadOverview(false))
         </button>
       </div>
       <p class="context-capacity-note">默认模式按模型能力和 CC 公式计算；预设与自定义值作为所有群聊的全局容量上限。</p>
+      <div class="session-memory-prompt-editor">
+        <div class="session-memory-prompt-head">
+          <div>
+            <span>Session Memory 抽取定制</span>
+            <small v-if="sessionMemoryCustomizationMode === 'prompt'">{{ sessionMemoryPromptProfile?.source || 'default' }} · {{ sessionMemoryPromptProfile?.checksum || 'built-in' }}</small>
+            <small v-else>{{ sessionMemoryTemplateProfile?.source || 'default' }} · {{ sessionMemoryTemplateProfile?.sectionCount || 0 }} sections · {{ sessionMemoryTemplateProfile?.checksum || 'built-in' }}</small>
+          </div>
+          <div class="session-memory-customization-tabs">
+            <button :class="{ active: sessionMemoryCustomizationMode === 'prompt' }" @click="sessionMemoryCustomizationMode = 'prompt'">提示词</button>
+            <button :class="{ active: sessionMemoryCustomizationMode === 'template' }" @click="sessionMemoryCustomizationMode = 'template'">模板</button>
+          </div>
+        </div>
+        <select v-model="sessionMemoryPromptTarget" :disabled="sessionMemoryPromptLoading || sessionMemoryPromptSaving || sessionMemoryTemplateLoading || sessionMemoryTemplateSaving" @change="loadSessionMemoryCustomization">
+          <option value="">全局默认</option>
+          <option v-for="target in sessionMemoryPromptTargets" :key="target.scopeId" :value="target.scopeId">{{ target.label }}</option>
+        </select>
+        <template v-if="sessionMemoryCustomizationMode === 'prompt'">
+          <textarea
+            v-model="sessionMemoryPromptContent"
+            :disabled="sessionMemoryPromptLoading || sessionMemoryPromptSaving"
+            rows="8"
+            maxlength="32000"
+            placeholder="例如：优先保留用户纠正、未完成任务和精确文件路径。可使用 {{currentNotes}}、{{notesPath}}、{{scopeId}}、{{groupId}}、{{groupSessionId}}。"
+          />
+          <div class="session-memory-editor-footer">
+            <small>{{ sessionMemoryPromptContent.length }}/32000 · {{ sessionMemoryPromptTarget ? '精确会话覆盖' : '所有群聊会话默认值' }}</small>
+            <div class="session-memory-prompt-actions">
+              <button class="btn btn-outline" :disabled="sessionMemoryPromptLoading || sessionMemoryPromptSaving" @click="loadSessionMemoryCustomPrompt">刷新</button>
+              <button class="btn btn-outline" :disabled="sessionMemoryPromptLoading || sessionMemoryPromptSaving" @click="saveSessionMemoryCustomPrompt(true)">重置</button>
+              <button class="btn btn-primary" :disabled="sessionMemoryPromptLoading || sessionMemoryPromptSaving" @click="saveSessionMemoryCustomPrompt(false)">{{ sessionMemoryPromptSaving ? '保存中' : '保存提示词' }}</button>
+            </div>
+          </div>
+        </template>
+        <template v-else>
+          <textarea
+            v-model="sessionMemoryTemplateContent"
+            :disabled="sessionMemoryTemplateLoading || sessionMemoryTemplateSaving"
+            rows="12"
+            maxlength="48000"
+            placeholder="# Current State&#10;_Active work, pending tasks, and immediate next steps._"
+          />
+          <div class="session-memory-editor-footer">
+            <small>{{ sessionMemoryTemplateContent.length }}/48000 · {{ sessionMemoryTemplateProfile?.sectionCount || 0 }} sections · {{ sessionMemoryPromptTarget ? '精确会话覆盖' : '所有群聊会话默认值' }}</small>
+            <div class="session-memory-prompt-actions">
+              <button class="btn btn-outline" :disabled="sessionMemoryTemplateLoading || sessionMemoryTemplateSaving" @click="loadSessionMemoryCustomTemplate">刷新</button>
+              <button class="btn btn-outline" :disabled="sessionMemoryTemplateLoading || sessionMemoryTemplateSaving" @click="saveSessionMemoryCustomTemplate(true)">重置</button>
+              <button class="btn btn-primary" :disabled="sessionMemoryTemplateLoading || sessionMemoryTemplateSaving" @click="saveSessionMemoryCustomTemplate(false)">{{ sessionMemoryTemplateSaving ? '保存中' : '保存模板' }}</button>
+            </div>
+          </div>
+        </template>
+      </div>
       <div v-if="modelCapacityStatus" class="capacity-runtime-strip">
         <span><small>解析来源</small><strong>{{ modelCapacityStatus.capacity?.source || 'unknown' }}</strong></span>
         <span><small>缓存状态</small><strong>{{ modelCapacityStatus.capacity?.cacheStatus || '—' }}</strong></span>
@@ -2613,6 +3093,16 @@ onMounted(() => loadOverview(false))
           <small>实际额度还会按当前子 Agent 模型窗口的 2% 自动下调。</small>
         </label>
         <label>
+          <span>Session Memory 单章节投影</span>
+          <input v-model.number="contextSettings.sessionMemoryCompactMaxSectionTokens" type="number" min="250" max="20000" step="250">
+          <small>默认 2,000 token，与 Claude Code 的 compact 章节预算一致。</small>
+        </label>
+        <label>
+          <span>Session Memory compact 总投影</span>
+          <input v-model.number="contextSettings.sessionMemoryCompactMaxTotalTokens" type="number" min="1000" max="100000" step="1000">
+          <small>默认 12,000 token；只限制模型输入投影，不修改完整记忆文件。</small>
+        </label>
+        <label>
           <span>归档保留天数</span>
           <input v-model.number="contextSettings.groupSessionRetentionDays" type="number" min="1" max="3650" step="1">
           <small>超过这个期限的归档会话进入清理候选，未完成任务会阻止删除。</small>
@@ -2740,7 +3230,8 @@ onMounted(() => loadOverview(false))
         <article v-for="row in sessionMemoryFleetRows" :key="row.scopeId" :class="row.status">
           <span :class="['usage-state', row.status === 'ok' ? 'used' : row.status === 'empty' ? 'waiting' : row.status]">{{ row.status }}</span>
           <strong>{{ row.groupSessionId || 'default' }}</strong>
-          <p>{{ row.groupId }} · turns {{ formatNumber(row.postTurnSummaryCount || 0) }}/{{ formatNumber(row.postTurnSummaryAssistantMessageCount || 0) }} · missing {{ formatNumber(row.postTurnSummaryMissingCount || 0) }} · ledger {{ row.postTurnSummaryLedgerValid ? 'verified' : 'invalid' }} · archives {{ formatNumber(row.postTurnSummaryArchiveCount || 0) }} · compact scope {{ row.autoCompactionScopeEvidencePresent ? row.autoCompactionTypedMemoryScopeValid ? 'verified' : 'invalid' : 'unobserved' }} · {{ row.extractionMethod || 'deterministic_structured_fallback' }} · receipt {{ row.modelReceiptChecksumValid ? 'verified' : row.modelExtracted ? 'invalid' : row.modelExtractionBackoff ? 'backoff' : row.directMemorySuppressionActive ? 'suppressed' : 'pending' }} · direct skip {{ formatNumber(row.directMemorySuppressionCount || 0) }} {{ row.directMemorySuppressionPresent ? row.directMemorySuppressionChecksumValid ? 'verified' : 'invalid' : 'none' }} / proofs {{ formatNumber(row.directMemorySuppressionProofCount || 0) }} / fence {{ formatNumber(row.directMemorySuppressionLedgerFence || 0) }} / cursor {{ row.directMemorySuppressionCursorBefore || 'start' }}→{{ row.directMemorySuppressionCursorAfter || 'none' }} · delivery {{ row.modelExtracted ? row.modelExtractionDeliveryEvidenceValid ? 'verified' : 'invalid' : 'unobserved' }} · quality {{ row.modelMergeQualityStatus || 'unobserved' }} {{ formatNumber(row.modelMergeQualityScore || 0) }} · facts {{ row.factSupersessionGraphPresent ? row.factSupersessionGraphValid ? 'verified' : 'invalid' : 'unobserved' }} {{ formatNumber(row.factSupersessionEdgeCount || 0) }}/{{ formatNumber(row.factSupersessionUnjustifiedLostCount || 0) }} · typed {{ row.modelExtractionTypedMemoryArchivePresent ? row.modelExtractionTypedMemoryArchiveValid ? 'verified' : 'invalid' : 'empty' }} {{ formatNumber(row.modelExtractionTypedMemoryAdmittedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRejectedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemorySupersededThisRun || 0) }} · retry {{ formatNumber(row.modelExtractionTypedMemoryRetryPendingCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRetryCompletedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRetryExhaustedCount || 0) }} · chain {{ row.modelExtractionHistoryChainValid && row.modelExtractionHistoryHeadMatches ? 'verified' : row.modelExtractionHistoryTotalCount ? 'invalid' : 'empty' }} · replay {{ row.modelExtractionReplayStatus || 'unobserved' }} · artifacts {{ row.modelExtractionArtifactRetentionStatus || 'empty' }} hot {{ formatBytes(row.modelExtractionArtifactHotBytes) }} / cold {{ formatBytes(row.modelExtractionArtifactArchivedBytes) }} / due {{ formatNumber(row.modelExtractionArtifactCandidateExecutionCount || 0) }} · input {{ row.modelInputBudgetStatus || 'unobserved' }} {{ formatNumber(row.modelInputEstimatedTokens || 0) }}/{{ formatNumber(row.modelInputMaxTokens || 0) }} · omitted {{ formatNumber(row.modelInputOmittedMessageCount || 0) }}{{ row.modelInputClipped ? ' · clipped' : '' }} · {{ row.cadenceStatus || 'unobserved' }} · tx {{ row.extractionStatus || 'idle' }} · Δ {{ formatNumber(row.cadenceTokensSinceLastExtraction || 0) }}</p>
+          <p>{{ row.groupId }} · turns {{ formatNumber(row.postTurnSummaryCount || 0) }}/{{ formatNumber(row.postTurnSummaryAssistantMessageCount || 0) }} · missing {{ formatNumber(row.postTurnSummaryMissingCount || 0) }} · ledger {{ row.postTurnSummaryLedgerValid ? 'verified' : 'invalid' }} · archives {{ formatNumber(row.postTurnSummaryArchiveCount || 0) }} · compact scope {{ row.autoCompactionScopeEvidencePresent ? row.autoCompactionTypedMemoryScopeValid ? 'verified' : 'invalid' : 'unobserved' }} · {{ row.extractionMethod || 'deterministic_structured_fallback' }} · receipt {{ row.modelReceiptChecksumValid ? 'verified' : row.modelExtracted ? 'invalid' : row.modelExtractionBackoff ? 'backoff' : row.directMemorySuppressionActive ? 'suppressed' : 'pending' }} v{{ formatNumber(row.modelReceiptVersion || 0) }} / {{ row.modelReceiptTrigger || 'legacy' }} / model {{ row.modelReceiptModelInvoked ? 'invoked' : 'unobserved' }}{{ row.modelManualSuppressionBypassed ? ` / manual bypass ${formatNumber(row.modelManualSuppressionProofCount || 0)} proof` : '' }} · prompt {{ row.modelCustomPromptSource || 'default' }} · direct skip {{ formatNumber(row.directMemorySuppressionCount || 0) }} {{ row.directMemorySuppressionPresent ? row.directMemorySuppressionChecksumValid ? 'verified' : 'invalid' : 'none' }} / proofs {{ formatNumber(row.directMemorySuppressionProofCount || 0) }} / fence {{ formatNumber(row.directMemorySuppressionLedgerFence || 0) }} / cursor {{ row.directMemorySuppressionCursorBefore || 'start' }}→{{ row.directMemorySuppressionCursorAfter || 'none' }} · delivery {{ row.modelExtracted ? row.modelExtractionDeliveryEvidenceValid ? 'verified' : 'invalid' : 'unobserved' }} · quality {{ row.modelMergeQualityStatus || 'unobserved' }} {{ formatNumber(row.modelMergeQualityScore || 0) }} / input {{ row.modelMergeQualityReplayInputMode || row.modelMergeQualityInputCanonicalization || 'unobserved' }} {{ row.modelMergeQualityInputChecksumValid ? 'verified' : 'unverified' }} · facts {{ row.factSupersessionGraphPresent ? row.factSupersessionGraphValid ? 'verified' : 'invalid' : 'unobserved' }} {{ formatNumber(row.factSupersessionEdgeCount || 0) }}/{{ formatNumber(row.factSupersessionUnjustifiedLostCount || 0) }} · typed {{ row.modelExtractionTypedMemoryArchivePresent ? row.modelExtractionTypedMemoryArchiveValid ? 'verified' : 'invalid' : 'empty' }} {{ formatNumber(row.modelExtractionTypedMemoryAdmittedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRejectedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemorySupersededThisRun || 0) }} · retry {{ formatNumber(row.modelExtractionTypedMemoryRetryPendingCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRetryCompletedCount || 0) }}/{{ formatNumber(row.modelExtractionTypedMemoryRetryExhaustedCount || 0) }} · chain {{ row.modelExtractionHistoryChainValid && row.modelExtractionHistoryHeadMatches ? 'verified' : row.modelExtractionHistoryTotalCount ? 'invalid' : 'empty' }} · replay {{ row.modelExtractionReplayStatus || 'unobserved' }} · artifacts {{ row.modelExtractionArtifactRetentionStatus || 'empty' }} hot {{ formatBytes(row.modelExtractionArtifactHotBytes) }} / cold {{ formatBytes(row.modelExtractionArtifactArchivedBytes) }} / due {{ formatNumber(row.modelExtractionArtifactCandidateExecutionCount || 0) }} · input {{ row.modelInputBudgetStatus || 'unobserved' }} {{ formatNumber(row.modelInputEstimatedTokens || 0) }}/{{ formatNumber(row.modelInputMaxTokens || 0) }} · {{ row.modelInputContentMode || 'legacy_flat_text' }} · rounds {{ formatNumber(row.modelInputSelectedApiRoundCount || 0) }}/{{ formatNumber(row.modelInputApiRoundCount || 0) }} · tools {{ formatNumber(row.modelInputToolUseBlockCount || 0) }}/{{ formatNumber(row.modelInputToolResultBlockCount || 0) }} {{ row.modelInputToolBoundaryStatus || 'unobserved' }} · omitted {{ formatNumber(row.modelInputOmittedMessageCount || 0) }}{{ row.modelInputClipped ? ' · clipped' : '' }} · {{ row.cadenceStatus || 'unobserved' }} · cadence cursor {{ row.cadenceLastExtractionCursorStatus || 'legacy' }} / scan {{ formatNumber(row.cadenceToolCallScanMessageCount || 0) }} / advance {{ row.cadenceCursorAdvanceStatus || 'legacy' }}{{ row.cadenceCursorHeldReason ? ` (${row.cadenceCursorHeldReason})` : '' }} · tx {{ row.extractionStatus || 'idle' }} · Δ {{ formatNumber(row.cadenceTokensSinceLastExtraction || 0) }}</p>
+          <p v-if="row.modelCustomTemplateConfigured">template {{ row.modelCustomTemplateSource || 'default' }} · {{ formatNumber(row.modelCustomTemplateSectionCount || 0) }} sections · {{ row.modelCustomTemplateChecksum || 'unverified' }}</p>
           <p v-if="row.manifestSelectorPresent">selector {{ row.manifestSelectorLatest?.status || 'empty' }} · decisions {{ formatNumber(row.manifestSelectorDecisionCount || 0) }} · selected {{ formatNumber(row.manifestSelectorSelectedDocumentCount || 0) }} · attached {{ formatNumber(row.manifestSelectorSelectedAttachedDocumentCount || 0) }} · committed {{ formatNumber(row.manifestSelectorSelectedCommittedDocumentCount || 0) }} · dropped {{ formatNumber(Number(row.manifestSelectorSelectedNotRecalledDocumentCount || 0) + Number(row.manifestSelectorRecalledNotAttachedDocumentCount || 0)) }} · empty {{ formatNumber(row.manifestSelectorEmptyDecisionCount || 0) }} · failed {{ formatNumber(row.manifestSelectorFailedDecisionCount || 0) }} · integrity {{ row.manifestSelectorValid ? 'verified' : 'invalid' }} · closure {{ row.manifestSelectorClosureValid ? 'verified' : 'gap' }}</p>
           <p v-if="row.manifestSelectorPresent">consumption {{ row.manifestSelectorConsumptionClosureValid ? 'verified' : 'gap' }} · outcomes {{ formatNumber(row.manifestSelectorConsumptionOutcomeCount || 0) }} · delivered {{ formatNumber(row.manifestSelectorConsumptionDeliveredDocumentCount || 0) }} · used {{ formatNumber(row.manifestSelectorConsumptionUsedDocumentCount || 0) }} · verified {{ formatNumber(row.manifestSelectorConsumptionVerifiedDocumentCount || 0) }} · ignored {{ formatNumber(row.manifestSelectorConsumptionIgnoredDocumentCount || 0) }} · unreported {{ formatNumber(row.manifestSelectorConsumptionUnreportedDocumentCount || 0) }} · weak binding {{ formatNumber(row.manifestSelectorConsumptionWeakReceiptBindingCount || 0) }} · unexpected {{ formatNumber(row.manifestSelectorConsumptionUnexpectedClaimCount || 0) }} · stale {{ formatNumber(row.manifestSelectorConsumptionStaleCommittedWithoutConsumptionCount || 0) }}</p>
           <p v-if="row.manifestSelectorPresent">calibration advisory · decisions {{ formatNumber(row.manifestSelectorCalibrationHintedDecisionCount || 0) }}/{{ formatNumber(row.manifestSelectorCalibrationObservedDecisionCount || 0) }} · evidence {{ formatNumber(row.manifestSelectorCalibrationEvidenceCount || 0) }} · hints {{ formatNumber(row.manifestSelectorCalibrationHintCount || 0) }} · support {{ formatNumber(row.manifestSelectorCalibrationSupportHintCount || 0) }} · caution {{ formatNumber(row.manifestSelectorCalibrationCautionHintCount || 0) }} · mixed {{ formatNumber(row.manifestSelectorCalibrationMixedHintCount || 0) }} · auto suppression disabled</p>
@@ -2751,6 +3242,7 @@ onMounted(() => loadOverview(false))
           <p v-if="row.memoryShapeTrendIncidentPresent">trend incident {{ row.memoryShapeTrendIncidentValid ? row.memoryShapeTrendIncidentStatus : 'invalid' }} · events/incidents {{ formatNumber(row.memoryShapeTrendIncidentEventCount || 0) }}/{{ formatNumber(row.memoryShapeTrendIncidentCount || 0) }} · pending/ack/resolved {{ formatNumber(row.memoryShapeTrendIncidentPendingCount || 0) }}/{{ formatNumber(row.memoryShapeTrendIncidentAcknowledgedCount || 0) }}/{{ formatNumber(row.memoryShapeTrendIncidentResolvedCount || 0) }} · signals {{ (row.memoryShapeTrendActiveIncident?.signalCodes || []).join(', ') || 'none' }} · {{ row.memoryShapeTrendIncidentRecoveredFromBackup ? 'backup recovered' : 'primary verified' }} · visibility only</p>
           <code>{{ formatNumber(row.markdownTokens || 0) }} / {{ formatNumber(row.totalTokenBudget || 12000) }}</code>
           <div class="session-memory-artifact-actions">
+            <button class="btn btn-outline" :disabled="!!sessionMemoryManualExtractionRunning || row.extractionStatus === 'in_progress'" title="绕过自动周期与自动抑制，调用模型从当前 exact-session 的完整记录重新提炼 Session Memory" @click="extractSessionMemoryNow(row)"><Sparkles :size="13" aria-hidden="true" />{{ sessionMemoryManualExtractionRunning === `${row.groupId}::${row.groupSessionId}` ? '抽取中' : '立即抽取' }}</button>
             <button class="btn btn-outline session-memory-diagnostic-btn" :disabled="!!sessionMemoryDiagnosticExportLoading" title="下载当前 exact-session 的 body-free 离线诊断包；不会注入上下文或修改记忆" @click="downloadSessionMemoryDiagnostic(row)"><Download :size="13" aria-hidden="true" />{{ sessionMemoryDiagnosticExportLoading === row.scopeId ? '导出中' : '下载诊断' }}</button>
             <button v-if="row.memoryShapeTrendIncidentStatus === 'pending' && row.memoryShapeTrendActiveIncident" class="btn btn-outline" :disabled="!!sessionMemoryTrendAckLoading" title="确认已检查当前 exact-session 趋势信号；不会改变记忆策略" @click="acknowledgeSessionMemoryTrendIncident(row)">{{ sessionMemoryTrendAckLoading === row.memoryShapeTrendActiveIncident.incidentId ? '确认中' : '确认趋势' }}</button>
             <button v-if="row.modelExtractionTypedMemoryRetryPendingCount || row.modelExtractionTypedMemoryRetryExhaustedCount" class="btn btn-outline" :disabled="!!sessionMemoryTypedRetryRunning" title="使用已签名抽取制品立即重试 typed-memory 提交，不重新调用模型" @click="retrySessionMemoryTypedCommit(row)">立即重试</button>
@@ -2963,6 +3455,12 @@ onMounted(() => loadOverview(false))
             <h4>项目子 Agent 记忆快照</h4>
           </div>
           <div class="task-agent-snapshot-actions">
+            <div class="live-memory-provider-selector" role="group" aria-label="Live memory Provider">
+              <button v-for="provider in ['claudecode', 'codex', 'cursor']" :key="provider" type="button" :class="{ active: liveMemoryWaveProvider === provider }" :disabled="liveMemoryWaveHasActiveApproval" @click="liveMemoryWaveProvider = provider">{{ provider === 'claudecode' ? 'Claude' : provider === 'codex' ? 'Codex' : 'Cursor' }}</button>
+            </div>
+            <button class="btn btn-sm btn-outline" :disabled="liveMemoryWaveApprovalLoading || !liveMemoryWaveApprovalAction" :title="liveMemoryWaveApprovalTitle" @click="openOperation(liveMemoryWaveApprovalAction)"><ShieldCheck :size="14" />{{ liveMemoryWaveApprovalLabel }}</button>
+            <button class="btn btn-sm btn-outline" :disabled="liveMemoryWaveApprovalRetentionLoading" @click="runLiveMemoryWaveApprovalRetention(true)">{{ liveMemoryWaveApprovalRetentionLoading ? '处理中' : '审批清理预演' }}</button>
+            <button class="btn btn-sm btn-outline" :disabled="liveMemoryWaveApprovalRetentionLoading || !liveMemoryWaveHasPrunableApprovals" @click="openOperation('prune_live_memory_wave_approvals')">清理审批回执</button>
             <button class="btn btn-sm btn-outline" :disabled="taskAgentSnapshotRetentionLoading" @click="runTaskAgentSnapshotRetention(true)">{{ taskAgentSnapshotRetentionLoading ? '处理中' : '预演清理' }}</button>
             <button class="btn btn-sm btn-primary" :disabled="taskAgentSnapshotRetentionLoading || !taskAgentSnapshotHasPrunable" @click="openOperation('prune_task_agent_memory_context_snapshots')">清理快照</button>
           </div>
@@ -2980,12 +3478,50 @@ onMounted(() => loadOverview(false))
           <span>处理 {{ taskAgentSnapshotRetentionResult.prunedCount || 0 }}</span>
           <span>跳过 {{ taskAgentSnapshotRetentionResult.skippedCount || 0 }}</span>
         </div>
+        <div v-if="liveMemoryWaveApprovalPreview?.schema" class="task-agent-snapshot-result">
+          <strong>Endurance Wave</strong>
+          <span>{{ liveMemoryWaveApprovalPreview.plan?.provider || 'provider' }} · {{ liveMemoryWaveApprovalPreview.plan?.model || 'model' }}</span>
+          <span>{{ liveMemoryWaveApprovalPreview.plan?.groups || 0 }} groups · c{{ liveMemoryWaveApprovalPreview.plan?.concurrency || 0 }} · {{ Math.round((liveMemoryWaveApprovalPreview.plan?.timeoutMs || 0) / 1000) }}s</span>
+          <span>{{ liveMemoryWaveApprovalInventory.approvedCount || 0 }} approved · {{ liveMemoryWaveApprovalInventory.completedCount || 0 }} completed · {{ liveMemoryWaveApprovalInventory.failedCount || 0 }} failed · {{ liveMemoryWaveApprovalInventory.expiredCount || 0 }} expired · {{ liveMemoryWaveApprovalInventory.prunableCount || 0 }} prunable</span>
+          <span>version transitions {{ liveMemoryVersionTransitionLedger.transitionCount || 0 }} · verified {{ liveMemoryVersionTransitionLedger.verifiedCount || 0 }} · degraded {{ liveMemoryVersionTransitionLedger.degradedCount || 0 }} · rollback {{ liveMemoryVersionTransitionLedger.rollbackCount || 0 }} · {{ liveMemoryVersionTransitionLedger.valid === false ? 'ledger invalid' : liveMemoryWaveApprovalPreview.versionTransitionReady === false ? 'approval gated' : 'continuity ready' }}</span>
+          <span v-if="liveMemoryTransitionCanaryPreview?.runtimeDriftDetected">transition canary · {{ liveMemoryTransitionCanaryPreview.runtime?.semanticVersion || 'new runtime' }} · 2 groups · c1 · {{ liveMemoryTransitionCanaryPreview.approvable ? 'explicit approval available' : 'blocked' }}</span>
+          <span v-if="liveMemoryInitialBaselineCanaryPreview?.runtimeUnproven">initial baseline · {{ liveMemoryInitialBaselineCanaryPreview.runtime?.semanticVersion || 'runtime ready' }} · 2 groups · c1 · {{ liveMemoryInitialBaselineCanaryPreview.approvable ? 'explicit approval available' : 'blocked' }}</span>
+        </div>
+        <div v-if="liveMemoryWaveApprovalRetentionResult" class="task-agent-snapshot-result">
+          <strong>{{ liveMemoryWaveApprovalRetentionResult.prunedCount ? '审批清理结果' : '审批保留预演' }}</strong>
+          <span>terminal {{ liveMemoryWaveApprovalRetentionResult.terminalCount || 0 }}</span>
+          <span>candidate {{ liveMemoryWaveApprovalRetentionResult.prunableCount || 0 }} · pruned {{ liveMemoryWaveApprovalRetentionResult.prunedCount || 0 }} · invalid {{ liveMemoryWaveApprovalRetentionResult.invalidCount || 0 }}</span>
+        </div>
+        <div v-if="taskAgentModelReceiptRows.length" class="task-agent-snapshot-list">
+          <div class="recall-diagnostic-head">
+            <strong>Model Memory Load Receipts</strong>
+            <span>{{ taskAgentModelReceiptLifecycle?.summary?.receiptFileCount || 0 }} receipts</span>
+          </div>
+          <article v-for="row in taskAgentModelReceiptRows" :key="row.challengeId" :class="row.status === 'referenced_invalid' || row.status === 'referenced_missing' ? 'fail' : 'warn'">
+            <span :class="['usage-state', row.status === 'referenced_invalid' || row.status === 'referenced_missing' ? 'fail' : 'warn']">{{ row.status }}</span>
+            <strong>{{ row.challengeId }}</strong>
+            <p>{{ compactDisplay(`${(row.groupIds || []).join(', ') || 'fleet orphan'} · ${(row.groupSessionIds || []).join(', ') || 'unbound'} · ${(row.issues || []).join(', ') || (row.prunable ? 'retention candidate' : 'retained')}`, 300) }}</p>
+            <code>{{ row.referenceCount || 0 }} refs · {{ row.valid === false ? 'signature invalid' : row.prunable ? 'prunable' : 'retained' }}</code>
+          </article>
+        </div>
+        <div v-if="taskAgentModelReceiptRecoveryRows.length" class="task-agent-snapshot-list">
+          <div class="recall-diagnostic-head">
+            <strong>Load Receipt Recovery</strong>
+            <span>{{ taskAgentModelReceiptRecovery?.summary?.recoveredCount || 0 }} recovered</span>
+          </div>
+          <article v-for="row in taskAgentModelReceiptRecoveryRows" :key="row.recoveryId || row.challengeId" :class="row.status === 'blocked' || !row.valid ? 'fail' : 'warn'">
+            <span :class="['usage-state', row.status === 'blocked' || !row.valid ? 'fail' : 'warn']">{{ row.status }}</span>
+            <strong>{{ row.recoveryId || row.challengeId }}</strong>
+            <p>{{ compactDisplay(`${row.groupId || 'group'} · ${row.groupSessionId || 'session'} · ${row.taskAgentSessionId || 'task agent'} · ${(row.issues || []).join(', ') || 'same-session acknowledgement'}`, 300) }}</p>
+            <code>attempt {{ row.attempt || 0 }}/1 · {{ row.suppressTaskReplay ? 'task replay suppressed' : 'receipt recovered' }}</code>
+          </article>
+        </div>
         <div v-if="taskAgentSnapshotRows.length" class="task-agent-snapshot-list">
           <article v-for="row in taskAgentSnapshotRows" :key="`${row.snapshotId}:${row.snapshotFile}`" :class="row.status">
             <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
             <strong>{{ row.snapshotId || row.sessionId || 'snapshot' }}</strong>
             <p>{{ compactDisplay(`${row.groupId || 'group'} · ${row.groupSessionId || 'session-unbound'} · ${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || row.invocationEdgeId || row.workerContextPacketId || row.snapshotFile}`, 300) }}</p>
-            <code>{{ row.prunable ? 'prunable' : `lifecycle #${row.sessionLifecycleGeneration || 0} ${row.sessionLifecycleFenceStatus || 'pending'} · ${row.invocationEdgeId ? `${row.invocationBranchKind || 'main'} · ${row.invocationEdgeStatus || 'prepared'} · ${row.invocationEdgeId}` : row.memoryContextDelivered ? `delivered · ${row.deliveryPromptBindingMode || 'bound'}` : row.deliveryStatus || (row.gateCount ? `${row.gateCount} gates` : 'gate check')}` }}</code>
+            <code>{{ row.prunable ? 'prunable' : `entry ${row.memoryEntrySyncMode || 'legacy'} +${row.memoryEntryChangedCount || 0}/-${row.memoryEntryRemovedCount || 0} · lifecycle #${row.sessionLifecycleGeneration || 0} ${row.sessionLifecycleFenceStatus || 'pending'} · ${row.invocationEdgeId ? `${row.invocationBranchKind || 'main'} · ${row.invocationEdgeStatus || 'prepared'} · ${row.invocationEdgeId}` : row.memoryContextDelivered ? `delivered · ${row.deliveryPromptBindingMode || 'bound'}` : row.deliveryStatus || (row.gateCount ? `${row.gateCount} gates` : 'gate check')}` }}</code>
           </article>
         </div>
         <div v-if="taskAgentInvocationRows.length" class="task-agent-snapshot-list task-agent-invocation-list">
@@ -3156,7 +3692,9 @@ onMounted(() => loadOverview(false))
               <article v-if="selectedScope === 'group' && detail.memory.compaction?.sessionMemoryCompactSelection?.schema">
                 <span>Session Memory</span>
                 <strong>{{ detail.memory.compaction.sessionMemoryCompactSelection.selected ? '已复用' : '已回退' }}</strong>
-                <small>{{ detail.memory.compaction.sessionMemoryCompactSelection.selected ? `保留 ${formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.preserved_message_count)} 条 · API 闭包向前扩展 ${formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.api_invariant_closure?.expanded_message_count)} 条 · 未调用压缩 API` : detail.memory.compaction.sessionMemoryCompactSelection.fallback_reason }}</small>
+                <small>{{ detail.memory.compaction.sessionMemoryCompactSelection.selected ? `保留 ${formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.preserved_message_count)} 条 · ${detail.memory.compaction.sessionMemoryCompactSelection.cursor_status === 'resumed_without_cursor' ? '恢复会话尾部窗口' : '快照游标'} · API 闭包向前扩展 ${formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.api_invariant_closure?.expanded_message_count)} 条 · 未调用压缩 API` : detail.memory.compaction.sessionMemoryCompactSelection.fallback_reason }}</small>
+                <small v-if="detail.memory.compaction.sessionMemoryCompactSelection.template_empty_checked">模板 {{ detail.memory.compaction.sessionMemoryCompactSelection.template_source || 'unknown' }} · {{ formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.template_section_count) }} sections · {{ detail.memory.compaction.sessionMemoryCompactSelection.template_only ? '仅模板，禁止复用' : '包含有效记忆' }} · {{ detail.memory.compaction.sessionMemoryCompactSelection.template_checksum || 'unknown checksum' }}</small>
+                <small v-if="detail.memory.compaction.sessionMemoryCompactSelection.compact_projection?.schema">compact 投影 {{ formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.compact_projection.original_token_estimate) }} -> {{ formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.compact_projection.projected_token_estimate) }} tokens · 截断 {{ formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.compact_projection.truncated_section_count) }}/{{ formatNumber(detail.memory.compaction.sessionMemoryCompactSelection.compact_projection.section_count) }} 节 · 完整文件 {{ detail.memory.compaction.sessionMemoryCompactSelection.compact_projection.summary_file }}</small>
               </article>
             </div>
             <section v-if="selectedScope === 'group' && resumeProjection" :class="['discipline-panel', resumeProjection.status === 'verified' || resumeProjection.status === 'no_boundary' ? 'ok' : 'fail']">
@@ -3300,7 +3838,7 @@ onMounted(() => loadOverview(false))
                     <article v-for="row in taskAgentMemoryContextSnapshotRows" :key="`${row.snapshotId}:${row.snapshotFile}`" :class="row.status === 'ok' ? 'ok' : row.status === 'warn' ? 'warn' : 'fail'">
                       <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
                       <strong>{{ row.snapshotId || row.sessionId || 'snapshot' }}</strong>
-                      <p>{{ compactDisplay(`${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || `${row.finalDispatchProvider || 'provider'}/${row.finalDispatchModel || 'default'} · ${row.workerContextPacketId || row.snapshotFile}`}`, 260) }}</p>
+                      <p>{{ compactDisplay(`${row.project || 'project'} · ${row.taskId || 'task'} · sync ${row.memorySnapshotSyncAction || 'legacy'} · ${(row.gaps || [])[0]?.reason || `${row.finalDispatchProvider || 'provider'}/${row.finalDispatchModel || 'default'} · ${row.workerContextPacketId || row.snapshotFile}`}`, 260) }}</p>
                       <code>{{ row.finalDispatchPayloadGatePresent ? `${row.finalDispatchStatus} · ${row.finalDispatchPromptTokens || 0}/${row.finalDispatchAutoCompactThreshold || 0} tokens · circuit ${row.finalDispatchReactiveCompactCircuitState || 'closed'}/${row.finalDispatchReactiveCompactCircuitFailures || 0} · ${row.finalDispatchReactiveCompactPresent ? `compact ${row.finalDispatchReactiveCompactOriginalTokens || 0}->${row.finalDispatchReactiveCompactRecoveredTokens || 0}` : `lineage ${row.finalDispatchLineageProofValid ? 'ok' : row.finalDispatchLineageProofRequired ? 'missing' : 'n/a'}`}` : row.postTurnSummaryCapsuleChecksum ? `summary ${row.postTurnSummaryCapsuleSelectedCount || 0}` : row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
                     </article>
                   </div>
@@ -3625,7 +4163,7 @@ onMounted(() => loadOverview(false))
                     <article v-for="row in promptCacheBreakDetectionEvents" :key="row.event_id" :class="row.cache_break ? 'warn' : 'ok'">
                       <span :class="['usage-state', row.cache_break ? 'waiting' : 'verified']">{{ row.classification || 'usage' }}</span>
                       <strong>{{ formatNumber(row.cache_read_input_tokens || 0) }} cache read</strong>
-                      <p>previous {{ row.previous_cache_read_tokens ?? 'none' }} · drop {{ row.token_drop || 0 }}</p>
+                      <p>previous {{ row.previous_cache_read_tokens ?? 'none' }} · drop {{ row.token_drop || 0 }}<template v-if="row.cache_break_reason"> · {{ row.cache_break_reason }}</template></p>
                       <code>gen {{ row.baseline_generation || 0 }} · call {{ row.call_number || 0 }}<template v-if="row.cache_deletion_applied"> · microcompact</template></code>
                     </article>
                   </div>
@@ -4550,6 +5088,14 @@ onMounted(() => loadOverview(false))
                       <code>{{ formatSigned(row.adjustment) }}</code>
                     </article>
                   </div>
+                  <div v-if="typedMemoryConsumptionLedger.recentRows?.length" class="recent-usage-list">
+                    <div class="recall-diagnostic-head"><strong>最近投递与使用证据</strong><span>{{ typedMemoryConsumptionLedger.recentRows.length }} rows</span></div>
+                    <article v-for="row in typedMemoryConsumptionLedger.recentRows.slice(0, 8)" :key="`recent-consumption:${row.entryId}`" class="recent-usage-row">
+                      <span :class="['usage-state', row.usageState]">{{ row.lifecycleState === 'delivered_unreported' ? '仅投递' : row.usageState }}</span>
+                      <strong>{{ row.relPath }}</strong>
+                      <p>{{ row.accessState || 'capture_missing' }} · {{ row.targetProject || 'agent' }}</p>
+                    </article>
+                  </div>
                   <div v-if="typedMemoryConsumptionLedger.staleRows?.length" class="recent-usage-list consumption-stale-list">
                     <div class="recall-diagnostic-head"><strong>已过期消费证据</strong><span>{{ typedMemoryConsumptionLedger.staleEntryCount }} rows</span></div>
                     <article v-for="row in typedMemoryConsumptionLedger.staleRows.slice(0, 6)" :key="row.entryId" class="recent-usage-row">
@@ -4629,7 +5175,7 @@ onMounted(() => loadOverview(false))
         <p class="modal-note">{{ operationNote(operationState.operation) }}</p>
         <label v-if="operationState.operation === 'block_pattern'">文本或正则规则<input v-model="operationState.pattern" placeholder="例如：客户手机号|内部代号" /></label>
         <label>操作原因<textarea v-model="operationState.reason" rows="3" placeholder="建议记录本次维护的原因"></textarea></label>
-        <div class="modal-actions"><button class="btn" @click="operationState = null">取消</button><button class="btn" :class="['rollback','disable'].includes(operationState.operation) ? 'btn-danger' : 'btn-primary'" :disabled="!operationState.reason.trim() || (operationState.operation === 'block_pattern' && !operationState.pattern.trim()) || (operationState.operation === 'archive_selftest_residue' && (selftestResidueArchiveLoading || !globalSelftestHasResidue || globalSelftestHasActivePollution)) || (operationState.operation === 'prune_task_agent_memory_context_snapshots' && (taskAgentSnapshotRetentionLoading || !taskAgentSnapshotHasPrunable))" @click="runOperation">{{ operationState.operation === 'archive_selftest_residue' ? '归档残留' : operationState.operation === 'prune_task_agent_memory_context_snapshots' ? '清理快照' : '执行' }}</button></div>
+        <div class="modal-actions"><button class="btn" @click="operationState = null">取消</button><button class="btn" :class="['rollback','disable','revoke_live_memory_wave','prune_live_memory_wave_approvals'].includes(operationState.operation) ? 'btn-danger' : 'btn-primary'" :disabled="!operationState.reason.trim() || (operationState.operation === 'block_pattern' && !operationState.pattern.trim()) || (operationState.operation === 'archive_selftest_residue' && (selftestResidueArchiveLoading || !globalSelftestHasResidue || globalSelftestHasActivePollution)) || (operationState.operation === 'prune_task_agent_memory_context_snapshots' && (taskAgentSnapshotRetentionLoading || !taskAgentSnapshotHasPrunable)) || (operationState.operation === 'approve_live_memory_wave' && (liveMemoryWaveApprovalLoading || !liveMemoryWaveApprovalPreview?.approvable || liveMemoryWaveHasActiveApproval)) || (operationState.operation === 'approve_live_memory_transition_canary' && (liveMemoryWaveApprovalLoading || !liveMemoryTransitionCanaryPreview?.approvable || liveMemoryWaveHasActiveApproval)) || (operationState.operation === 'approve_live_memory_initial_baseline_canary' && (liveMemoryWaveApprovalLoading || !liveMemoryInitialBaselineCanaryPreview?.approvable || liveMemoryWaveHasActiveApproval)) || (operationState.operation === 'revoke_live_memory_wave' && (liveMemoryWaveApprovalLoading || !liveMemoryWaveHasActiveApproval)) || (operationState.operation === 'prune_live_memory_wave_approvals' && (liveMemoryWaveApprovalRetentionLoading || !liveMemoryWaveHasPrunableApprovals))" @click="runOperation">{{ operationState.operation === 'archive_selftest_residue' ? '归档残留' : operationState.operation === 'prune_task_agent_memory_context_snapshots' ? '清理快照' : operationState.operation === 'approve_live_memory_wave' ? '创建批准' : operationState.operation === 'approve_live_memory_transition_canary' ? '创建 Canary 批准' : operationState.operation === 'approve_live_memory_initial_baseline_canary' ? '创建首次基线批准' : operationState.operation === 'revoke_live_memory_wave' ? '撤销批准' : operationState.operation === 'prune_live_memory_wave_approvals' ? '清理回执' : '执行' }}</button></div>
       </div>
     </div>
 
@@ -4646,6 +5192,7 @@ onMounted(() => loadOverview(false))
 
 <style scoped>
 .context-capacity-panel{margin:0 0 12px;padding:16px;border-radius:8px}.context-capacity-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.context-capacity-head h3{font-size:16px;margin-top:4px}.context-capacity-actions{display:flex;gap:8px}.context-preset-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:13px}.context-preset{min-height:76px;padding:11px;text-align:left;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.42);color:var(--text-primary);cursor:pointer;display:flex;flex-direction:column;gap:4px}.context-preset:hover{border-color:rgba(var(--accent-blue-rgb),.28)}.context-preset.active{border-color:var(--accent-blue);box-shadow:0 0 0 1px rgba(var(--accent-blue-rgb),.16);background:rgba(var(--accent-blue-rgb),.05)}.context-preset strong{font-size:12px}.context-preset span{font-size:9px;line-height:1.4;color:var(--text-muted)}.context-capacity-note{margin:10px 0;color:var(--text-muted);font-size:9px}.context-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.context-field-grid label{padding:11px;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.3);display:flex;flex-direction:column;gap:7px}.context-field-grid label>span{font-size:11px;font-weight:800}.context-field-grid input{width:100%;min-width:0;padding:9px 10px;border:1px solid var(--border-color);border-radius:7px;background:var(--surface-color);color:var(--text-primary);font-family:var(--font-tech);font-size:12px}.context-field-grid input:disabled{opacity:.7}.context-field-grid small{font-size:8px;line-height:1.45;color:var(--text-muted)}
+.session-memory-prompt-editor{display:grid;gap:8px;margin:10px 0;padding:11px 0;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color)}.session-memory-prompt-head,.session-memory-editor-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.session-memory-prompt-head>div:first-child{display:grid;gap:3px}.session-memory-prompt-head span{font-size:11px;font-weight:800}.session-memory-prompt-head small,.session-memory-editor-footer>small{font-size:8px;color:var(--text-muted);overflow-wrap:anywhere}.session-memory-prompt-actions{display:flex;gap:6px}.session-memory-customization-tabs{display:flex;border:1px solid var(--border-color);border-radius:7px;overflow:hidden}.session-memory-customization-tabs button{min-width:58px;padding:7px 10px;border:0;border-right:1px solid var(--border-color);background:transparent;color:var(--text-muted);font-size:10px;font-weight:800;cursor:pointer}.session-memory-customization-tabs button:last-child{border-right:0}.session-memory-customization-tabs button.active{background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.session-memory-prompt-editor select,.session-memory-prompt-editor textarea{width:100%;min-width:0;border:1px solid var(--border-color);border-radius:7px;background:var(--surface-color);color:var(--text-primary);font-size:11px}.session-memory-prompt-editor select{padding:8px 10px}.session-memory-prompt-editor textarea{min-height:132px;resize:vertical;padding:10px;font-family:var(--font-tech);line-height:1.55}
 .capacity-runtime-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;padding:10px 0;margin-bottom:10px;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color)}.capacity-runtime-strip span{min-width:0;display:flex;flex-direction:column;gap:3px}.capacity-runtime-strip small{font-size:8px;color:var(--text-muted)}.capacity-runtime-strip strong{font-family:var(--font-tech);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.retention-toggle-row{display:flex;align-items:center;gap:9px;min-height:36px}.context-field-grid .retention-toggle-row input{width:18px;height:18px;padding:0}.retention-toggle-row strong{font-size:10px;color:var(--accent-blue)}.retention-maintenance-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-color);font-size:9px;color:var(--text-muted)}.retention-maintenance-row>div{display:flex;gap:6px}.retention-maintenance-row .danger{color:var(--accent-red);border-color:rgba(239,68,68,.2)}
 .provider-capability-editor{margin:0 0 12px;padding:12px 0;border-bottom:1px solid var(--border-color)}.provider-capability-editor .context-capacity-head h3{font-size:13px}.provider-capability-fields{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:9px}.provider-capability-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 14px;margin-top:10px}.provider-capability-list>span{min-width:0;padding:8px 0;border-top:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;gap:8px}.provider-capability-list>span>span{min-width:0;display:flex;flex-direction:column;gap:3px}.provider-capability-list strong,.provider-capability-list small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-capability-list strong{font-size:10px}.provider-capability-list small{font-size:8px;color:var(--text-muted)}.provider-capability-list .capability-revoke{flex:0 0 auto;padding:5px 7px;font-size:8px}
 .capability-downgrade-list{margin-top:8px;border-top:1px solid rgba(239,68,68,.2)}.capability-downgrade-list>span{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border-color)}.capability-downgrade-list strong{font-size:9px;color:var(--accent-red)}.capability-downgrade-list small{font-size:8px;color:var(--text-muted);text-align:right}
@@ -4659,7 +5206,7 @@ onMounted(() => loadOverview(false))
 .global-alerts{display:flex;min-width:0;flex-direction:column;gap:6px;margin:-2px 0 12px}.global-alert{display:grid;min-width:0;grid-template-columns:7px auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);font-size:10px}.global-alert>span{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.global-alert strong{font-family:monospace}.global-alert strong,.global-alert p,.global-alert small{min-width:0;overflow-wrap:anywhere}.global-alert p{color:var(--text-secondary)}.global-alert small{color:var(--text-muted)}.global-alert.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.global-alert.critical>span{background:var(--accent-red)}
 .quality-panel{border-radius:16px;padding:18px;margin:12px 0}.quality-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.quality-panel-head h3{font-size:17px;margin:4px 0}.quality-panel-head p{font-size:11px;color:var(--text-muted);line-height:1.5}.quality-score{min-width:112px;padding:12px 14px;border-radius:13px;background:rgba(100,116,139,.08);text-align:right}.quality-score strong{display:block;font-family:var(--font-tech);font-size:26px}.quality-score span,.quality-score small{display:block;font-size:10px;color:var(--text-muted)}.quality-score small{margin-top:4px;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quality-score.ok strong{color:var(--accent-green)}.quality-score.warn strong{color:var(--accent-yellow)}.quality-score.fail strong{color:var(--accent-red)}.quality-check-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:14px}.quality-check-card{min-width:0;padding:12px;border-radius:11px;border:1px solid var(--border-color);background:rgba(255,255,255,.42)}.quality-check-card.ok{border-color:rgba(16,185,129,.18);background:rgba(16,185,129,.045)}.quality-check-card.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.06)}.quality-check-card.fail{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.055)}.quality-check-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.quality-check-top strong{min-width:0;font-size:12px;color:var(--text-primary);overflow-wrap:anywhere}.quality-check-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}.quality-check-top span{font-family:var(--font-tech);font-size:13px;color:var(--accent-blue)}.quality-refresh-btn{width:24px;height:24px;border-radius:8px;border:1px solid rgba(37,99,235,.18);background:rgba(37,99,235,.06);color:var(--accent-blue);font-size:13px;font-weight:900;line-height:1;cursor:pointer}.quality-refresh-btn:disabled{cursor:not-allowed;opacity:.52}.quality-check-card p{min-height:42px;margin:8px 0 10px;font-size:9.5px;line-height:1.45;color:var(--text-muted)}.quality-check-stats{display:flex;gap:5px;flex-wrap:wrap}.quality-check-stats span{padding:3px 6px;border-radius:999px;background:rgba(15,23,42,.055);font-size:9px;color:var(--text-secondary)}.quality-check-detail{margin-top:8px;font-size:9px;color:var(--text-muted)}.quality-check-detail summary{cursor:pointer;font-weight:800}.quality-check-detail ul{margin:6px 0 0;padding-left:16px;line-height:1.45}.quality-next-actions{display:flex;min-width:0;gap:6px;flex-wrap:wrap;margin-top:12px}.quality-next-actions strong{font-size:10px;color:var(--text-muted);padding:4px 0}.quality-next-actions span{max-width:100%;padding:5px 8px;border-radius:999px;background:rgba(245,158,11,.08);color:#a16207;font-size:9px;overflow-wrap:anywhere}
 .selftest-residue-panel{margin-top:12px;border:1px solid rgba(16,185,129,.16);border-radius:12px;background:rgba(16,185,129,.04);overflow:hidden}.selftest-residue-panel.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.selftest-residue-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.selftest-residue-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.selftest-residue-head h4{font-size:13px;margin-top:3px}.selftest-residue-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.selftest-residue-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.selftest-residue-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.selftest-residue-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.selftest-residue-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.selftest-residue-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.selftest-residue-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.selftest-residue-result strong{font-size:10px;color:var(--text-primary)}.selftest-residue-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.selftest-residue-list{border-top:1px solid var(--border-color)}.selftest-residue-list article{display:grid;grid-template-columns:64px minmax(80px,150px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.selftest-residue-list article:first-child{border-top:0}.selftest-residue-list article.warn{background:rgba(245,158,11,.045)}.selftest-residue-list article.fail{background:rgba(239,68,68,.045)}.selftest-residue-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.selftest-residue-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
-.task-agent-snapshot-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.14);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.task-agent-snapshot-panel.warn,.task-agent-snapshot-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.task-agent-snapshot-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.task-agent-snapshot-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.task-agent-snapshot-head h4{font-size:13px;margin-top:3px}.task-agent-snapshot-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.task-agent-snapshot-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.task-agent-snapshot-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.task-agent-snapshot-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.task-agent-snapshot-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.task-agent-snapshot-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.task-agent-snapshot-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.task-agent-snapshot-result strong{font-size:10px;color:var(--text-primary)}.task-agent-snapshot-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.task-agent-snapshot-list{border-top:1px solid var(--border-color)}.task-agent-snapshot-list article{display:grid;grid-template-columns:64px minmax(110px,210px) minmax(0,1fr) 80px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.task-agent-snapshot-list article:first-child{border-top:0}.task-agent-snapshot-list article.warn{background:rgba(245,158,11,.045)}.task-agent-snapshot-list article.fail{background:rgba(239,68,68,.045)}.task-agent-snapshot-list article.ok{background:rgba(16,185,129,.035)}.task-agent-snapshot-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-agent-snapshot-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.task-agent-snapshot-list code{font-size:8px;color:var(--text-muted);text-align:right}
+.task-agent-snapshot-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.14);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.task-agent-snapshot-panel.warn,.task-agent-snapshot-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.task-agent-snapshot-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.task-agent-snapshot-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.task-agent-snapshot-head h4{font-size:13px;margin-top:3px}.task-agent-snapshot-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}.live-memory-provider-selector{display:inline-grid;grid-template-columns:repeat(3,minmax(54px,1fr));border:1px solid var(--border-color);border-radius:7px;overflow:hidden;background:rgba(100,116,139,.06)}.live-memory-provider-selector button{min-height:28px;padding:4px 8px;border:0;border-left:1px solid var(--border-color);background:transparent;color:var(--text-muted);font-size:8px;font-weight:800;cursor:pointer}.live-memory-provider-selector button:first-child{border-left:0}.live-memory-provider-selector button.active{background:rgba(var(--accent-blue-rgb),.13);color:var(--accent-blue)}.live-memory-provider-selector button:disabled{cursor:not-allowed;opacity:.55}.task-agent-snapshot-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.task-agent-snapshot-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.task-agent-snapshot-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.task-agent-snapshot-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.task-agent-snapshot-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.task-agent-snapshot-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.task-agent-snapshot-result strong{font-size:10px;color:var(--text-primary)}.task-agent-snapshot-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.task-agent-snapshot-list{border-top:1px solid var(--border-color)}.task-agent-snapshot-list article{display:grid;grid-template-columns:64px minmax(110px,210px) minmax(0,1fr) 80px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.task-agent-snapshot-list article:first-child{border-top:0}.task-agent-snapshot-list article.warn{background:rgba(245,158,11,.045)}.task-agent-snapshot-list article.fail{background:rgba(239,68,68,.045)}.task-agent-snapshot-list article.ok{background:rgba(16,185,129,.035)}.task-agent-snapshot-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-agent-snapshot-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.task-agent-snapshot-list code{font-size:8px;color:var(--text-muted);text-align:right}
 .cross-group-quality-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.12);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.cross-group-quality-panel.warn,.cross-group-quality-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.cross-group-quality-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.cross-group-quality-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.cross-group-quality-head h4{font-size:13px;margin-top:3px}.cross-group-quality-actions{display:flex;gap:5px}.cross-group-quality-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.cross-group-quality-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.cross-group-quality-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.cross-group-quality-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue)}.cross-group-quality-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.cross-group-quality-table{border-top:1px solid var(--border-color)}.cross-group-quality-table article{display:grid;grid-template-columns:64px minmax(130px,230px) minmax(0,1fr) 92px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.cross-group-quality-table article:first-child{border-top:0}.cross-group-quality-table article.ok{background:rgba(16,185,129,.035)}.cross-group-quality-table article.warn,.cross-group-quality-table article.waiting{background:rgba(245,158,11,.045)}.cross-group-quality-table article.fail{background:rgba(239,68,68,.045)}.cross-group-quality-table strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cross-group-quality-table p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.cross-group-quality-table code{font-size:8px;color:var(--text-muted);text-align:right}.cross-group-quality-empty{padding:13px 10px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);text-align:center}
 .ignore-memory-receipt-panel{margin-top:12px;border:1px solid rgba(16,185,129,.16);border-radius:12px;background:rgba(16,185,129,.04);overflow:hidden}.ignore-memory-receipt-panel.warn,.ignore-memory-receipt-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.ignore-memory-receipt-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.ignore-memory-receipt-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.ignore-memory-receipt-head h4{font-size:13px;margin-top:3px}.ignore-memory-receipt-actions{display:flex;gap:5px;justify-content:flex-end}.ignore-memory-receipt-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;padding:9px}.ignore-memory-receipt-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.ignore-memory-receipt-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.ignore-memory-receipt-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.ignore-memory-receipt-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.ignore-memory-receipt-list{border-top:1px solid var(--border-color)}.ignore-memory-receipt-list article{display:grid;grid-template-columns:64px minmax(130px,220px) minmax(0,1fr) 120px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.ignore-memory-receipt-list article:first-child{border-top:0}.ignore-memory-receipt-list article.ok{background:rgba(16,185,129,.035)}.ignore-memory-receipt-list article.warn,.ignore-memory-receipt-list article.waiting{background:rgba(245,158,11,.045)}.ignore-memory-receipt-list article.fail{background:rgba(239,68,68,.045)}.ignore-memory-receipt-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.ignore-memory-receipt-list code{font-size:8px;color:var(--text-muted);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-empty{padding:13px 10px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);text-align:center}
 .ignore-memory-receipt-work-list{border-top:1px solid var(--border-color);background:rgba(var(--accent-blue-rgb),.025)}.ignore-memory-receipt-work-list article{display:grid;grid-template-columns:74px minmax(140px,230px) minmax(0,1fr) minmax(128px,auto);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.ignore-memory-receipt-work-list article.pending{background:rgba(var(--accent-blue-rgb),.035)}.ignore-memory-receipt-work-list article.in_progress{background:rgba(99,102,241,.045)}.ignore-memory-receipt-work-list article.blocked,.ignore-memory-receipt-work-list article.warn{background:rgba(245,158,11,.055)}.ignore-memory-receipt-work-list article.completed,.ignore-memory-receipt-work-list article.ok{background:rgba(16,185,129,.035)}.ignore-memory-receipt-work-list article.fail{background:rgba(239,68,68,.045)}.ignore-memory-receipt-work-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-work-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
@@ -4675,7 +5222,7 @@ onMounted(() => loadOverview(false))
 .acceptance-note{margin-top:9px;padding:9px 11px;border-radius:8px;background:rgba(16,185,129,.06);color:var(--text-muted);font-size:9px;border:1px solid rgba(16,185,129,.12)}
 .empty-state{padding:35px;text-align:center;color:var(--text-muted);font-size:11px}.empty-state.large{padding-top:180px}.mc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.24);backdrop-filter:blur(10px);z-index:200;display:grid;place-items:center}.mc-modal{width:min(520px,calc(100vw - 36px));max-height:80vh;overflow:auto;border:1px solid var(--border-color);background:rgba(255,255,255,.92);box-shadow:0 26px 80px rgba(15,23,42,.18);border-radius:15px;padding:22px}.mc-modal h3{font-size:19px;margin:4px 0 14px}.mc-modal label{display:flex;flex-direction:column;gap:6px;font-size:10px;font-weight:700;color:var(--text-muted);margin-top:13px}.mc-modal textarea{resize:vertical;font-size:12px;line-height:1.5}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.evidence-modal{width:min(760px,calc(100vw - 36px))}.evidence-row{border:1px solid var(--border-color);border-radius:10px;margin-top:9px;overflow:hidden}.evidence-row>div{display:flex;justify-content:space-between;padding:9px 12px;background:rgba(var(--accent-blue-rgb),.04);font-size:9px;color:var(--text-muted)}
 @media(max-width:1100px){.summary-strip{grid-template-columns:repeat(3,1fr)}.memory-groups{grid-template-columns:1fr}.workspace-grid{grid-template-columns:220px minmax(0,1fr)}.quality-check-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(4,minmax(0,1fr))}.post-compact-buckets{grid-template-columns:1fr}}
-@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel,.quality-panel-head,.post-compact-head,.cross-group-quality-head,.ignore-memory-receipt-head,.selftest-residue-head,.task-agent-snapshot-head,.context-capacity-head,.discipline-head{flex-direction:column;align-items:flex-start}.context-preset-grid,.context-field-grid{grid-template-columns:1fr}.summary-strip{grid-template-columns:repeat(2,1fr)}.global-alert{grid-template-columns:7px minmax(0,1fr);align-items:start}.global-alert>span{margin-top:3px}.global-alert strong,.global-alert p,.global-alert small{grid-column:2}.workspace-grid{grid-template-columns:minmax(0,1fr)}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.quality-check-grid{grid-template-columns:1fr}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}.post-compact-head code{max-width:100%;white-space:normal;overflow-wrap:anywhere}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-table article,.ignore-memory-receipt-list article,.ignore-memory-receipt-work-list article,.selftest-residue-list article,.task-agent-snapshot-list article,.recall-diagnostic-row,.recent-usage-row,.discipline-gap-list article{grid-template-columns:1fr}.cross-group-quality-table code,.ignore-memory-receipt-list code,.task-agent-snapshot-list code{text-align:left}}
+@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel,.quality-panel-head,.post-compact-head,.cross-group-quality-head,.ignore-memory-receipt-head,.selftest-residue-head,.task-agent-snapshot-head,.context-capacity-head,.session-memory-prompt-head,.discipline-head{flex-direction:column;align-items:flex-start}.session-memory-prompt-actions{flex-wrap:wrap}.context-preset-grid,.context-field-grid{grid-template-columns:1fr}.summary-strip{grid-template-columns:repeat(2,1fr)}.global-alert{grid-template-columns:7px minmax(0,1fr);align-items:start}.global-alert>span{margin-top:3px}.global-alert strong,.global-alert p,.global-alert small{grid-column:2}.workspace-grid{grid-template-columns:minmax(0,1fr)}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.quality-check-grid{grid-template-columns:1fr}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}.post-compact-head code{max-width:100%;white-space:normal;overflow-wrap:anywhere}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-table article,.ignore-memory-receipt-list article,.ignore-memory-receipt-work-list article,.selftest-residue-list article,.task-agent-snapshot-list article,.recall-diagnostic-row,.recent-usage-row,.discipline-gap-list article{grid-template-columns:1fr}.cross-group-quality-table code,.ignore-memory-receipt-list code,.task-agent-snapshot-list code{text-align:left}}
 :global([data-theme='dark']) .memory-center .aura-card,:global([data-theme='dark']) .summary-card,:global([data-theme='dark']) .memory-group,:global([data-theme='dark']) .memory-item,:global([data-theme='dark']) .boundary-grid article,:global([data-theme='dark']) .metrics-grid article,:global([data-theme='dark']) .quality-check-card,:global([data-theme='dark']) .ignore-memory-receipt-cards article,:global([data-theme='dark']) .ignore-memory-receipt-work-list article,:global([data-theme='dark']) .selftest-residue-cards article,:global([data-theme='dark']) .task-agent-snapshot-cards article,:global([data-theme='dark']) .post-compact-cards article,:global([data-theme='dark']) .discipline-cards article,:global([data-theme='dark']) .discipline-buckets article,:global([data-theme='dark']) .post-compact-bucket,:global([data-theme='dark']) .candidate-row,:global([data-theme='dark']) .recall-diagnostic-list,:global([data-theme='dark']) .recent-usage-list{background:rgba(15,23,42,.54)}:global([data-theme='dark']) .mc-modal{background:rgba(15,23,42,.94)}
 .scope-mark.global{background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue))}
 .memory-policy-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0 12px;font-size:10px;color:var(--text-muted)}.memory-policy-strip button{border:1px solid rgba(239,68,68,.18);background:rgba(239,68,68,.06);color:var(--accent-red);border-radius:14px;padding:4px 8px;cursor:pointer}
@@ -4692,6 +5239,7 @@ onMounted(() => loadOverview(false))
 @media(max-width:1100px){.timeline-component-list{grid-template-columns:repeat(3,minmax(0,1fr))}.timeline-event-list article{grid-template-columns:74px minmax(0,1fr) 100px}.timeline-event-list p{grid-column:1/-1;white-space:normal}}
 @media(max-width:760px){.agent-reliability-list{grid-template-columns:1fr}.timeline-component-list{grid-template-columns:repeat(2,minmax(0,1fr))}.timeline-event-list article,.hook-ledger-list article,.replay-needle-list article,.replay-repair-list article,.replay-attempt-list article,.replay-work-list article,.historical-boundary-list article,.agent-type-replay-list article,.agent-type-target-list article{grid-template-columns:1fr}.timeline-event-list code,.hook-ledger-list code{text-align:left}}
 @media(max-width:760px){.capacity-runtime-strip,.provider-capability-fields,.provider-capability-list,.capability-health-list{grid-template-columns:repeat(2,minmax(0,1fr))}.retention-maintenance-row{flex-direction:column;align-items:flex-start}}
+@media(max-width:760px){.session-memory-editor-footer{flex-direction:column;align-items:flex-start}}
 :global([data-theme='dark']) .agent-reliability-list article,:global([data-theme='dark']) .timeline-component-list article{background:rgba(15,23,42,.54)}
 .dispatch-recovery-panel{margin:10px 0;border:1px solid rgba(16,185,129,.2);border-radius:8px;background:rgba(16,185,129,.025);overflow:hidden}.dispatch-recovery-panel.alert{border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.035)}.dispatch-recovery-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border-bottom:1px solid var(--border-color)}.dispatch-recovery-head h4{margin:2px 0 0;font-size:13px}.dispatch-recovery-head .btn{padding:6px 9px;font-size:8px}.dispatch-recovery-counters{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border-bottom:1px solid var(--border-color)}.dispatch-recovery-counters span{min-width:0;padding:8px 10px;border-left:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;gap:6px}.dispatch-recovery-counters span:first-child{border-left:0}.dispatch-recovery-counters small{font-size:7px;font-weight:800;color:var(--text-muted);text-transform:uppercase;overflow:hidden;text-overflow:ellipsis}.dispatch-recovery-counters strong{font-family:var(--font-tech);font-size:13px;color:var(--accent-green)}.dispatch-recovery-panel.alert .dispatch-recovery-counters strong{color:var(--accent-yellow)}.dispatch-recovery-list>article{border-top:1px solid rgba(100,116,139,.1)}.dispatch-recovery-list>article:first-child{border-top:0}.dispatch-recovery-list>article.invalid,.dispatch-recovery-list>article.uncertain{background:rgba(245,158,11,.035)}.dispatch-recovery-row{display:grid;grid-template-columns:86px minmax(150px,220px) minmax(190px,1fr) 108px minmax(150px,auto);gap:8px;align-items:center;padding:9px 10px}.dispatch-recovery-state{border-radius:5px;padding:4px 6px;font-size:7px;font-weight:800;text-align:center;background:rgba(100,116,139,.1);color:var(--text-muted)}.dispatch-recovery-state.recoverable_commit{background:rgba(16,185,129,.1);color:var(--accent-green)}.dispatch-recovery-state.active{background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.dispatch-recovery-state.cancel_prepared,.dispatch-recovery-state.uncertain{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.dispatch-recovery-state.invalid{background:rgba(239,68,68,.1);color:var(--accent-red)}.dispatch-recovery-identity,.dispatch-recovery-proof{min-width:0;display:flex;flex-direction:column;gap:3px}.dispatch-recovery-identity strong,.dispatch-recovery-identity small,.dispatch-recovery-proof code,.dispatch-recovery-proof small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dispatch-recovery-identity strong{font-size:9px}.dispatch-recovery-identity small,.dispatch-recovery-proof small{font-size:7px;color:var(--text-muted)}.dispatch-recovery-proof code{font-size:8px;color:var(--accent-blue)}.dispatch-recovery-row>time{font-size:7px;color:var(--text-muted);text-align:right}.dispatch-recovery-actions{display:flex;justify-content:flex-end;gap:5px;flex-wrap:wrap}.dispatch-recovery-actions .btn{padding:5px 7px;font-size:7px;white-space:nowrap}.dispatch-recovery-actions .danger{color:var(--accent-red);border-color:rgba(239,68,68,.2)}.dispatch-recovery-ack{padding:0 10px 8px;font-size:7px;color:var(--accent-green)}.dispatch-transcript-list{max-height:280px;overflow:auto;border-top:1px solid var(--border-color);background:rgba(15,23,42,.025)}.dispatch-transcript-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border-color)}.dispatch-transcript-meta code,.dispatch-transcript-meta span{min-width:0;font-size:7px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dispatch-transcript-event{display:grid;grid-template-columns:88px 130px minmax(0,1fr);gap:8px;padding:6px 10px;border-top:1px solid rgba(100,116,139,.08);align-items:start}.dispatch-transcript-event:first-child{border-top:0}.dispatch-transcript-event time,.dispatch-transcript-event strong{font-size:7px;color:var(--text-muted)}.dispatch-transcript-event strong{color:var(--accent-blue)}.dispatch-transcript-event pre{margin:0;max-height:72px;overflow:auto;font-family:var(--font-tech);font-size:7px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-secondary)}.dispatch-recovery-empty{padding:14px;text-align:center;font-size:9px;color:var(--text-muted)}.dispatch-resolve-identity{display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--border-color);border-radius:7px;background:rgba(var(--accent-blue-rgb),.035)}.dispatch-resolve-identity code{font-size:8px;color:var(--accent-blue);overflow-wrap:anywhere}.dispatch-resolve-identity span{font-size:8px;color:var(--text-muted);overflow-wrap:anywhere}
 @media(max-width:1100px){.dispatch-recovery-row{grid-template-columns:82px minmax(140px,1fr) minmax(180px,1.5fr)}.dispatch-recovery-row>time{display:none}.dispatch-recovery-actions{grid-column:2/-1}.dispatch-recovery-counters{grid-template-columns:repeat(3,minmax(0,1fr))}.dispatch-recovery-counters span:nth-child(4){border-left:0;border-top:1px solid var(--border-color)}}
@@ -4710,4 +5258,6 @@ onMounted(() => loadOverview(false))
 .stale-candidate-list{border-top:1px solid var(--border-color)}.stale-candidate-row{padding:10px;border-top:1px solid rgba(100,116,139,.08);background:rgba(255,255,255,.18)}.stale-candidate-row:first-child{border-top:0}.stale-candidate-row.pending{background:rgba(245,158,11,.035)}.stale-candidate-row.applied{background:rgba(16,185,129,.03)}.stale-candidate-row.rejected{opacity:.72}.stale-candidate-head{display:grid;grid-template-columns:72px minmax(0,1fr) 72px;gap:8px;align-items:center}.stale-candidate-head strong{min-width:0;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stale-candidate-head code{text-align:right;font-size:8px;color:var(--text-muted)}.stale-candidate-row>p{margin:7px 0;font-size:9px;line-height:1.55;color:var(--text-secondary)}.stale-candidate-row>small{display:block;margin-top:7px;font-size:8px;color:var(--text-muted);overflow-wrap:anywhere}.stale-candidate-replacement{max-height:150px;overflow:auto;padding:8px;border:1px solid var(--border-color);border-radius:7px;background:rgba(var(--accent-blue-rgb),.035);font-family:var(--font-tech);font-size:8px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}.stale-candidate-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}.stale-candidate-resolution{margin-top:7px;font-size:8px;color:var(--text-muted)}
 @media(max-width:760px){.stale-candidate-head{grid-template-columns:1fr}.stale-candidate-head code{text-align:left}.stale-candidate-actions{justify-content:flex-start}}
 :global([data-theme='dark']) .stale-candidate-row{background:rgba(15,23,42,.42)}
+.detail-header>div:first-child{max-width:100%}
+.detail-header h3{overflow-wrap:anywhere}
 </style>
