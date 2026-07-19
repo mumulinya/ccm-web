@@ -222,6 +222,30 @@ function normalizeAgentReceipt(raw: any, agent: string) {
       || raw.verifierReview
       || raw.verifier_review
   );
+  const projectMemoryRaw = raw.projectMemory || raw.project_memory || raw.durableMemory || raw.durable_memory || {};
+  const normalizeMemoryCandidates = (value: any) => (Array.isArray(value) ? value : value ? [value] : [])
+    .filter((item: any) => typeof item === "string" || (item && typeof item === "object"))
+    .map((item: any) => typeof item === "string" ? compactMemoryText(item, 1000) : {
+      type: compactMemoryText(item.type || item.kind || "", 40),
+      content: compactMemoryText(item.content || item.value || item.text || item.decision || item.title || item.summary || "", 1000),
+      reason: compactMemoryText(item.reason || item.rationale || "", 600),
+      evidence: normalizeReceiptStringArray(item.evidence || item.sources).slice(0, 12),
+      relatedFiles: normalizeReceiptStringArray(item.relatedFiles || item.related_files).slice(0, 24),
+      status: compactMemoryText(item.status || "active", 24),
+    })
+    .filter((item: any) => typeof item === "string" ? !!item : !!item.content)
+    .slice(0, 20);
+  const projectMemory = {
+    constraints: normalizeMemoryCandidates(projectMemoryRaw.constraints || projectMemoryRaw.userConstraints || projectMemoryRaw.user_constraints),
+    decisions: normalizeMemoryCandidates(projectMemoryRaw.decisions || raw.newDecisions || raw.new_decisions),
+    facts: normalizeMemoryCandidates(projectMemoryRaw.facts || projectMemoryRaw.stableFacts || projectMemoryRaw.stable_facts),
+    lessons: normalizeMemoryCandidates(projectMemoryRaw.lessons || projectMemoryRaw.pitfalls),
+    risks: normalizeMemoryCandidates(projectMemoryRaw.risks),
+    openItems: normalizeMemoryCandidates(projectMemoryRaw.openItems || projectMemoryRaw.open_items || projectMemoryRaw.followUps || projectMemoryRaw.follow_ups),
+    contracts: normalizeMemoryCandidates(projectMemoryRaw.contracts || projectMemoryRaw.contractChanges || projectMemoryRaw.contract_changes),
+    architectureVerified: projectMemoryRaw.architectureVerified === true || projectMemoryRaw.architecture_verified === true,
+    techStackVerified: projectMemoryRaw.techStackVerified === true || projectMemoryRaw.tech_stack_verified === true,
+  };
   return {
     agent,
     status: allowed.has(status) ? status : "partial",
@@ -233,6 +257,7 @@ function normalizeAgentReceipt(raw: any, agent: string) {
     needs: normalizeReceiptStringArray(raw.needs || raw.followUps || raw.follow_ups),
     ack,
     contractChanges,
+    projectMemory,
     independentReview,
     reviewer: String(raw.reviewer || raw.reviewed_by || raw.reviewedBy || raw.verifier || "").trim(),
     role: String(raw.role || raw.agent_role || raw.type || "").trim(),

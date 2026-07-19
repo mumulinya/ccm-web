@@ -1,6 +1,6 @@
 # 月薪喵独立 SVG 动作重绘
 
-> 状态：已被 `docs/yuexinmiao1-source-faithful-composition-2026-07-19/README.md` 取代。纯手绘角色骨架与来源月薪喵差异明显，不再作为当前实现。
+> 状态：实验方案，已废弃。当前已恢复 `docs/yuexinmiao1-first-version-restore-2026-07-19/README.md` 记录的第一次替换版本。
 
 ## 目标
 

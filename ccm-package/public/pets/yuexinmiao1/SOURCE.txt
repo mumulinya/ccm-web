@@ -5,4 +5,4 @@ Source: https://codex-pet.org/zh/pets/yuexinmiao1/
 Package endpoint: https://codex-pet.org/api/pets/yuexinmiao1/files/spritesheet.webp
 Imported for local CCM use on 2026-07-19.
 The source package did not include an explicit license. Do not redistribute it until permission is confirmed.
-CCM business-state SVG animations preserve the exact source character by embedding selected atlas frames and add independently drawn business props and motion.
+Supplemental SVG animations are CCM-specific frame choreography around the attributed source atlas.

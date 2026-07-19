@@ -22,6 +22,8 @@ function editableField(itemType, item) {
         return "text";
     if (itemType === "decisions")
         return "decision";
+    if (itemType === "durableMemories")
+        return "content";
     if (itemType === "conclusions" || itemType === "completed" || itemType === "workerLedger")
         return "summary";
     if (itemType === "blocked")
@@ -71,17 +73,9 @@ function applyMemoryControls(scope, scopeId, source) {
     const memory = JSON.parse(JSON.stringify(source || {}));
     const keys = scope === "group"
         ? ["factAnchors", "persistentRequirements", "decisions", "completed", "blocked", "workerLedger", "openQuestions", "nextActions"]
-        : scope === "project" ? ["conclusions", "decisions"] : ["user", "feedback", "authorization", "decisions", "missions", "unresolved", "references"];
+        : scope === "project" ? ["durableMemories"] : ["user", "feedback", "authorization", "decisions", "missions", "unresolved", "references"];
     for (const key of keys)
         memory[key] = applyListControls(scope, scopeId, key, memory[key]);
-    if (scope === "project") {
-        for (const archiveKey of ["conclusionArchives", "decisionArchives"]) {
-            memory[archiveKey] = (memory[archiveKey] || []).map((archive) => ({
-                ...archive,
-                records: applyListControls(scope, scopeId, archiveKey === "conclusionArchives" ? "conclusions" : "decisions", (archive.records || []).map((item) => ({ ...item, archiveId: archive.id }))),
-            }));
-        }
-    }
     return memory;
 }
 function updateMemoryControl(input) {

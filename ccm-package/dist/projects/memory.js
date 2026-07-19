@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.scanProjectFileStructure = scanProjectFileStructure;
 exports.loadProjectMemory = loadProjectMemory;
 exports.updateProjectMemoryFromReceipt = updateProjectMemoryFromReceipt;
+exports.recordAcceptedProjectDeliveryMemory = recordAcceptedProjectDeliveryMemory;
 exports.buildProjectMemoryPacket = buildProjectMemoryPacket;
 exports.buildProjectExecutionBrief = buildProjectExecutionBrief;
 exports.buildProjectConversationBrief = buildProjectConversationBrief;
@@ -47,11 +48,12 @@ const context_budget_1 = require("../system/context-budget");
 const utils_1 = require("../core/utils");
 const memory_control_center_1 = require("../modules/knowledge/memory-control-center");
 const PROJECT_MEMORY_DIR = path.join(utils_1.CCM_DIR, "project-memory");
-const PROJECT_MEMORY_VERSION = 3;
+const PROJECT_MEMORY_VERSION = 4;
 const CONCLUSION_COMPACT_THRESHOLD = 20;
 const CONCLUSION_RECENT_KEEP = 10;
 const DECISION_COMPACT_THRESHOLD = 80;
 const DECISION_RECENT_KEEP = 40;
+const TASK_HISTORY_RECENT_KEEP = 80;
 const IGNORED_DIRS = new Set([".git", ".idea", ".vscode", "node_modules", "dist", "build", "target", ".next", ".nuxt", "coverage", ".gradle", ".cache"]);
 function compact(value, max = 1200) {
     const text = String(value || "").replace(/\r/g, "").trim();
@@ -77,6 +79,165 @@ function uniqueStrings(...values) {
     }
     return result;
 }
+function normalizeComparableText(value) {
+    return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+function contentId(prefix, value) {
+    return `${prefix}_${crypto.createHash("sha256").update(normalizeComparableText(value)).digest("hex").slice(0, 16)}`;
+}
+function isLowValueDurableMemory(value) {
+    const text = normalizeComparableText(value).replace(/[。.!！]+$/g, "");
+    if (!text || text.length < 4)
+        return true;
+    return /^(?:已)?(?:完成|处理|修改|修复|优化)(?:了)?(?:本次)?(?:任务|工作|需求)?$|^(?:本次)?(?:任务|工作|需求)(?:已经|已)?(?:完成|处理|修改|修复|优化)$|^(?:测试|构建|编译|验证)(?:已经|已)?(?:通过|完成|成功)$|^(?:无|没有|暂无|none|n\/a|null)$/i.test(text);
+}
+const DURABLE_MEMORY_TYPES = new Set(["constraint", "decision", "fact", "lesson", "risk", "open_item", "contract"]);
+function normalizeDurableMemoryType(value, fallback = "fact") {
+    const raw = String(value || fallback).trim().toLowerCase().replace(/[\s-]+/g, "_");
+    const aliases = {
+        constraints: "constraint", user_constraint: "constraint", rule: "constraint",
+        decisions: "decision", architecture_decision: "decision",
+        facts: "fact", stable_fact: "fact",
+        lessons: "lesson", pitfall: "lesson",
+        risks: "risk", warning: "risk",
+        open_items: "open_item", openitem: "open_item", todo: "open_item", follow_up: "open_item",
+        contracts: "contract", contract_change: "contract",
+    };
+    const normalized = aliases[raw] || raw;
+    return DURABLE_MEMORY_TYPES.has(normalized) ? normalized : fallback;
+}
+function normalizeDurableMemoryCandidate(value, fallbackType, meta) {
+    const object = value && typeof value === "object" ? value : {};
+    const content = compact(typeof value === "string"
+        ? value
+        : object.content || object.value || object.text || object.decision || object.title || object.summary || "", 1000);
+    if (!content || isLowValueDurableMemory(content))
+        return null;
+    const type = normalizeDurableMemoryType(object.type || object.kind, fallbackType);
+    const status = ["active", "resolved", "superseded"].includes(String(object.status || "").toLowerCase())
+        ? String(object.status).toLowerCase()
+        : "active";
+    const now = meta.time || new Date().toISOString();
+    return {
+        id: contentId(type, content),
+        type,
+        content,
+        reason: compact(object.reason || object.rationale || "", 600),
+        evidence: uniqueStrings(object.evidence || object.sources || []).slice(0, 12),
+        relatedFiles: uniqueStrings(object.relatedFiles || object.related_files || meta.filesModified || []).slice(0, 24),
+        status,
+        confidence: meta.accepted === true ? "accepted" : "unverified",
+        createdAt: now,
+        updatedAt: now,
+        lastVerifiedAt: meta.accepted === true ? now : "",
+        occurrences: 1,
+        source: {
+            kind: String(meta.sourceKind || "agent_receipt"),
+            taskId: String(meta.taskId || ""),
+            groupId: String(meta.groupId || ""),
+            agent: String(meta.agent || ""),
+        },
+        sourceTaskIds: uniqueStrings(meta.taskId || []).slice(-20),
+    };
+}
+function extractDurableMemoryCandidates(receipt, meta) {
+    if (String(receipt?.status || "").toLowerCase() !== "done" || meta.accepted !== true)
+        return [];
+    const block = receipt.projectMemory || receipt.project_memory || receipt.durableMemory || receipt.durable_memory || {};
+    const candidates = [];
+    const addMany = (values, type) => {
+        const rows = Array.isArray(values) ? values : values ? [values] : [];
+        for (const row of rows) {
+            const candidate = normalizeDurableMemoryCandidate(row, type, meta);
+            if (candidate)
+                candidates.push(candidate);
+        }
+    };
+    addMany(block.constraints || block.userConstraints || block.user_constraints, "constraint");
+    addMany(block.decisions, "decision");
+    addMany(block.facts || block.stableFacts || block.stable_facts, "fact");
+    addMany(block.lessons || block.pitfalls, "lesson");
+    addMany(block.risks, "risk");
+    addMany(block.openItems || block.open_items || block.followUps || block.follow_ups, "open_item");
+    addMany(block.contracts || block.contractChanges || block.contract_changes, "contract");
+    addMany(receipt.newDecisions || receipt.new_decisions, "decision");
+    for (const change of Array.isArray(receipt.contractChanges || receipt.contract_changes) ? (receipt.contractChanges || receipt.contract_changes) : []) {
+        const content = [
+            change?.type ? `${change.type}` : "契约变更",
+            change?.endpoint || change?.path || "",
+            Array.isArray(change?.fields) && change.fields.length ? `字段 ${change.fields.join("、")}` : "",
+            change?.note || "",
+        ].filter(Boolean).join("：");
+        const candidate = normalizeDurableMemoryCandidate({ type: "contract", content, reason: change?.note || "" }, "contract", meta);
+        if (candidate)
+            candidates.push(candidate);
+    }
+    return candidates;
+}
+function mergeDurableMemories(existing, candidates) {
+    const result = Array.isArray(existing) ? [...existing] : [];
+    for (const candidate of candidates) {
+        const index = result.findIndex(item => item?.id === candidate.id
+            || (item?.type === candidate.type && normalizeComparableText(item?.content) === normalizeComparableText(candidate.content)));
+        if (index < 0) {
+            result.push(candidate);
+            continue;
+        }
+        const previous = result[index] || {};
+        result[index] = {
+            ...previous,
+            ...candidate,
+            createdAt: previous.createdAt || candidate.createdAt,
+            reason: candidate.reason || previous.reason || "",
+            evidence: uniqueStrings(previous.evidence || [], candidate.evidence || []).slice(-12),
+            relatedFiles: uniqueStrings(previous.relatedFiles || [], candidate.relatedFiles || []).slice(-24),
+            occurrences: Number(previous.occurrences || 1) + 1,
+            sourceTaskIds: uniqueStrings(previous.sourceTaskIds || [], candidate.sourceTaskIds || []).slice(-20),
+        };
+    }
+    return result;
+}
+function buildTaskHistoryRecord(receipt, meta) {
+    const summary = compact(receipt.summary || "", 1000);
+    const filesModified = uniqueStrings(meta.filesModified || [], receipt.filesChanged || receipt.files_changed || []).slice(-120);
+    const actions = uniqueStrings(receipt.actions || []).slice(0, 30);
+    const verification = uniqueStrings(receipt.verification || []).slice(0, 20);
+    const blockers = uniqueStrings(receipt.blockers || []).slice(0, 20);
+    const needs = uniqueStrings(receipt.needs || []).slice(0, 20);
+    if (!summary && !filesModified.length && !actions.length && !verification.length && !blockers.length && !needs.length)
+        return null;
+    const identity = [meta.taskId || "", meta.agent || "", summary, filesModified.join("|")].join("::");
+    return {
+        id: meta.taskId ? `task_${contentId("history", `${meta.taskId}:${meta.agent || ""}`).slice(8)}` : contentId("history", identity),
+        time: meta.time,
+        updatedAt: meta.time,
+        taskId: String(meta.taskId || ""),
+        groupId: String(meta.groupId || ""),
+        agent: String(meta.agent || ""),
+        sourceKind: String(meta.sourceKind || "agent_receipt"),
+        status: String(receipt.status || "partial"),
+        summary,
+        actions,
+        filesModified,
+        verification,
+        blockers,
+        needs,
+        memoryUsed: uniqueStrings(receipt.memoryUsed || receipt.memory_used || []).slice(0, 20),
+        memoryIgnored: uniqueStrings(receipt.memoryIgnored || receipt.memory_ignored || []).slice(0, 20),
+        invokedSkills: uniqueStrings((receipt.invokedSkills || receipt.invoked_skills || []).map((item) => typeof item === "string" ? item : `Skill:${item.name || ""}${item.contentHash ? `#${item.contentHash}` : ""}`), (receipt.memoryUsed || receipt.memory_used || []).filter((item) => /Skill\s*[:：]/i.test(String(item || "")))).slice(0, 20),
+    };
+}
+function upsertTaskHistory(existing, record) {
+    if (!record)
+        return Array.isArray(existing) ? existing : [];
+    const result = Array.isArray(existing) ? [...existing] : [];
+    const index = result.findIndex(item => item?.id === record.id || (record.taskId && item?.taskId === record.taskId && String(item?.agent || "") === record.agent));
+    if (index >= 0)
+        result[index] = { ...result[index], ...record, time: result[index]?.time || record.time };
+    else
+        result.push(record);
+    return result.slice(-TASK_HISTORY_RECENT_KEEP);
+}
 function searchTokens(value) {
     const text = String(value || "").toLowerCase();
     const tokens = new Set();
@@ -92,17 +253,33 @@ function buildRelevantArchiveEvidence(memory, query, maxRecords = 6) {
     if (!tokens.length)
         return "";
     const candidates = [];
+    const scoreRecord = (text) => {
+        const lower = text.toLowerCase();
+        let score = 0;
+        for (const token of tokens)
+            if (lower.includes(token))
+                score += token.length >= 4 ? 3 : 1;
+        return score;
+    };
+    for (const record of memory.taskHistory || []) {
+        const text = `${record.summary || ""} ${(record.actions || []).join(" ")} ${(record.filesModified || []).join(" ")} ${(record.verification || []).join(" ")}`;
+        const score = scoreRecord(text);
+        if (score >= 2)
+            candidates.push({ score, time: record.updatedAt || record.time || "", type: "task_history", text: compactPreserveEdges(text, 1200), archiveId: record.id || "" });
+    }
+    for (const record of memory.conclusions || []) {
+        const text = `${record.summary || ""} ${(record.filesModified || []).join(" ")} ${(record.verification || []).join(" ")}`;
+        const score = scoreRecord(text);
+        if (score >= 2)
+            candidates.push({ score, time: record.time || "", type: "legacy_conclusion", text: compactPreserveEdges(text, 1200), archiveId: record.taskId || "" });
+    }
     for (const archive of [...(memory.conclusionArchives || []), ...(memory.decisionArchives || [])]) {
         for (const record of archive?.records || []) {
             const text = archive.kind === "decisions"
                 ? `${record.decision || ""} ${record.reason || ""}`
                 : `${record.summary || ""} ${(record.filesModified || []).join(" ")} ${(record.verification || []).join(" ")}`;
-            const lower = text.toLowerCase();
-            let score = 0;
-            for (const token of tokens)
-                if (lower.includes(token))
-                    score += token.length >= 4 ? 3 : 1;
-            if (score)
+            const score = scoreRecord(text);
+            if (score >= 2)
                 candidates.push({ score, time: record.time || "", type: archive.kind, text: compactPreserveEdges(text, 1200), archiveId: archive.id || "" });
         }
     }
@@ -110,8 +287,44 @@ function buildRelevantArchiveEvidence(memory, query, maxRecords = 6) {
     if (!selected.length)
         return "";
     return [
-        "- 按本次任务自动召回的项目历史原文（优先于滚动摘要）：",
+        "- 按本次任务召回的历史执行证据（仅供参考，使用前核验当前代码）：",
         ...selected.map(item => `  - [${item.type}/${item.archiveId}] ${item.time || ""} ${item.text}`),
+    ].join("\n");
+}
+function scoreDurableMemory(item, queryTokens) {
+    const text = `${item?.content || ""} ${item?.reason || ""} ${(item?.relatedFiles || []).join(" ")}`.toLowerCase();
+    let score = 0;
+    for (const token of queryTokens)
+        if (text.includes(token))
+            score += token.length >= 4 ? 3 : 1;
+    if (item?.type === "constraint")
+        score += 30;
+    if (["risk", "open_item"].includes(item?.type))
+        score += 20;
+    if (["decision", "contract"].includes(item?.type))
+        score += 10;
+    if (item?.confidence === "accepted")
+        score += 4;
+    return score;
+}
+function buildDurableMemoryContext(memory, query, maxRecords = 24) {
+    const queryTokens = searchTokens(query);
+    const active = (Array.isArray(memory.durableMemories) ? memory.durableMemories : [])
+        .filter((item) => item?.status !== "resolved" && item?.status !== "superseded" && item?.content)
+        .map((item) => ({ item, score: scoreDurableMemory(item, queryTokens) }))
+        .filter((row) => row.score > 0 || row.item.type === "constraint")
+        .sort((a, b) => b.score - a.score || String(b.item.updatedAt || "").localeCompare(String(a.item.updatedAt || "")))
+        .slice(0, maxRecords)
+        .map((row) => row.item);
+    if (!active.length)
+        return "- 核心长期记忆：当前没有通过验收门禁的相关记录。";
+    const labels = {
+        constraint: "长期约束", decision: "关键决策", fact: "稳定事实", lesson: "历史经验",
+        risk: "已知风险", open_item: "未完成事项", contract: "稳定契约",
+    };
+    return [
+        "- 核心长期记忆（已通过任务验收；与当前源码冲突时以当前源码为准）：",
+        ...active.map((item) => `  - [${labels[item.type] || item.type}] ${item.content}${item.reason ? `（${item.reason}）` : ""}`),
     ].join("\n");
 }
 function memoryFile(project) {
@@ -233,6 +446,14 @@ function createEmptyProjectMemory(project, workDir = "") {
         legacyCompressedConclusions: "",
         conclusions: [],
         conclusionArchives: [],
+        taskHistory: [],
+        durableMemories: [],
+        memoryPolicy: {
+            schema: "ccm-project-memory-policy-v4",
+            taskHistoryInjectedByDefault: false,
+            durableMemoryRequiresAcceptedDoneReceipt: true,
+            legacyConclusionsInjectedByDefault: false,
+        },
         decisions: [],
         decisionArchives: [],
         filesModified: [],
@@ -274,6 +495,15 @@ function loadProjectMemory(project, options = {}) {
     memory.version = PROJECT_MEMORY_VERSION;
     memory.conclusionArchives = Array.isArray(memory.conclusionArchives) ? memory.conclusionArchives : [];
     memory.decisionArchives = Array.isArray(memory.decisionArchives) ? memory.decisionArchives : [];
+    memory.taskHistory = Array.isArray(memory.taskHistory) ? memory.taskHistory.slice(-TASK_HISTORY_RECENT_KEEP) : [];
+    memory.durableMemories = Array.isArray(memory.durableMemories) ? memory.durableMemories : [];
+    memory.memoryPolicy = {
+        schema: "ccm-project-memory-policy-v4",
+        taskHistoryInjectedByDefault: false,
+        durableMemoryRequiresAcceptedDoneReceipt: true,
+        legacyConclusionsInjectedByDefault: false,
+        ...(memory.memoryPolicy || {}),
+    };
     memory.integrity = {
         conclusions: validateArchiveIntegrity(memory.conclusionArchives),
         decisions: validateArchiveIntegrity(memory.decisionArchives),
@@ -289,17 +519,6 @@ function loadProjectMemory(project, options = {}) {
     memory.updatedAt = new Date().toISOString();
     writeJsonAtomic(file, memory);
     return memory;
-}
-function normalizeDecision(item, meta) {
-    if (typeof item === "string")
-        return { time: meta.time, taskId: meta.taskId, groupId: meta.groupId, decision: compact(item, 700), reason: "" };
-    return {
-        time: meta.time,
-        taskId: meta.taskId,
-        groupId: meta.groupId,
-        decision: compact(item?.decision || item?.title || item?.summary || "", 700),
-        reason: compact(item?.reason || "", 500),
-    };
 }
 function createArchive(kind, records) {
     const serialized = JSON.stringify(records);
@@ -423,26 +642,26 @@ function updateProjectMemoryFromReceipt(input) {
     const now = new Date().toISOString();
     const actualPaths = (input.actualFiles || []).map((item) => item?.path || item).filter(Boolean);
     const filesModified = uniqueStrings(actualPaths, receipt.filesChanged || receipt.files_changed || []).slice(-120);
-    const conclusion = {
+    const meta = {
         time: now,
-        taskId: String(input.taskId || ""),
-        groupId: String(input.groupId || ""),
-        status: String(receipt.status || "partial"),
-        summary: compact(receipt.summary || "", 1000),
+        taskId: input.taskId || "",
+        groupId: input.groupId || "",
+        agent: input.agent || input.project,
+        sourceKind: input.sourceKind || "agent_receipt",
+        accepted: input.accepted === true,
         filesModified,
-        verification: uniqueStrings(receipt.verification || []).slice(0, 20),
-        memoryUsed: uniqueStrings(receipt.memoryUsed || receipt.memory_used || []).slice(0, 20),
-        memoryIgnored: uniqueStrings(receipt.memoryIgnored || receipt.memory_ignored || []).slice(0, 20),
-        invokedSkills: uniqueStrings((receipt.invokedSkills || receipt.invoked_skills || []).map((item) => typeof item === "string" ? item : `Skill:${item.name || ""}${item.contentHash ? `#${item.contentHash}` : ""}`), (receipt.memoryUsed || receipt.memory_used || []).filter((item) => /Skill\s*[:：]/i.test(String(item || "")))).slice(0, 20),
     };
-    memory.conclusions = [...(memory.conclusions || []), conclusion];
-    const decisions = Array.isArray(receipt.newDecisions || receipt.new_decisions) ? (receipt.newDecisions || receipt.new_decisions) : [];
-    memory.decisions = [...(memory.decisions || []), ...decisions.map((item) => normalizeDecision(item, { time: now, taskId: input.taskId || "", groupId: input.groupId || "" })).filter((item) => item.decision)];
+    const historyRecord = buildTaskHistoryRecord(receipt, meta);
+    memory.taskHistory = upsertTaskHistory(memory.taskHistory, historyRecord);
+    const durableCandidates = extractDurableMemoryCandidates(receipt, meta);
+    memory.durableMemories = mergeDurableMemories(memory.durableMemories, durableCandidates);
     memory.filesModified = uniqueStrings(memory.filesModified || [], filesModified).slice(-240);
-    if (receipt.architecture)
+    const projectMemory = receipt.projectMemory || receipt.project_memory || {};
+    if (meta.accepted && projectMemory.architectureVerified === true && receipt.architecture)
         memory.architecture = compact(receipt.architecture, 3000);
-    if (Array.isArray(receipt.techStack || receipt.tech_stack))
+    if (meta.accepted && projectMemory.techStackVerified === true && Array.isArray(receipt.techStack || receipt.tech_stack)) {
         memory.techStack = uniqueStrings(memory.techStack || [], receipt.techStack || receipt.tech_stack).slice(0, 40);
+    }
     const scannedStructure = scanProjectFileStructure(memory.workDir);
     memory.fileStructure = scannedStructure.startsWith("工作目录不可用") && (receipt.fileStructure || receipt.file_structure)
         ? compact(receipt.fileStructure || receipt.file_structure, 20_000)
@@ -450,6 +669,20 @@ function updateProjectMemoryFromReceipt(input) {
     applyResourceConfig(memory, input.resources);
     compactConclusions(memory);
     compactDecisions(memory);
+    const audit = {
+        id: contentId("admission", `${input.taskId || ""}:${input.agent || input.project}:${historyRecord?.id || "empty"}`),
+        at: now,
+        taskId: String(input.taskId || ""),
+        groupId: String(input.groupId || ""),
+        agent: String(input.agent || input.project),
+        sourceKind: String(input.sourceKind || "agent_receipt"),
+        receiptStatus: String(receipt.status || "partial"),
+        acceptedDelivery: meta.accepted,
+        taskHistoryRecorded: !!historyRecord,
+        durableCandidateCount: durableCandidates.length,
+        decision: durableCandidates.length ? "durable_memory_committed" : meta.accepted ? "history_only_no_explicit_durable_memory" : "history_only_not_accepted",
+    };
+    memory.lastMemoryAdmission = audit;
     memory.integrity = {
         conclusions: validateArchiveIntegrity(memory.conclusionArchives),
         decisions: validateArchiveIntegrity(memory.decisionArchives),
@@ -458,52 +691,76 @@ function updateProjectMemoryFromReceipt(input) {
     writeJsonAtomic(memoryFile(input.project), memory);
     return memory;
 }
+function recordAcceptedProjectDeliveryMemory(input) {
+    const task = input.task || {};
+    const delivery = input.deliverySummary || {};
+    if (delivery.acceptance_gate_passed !== true) {
+        return { committed: false, reason: "acceptance_gate_not_passed", projects: [], durableCandidateCount: 0 };
+    }
+    const receipts = Array.isArray(delivery.receipts) ? delivery.receipts : [];
+    const profiles = Array.isArray(delivery.project_agent_profiles) ? delivery.project_agent_profiles : [];
+    const results = [];
+    for (const receipt of receipts) {
+        const role = String(receipt?.role || "").toLowerCase();
+        const project = String(receipt?.agent || task.target_project || task.targetProject || "").trim();
+        if (!project || role === "independent_verifier" || /(?:^|[-_\s])test[-_\s]?agent(?:$|[-_\s])|coordinator/i.test(project))
+            continue;
+        if (String(receipt?.status || "").toLowerCase() !== "done")
+            continue;
+        const profile = profiles.find((item) => String(item?.project || item?.name || item?.agent || "") === project) || {};
+        try {
+            const memory = updateProjectMemoryFromReceipt({
+                project,
+                workDir: profile.workDir || profile.work_dir || profile.workingDirectory || profile.working_directory || "",
+                groupId: task.group_id || task.groupId || "",
+                taskId: task.id || "",
+                agent: project,
+                accepted: true,
+                sourceKind: "accepted_project_delivery",
+                receipt,
+                actualFiles: receipt.filesChanged || receipt.files_changed || [],
+                resources: input.resources,
+            });
+            results.push({
+                project,
+                taskHistoryRecorded: memory.lastMemoryAdmission?.taskHistoryRecorded === true,
+                durableCandidateCount: Number(memory.lastMemoryAdmission?.durableCandidateCount || 0),
+            });
+        }
+        catch (error) {
+            results.push({ project, error: String(error?.message || error), taskHistoryRecorded: false, durableCandidateCount: 0 });
+        }
+    }
+    return {
+        committed: results.some(item => !item.error && (item.taskHistoryRecorded || item.durableCandidateCount > 0)),
+        reason: results.length ? "accepted_delivery_processed" : "no_implementation_receipts",
+        projects: results,
+        durableCandidateCount: results.reduce((sum, item) => sum + Number(item.durableCandidateCount || 0), 0),
+    };
+}
 function buildProjectMemoryPacket(project, options = {}) {
     const memory = (0, memory_control_center_1.applyMemoryControls)("project", project, loadProjectMemory(project, { workDir: options.workDir, resources: options.resources, refreshStructure: false }));
     const lines = [
-        "第二层：独立项目记忆（跨群聊、跨临时会话持续保存）：",
+        "第二层：独立项目长期记忆（跨群聊、跨临时会话持续保存）：",
         `- 项目：${memory.project}`,
         `- 工作目录：${memory.workDir || "未配置"}`,
-        `- 架构描述：${memory.architecture || "尚未记录"}`,
+        `- 架构描述：${memory.architecture || "尚未记录"}（仅作定位提示，执行前核验当前源码）`,
         `- 技术栈：${memory.techStack?.length ? memory.techStack.join("、") : "尚未识别"}`,
+        `- 记忆策略：只注入通过最终验收的长期约束、决策、事实、经验、风险、未完成事项和稳定契约；普通任务回执不默认进入上下文。`,
     ];
     if (memory.storageRecovery?.recoveredFromBackup)
         lines.push("- 存储恢复：主文件损坏，本次已从最近有效备份恢复。");
     if (memory.integrity?.conclusions?.pass === false || memory.integrity?.decisions?.pass === false) {
         lines.push(`- ⚠ 项目记忆归档校验异常：${[...(memory.integrity?.conclusions?.corrupted || []), ...(memory.integrity?.decisions?.corrupted || [])].join("、")}`);
     }
-    const boundary = memory.compactBoundary || memory.decisionCompactBoundary;
-    if (boundary) {
-        lines.push(`- 项目记忆压缩边界：${boundary.kind || "memory"} archive=${boundary.archiveId || ""}；压缩前 ${boundary.preCompactTokenCount || 0} tokens，压缩后 ${boundary.postCompactTokenCount || 0} tokens，压力 ${boundary.context_budget?.pressure ?? 0}%。`);
-    }
-    if (memory.filesModified?.length)
-        lines.push(`- 压缩后恢复锚点：${memory.filesModified.slice(-12).join("、")}`);
-    if (Array.isArray(boundary?.post_compact_restore?.archiveIds) && boundary.post_compact_restore.archiveIds.length) {
-        lines.push(`- 压缩后归档回灌：${boundary.post_compact_restore.archiveIds.slice(-5).join("、")}`);
-    }
-    if (memory.compressedConclusions)
-        lines.push(`- 历史结论压缩摘要：\n${compact(memory.compressedConclusions, 3500)}`);
-    if (memory.conclusions?.length) {
-        lines.push("- 最近 3 条任务结论：");
-        for (const item of memory.conclusions.slice(-3))
-            lines.push(`  - [${item.status || "unknown"}] ${item.summary || "无摘要"}${item.filesModified?.length ? `；文件：${item.filesModified.slice(0, 8).join("、")}` : ""}${item.invokedSkills?.length ? `；Skill：${item.invokedSkills.slice(0, 6).join("、")}` : ""}`);
-    }
-    if (memory.decisions?.length) {
-        lines.push("- 架构/实现决策：");
-        for (const item of memory.decisions.slice(-8))
-            lines.push(`  - ${item.decision}${item.reason ? `（${item.reason}）` : ""}`);
-    }
-    if (memory.decisionArchives?.length) {
-        lines.push(`- 历史决策归档：${memory.decisionArchives.reduce((sum, item) => sum + Number(item.count || 0), 0)} 条，${memory.decisionArchives.length} 个带校验归档；需要时可从项目记忆原文回溯。`);
-        lines.push(compactPreserveEdges(renderArchiveIndex(memory.decisionArchives, "", 2600), 2600));
-    }
+    lines.push(buildDurableMemoryContext(memory, String(options.query || "")));
     const archiveEvidence = buildRelevantArchiveEvidence(memory, String(options.query || ""));
     if (archiveEvidence)
         lines.push(archiveEvidence);
     lines.push(`- MCP：${memory.resources?.mcp?.join("、") || "无"}`);
     lines.push(`- Skills：${memory.resources?.skill?.join("、") || "无"}`);
     lines.push(`- 共享文档：${memory.resources?.sharedDocuments?.join("、") || "无"}`);
-    lines.push("- 当前文件结构：", compact(memory.fileStructure, 6500));
+    lines.push("- 当前目录和文件状态：不从长期记忆注入缓存快照；执行时直接读取工作目录。", "- 普通任务历史：仅在与本轮任务关键词相关时召回，不能替代当前源码与命令结果。");
     return lines.join("\n");
 }
 function buildProjectGitStatusSummary(workDir = "") {
@@ -576,10 +833,15 @@ function runProjectMemorySelfTest() {
     const recalled = buildRelevantArchiveEvidence(sample, "后续结论 0 g0.ts");
     const brief = buildProjectExecutionBrief("self-test", "继续处理 g0.ts 相关问题", { query: "g0.ts", workDir: "", verificationHints: ["npm test"] });
     const skillMemoryProject = `skill-memory-self-test-${process.pid}`;
-    let invokedSkillPreserved = false;
+    let taskHistoryIsIdempotent = false;
+    let lowValueHistoryIsNotInjected = false;
+    let durableMemoryAdmissionWorks = false;
+    let failedReceiptCannotCommitDurableMemory = false;
+    let finalAcceptanceControlsCommit = false;
     try {
-        const updated = updateProjectMemoryFromReceipt({
+        updateProjectMemoryFromReceipt({
             project: skillMemoryProject,
+            taskId: "task-history-only",
             receipt: {
                 status: "done",
                 summary: "使用 Skill 生成发布说明",
@@ -587,9 +849,66 @@ function runProjectMemorySelfTest() {
                 memoryUsed: ["Skill:release-notes"],
             },
         });
-        const packet = buildProjectMemoryPacket(skillMemoryProject);
-        invokedSkillPreserved = updated.conclusions.at(-1)?.invokedSkills?.includes("Skill:release-notes#abc123")
-            && packet.includes("Skill:release-notes");
+        updateProjectMemoryFromReceipt({
+            project: skillMemoryProject,
+            taskId: "task-history-only",
+            receipt: { status: "done", summary: "使用 Skill 生成发布说明（更新）" },
+        });
+        const accepted = updateProjectMemoryFromReceipt({
+            project: skillMemoryProject,
+            taskId: "task-durable",
+            accepted: true,
+            sourceKind: "accepted_project_delivery",
+            receipt: {
+                status: "done",
+                summary: "完成支付接口改造",
+                filesChanged: ["src/payments/api.ts"],
+                projectMemory: {
+                    constraints: ["支付接口必须保持幂等"],
+                    decisions: [{ content: "支付请求使用 idempotency-key 去重", reason: "避免重复扣款" }],
+                    facts: ["任务已完成"],
+                },
+            },
+        });
+        updateProjectMemoryFromReceipt({
+            project: skillMemoryProject,
+            taskId: "task-durable-repeat",
+            accepted: true,
+            sourceKind: "accepted_project_delivery",
+            receipt: { status: "done", projectMemory: { constraints: ["支付接口必须保持幂等"] } },
+        });
+        const beforeFailed = accepted.durableMemories.length;
+        const afterFailed = updateProjectMemoryFromReceipt({
+            project: skillMemoryProject,
+            taskId: "task-failed",
+            accepted: true,
+            receipt: { status: "failed", projectMemory: { decisions: ["失败任务不应成为正式决策"] } },
+        });
+        const stored = loadProjectMemory(skillMemoryProject);
+        const defaultPacket = buildProjectMemoryPacket(skillMemoryProject, { query: "完全无关查询" });
+        const relevantPacket = buildProjectMemoryPacket(skillMemoryProject, { query: "支付 idempotency-key" });
+        taskHistoryIsIdempotent = stored.taskHistory.filter((item) => item.taskId === "task-history-only").length === 1;
+        lowValueHistoryIsNotInjected = !defaultPacket.includes("使用 Skill 生成发布说明");
+        durableMemoryAdmissionWorks = stored.durableMemories.filter((item) => item.content === "支付接口必须保持幂等").length === 1
+            && stored.durableMemories.find((item) => item.content === "支付接口必须保持幂等")?.occurrences === 2
+            && !stored.durableMemories.some((item) => item.content === "任务已完成")
+            && relevantPacket.includes("支付接口必须保持幂等")
+            && relevantPacket.includes("idempotency-key");
+        failedReceiptCannotCommitDurableMemory = afterFailed.durableMemories.length === beforeFailed + 0
+            && !afterFailed.durableMemories.some((item) => item.content.includes("失败任务不应"));
+        const rejectedDelivery = recordAcceptedProjectDeliveryMemory({
+            task: { id: "task-rejected-delivery", target_project: skillMemoryProject },
+            deliverySummary: { acceptance_gate_passed: false, receipts: [{ agent: skillMemoryProject, status: "done", projectMemory: { facts: ["不应提交"] } }] },
+        });
+        const acceptedDelivery = recordAcceptedProjectDeliveryMemory({
+            task: { id: "task-accepted-delivery", target_project: skillMemoryProject },
+            deliverySummary: { acceptance_gate_passed: true, receipts: [{ agent: skillMemoryProject, status: "done", projectMemory: { facts: ["正式验收后提交"] } }] },
+        });
+        const afterDelivery = loadProjectMemory(skillMemoryProject);
+        finalAcceptanceControlsCommit = rejectedDelivery.committed === false
+            && acceptedDelivery.committed === true
+            && afterDelivery.durableMemories.some((item) => item.content === "正式验收后提交")
+            && !afterDelivery.durableMemories.some((item) => item.content === "不应提交");
     }
     finally {
         try {
@@ -636,7 +955,11 @@ function runProjectMemorySelfTest() {
         projectBoundaryTracksTokenPressure: !!sample.compactBoundary?.context_budget && Number(sample.compression?.postCompactTokenCount || 0) > 0,
         decisionBoundaryTracksTokenPressure: !!sample.decisionCompactBoundary?.context_budget && Number(sample.decisionCompactBoundary?.postCompactTokenCount || 0) > 0,
         postCompactRestoreAnchorsRecorded: sample.compactBoundary?.post_compact_restore?.archiveIds?.length > 0 && sample.decisionCompactBoundary?.post_compact_restore?.archiveIds?.length > 0,
-        invokedSkillPreservedInMemory: invokedSkillPreserved,
+        taskHistoryUpsertsByTaskInsteadOfAppending: taskHistoryIsIdempotent,
+        lowValueTaskHistoryIsNotInjectedByDefault: lowValueHistoryIsNotInjected,
+        acceptedDurableMemoryIsDeduplicatedAndInjected: durableMemoryAdmissionWorks,
+        failedReceiptCannotCommitDurableMemory,
+        finalAcceptanceControlsDurableCommit: finalAcceptanceControlsCommit,
         buildsExecutionBriefWithRecallAndRules: brief.includes("CCM 项目执行前简报") && brief.includes("继续处理 g0.ts") && brief.includes("历史记忆只能辅助判断") && brief.includes("npm test"),
         atomicBackupRecoveryWorks: backupRecoveryWorks,
     };

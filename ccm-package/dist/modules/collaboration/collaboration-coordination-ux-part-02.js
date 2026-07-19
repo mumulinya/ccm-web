@@ -529,8 +529,9 @@ function buildChildAgentDevelopmentContract(targetProject, taskText = "", option
         "- 回执质量要求：status=done 只有在目标覆盖、文件/产出和验证证据都齐全时才能写；缺文件、缺验证、仍有依赖或不确定时写 blocked/needs_info/partial。",
         "- ACK 结构要求：CCM_AGENT_RECEIPT 中必须包含 ack 对象，字段包括 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；如果不清楚，unclear 必须列出问题且 status 不得写 done。",
         "- contractChanges 结构要求：如果涉及接口、字段、schema、路由、类型、配置或前后端契约变化，CCM_AGENT_RECEIPT 中必须包含 contractChanges 数组，写明 type、endpoint/path、request、response、fields、consumers、note。",
+        "- 项目长期记忆要求：CCM_AGENT_RECEIPT.projectMemory 只填写跨会话仍有价值且可由本轮证据支持的内容，分类为 constraints、decisions、facts、lessons、risks、openItems、contracts；普通完成总结、文件清单、测试输出、临时状态和可直接从源码读取的信息不要写入，确实没有长期内容时各分类留空。",
         "- contract injection 消费要求：如果工作单包含 injection_id，回执必须写 consumedInjectionIds，并说明是否已适配、无需适配或仍阻塞。",
-        "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、consumedInjectionIds、memoryUsed、memoryIgnored、typedMemoryUsage、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage、providerSwitchExecution。",
+        "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、projectMemory、consumedInjectionIds、memoryUsed、memoryIgnored、typedMemoryUsage、globalMemoryUsage、apiMicrocompactUsage、apiMicrocompactNativeApplyRequestTelemetry、postCompactCandidateUsage、providerSwitchExecution。",
     ].filter(Boolean).join("\n");
 }
 function isSuggestedOnlyVerification(value) {

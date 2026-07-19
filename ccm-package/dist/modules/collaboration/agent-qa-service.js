@@ -332,6 +332,9 @@ function writeAcceptedAgentQaToProjectMemory(qa) {
             workDir: qa.continuation?.source_work_dir || "",
             groupId: qa.group_id || "",
             taskId: qa.task_id || "",
+            agent: qa.from_agent,
+            accepted: true,
+            sourceKind: "accepted_agent_qa",
             receipt: {
                 status: "done",
                 summary: `Agent 协作结论：${(0, memory_2.compactMemoryText)(qa.question, 260)} → ${(0, memory_2.compactMemoryText)(qa.answer, 700)}`,

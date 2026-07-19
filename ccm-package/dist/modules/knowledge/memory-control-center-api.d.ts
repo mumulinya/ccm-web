@@ -63,6 +63,16 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
     hookResultTokens: number;
     ptlRecoveryAttempts: number;
     boundaryGeneration: number;
+    longTermMemory: {
+        schema: any;
+        durableCount: any;
+        activeCount: any;
+        taskHistoryCount: any;
+        legacyConclusionCount: any;
+        writePolicy: string;
+        taskHistoryInjectedByDefault: boolean;
+        lastAdmission: any;
+    };
     updatedAt: any;
     sessionMemory: {
         status: any;
@@ -137,6 +147,16 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         hookResultTokens: number;
         ptlRecoveryAttempts: number;
         boundaryGeneration: number;
+        longTermMemory: {
+            schema: any;
+            durableCount: any;
+            activeCount: any;
+            taskHistoryCount: any;
+            legacyConclusionCount: any;
+            writePolicy: string;
+            taskHistoryInjectedByDefault: boolean;
+            lastAdmission: any;
+        };
         updatedAt: any;
         sessionMemory: {
             status: any;

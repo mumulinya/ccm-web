@@ -85,10 +85,13 @@ Provider usage 必须匹配 `scope/session/provider/model/generation/boundaryGen
 
 ### `tas_*` worker
 
-- 直接使用父群聊或项目会话的正式摘要、Session Memory 和动态近期原文快照。
+- 父群聊尚未正式压缩时，直接使用当前精确 `gcs_*` 的全部原始消息，不使用固定 15 条、字符截断或本地摘要。
+- 最终完整 prompt 达到项目子 Agent 的真实模型触发线后，先执行父群聊正式模型压缩，再重建 invocation、memory bundle、handoff、契约和快照。
+- 正式压缩后使用模型摘要或 Session Memory 加动态近期完整原文；压缩前后都保持父会话与 `tas_*` 的精确身份绑定。
+- 运行时切换到更小容量的 fallback Provider 后，会按新模型重新执行门禁、正式压缩和一次完整重建。
 - 不再生成相互冲突的本地 worker summary，也不做字符级 prompt projection。
 - Provider 原生 compact 无法证明真实执行时，当前 generation 失效并要求新 generation 回注正式上下文。
-- 最终 payload 超阈值时禁止 Provider 调用。
+- 模型压缩失败或压缩后最终 payload 仍超阈值时禁止 Provider 调用；原 transcript 与旧 compact head 保持不变。
 
 ## Memory Center
 

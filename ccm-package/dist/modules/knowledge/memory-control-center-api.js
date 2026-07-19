@@ -258,7 +258,25 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
     let currentMessageCount = 0;
     let tokenSource = currentTokens > 0 ? "post_compact_record" : "empty";
     let tokenUpdatedAt = warning.createdAt || decision.createdAt || compaction.lastPressureSampleAt || compaction.lastCompactedAt || "";
-    if (scope === "group") {
+    if (scope === "project") {
+        const activeDurable = (Array.isArray(memory?.durableMemories) ? memory.durableMemories : [])
+            .filter((item) => item?.content && !["resolved", "superseded"].includes(String(item.status || "active")))
+            .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+            .slice(0, 24);
+        const projectedContext = {
+            project: memory?.project || scopeId,
+            workDir: memory?.workDir || "",
+            architecture: memory?.architecture || "",
+            techStack: memory?.techStack || [],
+            durableMemories: activeDurable,
+            resources: memory?.resources || {},
+        };
+        currentTokens = (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)({ role: "system", content: JSON.stringify(projectedContext) });
+        currentMessageCount = activeDurable.length;
+        tokenSource = "project_long_term_injection_estimate";
+        tokenUpdatedAt = memory?.updatedAt || tokenUpdatedAt;
+    }
+    else if (scope === "group") {
         const parts = parseGroupMemoryScopeId(scopeId, memory);
         const recordedTokens = Number(warning.tokenUsage
             ?? decision.activeTokensBeforeCompact
@@ -311,7 +329,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
             tokenSource = String(compaction.tokenMeasurement?.source || compaction.token_measurement?.source || tokenSource);
         }
     }
-    const autoCompactThreshold = Number(memory?.compaction?.auto_compact_threshold
+    const autoCompactThreshold = scope === "project" ? 0 : Number(memory?.compaction?.auto_compact_threshold
         || compaction.autoCompactThreshold
         || compaction.auto_compact_threshold
         || warning.thresholds?.autoCompactThreshold
@@ -319,7 +337,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
         || (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config)
         || capacity.autoCompactThreshold);
     const effectiveContextWindow = Number(capacity.effectiveContextWindow || capacity.effective_context_window || capacity.contextWindow || capacity.context_window || context_budget_1.DEFAULT_CONTEXT_WINDOW_TOKENS);
-    const remainingTokens = Math.max(0, autoCompactThreshold - currentTokens);
+    const remainingTokens = scope === "project" ? 0 : Math.max(0, autoCompactThreshold - currentTokens);
     return {
         currentTokens,
         currentMessageCount,
@@ -327,7 +345,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
         autoCompactThreshold,
         remainingTokens,
         effectiveContextWindow,
-        tokenPressure: autoCompactThreshold > 0 ? Math.round((currentTokens / autoCompactThreshold) * 1000) / 10 : 0,
+        tokenPressure: scope !== "project" && autoCompactThreshold > 0 ? Math.round((currentTokens / autoCompactThreshold) * 1000) / 10 : 0,
         tokenUpdatedAt,
         sampledAutoCompactThreshold: Number(warning.thresholds?.autoCompactThreshold || decision.triggerTokens || 0),
     };
@@ -441,6 +459,17 @@ function memorySummary(scope, scopeId, memory, label) {
         hookResultTokens: Number(compaction.hookResultTokens ?? compaction.hook_result_tokens ?? compactionContainer.hook_result_tokens ?? 0),
         ptlRecoveryAttempts: Number(compaction.ptlRecoveryAttempts ?? compaction.ptl_recovery_attempts ?? compactionContainer.ptl_recovery_attempts ?? 0),
         boundaryGeneration: Number(compaction.boundaryGeneration ?? compaction.boundary_generation ?? 0),
+        longTermMemory: scope === "project" ? {
+            schema: memory?.memoryPolicy?.schema || "legacy_project_memory",
+            durableCount: Array.isArray(memory?.durableMemories) ? memory.durableMemories.length : 0,
+            activeCount: (Array.isArray(memory?.durableMemories) ? memory.durableMemories : []).filter((item) => !["resolved", "superseded"].includes(String(item?.status || "active"))).length,
+            taskHistoryCount: Array.isArray(memory?.taskHistory) ? memory.taskHistory.length : 0,
+            legacyConclusionCount: (Array.isArray(memory?.conclusions) ? memory.conclusions.length : 0)
+                + (Array.isArray(memory?.conclusionArchives) ? memory.conclusionArchives.reduce((sum, item) => sum + Number(item?.count || 0), 0) : 0),
+            writePolicy: memory?.memoryPolicy?.durableMemoryRequiresAcceptedDoneReceipt === true ? "accepted_delivery_only" : "legacy",
+            taskHistoryInjectedByDefault: memory?.memoryPolicy?.taskHistoryInjectedByDefault === true,
+            lastAdmission: memory?.lastMemoryAdmission || null,
+        } : null,
         updatedAt: memory?.updated_at || memory?.updatedAt || compaction.lastCompactedAt || "",
         sessionMemory: sessionMemory ? {
             status: scope === "group"
@@ -666,7 +695,7 @@ function collectItems(scope, scopeId, memory) {
     const exactSessionScope = (scope === "group" && groupScope?.sessionId !== "default") || ["global_session", "project_session", "task_agent"].includes(scope);
     const keys = exactSessionScope ? []
         : scope === "group" ? ["persistentRequirements", "factAnchors", "decisions", "completed", "blocked", "workerLedger", "openQuestions", "nextActions"]
-            : scope === "project" ? ["decisions", "conclusions"]
+            : scope === "project" ? ["durableMemories"]
                 : ["user", "feedback", "authorization", "decisions", "missions", "unresolved", "references"];
     for (const key of keys) {
         const values = Array.isArray(memory?.[key]) ? memory[key] : [];
@@ -682,10 +711,10 @@ function collectItems(scope, scopeId, memory) {
                     evidence: {
                         groupId: item?.groupId || groupScope?.groupId || "",
                         messageId: item?.messageId || item?.source?.messageIds?.[0] || "",
-                        taskId: item?.taskId || "",
+                        taskId: item?.taskId || item?.source?.taskId || "",
                         sessionId: item?.source?.sessionId || groupScope?.sessionId || "",
                         missionId: item?.source?.missionId || "",
-                        time: item?.time || item?.timestamp || item?.source?.timestamp || "",
+                        time: item?.updatedAt || item?.time || item?.timestamp || item?.source?.timestamp || "",
                     },
                     raw: item,
                 };
@@ -693,16 +722,6 @@ function collectItems(scope, scopeId, memory) {
         });
     }
     appendSessionContinuityItems(groups, scope, scopeId, memory);
-    if (scope === "project") {
-        for (const [archiveKey, type] of [["decisionArchives", "decisions"], ["conclusionArchives", "conclusions"]]) {
-            const archived = (memory?.[archiveKey] || []).flatMap((archive) => (archive.records || []).map((item) => ({ ...item, archiveId: archive.id })));
-            groups.push({ type: `${type}Archive`, items: archived.map((item, index) => {
-                    const itemId = (0, memory_control_center_controls_1.getMemoryItemId)(type, item, index);
-                    const control = controls.find((entry) => entry.itemType === type && entry.itemId === itemId);
-                    return { itemId, type, archived: true, archiveId: item.archiveId, text: control?.editedText !== undefined ? control.editedText : (0, memory_control_center_controls_1.itemText)(type, item), originalText: (0, memory_control_center_controls_1.itemText)(type, item), pinned: !!control?.pinned, deprecated: !!control?.deprecated, reason: control?.reason || "", evidence: { groupId: item.groupId || "", taskId: item.taskId || "", time: item.time || "" }, raw: item };
-                }) });
-        }
-    }
     return groups;
 }
 function getMemoryCenterScope(scope, scopeId) {

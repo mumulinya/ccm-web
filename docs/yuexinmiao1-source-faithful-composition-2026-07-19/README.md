@@ -1,5 +1,7 @@
 # 月薪喵来源角色一致性合成
 
+> 状态：实验方案，已废弃。当前已恢复 `docs/yuexinmiao1-first-version-restore-2026-07-19/README.md` 记录的第一次替换版本。
+
 ## 结论
 
 `yuexinmiao1` 的公开宠物包只提供 `pet.json` 和 `spritesheet.webp`，没有 SVG 路径、角色源代码或可直接修改的动作工程。手工猜测角色轮廓会造成头身比例、线条和表情与来源角色明显不同，因此不再使用手绘通用猫骨架。

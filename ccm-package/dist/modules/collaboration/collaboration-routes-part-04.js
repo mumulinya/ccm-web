@@ -22,6 +22,7 @@ const storage_1 = require("./storage");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
+const memory_2 = require("../../projects/memory");
 const collaboration_protocol_1 = require("../../agents/collaboration-protocol");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
 const worker_handoff_1 = require("../../agents/worker-handoff");
@@ -626,6 +627,11 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     file_changes: execution.fileChanges || null,
                     delivery_summary: legacyDeliverySummary,
                 }) || { ...task, status: isCompleted ? "done" : "in_progress", delivery_summary: legacyDeliverySummary, status_detail: execution.detail || (isCompleted ? "验收通过" : "等待补充信息或返工") };
+                if (isCompleted && legacyDeliverySummary.acceptance_gate_passed === true) {
+                    const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: updatedTask, deliverySummary: legacyDeliverySummary });
+                    if (projectMemoryResult.committed)
+                        (0, logs_1.addTaskLog)(task_id, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.durableCandidateCount} 条长期记录`);
+                }
                 if (autoAssignGroupId) {
                     (0, collaboration_1.appendLegacyTaskExecutionGroupReport)({
                         groupId: autoAssignGroupId,

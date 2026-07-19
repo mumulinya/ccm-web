@@ -108,6 +108,7 @@ const isSessionDetail = computed(() => ['group', 'global_session', 'project_sess
 
 const typeLabels = {
   persistentRequirements: '长期要求', factAnchors: '事实', decisions: '决策', completed: '已完成',
+  durableMemories: '有效长期记忆',
   blocked: '阻塞', workerLedger: '子 Agent 记录', openQuestions: '待确认', nextActions: '下一步',
   conclusions: '结论', user: '用户偏好', feedback: '反馈', authorization: '授权', missions: '任务',
   unresolved: '未解决', references: '引用', sessionSummary: '当前会话摘要', legacySessionSummary: '历史会话摘要（待模型验证）', sessionArchives: '本会话压缩归档',
@@ -387,7 +388,7 @@ onMounted(() => loadOverview(false))
             <summary><FolderKanban :size="16" /><strong>{{ tree.label }}</strong><small>{{ tree.sessions.length }} 个会话</small></summary>
             <div class="scope-children">
               <button v-for="item in tree.longTerm" :key="item.id" :class="{ active: selectedId === item.id && selectedScope === item.scope }" @click="selectScope(item)">
-                <Globe2 :size="15" /><span><strong>长期记忆</strong><small>{{ formatNumber(item.currentTokens) }} / {{ formatNumber(item.autoCompactThreshold) }} tokens</small></span>
+                <Globe2 :size="15" /><span><strong>长期记忆</strong><small>{{ item.longTermMemory?.activeCount || 0 }} 条有效 · {{ item.longTermMemory?.taskHistoryCount || 0 }} 条历史</small></span>
               </button>
               <button v-for="item in tree.sessions" :key="item.id" :class="{ active: selectedId === item.id && selectedScope === item.scope }" @click="selectScope(item)">
                 <MessagesSquare :size="15" /><span><strong>{{ item.sessionLabel || item.label }}</strong><small>{{ formatNumber(item.currentTokens) }} / {{ formatNumber(item.autoCompactThreshold) }} tokens</small></span>
@@ -415,17 +416,23 @@ onMounted(() => loadOverview(false))
             <div><span class="eyebrow">{{ selectedScope.toUpperCase() }}</span><h3>{{ selectedSummary.label }}</h3></div>
             <button class="text-btn" @click="toggleAudit">{{ showAudit ? '返回记忆' : '审计记录' }}</button>
           </div>
-          <div class="summary-strip">
+          <div v-if="selectedScope === 'project'" class="summary-strip">
+            <span><small>实际注入估算</small><strong>{{ formatNumber(selectedSummary.currentTokens) }} tokens</strong></span>
+            <span><small>有效长期记忆</small><strong>{{ selectedSummary.longTermMemory?.activeCount || 0 }} 条</strong></span>
+            <span><small>任务历史</small><strong>{{ selectedSummary.longTermMemory?.taskHistoryCount || 0 }} 条</strong></span>
+            <span><small>写入策略</small><strong>验收后提交</strong></span>
+          </div>
+          <div v-else class="summary-strip">
             <span><small>当前模型上下文</small><strong>{{ formatNumber(selectedSummary.currentTokens) }}</strong></span>
             <span><small>自动压缩线</small><strong>{{ formatNumber(selectedSummary.autoCompactThreshold) }}</strong></span>
             <span><small>距离压缩</small><strong>{{ formatNumber(selectedSummary.remainingTokens) }}</strong></span>
             <span><small>状态</small><strong :class="selectedSummary.health"><CheckCircle2 v-if="selectedSummary.health === 'healthy'" :size="15" />{{ selectedSummary.health }}</strong></span>
           </div>
-          <p v-if="selectedSummary.beforeTokens || selectedSummary.afterTokens" class="compact-history">最近压缩：{{ formatNumber(selectedSummary.beforeTokens) }} → {{ formatNumber(selectedSummary.afterTokens) }} tokens</p>
-          <p v-if="selectedSummary.summarySource || selectedSummary.sessionMemory || selectedSummary.consecutiveFailures" class="compact-history">
+          <p v-if="selectedScope !== 'project' && (selectedSummary.beforeTokens || selectedSummary.afterTokens)" class="compact-history">最近压缩：{{ formatNumber(selectedSummary.beforeTokens) }} → {{ formatNumber(selectedSummary.afterTokens) }} tokens</p>
+          <p v-if="selectedScope !== 'project' && (selectedSummary.summarySource || selectedSummary.sessionMemory || selectedSummary.consecutiveFailures)" class="compact-history">
             正式摘要 {{ summarySourceLabel(selectedSummary.summarySource) }} · 近期原文 {{ formatNumber(selectedSummary.preservedRecentTokens) }} tokens / {{ selectedSummary.preservedRecentMessages || 0 }} 条 · Session Memory {{ sessionMemoryStatusLabel(selectedSummary.sessionMemory?.status) }} · 连续失败 {{ selectedSummary.consecutiveFailures || 0 }}
           </p>
-          <p v-if="selectedSummary.postCompactGate || selectedSummary.resolvedModelCapacity || selectedSummary.ptlRecoveryAttempts" class="compact-history">
+          <p v-if="selectedScope !== 'project' && (selectedSummary.postCompactGate || selectedSummary.resolvedModelCapacity || selectedSummary.ptlRecoveryAttempts)" class="compact-history">
             门禁 {{ selectedSummary.postCompactGate?.status || '未采样' }} · 模型容量 {{ formatNumber(selectedSummary.effectiveContextWindow) }} · 当前请求 {{ formatNumber(selectedSummary.pendingRequestTokens) }} · 恢复 {{ formatNumber(selectedSummary.recoveryContextTokens) }} · Hooks {{ formatNumber(selectedSummary.hookResultTokens) }} · PTL {{ selectedSummary.ptlRecoveryAttempts || 0 }} 次
           </p>
 

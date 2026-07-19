@@ -325,7 +325,7 @@ import {
   setReasoningAssertion,
   updateReasoningPlan,
 } from "../../agents/reasoning-loop";
-import { buildProjectExecutionBrief, buildProjectMemoryPacket } from "../../projects/memory";
+import { buildProjectExecutionBrief, buildProjectMemoryPacket, recordAcceptedProjectDeliveryMemory } from "../../projects/memory";
 import { recordGlobalDirectDispatchMemory, recordGlobalDirectDispatchRollbackMemory } from "../../agents/global/memory";
 import { createDispatchRecord, normalizeDispatchBatch } from "./dispatch-records";
 import {
@@ -1203,6 +1203,8 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
           daily_dev_execution_readiness: null,
           completed_at: new Date().toISOString()
         }) || { ...task, status: "done", result: result.substring(0, 500) };
+        const projectMemoryResult = recordAcceptedProjectDeliveryMemory({ task: completedTask, deliverySummary: finalizedDeliverySummary });
+        if (projectMemoryResult.committed) addTaskLog(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
         updateGroupTaskInlineStatus(completedTask, "done", execution.detail || "验收通过");
         finalizeTaskKernel(task, execution, finalizedDeliverySummary, "succeeded", execution.detail || "验收通过");
         addTaskLog(taskId, "success", `✅ 任务完成：${execution.detail || "验收通过"}`);
@@ -1247,6 +1249,8 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
             daily_dev_execution_readiness: null,
             completed_at: new Date().toISOString()
           }) || { ...task, status: "done", result: result.substring(0, 500) };
+          const projectMemoryResult = recordAcceptedProjectDeliveryMemory({ task: completedTask, deliverySummary: finalizedPromotedSummary });
+          if (projectMemoryResult.committed) addTaskLog(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
           updateGroupTaskInlineStatus(completedTask, "done", promotedExecution.detail);
           finalizeTaskKernel(task, promotedExecution, finalizedPromotedSummary, "succeeded", promotedExecution.detail);
           addTaskLog(taskId, "success", `✅ 任务完成：${promotedExecution.detail}`);

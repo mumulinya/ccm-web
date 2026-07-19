@@ -9,10 +9,23 @@ export declare function updateProjectMemoryFromReceipt(input: {
     workDir?: string;
     groupId?: string;
     taskId?: string;
+    agent?: string;
+    accepted?: boolean;
+    sourceKind?: string;
     receipt: any;
     actualFiles?: any[];
     resources?: any;
 }): any;
+export declare function recordAcceptedProjectDeliveryMemory(input: {
+    task: any;
+    deliverySummary: any;
+    resources?: any;
+}): {
+    committed: boolean;
+    reason: string;
+    projects: any[];
+    durableCandidateCount: any;
+};
 export declare function buildProjectMemoryPacket(project: string, options?: {
     workDir?: string;
     resources?: any;
@@ -41,7 +54,11 @@ export declare function runProjectMemorySelfTest(): {
         projectBoundaryTracksTokenPressure: boolean;
         decisionBoundaryTracksTokenPressure: boolean;
         postCompactRestoreAnchorsRecorded: boolean;
-        invokedSkillPreservedInMemory: boolean;
+        taskHistoryUpsertsByTaskInsteadOfAppending: boolean;
+        lowValueTaskHistoryIsNotInjectedByDefault: boolean;
+        acceptedDurableMemoryIsDeduplicatedAndInjected: boolean;
+        failedReceiptCannotCommitDurableMemory: boolean;
+        finalAcceptanceControlsDurableCommit: boolean;
         buildsExecutionBriefWithRecallAndRules: boolean;
         atomicBackupRecoveryWorks: boolean;
     };

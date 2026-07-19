@@ -380,7 +380,7 @@ import {
   updateReasoningPlan,
 } from "../../agents/reasoning-loop";
 
-import { buildProjectExecutionBrief, buildProjectMemoryPacket } from "../../projects/memory";
+import { buildProjectExecutionBrief, buildProjectMemoryPacket, recordAcceptedProjectDeliveryMemory } from "../../projects/memory";
 
 import { recordGlobalDirectDispatchMemory, recordGlobalDirectDispatchRollbackMemory } from "../../agents/global/memory";
 
@@ -1145,6 +1145,10 @@ export function handleCollaborationApi(
           file_changes: execution.fileChanges || null,
           delivery_summary: legacyDeliverySummary,
         }) || { ...task, status: isCompleted ? "done" : "in_progress", delivery_summary: legacyDeliverySummary, status_detail: execution.detail || (isCompleted ? "验收通过" : "等待补充信息或返工") };
+        if (isCompleted && legacyDeliverySummary.acceptance_gate_passed === true) {
+          const projectMemoryResult = recordAcceptedProjectDeliveryMemory({ task: updatedTask, deliverySummary: legacyDeliverySummary });
+          if (projectMemoryResult.committed) addTaskLog(task_id, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.durableCandidateCount} 条长期记录`);
+        }
 
         if (autoAssignGroupId) {
           appendLegacyTaskExecutionGroupReport({

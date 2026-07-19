@@ -5,13 +5,11 @@ import * as fs from "fs";
 
 import * as path from "path";
 
-import * as crypto from "crypto";
-
 import { loadProjectConfigs, loadTasks } from "../../core/db";
 
 import { CCM_DIR, getWorkDirForProject } from "../../core/utils";
 
-import { buildContextBudget, estimateTextTokens } from "../../system/context-budget";
+import { buildContextBudget } from "../../system/context-budget";
 
 import { buildToolAuthorizationPayload, normalizeToolAuthorization } from "../../tools/tool-authorization";
 
@@ -196,6 +194,13 @@ import { getGroupToolContinuityMarkdownFile, getGroupToolContinuitySnapshotFile,
 import {
   buildGroupMemoryContext,
   prepareGroupMemoryResumeProjection } from "./group-memory-context-part-01";
+
+export {
+  buildChildParentSessionContextPacket,
+  buildChildParentSessionContextProjection,
+  buildExactGroupSessionModelContextPacket,
+  buildExactGroupSessionModelContextProjection,
+} from "./group-session-model-context";
 
 export function buildGroupContextPacket(groupId: string, options: any = {}) {
   const groupSessionId = String(options.groupSessionId || options.group_session_id || getActiveGroupChatSessionId(groupId));

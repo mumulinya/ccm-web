@@ -1,6 +1,6 @@
 {
   "pass": false,
-  "generatedAt": "2026-07-18T14:39:26.852Z",
+  "generatedAt": "2026-07-19T14:19:36.927Z",
   "checks": [
     {
       "name": "active project is listed from isolated runtime",

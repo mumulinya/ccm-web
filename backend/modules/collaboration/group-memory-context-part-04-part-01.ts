@@ -215,6 +215,7 @@ export function renderGroupMemoryContextBundle(bundle: any) {
   const compaction = bundle.compaction || {};
   const resumeProjection = compaction.resumeProjection || compaction.resume_projection || {};
   const resumeContext = bundle.resume_context || bundle.resumeContext || {};
+  const parentSessionDelivery = bundle.parent_session_delivery || bundle.parentSessionDelivery || {};
   const related = bundle.related_work || {};
   const typedMemory = groupState.typedMemory || {};
   const providerRankingCompactRepairReceiptRecall = typedMemory.providerRankingCompactRepairReceiptRecall
@@ -1060,8 +1061,8 @@ export function renderGroupMemoryContextBundle(bundle: any) {
   if (typedMemory.recall?.workerContextPressureScoring?.active && Number(typedMemory.recall?.workerContextPressureScoring?.boosted_count || 0) > 0) {
     lines.push("- 上下文压力召回回执：本轮如使用或忽略 pressure recall typed MEMORY.md，CCM_AGENT_RECEIPT.memoryUsed/memoryIgnored 必须引用对应 relPath 或说明未使用原因。");
   }
-  if (groupState.summaryText) lines.push(`- 群聊压缩摘要：\n${compactPreserveLines(groupState.summaryText, 3200)}`);
-  if (resumeContext.text) lines.push(`- 已验证的会话恢复原文窗口：\n${resumeContext.text}`);
+  if (groupState.summaryText && parentSessionDelivery.suppress_local_digest !== true) lines.push(`- 群聊压缩摘要：\n${compactPreserveLines(groupState.summaryText, 3200)}`);
+  if (resumeContext.text && parentSessionDelivery.suppress_bounded_resume_context !== true) lines.push(`- 已验证的会话恢复原文窗口：\n${resumeContext.text}`);
   const addList = (title: string, items: any[], mapper: (item: any) => string, limit = 6) => {
     const list = (items || []).filter(Boolean).slice(-limit);
     if (!list.length) return;

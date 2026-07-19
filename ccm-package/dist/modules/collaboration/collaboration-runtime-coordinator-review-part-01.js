@@ -61,6 +61,7 @@ const agent_sessions_1 = require("../../tasks/agent-sessions");
 const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const reasoning_loop_1 = require("../../agents/reasoning-loop");
+const memory_2 = require("../../projects/memory");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
 const worker_handoff_1 = require("../../agents/worker-handoff");
 const collaboration_runtime_task_queue_1 = require("./collaboration-runtime-task-queue");
@@ -700,6 +701,9 @@ async function processTargetQueue(targetKey, ctx) {
                     daily_dev_execution_readiness: null,
                     completed_at: new Date().toISOString()
                 }) || { ...task, status: "done", result: result.substring(0, 500) };
+                const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedDeliverySummary });
+                if (projectMemoryResult.committed)
+                    (0, logs_1.addTaskLog)(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
                 (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(completedTask, "done", execution.detail || "验收通过");
                 finalizeTaskKernel(task, execution, finalizedDeliverySummary, "succeeded", execution.detail || "验收通过");
                 (0, logs_1.addTaskLog)(taskId, "success", `✅ 任务完成：${execution.detail || "验收通过"}`);
@@ -745,6 +749,9 @@ async function processTargetQueue(targetKey, ctx) {
                         daily_dev_execution_readiness: null,
                         completed_at: new Date().toISOString()
                     }) || { ...task, status: "done", result: result.substring(0, 500) };
+                    const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedPromotedSummary });
+                    if (projectMemoryResult.committed)
+                        (0, logs_1.addTaskLog)(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
                     (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(completedTask, "done", promotedExecution.detail);
                     finalizeTaskKernel(task, promotedExecution, finalizedPromotedSummary, "succeeded", promotedExecution.detail);
                     (0, logs_1.addTaskLog)(taskId, "success", `✅ 任务完成：${promotedExecution.detail}`);

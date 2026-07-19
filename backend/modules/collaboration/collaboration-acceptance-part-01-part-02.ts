@@ -623,6 +623,8 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
     verification: Array.isArray(receipt.verification) ? receipt.verification.slice(0, 30) : [],
     ack: receipt.ack || null,
     contractChanges: Array.isArray(receipt.contractChanges || receipt.contract_changes) ? (receipt.contractChanges || receipt.contract_changes).slice(0, 12) : [],
+    projectMemory: receipt.projectMemory || receipt.project_memory || null,
+    project_memory: receipt.project_memory || receipt.projectMemory || null,
     independentReview: Array.isArray(receipt.independentReview || receipt.independent_review || receipt.codeReview || receipt.code_review)
       ? (receipt.independentReview || receipt.independent_review || receipt.codeReview || receipt.code_review).slice(0, 8)
       : [],

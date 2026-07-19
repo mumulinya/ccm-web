@@ -84,6 +84,8 @@ Date: 2026-07-18
 9. Global Agent 只读全局长期记忆和当前全局会话连续性，群聊与项目内容不会串入。
 10. Memory Center 展示四类精确会话的 token、阈值、摘要、近期窗口、Session Memory 和熔断状态。
 
+2026-07-19 继续核对真实派发代码后，发现第 7 项此前仍有一个实现差异：父群聊尚未正式压缩时，`tas_*` 实际拿到的是固定 15 条消息、最后 5 条较完整正文和一份本地旧消息摘要，并非当前会话完整原文。现已删除该派发入口，改为压缩前完整精确 transcript；最终 prompt 达到子模型容量线时执行正式模型压缩，提交后重建全部派发证据，失败则不调用 Provider。详见 [项目子 Agent 父会话 CC 风格完整上下文](./child-parent-session-cc-full-context-2026-07-19/README.md)。
+
 Memory Center 的最终投影不再是扁平 scope 清单：现在以全局 Agent、群聊和项目为父节点，再展示各自的精确会话。群聊会话以真实 manifest 为准，不再因尚未生成压缩文件而漏掉。详见 [记忆中心项目与群聊会话层级](./memory-center-scope-session-hierarchy-2026-07-18/README.md)。
 
 后续核对发现记忆中心曾把 intent gateway 判断、普通回复流水和本地 deterministic fallback 冒充会话记忆。这些字段已从会话页与模型上下文移除，只保留审计/故障恢复价值。详见 [会话记忆真实投影与流水状态清理](./canonical-session-memory-presentation-2026-07-18/README.md)。

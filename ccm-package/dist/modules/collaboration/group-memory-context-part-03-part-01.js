@@ -552,8 +552,11 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
     });
     const relevantHistoricalEvidence = (0, group_memory_compaction_1.buildRelevantHistoricalGroupContext)(projectedMessages, boundaryIndex, [task, memory.goal, project].filter(Boolean).join("\n"), { maxMessages: 6, maxChars: Number(options.maxEvidenceChars || 7000) });
     const summaryText = memory.messageDigest || (0, group_memory_compaction_1.renderConversationSummary)(memory.conversationSummary || null);
-    const formalSummarySource = String(memory.compaction?.summarySource || "");
-    const formalSummaryAvailable = ["model", "session-memory"].includes(formalSummarySource);
+    const formalSummarySource = String(memory.compaction?.summarySource || "").toLowerCase();
+    const formalSummaryAvailable = ["model", "session-memory", "session_memory"].includes(formalSummarySource)
+        && !!memory.conversationSummary;
+    const dedicatedParentSessionContext = options.dedicatedParentSessionContext === true
+        || options.dedicated_parent_session_context === true;
     const continuityFloorIndex = Math.max(0, boundaryIndex + 1);
     const continuityWindow = (0, session_memory_window_1.calculateSessionMemoryKeepWindow)(projectedMessages, { floorIndex: continuityFloorIndex });
     const continuityRecentMessages = projectedMessages.slice(continuityWindow.startIndex).map((message, index) => ({
@@ -765,6 +768,14 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         target_project: project,
         task_query: (0, group_memory_shared_1.compactMemoryText)(task, 900),
         generated_at: generatedAt,
+        parent_session_delivery: {
+            schema: "ccm-child-parent-session-delivery-policy-v1",
+            mode: formalSummaryAvailable ? "canonical_summary_recent_raw" : "precompact_full_raw",
+            canonical_summary_available: formalSummaryAvailable,
+            dedicated_parent_session_context: dedicatedParentSessionContext,
+            suppress_local_digest: dedicatedParentSessionContext,
+            suppress_bounded_resume_context: dedicatedParentSessionContext,
+        },
         session_binding: sessionBinding,
         compact_head: compactHead,
         pressure_memory_provenance_receipt_discipline: pressureMemoryProvenanceReceiptDiscipline.active ? pressureMemoryProvenanceReceiptDiscipline : null,
