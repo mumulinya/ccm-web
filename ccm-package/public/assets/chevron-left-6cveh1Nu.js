@@ -1,0 +1,1 @@
+import{X as e}from"./index-BFs-Hr_I.js";var t=e(`chevron-left`,[[`path`,{d:`m15 18-6-6 6-6`,key:`1wnfg3`}]]);export{t};
