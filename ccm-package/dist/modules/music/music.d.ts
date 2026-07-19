@@ -1,9 +1,6 @@
+import { handleMusicApiPartA } from "./music-part-01";
+import { handleMusicApiPartB } from "./music-part-02";
+export { handleMusicApiPartA, handleMusicApiPartB };
 export { runMusicAgentIntentSelfTest } from "./agent";
 export { runMusicRemoteCommandQueueSelfTest } from "./state";
-interface MusicCtx {
-    getMusicPetAgent: () => any;
-    setMusicPetState: (state: string, detail?: string, track?: any) => void;
-    broadcastPetSpeech: (agent: string, payload: any) => void;
-    MUSIC_PET_AGENT_NAME: string;
-}
-export declare function handleMusicApi(pathname: string, req: any, res: any, parsed: any, ctx: MusicCtx): boolean;
+export declare function handleMusicApi(pathname: string, req: any, res: any, parsed: any, ctx: any): boolean;

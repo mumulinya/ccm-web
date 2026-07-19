@@ -343,11 +343,24 @@ async function runTestAgentCli(args = process.argv.slice(2), io = {}) {
             : `${JSON.stringify(plan, null, 2)}\n`);
         return { exitCode: plan.valid ? 0 : 2 };
     }
-    const report = await runAgent(workOrderInput, overrides);
-    stdout.write(options.summary
-        ? formatTestAgentCliReportSummary(report)
-        : `${JSON.stringify(report, null, 2)}\n`);
-    return { exitCode: exitCodeForReport(report) };
+    // Default path shares invokeTestAgent gates (contracts, artifacts, canAccept).
+    const invocation = await (0, invocation_1.invokeTestAgent)({
+        schema: "ccm-test-agent-invocation-request-v1",
+        source: options.handoffPath ? "handoff" : "work_order",
+        payload: workOrderJson.input,
+    }, overrides);
+    const report = invocation.report;
+    if (options.summary && report) {
+        stdout.write(formatTestAgentCliReportSummary(report));
+    }
+    else {
+        stdout.write(`${JSON.stringify(invocation, null, 2)}\n`);
+    }
+    return {
+        exitCode: invocation.status === "completed"
+            ? (invocation.canAccept ? 0 : 1)
+            : (report ? exitCodeForReport(report) : 2),
+    };
 }
 async function main() {
     const result = await runTestAgentCli();

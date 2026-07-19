@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import EmptyState from '../common/EmptyState.vue'
 
 const props = defineProps({
   groupName: { type: String, default: '' },
@@ -104,7 +105,7 @@ const auditRows = computed(() => {
 
       <div class="resource-body">
         <div class="resource-section-title">🔌 MCP 服务器</div>
-        <div v-if="(allTools.mcp || []).length === 0" class="resource-empty">暂无 MCP 服务器，请先在工具配置页面安装或启用</div>
+        <EmptyState v-if="(allTools.mcp || []).length === 0" icon="🔌" title="暂无 MCP 服务器" hint="请先在工具配置页面安装或启用" />
         <div v-for="tool in allTools.mcp" :key="tool.name" class="resource-card" :class="{ selected: isSelected('mcp', tool.name) }">
           <label class="resource-row">
             <input type="checkbox" :checked="isSelected('mcp', tool.name)" @change="emit('toggle-tool', 'mcp', tool.name)">
@@ -137,7 +138,7 @@ const auditRows = computed(() => {
         </div>
 
         <div class="resource-section-title spaced">⚡ Skills</div>
-        <div v-if="(allTools.skill || []).length === 0" class="resource-empty">暂无 Skills，请先在工具配置页面安装或启用</div>
+        <EmptyState v-if="(allTools.skill || []).length === 0" icon="⚡" title="暂无 Skills" hint="请先在工具配置页面安装或启用" />
         <label
           v-for="tool in allTools.skill"
           :key="tool.name"
@@ -194,7 +195,7 @@ const auditRows = computed(() => {
 .modal-close { position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.05); background: rgba(0,0,0,0.02); color: var(--text-secondary); cursor: pointer; }
 .resource-modal { max-height: 82vh; display: flex; flex-direction: column; }
 .modal h3 { margin: 0 0 8px; font-size: 16px; color: var(--text-primary); }
-.modal-desc, .resource-empty { font-size: 12px; color: var(--text-muted); }
+.modal-desc { font-size: 12px; color: var(--text-muted); }
 .modal-desc { margin-bottom: 16px; }
 .delivery-stages { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:0 0 16px; }
 .delivery-stages > div { min-width:0; display:grid; gap:3px; padding:8px 9px; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,.52); }
@@ -237,7 +238,6 @@ const auditRows = computed(() => {
 .audit-row { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; gap: 8px; align-items: start; font-size: 11px; }
 .audit-row span, .audit-row small { color: #991b1b; }
 .audit-row code { color: #7f1d1d; overflow-wrap: anywhere; white-space: normal; }
-.resource-empty { padding: 8px; }
 .resource-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px; }
 .resource-footer > div { display: flex; gap: 8px; }
 .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; transition: all 0.2s; }

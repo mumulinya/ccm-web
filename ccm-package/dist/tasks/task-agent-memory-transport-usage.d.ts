@@ -1,4 +1,31 @@
 export declare const TASK_AGENT_MEMORY_TRANSPORT_USAGE_SCHEMA = "ccm-task-agent-memory-transport-usage-v1";
+export declare const TASK_AGENT_MEMORY_TRANSPORT_USAGE_PROVENANCE_SCHEMA = "ccm-task-agent-memory-transport-usage-provenance-v1";
+export declare function taskAgentMemoryTransportPromptSizeBucket(value: any): string;
+export declare function taskAgentMemoryTransportTaskFamily(text: any, explicitKey?: any): {
+    key: string;
+    sourceChecksum: string;
+    source: string;
+};
+export declare function buildTaskAgentMemoryTransportUsageProvenance(input?: any): {
+    provenance_checksum: string;
+    schema: string;
+    version: number;
+    origin: string;
+    runner_kind: string;
+    account_backed: boolean;
+    live_execution_authorized: boolean;
+    fixture: boolean;
+    authorization_checksum: string;
+    execution_manifest_checksum: string;
+    execution_slot_checksum: string;
+    runner_admission_verified: boolean;
+    provider_runtime_identity_checksum: string;
+    captured_at: string;
+};
+export declare function verifyTaskAgentMemoryTransportUsageProvenance(provenance: any): {
+    valid: boolean;
+    issues: string[];
+};
 export declare function buildTaskAgentMemoryTransportUsageReceipt(input?: any): {
     usage_checksum: string;
     schema: string;
@@ -12,14 +39,34 @@ export declare function buildTaskAgentMemoryTransportUsageReceipt(input?: any): 
     task_id: string;
     task_agent_session_id: string;
     target_project: string;
+    task_family_key: string;
+    task_family_source: string;
+    task_family_source_checksum: string;
     snapshot_id: string;
     snapshot_checksum: string;
     runner_request_id: string;
     native_session_id: string;
-    provider: import("../agents/runtime").AgentRuntimeId;
+    provider: string;
     model: string;
     provider_contract_id: string;
     provider_runtime_version: string;
+    provider_runtime_identity_checksum: string;
+    usage_provenance: {
+        provenance_checksum: string;
+        schema: string;
+        version: number;
+        origin: string;
+        runner_kind: string;
+        account_backed: boolean;
+        live_execution_authorized: boolean;
+        fixture: boolean;
+        authorization_checksum: string;
+        execution_manifest_checksum: string;
+        execution_slot_checksum: string;
+        runner_admission_verified: boolean;
+        provider_runtime_identity_checksum: string;
+        captured_at: string;
+    };
     transport_mode: string;
     plan_checksum: string;
     manifest_checksum: string;
@@ -34,6 +81,7 @@ export declare function buildTaskAgentMemoryTransportUsageReceipt(input?: any): 
     total_cost_usd: number;
     cache_hit_ratio: number;
     final_prompt_estimated_tokens: number;
+    final_prompt_size_bucket: string;
     memory_transport_estimated_tokens: number;
     memory_transport_share_estimate: number;
     observed_at: string;

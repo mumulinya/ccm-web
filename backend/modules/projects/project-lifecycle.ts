@@ -4,6 +4,8 @@ import * as path from "path";
 import { CCM_DIR, CONFIGS_DIR, LOG_DIR } from "../../core/utils";
 import { loadProjectConfigs, saveProjectConfigs } from "../../core/db";
 import { WEB_SESSIONS_DIR, findCcSessionFile } from "./sessions";
+import { purgeProjectChatRunsForSession } from "../../projects/chat-runs";
+import { purgeProjectSessionAgentBinding, rotateProjectSessionAgentBinding } from "./project-session-agent-binding";
 import { resolveContainedPath, validateProjectName } from "./project-validation";
 
 const ARCHIVE_DIR = path.join(CONFIGS_DIR, "archived");
@@ -47,6 +49,14 @@ function configFile(name: string, archived = false) {
 function countJsonFiles(dir: string) {
   if (!fs.existsSync(dir)) return 0;
   return fs.readdirSync(dir).filter((item) => item.endsWith(".json") && fs.statSync(path.join(dir, item)).isFile()).length;
+}
+
+function projectWebSessionIds(project: string) {
+  const dir = resolveContainedPath(WEB_SESSIONS_DIR, validateProjectName(project));
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter(item => item.endsWith(".json") && fs.statSync(resolveContainedPath(dir, item)).isFile())
+    .map(item => item.slice(0, -5));
 }
 
 function fileDescriptor(label: string, target: string) {
@@ -104,6 +114,9 @@ export function archiveProject(name: string) {
   const destination = configFile(project, true);
   if (!fs.existsSync(source)) throw new Error("项目不存在或已经归档");
   if (fs.existsSync(destination)) throw new Error("归档区已存在同名项目");
+  for (const sessionId of projectWebSessionIds(project)) {
+    rotateProjectSessionAgentBinding(project, sessionId, "项目已归档");
+  }
   ensureDirectories();
   fs.renameSync(source, destination);
   const state = readState();
@@ -142,6 +155,11 @@ export function purgeArchivedProject(name: string, previewToken: string) {
   if (!preview || preview.project !== impact.project || preview.expiresAt < Date.now()) throw new Error("删除预览已失效，请重新预览");
   if (preview.fingerprint !== impact.fingerprint) throw new Error("项目数据已变化，请重新预览后再删除");
   if (!fs.existsSync(configFile(impact.project, true))) throw new Error("归档项目不存在");
+
+  for (const sessionId of projectWebSessionIds(impact.project)) {
+    purgeProjectSessionAgentBinding(impact.project, sessionId);
+    purgeProjectChatRunsForSession(impact.project, sessionId);
+  }
 
   for (const item of impact.items) {
     if (!item.exists) continue;

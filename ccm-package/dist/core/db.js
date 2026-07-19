@@ -497,6 +497,12 @@ function applyMetricToStore(value, agent, data = {}, now = new Date()) {
     scope.dailyRoles[today][role][cleanAgent] = applyMetricAggregate(scope.dailyRoles[today][role][cleanAgent], data, at);
     metrics.scopes[scopeKey] = scope;
     const aggregate = scope.agents[cleanAgent];
+    const success = data.success === true;
+    const explicitStatus = String(data.status || "").trim().toLowerCase();
+    const inferredStatus = success
+        ? "completed"
+        : (/cancell?ed/i.test(String(data.error || data.message || "")) ? "cancelled" : "failed");
+    const status = ["completed", "failed", "cancelled"].includes(explicitStatus) ? explicitStatus : inferredStatus;
     metrics.events.push({
         id: String(data.eventId || data.event_id || `metric_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`),
         at,
@@ -508,7 +514,8 @@ function applyMetricToStore(value, agent, data = {}, now = new Date()) {
         role,
         source: String(data.source || data.metricSource || data.metric_source || "agent-execution"),
         runtime: String(data.runtime || data.agentType || data.agent_type || ""),
-        success: data.success === true,
+        success,
+        status,
         durationMs: finiteMetricNumber(data.durationMs ?? data.duration_ms),
         fileChangeCount: finiteMetricNumber(data.fileChangeCount ?? data.file_change_count),
         inputTokens: finiteMetricNumber(data.inputTokens ?? data.input_tokens ?? data.usage?.inputTokens ?? data.usage?.input_tokens),
@@ -517,7 +524,7 @@ function applyMetricToStore(value, agent, data = {}, now = new Date()) {
         traceId: String(data.traceId || data.trace_id || ""),
         taskId: String(data.taskId || data.task_id || ""),
         executionId: String(data.executionId || data.execution_id || ""),
-        error: data.success === true ? "" : String(data.error || data.message || "").slice(0, 300),
+        error: success ? "" : String(data.error || data.message || "").slice(0, 300),
         usageReported: aggregate.usageReportedCalls > 0 && (finiteMetricNumber(data.inputTokens ?? data.input_tokens ?? data.usage?.inputTokens ?? data.usage?.input_tokens) > 0
             || finiteMetricNumber(data.outputTokens ?? data.output_tokens ?? data.usage?.outputTokens ?? data.usage?.output_tokens) > 0
             || finiteMetricNumber(data.totalCostUsd ?? data.total_cost_usd ?? data.usage?.totalCostUsd ?? data.usage?.total_cost_usd ?? data.totalCost) > 0),
@@ -554,8 +561,22 @@ function runMetricsAggregationSelfTest() {
     store = applyMetricToStore(store, "coordinator", { groupId: "group-a", role: "main_agent", success: true, durationMs: 100, traceId: "trace-a" }, "2026-07-13T10:00:00.000Z");
     store = applyMetricToStore(store, "coordinator", { groupId: "group-b", role: "main_agent", success: false, durationMs: 900, traceId: "trace-b" }, "2026-07-13T10:01:00.000Z");
     store = applyMetricToStore(store, "worker", { groupId: "group-a", role: "member_agent", success: true, durationMs: 300, inputTokens: 20, outputTokens: 5 }, "2026-07-13T10:02:00.000Z");
+    store = applyMetricToStore(store, "global-agent", {
+        scopeType: "global",
+        scopeId: "global",
+        role: "global_agent",
+        success: true,
+        status: "completed",
+        durationMs: 250,
+        traceId: "trace-global",
+        executionId: "run-global-1",
+        source: "global-agent-loop",
+        inputTokens: 120,
+        outputTokens: 40,
+    }, "2026-07-13T10:03:00.000Z");
     const groupA = store.scopes["group:group-a"];
     const groupB = store.scopes["group:group-b"];
+    const globalScope = store.scopes["global:global"];
     const checks = {
         separatesGroups: groupA?.agents?.coordinator?.calls === 1 && groupB?.agents?.coordinator?.calls === 1,
         keepsMainAgentOutcomesSeparate: groupA?.agents?.coordinator?.successes === 1 && groupB?.agents?.coordinator?.failures === 1,
@@ -563,6 +584,22 @@ function runMetricsAggregationSelfTest() {
         retainsMemberMetricsInsideGroup: groupA?.agents?.worker?.calls === 1 && !groupB?.agents?.worker,
         storesTraceIdentity: store.events.some((item) => item.groupId === "group-a" && item.traceId === "trace-a"),
         recordsUsageCoverage: groupA?.agents?.worker?.usageReportedCalls === 1,
+        recordsGlobalScope: globalScope?.agents?.["global-agent"]?.calls === 1
+            && globalScope?.roles?.global_agent?.["global-agent"]?.calls === 1
+            && !globalScope?.groupId,
+        recordsGlobalTokenUsage: globalScope?.agents?.["global-agent"]?.inputTokens === 120
+            && globalScope?.agents?.["global-agent"]?.outputTokens === 40
+            && globalScope?.agents?.["global-agent"]?.usageReportedCalls === 1,
+        storesGlobalEventScope: store.events.some((item) => (item.scopeType === "global"
+            && item.scopeId === "global"
+            && item.agent === "global-agent"
+            && item.role === "global_agent"
+            && item.executionId === "run-global-1"
+            && item.traceId === "trace-global"
+            && item.status === "completed"
+            && item.inputTokens === 120
+            && item.outputTokens === 40
+            && item.usageReported === true)),
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

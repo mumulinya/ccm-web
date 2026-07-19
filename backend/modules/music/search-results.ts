@@ -118,6 +118,44 @@ export function verifyDownloadToken(token: any, expectedSource?: MusicSource) {
   return payload;
 }
 
+export function issueDownloadToken(source: MusicSource, sourceId: string, title: string, artist: string) {
+  const payload: TokenPayload = {
+    v: 1,
+    source,
+    sourceId: String(sourceId || "").trim(),
+    title: String(title || sourceId || "music").slice(0, 200),
+    artist: String(artist || "未知").slice(0, 200),
+    exp: Date.now() + TOKEN_TTL_MS,
+  };
+  if (!payload.sourceId) throw new Error("缺少转码目标 ID");
+  return tokenFor(payload);
+}
+
+export function extractMusicConvertTarget(message: string, keyword = "") {
+  const text = `${keyword || ""} ${message || ""}`;
+  const bvid = text.match(/BV[\w]+/i)?.[0];
+  if (bvid) {
+    return {
+      source: "bilibili" as const,
+      sourceId: bvid,
+      title: bvid,
+      artist: "B站转码",
+    };
+  }
+  const songId =
+    text.match(/(?:song\?id=|id[=：:\s#]|网易云\s*[#]?)(\d{5,})/i)?.[1] ||
+    text.match(/\b(\d{6,})\b/)?.[1];
+  if (songId) {
+    return {
+      source: "netease" as const,
+      sourceId: songId,
+      title: `netease-${songId}`,
+      artist: "网易云转码",
+    };
+  }
+  return null;
+}
+
 export function runMusicSearchResultSelfTest() {
   const signed = signSearchResults("netease", "晴天 周杰伦", [
     { songId: 2, title: "晴天（Live）", artist: "其他歌手", album: "现场" },

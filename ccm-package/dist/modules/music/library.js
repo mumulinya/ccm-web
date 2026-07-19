@@ -34,15 +34,124 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MUSIC_DIR = void 0;
+exports.formatDurationSec = formatDurationSec;
+exports.resolveTrackDuration = resolveTrackDuration;
+exports.buildLocalTrackMeta = buildLocalTrackMeta;
 exports.parseMusicFilename = parseMusicFilename;
 exports.getMp3Cover = getMp3Cover;
 exports.searchLocalMusic = searchLocalMusic;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 exports.MUSIC_DIR = path.join(utils_1.CCM_DIR, "music");
+const DURATION_CACHE_FILE = path.join(exports.MUSIC_DIR, ".duration-cache.json");
 if (!fs.existsSync(exports.MUSIC_DIR))
     fs.mkdirSync(exports.MUSIC_DIR, { recursive: true });
+let durationCache = null;
+function loadDurationCache() {
+    if (durationCache)
+        return durationCache;
+    try {
+        if (fs.existsSync(DURATION_CACHE_FILE)) {
+            durationCache = JSON.parse(fs.readFileSync(DURATION_CACHE_FILE, "utf8") || "{}") || {};
+        }
+        else {
+            durationCache = {};
+        }
+    }
+    catch {
+        durationCache = {};
+    }
+    return durationCache;
+}
+function saveDurationCache() {
+    if (!durationCache)
+        return;
+    try {
+        fs.writeFileSync(DURATION_CACHE_FILE, JSON.stringify(durationCache));
+    }
+    catch { }
+}
+function formatDurationSec(sec) {
+    if (!sec || !Number.isFinite(sec) || sec <= 0)
+        return "";
+    const total = Math.round(sec);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+}
+function probeDurationSec(filePath) {
+    try {
+        (0, utils_1.refreshEnvPath)();
+        const out = (0, child_process_1.execFileSync)("ffprobe", [
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            filePath,
+        ], { encoding: "utf8", windowsHide: true, timeout: 8000, maxBuffer: 1024 * 1024 });
+        const sec = parseFloat(String(out || "").trim());
+        if (Number.isFinite(sec) && sec > 0)
+            return sec;
+    }
+    catch { }
+    try {
+        (0, utils_1.refreshEnvPath)();
+        (0, child_process_1.execFileSync)("ffmpeg", ["-i", filePath], {
+            encoding: "utf8",
+            windowsHide: true,
+            timeout: 8000,
+            maxBuffer: 2 * 1024 * 1024,
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+    }
+    catch (error) {
+        const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : String(error?.stderr || "");
+        const msg = `${stderr}\n${error?.message || ""}`;
+        const match = msg.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+        if (match) {
+            return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+        }
+    }
+    return 0;
+}
+/** 读取本地音频时长（带文件戳缓存） */
+function resolveTrackDuration(filename, filePath, stat) {
+    const cache = loadDurationCache();
+    const stamp = `${filename}|${stat.mtimeMs}|${stat.size}`;
+    const hit = cache[filename];
+    if (hit && hit.stamp === stamp && Number(hit.durationSec) > 0) {
+        return {
+            durationSec: Number(hit.durationSec),
+            duration: formatDurationSec(Number(hit.durationSec)),
+        };
+    }
+    const durationSec = probeDurationSec(filePath);
+    cache[filename] = { stamp, durationSec };
+    saveDurationCache();
+    return {
+        durationSec,
+        duration: formatDurationSec(durationSec),
+    };
+}
+function buildLocalTrackMeta(filename, id = 0) {
+    const filePath = path.join(exports.MUSIC_DIR, filename);
+    const stat = fs.statSync(filePath);
+    const { artist, title, bvid } = parseMusicFilename(filename);
+    const { duration, durationSec } = resolveTrackDuration(filename, filePath, stat);
+    return {
+        id,
+        filename,
+        title,
+        artist,
+        bvid,
+        pic: `/api/music/cover?file=${encodeURIComponent(filename)}`,
+        size: stat.size,
+        modified: stat.mtime.toISOString(),
+        duration,
+        durationSec,
+    };
+}
 function parseMusicFilename(filename) {
     const name = filename.replace(/\.[^.]+$/, "");
     const bvidMatch = name.match(/(BV[\w]+)/i);
@@ -167,10 +276,6 @@ function searchLocalMusic(keyword) {
     return fs.readdirSync(exports.MUSIC_DIR)
         .filter(f => /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f))
         .filter(f => f.toLowerCase().includes(q))
-        .map((f, i) => {
-        const stat = fs.statSync(path.join(exports.MUSIC_DIR, f));
-        const { artist, title, bvid } = parseMusicFilename(f);
-        return { id: i, filename: f, title, artist, bvid, pic: `/api/music/cover?file=${encodeURIComponent(f)}`, size: stat.size };
-    });
+        .map((f, i) => buildLocalTrackMeta(f, i));
 }
 //# sourceMappingURL=library.js.map

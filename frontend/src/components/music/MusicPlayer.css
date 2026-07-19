@@ -1,0 +1,927 @@
+/* === 极光流光背景与磨砂玻璃视觉系统 === */
+.aura-player {
+  --audio-bass: 0;
+  --audio-treble: 0;
+  height: 100%; width: 100%;
+  background: linear-gradient(135deg, #090616 0%, #150F2D 50%, #0F0A21 100%);
+  color: #E2D8FF;
+  font-family: 'Outfit', 'Inter', -apple-system, sans-serif;
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: background 1.5s ease;
+}
+
+/* 磨砂玻璃卡片：轻模糊，避免把清晰动漫底图完全糊掉 */
+.aura-card {
+  border: 1px solid rgba(165, 139, 255, 0.12) !important;
+  background: rgba(20, 16, 38, 0.42) !important;
+  backdrop-filter: blur(10px) saturate(140%) !important;
+  border-radius: 8px !important;
+  padding: 16px 20px !important; 
+  box-sizing: border-box !important;
+  box-shadow: 0 12px 48px rgba(10, 5, 20, 0.5) !important;
+  transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.4s cubic-bezier(0.25, 1, 0.5, 1), border-color 0.4s !important;
+}
+
+/* 卡片悬停微交互 */
+.aura-card:hover {
+  box-shadow: 0 20px 56px rgba(123, 97, 255, 0.2) !important;
+  border-color: rgba(165, 139, 255, 0.25) !important;
+}
+
+/* 动态背景光晕移动 */
+.music-cover-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center right;
+  background-repeat: no-repeat;
+  opacity: 1;
+  transition: background-image 1.2s ease, opacity 0.8s ease;
+}
+
+.ambient-glow-background {
+  position: absolute;
+  inset: -20%;
+  z-index: 1;
+  pointer-events: none;
+  /* 仅色光呼吸，强度压低以免盖住清晰底图 */
+  opacity: calc(0.06 + (var(--audio-bass) * 0.18));
+  filter: blur(calc(56px - (var(--audio-bass) * 12px))) saturate(calc(120% + (var(--audio-treble) * 60%)));
+  background-image: radial-gradient(circle at 30% 30%, #7B61FF 0%, transparent 60%),
+                    radial-gradient(circle at 70% 70%, #A58BFF 0%, transparent 60%);
+  animation: slow-halo 25s infinite alternate ease-in-out;
+  transition: background-image 1.2s ease;
+  will-change: opacity, filter;
+}
+
+.aura-player.is-playing .ambient-glow-background {
+  opacity: calc(0.1 + (var(--audio-bass) * 0.22));
+}
+
+@keyframes slow-halo {
+  0% { transform: rotate(0deg) scale(1); }
+  100% { transform: rotate(360deg) scale(1.15); }
+}
+
+/* 霓虹极光背景流光 */
+.aurora-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px) brightness(calc(1 + (var(--audio-treble) * 0.55)));
+  pointer-events: none;
+  opacity: calc(0.16 + (var(--audio-bass) * 0.38));
+  mix-blend-mode: screen;
+  z-index: 0;
+  will-change: transform, opacity;
+  transition: opacity 0.12s linear, filter 0.12s linear;
+}
+.aura-player.is-playing .aurora-glow {
+  opacity: calc(0.22 + (var(--audio-bass) * 0.45));
+}
+.aurora-glow-1 {
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, rgba(123, 97, 255, 0.6) 0%, transparent 80%);
+  top: -10%;
+  left: 10%;
+  animation: aurora-float-1 28s infinite alternate ease-in-out;
+}
+.aurora-glow-2 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(165, 139, 255, 0.45) 0%, transparent 80%);
+  bottom: -15%;
+  right: 15%;
+  animation: aurora-float-2 32s infinite alternate ease-in-out;
+}
+.aurora-glow-3 {
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, rgba(0, 242, 254, 0.25) 0%, transparent 80%);
+  top: 30%;
+  left: 45%;
+  animation: aurora-float-3 24s infinite alternate ease-in-out;
+  opacity: calc(0.14 + (var(--audio-treble) * 0.4));
+}
+
+@keyframes aurora-float-1 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(70px, 50px) scale(1.15); }
+}
+@keyframes aurora-float-2 {
+  0% { transform: translate(0, 0) scale(1.1); }
+  100% { transform: translate(-60px, -70px) scale(0.9); }
+}
+@keyframes aurora-float-3 {
+  0% { transform: translate(0, 0) scale(0.95); }
+  100% { transform: translate(50px, -40px) scale(1.1); }
+}
+
+/* 粒子层 + 点阵微漂移 */
+.scanline-overlay::after {
+  content: ''; position: absolute; inset: 0; z-index: 999; pointer-events: none;
+  background-image: radial-gradient(rgba(165, 139, 255, 0.05) 1px, transparent 0);
+  background-size: 16px 16px;
+  opacity: 0.75;
+  animation: scanline-drift 48s linear infinite;
+}
+.dot-matrix-bg::before {
+  content: '';
+  position: absolute;
+  inset: -8%;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(rgba(165, 139, 255, 0.04) 1px, transparent 0),
+    radial-gradient(rgba(111, 238, 225, 0.03) 1px, transparent 0);
+  background-size: 22px 22px, 34px 34px;
+  background-position: 0 0, 11px 17px;
+  opacity: calc(0.35 + (var(--audio-bass) * 0.25));
+  animation: dot-matrix-pulse 18s ease-in-out infinite alternate;
+}
+@keyframes scanline-drift {
+  0% { background-position: 0 0; }
+  100% { background-position: 16px 16px; }
+}
+@keyframes dot-matrix-pulse {
+  0% { opacity: 0.28; transform: translate3d(0, 0, 0); }
+  100% { opacity: 0.48; transform: translate3d(-6px, 4px, 0); }
+}
+
+/* 主容器 */
+.aura-main-container {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  padding: 16px; box-sizing: border-box;
+  z-index: 2;
+  gap: 12px;
+}
+
+/* 顶部 Header */
+.aura-header {
+  height: 64px; 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between;
+  border: 1px solid rgba(165, 139, 255, 0.12);
+  background: rgba(20, 16, 38, 0.55);
+  backdrop-filter: blur(10px) saturate(140%);
+  padding: 0 20px; 
+  border-radius: 20px; 
+  box-shadow: 0 8px 32px rgba(10, 5, 20, 0.4);
+}
+
+.header-logo-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-logo-vinyl {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2a2a2e 0%, #0c0c0e 65%, #18181c 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+}
+.header-logo-vinyl.is-playing {
+  animation: rotate-disc 8s linear infinite;
+}
+.header-logo-center {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #A58BFF;
+  border: 1px solid #000;
+}
+
+.header-logo-text-group {
+  display: flex;
+  flex-direction: column;
+}
+.header-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #D8CCFF;
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+.header-subtitle {
+  font-size: 9px;
+  color: #A58BFF;
+  opacity: 0.8;
+}
+
+/* 顶部三联状态看板 */
+.header-dashboard-widgets {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.header-widget-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(165, 139, 255, 0.08);
+  padding: 4px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(165, 139, 255, 0.1);
+}
+.widget-icon {
+  font-size: 14px;
+}
+.widget-text-group {
+  display: flex;
+  flex-direction: column;
+}
+.widget-label {
+  font-size: 8px;
+  color: #A58BFF;
+  text-transform: uppercase;
+}
+.widget-value {
+  font-size: 11px;
+  font-weight: 700;
+  color: #D8CCFF;
+}
+
+/* 顶部频谱 */
+.header-spectrum-section {
+  flex: 1;
+  height: 24px;
+  margin: 0 16px;
+  position: relative;
+  max-width: 240px;
+  mask-image: linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%);
+}
+.header-spectrum-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* 模式切换 */
+.header-switch-section {
+  display: flex;
+  flex-shrink: 0;
+  width: 160px;
+  justify-content: flex-end;
+}
+.switch-glass-container {
+  display: flex;
+  background: rgba(165, 139, 255, 0.08);
+  padding: 3px;
+  border-radius: 14px;
+  position: relative;
+  border: 1px solid rgba(165, 139, 255, 0.1);
+}
+.switch-glass-container.triple .switch-btn {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+.switch-slider {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #E8E0FF 0%, #D8CCFF 55%, #C4B5FD 100%);
+  box-shadow: 0 4px 14px rgba(216, 204, 255, 0.35);
+  z-index: 1;
+  pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+  transform: translateX(0);
+}
+.switch-slider.slide-bili {
+  transform: translateX(100%);
+}
+.switch-slider.slide-netease {
+  transform: translateX(200%);
+}
+.switch-btn {
+  background: transparent;
+  border: none;
+  color: #A58BFF;
+  padding: 4px 10px;
+  font-size: 9px;
+  font-weight: 800;
+  border-radius: 10px;
+  cursor: pointer;
+  z-index: 2;
+  transition: color 0.3s ease;
+  position: relative;
+}
+.switch-btn.active {
+  color: #0a0616;
+  background: transparent;
+  box-shadow: none;
+}
+.aura-os-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 38% 62%;
+  grid-template-rows: 39% 61%;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 1. 氛围歌词气泡墙 */
+.atmosphere-card {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transition: background-image 1.2s ease, box-shadow 0.5s ease, border-color 0.5s ease;
+}
+.atmosphere-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(180deg, rgba(9, 6, 22, 0.08) 0%, rgba(9, 6, 22, 0.32) 100%);
+  opacity: calc(0.35 - (var(--audio-bass) * 0.12));
+  transition: opacity 0.15s linear;
+}
+.aura-player.is-playing .atmosphere-card {
+  box-shadow: 0 16px 48px rgba(123, 97, 255, calc(0.12 + (var(--audio-bass) * 0.22))) !important;
+  border-color: rgba(165, 139, 255, calc(0.16 + (var(--audio-treble) * 0.2))) !important;
+}
+
+.atmosphere-header {
+  position: relative;
+  z-index: 2;
+}
+.card-header-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+.pulse-dot-green {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #52C41A;
+  box-shadow: 0 0 8px #52C41A;
+  animation: clockPulse 2s infinite;
+}
+.status-text-green {
+  color: #52C41A;
+  font-weight: 700;
+}
+.status-subtext-blue {
+  color: #D8CCFF;
+  font-weight: 700;
+}
+
+/* 漂浮弹幕 */
+.atmosphere-bubble-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 1;
+}
+.floating-bubble {
+  position: absolute !important;
+  left: auto !important;
+  right: 0 !important;
+  max-width: min(92%, 260px);
+  padding: 6px 10px;
+  background: linear-gradient(135deg, rgba(24, 18, 48, 0.82) 0%, rgba(12, 10, 24, 0.55) 100%) !important;
+  backdrop-filter: blur(12px) !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(165, 139, 255, 0.22) !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 6px 20px rgba(123, 97, 255, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.08) !important;
+  font-size: 10px;
+  font-weight: 500;
+  color: #E2D8FF !important;
+  will-change: transform;
+  animation: bubble-slide-left var(--bubble-duration, 15s) linear forwards;
+  transition: border-color 0.3s, background 0.3s, box-shadow 0.3s;
+}
+.floating-bubble:hover {
+  border-color: rgba(165, 139, 255, 0.45) !important;
+  background: rgba(24, 18, 48, 0.92) !important;
+  box-shadow: 0 8px 24px rgba(123, 97, 255, 0.22) !important;
+  z-index: 10;
+}
+.bubble-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(165, 139, 255, 0.3);
+  box-shadow: 0 0 6px rgba(165, 139, 255, 0.2);
+  flex-shrink: 0;
+}
+.bubble-text {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes bubble-slide-left {
+  0% {
+    transform: translate3d(110%, 0, 0);
+    opacity: 0;
+  }
+  8% { opacity: 0.95; }
+  88% { opacity: 0.95; }
+  100% {
+    transform: translate3d(calc(-100% - 12px), -2px, 0);
+    opacity: 0;
+  }
+}
+.atmosphere-footer {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+}
+.now-playing-tag {
+  font-size: 9px;
+  color: #A58BFF;
+  background: rgba(165, 139, 255, 0.1);
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(165, 139, 255, 0.15);
+}
+
+/* 2. 当前歌词 + 半露黑胶唱盘 + Aura小助手合并大卡片 */
+.lyric-vinyl-assistant-card {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
+  gap: 16px !important;
+  transition: box-shadow 0.45s ease, border-color 0.45s ease !important;
+}
+.lyric-vinyl-assistant-card.is-playing {
+  box-shadow: 0 18px 52px rgba(123, 97, 255, calc(0.14 + (var(--audio-bass) * 0.2))) !important;
+  border-color: rgba(165, 139, 255, calc(0.18 + (var(--audio-treble) * 0.18))) !important;
+}
+
+.lyric-section {
+  flex: 1.05;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px 0;
+  justify-content: flex-start;
+}
+.panel-tag-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: #D8CCFF;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.lyric-vinyl-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+}
+.turntable-lyrics-wrap {
+  width: 100%;
+  height: 100px;
+  overflow: hidden;
+  position: relative;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 25%, #000 75%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 25%, #000 75%, transparent 100%);
+}
+.turntable-lyrics-list {
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
+}
+.lyric-line {
+  height: 28px;
+  line-height: 28px;
+  font-size: 12px;
+  color: rgba(216, 204, 255, 0.35);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.lyric-line-active {
+  color: #FFF !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+  transform: scale(1.02) !important;
+  text-shadow: 0 0 10px rgba(165, 139, 255, 0.8) !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.lyric-empty {
+  height: 90px;
+  line-height: 90px;
+  font-size: 10px;
+  color: rgba(165, 139, 255, 0.4);
+}
+.lyric-time-indicator {
+  font-size: 9px;
+  color: #A58BFF;
+  margin-top: 6px;
+}
+
+/* 拟物黑胶大唱盘 */
+.vinyl-section {
+  flex: 0.9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: visible;
+}
+.vinyl-wrapper {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vinyl-record {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2a2a2e 0%, #0c0c0e 25%, #1c1c20 35%, #08080a 50%, #151518 68%, #030304 100%);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.05), -8px 8px 24px rgba(0,0,0,0.6);
+  animation: rotate-disc 30s linear infinite;
+  animation-play-state: paused;
+  transition: animation-play-state 0.3s ease;
+}
+.vinyl-record.playing {
+  animation-play-state: running;
+}
+.vinyl-record .vinyl-cover {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+  border: 2px solid #000;
+}
+.vinyl-grooves {
+  position: absolute;
+  inset: 0;
+  background: repeating-radial-gradient(circle, transparent, transparent 2px, rgba(255,255,255,0.03) 3px, transparent 4px);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.vinyl-highlight-overlay {
+  position: absolute;
+  inset: 0;
+  background: conic-gradient(from 45deg, transparent, rgba(255,255,255,0.05) 15%, transparent 30%, transparent 50%, rgba(255,255,255,0.05) 65%, transparent 80%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.vinyl-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 0.8s ease;
+}
+.cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #A58BFF;
+  background: radial-gradient(circle at 40% 35%, rgba(165, 139, 255, 0.28), rgba(20, 16, 38, 0.9));
+  text-shadow: 0 0 12px rgba(165, 139, 255, 0.55);
+}
+.aura-player.is-playing .vinyl-record {
+  box-shadow:
+    inset 0 0 12px rgba(255, 255, 255, 0.06),
+    -8px 8px 24px rgba(0, 0, 0, 0.6),
+    0 0 calc(18px + (var(--audio-bass) * 28px)) rgba(165, 139, 255, calc(0.18 + (var(--audio-bass) * 0.35)));
+}
+.blink-cursor::after {
+  content: '▋';
+  display: inline-block;
+  margin-left: 4px;
+  color: #A58BFF;
+  animation: blink-cursor 1.1s steps(1) infinite;
+  vertical-align: baseline;
+}
+@keyframes blink-cursor {
+  0%, 45% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.tonearm-arm {
+  position: absolute;
+  top: -18px; 
+  right: 18px;
+  width: 36px; 
+  height: 72px;
+  pointer-events: none;
+  transform-origin: top right;
+  transform: rotate(-35deg);
+  transition: transform 0.8s cubic-bezier(0.25, 1, 0.5, 1);
+  z-index: 5;
+}
+.tonearm-arm.play-stylus {
+  transform: rotate(5deg) !important;
+}
+.tonearm-arm .tonearm-base {
+  position: absolute;
+  top: 0; right: 0;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #3f3f3f 0%, #18181b 80%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.tonearm-arm .tonearm-shaft {
+  position: absolute;
+  top: 12px; right: 7px;
+  width: 2px; height: 50px;
+  background: linear-gradient(to bottom, #d4d4d8, #71717a);
+  transform-origin: top center;
+}
+.tonearm-arm .tonearm-head {
+  position: absolute;
+  bottom: 0; right: 2px;
+  width: 6px; height: 10px;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+}
+
+/* 右侧 Aura 小助手 */
+.assistant-section {
+  flex: 1.2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  border-left: 1px solid rgba(165, 139, 255, 0.1);
+  padding: 12px 0 12px 16px;
+  justify-content: flex-start;
+}
+.assistant-content-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assistant-status-tips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, rgba(165, 139, 255, 0.08) 0%, rgba(123, 97, 255, 0.02) 100%) !important;
+  padding: 6px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(165, 139, 255, 0.12) !important;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  cursor: pointer;
+}
+.assistant-status-tips:hover {
+  transform: translateY(-2px);
+  border-color: rgba(165, 139, 255, 0.3) !important;
+  box-shadow: 0 6px 20px rgba(123, 97, 255, 0.12) !important;
+  background: linear-gradient(135deg, rgba(165, 139, 255, 0.12) 0%, rgba(123, 97, 255, 0.05) 100%) !important;
+}
+.status-tips-icon {
+  font-size: 14px;
+}
+.tips-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tips-label {
+  font-size: 9px;
+  color: #A58BFF;
+  opacity: 0.85;
+}
+.tips-value {
+  font-size: 11px;
+  font-weight: bold;
+  color: #E2D8FF;
+}
+.assistant-quote-bubble {
+  display: flex;
+  flex-direction: column;
+}
+.quote-label {
+  font-size: 9px;
+  color: #A58BFF;
+  margin-bottom: 2px;
+}
+.quote-bubble-content {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 12px;
+  padding: 8px 12px;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  cursor: pointer;
+}
+.quote-bubble-content:hover {
+  transform: translateY(-2px);
+  border-color: rgba(165, 139, 255, 0.25) !important;
+  box-shadow: 0 6px 20px rgba(123, 97, 255, 0.12) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%) !important;
+}
+.quote-text {
+  font-size: 11px;
+  color: #E2D8FF;
+  line-height: 1.4;
+  font-style: italic;
+  margin: 0;
+}
+
+.recommend-mini-card {
+  background: linear-gradient(135deg, rgba(20, 16, 38, 0.5) 0%, rgba(10, 5, 20, 0.3) 100%) !important;
+  border: 1px solid rgba(165, 139, 255, 0.15) !important;
+  border-radius: 14px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.recommend-mini-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(165, 139, 255, 0.35) !important;
+  box-shadow: 0 8px 24px rgba(123, 97, 255, 0.2) !important;
+  background: linear-gradient(135deg, rgba(20, 16, 38, 0.6) 0%, rgba(10, 5, 20, 0.4) 100%) !important;
+}
+.rec-header {
+  font-size: 8px;
+  color: #A58BFF;
+}
+.rec-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rec-cover-wrap {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #A58BFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 3. Aura 小助手子类样式 */
+.assistant-content-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+}
+.assistant-status-tips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(165, 139, 255, 0.06);
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(165, 139, 255, 0.1);
+}
+.status-tips-icon {
+  font-size: 14px;
+}
+.tips-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tips-label {
+  font-size: 9px;
+  color: #A58BFF;
+  opacity: 0.85;
+}
+.tips-value {
+  font-size: 11px;
+  font-weight: bold;
+  color: #E2D8FF;
+}
+.assistant-quote-bubble {
+  display: flex;
+  flex-direction: column;
+}
+.quote-label {
+  font-size: 9px;
+  color: #A58BFF;
+  margin-bottom: 2px;
+}
+.quote-bubble-content {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+.quote-text {
+  font-size: 11px;
+  color: #E2D8FF;
+  line-height: 1.4;
+  font-style: italic;
+  margin: 0;
+}
+
+.rec-header {
+  font-size: 8px;
+  color: #A58BFF;
+}
+.rec-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rec-cover-wrap {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #A58BFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rec-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.rec-cover-placeholder {
+  font-size: 8px;
+  color: #FFF;
+}
+.rec-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rec-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #E2D8FF;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-artist {
+  font-size: 8px;
+  color: #A58BFF;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-play-btn {
+  background: #7B61FF;
+  color: #FFF;
+  border: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+

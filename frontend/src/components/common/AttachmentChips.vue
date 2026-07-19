@@ -1,9 +1,41 @@
 <script setup>
+import { onBeforeUnmount, ref, watch } from 'vue'
+
 const props = defineProps({
   files: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['remove'])
+const imagePreviews = ref(new Map())
+
+const releasePreview = (url) => {
+  if (url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+}
+
+watch(() => props.files, (files) => {
+  const previous = imagePreviews.value
+  const next = new Map()
+  for (const file of files || []) {
+    if (!String(file?.type || '').startsWith('image/')) continue
+    if (previous.has(file)) {
+      next.set(file, previous.get(file))
+      continue
+    }
+    if (typeof Blob !== 'undefined' && file instanceof Blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      next.set(file, URL.createObjectURL(file))
+    }
+  }
+  for (const [file, url] of previous) {
+    if (!next.has(file)) releasePreview(url)
+  }
+  imagePreviews.value = next
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  for (const url of imagePreviews.value.values()) releasePreview(url)
+})
+
+const imagePreviewFor = (file) => imagePreviews.value.get(file) || ''
 
 const formatFileSize = (size) => {
   if (!size) return '0 B'
@@ -20,6 +52,7 @@ const formatFileSize = (size) => {
       :key="`${file.name || file.path || 'file'}-${index}`"
       class="attachment-chip"
     >
+      <img v-if="imagePreviewFor(file)" :src="imagePreviewFor(file)" :alt="file.name || '粘贴的图片'">
       <span>{{ file.name || file.path || '附件' }}</span>
       <small>{{ formatFileSize(file.size) }}</small>
       <button type="button" title="移除附件" @click="emit('remove', index)">x</button>
@@ -47,6 +80,14 @@ const formatFileSize = (size) => {
   background: rgba(255, 255, 255, 0.9);
   color: var(--text-primary);
   font-size: 12px;
+}
+
+.attachment-chip img {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 5px;
+  object-fit: cover;
 }
 
 .attachment-chip span {

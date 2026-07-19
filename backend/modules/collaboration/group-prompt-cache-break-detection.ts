@@ -131,6 +131,7 @@ function emptyLedger(groupId: string, groupSessionId: string) {
     recent_prompt_state_events: [] as any[],
     last_api_success_at: "",
     last_event: null as any,
+    last_group_main_context_usage_event: null as any,
     recent_events: [] as any[],
     updated_at: "",
   };
@@ -374,6 +375,7 @@ export function notifyGroupPromptCacheCompaction(input: any = {}) {
       revision: Math.max(0, Number(current.revision || 0)) + 1,
       baseline_generation: generation,
       previous_cache_read_tokens: null,
+      last_group_main_context_usage_event: null,
       pending_post_compaction: {
         boundary_id: boundaryId,
         generation,
@@ -444,6 +446,7 @@ export function notifyGroupPromptCacheDeletion(input: any = {}) {
       applied_edit_count: Number(executionReceipt.applied_edit_count || 0),
       cleared_input_tokens: Number(executionReceipt.cleared_input_tokens || 0),
       baseline_generation: Math.max(0, Number(current.baseline_generation || 0)),
+      boundary_generation: Math.max(0, Number(input.boundaryGeneration ?? input.boundary_generation ?? current.baseline_generation ?? 0)),
       previous_cache_read_tokens: current.previous_cache_read_tokens,
       cache_deletion_status: "pending_next_api_usage",
       body_free: true,
@@ -479,6 +482,11 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
     const cacheRead = finite(usage.cacheReadInputTokens ?? usage.cache_read_input_tokens);
     const cacheCreation = finite(usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens);
     const directInput = finite(usage.directInputTokens ?? usage.direct_input_tokens);
+    const output = finite(usage.outputTokens ?? usage.output_tokens);
+    const estimatedContext = finite(input.estimatedContextTokens ?? input.estimated_context_tokens);
+    const estimatedPayload = finite(input.estimatedPayloadTokens ?? input.estimated_payload_tokens ?? estimatedContext);
+    const estimatedFixed = finite(input.estimatedFixedTokens ?? input.estimated_fixed_tokens);
+    const observedContext = directInput + cacheCreation + cacheRead + output;
     const previous = current.previous_cache_read_tokens === null || current.previous_cache_read_tokens === undefined
       ? null
       : finite(current.previous_cache_read_tokens);
@@ -546,6 +554,14 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
       cache_read_input_tokens: cacheRead,
       cache_creation_input_tokens: cacheCreation,
       direct_input_tokens: directInput,
+      output_tokens: output,
+      estimated_context_tokens: estimatedContext,
+      estimated_payload_tokens: estimatedPayload,
+      estimated_fixed_tokens: estimatedFixed,
+      payload_checksum: String(input.payloadChecksum || input.payload_checksum || ""),
+      fixed_context_checksum: String(input.fixedContextChecksum || input.fixed_context_checksum || ""),
+      provider_observed_context_tokens: observedContext,
+      positive_estimation_drift_tokens: Math.max(0, observedContext - estimatedContext),
       token_drop: tokenDrop,
       drop_ratio: Math.round(dropRatio * 10_000) / 10_000,
       classification,
@@ -573,6 +589,9 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
       recorded_at: at,
     };
     const event = { ...eventCore, event_checksum: eventChecksum(eventCore) };
+    const isGroupMainContextUsage = event.source === "group_main_planning"
+      && event.provider_observed_context_tokens > 0
+      && event.estimated_context_tokens > 0;
     const stored = persistLedger(file, {
       ...current,
       status: cacheBreak ? "cache_break_detected" : "tracking",
@@ -586,11 +605,38 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
       cache_deletion_consumed_count: Math.max(0, Number(current.cache_deletion_consumed_count || 0)) + (isCacheDeletion ? 1 : 0),
       last_api_success_at: provider === "anthropic" && !excludedModel ? at : current.last_api_success_at,
       last_event: event,
+      last_group_main_context_usage_event: isGroupMainContextUsage
+        ? event
+        : current.last_group_main_context_usage_event,
       recent_events: [...(Array.isArray(current.recent_events) ? current.recent_events : []), event],
       updated_at: at,
     });
     return { recorded: true, event, ledger: stored };
   });
+}
+
+export function readGroupMainContextUsageBaseline(groupId: string, groupSessionId: string, expected: any = {}) {
+  const ledger = readGroupPromptCacheBreakDetection(groupId, groupSessionId);
+  const event = ledger.last_group_main_context_usage_event || null;
+  const issues: string[] = [];
+  if (ledger.checksum_valid !== true) issues.push("usage_ledger_invalid");
+  if (!event) issues.push("usage_baseline_missing");
+  if (event && String(event.event_checksum || "") !== eventChecksum(event)) issues.push("usage_event_checksum_invalid");
+  if (event && String(event.group_id || "") !== String(groupId || "")) issues.push("usage_group_mismatch");
+  if (event && String(event.group_session_id || "") !== String(groupSessionId || "")) issues.push("usage_session_mismatch");
+  if (event && event.source !== "group_main_planning") issues.push("usage_source_invalid");
+  if (event && Number(event.baseline_generation || 0) !== Number(ledger.baseline_generation || 0)) issues.push("usage_generation_stale");
+  if (ledger.pending_post_compaction) issues.push("usage_post_compaction_reset_pending");
+  if (expected.provider && event && String(event.provider || "") !== String(expected.provider || "").toLowerCase()) issues.push("usage_provider_mismatch");
+  if (expected.model && event && String(event.model || "") !== String(expected.model || "")) issues.push("usage_model_mismatch");
+  if (event && Number(event.provider_observed_context_tokens || 0) <= 0) issues.push("usage_observed_tokens_missing");
+  if (event && Number(event.estimated_context_tokens || 0) <= 0) issues.push("usage_estimated_tokens_missing");
+  return {
+    valid: issues.length === 0,
+    issues,
+    event: issues.length === 0 ? event : null,
+    ledger,
+  };
 }
 
 export function deleteGroupPromptCacheBreakDetection(groupId: string, groupSessionId: string) {

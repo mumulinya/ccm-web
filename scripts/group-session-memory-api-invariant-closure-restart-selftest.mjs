@@ -17,6 +17,17 @@ const blockedSessionId = "gcs_phase331_floor_blocked";
 const journalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-phase331-journal-"));
 const sessionDirs = [];
 
+function mockModelSummary({ user }) {
+  const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+  const start = user.indexOf(marker) + marker.length;
+  const ends = [
+    user.indexOf("\n用户本次 /compact 的附加要求", start),
+    user.indexOf("\n\n本次被压缩区间内的全部用户消息", start),
+  ].filter(index => index >= 0);
+  const end = Math.min(...ends);
+  return { summary: JSON.parse(user.slice(start, end)), provider: "mock", model: "mock-group-summary" };
+}
+
 function messages() {
   const rows = Array.from({ length: 60 }, (_, index) => ({
     id: `phase331-message-${index}`,
@@ -80,7 +91,9 @@ async function run(sessionId, memory = {}) {
     transcriptPath: `phase331-${sessionId}.json`,
     force: true,
     config: {
-      memoryCompactionUseModel: false,
+      memoryCompactionUseModel: true,
+      memoryCompactionMode: "model-required",
+      compactionModelCall: mockModelSummary,
       minKeepMessages: 1,
       minKeepTokens: 1,
       maxKeepTokens: 40_000,

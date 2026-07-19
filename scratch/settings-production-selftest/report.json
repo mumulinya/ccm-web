@@ -1,7 +1,7 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T01:45:05.872Z",
-  "baseUrl": "http://127.0.0.1:3082",
+  "generatedAt": "2026-07-18T15:22:32.437Z",
+  "baseUrl": "http://127.0.0.1:3080",
   "checks": [
     {
       "name": "settings source removes hidden diagnostics and uses scoped reset",

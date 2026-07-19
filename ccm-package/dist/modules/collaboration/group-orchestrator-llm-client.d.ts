@@ -32,6 +32,24 @@ export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
 export declare function normalizeAnthropicMessagesUrl(apiUrl: string): string;
 export declare function shouldUseAnthropic(config: any): boolean;
 export declare function extractJsonObject(text: string): any;
+export declare function resolveReasoningEffort(config: any): string;
+export declare function buildOpenAiReasoningFields(config: any): {
+    reasoning_effort?: undefined;
+    reasoning?: undefined;
+} | {
+    reasoning_effort: string;
+    reasoning: {
+        effort: string;
+    };
+};
+export declare function buildAnthropicThinkingFields(config: any): {
+    thinking?: undefined;
+} | {
+    thinking: {
+        type: string;
+        budget_tokens: number;
+    };
+};
 export declare function fetchWithNodeHttpFallback(endpoint: string | URL, init?: any): Promise<any>;
 export declare function callOpenAiCompatibleChat(config: any, options: LlmCallOptions): Promise<string>;
 export declare function callAnthropicCompatibleChat(config: any, options: LlmCallOptions): Promise<any>;

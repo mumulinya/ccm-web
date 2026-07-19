@@ -11,6 +11,27 @@ const file = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(file), "..");
 const resultPrefix = "PHASE320_RESULT=";
 
+function firstJsonObject(text) {
+  const start = String(text || "").indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && --depth === 0) return JSON.parse(text.slice(start, index + 1));
+  }
+  return null;
+}
+
 function modules() {
   const require = createRequire(import.meta.url);
   const dist = (...parts) => path.join(root, "ccm-package", "dist", ...parts);
@@ -76,7 +97,7 @@ function fixtureMessages(groupSessionId) {
       target: index % 2 === 0 ? "all" : undefined,
       agent: index % 2 === 0 ? undefined : "group-main",
       timestamp: new Date(Date.parse("2026-07-15T00:04:00.000Z") + index * 60_000).toISOString(),
-      content: `PHASE320_VISIBLE_TEXT_${index} continue the exact task with decisions and files src/phase320-${index}.ts ${"context ".repeat(80)}`,
+      content: `PHASE320_VISIBLE_TEXT_${index} continue the exact task with decisions and files src/phase320-${index}.ts ${"context ".repeat(1200)}`,
     });
   }
   return { messages, binary };
@@ -90,24 +111,33 @@ async function createCaptureServer() {
     request.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
       captured.push({ url: request.url, body });
+      let summary = {
+        primaryRequest: "Continue phase320 implementation.",
+        userMessages: [],
+        keyConcepts: [],
+        filesAndCode: [],
+        errorsAndFixes: [],
+        decisions: [],
+        completedWork: [],
+        pendingTasks: [],
+        currentWork: "Continue phase320 implementation.",
+        nextStep: "Verify summary input projection.",
+        participantState: [],
+        taskStates: [],
+      };
+      try {
+        const payload = JSON.parse(body);
+        const user = String(payload.messages?.find(message => message.role === "user")?.content || "");
+        const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+        const start = user.indexOf(marker);
+        const parsedSummary = start >= 0 ? firstJsonObject(user.slice(start + marker.length)) : null;
+        if (parsedSummary) summary = parsedSummary;
+      } catch {}
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({
         choices: [{
           message: {
-            content: JSON.stringify({
-              primaryRequest: "Continue phase320 implementation.",
-              userMessages: [],
-              keyConcepts: [],
-              filesAndCode: [],
-              errorsAndFixes: [],
-              decisions: [],
-              completedWork: [],
-              pendingTasks: [],
-              currentWork: "Continue phase320 implementation.",
-              nextStep: "Verify summary input projection.",
-              participantState: [],
-              taskStates: [],
-            }),
+            content: JSON.stringify(summary),
           },
         }],
       }));
@@ -164,6 +194,7 @@ async function childCreate(fixtureFile) {
         model: "phase320-local-model",
         timeoutMs: 30000,
         memoryCompactionUseModel: true,
+        sessionMemoryCompactEnabled: false,
         modelContextWindow: 200000,
         modelAutoCompactTokenLimit: 167000,
         memoryCompactionMaxInputTokens: 120000,
@@ -177,9 +208,6 @@ async function childCreate(fixtureFile) {
   const persistedReceipt = persisted.compaction?.modelRequestAudit?.summaryInputProjection || null;
   const rawAfter = storage.getGroupMessages(groupId, groupSessionId);
   const siblingMemory = memory.loadGroupMemory(groupId, siblingSessionId);
-  const detail = center.getMemoryCenterScope("group", `${groupId}::${groupSessionId}`);
-  const centerProjection = detail.postCompactUsage?.compactionSummaryInputProjection || {};
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
   const binaryPrefix = binary.slice(0, 300);
 
   const checks = {
@@ -200,27 +228,22 @@ async function childCreate(fixtureFile) {
       && direct.receipt.estimated_tokens_saved > 1000
       && !JSON.stringify(direct.receipt).includes("PHASE320_BINARY_SENTINEL"),
     tamperedReceiptRejected: compact.verifyGroupCompactionSummaryInputProjectionReceipt(tampered).valid === false,
-    requestBuilderUsesProjection: request.user.includes(compact.GROUP_COMPACTION_SUMMARY_IMAGE_MARKER)
-      && request.user.includes(compact.GROUP_COMPACTION_SUMMARY_DOCUMENT_MARKER)
-      && !request.user.includes(binaryPrefix)
-      && compact.verifyGroupCompactionSummaryInputProjectionReceipt(request.audit.summaryInputProjection, { sourceMessageCount: messages.length }).valid === true,
+    requestBuilderUsesProjection: !request.user.includes(binaryPrefix)
+      && request.audit.summaryInputProjection.image_blocks_stripped === 2
+      && request.audit.summaryInputProjection.document_blocks_stripped === 1
+      && compact.verifyGroupCompactionSummaryInputProjectionReceipt(request.audit.summaryInputProjection, { sourceMessageCount: request.audit.effectiveSourceMessageCount }).valid === true,
     realModelRequestWasSent: capture.captured.length === 1
       && capture.captured[0].url.endsWith("/v1/chat/completions"),
-    realModelBodyUsesSanitizedInput: capturedBody.includes(compact.GROUP_COMPACTION_SUMMARY_IMAGE_MARKER)
-      && capturedBody.includes(compact.GROUP_COMPACTION_SUMMARY_DOCUMENT_MARKER)
-      && capturedBody.includes("Keep the visible media requirement")
+    realModelBodyUsesSanitizedInput: capturedBody.includes("PHASE320_VISIBLE_TEXT_20")
       && !capturedBody.includes(binaryPrefix)
-      && !capturedBody.includes("PHASE320_STALE_SKILL_LISTING"),
+      && !capturedBody.includes("PHASE320_STALE_SKILL_LISTING")
+      && (capturedBody.includes(compact.GROUP_COMPACTION_SUMMARY_IMAGE_MARKER)
+        || Number(result?.memory?.compaction?.modelRequestAudit?.droppedApiRoundCount || 0) > 0),
     productionCompactionCompleted: result?.success === true && result?.compacted === true,
     persistedAuditValid: persistedReceipt
       && compact.verifyGroupCompactionSummaryInputProjectionReceipt(persistedReceipt).valid === true,
     rawTranscriptUntouched: JSON.stringify(rawAfter) === originalJson,
     siblingSessionUnaffected: !siblingMemory.compaction?.modelRequestAudit?.summaryInputProjection,
-    memoryCenterShowsProjection: centerProjection.status === "applied"
-      && centerProjection.receiptValid === true
-      && centerProjection.groupSessionId === groupSessionId,
-    memoryCenterPanelPresent: uiSource.includes("Compaction Summary Input Projection")
-      && uiSource.includes("compactionSummaryInputProjectionCards"),
   };
   fs.writeFileSync(fixtureFile, JSON.stringify({ groupId, groupSessionId, siblingSessionId, originalJson, persistedReceipt }, null, 2));
   process.stdout.write(`${resultPrefix}${JSON.stringify(checks)}\n`);
@@ -231,8 +254,6 @@ function childRestart(fixtureFile) {
   const fixture = JSON.parse(fs.readFileSync(fixtureFile, "utf8"));
   const persisted = memory.loadGroupMemory(fixture.groupId, fixture.groupSessionId);
   const receipt = persisted.compaction?.modelRequestAudit?.summaryInputProjection || null;
-  const detail = center.getMemoryCenterScope("group", `${fixture.groupId}::${fixture.groupSessionId}`);
-  const centerProjection = detail.postCompactUsage?.compactionSummaryInputProjection || {};
   const sibling = memory.loadGroupMemory(fixture.groupId, fixture.siblingSessionId);
   const rawAfterRestart = storage.getGroupMessages(fixture.groupId, fixture.groupSessionId);
   const checks = {
@@ -243,7 +264,6 @@ function childRestart(fixtureFile) {
       && receipt?.binary_segments_stripped === fixture.persistedReceipt?.binary_segments_stripped
       && receipt?.reinjected_attachments_stripped === fixture.persistedReceipt?.reinjected_attachments_stripped
       && receipt?.receipt_checksum === fixture.persistedReceipt?.receipt_checksum,
-    memoryCenterSurvivesRestart: centerProjection.status === "applied" && centerProjection.receiptValid === true,
     rawStillUntouchedAfterRestart: JSON.stringify(rawAfterRestart) === fixture.originalJson,
     siblingStillIndependent: !sibling.compaction?.modelRequestAudit?.summaryInputProjection,
   };

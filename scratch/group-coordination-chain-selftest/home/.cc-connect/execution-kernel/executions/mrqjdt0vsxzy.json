@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "id": "mrqjdt0vsxzy",
+  "taskId": "mrqjdt0vsxzy",
+  "project": "backend-agent",
+  "agent": "backend-agent",
+  "state": "failed",
+  "packet": {
+    "version": 1,
+    "taskId": "mrqjdt0vsxzy",
+    "objective": "保持当前原生会话运行，用于验证协作会话不会打断它",
+    "project": "backend-agent",
+    "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project",
+    "scope": {
+      "allowedPaths": [],
+      "deniedPaths": [
+        ".git",
+        ".env",
+        "node_modules"
+      ],
+      "requiresChanges": true
+    },
+    "isolation": {
+      "mode": "worktree",
+      "failClosed": true
+    },
+    "branchPolicy": "worktree",
+    "verification": {
+      "required": true,
+      "commands": [],
+      "requiredGreenLevel": "project"
+    },
+    "commitPolicy": "verified_commit",
+    "permissions": {
+      "filesystem": "workspace_write",
+      "network": "allow",
+      "envAllowlist": [
+        "PATH",
+        "Path",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "HOME",
+        "USERPROFILE",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "PROGRAMDATA",
+        "TERM",
+        "COLORTERM",
+        "LANG",
+        "LC_ALL",
+        "SHELL",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "CODEX_HOME",
+        "CURSOR_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "CLAUDE_CONFIG_DIR",
+        "CCM_CODEX_GATEWAY_CONFIG",
+        "CCM_CODEX_API_KEY",
+        "CCM_CODEX_LOCAL_ACCESS_TOKEN"
+      ]
+    },
+    "budget": {
+      "timeoutMs": 300000,
+      "maxOutputBytes": 2097152,
+      "maxRecoveryAttempts": 1
+    },
+    "escalationPolicy": "ask_user",
+    "acceptanceCriteria": "",
+    "createdAt": "2026-07-18T15:43:31.000Z"
+  },
+  "processIds": [],
+  "externalRunnerRequestIds": [],
+  "workspace": {
+    "mode": "worktree",
+    "requestedMode": "worktree",
+    "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project\\.cc-connect\\worktrees\\mrqjdt0vsxzy-task-queue-backend-agent-mrqjdtv2",
+    "originalWorkDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project",
+    "worktreePath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project\\.cc-connect\\worktrees\\mrqjdt0vsxzy-task-queue-backend-agent-mrqjdtv2",
+    "worktreeBranch": "ccm/mrqjdt0vsxzy-task-queue-backend-agent-mrqjdtv2",
+    "baseHead": "67591fa7615c76d59fcc6348f85326a22a236b02",
+    "baseBranch": "master",
+    "reused": false,
+    "project": "backend-agent",
+    "updatedAt": "2026-07-18T15:43:32.206Z"
+  },
+  "checkpointIds": [
+    "checkpoint-mrqjdt0vsxzy-mrqjdutb-a56d4d3f"
+  ],
+  "green": {
+    "level": "none",
+    "checks": [],
+    "evaluatedAt": ""
+  },
+  "failure": {
+    "failureClass": "trust_gate",
+    "recoverable": true,
+    "recovery": [
+      "确认工作目录在允许列表",
+      "重新启动 Agent"
+    ],
+    "message": "task Agent memory prompt injection proof invalid: required_trusted_envelope_unbound,required_projection_unbound"
+  },
+  "cancellation": null,
+  "createdAt": "2026-07-18T15:43:31.000Z",
+  "updatedAt": "2026-07-18T15:43:33.162Z",
+  "startedAt": "2026-07-18T15:43:31.003Z",
+  "finishedAt": "2026-07-18T15:43:33.162Z",
+  "events": [
+    {
+      "id": "event-mrqjdtbs-045e",
+      "at": "2026-07-18T15:43:31.000Z",
+      "taskId": "mrqjdt0vsxzy",
+      "executionId": "mrqjdt0vsxzy",
+      "name": "execution.queued",
+      "state": "queued",
+      "status": "info",
+      "message": "开发执行已进入队列"
+    },
+    {
+      "id": "event-mrqjdtbv-3f1e",
+      "at": "2026-07-18T15:43:31.004Z",
+      "taskId": "mrqjdt0vsxzy",
+      "executionId": "mrqjdt0vsxzy",
+      "name": "execution.spawning",
+      "state": "spawning",
+      "status": "info",
+      "message": "任务队列正在启动开发执行内核"
+    },
+    {
+      "id": "event-mrqjdu9a-5add",
+      "at": "2026-07-18T15:43:32.206Z",
+      "taskId": "mrqjdt0vsxzy",
+      "executionId": "mrqjdt0vsxzy",
+      "name": "workspace.prepared",
+      "state": "spawning",
+      "status": "info",
+      "message": "独立 worktree 已准备",
+      "data": {
+        "mode": "worktree",
+        "requestedMode": "worktree",
+        "workDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project\\.cc-connect\\worktrees\\mrqjdt0vsxzy-task-queue-backend-agent-mrqjdtv2",
+        "originalWorkDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project",
+        "worktreePath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project\\.cc-connect\\worktrees\\mrqjdt0vsxzy-task-queue-backend-agent-mrqjdtv2",
+        "worktreeBranch": "ccm/mrqjdt0vsxzy-task-queue-backend-agent-mrqjdtv2",
+        "baseHead": "67591fa7615c76d59fcc6348f85326a22a236b02",
+        "baseBranch": "master",
+        "reused": false,
+        "project": "backend-agent",
+        "updatedAt": "2026-07-18T15:43:32.206Z"
+      }
+    },
+    {
+      "id": "event-mrqjdute-7351",
+      "at": "2026-07-18T15:43:32.930Z",
+      "taskId": "mrqjdt0vsxzy",
+      "executionId": "mrqjdt0vsxzy",
+      "name": "checkpoint.created",
+      "state": "spawning",
+      "status": "ok",
+      "message": "已创建任务前文件检查点",
+      "data": {
+        "checkpointId": "checkpoint-mrqjdt0vsxzy-mrqjdutb-a56d4d3f",
+        "checkpointCommit": "76823fdfa07468edb2fc74e277cf800d48f38f62"
+      }
+    },
+    {
+      "id": "event-mrqjduzu-9e25",
+      "at": "2026-07-18T15:43:33.162Z",
+      "taskId": "mrqjdt0vsxzy",
+      "executionId": "mrqjdt0vsxzy",
+      "name": "execution.failed",
+      "state": "failed",
+      "status": "error",
+      "failureClass": "trust_gate",
+      "message": "task Agent memory prompt injection proof invalid: required_trusted_envelope_unbound,required_projection_unbound"
+    }
+  ]
+}

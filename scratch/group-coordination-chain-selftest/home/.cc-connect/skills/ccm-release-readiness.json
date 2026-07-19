@@ -1,0 +1,36 @@
+{
+  "name": "ccm-release-readiness",
+  "type": "skill",
+  "description": "Assess build, configuration, compatibility, migration, rollout, rollback, and residual release risk.",
+  "prompt": "",
+  "enabled": true,
+  "version": "1.0.0",
+  "author": "CCM",
+  "packagePath": "C:\\Users\\admin\\.cc-connect\\ccm\\ccm-package\\templates\\skills\\ccm-release-readiness",
+  "skillFile": "C:\\Users\\admin\\.cc-connect\\ccm\\ccm-package\\templates\\skills\\ccm-release-readiness\\SKILL.md",
+  "packageStats": {
+    "files": 3,
+    "totalBytes": 2284
+  },
+  "contentHash": "e7ae197c43f3c0a7372d",
+  "origin": "internal",
+  "scope": "ccm-internal",
+  "sourceType": "builtin",
+  "immutable": true,
+  "deletable": false,
+  "editable": false,
+  "disableable": false,
+  "systemManaged": true,
+  "roleSkill": true,
+  "marketplace": {
+    "source": {
+      "id": "ccm-role-skills",
+      "label": "CCM Role Skills",
+      "kind": "builtin",
+      "trust": "official"
+    },
+    "itemId": "ccm-role-skills:skill:ccm-release-readiness",
+    "homepage": ""
+  },
+  "updated_at": "2026-07-18T15:43:31.093Z"
+}

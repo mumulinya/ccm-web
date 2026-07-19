@@ -102,7 +102,7 @@ export declare function validateExternalRunnerRuntimeToolGate(request: any, opti
     ok: boolean;
     reason: string;
     runtimeToolSnapshot: any;
-    runtimeToolReadiness: import("../tools/runtime-tool-sync").RuntimeToolReadiness;
+    runtimeToolReadiness: import("../tools/runtime-tool-sync-part-01").RuntimeToolReadiness;
     runtimeToolScope: {
         ok: boolean;
         skipped: boolean;
@@ -153,7 +153,7 @@ export declare function validateExternalRunnerRuntimeToolGate(request: any, opti
 } | {
     ok: boolean;
     runtimeToolSnapshot: any;
-    runtimeToolReadiness: import("../tools/runtime-tool-sync").RuntimeToolReadiness;
+    runtimeToolReadiness: import("../tools/runtime-tool-sync-part-01").RuntimeToolReadiness;
     runtimeToolScope: {
         ok: boolean;
         skipped: boolean;

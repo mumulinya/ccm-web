@@ -16,6 +16,7 @@ export declare function createGlobalAgentHistoryRuntime(deps: any): {
     syncGlobalAgentWebHistory: (payload: any) => any;
     getGlobalAgentConversationMessages: (sessionId: string) => any[];
     appendGlobalAgentConversationMessage: (sessionId: string, role: "user" | "assistant", content: string, source?: string) => void;
+    scheduleGlobalSessionAutoTitle: (sessionId: string) => Promise<any>;
     resolveFeishuGlobalAgentSessionId: (payload: any, store?: any) => string;
     runFeishuGlobalAgentSessionRoutingSelfTest: () => {
         pass: boolean;

@@ -1,10 +1,14 @@
 <script setup>
+import PetSprite from './PetSprite.vue'
+
 defineProps({
   petTypes: { type: Array, default: () => [] },
   actionPetType: { type: String, default: '' },
+  actionPetSkin: { type: Object, default: null },
   rows: { type: Array, default: () => [] },
   imageErrors: { type: Object, default: () => ({}) },
   uploadingAsset: { type: String, default: '' },
+  readonlyNotice: { type: String, default: '' },
   assetUrl: { type: Function, required: true },
   assetFileName: { type: Function, required: true },
   canUploadAsset: { type: Function, required: true },
@@ -29,10 +33,20 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
       <div class="asset-count">{{ rows.length }} 个动作资源</div>
     </div>
 
+    <div v-if="readonlyNotice" class="asset-readonly-notice">{{ readonlyNotice }}</div>
+
     <div class="asset-grid">
       <div v-for="row in rows" :key="row.key" class="asset-card">
         <div class="asset-preview">
+          <PetSprite
+            v-if="row.useV2Preview"
+            :type="actionPetType"
+            :skin="actionPetSkin"
+            :state="row.previewState || 'idle'"
+            :size="56"
+          />
           <img
+            v-else
             :src="assetUrl(row.assetPath)"
             alt=""
             aria-hidden="true"
@@ -46,7 +60,7 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
             <span class="asset-group">{{ row.group }}</span>
           </div>
           <div class="asset-path" :title="row.assetPath">{{ row.assetPath }}</div>
-          <div class="asset-file">{{ assetFileName(row.assetPath) }}</div>
+          <div class="asset-file">{{ row.useV2Preview ? (row.previewState || 'preview') : assetFileName(row.assetPath) }}</div>
         </div>
         <div class="asset-actions">
           <button
@@ -57,7 +71,7 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
           >
             {{ uploadingAsset === row.assetPath ? '上传中' : (row.assetPath.toLowerCase().endsWith('.png') ? '上传图片' : '上传 SVG') }}
           </button>
-          <span v-else class="asset-readonly">只读</span>
+          <span v-else class="asset-readonly">只读预览</span>
           <input
             v-if="canUploadAsset(row)"
             class="hidden-file-input"
@@ -79,6 +93,7 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
 .asset-select-wrap label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
 .asset-select-wrap select { width: 240px; padding: 9px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); outline: none; }
 .asset-count { padding: 6px 10px; border-radius: 999px; background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); font-size: 12px; font-weight: 700; }
+.asset-readonly-notice { padding: 12px 14px; border-radius: 12px; background: rgba(245, 158, 11, 0.1); color: #b45309; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .asset-card { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 12px; align-items: center; padding: 14px; background: rgba(255, 255, 255, 0.42); border: 1px solid rgba(0, 0, 0, 0.045); border-radius: 14px; min-width: 0; }
 .asset-preview { width: 68px; height: 68px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.7); border-radius: 12px; border: 1px solid rgba(0,0,0,0.04); }
@@ -98,6 +113,7 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-outline { background: transparent; border: 1px solid rgba(0, 0, 0, 0.08); color: var(--text-secondary); }
 :global([data-theme="dark"] .asset-toolbar), :global([data-theme="dark"] .asset-card), :global([data-theme="dark"] .asset-preview){ background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
+:global([data-theme="dark"] .asset-readonly-notice) { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
 @media (max-width: 768px) {
   .asset-toolbar { align-items: stretch; flex-direction: column; }
   .asset-select-wrap, .asset-select-wrap select { width: 100%; }

@@ -1,0 +1,65 @@
+export declare function runGroupMemoryPreservedSegmentSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        keepIndexExpandedToTaskStart: boolean;
+        taskTransactionProtected: boolean;
+        segmentRecordsBudget: boolean;
+        compactBoundaryCarriesSegment: boolean;
+        postCompactRestoreCarriesSegment: boolean;
+        memoryCarriesSegment: boolean;
+        rawTranscriptUntouched: boolean;
+    };
+    keepIndex: number;
+    segment: {
+        schema: string;
+        version: number;
+        keepIndex: number;
+        floorIndex: number;
+        preservedMessageCount: number;
+        preservedTextBlockMessageCount: number;
+        preservedTokenEstimate: any;
+        preservedMessageIds: string[];
+        omittedPreservedMessageIds: number;
+        firstPreservedMessageId: string;
+        lastPreservedMessageId: string;
+        summarizedThroughMessageId: string;
+        summaryMessageId: string;
+        summaryChecksum: string;
+        headMessageId: string;
+        anchorMessageId: string;
+        tailMessageId: string;
+        anchorKind: string;
+        anchorMode: string;
+        minTokens: number;
+        minTextBlockMessages: number;
+        maxTokens: number;
+        protectedTaskTransaction: boolean;
+        firstPreservedTaskId: string;
+        transcriptPath: any;
+        createdAt: any;
+    };
+    boundarySegment: any;
+}>;
+export declare function runGroupMemoryPostCompactRecoveryAuditSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        compacted: boolean;
+        auditRecordedInCompaction: boolean;
+        auditRecordedInBoundary: boolean;
+        auditRecordedInMessageCompression: boolean;
+        boundaryRangeResolvable: boolean;
+        rawTranscriptRecoverable: boolean;
+        preservedAndReinjectReady: boolean;
+        warningSuppressedAfterCompact: boolean;
+        childAgentActionSafe: boolean;
+        rawTranscriptUntouched: boolean;
+    };
+    audit: any;
+}>;
+export declare function runGroupMemoryCompactWarningSelfTest(): any;
+export declare function runGroupMemoryCompactionSelfTest(): any;
+export declare function runGroupMemoryModelCapacitySelfTest(): any;
+export declare function runGroupApiMicrocompactNativeApplyPlanSelfTest(): any;
+export declare function runGroupMemoryQualityGateSelfTest(): any;
+export declare function runGroupMemoryMicroCompactSelfTest(): any;
+export declare function runGroupMemoryTimeBasedMicroCompactSelfTest(): any;

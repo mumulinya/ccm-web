@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import AttachmentChips from './AttachmentChips.vue'
+import EmptyState from './EmptyState.vue'
+import LoadingSkeleton from './LoadingSkeleton.vue'
 
 const emit = defineEmits(['navigate'])
 const data = ref(null)
@@ -236,7 +238,7 @@ onUnmounted(() => timer && window.clearInterval(timer))
       </div>
     </section>
 
-    <div v-if="loading" class="empty">正在整理今天的工作…</div>
+    <LoadingSkeleton v-if="loading" variant="cards" :cards="3" />
     <template v-else>
       <section v-if="attention.length" class="section-block">
         <div class="section-title"><div><span class="eyebrow warn">优先处理</span><h2>有 {{ attention.length }} 件事需要你</h2></div></div>
@@ -260,7 +262,12 @@ onUnmounted(() => timer && window.clearInterval(timer))
             <div class="task-bottom"><small>{{ formatTime(task.updated_at) }}</small><button class="text-btn" @click="navigateTask(task)">查看进度</button></div>
           </article>
         </div>
-        <div v-else class="empty compact-empty">现在没有任务在运行。上面说一句目标，就可以开始。</div>
+        <EmptyState
+          v-else
+          icon="◎"
+          title="现在没有任务在运行"
+          hint="上面说一句目标，就可以开始。"
+        />
       </section>
 
       <section v-if="completed.length" class="section-block">
@@ -288,10 +295,11 @@ onUnmounted(() => timer && window.clearInterval(timer))
 .hero,.section-title,.confirm-head,.intake-footer,.task-bottom,.confirm-actions{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .hero{padding:10px 0 22px}.hero h1{font-size:34px;margin:5px 0 8px;letter-spacing:-.03em}.hero p{margin:0;color:var(--text-secondary,#667085)}
 .eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#4f6fff}.eyebrow.warn{color:#b54708}.success-text{color:#067647}
-.intake-card,.confirm-card,.task-card,.resources button,.technical{background:var(--bg-card,#fff);border:1px solid var(--border-color,#e5e9f2);border-radius:18px;box-shadow:0 10px 35px rgba(31,42,68,.06)}
+.intake-card,.confirm-card,.task-card,.resources button,.technical{background:var(--surface,var(--bg-card,#fff));border:1px solid var(--border-color,#e5e9f2);border-radius:var(--radius-xl,12px);box-shadow:var(--shadow-sm)}
+.eyebrow{color:var(--accent-blue)}.text-btn{color:var(--accent-blue)!important}
 .intake-card{padding:18px}.intake-card textarea{width:100%;box-sizing:border-box;border:0;resize:vertical;background:transparent;color:inherit;font:500 17px/1.65 inherit;outline:0}.intake-footer{border-top:1px solid var(--border-color,#edf0f5);padding-top:12px}.intake-footer select{border:0;background:var(--bg-secondary,#f5f7fb);color:inherit;padding:9px 12px;border-radius:10px;max-width:330px}.hint{margin-left:auto;color:#98a2b3;font-size:12px}
-.intake-card :deep(.attachment-row){margin:8px 0 12px}.hidden-file-input{display:none}.attach-action{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 10px;border:1px solid var(--border-color,#dfe4ec);border-radius:8px;background:var(--bg-card,#fff);color:inherit;font-weight:700}.attach-action:disabled{opacity:.5;cursor:not-allowed}.source-summary{border-left:3px solid #12b76a}.confirm-card details:not([open])>:not(summary){display:none}.source-fallback-notice{margin:8px 0 0;color:#b54708}.confirm-card details>code{display:block;margin-top:7px;overflow-wrap:anywhere}.source-technical-list{display:grid;gap:7px;margin:10px 0 0;padding:0;list-style:none}.source-technical-list li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:7px 8px;border:1px solid var(--border-color,#e5e9f2);border-radius:8px}.source-technical-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source-technical-list span{color:#667085}.source-technical-list small{grid-column:1/-1;color:#b54708;overflow-wrap:anywhere}
-button{font:inherit;cursor:pointer}.primary,.ghost{border-radius:10px;padding:10px 16px;font-weight:700}.primary{border:1px solid #4f6fff;background:#4f6fff;color:white}.primary:disabled,.ghost:disabled{opacity:.5;cursor:not-allowed}.ghost{border:1px solid var(--border-color,#dfe4ec);background:var(--bg-card,#fff);color:inherit}.small{padding:7px 11px;font-size:13px}.danger-text{color:#b42318}
+.intake-card :deep(.attachment-row){margin:8px 0 12px}.hidden-file-input{display:none}.attach-action{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 10px;border:1px solid var(--border-color,#dfe4ec);border-radius:8px;background:var(--surface,#fff);color:inherit;font-weight:700}.attach-action:disabled{opacity:.5;cursor:not-allowed}.source-summary{border-left:3px solid #12b76a}.confirm-card details:not([open])>:not(summary){display:none}.source-fallback-notice{margin:8px 0 0;color:#b54708}.confirm-card details>code{display:block;margin-top:7px;overflow-wrap:anywhere}.source-technical-list{display:grid;gap:7px;margin:10px 0 0;padding:0;list-style:none}.source-technical-list li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:7px 8px;border:1px solid var(--border-color,#e5e9f2);border-radius:8px}.source-technical-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source-technical-list span{color:#667085}.source-technical-list small{grid-column:1/-1;color:#b54708;overflow-wrap:anywhere}
+button{font:inherit;cursor:pointer}.primary,.ghost{border-radius:10px;padding:10px 16px;font-weight:700}.primary{border:1px solid var(--accent-blue);background:var(--accent-blue);color:white}.primary:disabled,.ghost:disabled{opacity:.5;cursor:not-allowed}.ghost{border:1px solid var(--border-color,#dfe4ec);background:var(--surface,#fff);color:inherit}.small{padding:7px 11px;font-size:13px}.danger-text{color:#b42318}
 .confirm-card{margin-top:18px;padding:20px;border-color:#b9c6ff;background:linear-gradient(135deg,rgba(79,111,255,.06),rgba(255,255,255,.02))}.confirm-head h2{margin:8px 0 0;font-size:20px}.safe-note{font-size:13px;color:#067647}.confirm-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}.confirm-grid>div{background:var(--bg-secondary,#f7f8fb);border-radius:12px;padding:13px}.confirm-grid .wide{grid-column:1/-1}.confirm-grid label{display:block;color:#7a8496;font-size:12px;margin-bottom:5px}.confirm-grid p{margin:0;line-height:1.55}.confirm-card details{font-size:12px;color:#7a8496}.confirm-actions{justify-content:flex-end;margin-top:16px}
 .section-block{margin-top:34px}.section-title{margin-bottom:14px}.section-title h2{margin:4px 0 0;font-size:22px}.task-list{display:flex;flex-direction:column;gap:10px}.task-card{padding:17px 18px;display:flex;justify-content:space-between;gap:20px}.task-card.needs_user{border-left:4px solid #f79009}.task-card.failed{border-left:4px solid #f04438}.task-main h3,.task-card.compact h3{margin:8px 0 6px;font-size:17px}.task-main p,.task-card.compact p{margin:0 0 8px;color:var(--text-secondary,#667085);line-height:1.5}.task-main small,.task-card small{color:#98a2b3}.task-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.status{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800}.status.decision{background:#fff3e0;color:#b54708}.status.danger{background:#fee4e2;color:#b42318}.status.active{background:#e8edff;color:#3e5bd9}.status.queued{background:#f2f4f7;color:#475467}.status.success{background:#dcfae6;color:#067647}
 .task-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.task-card.compact{display:block}.text-btn{border:0;background:transparent;color:#4f6fff;padding:4px;font-weight:700}.completed-list{border:1px solid var(--border-color,#e5e9f2);border-radius:16px;overflow:hidden}.completed-list button{width:100%;display:grid;grid-template-columns:28px 1fr auto;align-items:center;text-align:left;gap:10px;padding:14px 16px;border:0;border-bottom:1px solid var(--border-color,#edf0f5);background:var(--bg-card,#fff);color:inherit}.completed-list button:last-child{border-bottom:0}.completed-list button>span{color:#12b76a;font-weight:900}.completed-list small{display:block;color:#98a2b3;margin-top:3px}.completed-list time{font-size:12px;color:#98a2b3}

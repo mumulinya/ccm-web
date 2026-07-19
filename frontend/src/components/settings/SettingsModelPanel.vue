@@ -15,6 +15,7 @@ const modelConfig = ref({
   apiKey: '',
   model: '',
   temperature: 0.2,
+  reasoningEffort: 'off',
   timeoutMs: 120000,
   fallbackToRules: true,
   hasKey: false,
@@ -199,6 +200,16 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
                 <div class="settings-field">
                   <label for="model-timeout">超时时间（毫秒）</label>
                   <input id="model-timeout" v-model.number="modelConfig.timeoutMs" type="number" min="5000" step="1000" class="settings-input">
+                </div>
+                <div class="settings-field">
+                  <label for="model-reasoning-effort">推理强度</label>
+                  <select id="model-reasoning-effort" v-model="modelConfig.reasoningEffort" class="settings-input">
+                    <option value="off">关闭</option>
+                    <option value="low">低</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
+                  </select>
+                  <span class="settings-field-hint">仅对支持推理的模型生效；OpenAI 兼容接口发送 reasoning_effort，Anthropic 兼容接口发送 thinking 预算。不支持的网关可先选「关闭」。</span>
                 </div>
               </div>
               <label class="settings-switch" style="margin-top:12px">

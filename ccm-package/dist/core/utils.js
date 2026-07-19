@@ -465,6 +465,7 @@ function parseMultipart(buffer, boundary) {
         if (filenameMatch && nameMatch) {
             const name = nameMatch[1];
             const filename = filenameMatch[1];
+            const contentTypeMatch = headerStr.match(/content-type:\s*([^\r\n]+)/i);
             const ext = path.extname(filename);
             const safeName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
             const filePath = path.join(exports.UPLOAD_DIR, safeName);
@@ -472,7 +473,13 @@ function parseMultipart(buffer, boundary) {
                 fs.mkdirSync(exports.UPLOAD_DIR, { recursive: true });
             }
             fs.writeFileSync(filePath, body);
-            files.push({ field: name, filename, savedPath: filePath, size: body.length });
+            files.push({
+                field: name,
+                filename,
+                savedPath: filePath,
+                size: body.length,
+                contentType: String(contentTypeMatch?.[1] || "").trim(),
+            });
         }
         else if (nameMatch) {
             fields[nameMatch[1]] = body.toString("utf-8");

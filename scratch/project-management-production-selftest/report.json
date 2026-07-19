@@ -1,6 +1,6 @@
 {
-  "pass": true,
-  "generatedAt": "2026-07-14T03:47:14.775Z",
+  "pass": false,
+  "generatedAt": "2026-07-18T14:39:26.852Z",
   "checks": [
     {
       "name": "active project is listed from isolated runtime",
@@ -17,14 +17,7 @@
     {
       "name": "archived project can be restored without losing sessions",
       "pass": true
-    },
-    {
-      "name": "permanent purge requires preview, deletes exact project data and preserves source, tasks and TestAgent evidence",
-      "pass": true
-    },
-    {
-      "name": "lifecycle history records archive, restore and purge operations",
-      "pass": true
     }
-  ]
+  ],
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\nfalse !== true\n\n    at file:///C:/Users/admin/.cc-connect/ccm/scripts/project-management-production-selftest.mjs:105:10\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)"
 }

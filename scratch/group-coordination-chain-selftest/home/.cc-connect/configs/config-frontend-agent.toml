@@ -1,0 +1,7 @@
+language = "zh"
+[[projects]]
+name = "frontend-agent"
+[projects.agent]
+type = "claudecode"
+[projects.agent.options]
+work_dir = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\frontend-project"

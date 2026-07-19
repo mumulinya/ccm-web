@@ -10,8 +10,8 @@ export declare function runTestAgentBrowserToolCallTimeoutSelfTest(): Promise<{
     summary: import("..").BrowserToolCallTimeoutSummary;
     reportContract: import("..").TestAgentReportContractValidation;
     verdictContract: import("..").TestAgentVerdictContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     missingAbortContract: import("..").TestAgentReportContractValidation;
     falsePassContract: import("..").TestAgentReportContractValidation;
-    tamperedVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    tamperedVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
 }>;

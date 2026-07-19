@@ -52,6 +52,13 @@ exports.runTestAgentArtifactSelfTest = runTestAgentArtifactSelfTest;
 exports.runTestAgentVerdictSelfTest = runTestAgentVerdictSelfTest;
 exports.runTestAgentFailureSummarySelfTest = runTestAgentFailureSummarySelfTest;
 exports.runTestAgentBrowserProviderGapSummarySelfTest = runTestAgentBrowserProviderGapSummarySelfTest;
+exports.runTestAgentMcpLiveUrlFailClosedSelfTest = runTestAgentMcpLiveUrlFailClosedSelfTest;
+exports.runTestAgentUploadPathEscapeSelfTest = runTestAgentUploadPathEscapeSelfTest;
+exports.runTestAgentIndependentReviewDecisionAlignmentSelfTest = runTestAgentIndependentReviewDecisionAlignmentSelfTest;
+exports.runTestAgentProviderGapForcesPlaywrightRecheckSelfTest = runTestAgentProviderGapForcesPlaywrightRecheckSelfTest;
+exports.runTestAgentFlakyHardBlocksAcceptSelfTest = runTestAgentFlakyHardBlocksAcceptSelfTest;
+exports.runTestAgentEnvironmentPrepStructuredSelfTest = runTestAgentEnvironmentPrepStructuredSelfTest;
+exports.runTestAgentPetActivityKeySelfTest = runTestAgentPetActivityKeySelfTest;
 exports.runTestAgentBrowserSessionComparisonSelfTest = runTestAgentBrowserSessionComparisonSelfTest;
 exports.runTestAgentBrowserFlowSummarySelfTest = runTestAgentBrowserFlowSummarySelfTest;
 exports.runTestAgentBrowserMultiSessionSummarySelfTest = runTestAgentBrowserMultiSessionSummarySelfTest;
@@ -422,6 +429,27 @@ function runTestAgentFailureSummarySelfTest() {
 }
 function runTestAgentBrowserProviderGapSummarySelfTest() {
     return require("./self-test-core").runTestAgentBrowserProviderGapSummarySelfTest();
+}
+async function runTestAgentMcpLiveUrlFailClosedSelfTest() {
+    return require("./credibility-self-tests").runTestAgentMcpLiveUrlFailClosedSelfTest();
+}
+function runTestAgentUploadPathEscapeSelfTest() {
+    return require("./credibility-self-tests").runTestAgentUploadPathEscapeSelfTest();
+}
+function runTestAgentIndependentReviewDecisionAlignmentSelfTest() {
+    return require("./credibility-self-tests").runTestAgentIndependentReviewDecisionAlignmentSelfTest();
+}
+function runTestAgentProviderGapForcesPlaywrightRecheckSelfTest() {
+    return require("./credibility-self-tests").runTestAgentProviderGapForcesPlaywrightRecheckSelfTest();
+}
+function runTestAgentFlakyHardBlocksAcceptSelfTest() {
+    return require("./credibility-self-tests").runTestAgentFlakyHardBlocksAcceptSelfTest();
+}
+function runTestAgentEnvironmentPrepStructuredSelfTest() {
+    return require("./credibility-self-tests").runTestAgentEnvironmentPrepStructuredSelfTest();
+}
+function runTestAgentPetActivityKeySelfTest() {
+    return require("./credibility-self-tests").runTestAgentPetActivityKeySelfTest();
 }
 async function runTestAgentBrowserSessionComparisonSelfTest() {
     return require("./self-test-core").runTestAgentBrowserSessionComparisonSelfTest();

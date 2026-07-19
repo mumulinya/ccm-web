@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "boot_id": "DESKTOP-MN23N8A:8692:cecb38d2",
+  "pid": 8692,
+  "hostname": "DESKTOP-MN23N8A",
+  "status": "running",
+  "started_at": "2026-07-17T14:25:04.002Z",
+  "last_seen_at": "2026-07-17T14:28:34.935Z",
+  "restart": {
+    "category": "initial_start",
+    "expected": true,
+    "reason": "首次记录的 CCM 进程启动"
+  },
+  "previous_boot_id": "",
+  "previous_pid": 0,
+  "active_execution": {
+    "task_id": "",
+    "trace_id": "",
+    "task_ids": [],
+    "trace_ids": [],
+    "captured_at": "2026-07-17T14:28:34.969Z"
+  }
+}

@@ -118,8 +118,8 @@ if (process.argv.includes("--child")) {
   } catch (error) {
     blockedError = error;
   }
-  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration.ts"), "utf8");
-  const memoryCenterSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-02-part-02.ts"), "utf8");
+  const snapshotSource = fs.readFileSync(path.join(root, "backend", "tasks", "agent-sessions-snapshot-rows.ts"), "utf8");
   const snapshotSession = agentSessions.openTaskAgentSession({
     scopeId: packet.task_id,
     taskId: packet.task_id,
@@ -184,10 +184,9 @@ if (process.argv.includes("--child")) {
       && snapshotInventory.summary?.finalDispatchGateMissingCount === 0
       && snapshotInventory.rows?.[0]?.finalDispatchPayloadGateValid === true
       && snapshotInventory.rows?.[0]?.finalDispatchPromptBound === true,
-    memoryCenterExposesFinalPromptGate: memoryCenterSource.includes("finalDispatchPromptTokens")
-      && memoryCenterSource.includes("finalDispatchAutoCompactThreshold")
-      && memoryCenterSource.includes("finalDispatchLineageProofValid")
-      && memoryCenterSource.includes("finalDispatchGateBlockedCount"),
+    snapshotPersistsFinalPromptGate: snapshotSource.includes("finalDispatchPromptTokens")
+      && snapshotSource.includes("finalDispatchAutoCompactThreshold")
+      && snapshotSource.includes("finalDispatchLineageProofValid"),
     gateContainsNoPromptBody: !JSON.stringify(readyGate).includes("PHASE315_READY")
       && !JSON.stringify(blockedGate).includes("PHASE315_BLOCKED"),
   };

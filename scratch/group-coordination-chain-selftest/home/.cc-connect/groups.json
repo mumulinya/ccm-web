@@ -1,0 +1,21 @@
+[
+  {
+    "id": "group-business-chain",
+    "name": "协作链验收群",
+    "members": [
+      {
+        "project": "coordinator",
+        "role": "coordinator",
+        "agent": "coded-orchestrator"
+      },
+      {
+        "project": "frontend-agent",
+        "agent": "claudecode"
+      },
+      {
+        "project": "backend-agent",
+        "agent": "codex"
+      }
+    ]
+  }
+]

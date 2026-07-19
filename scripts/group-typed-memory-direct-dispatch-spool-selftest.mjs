@@ -237,7 +237,7 @@ try {
   ok(notStartedRecovery.rows.some(row => row.ticket_id === notStartedRecord.ticket_id && row.action === "marked_uncertain"), "startup recovery must not commit a request that never reached OS spawn");
   equal(typed.getGroupTypedMemoryRecallScopeStats(`${notStarted.groupId}--${notStarted.groupSessionId}`, notStarted.scope).deliveryCount, 0, "pre-spawn failure must consume zero surfaced budget");
 
-  const serverSource = fs.readFileSync(path.join(root, "backend", "server.ts"), "utf8");
+  const serverSource = fs.readFileSync(path.join(root, "backend", "server-agent-runner.ts"), "utf8");
   const directCreate = serverSource.indexOf("const durableDirectDispatch =");
   const directRun = serverSource.indexOf("await runManagedCommand", directCreate);
   const directComplete = serverSource.indexOf("completeDirectAgentDispatch(durableDirectDispatch.id", directRun);
@@ -253,7 +253,10 @@ try {
   ok(serverSource.includes("callAgentViaExternalRunner"), "external runner fallback must remain available");
   const kernelSource = fs.readFileSync(path.join(root, "backend", "agents", "execution-kernel.ts"), "utf8");
   ok(kernelSource.includes('child.once("spawn", () => input.onStarted?.'), "managed direct CLI must expose actual OS spawn witness");
-  const collaborationSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration.ts"), "utf8");
+  const collaborationSource = [
+    "collaboration-cross-agents-part-02-part-02.ts",
+    "collaboration-task-executor.ts",
+  ].map(file => fs.readFileSync(path.join(root, "backend", "modules", "collaboration", file), "utf8")).join("\n");
   equal((collaborationSource.match(/durableDispatch: \w*typedMemoryDispatchAdmission\.required === true/gi) || []).length, 3, "all three typed-memory child paths must enable direct durable spool");
   const globalSource = [
     fs.readFileSync(path.join(root, "backend", "agents", "global", "loop.ts"), "utf8"),

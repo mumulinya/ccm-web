@@ -107,6 +107,8 @@ Standalone MCP server for Feishu/Lark messaging. ESM module (`"type": "module"`)
 - Git commits use conventional prefixes: `chore:`, `feat:`, `docs:`, `fix:`
 - Node.js >= 18.0.0 required
 - Windows is the primary development platform
+- Do not add new logic to files that already exceed 1,500 lines; extract new behavior into focused modules instead.
+- Do not wire diagnostic/local keyword rules into the healthy model routing path. Healthy routing uses model decisions and tools only; local rules are limited to write authorization, clarification, confirmation, idempotency, schema validation, explicit buttons, offline diagnostics, and dedicated degraded entrypoints.
 
 ## Collaboration Runtime UX
 

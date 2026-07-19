@@ -1,0 +1,286 @@
+  <div class="pet-space-container">
+    <!-- 左半边：桌面宠物控制 与 宠物列表 -->
+    <div class="pet-space-left">
+      <div class="glass-panel pet-card-section workspace-companion-card">
+        <div class="companion-copy">
+          <div class="companion-kicker">WORKSPACE COMPANION</div>
+          <h2>一个安静的工作台宠物</h2>
+          <p>这里只管理全局 Agent 与音乐 Agent；群聊、子 Agent、第三方 Agent 和 TestAgent 的工作统一映射到全局宠物。</p>
+        </div>
+        <div class="companion-stage" :class="workspaceMood.key">
+          <div class="orbit-ring ring-one"></div>
+          <div class="orbit-ring ring-two"></div>
+          <div class="codex-companion">
+            <div class="companion-core">
+              <span class="core-eye"></span>
+              <span class="core-eye"></span>
+            </div>
+            <div class="companion-shadow"></div>
+          </div>
+          <div class="mood-pill">{{ workspaceMood.label }}</div>
+        </div>
+        <div class="workspace-metrics">
+          <div v-for="item in companionSignals" :key="item.label" class="workspace-metric">
+            <strong>{{ item.value }}</strong>
+            <span>{{ item.label }}</span>
+          </div>
+        </div>
+        <div class="workspace-progress">
+          <span :style="{ width: `${workspaceMood.progress}%` }"></span>
+        </div>
+        <div class="workspace-detail">{{ workspaceMood.detail }}</div>
+      </div>
+
+      <div class="glass-panel pet-card-section">
+        <div class="section-title">🖥️ 桌面宠物引擎</div>
+        <div class="desktop-engine-card">
+          <div class="engine-info">
+            <div class="status-indicator" :class="{ active: desktopPetRunning }"></div>
+            <div>
+              <div class="engine-name">系统桌面宠物</div>
+              <div class="engine-status">{{ desktopPetRunning ? '运行中 - 在您 Windows 桌面上跳动' : '已停止运行' }}</div>
+            </div>
+          </div>
+          <button v-if="!desktopPetRunning" class="btn btn-primary" @click="launchDesktopPet">启动引擎</button>
+          <button v-else class="btn btn-danger" @click="closeDesktopPet">关闭引擎</button>
+        </div>
+      </div>
+
+      <PetAgentList
+        :agents="allPetAgents"
+        :selected-agent="selectedAgent"
+        :pet-types="petTypes"
+        :all-enabled="allEnabled"
+        :get-config="getConfig"
+        :get-pet-icon-path="getPetIconPath"
+        :get-agent-label="getAgentLabel"
+        :get-agent-state-label="getAgentStateLabel"
+        :get-agent-state-detail="getAgentStateDetail"
+        :system-agent-names="[GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME]"
+        @select-agent="selectAgent"
+        @toggle-agent="togglePet"
+        @toggle-all="toggleAll"
+        @create-pet="showGenerationModal = true"
+      />
+    </div>
+
+    <!-- 右半边：选中的配置 或 宠物图鉴 -->
+    <div class="pet-space-right">
+      <div class="glass-panel pet-detail-panel">
+        <div class="tab-selectors">
+          <button :class="{ active: rightTab === 'config' }" @click="rightTab = 'config'">
+            ⚙️ 宠物装扮与配置
+          </button>
+          <button :class="{ active: rightTab === 'gallery' }" @click="rightTab = 'gallery'">
+            🎨 宠物全能图鉴
+          </button>
+          <button :class="{ active: rightTab === 'strategy' }" @click="rightTab = 'strategy'">
+            🎬 工作台状态策略
+          </button>
+          <button :class="{ active: rightTab === 'assets' }" @click="rightTab = 'assets'">
+            🧩 动作资源
+          </button>
+        </div>
+
+        <div class="right-tab-content">
+          <!-- 装扮与配置 -->
+          <div v-if="rightTab === 'config'" class="config-tab-pane">
+            <div v-if="!selectedAgent" class="empty-detail">
+              <span class="icon">🐾</span>
+              <p>请选择全局 Agent 或音乐 Agent</p>
+              <p class="sub">其他执行 Agent 的工作状态会汇总到全局 Agent 宠物</p>
+            </div>
+            <div v-else class="config-wrapper">
+              <div class="current-pet-hero">
+                <div class="hero-avatar">
+                  <PetSprite
+                    v-if="isV2PetType(getConfig(selectedAgent).type)"
+                    :type="getConfig(selectedAgent).type"
+                    :skin="getPetTypeInfo(getConfig(selectedAgent).type)"
+                    :state="selectedAgentInfo?.state || 'idle'"
+                    :size="80"
+                  />
+                  <img
+                    v-else
+                    :src="getPetIconPath(getConfig(selectedAgent).type)"
+                    width="80"
+                    height="80"
+                    :class="{ pixelated: isPixelated(getConfig(selectedAgent).type) }"
+                    alt=""
+                  />
+                </div>
+                <div class="hero-meta">
+                  <div class="hero-agent">{{ getAgentLabel(selectedAgentInfo) || selectedAgent }}</div>
+                  <div class="hero-pet-name">当前外观：{{ petTypes.find(p => p.id === getConfig(selectedAgent).type)?.name }}</div>
+                  <div v-if="selectedAgentInfo && isSystemAgentSelected" class="pet-live-status hero" :class="selectedAgentInfo.state || 'idle'">
+                    <span>{{ getAgentStateLabel(selectedAgentInfo) }}</span>
+                    <em>{{ getAgentStateDetail(selectedAgentInfo) }}</em>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="isSystemAgentSelected" class="agent-name-editor">
+                <label>Agent 显示名称</label>
+                <div class="name-editor-row">
+                  <input
+                    v-model="agentLabelDraft"
+                    maxlength="24"
+                    placeholder="给这个 Agent 宠物起个名字"
+                    @keydown.enter="saveAgentLabel" />
+                  <button class="btn btn-primary btn-sm" @click="saveAgentLabel">保存名称</button>
+                </div>
+                <div class="name-editor-hint">{{ isMusicAgentSelected ? '会同步到宠物空间、音乐播放页和桌面宠物气泡。' : '会同步到宠物空间和桌面宠物气泡。' }}</div>
+              </div>
+
+              <div
+                v-if="isCustomSkin(getConfig(selectedAgent).type)"
+                class="agent-name-editor skin-name-editor"
+              >
+                <label>皮肤名称</label>
+                <div class="name-editor-row">
+                  <input
+                    :value="skinNameDrafts[getConfig(selectedAgent).type] ?? petTypes.find(p => p.id === getConfig(selectedAgent).type)?.name"
+                    maxlength="24"
+                    placeholder="修改当前自定义皮肤名称"
+                    @input="setSkinNameDraft(getConfig(selectedAgent).type, $event.target.value)"
+                    @focus="beginRenameSkin(petTypes.find(p => p.id === getConfig(selectedAgent).type))"
+                    @keydown.enter="saveCustomSkinName(getConfig(selectedAgent).type)"
+                  />
+                  <button class="btn btn-primary btn-sm" @click="saveCustomSkinName(getConfig(selectedAgent).type)">保存皮肤名</button>
+                </div>
+                <div class="name-editor-hint">与上方「Agent 显示名称」独立；只改外观在图鉴与皮肤选择中的名字。</div>
+              </div>
+
+              <div class="skins-selection">
+                <div class="sub-section-title">✨ 更换精美皮肤</div>
+                <PetSkinGrid
+                  :pet-types="petTypes"
+                  :selected-type="getConfig(selectedAgent).type"
+                  :get-pet-icon-path="getPetIconPath"
+                  :is-pixelated="isPixelated"
+                  @select-skin="updatePetType(selectedAgent, $event)"
+                  @create-skin="showGenerationModal = true"
+                />
+                <!-- 仅当前装扮为自定义皮肤时，才显示彻底删除皮肤分类的按钮 -->
+                <div v-if="isCustomSkin(getConfig(selectedAgent).type)" class="delete-skin-section" style="margin-top: 24px; padding-top: 16px; border-top: 1px dashed rgba(0,0,0,0.08);">
+                  <button class="btn btn-outline btn-danger btn-sm" @click="deleteCustomSkin(getConfig(selectedAgent).type)">
+                    🗑️ 彻底删除“{{ petTypes.find(p => p.id === getConfig(selectedAgent).type)?.name }}”皮肤分类
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 宠物图鉴 -->
+          <div v-if="rightTab === 'gallery'" class="gallery-tab-pane">
+            <div class="gallery-grid">
+              <div v-for="pt in petTypes" :key="pt.id" class="gallery-item-card">
+                <div class="item-avatar">
+                  <PetSprite v-if="Number(pt.spriteVersionNumber) === 2" :type="pt.id" :skin="pt" state="idle" :size="56" />
+                  <img v-else :src="getPetIconPath(pt.id)" width="56" height="56" :class="{ pixelated: isPixelated(pt.id) }" alt="">
+                </div>
+                <div class="item-info">
+                  <div class="item-title">{{ pt.emoji }} {{ pt.name }}</div>
+                  <div class="item-desc">
+                    <span v-if="pt.id === 'robot'">充满未来感的极简小机器人，指示灯会跟随 Agent 的运转而发光。</span>
+                    <span v-else-if="pt.id === 'ghost'">神秘的幽灵飘飘，漂浮在屏幕角落默默守护主人的代码库。</span>
+                    <span v-else-if="pt.id === 'yuexinmiao'">带着金币小挂饰的月薪喵，会用呼吸、眨眼、搬运和提醒动作陪你处理任务。</span>
+                    <span v-else-if="pt.id === 'cloudling'">软绵绵的可爱小云朵，会随着任务的变化展现出下雨、打雷或杂耍的有趣姿态。</span>
+                    <span v-else-if="pt.id === 'calico'">三花色的小花猫，精美的 APNG 帧动画，拥有打哈欠、抓小鱼、玩杂耍等超流畅的动作细节。</span>
+                    <span v-else-if="pt.generated">根据参考图生成，包含 9 组标准动作和 16 个观察方向。</span>
+                    <span v-else>自定义宠物皮肤。</span>
+                  </div>
+                  <div v-if="isCustomSkin(pt.id)" class="gallery-rename">
+                    <div v-if="renamingSkinId === pt.id" class="name-editor-row">
+                      <input
+                        v-model="skinNameDrafts[pt.id]"
+                        maxlength="24"
+                        placeholder="皮肤名称"
+                        @keydown.enter="saveCustomSkinName(pt.id)"
+                      />
+                      <button class="btn btn-primary btn-sm" @click="saveCustomSkinName(pt.id)">保存</button>
+                      <button class="btn btn-outline btn-sm" @click="cancelRenameSkin">取消</button>
+                    </div>
+                    <button v-else class="btn btn-outline btn-sm" @click="beginRenameSkin(pt)">修改皮肤名称</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 工作台状态策略 -->
+          <div v-if="rightTab === 'strategy'" class="strategy-tab-pane">
+            <div class="strategy-summary">
+              <div>
+                <div class="strategy-summary-title">工作台伴侣状态轮转</div>
+                <div class="strategy-summary-meta">
+                  完整周期 {{ formatStrategyDuration(projectPetStrategy.idleCycleSeconds) }}，任务开始时主伴侣切换到工作态
+                </div>
+              </div>
+              <span class="strategy-count">{{ projectPetStrategy.idle.length + projectPetStrategy.active.length }} 个策略</span>
+            </div>
+
+            <div class="strategy-section">
+              <div class="sub-section-title">空闲轮转动作</div>
+              <div class="strategy-flow">
+                <div v-for="row in projectPetStrategy.idle" :key="`idle-${row.order}-${row.state}`" class="strategy-step">
+                  <div class="strategy-order">{{ row.order }}</div>
+                  <div class="strategy-main">
+                    <div class="strategy-title-row">
+                      <span class="strategy-state">{{ getStateLabel(row.state) }}</span>
+                      <span class="strategy-state-code">{{ row.state }}</span>
+                    </div>
+                    <div class="strategy-detail">{{ row.detail }}</div>
+                  </div>
+                  <div class="strategy-duration">{{ formatStrategyDuration(row.seconds) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="strategy-section">
+              <div class="sub-section-title">任务打断动作</div>
+              <div class="strategy-flow">
+                <div v-for="row in projectPetStrategy.active" :key="`active-${row.order}-${row.state}`" class="strategy-step active-mode">
+                  <div class="strategy-order">{{ row.order }}</div>
+                  <div class="strategy-main">
+                    <div class="strategy-title-row">
+                      <span class="strategy-state">{{ getStateLabel(row.state) }}</span>
+                      <span class="strategy-state-code">{{ row.state }}</span>
+                    </div>
+                    <div class="strategy-detail">{{ row.trigger || row.detail }}</div>
+                  </div>
+                  <div class="strategy-duration">{{ formatStrategyDuration(row.seconds) }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 动作资源 -->
+          <PetAssetGrid
+            v-if="rightTab === 'assets'"
+            v-model:action-pet-type="actionPetType"
+            :pet-types="editablePetTypes"
+            :rows="actionAssetRows"
+            :image-errors="imageErrors"
+            :uploading-asset="uploadingAsset"
+            :readonly-notice="assetsReadonlyNotice"
+            :action-pet-skin="actionPetSkin"
+            :asset-url="assetUrl"
+            :asset-file-name="assetFileName"
+            :can-upload-asset="canUploadAsset"
+            :set-upload-input="setUploadInput"
+            @reset-errors="imageErrors = {}"
+            @image-error="handleImageError"
+            @choose-file="chooseAssetFile"
+            @upload-file="uploadAssetFile"
+          />
+        </div>
+      </div>
+      
+      <PetGenerationModal
+        v-if="showGenerationModal"
+        @completed="handleGenerationCompleted"
+        @close="showGenerationModal = false"
+      />
+    </div>
+  </div>

@@ -12,22 +12,8 @@ type LocalIntentResult = any;
 
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 export function createGlobalAgentAgenticRuntime(deps: any) {
-  const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSession, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createPetGenerationJob, executeFeishuAction, executePlayMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps
+  const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createPetGenerationJob, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps
 
-  function hasExplicitGlobalWriteAuthorization(message: string) {
-    const text = normalizeText(message);
-    if (!text) return false;
-    if (/(?:不要|不用|先别|暂时别|仅|只)(?:执行|操作|修改|创建|派发|启动|停止|删除|提交)/.test(text)) return false;
-    if (hasExplicitDevelopmentExecutionIntent(text)) return true;
-    const explicitVerb = /(创建|新建|添加|派发|启动|开启|停止|关闭|暂停|恢复|继续|重试|提交|删除|移除|播放|打开|运行|执行)/;
-    const explicitAuthorization = /(?:我)?明确授权(?:你|系统|全局Agent|全局agent)?/.test(text) && explicitVerb.test(text);
-    const directive = explicitVerb.test(text) && (/^(请|帮我|麻烦|给我|直接|立即|马上|开始|创建|新建|添加|派发|启动|开启|停止|关闭|暂停|恢复|继续|重试|提交|删除|移除|播放|打开|运行|执行)/.test(text) || /(?:我要你|需要你|由你|替我)/.test(text));
-    const explicitDispatch = /^(?:请)?给.+(?:群|项目|Agent|agent).*(?:派发|下发|修复|实现|修改|处理|执行)/.test(text);
-    const explicitGenericTarget = /^给(?:某个|这个|该)?(?:项目|群聊|Agent|agent).*(?:加|新增|实现|修改|修复|处理|执行)/.test(text);
-    const explanatory = /(?:怎么|如何|为什么|是什么|原理|介绍|讲讲|说明|能否|能不能|可不可以|是否|有哪些|有什么)[^。！？]*[?？]?$/i.test(text);
-    return (explicitAuthorization || directive || explicitDispatch || explicitGenericTarget) && !explanatory;
-  }
-  
   function safeProjectRows() {
     return getConfigs().map((config: any) => {
       const info = getConfigInfo(config.path)?.[0] || {};
@@ -67,6 +53,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     "cron_jobs",
     "tools",
     "global_memory",
+    "session_continuity",
     "memory_context_boundary",
     "context_source_manifest",
     "context_boundary_proof",
@@ -192,6 +179,9 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         limit: 7,
         recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
       }) : "",
+      session_continuity: sessionId && options.includeSessionContinuity !== false && options.include_session_continuity !== false
+        ? buildGlobalAgentSessionContinuation(sessionId)
+        : null,
       memory_context_boundary: {
         schema: "ccm-global-agent-memory-boundary-v1",
         policy: "global_memory_only_group_session_content_excluded",
@@ -258,7 +248,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     }
     const spec = GLOBAL_AGENT_TOOL_SPECS.find(item => item.name === toolName)!;
     const fallbackRisk = typeof spec.risk === "function" ? spec.risk(action.params || {}) : spec.risk;
-    const deterministicUiTools = new Set(["play_music", "toggle_pet", "navigate"]);
+    const deterministicUiTools = new Set(["play_music", "stop_music", "toggle_pet", "navigate"]);
     if (fallbackRisk !== "read" && !deterministicUiTools.has(toolName)) {
       return {
         state: "answer",
@@ -416,9 +406,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         const operation = String(args.operation || "").toLowerCase();
         if (operation !== "status" && !String(args.reason || "").trim()) throw new Error("全局记忆变更操作必须说明原因");
         if (operation === "compact") {
-          observation = { success: true, operation, sessions: loadGlobalAgentMemory().sessions.map((session: any) => compactGlobalAgentSession(session.sessionId, { force: true, reason: args.reason })) };
+          observation = { success: true, operation, sessions: await Promise.all(loadGlobalAgentMemory().sessions.map((session: any) => compactGlobalAgentSessionWithModel(session.sessionId, { force: true, reason: args.reason }))) };
         } else if (operation === "rebuild") {
-          observation = { success: true, operation, memory: rebuildGlobalAgentMemory(args.reason, "global-agent") };
+          const memory = rebuildGlobalAgentMemory(args.reason, "global-agent");
+          const sessions = await Promise.all((memory.sessions || []).map((session: any) => compactGlobalAgentSessionWithModel(session.sessionId, { force: true, reason: args.reason || "rebuild" })));
+          observation = { success: true, operation, memory: loadGlobalAgentMemory(), sessions };
         } else if (["enable", "disable"].includes(operation)) {
           observation = { success: true, operation, policy: setGlobalAgentMemoryPolicy({ disabled: operation === "disable", reason: args.reason, actor: "global-agent" }) };
         } else if (operation === "status") {
@@ -683,6 +675,16 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           command: played.command,
           client_effect: played.client_effect,
         };
+      } else if (name === "stop_music") {
+        const stopped = await executeStopMusic(baseUrl, {
+          source: run.source || "global-agent",
+        });
+        observation = {
+          success: stopped.success !== false,
+          message: stopped.message,
+          command: stopped.command,
+          client_effect: stopped.client_effect,
+        };
       } else if (name === "git_review") {
         observation = await postLocalApi(baseUrl, "/api/global-agent/git-review", { project: args.project });
       } else if (name === "git_commit") {
@@ -767,7 +769,13 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       callModel: async (messages, run) => {
         attachGlobalRunRequirementSources(run, input.sourceIngestion);
         if (!config.apiKey || !config.apiUrl || !config.model) throw new Error("统一大模型尚未配置");
-        return callGlobalModelWithRetry(config, messages);
+        const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
+        return callGlobalModelWithRetry(config, messages, {
+          onUsage: (usage: any) => {
+            (run as any).latest_context_usage = usage;
+            accumulateGlobalAgentRunUsage(run, usage);
+          },
+        });
       },
       getContext: (run) => buildAgenticContext(run.user_message, run.session_id),
       verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
@@ -799,11 +807,20 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion });
     const sessionId = input.sessionId || "default";
     if (!/feishu/i.test(input.source || "")) {
-      try {
-        ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }] });
-      } catch (error: any) {
-        console.warn(`[全局记忆] Agentic 请求写入失败：${error?.message || error}`);
-      }
+      ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
+    }
+    const compactionFixedContext = buildAgenticContext(input.message, sessionId, {
+      includeSessionContinuity: false,
+      recordMemoryMetric: false,
+    });
+    const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
+      reason: "auto_model",
+      currentRequest: { role: "user", content: input.message },
+      fixedContext: compactionFixedContext,
+      tools: GLOBAL_AGENT_TOOL_SPECS,
+    });
+    if (compaction?.reason === "circuit_breaker") {
+      throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
     }
     const startsNewTopic = /^(?:新问题|换个问题|另外(?:一个)?问题|忽略刚才|取消刚才|重新开始)/.test(String(input.message || "").trim());
     const requestedClarificationRunId = String(input.clarificationRunId || "").trim();
@@ -833,10 +850,12 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     attachGlobalRunRequirementSources(run, input.sourceIngestion);
     if (!/feishu/i.test(input.source || "")) {
       try {
+        const assistantMessageId = `gam_${String(run.id || "result")}_assistant`;
         ingestGlobalAgentConversation({
           sessionId,
           source: input.source || "web",
           messages: [{
+            id: assistantMessageId,
             role: "assistant",
             content: globalRunVisibleReply(run, "我已整理处理结果，技术细节已放入技术详情。"),
             technical_content: run.final_report?.technical_content || run.final_delivery_report?.technical_content || "",
@@ -844,6 +863,15 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
             trace_id: run.trace_id,
             mission_id: run.mission_id,
           }],
+        });
+        recordGlobalAgentSessionProviderUsage(sessionId, {
+          usage: (run as any).latest_context_usage || null,
+          provider: String((run as any).latest_context_usage?.provider || ""),
+          model: String((run as any).latest_context_usage?.model || loadOrchestratorConfig()?.model || ""),
+          anchorMessageId: assistantMessageId,
+          currentRequest: { role: "user", content: input.message },
+          fixedContext: compactionFixedContext,
+          tools: GLOBAL_AGENT_TOOL_SPECS,
         });
       } catch (error: any) {
         console.warn(`[全局记忆] Agentic 结果写入失败：${error?.message || error}`);

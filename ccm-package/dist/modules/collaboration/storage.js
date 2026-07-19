@@ -43,6 +43,7 @@ exports.findGroupChatSessionContainingMessage = findGroupChatSessionContainingMe
 exports.createGroupChatSession = createGroupChatSession;
 exports.selectGroupChatSession = selectGroupChatSession;
 exports.renameGroupChatSession = renameGroupChatSession;
+exports.scheduleGroupSessionAutoTitle = scheduleGroupSessionAutoTitle;
 exports.archiveGroupChatSession = archiveGroupChatSession;
 exports.findActiveGroupSessionTasks = findActiveGroupSessionTasks;
 exports.reconcileGroupSessionLifecycleAgentCancellations = reconcileGroupSessionLifecycleAgentCancellations;
@@ -61,6 +62,7 @@ const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const session_title_1 = require("../../system/session-title");
 const group_orchestrator_1 = require("./group-orchestrator");
 const group_post_turn_summary_1 = require("./group-post-turn-summary");
 const group_session_lifecycle_head_1 = require("./group-session-lifecycle-head");
@@ -268,7 +270,8 @@ function createGroupChatSession(groupId, title = "") {
     const manifest = listGroupChatSessions(groupId);
     const now = new Date().toISOString();
     const id = `gcs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const session = { id, title: String(title || "新会话").trim().slice(0, 80) || "新会话", createdAt: now, updatedAt: now, messageCount: 0, legacy: false };
+    const cleanTitle = String(title || "新会话").trim().slice(0, 80) || "新会话";
+    const session = { id, title: cleanTitle, titleOrigin: (0, session_title_1.isSessionTitlePlaceholder)(cleanTitle) ? "placeholder" : "manual", createdAt: now, updatedAt: now, messageCount: 0, legacy: false };
     const existingSessions = manifest.sessions.filter((item) => item.id !== GROUP_DEFAULT_SESSION_ID || fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID)));
     (0, group_session_lifecycle_head_1.ensureGroupSessionLifecycleHead)(groupId, id, { createdAt: now, reason: "group_chat_session_created" });
     try {
@@ -301,13 +304,54 @@ function renameGroupChatSession(groupId, sessionId, title) {
     const sessions = manifest.sessions.map((item) => {
         if (item.id !== sessionId)
             return item;
-        renamed = { ...item, title: cleanTitle, updatedAt: new Date().toISOString() };
+        renamed = { ...item, title: cleanTitle, titleOrigin: "manual", updatedAt: new Date().toISOString() };
         return renamed;
     });
     if (!renamed)
         throw new Error("群聊会话不存在");
     writeGroupSessionManifest(groupId, { ...manifest, sessions });
     return renamed;
+}
+const groupSessionTitleJobs = new Map();
+function scheduleGroupSessionAutoTitle(groupId, sessionId, options = {}) {
+    const key = `${groupId}::${sessionId}`;
+    const existingJob = groupSessionTitleJobs.get(key);
+    if (existingJob)
+        return existingJob;
+    const job = (async () => {
+        const manifest = listGroupChatSessions(groupId);
+        const session = manifest.sessions.find((item) => item.id === sessionId);
+        if (!session || !(0, session_title_1.isSessionTitlePlaceholder)(session.title, session.titleOrigin))
+            return { renamed: false, reason: "title_already_set", session };
+        const messages = getGroupMessages(groupId, sessionId);
+        const userIndex = messages.findIndex((message) => message?.role === "user"
+            && ((0, session_title_1.isMeaningfulSessionTitleInput)(message?.content) || (message?.files || message?.attachments || []).length));
+        if (userIndex < 0)
+            return { renamed: false, reason: "meaningful_user_message_missing", session };
+        const userMessage = messages[userIndex];
+        const assistantMessage = messages.slice(userIndex + 1).find((message) => message?.role === "assistant" && String(message?.content || "").trim());
+        if (!assistantMessage)
+            return { renamed: false, reason: "assistant_reply_missing", session };
+        const files = userMessage.files || userMessage.attachments || [];
+        const generated = await (0, session_title_1.generateSessionTitleWithModel)({
+            scope: "group",
+            userMessage: String(userMessage.content || ""),
+            assistantMessage: String(assistantMessage.content || ""),
+            attachmentNames: files.map((file) => String(file?.name || file?.filename || "")).filter(Boolean),
+        }, options);
+        if (!generated.title)
+            return { renamed: false, reason: "title_input_skipped", generated };
+        const latest = listGroupChatSessions(groupId);
+        const current = latest.sessions.find((item) => item.id === sessionId);
+        if (!current || !(0, session_title_1.isSessionTitlePlaceholder)(current.title, current.titleOrigin))
+            return { renamed: false, reason: "title_changed_during_generation", session: current };
+        const now = new Date().toISOString();
+        const renamed = { ...current, title: generated.title, titleOrigin: generated.source === "model" ? "model" : "fallback", titleGeneratedAt: now, updatedAt: now };
+        writeGroupSessionManifest(groupId, { ...latest, sessions: latest.sessions.map((item) => item.id === sessionId ? renamed : item) });
+        return { renamed: true, session: renamed, generated };
+    })().finally(() => groupSessionTitleJobs.delete(key));
+    groupSessionTitleJobs.set(key, job);
+    return job;
 }
 function archiveGroupChatSession(groupId, sessionId, archived = true) {
     const manifest = listGroupChatSessions(groupId);
@@ -573,6 +617,11 @@ function appendGroupMessage(groupId, msg) {
             hook(groupId, next, messages);
         }
         catch { }
+    }
+    if (String(next.role || "") === "assistant" && String(next.content || "").trim()) {
+        void scheduleGroupSessionAutoTitle(groupId, sessionId).catch((error) => {
+            console.warn(`[群聊会话] 自动命名失败 (${groupId}/${sessionId})：${error?.message || error}`);
+        });
     }
     return next;
 }

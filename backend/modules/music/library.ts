@@ -1,10 +1,115 @@
 import * as fs from "fs";
 import * as path from "path";
-import { CCM_DIR } from "../../core/utils";
+import { execFileSync } from "child_process";
+import { CCM_DIR, refreshEnvPath } from "../../core/utils";
 
 export const MUSIC_DIR = path.join(CCM_DIR, "music");
+const DURATION_CACHE_FILE = path.join(MUSIC_DIR, ".duration-cache.json");
 
 if (!fs.existsSync(MUSIC_DIR)) fs.mkdirSync(MUSIC_DIR, { recursive: true });
+
+type DurationCacheEntry = { stamp: string; durationSec: number };
+let durationCache: Record<string, DurationCacheEntry> | null = null;
+
+function loadDurationCache() {
+  if (durationCache) return durationCache;
+  try {
+    if (fs.existsSync(DURATION_CACHE_FILE)) {
+      durationCache = JSON.parse(fs.readFileSync(DURATION_CACHE_FILE, "utf8") || "{}") || {};
+    } else {
+      durationCache = {};
+    }
+  } catch {
+    durationCache = {};
+  }
+  return durationCache;
+}
+
+function saveDurationCache() {
+  if (!durationCache) return;
+  try { fs.writeFileSync(DURATION_CACHE_FILE, JSON.stringify(durationCache)); } catch {}
+}
+
+export function formatDurationSec(sec: number) {
+  if (!sec || !Number.isFinite(sec) || sec <= 0) return "";
+  const total = Math.round(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function probeDurationSec(filePath: string) {
+  try {
+    refreshEnvPath();
+    const out = execFileSync("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      filePath,
+    ], { encoding: "utf8", windowsHide: true, timeout: 8000, maxBuffer: 1024 * 1024 });
+    const sec = parseFloat(String(out || "").trim());
+    if (Number.isFinite(sec) && sec > 0) return sec;
+  } catch {}
+
+  try {
+    refreshEnvPath();
+    execFileSync("ffmpeg", ["-i", filePath], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 8000,
+      maxBuffer: 2 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error: any) {
+    const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : String(error?.stderr || "");
+    const msg = `${stderr}\n${error?.message || ""}`;
+    const match = msg.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (match) {
+      return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+    }
+  }
+  return 0;
+}
+
+/** 读取本地音频时长（带文件戳缓存） */
+export function resolveTrackDuration(filename: string, filePath: string, stat: fs.Stats) {
+  const cache = loadDurationCache();
+  const stamp = `${filename}|${stat.mtimeMs}|${stat.size}`;
+  const hit = cache[filename];
+  if (hit && hit.stamp === stamp && Number(hit.durationSec) > 0) {
+    return {
+      durationSec: Number(hit.durationSec),
+      duration: formatDurationSec(Number(hit.durationSec)),
+    };
+  }
+
+  const durationSec = probeDurationSec(filePath);
+  cache[filename] = { stamp, durationSec };
+  saveDurationCache();
+  return {
+    durationSec,
+    duration: formatDurationSec(durationSec),
+  };
+}
+
+export function buildLocalTrackMeta(filename: string, id = 0) {
+  const filePath = path.join(MUSIC_DIR, filename);
+  const stat = fs.statSync(filePath);
+  const { artist, title, bvid } = parseMusicFilename(filename);
+  const { duration, durationSec } = resolveTrackDuration(filename, filePath, stat);
+  return {
+    id,
+    filename,
+    title,
+    artist,
+    bvid,
+    pic: `/api/music/cover?file=${encodeURIComponent(filename)}`,
+    size: stat.size,
+    modified: stat.mtime.toISOString(),
+    duration,
+    durationSec,
+  };
+}
 
 export function parseMusicFilename(filename: string) {
   const name = filename.replace(/\.[^.]+$/, "");
@@ -136,9 +241,5 @@ export function searchLocalMusic(keyword: string) {
   return fs.readdirSync(MUSIC_DIR)
     .filter(f => /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f))
     .filter(f => f.toLowerCase().includes(q))
-    .map((f, i) => {
-      const stat = fs.statSync(path.join(MUSIC_DIR, f));
-      const { artist, title, bvid } = parseMusicFilename(f);
-      return { id: i, filename: f, title, artist, bvid, pic: `/api/music/cover?file=${encodeURIComponent(f)}`, size: stat.size };
-    });
+    .map((f, i) => buildLocalTrackMeta(f, i));
 }

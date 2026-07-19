@@ -35,6 +35,8 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.signSearchResults = signSearchResults;
 exports.verifyDownloadToken = verifyDownloadToken;
+exports.issueDownloadToken = issueDownloadToken;
+exports.extractMusicConvertTarget = extractMusicConvertTarget;
 exports.runMusicSearchResultSelfTest = runMusicSearchResultSelfTest;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
@@ -149,6 +151,42 @@ function verifyDownloadToken(token, expectedSource) {
     if (expectedSource && payload.source !== expectedSource)
         throw new Error("下载来源与凭证不匹配");
     return payload;
+}
+function issueDownloadToken(source, sourceId, title, artist) {
+    const payload = {
+        v: 1,
+        source,
+        sourceId: String(sourceId || "").trim(),
+        title: String(title || sourceId || "music").slice(0, 200),
+        artist: String(artist || "未知").slice(0, 200),
+        exp: Date.now() + TOKEN_TTL_MS,
+    };
+    if (!payload.sourceId)
+        throw new Error("缺少转码目标 ID");
+    return tokenFor(payload);
+}
+function extractMusicConvertTarget(message, keyword = "") {
+    const text = `${keyword || ""} ${message || ""}`;
+    const bvid = text.match(/BV[\w]+/i)?.[0];
+    if (bvid) {
+        return {
+            source: "bilibili",
+            sourceId: bvid,
+            title: bvid,
+            artist: "B站转码",
+        };
+    }
+    const songId = text.match(/(?:song\?id=|id[=：:\s#]|网易云\s*[#]?)(\d{5,})/i)?.[1] ||
+        text.match(/\b(\d{6,})\b/)?.[1];
+    if (songId) {
+        return {
+            source: "netease",
+            sourceId: songId,
+            title: `netease-${songId}`,
+            artist: "网易云转码",
+        };
+    }
+    return null;
 }
 function runMusicSearchResultSelfTest() {
     const signed = signSearchResults("netease", "晴天 周杰伦", [

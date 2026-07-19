@@ -46,6 +46,12 @@ export declare function recordGroupPromptCacheUsage(input?: any): {
     recorded: boolean;
     reason: string;
 };
+export declare function readGroupMainContextUsageBaseline(groupId: string, groupSessionId: string, expected?: any): {
+    valid: boolean;
+    issues: string[];
+    event: any;
+    ledger: any;
+};
 export declare function deleteGroupPromptCacheBreakDetection(groupId: string, groupSessionId: string): {
     file: string;
     deleted: number;

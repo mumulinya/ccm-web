@@ -75,7 +75,7 @@ export declare function buildMainAgentDisplayStream(input: {
     };
     workchain: {
         schema: string;
-        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+        surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
         mode: string;
         status: string;
         phase: string;
@@ -90,7 +90,7 @@ export declare function buildMainAgentDisplayStream(input: {
             schema: string;
             source: string;
             title: string;
-            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+            surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
             mode: string;
             task_id: string;
             run_id: string;
@@ -160,7 +160,7 @@ export declare function buildMainAgentDisplayStream(input: {
             schema: string;
             source: string;
             title: string;
-            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+            surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
             mode: string;
             task_id: string;
             run_id: string;
@@ -301,7 +301,7 @@ export declare function buildMainAgentDisplayStream(input: {
                 schema: string;
                 source: string;
                 title: string;
-                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
                 mode: string;
                 task_id: string;
                 run_id: string;
@@ -371,7 +371,7 @@ export declare function buildMainAgentDisplayStream(input: {
                 schema: string;
                 source: string;
                 title: string;
-                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
                 mode: string;
                 task_id: string;
                 run_id: string;
@@ -516,7 +516,7 @@ export declare function buildMainAgentDisplayStream(input: {
             schema: string;
             source: string;
             title: string;
-            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+            surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
             mode: string;
             task_id: string;
             run_id: string;
@@ -586,7 +586,7 @@ export declare function buildMainAgentDisplayStream(input: {
             schema: string;
             source: string;
             title: string;
-            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+            surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
             mode: string;
             task_id: string;
             run_id: string;
@@ -658,7 +658,7 @@ export declare function buildMainAgentDisplayStream(input: {
         schema: string;
         source: string;
         title: string;
-        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+        surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
         mode: string;
         task_id: string;
         run_id: string;
@@ -728,7 +728,7 @@ export declare function buildMainAgentDisplayStream(input: {
         schema: string;
         source: string;
         title: string;
-        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+        surface: import("../../agents/workchain-part-01-part-01").MainAgentWorkchainSurface;
         mode: string;
         task_id: string;
         run_id: string;

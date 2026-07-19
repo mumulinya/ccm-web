@@ -13,8 +13,11 @@ export declare function defaultOrchestratorConfig(): {
     apiKey: string;
     model: string;
     temperature: number;
+    reasoningEffort: string;
     timeoutMs: number;
     fallbackToRules: boolean;
+    memoryCompactionUseModel: boolean;
+    memoryCompactionMode: string;
     memoryContextPreset: string;
     modelContextWindow: number;
     modelAutoCompactTokenLimit: number;

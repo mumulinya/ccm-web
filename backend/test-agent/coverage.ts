@@ -178,13 +178,14 @@ function toolCallCandidate(records: BrowserToolCallRecord[], browserResults: Bro
   const failedCalls = records.filter(item => item.status === "failed").length;
   const failedFinalResult = browserResults.some(item => item.status === "failed" || item.status === "blocked");
   const passedFinalResult = browserResults.some(item => item.status === "passed");
+  // Never invent a passed transcript when no browser check actually passed.
   const status = failedFinalResult
     ? "failed"
     : passedFinalResult
       ? "passed"
       : failedCalls
         ? "failed"
-        : "passed";
+        : "skipped";
   const haystack = records.map(item => `${item.status} ${item.toolName} ${JSON.stringify(item.input)} ${item.outputPreview || ""} ${item.error || ""}`).join("\n");
   return candidate(
     "Browser MCP tool call transcript",
@@ -217,14 +218,15 @@ function scoreCandidate(criterion: string, item: CoverageCandidate) {
   if (normalizedCriterion.length >= 6 && item.haystack.includes(normalizedCriterion)) return 100;
   const hits = criterionTokens.filter(token => item.haystack.includes(token));
   if (!hits.length) return 0;
-  if (criterionTokens.length === 1) return hits.length;
+  if (criterionTokens.length === 1) return hits.length === 1 ? 1 : 0;
   return hits.length / Math.min(criterionTokens.length, 6);
 }
 
 function matchingCandidates(criterion: string, candidates: CoverageCandidate[]): ScoredCoverageCandidate[] {
   return candidates
     .map(item => ({ item, score: scoreCandidate(criterion, item) }))
-    .filter(match => match.score >= 0.34 || match.score === 100)
+    // Require a strong token overlap (or a direct full-text hit) before treating evidence as a match.
+    .filter(match => match.score >= 0.67 || match.score === 100)
     .sort((a, b) => b.score - a.score);
 }
 

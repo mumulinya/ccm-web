@@ -37,6 +37,17 @@ const markdown = [
 ].join("\n");
 const checksum = crypto.createHash("sha256").update(markdown).digest("hex").slice(0, 24);
 
+function mockModelSummary({ user }) {
+  const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+  const start = user.indexOf(marker) + marker.length;
+  const ends = [
+    user.indexOf("\n用户本次 /compact 的附加要求", start),
+    user.indexOf("\n\n本次被压缩区间内的全部用户消息", start),
+  ].filter(index => index >= 0);
+  const end = Math.min(...ends);
+  return { summary: JSON.parse(user.slice(start, end)), provider: "mock", model: "mock-group-summary" };
+}
+
 function writeSnapshot(content = markdown, declaredChecksum = checksum) {
   fs.mkdirSync(memoryDir, { recursive: true });
   fs.writeFileSync(summaryFile, content, "utf8");
@@ -66,6 +77,8 @@ async function run(sessionId, config = {}) {
       apiUrl: "http://127.0.0.1:1/v1",
       apiKey: "must-not-be-used",
       model: "must-not-be-called",
+      memoryCompactionMode: "model-required",
+      compactionModelCall: mockModelSummary,
       minKeepMessages: 5,
       minKeepTokens: 10_000,
       maxKeepTokens: 40_000,
@@ -136,9 +149,10 @@ try {
     && checksumFallback.sessionMemoryCompactSelection.fallback_reason === "summary_markdown_checksum_mismatch";
 
   writeSnapshot();
-  const customFallback = await run(groupSessionId, { memoryCompactionUseModel: false, compactInstructions: "Only summarize errors" });
-  checks.customInstructionsSkipReuse = customFallback.sessionMemoryCompactSelection.selected === false
-    && customFallback.sessionMemoryCompactSelection.fallback_reason === "custom_instructions_present";
+  const customFallback = await run(groupSessionId, { customInstructions: "Only summarize errors" });
+  checks.customInstructionsSkipReuse = customFallback.sessionMemoryCompactSelection == null
+    && customFallback.memory.compaction.modelAttempted === true
+    && customFallback.memory.compaction.summarySource === "model";
 
   assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify(checks, null, 2));
   process.stdout.write(`PHASE330_RESULT=${JSON.stringify({ checks: Object.keys(checks).length, passed: Object.values(checks).filter(Boolean).length })}\n`);

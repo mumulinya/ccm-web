@@ -40,8 +40,13 @@ const MCP_REQUIRES_PLAYWRIGHT_ACTIONS = new Set([
     "goBack",
     "goForward",
     "selectOption",
+    // Cached MCP URLs are not trusted; live URL waits belong on Playwright until adapters prove observation.
+    "waitForUrl",
 ]);
 const MCP_REQUIRES_PLAYWRIGHT_ASSERTIONS = new Set([
+    "urlEquals",
+    "urlIncludes",
+    "urlNotIncludes",
     "focused",
     "notFocused",
     "enabled",

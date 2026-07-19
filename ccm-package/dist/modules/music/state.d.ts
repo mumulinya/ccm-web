@@ -16,9 +16,13 @@ type MusicRemoteCommand = {
 };
 /** @deprecated Prefer enqueueMusicRemoteCommand; kept for import compatibility. */
 export declare function saveMusicRemoteCommand(command: any): MusicRemoteCommand;
+export declare const STOP_MUSIC_KEYWORD = "__stop__";
 export declare function enqueueMusicRemoteCommand(command: any): MusicRemoteCommand;
 export declare function claimMusicRemoteCommand(): MusicRemoteCommand;
-/** Remove a command from the queue so the App poller will not also play it (Web client_effect path). */
+/**
+ * Web client_effect path: remove a pending command so the App poller will not also play it.
+ * Returns null if missing or already claimed by the poller (do not steal / double-play).
+ */
 export declare function takeMusicRemoteCommand(id: string): MusicRemoteCommand;
 export declare function ackMusicRemoteCommand(input: {
     id: string;
@@ -42,9 +46,11 @@ export declare function runMusicRemoteCommandQueueSelfTest(): {
     success: boolean;
     checks: {
         claimFirst: boolean;
-        claimIdempotent: boolean;
+        claimNotRedelivered: boolean;
+        takeDoesNotStealClaimed: boolean;
         secondStillPending: boolean;
         ackRemoves: boolean;
+        takePendingOnly: boolean;
         failRequeues: boolean;
     };
 };

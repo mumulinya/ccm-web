@@ -1,0 +1,56 @@
+// Barrel for self-test-browser-assertions/ parts.
+export {
+  runTestAgentPlaywrightFailureScreenshotSelfTest,
+  runTestAgentBrowserUrlTitleAssertionSelfTest,
+  runTestAgentBrowserConsoleAssertionSelfTest,
+  runTestAgentBrowserNetworkStateActionSelfTest,
+  runTestAgentBrowserAccessibilityAssertionSelfTest,
+  runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest,
+  runTestAgentBrowserAriaStateAssertionSelfTest,
+  runTestAgentBrowserNetworkAssertionSelfTest,
+  runTestAgentStructuredBrowserNetworkAssertionSelfTest
+} from "./part-01";
+export {
+  runTestAgentNegativeBrowserNetworkAssertionSelfTest,
+  runTestAgentBrowserRequestMetadataAssertionSelfTest,
+  runTestAgentBrowserInteractionSummarySelfTest,
+  runTestAgentAcceptanceDerivedChecksSelfTest,
+  runTestAgentAcceptanceDerivedAccessibilitySelfTest,
+  runTestAgentAcceptanceDerivedStorageAssertionSelfTest,
+  runTestAgentAcceptanceDerivedCookieAssertionSelfTest,
+  runTestAgentAcceptanceDerivedNetworkAssertionSelfTest,
+  runTestAgentAcceptanceDerivedNegativeUiSelfTest,
+  runTestAgentSemanticLocatorSelfTest,
+  runTestAgentBrowserStateSelfTest,
+  runTestAgentBrowserScriptWaitAssertionSelfTest,
+  runTestAgentBrowserSelectStateSelfTest,
+  runTestAgentBrowserInputValueAssertionSelfTest
+} from "./part-02";
+export {
+  runTestAgentBrowserEnabledStateSelfTest,
+  runTestAgentBrowserFocusStateSelfTest,
+  runTestAgentBrowserPresenceAssertionSelfTest,
+  runTestAgentBrowserElementCountSelfTest,
+  runTestAgentBrowserDialogAssertionSelfTest,
+  runTestAgentBrowserPopupAssertionSelfTest,
+  runTestAgentBrowserTableAssertionSelfTest,
+  runTestAgentBrowserDragToActionSelfTest,
+  runTestAgentBrowserHoverActionSelfTest
+} from "./part-03";
+export {
+  runTestAgentBrowserHistoryNavigationActionSelfTest,
+  runTestAgentBrowserScrollActionSelfTest,
+  runTestAgentBrowserAdvancedMouseActionSelfTest,
+  runTestAgentBrowserKeyboardActionSelfTest,
+  runTestAgentBrowserStorageActionSelfTest,
+  runTestAgentBrowserCookieActionSelfTest,
+  runTestAgentBrowserClipboardAssertionSelfTest,
+  runTestAgentBrowserElementScreenshotAssertionSelfTest,
+  runTestAgentBrowserTextOrderAssertionSelfTest
+} from "./part-04";
+export {
+  runTestAgentBrowserAttributeAssertionSelfTest,
+  runTestAgentBrowserComputedStyleAssertionSelfTest,
+  runTestAgentBrowserCookieAssertionSelfTest,
+  runTestAgentPlaywrightDownloadArtifactSelfTest
+} from "./part-05";

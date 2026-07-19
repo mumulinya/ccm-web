@@ -481,13 +481,14 @@ function extractAgentCommandUsage(rawOutput, agentType = "") {
                 event.metadata?.usage,
             ].filter(item => item && typeof item === "object");
             for (const candidate of candidates) {
-                const directInputTokens = takeMax(0, candidate.input_tokens, candidate.inputTokens, candidate.prompt_tokens, candidate.promptTokens);
+                const providerInputTokens = takeMax(0, candidate.input_tokens, candidate.inputTokens, candidate.prompt_tokens, candidate.promptTokens);
                 const cacheCreationTokens = takeMax(0, candidate.cache_creation_input_tokens, candidate.cacheCreationInputTokens);
                 const anthropicCacheReadTokens = takeMax(0, candidate.cache_read_input_tokens, candidate.cacheReadInputTokens);
                 const includedCacheReadTokens = takeMax(0, candidate.cached_input_tokens, candidate.cachedInputTokens, candidate.prompt_tokens_details?.cached_tokens, candidate.promptTokensDetails?.cachedTokens, candidate.input_tokens_details?.cached_tokens, candidate.inputTokensDetails?.cachedTokens);
                 const cacheReadTokens = Math.max(anthropicCacheReadTokens, includedCacheReadTokens);
                 const cacheReadIncludedInInput = includedCacheReadTokens > 0 && anthropicCacheReadTokens === 0;
-                const inputTokens = directInputTokens + cacheCreationTokens + (cacheReadIncludedInInput ? 0 : cacheReadTokens);
+                const directInputTokens = cacheReadIncludedInInput ? Math.max(0, providerInputTokens - cacheReadTokens) : providerInputTokens;
+                const inputTokens = providerInputTokens + cacheCreationTokens + (cacheReadIncludedInInput ? 0 : cacheReadTokens);
                 const outputTokens = takeMax(0, candidate.output_tokens, candidate.outputTokens, candidate.completion_tokens, candidate.completionTokens);
                 const providerTotalTokens = takeMax(0, candidate.total_tokens, candidate.totalTokens);
                 const costUsd = takeMax(0, candidate.total_cost_usd, candidate.totalCostUsd, candidate.cost_usd, candidate.costUsd);

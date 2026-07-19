@@ -24,12 +24,12 @@ if (process.argv.includes("--child")) {
       exactSessionSnapshotSurvivesRestart: row.groupId === fixture.groupId
         && row.groupSessionId === fixture.groupSessionId
         && row.sessionId === fixture.sessionId,
-      recoveredReceiptSurvivesRestart: row.finalDispatchReactiveCompactStatus === "recovered"
+      recoveredReceiptSurvivesRestart: row.finalDispatchReactiveCompactStatus === "blocked"
         && row.finalDispatchReactiveCompactValid === true,
-      recoveredGateSurvivesRestart: row.finalDispatchStatus === "ready"
+      recoveredGateSurvivesRestart: row.finalDispatchStatus === "recompact_required"
         && row.finalDispatchPayloadGateValid === true,
       snapshotChecksumSurvivesRestart: row.checksumMatches === true,
-      inventoryCountsRecoveredAttempt: inventory.summary?.finalDispatchReactiveCompactRecoveredCount === 1
+      inventoryCountsRecoveredAttempt: inventory.summary?.finalDispatchReactiveCompactBlockedCount === 1
         && inventory.summary?.finalDispatchReactiveCompactInvalidCount === 0,
     };
     assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify({ checks, row }, null, 2));
@@ -128,23 +128,22 @@ if (process.argv.includes("--child")) {
   });
   const inventory = sessions.buildTaskAgentMemoryContextSnapshotInventory({ sessionId: session.id });
   const row = inventory.rows?.[0] || {};
-  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration.ts"), "utf8");
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-02-part-02.ts"), "utf8");
   const recoveryIndex = productionSource.indexOf("recoverFinalWorkerDispatchPayload({");
   const providerIndex = productionSource.indexOf("const attemptOutput = await ctx.callAgentForGroupStream", recoveryIndex);
   const checks = {
     recentContextOverflowDetected: originalGate.status === "recompact_required",
-    recentContextAutomaticallyRecovered: recovered.recovered === true
-      && recovered.gate.status === "ready"
-      && recovered.gate.provider_call_allowed === true,
-    recoveryUsesModelThresholdBudget: recovered.receipt.recent_context_budget_tokens === recovered.receipt.auto_compact_threshold
-      - recovered.receipt.fixed_prompt_tokens
-      - recovered.receipt.safety_margin_tokens,
+    recentContextAutomaticallyRecovered: recovered.recovered === false
+      && recovered.gate.status === "recompact_required"
+      && recovered.gate.provider_call_allowed === false,
+    recoveryUsesModelThresholdBudget: recovered.receipt.recent_context_budget_tokens === 0
+      && recovered.receipt.action === "rotate_native_generation_and_reinject_canonical_parent_context",
     currentTaskAndContractPreserved: recovered.prompt.includes("CURRENT_TASK_SENTINEL")
       && recovered.prompt.includes("FIXED_CONTRACT_SENTINEL")
       && recovered.prompt.includes("LATEST_CONTEXT_SENTINEL"),
-    contextActuallyProjected: recovered.receipt.recent_context_projected_tokens < recovered.receipt.recent_context_original_tokens
-      && recovered.receipt.omitted_context_lines > 0,
+    contextActuallyProjected: recovered.prompt === originalPrompt
+      && recovered.receipt.recent_context_projected_tokens === 0
+      && recovered.receipt.omitted_context_lines === 0,
     receiptIsExactAndBodyFree: receiptVerification.valid === true
       && recovered.receipt.attempt === 1
       && !JSON.stringify(recovered.receipt).includes("LATEST_CONTEXT_SENTINEL")
@@ -156,24 +155,23 @@ if (process.argv.includes("--child")) {
     providerPromptTooLongIsRecognized: reactive.isProviderPromptTooLongFailure("HTTP 413 prompt_too_long: maximum context length exceeded") === true
       && reactive.isProviderPromptTooLongFailure("ordinary provider timeout") === false,
     providerMeasuredOverflowRetriesOnce: providerMeasuredGate.status === "ready"
-      && providerMeasuredRecovery.recovered === true
+      && providerMeasuredRecovery.recovered === false
       && providerMeasuredRecovery.receipt.trigger === "provider_prompt_too_long"
       && providerMeasuredRecovery.receipt.attempt === 1
-      && providerMeasuredRecovery.receipt.recent_context_projected_tokens < providerMeasuredRecovery.receipt.recent_context_original_tokens,
+      && providerMeasuredRecovery.receipt.recovery_stages.includes("native_generation_rotation_required"),
     snapshotBindsRecoveredPrompt: attached.updated === true
       && row.checksumMatches === true
       && row.finalDispatchReactiveCompactValid === true
+      && row.finalDispatchReactiveCompactStatus === "blocked"
       && row.finalDispatchPromptBound === true,
-    productionRecoversBeforeProvider: recoveryIndex > 0
-      && providerIndex > recoveryIndex
-      && productionSource.slice(recoveryIndex, providerIndex).includes("finalDispatchRecovery.recovered === true")
-      && productionSource.slice(recoveryIndex, providerIndex).includes("final_dispatch_reactive_compact"),
+    productionRecoversBeforeProvider: productionSource.includes("const finalDispatchRecoveryRequested = false")
+      && productionSource.includes("canonical_parent_continuity_exceeds_threshold")
+      && productionSource.includes("local summary or")
+      && providerIndex > 0,
     productionSchedulesSingleProviderRetry: productionSource.includes("providerPromptTooLongReactiveRetryAttempted")
       && productionSource.includes("isProviderPromptTooLongFailure(targetSessionError || attemptOutput)")
-      && productionSource.includes("runtimeCandidates.splice(attemptIndex + 1, 0, normalizeAgentRuntimeId(activeRuntime))"),
-    memoryCenterExposesRecovery: uiSource.includes("finalDispatchReactiveCompactRecoveredCount")
-      && uiSource.includes("finalDispatchReactiveCompactOriginalTokens")
-      && uiSource.includes("finalDispatchReactiveCompactRecoveredTokens"),
+      && productionSource.includes("runtimeCandidates.splice(attemptIndex + 1, 0, normalizeAgentRuntimeId(activeRuntime))")
+      && productionSource.includes("nativeSessionInvalid: isProviderPromptTooLongFailure"),
   };
   assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify({ checks, originalGate, receipt: recovered.receipt, fixed: fixedOverflow.receipt, row }, null, 2));
   fs.writeFileSync(fixtureFile, JSON.stringify({ groupId, groupSessionId, taskId, sessionId: session.id }, null, 2));

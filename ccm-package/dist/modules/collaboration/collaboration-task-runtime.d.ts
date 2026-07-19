@@ -220,7 +220,7 @@ export declare function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options?: an
             status: any;
             target_key: string;
             retry_count: number;
-            reason: string;
+            reason: any;
         }[];
         total: number;
     };
@@ -242,7 +242,7 @@ export declare function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options?: an
             status: any;
             target_key: string;
             retry_count: number;
-            reason: string;
+            reason: any;
         }[];
         total: number;
     };

@@ -1,8 +1,14 @@
 import { computed, ref } from 'vue'
+import {
+  mergeGlobalMessageAttachments,
+  normalizeGlobalMessageAttachments,
+} from '../utils/globalAgentAttachments.js'
 
 const SESSIONS_STORAGE_KEY = 'cc_global_assistant_sessions_v2'
 const CURRENT_ID_STORAGE_KEY = 'cc_global_assistant_current_id_v2'
 const SESSION_MESSAGE_LIMIT = 120
+const isPlaceholderSessionTitle = (name, origin = '') => String(origin || '').toLowerCase() !== 'manual'
+  && (!String(name || '').trim() || ['新会话', '默认会话', '全局 Agent 会话', '飞书全局 Agent', '未命名会话'].includes(String(name || '').trim()) || /^会话\s*\d+\s*[·-]/.test(String(name || '').trim()))
 
 const createWelcomeMessage = (welcome) => ({
   ...(welcome || {}),
@@ -12,6 +18,7 @@ const createWelcomeMessage = (welcome) => ({
 const createSession = (name, welcome) => ({
   id: 'session_' + Date.now(),
   name,
+  titleOrigin: 'placeholder',
   messages: [createWelcomeMessage(welcome)],
   createdAt: new Date().toISOString(),
 })
@@ -20,12 +27,14 @@ const normalizeMessage = (message) => {
   if (!message || !['user', 'assistant'].includes(String(message.role || ''))) return null
   const content = String(message.content || '').trim()
   if (!content) return null
-  return {
+  const normalized = {
     ...message,
     role: String(message.role),
     content,
     timestamp: message.timestamp || new Date().toISOString(),
   }
+  normalized.files = normalizeGlobalMessageAttachments(message.files, normalized.role)
+  return normalized
 }
 
 const messageStableIdentity = (message) => {
@@ -89,16 +98,32 @@ const messageRevisionAt = (message) => {
 const mergeMessageVersions = (previous, incoming) => {
   const previousRevision = messageRevisionAt(previous)
   const incomingRevision = messageRevisionAt(incoming)
-  if (previousRevision > incomingRevision) return { ...incoming, ...previous }
-  if (incomingRevision > previousRevision) return { ...previous, ...incoming }
-  return {
-    ...previous,
-    ...incoming,
-    role: previous.role,
-    content: previous.content,
-    timestamp: previous.timestamp,
-  }
+  const merged = previousRevision > incomingRevision
+    ? { ...incoming, ...previous }
+    : incomingRevision > previousRevision
+      ? { ...previous, ...incoming }
+      : {
+          ...previous,
+          ...incoming,
+          role: previous.role,
+          content: previous.content,
+          timestamp: previous.timestamp,
+        }
+  merged.files = mergeGlobalMessageAttachments(previous.files, incoming.files, merged.role)
+  return merged
 }
+
+const serializeGlobalMessageForPersistence = (message) => ({
+  ...message,
+  files: normalizeGlobalMessageAttachments(message?.files, message?.role, { forPersistence: true }),
+})
+
+const serializeGlobalSessionsForPersistence = (sessions = []) => (
+  (Array.isArray(sessions) ? sessions : []).map(session => ({
+    ...session,
+    messages: (Array.isArray(session?.messages) ? session.messages : []).map(serializeGlobalMessageForPersistence),
+  }))
+)
 
 const messageSignature = (message) => {
   try {
@@ -241,6 +266,8 @@ export const __globalAgentSessionTestHooks = {
   globalMissionConversationState,
   globalMissionNotificationId,
   upsertGlobalMissionConversationNotification,
+  serializeGlobalMessageForPersistence,
+  serializeGlobalSessionsForPersistence,
 }
 
 export { globalMissionConversationState, globalMissionNotificationId, upsertGlobalMissionConversationNotification }
@@ -264,8 +291,8 @@ export function useGlobalAgentSessions(options = {}) {
     currentSessionId.value = defaultSession.id
   }
 
-  const persistLocalHistory = () => {
-    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value))
+  const persistLocalHistory = (persistentSessions = serializeGlobalSessionsForPersistence(sessions.value)) => {
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(persistentSessions))
     localStorage.setItem(CURRENT_ID_STORAGE_KEY, currentSessionId.value)
   }
 
@@ -293,11 +320,12 @@ export function useGlobalAgentSessions(options = {}) {
 
   const saveHistory = () => {
     try {
-      persistLocalHistory()
+      const persistentSessions = serializeGlobalSessionsForPersistence(sessions.value)
+      persistLocalHistory(persistentSessions)
       fetch('/api/global-agent/history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessions: sessions.value, currentSessionId: currentSessionId.value })
+        body: JSON.stringify({ sessions: persistentSessions, currentSessionId: currentSessionId.value })
       }).catch(() => {})
     } catch {}
   }
@@ -335,7 +363,12 @@ export function useGlobalAgentSessions(options = {}) {
         const merged = mergeHistoryMessages(existing.messages || [], serverSession.messages || [])
         if (messagesChanged(existing.messages || [], merged)) changed = true
         existing.messages = merged
-        existing.name = existing.name || serverSession.name
+        if (isPlaceholderSessionTitle(existing.name, existing.titleOrigin) && !isPlaceholderSessionTitle(serverSession.name, serverSession.titleOrigin)) {
+          existing.name = serverSession.name
+          existing.titleOrigin = serverSession.titleOrigin || 'model'
+          existing.titleGeneratedAt = serverSession.titleGeneratedAt || ''
+          changed = true
+        }
         existing.createdAt = existing.createdAt || serverSession.createdAt
         existing.updatedAt = [sessionUpdatedAt(existing), sessionUpdatedAt(serverSession)].sort().pop() || existing.updatedAt
       }

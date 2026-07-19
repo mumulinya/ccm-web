@@ -1,0 +1,309 @@
+  <div class="group-chat">
+    <GroupChatHeader
+      :groups="groups"
+      :current-group="currentGroup"
+      :sessions="groupSessions"
+      :current-session-id="currentGroupSessionId"
+      :collaboration-protocol="collaborationProtocol"
+      :memory-active="hasCompressedMemory()"
+      :memory-label="getMemoryCompressionLabel()"
+      :memory-meta="getMemoryCompressionMeta()"
+      :memory-title="getMemoryCompressionTitle()"
+      :get-member-count-label="getMemberCountLabel"
+      @select-group="selectGroup"
+      @select-session="selectGroupSession"
+      @create-session="createGroupSession"
+      @rename-session="renameGroupSession"
+      @archive-session="archiveGroupSession"
+      @delete-session="deleteGroupSession"
+      @create-group="showCreate = true"
+      @load-tools="loadGroupTools"
+      @load-files="loadGroupFiles"
+      @load-logs="loadLogs"
+      @show-members="showMembers = true"
+      @refresh="loadMessages"
+      @save-knowledge="saveCurrentGroupConversationKnowledge"
+      @rename="renameName = $event; showRename = true"
+      @clear-messages="clearGroupMessages"
+      @delete-group="deleteGroup"
+    />
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+      <div class="content">
+        <!-- 消息区域 -->
+        <div id="groupMessages" ref="groupMessagesEl" class="messages" @scroll="updateGroupMessageScrollState">
+          <div ref="groupMessagesContentEl" style="display: flex; flex-direction: column; width: 100%; min-height: 100%;">
+            <EmptyState
+              v-if="!currentGroup"
+              large
+              icon="💬"
+              title="开始群聊协作"
+              hint="创建群聊并添加 Agent 成员"
+            />
+            <div v-else class="messages-flow" :key="`${currentGroup?.id}:${currentGroupSessionId}`" style="width: 100%; display: flex; flex-direction: column;">
+              <GroupMainAgentStatusCard
+                v-if="hasMainAgentStatusDetail"
+                :status="mainAgentStatus"
+                :group-agent-qa="groupAgentQa"
+                :latest-decision="latestMainAgentDecision"
+                @open-pipeline="openMainAgentPipeline"
+                @locate-decision="scrollToLatestMainDecision"
+              />
+              <template v-for="(msg, i) in messages" :key="getGroupMessageKey(msg)">
+                <ContextCompactionEvent
+                  v-if="contextCompactionEvent?.insertIndex === i"
+                  :event="contextCompactionEvent"
+                />
+                <div v-show="shouldShowGroupMessage(msg, i)" :id="'gc-msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
+                <ChatAvatar v-if="msg.role === 'user'" role="user" class="message-avatar" />
+                <ChatAvatar v-else-if="msg.role === 'assistant'" role="agent" class="message-avatar" />
+                <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
+                <!-- 思考过程消息 -->
+                <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
+                  <div class="thinking-header">
+                    <span class="thinking-icon">🧠</span>
+                    <span>正在处理...</span>
+                  </div>
+                  <div class="thinking-content">{{ msg.content }}</div>
+                  <span class="stream-cursor">▌</span>
+                </div>
+                <!-- 用户消息 -->
+                <div v-else-if="msg.role === 'user'" class="bubble">
+                  <div v-html="highlightMentions(msg.content)"></div>
+                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
+                </div>
+                <!-- 项目主 Agent 任务接管 -->
+                <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :display-content="getVisibleGroupMessageContent(msg, '我已接管项目任务。')" :accent-style="getAgentAccentStyle(msg.agent)">
+                  <MainAgentDecisionCard v-if="getMainAgentDecision(msg) && !isPrimaryTaskCard(msg, i)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
+                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
+                </ProjectTaskIntakeMessage>
+                <ConflictPlanMessage v-else-if="msg.type === 'conflict_plan'" :msg="msg" />
+                <!-- Agent 问答 -->
+                <AgentQaMessage
+                  v-else-if="isAgentQaMessage(msg)"
+                  :msg="msg"
+                  :display-content="getVisibleGroupMessageContent(msg, '回复已整理，技术细节已放入技术详情。')"
+                  :accent-style="getAgentAccentStyle(msg.agent)"
+                  :action-loading="agentQaActionLoading"
+                  :highlight-mentions="highlightMentions"
+                  :get-agent-display-name="getAgentDisplayName"
+                  @action="runAgentQaAction(msg, $event)"
+                />
+                <!-- Agent 回复 -->
+                <AgentExecutionMessage
+                  v-else
+                  :msg="msg"
+                  :accent-style="getAgentAccentStyle(msg.agent)"
+                  :status="getAgentMessageStatus(msg)"
+                  :agent-initials="getAgentInitials(msg.agent)"
+                  :agent-display-name="getAgentDisplayName(msg.agent)"
+                  :main-agent-decision="getMainAgentDecision(msg)"
+                  :task-card="getTaskCard(msg)"
+                  :task-runtime="getTaskRuntime(msg)"
+                  :primary-task-card="isPrimaryTaskCard(msg, i)"
+                  :show-orchestration-plan="shouldShowOrchestrationPlan(msg)"
+                  :work-events="getWorkEvents(msg)"
+                  :main-agent="isGroupMainAgentMessage(msg)"
+                  :file-changes-title="getFileChangesTitle(msg.fileChanges)"
+                  :workflow-steps="workflowSteps"
+                  :highlight-mentions="highlightMentions"
+                  :get-plan-title="getPlanTitle"
+                  :get-execution-order-label="getExecutionOrderLabel"
+                  :get-dispatch-action-label="getDispatchActionLabel"
+                  :compact-plan-text="compactPlanText"
+                  :get-workflow-label="getWorkflowLabel"
+                  :get-workflow-step-state="getWorkflowStepState"
+                  :get-assignment-key="getAssignmentKey"
+                  :get-assignment-status-class="getAssignmentStatusClass"
+                  :get-assignment-status-label="getAssignmentStatusLabel"
+                  :get-agent-display-name="getAgentDisplayName"
+                  @step-action="handleTaskCardAction(msg, $event)"
+                  @task-action="handleTaskCardAction(msg, $event)"
+                  @open-pipeline="openPipelineViewer(msg)"
+                  @open-file-diff="openFileDiff"
+                />
+                <div class="msg-meta">{{ new Date(msg.timestamp).toLocaleString('zh-CN') }}</div>
+                </div>
+              </template>
+              <ContextCompactionEvent
+                v-if="contextCompactionEvent?.insertIndex === messages.length"
+                :event="contextCompactionEvent"
+              />
+            </div>
+          </div>
+        </div>
+        <!-- 消息锚点导航条 (Codex 风格) -->
+        <MessageNavigator
+          :items="navMessages"
+          :scroll-container="groupMessagesEl"
+          target-id-prefix="gc-msg-"
+          @navigate="scrollToMessage"
+        />
+
+        <!-- 等待跨 Agent 回复提示 -->
+        <div v-if="waitingCrossReply" style="padding:6px 16px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--accent-purple);background:rgba(167,139,250,0.05);border-top:1px solid rgba(167,139,250,0.15)">
+          <span style="animation:pulse 1.5s infinite">⏳</span>
+          <span>等待其他 Agent 回复中...</span>
+          <span style="margin-left:auto;font-size:10px;color:var(--text-muted);cursor:pointer" @click="waitingCrossReply = false">忽略</span>
+        </div>
+
+        <!-- 输入栏 -->
+        <ConversationTurnControls
+          v-if="currentGroup"
+          :busy="isStreaming"
+          v-model:mode="groupTurnControl.mode.value"
+          :turns="groupTurnControl.turns.value"
+          :stopping="stoppingGroupTurn"
+          @stop="stopGroupCurrentWork()"
+          @cancel="groupTurnControl.cancel"
+          @retry="(turn) => groupTurnControl.retry(turn).then(() => drainGroupTurnQueue())"
+        />
+        <ChatComposer
+          v-if="currentGroup"
+          v-model="newMessage"
+          input-id="groupChatInput"
+          :placeholder="groupComposerPlaceholder"
+          :send-label="isStreaming ? (groupTurnControl.mode.value === 'steer' ? '引导' : '排队') : groupComposerSendLabel"
+          :disabled="false"
+          :busy="isStreaming"
+          :allow-input-while-busy="true"
+          :files="messageFiles"
+          :slash="slash"
+          :templates-open="showTemplateSelector"
+          :templates="allTemplates"
+          :template-search-query="templateSearchQuery"
+          :active-template-index="activeTemplateIndex"
+          :recommended-template="recommendedTemplate"
+          @files-selected="onMessageFilesSelected"
+          @remove-file="removeMessageFile"
+          @open-template="openTemplateSelector"
+          @update:template-search-query="templateSearchQuery = $event"
+          @select-template="selectChatTemplate"
+          @apply-recommendation="applyRecommendation"
+          @keydown="handleKeydown"
+          @input="handleInput"
+          @send="sendMessage"
+        >
+          <template #prefix>
+            <div v-if="isTaskSupplementMode" class="task-supplement-context" aria-live="polite">
+              <span class="task-supplement-label">正在补充</span>
+              <strong :title="pendingGroupTaskInput?.title">{{ pendingGroupTaskInput?.title }}</strong>
+              <button type="button" title="取消补充" aria-label="取消补充" @click="cancelTaskSupplementInput">×</button>
+            </div>
+            <div v-else-if="isClarificationResponseMode" class="task-supplement-context clarification-response-context" aria-live="polite">
+              <span class="task-supplement-label">正在回答</span>
+              <strong :title="pendingGroupClarificationInput?.title">{{ pendingGroupClarificationInput?.title }}</strong>
+              <button type="button" title="取消回答并发送新消息" aria-label="取消回答并发送新消息" @click="cancelGroupClarificationInput">×</button>
+            </div>
+            <div v-else class="message-mode" aria-label="消息模式">
+              <button type="button" :class="{ active: messageMode === 'conversation' }" @click="messageMode = 'conversation'">对话</button>
+              <button type="button" :class="{ active: messageMode === 'project_analysis' }" @click="messageMode = 'project_analysis'">项目分析</button>
+              <button type="button" :class="{ active: messageMode === 'project_task' }" @click="messageMode = 'project_task'">项目任务</button>
+            </div>
+          </template>
+          <template #context>
+            <SessionContextUsage
+              :usage="groupContextUsage"
+              :loading="groupContextLoading"
+              :error="groupContextError"
+              :compacting="groupContextCompacting"
+              @refresh="refreshGroupContextUsage"
+            />
+          </template>
+        </ChatComposer>
+      </div>
+    </div>
+
+    <AgentCodeChangeDrawer
+      :visible="codeChangeDrawer.visible"
+      :title="codeChangeDrawer.title"
+      :subtitle="codeChangeDrawer.subtitle"
+      :project="codeChangeDrawer.project"
+      :fileChanges="codeChangeDrawer.fileChanges"
+      :files="codeChangeDrawer.files"
+      :selectedPath="codeChangeDrawer.selectedPath"
+      @close="closeCodeChangeDrawer"
+      @open-changes="openDrawerChangesTab"
+    />
+
+    <AgentPipelineModal
+      v-if="pipelineViewer.visible"
+      :viewer="pipelineViewer"
+      @close="pipelineViewer.visible = false"
+    />
+
+    <UnifiedDiffModal
+      :visible="diffViewer.visible"
+      :file="diffViewer.file"
+      @close="closeFileDiff"
+    />
+
+    <GroupCreateModal
+      v-if="showCreate"
+      v-model:name="newGroupName"
+      :projects="projects"
+      @toggle-project="updateCreateGroupProjectSelection"
+      @submit="submitCreateGroup"
+      @close="showCreate = false"
+    />
+
+    <GroupRenameModal
+      v-if="showRename"
+      v-model:name="renameName"
+      :placeholder="currentGroup?.name"
+      @submit="submitRename"
+      @close="showRename = false"
+    />
+
+    <GroupLogsModal
+      v-if="showLogs"
+      :group-name="currentGroup?.name"
+      :logs="logs"
+      v-model:filter="logFilter"
+      @clear="clearLogs"
+      @close="showLogs = false"
+    />
+
+    <GroupToolsModal
+      v-if="showTools"
+      :group-name="currentGroup?.name"
+      :tools="groupTools"
+      :all-tools="groupAllTools"
+      :tool-audit="groupToolAudit"
+      :authorization-readiness="groupAuthorizationReadiness"
+      :connection-preflight="groupConnectionPreflight"
+      :verification-status="groupToolVerification"
+      @close="showTools = false"
+      @toggle-tool="toggleGroupTool"
+      @save="saveGroupTools"
+    />
+
+    <GroupSharedFilesModal
+      v-if="showSharedFiles"
+      :group-name="currentGroup?.name"
+      :files="groupFiles"
+      @add-file="addGroupFile"
+      @delete-file="deleteGroupFile"
+      @close="showSharedFiles = false"
+    />
+
+    <GroupMembersModal
+      v-if="showMembers"
+      :group-name="currentGroup?.name"
+      :members="getRoutableMembers()"
+      :available-projects="getAvailableProjects()"
+      @add-member="addGroupMember"
+      @remove-member="removeGroupMember"
+      @close="showMembers = false"
+    />
+
+    <TemplateVariablesModal
+      v-if="showVariableModal && activeTemplate"
+      :template="activeTemplate"
+      :variables="templateVariables"
+      @update-variable="({ key, value }) => { templateVariables[key] = value }"
+      @apply="applyTemplateVariables"
+      @close="showVariableModal = false"
+    />
+  </div>

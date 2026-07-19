@@ -4,7 +4,7 @@ import type { GlobalMissionSupervisorRuntime } from "../../agents/global/mission
 import { type RequirementIngestionResult } from "../requirements/source-ingestion";
 type LocalIntentResult = any;
 export declare function createGlobalAgentAgenticRuntime(deps: any): {
-    hasExplicitGlobalWriteAuthorization: (message: string) => boolean;
+    hasExplicitGlobalWriteAuthorization: any;
     verifyGlobalAgentContextBoundary: (context?: any) => {
         schema: string;
         valid: boolean;

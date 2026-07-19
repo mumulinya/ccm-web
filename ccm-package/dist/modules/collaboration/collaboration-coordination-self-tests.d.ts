@@ -25,8 +25,10 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
         hardReviewRouteSuppressesConflictingLlmFollowUps: boolean;
         needsRecheckCreatesSameTestAgentWorkOrderContinuation: any;
         needsEnvironmentPreparesConditionsBeforeRecheck: any;
+        needsEnvironmentStructuredPrepChecklist: boolean;
         implementationReworkSchedulesTestAgentRecheck: boolean;
         coordinatorReviewBudgetCoversRepairRecheckAndAcceptance: boolean;
+        testAgentRecheckBudgetPerSubject: boolean;
         latestTestAgentReviewSupersedesStaleFailure: any;
         independentReworkDispatchesToVerifier: boolean;
         independentReworkTaskNamesReviewSubject: any;

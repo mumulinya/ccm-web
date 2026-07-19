@@ -1,0 +1,14 @@
+export declare function distillPostCompactCompletionMemoryPreservationRepairClosureToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, options?: any): any;
+export declare function lookupPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, query?: any, options?: any): any;
+export declare function distillPostCompactCompletionMemoryPreservationClosureConflictResolutionToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillProviderRankingMemoryUsageReceiptRepairToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillProviderDispatchOverrideFollowupToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillProviderSwitchExecutionToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillProviderDispatchOverrideFollowupReceiptValidationToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillIgnoreMemoryReceiptRepairToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillContextUsageRepairToTypedMemory(groupId: string, input?: any, options?: any): any;
+export declare function distillCompactStrategyToTypedMemory(groupId: string, input?: any, options?: any): any;

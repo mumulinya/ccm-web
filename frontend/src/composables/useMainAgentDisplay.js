@@ -23,8 +23,10 @@ export const mainDecisionTone = (decision) => {
   return 'idle'
 }
 
-export const isQuietMainAgentConversationDecision = (decision) => {
-  if (!decision || String(decision.mode || '').toLowerCase() !== 'conversation') return false
+/** Quiet when read-only conversation/analysis needs no user-facing decision chrome. */
+export const isQuietMainAgentDecision = (decision) => {
+  const mode = String(decision?.mode || '').toLowerCase()
+  if (!decision || !['conversation', 'project_analysis'].includes(mode)) return false
   const actions = decision?.decision?.selected_actions || decision?.decision?.selectedActions || []
   const workflowActions = new Set([
     'create_project_task',
@@ -52,6 +54,9 @@ export const isQuietMainAgentConversationDecision = (decision) => {
   return !hasActiveStep
 }
 
+/** @deprecated use isQuietMainAgentDecision */
+export const isQuietMainAgentConversationDecision = (decision) => isQuietMainAgentDecision(decision)
+
 export const mainDecisionNextStep = (decision) => compactStatusText(decision?.decision?.dispatch_policy?.nextStep || decision?.verify?.conclusion || '等待下一条消息', 120)
 
 export const mainDecisionActionSummary = (decision) => {
@@ -75,7 +80,7 @@ export const mainDecisionActionSummary = (decision) => {
 export const mainDecisionPlanSummary = (decision) => {
   const display = decision?.todo_plan?.display || {}
   const policy = decision?.todo_plan?.display_policy || decision?.todo_plan?.displayPolicy || {}
-  if (decision?.mode === 'conversation' && (display.user_visible === false || display.hide_for_simple_conversation === true)) return ''
+  if (['conversation', 'project_analysis'].includes(String(decision?.mode || '')) && (display.user_visible === false || display.hide_for_simple_conversation === true)) return ''
   const steps = Array.isArray(decision?.user_plan_steps)
     ? decision.user_plan_steps
     : Array.isArray(decision?.todo_plan?.steps)

@@ -1,0 +1,20 @@
+{
+  "schema": "ccm-model-capability-refresh-outcome-ledger-v1",
+  "generatedAt": "2026-07-17T14:25:04.944Z",
+  "retentionDays": 90,
+  "historySources": {
+    "activeJournalRows": 1,
+    "archiveFiles": 0,
+    "archivedJournalRows": 0
+  },
+  "outcomeCount": 0,
+  "latestOutcomes": [],
+  "providers": [],
+  "totals": {
+    "refreshed": 0,
+    "metadataAbsent": 0,
+    "unsupported": 0,
+    "degradedProviders": 0
+  },
+  "checksum": "7744d60be45eb4d2a6f348933900a85ed1524a1ba8d9156014d5585768a9688b"
+}

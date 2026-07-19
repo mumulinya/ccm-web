@@ -1,0 +1,308 @@
+export declare function readGroupTypedMemoryPressureRecallUsageLedger(groupId: string): any;
+export declare function writeGroupTypedMemoryPressureRecallUsageLedger(groupId: string, ledger: any): void;
+export declare function recordGroupTypedMemoryPressureRecallUsageLedger(groupId: string, input?: any): any;
+export declare function getPostCompactCompletionMemoryPreservationClosureUsageLedgerFile(groupId: string): string;
+export declare function normalizePostCompactCompletionMemoryPreservationClosureUsageState(value: any): "" | "verified" | "used" | "ignored" | "mentioned";
+export declare function normalizePostCompactCompletionMemoryPreservationClosureTaskFamily(text: any, explicitKey?: any): {
+    schema: string;
+    key: string;
+    tokens: string[];
+    source_available: boolean;
+};
+export declare function postCompactCompletionMemoryPreservationClosureTaskFamilyRelevance(entry?: any, queryFamily?: any, options?: any): {
+    score: number;
+    matched: boolean;
+    reason: string;
+    overlap_tokens?: undefined;
+    threshold?: undefined;
+} | {
+    score: number;
+    matched: boolean;
+    reason: string;
+    overlap_tokens: string[];
+    threshold: number;
+};
+export declare function normalizePostCompactCompletionMemoryPreservationClosureUsageAging(options?: any): {
+    schema: string;
+    enabled: boolean;
+    now_ms: number;
+    now: string;
+    half_life_days: number;
+    stale_after_days: number;
+    min_decay_weight: number;
+};
+export declare function postCompactCompletionMemoryPreservationClosureEvidenceSessionKey(entry?: any): string;
+export declare function clusterPostCompactCompletionMemoryPreservationClosureEvidence(entries?: any[]): any[];
+export declare function scorePostCompactCompletionMemoryPreservationClosureEvidence(entries?: any[], options?: any): {
+    schema: string;
+    independentEntries: any[];
+    rawEntryCount: number;
+    independentEvidenceCount: number;
+    correlatedDuplicateCount: number;
+    independentSessionCount: number;
+    independentPacketCount: number;
+    distinctProviderCount: number;
+    distinctReceiptSourceCount: number;
+    providers: string[];
+    receiptSources: string[];
+    weightedEvidence: number;
+    averageSourceReliability: number;
+    confidence: number;
+    confidenceThreshold: number;
+};
+export declare function arbitratePostCompactCompletionMemoryPreservationClosureEvidenceConflict(independentEntries?: any[], options?: any): {
+    schema: string;
+    active: boolean;
+    arbitration_state: string;
+    ranking_action: string;
+    current_session_verification_required: boolean;
+    historical_majority_authorization_allowed: boolean;
+    conflict_ratio: number;
+    conflict_confidence: number;
+    min_branch_weight: number;
+    ratio_threshold: number;
+    positive: {
+        entry_count: number;
+        independent_session_count: number;
+        independent_packet_count: number;
+        weighted_evidence: number;
+        confidence: number;
+        providers: string[];
+        receipt_sources: string[];
+        entry_ids: string[];
+        task_agent_session_ids: string[];
+        native_session_ids: string[];
+    };
+    ignored: {
+        entry_count: number;
+        independent_session_count: number;
+        independent_packet_count: number;
+        weighted_evidence: number;
+        confidence: number;
+        providers: string[];
+        receipt_sources: string[];
+        entry_ids: string[];
+        task_agent_session_ids: string[];
+        native_session_ids: string[];
+    };
+};
+export declare function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats?: any, options?: any): "require_receipt_repair_before_reuse" | "resolved_conflict_promote_but_reverify_future_session" | "resolved_conflict_neutral_reverify_future_session" | "surface_conflict_reverify_current_session" | "deprioritize_closure_recall" | "promote_but_reverify_current_source" | "caution_stale_history_reverify_current_source" | "neutral_reverify_current_source";
+export declare function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId: string, options?: any): any;
+export declare function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId: string, input?: any): any;
+export declare function buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId: string, options?: any): any;
+export declare function listGroupTypedMemoryPressureRecallUsageLedgers(options?: any): any;
+export declare function getGroupTypedMemoryRecallLedgerFile(groupId: string): string;
+export declare function getGroupTypedMemoryConsumptionLedgerFile(groupId: string): string;
+export declare function getGroupTypedMemoryStaleCandidateLedgerFile(groupId: string): string;
+export declare function getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId: string): any;
+export declare function cleanupGroupTypedMemoryArtifactStage(groupId: string, leaseId: string): void;
+export declare function postCompactCompletionMemoryPreservationRepairClosureInputRows(input?: any): any;
+export declare function postCompactCompletionMemoryPreservationRepairClosureRowId(row?: any): string;
+export declare function normalizePostCompactCompletionMemoryPreservationRepairClosureRows(input?: any, options?: any): any;
+export declare function mergePostCompactCompletionMemoryPreservationRepairClosureRows(existing?: any[], incoming?: any[], options?: any): {
+    rows: any[];
+    newRowCount: number;
+    updatedRowCount: number;
+    prunedRowCount: number;
+};
+export declare function postCompactCompletionMemoryPreservationRepairClosureArchive(rows?: any[], options?: any): any;
+export declare function renderPostCompactCompletionMemoryPreservationRepairClosureBody(archive?: any, options?: any): string;
+export declare function normalizePostCompactCompletionMemoryPreservationClosureConflictResolutionRows(groupId: string, input?: any, options?: any): any;
+export declare function renderPostCompactCompletionMemoryPreservationClosureConflictResolutionBody(archive?: any, options?: any): string;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveDir(groupId: string): string;
+export declare function conflictResolutionColdArchiveShardFile(groupId: string, relPath: string): string;
+export declare function readAndVerifyConflictResolutionColdArchiveShard(groupId: string, descriptor?: any): {
+    valid: any;
+    file: string;
+    descriptor: any;
+    shard: any;
+    rows: any;
+    calculatedChecksum: string;
+    error: string;
+};
+export declare function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchive(groupId: string, options?: any): any;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveQuarantineFile(groupId: string): any;
+export declare function listConflictResolutionColdArchiveShardFiles(groupId: string): string[];
+export declare function readStandaloneConflictResolutionColdArchiveShard(groupId: string, file: string): {
+    valid: any;
+    file: string;
+    shard: any;
+    rows: any;
+    calculatedChecksum: string;
+    error: string;
+};
+export declare function reconcilePostCompactCompletionMemoryPreservationClosureConflictResolutionOrphanShards(groupId: string, options?: any): any;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceLedgerFile(groupId: string): any;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionGcApprovalLedgerFile(groupId: string): any;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationFile(groupId: string): any;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryFile(groupId: string): any;
+export declare function conflictResolutionMaintenanceScopeMetadata(scopeId: string): {
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
+    exact_session: boolean;
+};
+export declare function conflictResolutionMaintenanceState(groupId: string, options?: any): {
+    current_manifest_checksum: any;
+    previous_manifest_checksum: any;
+    quarantine_checksum: any;
+    grace_period_ms: number;
+    recommendation: {
+        severity: string;
+        action: string;
+        destructive: boolean;
+        reason: string;
+    };
+    state_fingerprint: string;
+    revalidated: boolean;
+    healthy: boolean;
+    valid: boolean;
+    generation: any;
+    quarantine: any;
+    source_group_id: string;
+    group_session_id: string;
+    typed_scope_id: string;
+    exact_session: boolean;
+    at: string;
+    group_id: string;
+};
+export declare function acknowledgePostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId: string, input?: any): any;
+export declare function suppressPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotification(groupId: string, input?: any): any;
+export declare function conflictResolutionMaintenanceNotificationDeliveryChecksum(entry?: any): string;
+export declare function conflictResolutionMaintenanceNotificationDeliveryCompactChecksum(entry?: any): string;
+export declare function conflictResolutionMaintenanceNotificationDeliveryLedgerChecksum(value?: any): string;
+export declare function getConflictResolutionMaintenanceNotificationDeliveryPreviousFile(groupId: string): string;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineFile(groupId: string): any;
+export declare function getConflictResolutionMaintenanceNotificationDeliveryRecoveryEvidenceDir(groupId: string): string;
+export declare function verifyConflictResolutionMaintenanceNotificationDeliveryLedgerCandidate(groupId: string, file: string): {
+    file: string;
+    present: boolean;
+    value: any;
+    valid: any;
+    group_valid: boolean;
+    ledger_checksum_valid: boolean;
+    detailed_valid: any;
+    compacted_valid: any;
+    retention_generation: number;
+    ledger_checksum: any;
+    error: string;
+};
+export declare function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryGenerations(groupId: string): any;
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryCleanupGroupLedgerLockFile(groupId: string): any;
+export declare function cleanupGroupLedgerLockChecksum(lock?: any): string;
+export declare function readCleanupGroupLedgerLock(groupId: string, at: string): {
+    file: any;
+    present: boolean;
+    valid: boolean;
+    active: boolean;
+    abandoned: boolean;
+    lock: any;
+    owner_alive?: undefined;
+} | {
+    file: any;
+    present: boolean;
+    valid: boolean;
+    active: boolean;
+    abandoned: boolean;
+    owner_alive: boolean;
+    lock: any;
+};
+export declare function cleanupMetadataBackoffWait(ms: number): void;
+export declare function pruneCleanupMetadataArchives(directory: string, prefix: string, maxEntries: number): number;
+export declare function acquireCleanupGroupLedgerLock(groupId: string, at: string, options?: any): {
+    acquired: boolean;
+    reason: string;
+    status: {
+        file: any;
+        present: boolean;
+        valid: boolean;
+        active: boolean;
+        abandoned: boolean;
+        lock: any;
+        owner_alive?: undefined;
+    } | {
+        file: any;
+        present: boolean;
+        valid: boolean;
+        active: boolean;
+        abandoned: boolean;
+        owner_alive: boolean;
+        lock: any;
+    };
+    waited_ms?: undefined;
+    retryable?: undefined;
+    handle?: undefined;
+    error?: undefined;
+} | {
+    acquired: boolean;
+    reason: string;
+    status: {
+        file: any;
+        present: boolean;
+        valid: boolean;
+        active: boolean;
+        abandoned: boolean;
+        lock: any;
+        owner_alive?: undefined;
+    } | {
+        file: any;
+        present: boolean;
+        valid: boolean;
+        active: boolean;
+        abandoned: boolean;
+        owner_alive: boolean;
+        lock: any;
+    };
+    waited_ms: number;
+    retryable: boolean;
+    handle?: undefined;
+    error?: undefined;
+} | {
+    acquired: boolean;
+    waited_ms: number;
+    handle: {
+        fd: number;
+        file: any;
+        lock: any;
+        released: boolean;
+        waitedMs: number;
+        prunedHistoryCount: number;
+    };
+    reason?: undefined;
+    status?: undefined;
+    retryable?: undefined;
+    error?: undefined;
+} | {
+    acquired: boolean;
+    reason: string;
+    error: string;
+    status?: undefined;
+    waited_ms?: undefined;
+    retryable?: undefined;
+    handle?: undefined;
+} | {
+    acquired: boolean;
+    reason: string;
+    status?: undefined;
+    waited_ms?: undefined;
+    retryable?: undefined;
+    handle?: undefined;
+    error?: undefined;
+};
+export declare function cleanupGroupLedgerLockHeld(groupId: string, handle: any): boolean;
+export declare function releaseCleanupGroupLedgerLock(groupId: string, handle: any): void;
+export declare function withCleanupGroupLedgerLock<T>(groupId: string, at: string, options: any, run: (handle: any) => T): T;
+export declare function appendConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entry: any, at: string): any;
+export declare function conflictResolutionMaintenanceNotificationDeliveryQuarantineCompactChecksum(value?: any): string;
+export declare function retainConflictResolutionMaintenanceNotificationDeliveryQuarantine(groupId: string, entries: any[], compactedEntries: any[], at: string, options?: any): {
+    entries: any[];
+    compacted_entries: any[];
+    retention: {
+        policy: string;
+        unresolved_count: number;
+        cleaned_compacted_this_run_count: number;
+        compacted_summary_count: number;
+        latest_recovery_proof_id: any;
+        max_compacted_entries: number;
+    };
+};

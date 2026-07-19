@@ -60,6 +60,7 @@ class LibraryStateStore {
     if (input.name !== undefined) {
       const clean = cleanName(input.name);
       if (!clean) throw new Error("歌单名称不能为空");
+      if (this.state.playlists.some(list => list.id !== id && list.name.toLowerCase() === clean.toLowerCase())) throw new Error("已有同名歌单");
       item.name = clean;
     }
     if (input.tracks !== undefined) item.tracks = uniqueTracks(input.tracks);

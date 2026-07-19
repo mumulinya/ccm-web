@@ -1,4 +1,9 @@
 import { BrowserStepResult } from "../types";
+export type BrowserScreenshotRef = {
+    stepName: string;
+    path: string;
+    kind: "failure" | "capture";
+};
 export declare function writePlaywrightFailureScreenshot(input: {
     page: any;
     artifactDir: string;
@@ -6,4 +11,4 @@ export declare function writePlaywrightFailureScreenshot(input: {
     checkName: string;
     index: number;
     failedStep?: BrowserStepResult;
-}): Promise<string[]>;
+}): Promise<BrowserScreenshotRef[]>;

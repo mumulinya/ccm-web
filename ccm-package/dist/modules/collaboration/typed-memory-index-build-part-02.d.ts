@@ -1,0 +1,168 @@
+import { GroupTypedMemoryManifestSelectorExecutor, GroupTypedMemoryType } from "./typed-memory-shared";
+export declare function applyGroupDirectMemoryRequests(groupId: string, factsInput: any, requests?: any[], previous?: any, updatedAt?: string): {
+    facts: any;
+    ledger: {
+        schema: string;
+        version: number;
+        groupId: string;
+        evaluatedThisRun: number;
+        rememberedThisRun: number;
+        forgottenThisRun: number;
+        duplicateThisRun: number;
+        rejectedThisRun: number;
+        activeDirectMemoryCount: number;
+        receiptCount: number;
+        tombstoneCount: number;
+        receipts: any[];
+        tombstones: any[];
+        updatedAt: string;
+    };
+};
+export declare function filterFactsByDirectMemoryTombstones(facts: any, directMemory: any): {
+    facts: any;
+    suppressedCount: number;
+};
+export declare function getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile(groupId: string): any;
+export declare function conflictResolutionColdArchiveManifestChecksum(manifest?: any): any;
+export declare function getConflictResolutionColdArchiveManifestGenerationsDir(groupId: string): any;
+export declare function getConflictResolutionColdArchiveManifestGenerationFile(groupId: string, manifestChecksum: string): any;
+export declare function readConflictResolutionColdArchiveManifest(groupId: string): any;
+export declare function readPreviousConflictResolutionColdArchiveManifest(groupId: string, currentManifest?: any): any;
+export declare function verifyPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestGenerations(groupId: string, options?: any): any;
+export declare function recoverPostCompactCompletionMemoryPreservationClosureConflictResolutionManifestFromGeneration(groupId: string, options?: any): any;
+export declare function buildGroupDirectMemoryAction(groupId: string, input?: any): {
+    schema: string;
+    version: number;
+    requestId: string;
+    action: string;
+    scopeId: string;
+    content: string;
+    memoryType: GroupTypedMemoryType;
+    targetMemoryId: string;
+    requestChecksum: string;
+};
+export declare function commitGroupDirectMemoryAction(groupId: string, messages?: any[], input?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    requestId: string;
+    committed: boolean;
+    receipt: any;
+    directMemory: any;
+    distillation: any;
+    index: {
+        file: string;
+        dir: string;
+        docs: {
+            file: string;
+            relPath: string;
+            name: any;
+            description: any;
+            type: GroupTypedMemoryType;
+            source: any;
+            paths: string[];
+            updatedAt: any;
+            checksum: any;
+            body: string;
+            mtimeMs: number;
+            bytes: number;
+        }[];
+        changed: boolean;
+        lineCount: number;
+        bytes: number;
+        entrypointTruncation: {
+            content: any;
+            schema: string;
+            version: number;
+            lineCount: number;
+            byteCount: number;
+            loadedLineCount: number;
+            loadedByteCount: number;
+            wasLineTruncated: boolean;
+            wasByteTruncated: boolean;
+            truncated: boolean;
+            maxLines: number;
+            maxBytes: number;
+        };
+    };
+};
+export declare function syncGroupTypedMemoryFromGroupMemory(groupId: string, memory?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    writes: any[];
+    index: {
+        file: string;
+        dir: string;
+        docs: {
+            file: string;
+            relPath: string;
+            name: any;
+            description: any;
+            type: GroupTypedMemoryType;
+            source: any;
+            paths: string[];
+            updatedAt: any;
+            checksum: any;
+            body: string;
+            mtimeMs: number;
+            bytes: number;
+        }[];
+        changed: boolean;
+        lineCount: number;
+        bytes: number;
+        entrypointTruncation: {
+            content: any;
+            schema: string;
+            version: number;
+            lineCount: number;
+            byteCount: number;
+            loadedLineCount: number;
+            loadedByteCount: number;
+            wasLineTruncated: boolean;
+            wasByteTruncated: boolean;
+            truncated: boolean;
+            maxLines: number;
+            maxBytes: number;
+        };
+    };
+};
+export declare function groupTypedMemoryManifestSelectionChecksum(value: any): string;
+export declare function groupTypedMemoryManifestSelectorCalibrationChecksum(value: any): string;
+export declare function getGroupTypedMemoryManifestSelectorDecisionDir(scopeId: string): any;
+export declare function getGroupTypedMemoryManifestSelectorOutcomeDir(scopeId: string): any;
+export declare function getGroupTypedMemoryManifestSelectorConsumptionDir(scopeId: string): any;
+export declare function groupTypedMemoryManifestSelectorOutcomeChecksum(value: any): string;
+export declare function verifyGroupTypedMemoryManifestSelectorOutcome(outcome: any, expectedScopeId?: string, selection?: any): any;
+export declare function recordGroupTypedMemoryManifestSelectorOutcome(scopeId: string, selection: any, input?: any): any;
+export declare function groupTypedMemoryManifestSelectorConsumptionChecksum(value: any): string;
+export declare function readGroupTypedMemoryManifestSelectorChain(scopeId: string, requestId: string): {
+    valid: boolean;
+    selection: any;
+    attached: any;
+    committed: any;
+    files: {
+        decisionFile: string;
+        attachedFile: string;
+        committedFile: string;
+    };
+};
+export declare function verifyGroupTypedMemoryManifestSelectorConsumptionOutcome(consumption: any, expectedScopeId?: string, committedOutcome?: any): any;
+export declare function recordGroupTypedMemoryManifestSelectorConsumptionOutcomes(scopeId: string, input?: any): any;
+export declare function summarizeGroupTypedMemoryManifestSelectorConsumption(scopeId: string, options?: any): any;
+export declare function verifyGroupTypedMemoryManifestSelectorCalibration(calibration: any, expectedScopeId?: string, expectedQueryChecksum?: string): any;
+export declare function buildGroupTypedMemoryManifestSelectorCalibration(scopeId: string, query: string, options?: any): any;
+export declare function groupTypedMemoryManifestSelectorAgeStats(candidates: any[], nowMs: number): {
+    newest: number;
+    oldest: number;
+    average: number;
+};
+export declare function recordGroupTypedMemoryManifestSelectorDecision(scopeId: string, decision: any): string;
+export declare function verifyGroupTypedMemoryManifestSelection(selection: any, expectedScopeId?: string): any;
+export declare function configureGroupTypedMemoryManifestSelector(executor: GroupTypedMemoryManifestSelectorExecutor | null): any;
+export declare function buildGroupTypedMemoryManifest(scopeId: string, query: string, options?: any): any;
+export declare function parseGroupTypedMemoryManifestSelectorOutput(value: any): any;
+export declare function finalizeGroupTypedMemoryManifestSelection(scopeId: string, input: any, options?: any): any;
+export declare function selectGroupTypedMemoryManifest(scopeId: string, query: string, options?: any): Promise<any>;
+export declare function summarizeGroupTypedMemoryManifestSelectorOutcomes(scopeId: string, options?: any): any;
+export declare function summarizeGroupTypedMemoryManifestSelectorDecisions(scopeId: string, options?: any): any;

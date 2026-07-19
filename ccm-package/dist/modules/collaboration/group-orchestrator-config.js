@@ -62,8 +62,11 @@ function defaultOrchestratorConfig() {
         apiKey: "",
         model: "",
         temperature: 0.2,
+        reasoningEffort: "off",
         timeoutMs: 120000,
         fallbackToRules: true,
+        memoryCompactionUseModel: true,
+        memoryCompactionMode: "model-required",
         memoryContextPreset: "default",
         modelContextWindow: 0,
         modelAutoCompactTokenLimit: 0,
@@ -110,6 +113,8 @@ function loadOrchestratorConfig() {
         return {
             ...defaultOrchestratorConfig(),
             ...stored,
+            memoryCompactionUseModel: true,
+            memoryCompactionMode: "model-required",
             apiKey: stored.apiKey ? (0, credential_store_1.resolveCredential)(stored.apiKey) : "",
         };
     }
@@ -149,6 +154,13 @@ function saveOrchestratorConfig(updates) {
             throw new Error("模型温度必须介于 0 和 1");
         next.temperature = temperature;
     }
+    const reasoningEffort = updates.reasoningEffort ?? updates.reasoning_effort;
+    if (reasoningEffort !== undefined) {
+        const effort = String(reasoningEffort || "off").trim().toLowerCase();
+        if (!["off", "low", "medium", "high"].includes(effort))
+            throw new Error("推理强度必须是 off、low、medium 或 high");
+        next.reasoningEffort = effort;
+    }
     if (updates.timeoutMs !== undefined) {
         const timeoutMs = Number(updates.timeoutMs);
         if (!Number.isFinite(timeoutMs) || timeoutMs < 5_000 || timeoutMs > 300_000)
@@ -157,6 +169,17 @@ function saveOrchestratorConfig(updates) {
     }
     if (updates.fallbackToRules !== undefined)
         next.fallbackToRules = !!updates.fallbackToRules;
+    const memoryCompactionUseModel = updates.memoryCompactionUseModel ?? updates.memory_compaction_use_model;
+    const memoryCompactionMode = updates.memoryCompactionMode ?? updates.memory_compaction_mode;
+    if (memoryCompactionUseModel !== undefined && memoryCompactionUseModel !== true)
+        throw new Error("群聊记忆压缩必须使用模型摘要");
+    if (memoryCompactionMode !== undefined) {
+        const mode = String(memoryCompactionMode || "model-required").trim().toLowerCase();
+        if (mode !== "model-required")
+            throw new Error("群聊记忆压缩模式只支持 model-required");
+    }
+    next.memoryCompactionUseModel = true;
+    next.memoryCompactionMode = "model-required";
     const memoryContextPreset = updates.memoryContextPreset ?? updates.memory_context_preset;
     const modelContextWindow = updates.modelContextWindow ?? updates.model_context_window;
     const modelAutoCompactTokenLimit = updates.modelAutoCompactTokenLimit ?? updates.model_auto_compact_token_limit;
@@ -334,7 +357,12 @@ async function testUnifiedModelConnection() {
     try {
         if (config.enabled === false)
             throw new Error("统一大模型已关闭");
-        const testConfig = { ...config, timeoutMs: Math.min(20_000, Math.max(5_000, Number(config.timeoutMs) || 15_000)) };
+        // Connection checks stay lightweight: never attach reasoning / thinking params.
+        const testConfig = {
+            ...config,
+            timeoutMs: Math.min(20_000, Math.max(5_000, Number(config.timeoutMs) || 15_000)),
+            reasoningEffort: "off",
+        };
         const messages = [{ role: "user", content: "仅回复 OK" }];
         const content = provider === "anthropic-compatible"
             ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(testConfig, {

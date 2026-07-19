@@ -16,13 +16,13 @@ export declare function runTestAgentClaudeChromeExistingSessionSelfTest(): Promi
     pass: boolean;
     minimalReport: import("..").TestAgentReport;
     minimalContract: import("..").TestAgentReportContractValidation;
-    minimalArtifacts: import("../artifact-verifier").TestAgentArtifactVerification;
-    transcriptTamperedArtifacts: import("../artifact-verifier").TestAgentArtifactVerification;
+    minimalArtifacts: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    transcriptTamperedArtifacts: import("../artifact-verifier-core").TestAgentArtifactVerification;
     tamperedContract: import("..").TestAgentReportContractValidation;
-    reportTamperedArtifacts: import("../artifact-verifier").TestAgentArtifactVerification;
+    reportTamperedArtifacts: import("../artifact-verifier-core").TestAgentArtifactVerification;
     fullReport: import("..").TestAgentReport;
     fullContract: import("..").TestAgentReportContractValidation;
-    fullArtifacts: import("../artifact-verifier").TestAgentArtifactVerification;
+    fullArtifacts: import("../artifact-verifier-core").TestAgentArtifactVerification;
     missingReport: import("..").TestAgentReport;
     minimalCalls: {
         toolName: string;

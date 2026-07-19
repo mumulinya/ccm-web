@@ -1,4 +1,6 @@
 <script setup>
+import EmptyState from '../common/EmptyState.vue'
+
 defineProps({
   visible: { type: Boolean, default: false },
   projectName: { type: String, default: '' },
@@ -36,7 +38,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
       </div>
 
       <div class="shared-list">
-        <div v-if="files.length === 0" class="empty-files">暂无共享文件</div>
+        <EmptyState v-if="files.length === 0" icon="📁" title="暂无共享文件" />
         <div v-for="f in files" :key="f.name" class="shared-file-item">
           <div class="shared-file-head">
             <div>
@@ -114,12 +116,6 @@ const updateField = (field, event) => emit('update-field', { field, value: event
 .shared-list {
   flex: 1;
   overflow-y: auto;
-}
-
-.empty-files {
-  padding: 40px;
-  color: var(--text-muted);
-  text-align: center;
 }
 
 .shared-file-item {

@@ -1,0 +1,54 @@
+{
+  "schema": "ccm-group-coordination-store-v1",
+  "version": 1,
+  "updated_at": "2026-07-18T15:43:30.826Z",
+  "requests": [
+    {
+      "schema": "ccm-group-coordination-request-v1",
+      "id": "gcr_mrqjdt6y_45bba350b4",
+      "status": "submitted",
+      "kind": "implementation",
+      "group_id": "group-business-chain",
+      "task_id": "mrqjdt0jrkdg",
+      "group_session_id": "",
+      "source_project": "frontend-agent",
+      "source_agent_type": "claudecode",
+      "source_task_agent_session_id": "tas-business-frontend",
+      "source_native_session_id": "native-business-frontend",
+      "source_work_dir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\frontend-project",
+      "summary": "实现订单创建接口",
+      "question": "新增 POST /api/orders，返回 orderId 供前端继续联调",
+      "reason": "前端当前被后端接口阻塞",
+      "blocking": true,
+      "required_capabilities": [
+        "backend",
+        "api"
+      ],
+      "target_hint": "backend-agent",
+      "evidence": [],
+      "acceptance_criteria": [
+        "接口返回 orderId",
+        "运行接口测试"
+      ],
+      "requested_write_paths": [
+        "src/orders-api.ts"
+      ],
+      "idempotency_key": "business-chain-order-api",
+      "coordinator_claim_id": "",
+      "work_item_task_id": "",
+      "resolution": null,
+      "metadata": {
+        "submitted_tool": "request_coordination"
+      },
+      "audit": [
+        {
+          "at": "2026-07-18T15:43:30.826Z",
+          "type": "submitted_via_mcp",
+          "detail": "子 Agent 已向群聊主 Agent 提交协调请求"
+        }
+      ],
+      "created_at": "2026-07-18T15:43:30.826Z",
+      "updated_at": "2026-07-18T15:43:30.826Z"
+    }
+  ]
+}

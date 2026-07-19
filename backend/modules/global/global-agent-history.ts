@@ -1,8 +1,20 @@
 import fs from "fs";
+import { sanitizeGlobalHistoryAttachments } from "./global-agent-attachments";
 
 // Persistent Web/Feishu conversation history and session routing.
 export function createGlobalAgentHistoryRuntime(deps: any) {
   const { GLOBAL_AGENT_HISTORY_FILE, GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_AGENT_SESSION_LIMIT, buildGlobalVisibleReplyContent, ingestGlobalAgentConversation, writeGlobalJsonAtomic } = deps
+  const generateSessionTitle = typeof deps.generateSessionTitle === "function"
+    ? deps.generateSessionTitle
+    : async () => ({ title: "", source: "skipped" });
+  const isSessionTitlePlaceholder = typeof deps.isSessionTitlePlaceholder === "function"
+    ? deps.isSessionTitlePlaceholder
+    : (title: any, origin: any = "") => String(origin || "").toLowerCase() !== "manual"
+      && ["", "新会话", "默认会话", "全局 Agent 会话", "飞书全局 Agent"].includes(String(title || "").trim());
+  const isMeaningfulSessionTitleInput = typeof deps.isMeaningfulSessionTitleInput === "function"
+    ? deps.isMeaningfulSessionTitleInput
+    : (value: any) => /\p{L}/u.test(String(value || ""));
+  const globalSessionTitleJobs = new Map<string, Promise<any>>();
 
   const GLOBAL_AGENT_HISTORY_METADATA_KEYS = [
     "type",
@@ -51,7 +63,9 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     const metadata: any = {};
     for (const key of GLOBAL_AGENT_HISTORY_METADATA_KEYS) {
       if (message?.[key] !== undefined) {
-        const value = truncateGlobalHistoryValue(message[key]);
+        const value = key === "files"
+          ? sanitizeGlobalHistoryAttachments(message[key], message?.role)
+          : truncateGlobalHistoryValue(message[key]);
         if (value !== undefined) metadata[key] = value;
       }
     }
@@ -174,12 +188,25 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     try {
       if (fs.existsSync(GLOBAL_AGENT_HISTORY_FILE)) {
         const data = JSON.parse(fs.readFileSync(GLOBAL_AGENT_HISTORY_FILE, "utf-8"));
-        return { sessions: [], ...data };
+        return {
+          ...data,
+          sessions: (Array.isArray(data.sessions) ? data.sessions : []).map((session: any) => ({
+            ...session,
+            messages: normalizeGlobalAgentMessages(session.messages || []),
+          })),
+        };
       }
     } catch {}
     try {
       const recovered = JSON.parse(fs.readFileSync(`${GLOBAL_AGENT_HISTORY_FILE}.bak`, "utf-8"));
-      return { sessions: [], ...recovered, storage_recovery: { recovered_from_backup: true, recovered_at: new Date().toISOString() } };
+      return {
+        ...recovered,
+        sessions: (Array.isArray(recovered.sessions) ? recovered.sessions : []).map((session: any) => ({
+          ...session,
+          messages: normalizeGlobalAgentMessages(session.messages || []),
+        })),
+        storage_recovery: { recovered_from_backup: true, recovered_at: new Date().toISOString() },
+      };
     } catch {}
     return { current_session_id: "", sessions: [] };
   }
@@ -196,6 +223,41 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       .sort((a: any, b: any) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
       .slice(0, GLOBAL_AGENT_SESSION_LIMIT);
     writeGlobalJsonAtomic(GLOBAL_AGENT_HISTORY_FILE, store);
+  }
+
+  function scheduleGlobalSessionAutoTitle(sessionId: string) {
+    const existingJob = globalSessionTitleJobs.get(sessionId);
+    if (existingJob) return existingJob;
+    const job = (async () => {
+      const store = loadGlobalAgentHistoryStore();
+      const session = (store.sessions || []).find((item: any) => String(item.id) === sessionId);
+      if (!session || !isSessionTitlePlaceholder(session.name, session.titleOrigin)) return { renamed: false, reason: "title_already_set", session };
+      const messages = normalizeGlobalAgentMessages(session.messages || []);
+      const userIndex = messages.findIndex((message: any) => message.role === "user"
+        && (isMeaningfulSessionTitleInput(message.content) || (message.files || []).length));
+      if (userIndex < 0) return { renamed: false, reason: "user_message_missing", session };
+      const userMessage = messages[userIndex];
+      const assistantMessage = messages.slice(userIndex + 1).find((message: any) => message.role === "assistant" && String(message.content || "").trim());
+      if (!assistantMessage) return { renamed: false, reason: "assistant_reply_missing", session };
+      const generated = await generateSessionTitle({
+        scope: "global",
+        userMessage: String(userMessage.content || ""),
+        assistantMessage: String(assistantMessage.content || ""),
+        attachmentNames: (userMessage.files || []).map((file: any) => String(file?.name || "")).filter(Boolean),
+      });
+      if (!generated?.title) return { renamed: false, reason: "title_input_skipped", generated };
+      const latestStore = loadGlobalAgentHistoryStore();
+      const current = (latestStore.sessions || []).find((item: any) => String(item.id) === sessionId);
+      if (!current || !isSessionTitlePlaceholder(current.name, current.titleOrigin)) return { renamed: false, reason: "title_changed_during_generation", session: current };
+      current.name = generated.title;
+      current.titleOrigin = generated.source === "model" ? "model" : "fallback";
+      current.titleGeneratedAt = new Date().toISOString();
+      current.updatedAt = current.titleGeneratedAt;
+      saveGlobalAgentHistoryStore(latestStore);
+      return { renamed: true, session: current, generated };
+    })().finally(() => globalSessionTitleJobs.delete(sessionId));
+    globalSessionTitleJobs.set(sessionId, job);
+    return job;
   }
   
   function reconcileGlobalAgentWebHistory(store: any, payload: any) {
@@ -214,9 +276,17 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       const existing = existingWebSessions.get(id) as any;
       const incomingMessages = Array.isArray(session.messages) ? session.messages : [];
       const lastMessageAt = incomingMessages[incomingMessages.length - 1]?.timestamp || "";
+      const incomingName = String(session.name || "").trim();
+      const existingName = String(existing?.name || "").trim();
+      const keepExistingTitle = !!existingName
+        && !isSessionTitlePlaceholder(existingName, existing?.titleOrigin)
+        && isSessionTitlePlaceholder(incomingName, session.titleOrigin);
+      const resolvedName = keepExistingTitle ? existingName : incomingName || existingName || "全局 Agent 会话";
       webSessions.push({
         id,
-        name: session.name || existing?.name || "全局 Agent 会话",
+        name: resolvedName,
+        titleOrigin: keepExistingTitle ? existing?.titleOrigin : session.titleOrigin || existing?.titleOrigin || (isSessionTitlePlaceholder(resolvedName) ? "placeholder" : "manual"),
+        titleGeneratedAt: keepExistingTitle ? existing?.titleGeneratedAt || "" : session.titleGeneratedAt || existing?.titleGeneratedAt || "",
         source: "web",
         createdAt: existing?.createdAt || session.createdAt || new Date().toISOString(),
         updatedAt: session.updatedAt || session.updated_at || lastMessageAt || existing?.updatedAt || new Date().toISOString(),
@@ -248,6 +318,12 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     }
     const reconciled = reconcileGlobalAgentWebHistory(store, payload);
     saveGlobalAgentHistoryStore(reconciled);
+    for (const session of reconciled.sessions || []) {
+      if (String(session.source || "") !== "web") continue;
+      void scheduleGlobalSessionAutoTitle(String(session.id || "")).catch((error: any) => {
+        console.warn(`[全局会话] 自动命名失败 (${session.id})：${error?.message || error}`);
+      });
+    }
     return reconciled;
   }
   
@@ -274,6 +350,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       session = {
         id: sessionId,
         name: source === "feishu" ? "飞书全局 Agent" : "全局 Agent 会话",
+        titleOrigin: "placeholder",
         source,
         createdAt: new Date().toISOString(),
         messages: getBaseGlobalAgentMessages(store),
@@ -290,6 +367,11 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     session.updatedAt = new Date().toISOString();
     store.sessions = sessions;
     saveGlobalAgentHistoryStore(store);
+    if (role === "assistant") {
+      void scheduleGlobalSessionAutoTitle(sessionId).catch((error: any) => {
+        console.warn(`[全局会话] 自动命名失败 (${sessionId})：${error?.message || error}`);
+      });
+    }
   }
   
   function buildFeishuConversationId(payload: any) {
@@ -339,6 +421,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     syncGlobalAgentWebHistory,
     getGlobalAgentConversationMessages,
     appendGlobalAgentConversationMessage,
+    scheduleGlobalSessionAutoTitle,
     resolveFeishuGlobalAgentSessionId,
     runFeishuGlobalAgentSessionRoutingSelfTest,
   }

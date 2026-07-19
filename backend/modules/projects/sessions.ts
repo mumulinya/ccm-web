@@ -1,9 +1,20 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
-import { sendJson, CCM_DIR, SESSIONS_DIR, UPLOAD_DIR, GROUP_MESSAGES_DIR } from "../../core/utils";
+import { sendJson, CCM_DIR, SESSIONS_DIR } from "../../core/utils";
 import { resolveContainedPath, validateProjectName, validateSessionId } from "./project-validation";
-import { getConfigs, getConfigInfo } from "../../core/db";
+import { getConfigs } from "../../core/db";
+import {
+  generateSessionTitleWithModel,
+  isMeaningfulSessionTitleInput,
+  isSessionTitlePlaceholder,
+} from "../../system/session-title";
+import { purgeProjectChatRunsForSession } from "../../projects/chat-runs";
+import { compactProjectSessionWithModel, scheduleProjectSessionMemoryExtraction } from "./project-session-compaction";
+import {
+  getProjectSessionAgentBinding,
+  purgeProjectSessionAgentBinding,
+  rotateProjectSessionAgentBinding,
+} from "./project-session-agent-binding";
 
 export const WEB_SESSIONS_DIR = path.join(CCM_DIR, "web-sessions");
 
@@ -119,14 +130,18 @@ export function getSessions(projectName: string) {
 export function getSessionDetail(projectName: string, sessionId: string) {
   const filePath = getSessionFilePath(projectName, sessionId);
   if (fs.existsSync(filePath)) {
-    try { return JSON.parse(fs.readFileSync(filePath, "utf-8")); } catch {}
+    try {
+      const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      return { ...data, agent_binding: getProjectSessionAgentBinding(projectName, sessionId) };
+    } catch {}
   }
   // fallback: 从 cc-connect 文件读取
   const ccFile = findCcSessionFile(projectName);
   if (ccFile) {
     try {
       const data = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-      return data.sessions[sessionId] || null;
+      const session = data.sessions[sessionId] || null;
+      return session ? { ...session, agent_binding: getProjectSessionAgentBinding(projectName, sessionId) } : null;
     } catch {}
   }
   return null;
@@ -151,6 +166,7 @@ function normalizeWebSessionMessage(message: any) {
     "projectRun",
     "agenticRun",
     "managementReceipt",
+    "provider_usage",
     "type",
   ]) {
     if (Object.prototype.hasOwnProperty.call(input, key)) safe[key] = input[key];
@@ -186,42 +202,46 @@ function getNextSessionId(projectName: string) {
   return `s${nums.length > 0 ? Math.max(...nums) + 1 : 1}`;
 }
 
-// === 智能标题生成 ===
-function generateTitle(message: string) {
-  if (!message) return "新会话";
-  let text = message.trim();
+const projectSessionTitleJobs = new Map<string, Promise<any>>();
 
-  // 去掉常见前缀
-  text = text.replace(/^(帮我|请|麻烦|帮忙|能不能|可以)\s*/i, "");
-
-  // 按标点截断，取第一句
-  const firstSentence = text.split(/[。！？\n.!?]/)[0].trim();
-  if (firstSentence.length > 0) text = firstSentence;
-
-  // 如果有代码相关关键词，加上标签
-  const tags: any = {
-    "bug|报错|错误|异常|失败|fix|修复": "🐛",
-    "接口|api|API|请求|返回": "🔌",
-    "页面|前端|UI|样式|布局": "🎨",
-    "数据库|sql|SQL|表|字段": "🗄️",
-    "部署|上线|发布|docker": "🚀",
-    "测试|test|单元测试": "🧪",
-    "优化|性能|重构": "⚡",
-    "新增|添加|功能|需求": "✨",
-  };
-  let icon = "";
-  for (const [pattern, emoji] of Object.entries(tags)) {
-    if (new RegExp(pattern, "i").test(text)) { icon = emoji + " "; break; }
-  }
-
-  // 截断到合适长度
-  if (text.length > 18) {
-    text = text.substring(0, 18);
-    const lastSpace = text.lastIndexOf(" ");
-    if (lastSpace > 8) text = text.substring(0, lastSpace);
-  }
-
-  return icon + text || "新会话";
+export function scheduleProjectSessionAutoTitle(project: string, sessionId: string, options: { modelCall?: (request: any) => Promise<any> } = {}) {
+  const safeProject = validateProjectName(project);
+  const safeSessionId = validateSessionId(sessionId);
+  const key = `${safeProject}::${safeSessionId}`;
+  const existingJob = projectSessionTitleJobs.get(key);
+  if (existingJob) return existingJob;
+  const job = (async () => {
+    const filePath = getSessionFilePath(safeProject, safeSessionId);
+    if (!fs.existsSync(filePath)) return { renamed: false, reason: "session_missing" };
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    if (!isSessionTitlePlaceholder(data.name, data.title_origin || data.titleOrigin)) return { renamed: false, reason: "title_already_set", name: data.name };
+    const history = Array.isArray(data.history) ? data.history : [];
+    const userIndex = history.findIndex((message: any) => message?.role === "user"
+      && (isMeaningfulSessionTitleInput(message?.content) || (message?.files || message?.attachments || []).length));
+    if (userIndex < 0) return { renamed: false, reason: "meaningful_user_message_missing", name: data.name };
+    const userMessage = history[userIndex];
+    const assistantMessage = history.slice(userIndex + 1).find((message: any) => message?.role === "assistant" && String(message?.content || "").trim());
+    if (!assistantMessage) return { renamed: false, reason: "assistant_reply_missing", name: data.name };
+    const files = userMessage.files || userMessage.attachments || [];
+    const generated = await generateSessionTitleWithModel({
+      scope: "project",
+      userMessage: String(userMessage.content || ""),
+      assistantMessage: String(assistantMessage.content || ""),
+      attachmentNames: files.map((file: any) => String(file?.name || file?.filename || "")).filter(Boolean),
+    }, options);
+    if (!generated.title) return { renamed: false, reason: "title_input_skipped", name: data.name, generated };
+    const latest = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    if (!isSessionTitlePlaceholder(latest.name, latest.title_origin || latest.titleOrigin)) return { renamed: false, reason: "title_changed_during_generation", name: latest.name };
+    latest.name = generated.title;
+    latest.title_origin = generated.source === "model" ? "model" : "fallback";
+    latest.title_generated_at = new Date().toISOString();
+    latest.updated_at = latest.title_generated_at;
+    fs.writeFileSync(filePath, JSON.stringify(latest, null, 2));
+    syncToFilesystemToCc(safeProject);
+    return { renamed: true, name: latest.name, generated };
+  })().finally(() => projectSessionTitleJobs.delete(key));
+  projectSessionTitleJobs.set(key, job);
+  return job;
 }
 
 // === Sessions API 路由分流 ===
@@ -236,11 +256,8 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const dir = ensureWebSessionDir(safeProject);
         const sid = getNextSessionId(safeProject);
         const now = new Date();
-        const pad = (n: number) => String(n).padStart(2, "0");
-        const timeStr = `${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-        const count = fs.readdirSync(dir).filter(f=>f.endsWith(".json")).length;
-        const sessionName = name || `会话 ${count + 1} · ${timeStr}`;
-        const sessionData = { id: sid, name: sessionName, agent_type: "claudecode", history: [], created_at: now.toISOString(), updated_at: now.toISOString() };
+        const sessionName = String(name || "新会话").trim() || "新会话";
+        const sessionData = { id: sid, name: sessionName, title_origin: isSessionTitlePlaceholder(sessionName) ? "placeholder" : "manual", agent_type: "claudecode", history: [], created_at: now.toISOString(), updated_at: now.toISOString() };
         fs.writeFileSync(getSessionFilePath(safeProject, sid), JSON.stringify(sessionData, null, 2));
         syncToFilesystemToCc(safeProject);
         sendJson(res, { success: true, sessionId: sid, name: sessionName });
@@ -262,11 +279,18 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         if (!data.history) data.history = [];
-        data.history.push(normalizeWebSessionMessage(message));
+        const normalizedMessage = normalizeWebSessionMessage(message);
+        data.history.push(normalizedMessage);
         data.updated_at = new Date().toISOString();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         syncToFilesystemToCc(project);
-        sendJson(res, { success: true, count: data.history.length });
+        if (normalizedMessage.role === "assistant") {
+          scheduleProjectSessionMemoryExtraction(project, sessionId);
+          void scheduleProjectSessionAutoTitle(project, sessionId).catch((error: any) => {
+            console.warn(`[项目会话] 自动命名失败 (${project}/${sessionId})：${error?.message || error}`);
+          });
+        }
+        sendJson(res, { success: true, count: data.history.length, name: data.name });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -288,10 +312,12 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const before = Array.isArray(data.history) ? data.history.length : 0;
         data.history = (Array.isArray(data.history) ? data.history : []).filter((message: any, index: number) => !messageMatchesDeleteSelector(message, payload, index));
         const deleted = before - data.history.length;
+        const rotation = deleted > 0 ? rotateProjectSessionAgentBinding(project, sessionId, "项目会话消息删除，压缩边界失效") : null;
+        if (deleted > 0) delete data.compaction;
         data.updated_at = new Date().toISOString();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         syncToFilesystemToCc(project);
-        sendJson(res, { success: true, deleted, count: data.history.length });
+        sendJson(res, { success: true, deleted, count: data.history.length, binding_generation: rotation?.nextGeneration || 0 });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -313,10 +339,12 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         const before = Array.isArray(data.history) ? data.history.length : 0;
         data.history = payload.messages.map(normalizeWebSessionMessage);
+        const rotation = rotateProjectSessionAgentBinding(project, sessionId, "项目会话消息替换，压缩边界失效");
+        delete data.compaction;
         data.updated_at = new Date().toISOString();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         syncToFilesystemToCc(project);
-        sendJson(res, { success: true, replaced: before, count: data.history.length });
+        sendJson(res, { success: true, replaced: before, count: data.history.length, binding_generation: rotation.nextGeneration });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -335,12 +363,33 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         const cleared = Array.isArray(data.history) ? data.history.length : 0;
+        const rotation = rotateProjectSessionAgentBinding(project, sessionId, "用户清空项目会话");
         data.history = [];
+        delete data.compaction;
         data.updated_at = new Date().toISOString();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         syncToFilesystemToCc(project);
-        sendJson(res, { success: true, cleared });
+        sendJson(res, { success: true, cleared, binding_generation: rotation.nextGeneration, closed_agent_sessions: rotation.closed.length });
       } catch (e: any) { sendJson(res, { error: e.message }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/sessions/compact" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const project = validateProjectName(payload.project);
+        const sessionId = validateSessionId(payload.sessionId || payload.session_id);
+        const result = await compactProjectSessionWithModel(project, sessionId, {
+          force: true,
+          reason: "manual_slash_compact",
+          customInstructions: String(payload.customInstructions || payload.custom_instructions || "").trim(),
+        });
+        sendJson(res, { success: true, project, session_id: sessionId, mode: "model_required", ...result });
+      } catch (e: any) { sendJson(res, { success: false, error: e?.message || "项目会话压缩失败" }, 400); }
     });
     return true;
   }
@@ -353,6 +402,8 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const { project, sessionId } = JSON.parse(body);
         const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
+        const bindingCleanup = purgeProjectSessionAgentBinding(project, sessionId);
+        const runCleanup = purgeProjectChatRunsForSession(project, sessionId);
         fs.unlinkSync(filePath);
         const ccFile = findCcSessionFile(project);
         if (ccFile) {
@@ -365,7 +416,7 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
             fs.writeFileSync(ccFile, JSON.stringify(data, null, 2));
           } catch {}
         }
-        sendJson(res, { success: true });
+        sendJson(res, { success: true, removed_agent_sessions: bindingCleanup.removed.length, removed_project_runs: runCleanup.removed.length });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -385,6 +436,8 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         data.name = safeName;
+        data.title_origin = "manual";
+        data.updated_at = new Date().toISOString();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         const ccFile = findCcSessionFile(project);
         if (ccFile) {
@@ -392,6 +445,8 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
             const ccData = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
             if (ccData.sessions[sessionId]) {
               ccData.sessions[sessionId].name = safeName;
+              ccData.sessions[sessionId].title_origin = "manual";
+              ccData.sessions[sessionId].updated_at = data.updated_at;
               fs.writeFileSync(ccFile, JSON.stringify(ccData, null, 2));
             }
           } catch {}
@@ -409,37 +464,13 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
     req.on("data", (chunk) => body += chunk);
     req.on("end", async () => {
       try {
-        const { project, sessionId, message } = JSON.parse(body);
-        const activeProject = requireActiveProject(project);
+        const { project, sessionId } = JSON.parse(body);
+        requireActiveProject(project);
         const filePath = getSessionFilePath(project, sessionId);
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
-
-        let title = "";
-        try {
-          const prompt = `根据以下消息生成简短中文标题（不超过15字，无引号无标点）：${message}`;
-          fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-          const tmpFile = resolveContainedPath(UPLOAD_DIR, `_title_${Date.now()}.txt`);
-          fs.writeFileSync(tmpFile, prompt, "utf-8");
-          const configuredWorkDir = String(getConfigInfo(activeProject.config.path)[0]?.workDir || "").trim();
-          const safeCwd = configuredWorkDir && path.isAbsolute(configuredWorkDir) && fs.existsSync(configuredWorkDir) ? configuredWorkDir : process.cwd();
-          const result = execSync(`type "${tmpFile}" | claude -p`, {
-            encoding: "utf-8", timeout: 30000, cwd: safeCwd,
-            shell: true as any,
-            maxBuffer: 1024 * 1024,
-          });
-          try { fs.unlinkSync(tmpFile); } catch {}
-          title = result.trim().replace(/^["'"「『【\*]+|["'"」』】\*]+$/g, "").substring(0, 20);
-        } catch (aiErr: any) {
-          console.log("AI命名失败:", (aiErr.message || "").substring(0, 200));
-        }
-
-        if (!title) title = generateTitle(message);
-
+        const result = await scheduleProjectSessionAutoTitle(project, sessionId);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-        data.name = title;
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-
-        sendJson(res, { success: true, name: title });
+        sendJson(res, { success: true, name: data.name, title_source: data.title_origin || "", renamed: result.renamed === true });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

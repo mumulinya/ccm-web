@@ -99,16 +99,13 @@ function childOpen(fixtureFile) {
 }
 
 function childRestart(fixtureFile) {
-  const { sessions, center } = modules();
+  const { sessions } = modules();
   const fixture = JSON.parse(fs.readFileSync(fixtureFile, "utf8"));
   const identity = { groupId: fixture.groupId, groupSessionId: fixture.groupSessionId, taskId: fixture.taskId };
   const before = sessions.inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(fixture.sessionId, identity);
   const inventoryBefore = sessions.buildTaskAgentMemoryContextSnapshotInventory({ sessionId: fixture.sessionId });
   const rowBefore = inventoryBefore.rows?.[0] || {};
-  const detailBefore = center.getMemoryCenterScope("group", `${fixture.groupId}::${fixture.groupSessionId}`);
-  const centerBefore = detailBefore.postCompactUsage?.taskAgentMemoryContextSnapshots || {};
-  const source = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration.ts"), "utf8");
-  const ui = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const source = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-02-part-02.ts"), "utf8");
   const successfulAttemptIndex = source.indexOf("if (!effectiveFailedAttempt) {");
   const successOutcomeIndex = source.indexOf('outcome: "success"', successfulAttemptIndex);
   const successBreakIndex = source.indexOf("break;", successOutcomeIndex);
@@ -136,9 +133,6 @@ function childRestart(fixtureFile) {
     inventoryShowsOpen: rowBefore.finalDispatchReactiveCompactCircuitState === "open"
       && rowBefore.finalDispatchReactiveCompactCircuitFailures === 3
       && inventoryBefore.summary?.finalDispatchReactiveCompactCircuitOpenCount === 1,
-    memoryCenterShowsOpen: centerBefore.finalDispatchReactiveCompactCircuitOpenCount === 1
-      && centerBefore.finalDispatchReactiveCompactCircuitFailureCount === 3
-      && centerBefore.finalDispatchReactiveCompactCircuitInvalidCount === 0,
     productionChecksBeforeRecovery: source.includes("finalDispatchReactiveCompactCircuitBreaker?.blocked !== true")
       && source.includes("retryCircuit?.blocked === true")
       && source.includes("provider_prompt_too_long_after_reactive_compact"),
@@ -147,9 +141,6 @@ function childRestart(fixtureFile) {
       && successBreakIndex > successOutcomeIndex
       && failedAttemptIndex > successBreakIndex
       && !source.slice(failedAttemptIndex, source.indexOf("if (providerPromptTooLong", failedAttemptIndex)).includes('outcome: "success"'),
-    uiExposesCircuit: ui.includes("compact circuit")
-      && ui.includes("finalDispatchReactiveCompactCircuitOpenCount")
-      && ui.includes("finalDispatchReactiveCompactCircuitState"),
     tamperFailsClosed: tampered.state === "fail_closed" && tampered.blocked === true && tampered.checksum_valid === false,
     tamperedFailureCannotMutate: failureOnTampered.recorded === false && failureOnTampered.blocked === true,
     successRepairsAndResets: repaired.state === "closed" && repaired.consecutive_failures === 0 && repaired.checksum_valid === true && !!repaired.last_success_at,

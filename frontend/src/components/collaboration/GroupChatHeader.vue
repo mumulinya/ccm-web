@@ -1,8 +1,11 @@
 <script setup>
+import { ref, watch } from 'vue'
 import {
   Activity,
   Archive,
   BookOpen,
+  ChevronDown,
+  ChevronUp,
   FileText,
   FolderOpen,
   MoreHorizontal,
@@ -16,7 +19,7 @@ import {
   MessageSquare,
 } from '@lucide/vue'
 
-defineProps({
+const props = defineProps({
   groups: { type: Array, default: () => [] },
   currentGroup: { type: Object, default: null },
   sessions: { type: Array, default: () => [] },
@@ -47,24 +50,45 @@ const emit = defineEmits([
   'clear-messages',
   'delete-group'
 ])
+
+const groupsExpanded = ref(false)
+watch(() => props.currentGroup?.id, () => { groupsExpanded.value = false })
+
+function onSelectGroup(id) {
+  emit('select-group', id)
+  groupsExpanded.value = false
+}
 </script>
 
 <template>
   <div class="toolbar">
     <div class="toolbar-left">
       <span class="label">群聊：</span>
-      <div class="group-list">
-        <div
-          v-for="group in groups"
-          :key="group.id"
-          class="group-card"
-          :class="{ active: currentGroup?.id === group.id }"
-          @click="emit('select-group', group.id)"
-        >
-          <MessageSquare :size="15" />
-          <span>{{ group.name }}</span>
-          <span class="badge">{{ getMemberCountLabel(group) }}</span>
+      <div class="group-list-wrap">
+        <div class="group-list" :class="{ 'is-collapsed': !groupsExpanded }">
+          <div
+            v-for="group in groups"
+            :key="group.id"
+            class="group-card"
+            :class="{ active: currentGroup?.id === group.id }"
+            @click="onSelectGroup(group.id)"
+          >
+            <MessageSquare :size="15" />
+            <span>{{ group.name }}</span>
+            <span class="badge">{{ getMemberCountLabel(group) }}</span>
+          </div>
         </div>
+        <button
+          v-if="groups.length > 1"
+          type="button"
+          class="group-list-toggle"
+          :aria-expanded="groupsExpanded"
+          :title="groupsExpanded ? '收起群列表' : '展开全部群聊'"
+          @click="groupsExpanded = !groupsExpanded"
+        >
+          <component :is="groupsExpanded ? ChevronUp : ChevronDown" :size="16" />
+          <span>{{ groupsExpanded ? '收起' : `全部 ${groups.length}` }}</span>
+        </button>
       </div>
     </div>
     <button class="btn btn-primary" @click="emit('create-group')"><Plus :size="15" />新建群聊</button>
@@ -156,7 +180,30 @@ const emit = defineEmits([
 :global([data-theme="dark"] .group-card.active){background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent-blue) 28%,transparent);color:var(--accent-blue)}
 :global([data-theme="dark"] .badge){background:var(--control-hover)}
 
+.group-list-wrap{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.group-list-toggle{display:none;align-items:center;gap:4px;min-height:40px;padding:0 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-secondary);font-size:12px;font-weight:650;cursor:pointer;white-space:nowrap}
+.group-list-toggle:hover{background:var(--control-hover);border-color:var(--border-strong);color:var(--text-primary)}
+
 @media (max-width: 768px) {
-  .toolbar{min-height:52px;padding:7px 8px}.toolbar .label{display:none}.toolbar-left{gap:6px}.group-list{gap:5px}.group-card{padding:0 9px}.content-header{min-height:auto;padding:7px 8px;align-items:flex-start;flex-direction:column}.group-title-line{width:100%;gap:6px}.session-switcher{flex:1;min-width:0}.session-switcher select{min-width:0;max-width:none;flex:1}.collaboration-status{margin-left:auto}.header-actions{width:100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.header-actions .btn{padding:0 6px}.header-actions .group-action-menu>summary{width:100%}.group-action-menu .action-menu-popover{right:0;left:auto}.toolbar>.btn-primary{width:34px;padding:0;font-size:0}.toolbar>.btn-primary svg{width:16px;height:16px}
+  .toolbar{min-height:52px;padding:7px 8px;flex-wrap:wrap}
+  .toolbar .label{display:none}
+  .toolbar-left{gap:6px;width:100%;flex-direction:column;align-items:stretch}
+  .group-list-wrap{flex-direction:column;align-items:stretch;gap:6px;width:100%}
+  .group-list{gap:5px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .group-list.is-collapsed .group-card:not(.active){display:none}
+  .group-list.is-collapsed:not(:has(.group-card.active)) .group-card:first-child{display:flex}
+  .group-list:not(.is-collapsed){flex-direction:column;max-height:40vh;overflow-y:auto}
+  .group-list-toggle{display:inline-flex;width:100%;justify-content:center}
+  .group-card{min-height:40px;padding:0 12px;font-size:13px}
+  .content-header{min-height:auto;padding:7px 8px;align-items:flex-start;flex-direction:column;gap:10px}
+  .group-title-line{width:100%;gap:6px}
+  .session-switcher{width:100%;flex:1;min-width:0}
+  .session-switcher select{min-width:0;max-width:none;flex:1;width:100%;min-height:40px}
+  .collaboration-status{margin-left:auto}
+  .header-actions{width:100%;display:flex;flex-wrap:wrap;gap:8px}
+  .header-actions .btn{min-height:40px;padding:0 10px}
+  .header-actions .group-action-menu>summary{width:40px;height:40px}
+  .group-action-menu .action-menu-popover{right:0;left:auto}
+  .toolbar>.btn-primary{min-height:40px;width:auto;padding:0 12px;font-size:12px}
 }
 </style>

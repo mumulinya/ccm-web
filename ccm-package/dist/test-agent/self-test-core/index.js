@@ -1,0 +1,38 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.runTestAgentAutoBrowserSmokeSelfTest = exports.runTestAgentBrowserProbeTemplateSelfTest = exports.runTestAgentAdversarialBrowserSelfTest = exports.runTestAgentAdversarialHttpSelfTest = exports.runTestAgentHttpApiSelfTest = exports.runTestAgentExecutionPlanSelfTest = exports.runTestAgentCommandPlannerSelfTest = exports.runTestAgentCoverageSelfTest = exports.runTestAgentBrowserEvidenceArtifactSelfTest = exports.runTestAgentMcpFailureScreenshotSelfTest = exports.runTestAgentMcpScreenshotArtifactSelfTest = exports.runTestAgentArtifactVerifierSelfTest = exports.runTestAgentArtifactManifestSelfTest = exports.runTestAgentAcceptanceSummarySelfTest = exports.runTestAgentBrowserStabilitySummarySelfTest = exports.runTestAgentBrowserMultiSessionSummarySelfTest = exports.runTestAgentBrowserFlowSummarySelfTest = exports.runTestAgentBrowserSessionComparisonSelfTest = exports.runTestAgentBrowserProviderGapSummarySelfTest = exports.runTestAgentFailureSummarySelfTest = exports.runTestAgentVerdictSelfTest = exports.runTestAgentArtifactSelfTest = exports.runTestAgentHandoffContractSelfTest = exports.runTestAgentHandoffBuilderSelfTest = exports.runTestAgentSelfTestMatrixSelfTest = exports.runTestAgentWorkOrderNormalizationSelfTest = exports.runTestAgentComputerUseMcpSelfTest = exports.runTestAgentClaudeChromeMcpSelfTest = exports.runTestAgentMcpProviderSelfTest = exports.runTestAgentSelfTest = void 0;
+// Barrel for self-test-core/ parts.
+var part_01_1 = require("./part-01");
+Object.defineProperty(exports, "runTestAgentSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentSelfTest; } });
+Object.defineProperty(exports, "runTestAgentMcpProviderSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentMcpProviderSelfTest; } });
+Object.defineProperty(exports, "runTestAgentClaudeChromeMcpSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentClaudeChromeMcpSelfTest; } });
+Object.defineProperty(exports, "runTestAgentComputerUseMcpSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentComputerUseMcpSelfTest; } });
+Object.defineProperty(exports, "runTestAgentWorkOrderNormalizationSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentWorkOrderNormalizationSelfTest; } });
+Object.defineProperty(exports, "runTestAgentSelfTestMatrixSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentSelfTestMatrixSelfTest; } });
+Object.defineProperty(exports, "runTestAgentHandoffBuilderSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentHandoffBuilderSelfTest; } });
+Object.defineProperty(exports, "runTestAgentHandoffContractSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentHandoffContractSelfTest; } });
+Object.defineProperty(exports, "runTestAgentArtifactSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentArtifactSelfTest; } });
+Object.defineProperty(exports, "runTestAgentVerdictSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentVerdictSelfTest; } });
+Object.defineProperty(exports, "runTestAgentFailureSummarySelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentFailureSummarySelfTest; } });
+Object.defineProperty(exports, "runTestAgentBrowserProviderGapSummarySelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentBrowserProviderGapSummarySelfTest; } });
+Object.defineProperty(exports, "runTestAgentBrowserSessionComparisonSelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentBrowserSessionComparisonSelfTest; } });
+Object.defineProperty(exports, "runTestAgentBrowserFlowSummarySelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentBrowserFlowSummarySelfTest; } });
+Object.defineProperty(exports, "runTestAgentBrowserMultiSessionSummarySelfTest", { enumerable: true, get: function () { return part_01_1.runTestAgentBrowserMultiSessionSummarySelfTest; } });
+var part_02_1 = require("./part-02");
+Object.defineProperty(exports, "runTestAgentBrowserStabilitySummarySelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentBrowserStabilitySummarySelfTest; } });
+Object.defineProperty(exports, "runTestAgentAcceptanceSummarySelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentAcceptanceSummarySelfTest; } });
+Object.defineProperty(exports, "runTestAgentArtifactManifestSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentArtifactManifestSelfTest; } });
+Object.defineProperty(exports, "runTestAgentArtifactVerifierSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentArtifactVerifierSelfTest; } });
+Object.defineProperty(exports, "runTestAgentMcpScreenshotArtifactSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentMcpScreenshotArtifactSelfTest; } });
+Object.defineProperty(exports, "runTestAgentMcpFailureScreenshotSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentMcpFailureScreenshotSelfTest; } });
+Object.defineProperty(exports, "runTestAgentBrowserEvidenceArtifactSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentBrowserEvidenceArtifactSelfTest; } });
+Object.defineProperty(exports, "runTestAgentCoverageSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentCoverageSelfTest; } });
+Object.defineProperty(exports, "runTestAgentCommandPlannerSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentCommandPlannerSelfTest; } });
+Object.defineProperty(exports, "runTestAgentExecutionPlanSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentExecutionPlanSelfTest; } });
+Object.defineProperty(exports, "runTestAgentHttpApiSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentHttpApiSelfTest; } });
+Object.defineProperty(exports, "runTestAgentAdversarialHttpSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentAdversarialHttpSelfTest; } });
+Object.defineProperty(exports, "runTestAgentAdversarialBrowserSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentAdversarialBrowserSelfTest; } });
+Object.defineProperty(exports, "runTestAgentBrowserProbeTemplateSelfTest", { enumerable: true, get: function () { return part_02_1.runTestAgentBrowserProbeTemplateSelfTest; } });
+var part_03_1 = require("./part-03");
+Object.defineProperty(exports, "runTestAgentAutoBrowserSmokeSelfTest", { enumerable: true, get: function () { return part_03_1.runTestAgentAutoBrowserSmokeSelfTest; } });
+//# sourceMappingURL=index.js.map

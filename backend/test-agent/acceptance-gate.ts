@@ -46,6 +46,8 @@ export function buildAcceptanceEvidenceGateSummary(
   const fallbackItems = coverage.filter(item =>
     item.evidenceSource === "single_criterion_report_status"
     || item.matchStrength === "fallback"
+    // Pure token matches are too loose for accept; treat like weak fallback evidence.
+    || item.matchStrength === "token"
   );
   const missingItems = coverage.filter(item => item.evidenceSource === "none" || !item.evidenceSource);
   const status = statusFor({

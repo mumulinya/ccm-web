@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "trace_id": "task_mrqjdt0j_8915ffecd750",
+  "created_at": "2026-07-18T15:43:30.601Z",
+  "events": [
+    {
+      "id": "task:mrqjdt0jrkdg:created",
+      "at": "2026-07-18T15:43:30.601Z",
+      "type": "task.created",
+      "status": "ok",
+      "task_id": "mrqjdt0jrkdg",
+      "group_id": "group-business-chain",
+      "agent": "frontend-agent",
+      "runtime": "",
+      "message": "完成订单提交流程",
+      "data": {
+        "workflow_type": "daily_dev",
+        "assign_type": "group",
+        "group_session_id": "gcs_mrqjdsz5_yf62an",
+        "idempotency_key": "absent"
+      }
+    }
+  ],
+  "updated_at": "2026-07-18T15:43:30.601Z",
+  "task_id": "mrqjdt0jrkdg",
+  "group_id": "group-business-chain"
+}

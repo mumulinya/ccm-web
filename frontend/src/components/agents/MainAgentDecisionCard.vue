@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections, sanitizeUserFacingPlanStructure, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
-import { isQuietMainAgentConversationDecision } from '../../composables/useMainAgentDisplay.js'
+import { isQuietMainAgentDecision } from '../../composables/useMainAgentDisplay.js'
 
 const props = defineProps({
   decision: { type: Object, default: null },
@@ -9,7 +9,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['step-action'])
-const shouldHideDecisionCard = computed(() => isQuietMainAgentConversationDecision(props.decision))
+const shouldHideDecisionCard = computed(() => isQuietMainAgentDecision(props.decision))
 
 const displayPlanText = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanText(value, fallback, max)
 const displayPlanStructure = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanStructure(value, { fallback, max })
@@ -318,7 +318,7 @@ const actionRows = computed(() => selectedActions.value.map(id => {
       <div class="decision-title">
         <span class="decision-icon">{{ modeInfo.icon }}</span>
         <div>
-          <strong>处理方式：{{ modeInfo.label }}</strong>
+          <strong>当前进展</strong>
           <small>{{ publicHeaderNote }}</small>
         </div>
       </div>
@@ -418,6 +418,11 @@ const actionRows = computed(() => selectedActions.value.map(id => {
 
     <details class="decision-technical">
       <summary>技术详情</summary>
+
+      <div class="tech-row">
+        <span>处理方式</span>
+        <code>{{ modeInfo.label }}{{ decision.mode ? ` · ${decision.mode}` : '' }}</code>
+      </div>
 
       <div v-if="loopStages.length" class="decision-loop">
         <div class="loop-head">

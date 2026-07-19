@@ -39,6 +39,7 @@ exports.shouldSwitchRuntime = shouldSwitchRuntime;
 exports.buildRuntimeRecoveryPrompt = buildRuntimeRecoveryPrompt;
 exports.inferTaskPathScopes = inferTaskPathScopes;
 exports.buildCollaborationConflictPlan = buildCollaborationConflictPlan;
+exports.orderMentionsForConflictPlan = orderMentionsForConflictPlan;
 exports.runCollaborationResilienceSelfTest = runCollaborationResilienceSelfTest;
 exports.runCollaborationResilienceIntegrationSelfTest = runCollaborationResilienceIntegrationSelfTest;
 const crypto = __importStar(require("crypto"));
@@ -176,8 +177,12 @@ function buildCollaborationConflictPlan(inputs, requestedOrder = "parallel") {
     const lanes = inputs.map((input, index) => ({
         ...input,
         index,
+        verificationOnly: input.verificationOnly === true,
         repoKey: getRepoKey(input.workDir),
-        scopes: unique([...(input.writablePaths || []).map(normalizeScope).filter(Boolean), ...inferTaskPathScopes(input.task)]),
+        scopes: unique([
+            ...(input.writablePaths || []).map(normalizeScope).filter(Boolean),
+            ...(input.verificationOnly ? [] : inferTaskPathScopes(input.task)),
+        ]),
     }));
     const parent = lanes.map((_, index) => index);
     const find = (index) => parent[index] === index ? index : (parent[index] = find(parent[index]));
@@ -190,15 +195,23 @@ function buildCollaborationConflictPlan(inputs, requestedOrder = "parallel") {
             const right = lanes[j];
             if (left.repoKey !== right.repoKey)
                 continue;
-            const overlap = left.project === right.project || scopesOverlap(left.scopes, right.scopes);
+            const writeVerifyOverlap = left.verificationOnly !== right.verificationOnly;
+            const overlap = left.project === right.project
+                || scopesOverlap(left.scopes, right.scopes)
+                || writeVerifyOverlap;
             if (!overlap)
                 continue;
             join(i, j);
             conflicts.push({
                 projects: [left.project, right.project],
-                reason: left.project === right.project ? "同一项目收到多个并发工作单" : "多个 Agent 指向同一仓库且修改范围可能重叠",
+                reason: writeVerifyOverlap
+                    ? "同一仓库上实现 Agent 与 TestAgent 写验可能冲突，已改为先写后验串行"
+                    : left.project === right.project
+                        ? "同一项目收到多个并发工作单"
+                        : "多个 Agent 指向同一仓库且修改范围可能重叠",
                 scopes: unique([...left.scopes, ...right.scopes]),
                 repoKey: left.repoKey,
+                writeVerifyOverlap,
             });
         }
     }
@@ -206,12 +219,28 @@ function buildCollaborationConflictPlan(inputs, requestedOrder = "parallel") {
     const plannedLanes = lanes.map((lane, index) => {
         const root = find(index);
         const members = lanes.filter((_, itemIndex) => find(itemIndex) === root);
-        if (members.length < 2)
-            return { ...lane, conflictWorkspaceKey: "", conflictGroup: "", mergeOwner: true };
+        if (members.length < 2) {
+            return {
+                ...lane,
+                conflictWorkspaceKey: "",
+                conflictGroup: "",
+                mergeOwner: true,
+                runAfterWriters: lane.verificationOnly === true,
+            };
+        }
         if (!clusterIds.has(root))
             clusterIds.set(root, `conflict-${crypto.createHash("sha1").update(`${lane.repoKey}:${root}`).digest("hex").slice(0, 10)}`);
         const conflictGroup = clusterIds.get(root);
-        return { ...lane, conflictWorkspaceKey: conflictGroup, conflictGroup, mergeOwner: members[0].index === index };
+        const writers = members.filter(item => !item.verificationOnly);
+        const mergeOwnerIndex = (writers[0] || members[0]).index;
+        return {
+            ...lane,
+            // Verification-only lanes must not join shared writable worktrees.
+            conflictWorkspaceKey: lane.verificationOnly ? "" : conflictGroup,
+            conflictGroup,
+            mergeOwner: mergeOwnerIndex === index,
+            runAfterWriters: lane.verificationOnly === true && writers.length > 0,
+        };
     });
     return {
         requestedOrder,
@@ -220,6 +249,38 @@ function buildCollaborationConflictPlan(inputs, requestedOrder = "parallel") {
         lanes: plannedLanes,
         protected: conflicts.length > 0,
     };
+}
+/** Stable order: writers first, then verification-only (TestAgent) lanes in the same conflict group. */
+function orderMentionsForConflictPlan(mentions, conflictPlan = {}) {
+    const lanes = Array.isArray(conflictPlan?.lanes) ? conflictPlan.lanes : [];
+    const isVerifyLane = (mention, lane) => {
+        // Prefer flags already stamped on the mention; lane index is only a fallback
+        // before stamping (and must not be used after mentions were reordered).
+        if (mention && ("verificationOnly" in mention || "runAfterWriters" in mention)) {
+            return mention.verificationOnly === true || mention.runAfterWriters === true;
+        }
+        return lane?.verificationOnly === true || lane?.runAfterWriters === true;
+    };
+    return mentions
+        .map((mention, index) => ({ mention, index, lane: lanes[index] || null }))
+        .sort((left, right) => {
+        const leftGroup = String(left.mention?.conflictGroup || left.lane?.conflictGroup || "");
+        const rightGroup = String(right.mention?.conflictGroup || right.lane?.conflictGroup || "");
+        if (leftGroup && leftGroup === rightGroup) {
+            const leftVerify = isVerifyLane(left.mention, left.lane) ? 1 : 0;
+            const rightVerify = isVerifyLane(right.mention, right.lane) ? 1 : 0;
+            if (leftVerify !== rightVerify)
+                return leftVerify - rightVerify;
+        }
+        else if (!leftGroup && !rightGroup) {
+            const leftVerify = isVerifyLane(left.mention, left.lane) ? 1 : 0;
+            const rightVerify = isVerifyLane(right.mention, right.lane) ? 1 : 0;
+            if (leftVerify !== rightVerify)
+                return leftVerify - rightVerify;
+        }
+        return left.index - right.index;
+    })
+        .map(item => item.mention);
 }
 function runCollaborationResilienceSelfTest() {
     const candidates = buildRuntimeRecoveryCandidates("cursor", ["codex"], runtime => ["codex", "claudecode"].includes(runtime));
@@ -231,6 +292,18 @@ function runCollaborationResilienceSelfTest() {
         { key: "a", project: "a", task: "修改 src/a.ts", workDir: path.join(process.cwd(), "a") },
         { key: "b", project: "b", task: "修改 src/b.ts", workDir: path.join(process.cwd(), "b") },
     ], "parallel");
+    const writeVerify = buildCollaborationConflictPlan([
+        { key: "writer", project: "demo-app", task: "修改 src/api.ts", workDir: process.cwd(), writablePaths: ["src"] },
+        { key: "tester", project: "test-agent", task: "独立复核", workDir: process.cwd(), verificationOnly: true },
+    ], "parallel");
+    const tagged = writeVerify.lanes.map((lane) => ({
+        targetName: lane.project,
+        conflictGroup: lane.conflictGroup,
+        verificationOnly: lane.verificationOnly === true,
+        runAfterWriters: lane.runAfterWriters === true,
+    }));
+    // Put verifier first intentionally; ordering must still prefer the writer.
+    const ordered = orderMentionsForConflictPlan([tagged[1], tagged[0]], writeVerify);
     const checks = {
         keepsPrimaryRuntimeFirst: candidates[0] === "cursor",
         usesConfiguredFallbackNext: candidates[1] === "codex",
@@ -240,6 +313,11 @@ function runCollaborationResilienceSelfTest() {
         authenticationFailureSwitchesRuntime: shouldSwitchRuntime("401 Unauthorized: Invalid API Key").switchRuntime,
         serializesOverlappingRepoLanes: conflict.protected && conflict.effectiveOrder === "sequential" && conflict.lanes.every(item => !!item.conflictWorkspaceKey),
         keepsSeparateReposParallel: !separate.protected && separate.effectiveOrder === "parallel",
+        serializesSameRepoWriteThenVerify: writeVerify.protected
+            && writeVerify.effectiveOrder === "sequential"
+            && writeVerify.lanes.some(item => item.verificationOnly && !item.conflictWorkspaceKey && item.runAfterWriters)
+            && ordered[0]?.targetName === "demo-app"
+            && ordered[1]?.targetName === "test-agent",
         recoveryPromptPreservesOriginalTask: buildRuntimeRecoveryPrompt({ originalPrompt: "实现支付功能", fromRuntime: "cursor", toRuntime: "codex", attempt: 2, failure: "provider unavailable" }).includes("实现支付功能"),
     };
     return { pass: Object.values(checks).every(Boolean), checks };

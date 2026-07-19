@@ -1,8 +1,13 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, useSlots } from 'vue'
 import AttachmentChips from './AttachmentChips.vue'
 import SlashCommandMenu from './SlashCommandMenu.vue'
 import TemplatePicker from './TemplatePicker.vue'
+import {
+  countNewAttachmentFiles,
+  extractClipboardAttachmentFiles,
+  mergeUniqueAttachmentFiles,
+} from '../../utils/clipboardAttachments.js'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -30,6 +35,7 @@ const emit = defineEmits([
   'keydown',
   'input',
   'files-selected',
+  'files-pasted',
   'remove-file',
   'open-template',
   'update:template-search-query',
@@ -40,6 +46,7 @@ const emit = defineEmits([
 ])
 
 const fileInput = ref(null)
+const slots = useSlots()
 const slashState = computed(() => props.slash || {})
 
 const chooseFiles = () => {
@@ -47,8 +54,22 @@ const chooseFiles = () => {
 }
 
 const onFilesSelected = (event) => {
-  emit('files-selected', Array.from(event.target.files || []))
+  const files = Array.from(event.target.files || [])
+  const additions = mergeUniqueAttachmentFiles(props.files, files).slice(props.files.length)
+  if (additions.length) emit('files-selected', additions)
   event.target.value = ''
+}
+
+const onPaste = (event) => {
+  if (props.disabled || props.busy) return
+  const files = extractClipboardAttachmentFiles(event)
+  if (!files.length) return
+
+  event.preventDefault()
+  if (countNewAttachmentFiles(props.files, files) === 0) return
+  const additions = mergeUniqueAttachmentFiles(props.files, files).slice(props.files.length)
+  emit('files-selected', additions)
+  emit('files-pasted', additions)
 }
 
 const onInput = (event) => {
@@ -63,7 +84,7 @@ const onInput = (event) => {
     <input ref="fileInput" type="file" multiple class="hidden-file-input" :accept="props.accept" @change="onFilesSelected">
     <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.attachTitle" @click="chooseFiles">📎</button>
     <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.templateTitle" @click="emit('open-template')">📚</button>
-    <div class="chat-input-wrap">
+    <div class="chat-input-wrap" :class="{ 'has-context-usage': !!slots.context }">
       <div
         v-if="props.recommendedTemplate"
         class="recommendation-bubble"
@@ -82,6 +103,7 @@ const onInput = (event) => {
         :disabled="props.disabled || (props.busy && !props.allowInputWhileBusy)"
         @input="onInput"
         @keydown="emit('keydown', $event)"
+        @paste="onPaste"
       ></textarea>
       <SlashCommandMenu
         v-if="props.slash"
@@ -93,6 +115,9 @@ const onInput = (event) => {
         @select="slashState.select"
       />
       <slot name="overlays" />
+      <div v-if="slots.context" class="composer-context-slot">
+        <slot name="context" />
+      </div>
       <TemplatePicker
         :open="props.templatesOpen"
         :templates="props.templates"
@@ -187,6 +212,17 @@ textarea {
   color: var(--text-primary);
   font-size: 13.5px;
   line-height: 1.5;
+}
+
+.chat-input-wrap.has-context-usage textarea {
+  padding-right: 76px;
+}
+
+.composer-context-slot {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 7;
 }
 
 textarea:focus {

@@ -28,6 +28,9 @@ export declare function runMetricsAggregationSelfTest(): {
         retainsMemberMetricsInsideGroup: boolean;
         storesTraceIdentity: any;
         recordsUsageCoverage: boolean;
+        recordsGlobalScope: boolean;
+        recordsGlobalTokenUsage: boolean;
+        storesGlobalEventScope: any;
     };
 };
 export declare function loadTasks(): any[];

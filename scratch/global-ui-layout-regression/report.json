@@ -1,7 +1,7 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T04:34:31.923Z",
-  "baseUrl": "http://127.0.0.1:3082",
+  "generatedAt": "2026-07-18T17:06:45.245Z",
+  "baseUrl": "http://127.0.0.1:3080",
   "checks": [
     {
       "name": "desktop shell uses one compact top bar and compact navigation",

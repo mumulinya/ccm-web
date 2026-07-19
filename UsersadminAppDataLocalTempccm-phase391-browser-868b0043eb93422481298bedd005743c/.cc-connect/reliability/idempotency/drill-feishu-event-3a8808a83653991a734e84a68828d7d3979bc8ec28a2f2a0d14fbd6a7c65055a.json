@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "operation_id": "op_c525d21cbf5673af",
+  "scope": "drill-feishu-event",
+  "key_hash": "aeb442136767f4ee3f53307da396a9b9151e662edc1f62deae77546e25845c78",
+  "trace_id": "e2e_mrp15qmr_2e03de571c42",
+  "status": "completed",
+  "owner_id": "DESKTOP-MN23N8A:8692:62f88529",
+  "owner_pid": 8692,
+  "attempt": 1,
+  "created_at": "2026-07-17T14:25:37.549Z",
+  "updated_at": "2026-07-17T14:25:37.704Z",
+  "recovered_from_stale": false,
+  "metadata": {
+    "scenario": "duplicate-message"
+  },
+  "duplicate_count": 2,
+  "last_duplicate_at": "2026-07-17T14:25:37.756Z",
+  "completed_at": "2026-07-17T14:25:37.704Z",
+  "result": {
+    "task_id": "e2e-task-1784298334988-eba34d"
+  }
+}

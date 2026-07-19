@@ -21,6 +21,18 @@ type TokenPayload = {
 };
 export declare function signSearchResults(source: MusicSource, query: string, results: any[], limit?: number): SignedMusicResult[];
 export declare function verifyDownloadToken(token: any, expectedSource?: MusicSource): TokenPayload;
+export declare function issueDownloadToken(source: MusicSource, sourceId: string, title: string, artist: string): string;
+export declare function extractMusicConvertTarget(message: string, keyword?: string): {
+    source: "bilibili";
+    sourceId: string;
+    title: string;
+    artist: string;
+} | {
+    source: "netease";
+    sourceId: string;
+    title: string;
+    artist: string;
+};
 export declare function runMusicSearchResultSelfTest(): {
     ok: boolean;
     first: string;

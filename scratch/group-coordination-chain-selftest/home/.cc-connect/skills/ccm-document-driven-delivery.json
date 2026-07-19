@@ -1,0 +1,36 @@
+{
+  "name": "ccm-document-driven-delivery",
+  "type": "skill",
+  "description": "Trace PRD, API, image, and attachment clauses through implementation and criterion-linked verification.",
+  "prompt": "",
+  "enabled": true,
+  "version": "1.0.0",
+  "author": "CCM",
+  "packagePath": "C:\\Users\\admin\\.cc-connect\\ccm\\ccm-package\\templates\\skills\\ccm-document-driven-delivery",
+  "skillFile": "C:\\Users\\admin\\.cc-connect\\ccm\\ccm-package\\templates\\skills\\ccm-document-driven-delivery\\SKILL.md",
+  "packageStats": {
+    "files": 3,
+    "totalBytes": 1991
+  },
+  "contentHash": "f5118b59ca1e6575216a",
+  "origin": "internal",
+  "scope": "ccm-internal",
+  "sourceType": "builtin",
+  "immutable": true,
+  "deletable": false,
+  "editable": false,
+  "disableable": false,
+  "systemManaged": true,
+  "roleSkill": true,
+  "marketplace": {
+    "source": {
+      "id": "ccm-role-skills",
+      "label": "CCM Role Skills",
+      "kind": "builtin",
+      "trust": "official"
+    },
+    "itemId": "ccm-role-skills:skill:ccm-document-driven-delivery",
+    "homepage": ""
+  },
+  "updated_at": "2026-07-18T15:43:31.077Z"
+}

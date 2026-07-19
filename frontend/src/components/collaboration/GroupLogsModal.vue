@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import EmptyState from '../common/EmptyState.vue'
 
 const props = defineProps({
   groupName: { type: String, default: '' },
@@ -36,7 +37,7 @@ const filteredLogs = computed(() => (
 
       <div class="group-logs-content logs-styled-body" id="logsContent">
         <div id="logsContentInner" class="logs-inner">
-          <div v-if="filteredLogs.length === 0" class="logs-empty-state">暂无日志</div>
+          <EmptyState v-if="filteredLogs.length === 0" icon="📋" title="暂无日志" />
           <div v-for="(log, index) in filteredLogs" :key="index" class="log-entry-card" :class="log.level">
             <div class="log-entry-header">
               <span class="log-badge" :class="log.level">
@@ -70,7 +71,6 @@ const filteredLogs = computed(() => (
 .total-badge { font-size: 11px; color: var(--text-muted); padding: 4px 8px; border-radius: 999px; background: rgba(15, 23, 42, 0.05); }
 .group-logs-content { flex: 1; overflow-y: auto; min-height: 220px; max-height: 52vh; padding-right: 4px; }
 .logs-inner { display: flex; flex-direction: column; gap: 10px; width: 100%; }
-.logs-empty-state { color: var(--text-muted); text-align: center; padding: 32px; }
 .log-entry-card { padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.48); }
 .log-entry-card:hover { border-color: rgba(59, 130, 246, 0.18); }
 .log-entry-card.success { border-color: rgba(34,197,94,0.18); }

@@ -2,7 +2,7 @@ export declare const PROJECT_CHAT_RUNS_FILE: string;
 export declare const projectChatRuns: Map<string, any>;
 export declare function saveProjectChatRuns(): void;
 export declare function loadProjectChatRuns(): void;
-export declare function createProjectChatRun(project: string, message: string, workDir: string, parentRunId?: string): any;
+export declare function createProjectChatRun(project: string, message: string, workDir: string, parentRunId?: string, projectSessionId?: string): any;
 export declare function publicProjectChatRun(run: any): {
     id: any;
     trace_id: any;
@@ -13,6 +13,8 @@ export declare function publicProjectChatRun(run: any): {
     checkpoint_id: any;
     rollback_available: boolean;
     parent_run_id: any;
+    project_session_id: any;
+    project_session_generation: number;
     task_session_scope_id: any;
     task_agent_session_id: any;
     native_session_id: any;
@@ -33,4 +35,16 @@ export declare function purgeProjectChatRun(id: string): {
         checkpoints: number;
         outputs: number;
     };
+};
+export declare function purgeProjectChatRunsForSession(project: string, projectSessionId: string): {
+    ids: string[];
+    removed: {
+        run: any;
+        cleanup: {
+            sessions: number;
+            executions: number;
+            checkpoints: number;
+            outputs: number;
+        };
+    }[];
 };

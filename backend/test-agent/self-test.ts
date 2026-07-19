@@ -311,6 +311,34 @@ export function runTestAgentBrowserProviderGapSummarySelfTest() {
   return require("./self-test-core").runTestAgentBrowserProviderGapSummarySelfTest();
 }
 
+export async function runTestAgentMcpLiveUrlFailClosedSelfTest() {
+  return require("./credibility-self-tests").runTestAgentMcpLiveUrlFailClosedSelfTest();
+}
+
+export function runTestAgentUploadPathEscapeSelfTest() {
+  return require("./credibility-self-tests").runTestAgentUploadPathEscapeSelfTest();
+}
+
+export function runTestAgentIndependentReviewDecisionAlignmentSelfTest() {
+  return require("./credibility-self-tests").runTestAgentIndependentReviewDecisionAlignmentSelfTest();
+}
+
+export function runTestAgentProviderGapForcesPlaywrightRecheckSelfTest() {
+  return require("./credibility-self-tests").runTestAgentProviderGapForcesPlaywrightRecheckSelfTest();
+}
+
+export function runTestAgentFlakyHardBlocksAcceptSelfTest() {
+  return require("./credibility-self-tests").runTestAgentFlakyHardBlocksAcceptSelfTest();
+}
+
+export function runTestAgentEnvironmentPrepStructuredSelfTest() {
+  return require("./credibility-self-tests").runTestAgentEnvironmentPrepStructuredSelfTest();
+}
+
+export function runTestAgentPetActivityKeySelfTest() {
+  return require("./credibility-self-tests").runTestAgentPetActivityKeySelfTest();
+}
+
 export async function runTestAgentBrowserSessionComparisonSelfTest() {
   return require("./self-test-core").runTestAgentBrowserSessionComparisonSelfTest();
 }

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MUSIC_REMOTE_COMMANDS_FILE = exports.MUSIC_REMOTE_COMMAND_FILE = void 0;
+exports.STOP_MUSIC_KEYWORD = exports.MUSIC_REMOTE_COMMANDS_FILE = exports.MUSIC_REMOTE_COMMAND_FILE = void 0;
 exports.saveMusicRemoteCommand = saveMusicRemoteCommand;
 exports.enqueueMusicRemoteCommand = enqueueMusicRemoteCommand;
 exports.claimMusicRemoteCommand = claimMusicRemoteCommand;
@@ -52,7 +52,8 @@ const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("../collaboration/group-orchestrator");
 exports.MUSIC_REMOTE_COMMAND_FILE = path.join(utils_1.CCM_DIR, "music-remote-command.json");
 exports.MUSIC_REMOTE_COMMANDS_FILE = path.join(utils_1.CCM_DIR, "music-remote-commands.json");
-const STALE_MS = 60_000;
+/** Claimed commands not acked within this window return to pending for a single retry owner. */
+const CLAIM_LEASE_MS = 60_000;
 const MAX_QUEUE = 50;
 function nowIso() {
     return new Date().toISOString();
@@ -100,8 +101,16 @@ function writeQueue(commands) {
     fs.writeFileSync(exports.MUSIC_REMOTE_COMMANDS_FILE, JSON.stringify({ version: 1, updated_at: nowIso(), commands: trimmed }, null, 2), "utf-8");
     // Keep a pointer file for older diagnostics that still read the single-command path.
     const head = trimmed.find(item => item.status === "pending" || item.status === "claimed") || trimmed[trimmed.length - 1] || null;
-    if (head)
+    if (head) {
         fs.writeFileSync(exports.MUSIC_REMOTE_COMMAND_FILE, JSON.stringify(head, null, 2), "utf-8");
+    }
+    else if (fs.existsSync(exports.MUSIC_REMOTE_COMMAND_FILE)) {
+        // 队列空时清掉旧 pointer，避免误以为仍有 claimed 指令
+        try {
+            fs.unlinkSync(exports.MUSIC_REMOTE_COMMAND_FILE);
+        }
+        catch { }
+    }
 }
 function markStale(commands) {
     const now = Date.now();
@@ -110,14 +119,19 @@ function markStale(commands) {
         if (item.status !== "pending" && item.status !== "claimed")
             continue;
         const created = Date.parse(item.created_at || "") || 0;
-        if (created && now - created > STALE_MS && item.status === "pending" && !item.claimed_at) {
-            // Keep pending until claimed; only mark claimed-but-unacked as stale after timeout.
-        }
         if (item.status === "claimed") {
             const claimed = Date.parse(item.claimed_at || "") || created;
-            if (claimed && now - claimed > STALE_MS) {
-                item.status = "stale";
-                item.last_error = item.last_error || "播放指令超时未完成，请确认 CCM Web 已打开";
+            if (claimed && now - claimed > CLAIM_LEASE_MS) {
+                // Lease expired: requeue for another single owner instead of re-delivering the same claim.
+                if ((item.attempts || 0) >= 3) {
+                    item.status = "stale";
+                    item.last_error = item.last_error || "播放指令超时未完成，请确认 CCM Web 已打开";
+                }
+                else {
+                    item.status = "pending";
+                    item.claimed_at = undefined;
+                    item.last_error = item.last_error || "播放指令租约过期，等待重新领取";
+                }
                 changed = true;
             }
         }
@@ -130,12 +144,14 @@ function markStale(commands) {
 function saveMusicRemoteCommand(command) {
     return enqueueMusicRemoteCommand(command);
 }
+exports.STOP_MUSIC_KEYWORD = "__stop__";
 function enqueueMusicRemoteCommand(command) {
-    const commands = markStale(readQueue());
+    let commands = markStale(readQueue());
+    const type = String(command?.type || "play").trim() || "play";
     const payload = {
         id: `music_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`,
-        type: String(command?.type || "play"),
-        keyword: String(command?.keyword || "").trim(),
+        type,
+        keyword: String(command?.keyword || "").trim() || (type === "stop" ? exports.STOP_MUSIC_KEYWORD : ""),
         mode: String(command?.mode || "").trim() || undefined,
         source: String(command?.source || "global-agent"),
         created_at: nowIso(),
@@ -144,15 +160,23 @@ function enqueueMusicRemoteCommand(command) {
     };
     if (!payload.keyword)
         throw new Error("缺少音乐关键词");
+    // Stop should cancel not-yet-played songs so they do not restart after stopping.
+    if (type === "stop") {
+        commands = commands.filter(item => !(item.status === "pending" && item.type === "play"));
+    }
+    else if (type === "play") {
+        // 新点歌替换尚未播放的旧点歌，避免队列积压播错歌
+        commands = commands.filter(item => !(item.status === "pending" && item.type === "play"));
+    }
     commands.push(payload);
     writeQueue(commands);
     return payload;
 }
 function claimMusicRemoteCommand() {
     const commands = markStale(readQueue());
-    const alreadyClaimed = commands.find(item => item.status === "claimed");
-    if (alreadyClaimed)
-        return alreadyClaimed;
+    // Do not re-deliver an in-flight claim; the owning poller must ack (or wait for lease expiry).
+    if (commands.some(item => item.status === "claimed"))
+        return null;
     const next = commands.find(item => item.status === "pending");
     if (!next)
         return null;
@@ -162,7 +186,10 @@ function claimMusicRemoteCommand() {
     writeQueue(commands);
     return next;
 }
-/** Remove a command from the queue so the App poller will not also play it (Web client_effect path). */
+/**
+ * Web client_effect path: remove a pending command so the App poller will not also play it.
+ * Returns null if missing or already claimed by the poller (do not steal / double-play).
+ */
 function takeMusicRemoteCommand(id) {
     const commandId = String(id || "").trim();
     if (!commandId)
@@ -171,7 +198,10 @@ function takeMusicRemoteCommand(id) {
     const index = commands.findIndex(item => item.id === commandId);
     if (index < 0)
         return null;
-    const [item] = commands.splice(index, 1);
+    const item = commands[index];
+    if (item.status !== "pending")
+        return null;
+    commands.splice(index, 1);
     writeQueue(commands);
     return item;
 }
@@ -212,31 +242,39 @@ function runMusicRemoteCommandQueueSelfTest() {
     const b = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-b", source: "self-test" });
     const claimed = claimMusicRemoteCommand();
     const stillQueued = listMusicRemoteCommands().some(item => item.id === b.id && item.status === "pending");
-    const sameClaim = claimMusicRemoteCommand();
+    const noRedeliver = claimMusicRemoteCommand() == null;
+    const takeWhileClaimed = takeMusicRemoteCommand(a.id) == null;
     const ackOk = ackMusicRemoteCommand({ id: a.id, status: "success" });
     const aGone = !listMusicRemoteCommands().some(item => item.id === a.id);
-    const claimedB = claimMusicRemoteCommand();
-    const failAck = ackMusicRemoteCommand({ id: b.id, status: "failed", error: "boom" });
-    const bRetryable = listMusicRemoteCommands().some(item => item.id === b.id && item.status === "pending");
-    ackMusicRemoteCommand({ id: b.id, status: "success" });
+    const takePending = takeMusicRemoteCommand(b.id);
+    const bTakenGone = takePending?.id === b.id && !listMusicRemoteCommands().some(item => item.id === b.id);
+    const c = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-c", source: "self-test" });
+    const claimedC = claimMusicRemoteCommand();
+    const failAck = ackMusicRemoteCommand({ id: c.id, status: "failed", error: "boom" });
+    const cRetryable = listMusicRemoteCommands().some(item => item.id === c.id && item.status === "pending");
+    ackMusicRemoteCommand({ id: c.id, status: "success" });
     for (const item of listMusicRemoteCommands().filter(row => String(row.source || "").includes("self-test"))) {
         ackMusicRemoteCommand({ id: item.id, status: "success" });
     }
     return {
         success: claimed?.id === a.id
-            && sameClaim?.id === a.id
+            && noRedeliver
+            && takeWhileClaimed
             && stillQueued
             && ackOk.success === true
             && aGone
-            && claimedB?.id === b.id
+            && bTakenGone
+            && claimedC?.id === c.id
             && failAck.success === true
-            && bRetryable,
+            && cRetryable,
         checks: {
             claimFirst: claimed?.id === a.id,
-            claimIdempotent: sameClaim?.id === a.id,
+            claimNotRedelivered: noRedeliver,
+            takeDoesNotStealClaimed: takeWhileClaimed,
             secondStillPending: stillQueued,
             ackRemoves: aGone,
-            failRequeues: bRetryable,
+            takePendingOnly: bTakenGone,
+            failRequeues: cRetryable,
         },
     };
 }

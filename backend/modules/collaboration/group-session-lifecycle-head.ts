@@ -508,3 +508,72 @@ export function validateGroupSessionLifecycleRuntimeFence(input: any = {}) {
     expected: bindingValidation?.expected || null,
   };
 }
+
+export function withGroupSessionLifecycleCommitFence<T>(input: any, operation: (state: any) => T): T {
+  const fence = normalizeGroupSessionLifecycleRuntimeFence(input);
+  if (!fence.required) return operation({ fence, validation: validateGroupSessionLifecycleRuntimeFence(fence), head: null });
+  if (!fence.groupId || !fence.groupSessionId.startsWith("gcs_")) {
+    const error: any = new Error("group compaction lifecycle commit fence requires groupId + gcs_* identity");
+    error.code = "GROUP_COMPACTION_SESSION_LIFECYCLE_STALE";
+    error.lifecycleValidation = validateGroupSessionLifecycleRuntimeFence(fence);
+    throw error;
+  }
+  const file = getGroupSessionLifecycleHeadFile(fence.groupId, fence.groupSessionId);
+  return withFileLock(file, () => {
+    const validation = validateGroupSessionLifecycleRuntimeFence(fence);
+    if (!validation.valid) {
+      const error: any = new Error(`group compaction session lifecycle fence is stale: ${validation.issues.join(",")}`);
+      error.code = "GROUP_COMPACTION_SESSION_LIFECYCLE_STALE";
+      error.lifecycleValidation = validation;
+      throw error;
+    }
+    return operation({ fence, validation, head: readGroupSessionLifecycleHead(fence.groupId, fence.groupSessionId) });
+  });
+}
+
+function groupCompactionLifecycleCommitProofChecksum(proof: any) {
+  const payload = { ...(proof || {}) };
+  delete payload.proof_checksum;
+  delete payload.checksum_valid;
+  delete payload.issues;
+  return checksum(payload);
+}
+
+export function buildGroupCompactionLifecycleCommitProof(input: any = {}) {
+  const fence = normalizeGroupSessionLifecycleRuntimeFence(input.fence || input);
+  const validation = input.validation || validateGroupSessionLifecycleRuntimeFence(fence);
+  if (!validation.valid) throw new Error(`cannot prove stale group compaction lifecycle fence: ${validation.issues.join(",")}`);
+  const payload: any = {
+    schema: "ccm-group-compaction-session-lifecycle-commit-proof-v1",
+    version: 1,
+    group_id: fence.groupId,
+    group_session_id: fence.groupSessionId,
+    lifecycle_generation: fence.lifecycleGeneration,
+    lifecycle_status: fence.lifecycleStatus,
+    lifecycle_head_id: fence.lifecycleHeadId,
+    lifecycle_head_checksum: fence.lifecycleHeadChecksum,
+    boundary_id: String(input.boundaryId || input.boundary_id || ""),
+    compact_transaction_receipt_checksum: String(input.compactTransactionReceiptChecksum || input.compact_transaction_receipt_checksum || ""),
+    validation_status: String(validation.status || "current_active"),
+    body_free: true,
+    committed_at: String(input.committedAt || input.committed_at || new Date().toISOString()),
+  };
+  return { ...payload, proof_checksum: groupCompactionLifecycleCommitProofChecksum(payload) };
+}
+
+export function verifyGroupCompactionLifecycleCommitProof(proof: any, expected: any = {}) {
+  const issues: string[] = [];
+  if (proof?.schema !== "ccm-group-compaction-session-lifecycle-commit-proof-v1" || Number(proof?.version || 0) !== 1) issues.push("group_compaction_lifecycle_proof_schema_invalid");
+  if (!String(proof?.group_id || "")) issues.push("group_compaction_lifecycle_proof_group_missing");
+  if (!String(proof?.group_session_id || "").startsWith("gcs_")) issues.push("group_compaction_lifecycle_proof_session_missing");
+  if (Number(proof?.lifecycle_generation || 0) < 1 || String(proof?.lifecycle_status || "") !== "active") issues.push("group_compaction_lifecycle_proof_binding_invalid");
+  if (!String(proof?.lifecycle_head_id || "") || !String(proof?.lifecycle_head_checksum || "")) issues.push("group_compaction_lifecycle_proof_head_missing");
+  if (!String(proof?.boundary_id || "") || !String(proof?.compact_transaction_receipt_checksum || "")) issues.push("group_compaction_lifecycle_proof_transaction_missing");
+  if (proof?.validation_status !== "current_active" || proof?.body_free !== true) issues.push("group_compaction_lifecycle_proof_policy_invalid");
+  if (String(proof?.proof_checksum || "") !== groupCompactionLifecycleCommitProofChecksum(proof)) issues.push("group_compaction_lifecycle_proof_checksum_invalid");
+  if (expected.groupId && String(proof?.group_id || "") !== String(expected.groupId)) issues.push("group_compaction_lifecycle_proof_group_mismatch");
+  if (expected.groupSessionId && String(proof?.group_session_id || "") !== String(expected.groupSessionId)) issues.push("group_compaction_lifecycle_proof_session_mismatch");
+  if (expected.boundaryId && String(proof?.boundary_id || "") !== String(expected.boundaryId)) issues.push("group_compaction_lifecycle_proof_boundary_mismatch");
+  if (expected.compactTransactionReceiptChecksum && String(proof?.compact_transaction_receipt_checksum || "") !== String(expected.compactTransactionReceiptChecksum)) issues.push("group_compaction_lifecycle_proof_transaction_mismatch");
+  return { valid: issues.length === 0, issues };
+}

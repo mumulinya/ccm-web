@@ -57,7 +57,6 @@ const hasFileChanges = computed(() => (
 </script>
 
 <template>
-  <span class="agent-label">项目 Agent</span>
   <TaskExperienceCard
     v-if="taskCard"
     :card="taskCard"
@@ -104,17 +103,6 @@ const hasFileChanges = computed(() => (
 </template>
 
 <style scoped>
-.agent-label {
-  color: var(--accent-blue);
-  font-size: 12.5px;
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  filter: drop-shadow(0 1px 2px rgba(59, 130, 246, 0.05));
-}
-
 .stream-cursor {
   animation: pulse-glow 1s infinite ease-in-out;
   color: var(--accent-blue);

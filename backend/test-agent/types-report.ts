@@ -1,0 +1,210 @@
+// Behavior-freeze split from types.ts (part 3/3).
+
+import type {
+  BrowserToolCallRecord,
+  TestAgentRecommendation,
+  TestAgentRequiredCheck,
+  TestAgentStatus,
+} from "./types-specs";
+
+import type {
+  AcceptanceCoverageItem,
+  AcceptanceEvidenceGateSummary,
+  AdversarialEvidenceSummary,
+  BrowserActionEffectSummary,
+  BrowserCheckExecutionCoverageSummary,
+  BrowserCheckResult,
+  BrowserEvidenceTemporalIntegritySummary,
+  BrowserFlowSummary,
+  BrowserInteractionSummaryItem,
+  BrowserMultiSessionSummary,
+  BrowserNetworkSummaryItem,
+  BrowserProviderGapItem,
+  BrowserProviderSummary,
+  BrowserRecoverySummary,
+  BrowserResourceLifecycleEvent,
+  BrowserResourceLifecycleSummary,
+  BrowserStabilitySummary,
+  BrowserToolCallTimeoutSummary,
+  BrowserToolEvidenceLineageSummary,
+  CommandRunResult,
+  DevServerResult,
+  EvidenceItem,
+  HttpCheckResult,
+  HttpConcurrencySummary,
+  RequiredCheckCoverageItem,
+  TestAgentAcceptanceSummary,
+  TestAgentFailureSummaryItem,
+  TestAgentRequiredCheckSummary,
+  WorkOrderIssue,
+} from "./types-results";
+
+export interface TestAgentVerdict {
+  schema: "ccm-test-agent-verdict-v1";
+  agent: "test-agent";
+  reportId: string;
+  workOrderId: string;
+  taskId: string;
+  groupId: string;
+  status: TestAgentStatus;
+  recommendation: TestAgentRecommendation;
+  canAccept: boolean;
+  needsRework: boolean;
+  needsHuman: boolean;
+  summary: string;
+  failedRequiredChecks: RequiredCheckCoverageItem[];
+  unknownRequiredChecks: RequiredCheckCoverageItem[];
+  failedAcceptanceCriteria: AcceptanceCoverageItem[];
+  unknownAcceptanceCriteria: AcceptanceCoverageItem[];
+  requiredCheckSummary: TestAgentRequiredCheckSummary;
+  acceptanceSummary: TestAgentAcceptanceSummary;
+  blockedReasons: string[];
+  risks: string[];
+  nextActions: string[];
+  evidenceSummary: {
+    commands: Record<string, number>;
+    devServers: Record<string, number>;
+    httpChecks: Record<string, number>;
+    httpConcurrencyChecks?: number;
+    httpConcurrentRequests?: number;
+    httpConcurrentFailed?: number;
+    httpConcurrentBlocked?: number;
+    browserChecks: Record<string, number>;
+    browserToolCalls: Record<string, number>;
+    browserToolLinkedResults?: number;
+    browserToolUnlinkedResults?: number;
+    browserToolLinkedCalls?: number;
+    browserToolOrphanCalls?: number;
+    browserToolUnscopedCalls?: number;
+    browserToolInvalidLinks?: number;
+    browserToolTimedOutCalls?: number;
+    browserToolAbortRequestedCalls?: number;
+    browserNetworkErrors?: number;
+    browserActions?: number;
+    browserFailedActions?: number;
+    browserAssertions?: number;
+    browserFailedAssertions?: number;
+    browserAcceptanceFlows?: number;
+    browserFailedAcceptanceFlows?: number;
+    browserMultiSessionScenarios?: number;
+    browserMultiSessionSessions?: number;
+    browserMultiSessionParallelGroups?: number;
+    browserMultiSessionComparisons?: number;
+    browserFailedSessionComparisons?: number;
+    browserFailedMultiSessionScenarios?: number;
+    browserStabilityGroups?: number;
+    browserFlakyStabilityGroups?: number;
+    browserStabilityRuns?: number;
+    browserFailedStabilityRuns?: number;
+    browserPlannedChecks?: number;
+    browserExpectedRuns?: number;
+    browserCoveredRuns?: number;
+    browserMissingRuns?: number;
+    browserDuplicateResults?: number;
+    browserInvalidResults?: number;
+    browserTemporalInvalidItems?: number;
+    browserTemporalPlanMismatches?: number;
+    browserTemporalWindowViolations?: number;
+    browserOwnedResources?: number;
+    browserReleasedResources?: number;
+    browserOpenResources?: number;
+    browserCleanupFailures?: number;
+    browserRecoveryAttempts?: number;
+    browserRecoveredOperations?: number;
+    browserFailedRecoveries?: number;
+    browserUnsafeRetriesPrevented?: number;
+    browserActionEffectChecks?: number;
+    browserActionEffects?: number;
+    browserFailedActionEffects?: number;
+    browserCrossSessionActionEffects?: number;
+    adversarialProbes?: number;
+    adversarialPassed?: number;
+    adversarialFailed?: number;
+    adversarialBlocked?: number;
+    adversarialRelevant?: number;
+    adversarialUnlinked?: number;
+    adversarialPassedRelevant?: number;
+    acceptanceMatchedEvidence?: number;
+    acceptanceFallbackEvidence?: number;
+    acceptanceMissingEvidence?: number;
+    browserProviderGaps?: number;
+    artifacts: number;
+  };
+  browserNetworkSummary?: BrowserNetworkSummaryItem[];
+  httpConcurrencySummary?: HttpConcurrencySummary;
+  browserInteractionSummary?: BrowserInteractionSummaryItem[];
+  browserFlowSummary?: BrowserFlowSummary;
+  browserMultiSessionSummary?: BrowserMultiSessionSummary;
+  browserStabilitySummary?: BrowserStabilitySummary;
+  browserCheckExecutionCoverage?: BrowserCheckExecutionCoverageSummary;
+  browserEvidenceTemporalIntegrity?: BrowserEvidenceTemporalIntegritySummary;
+  browserResourceLifecycleSummary?: BrowserResourceLifecycleSummary;
+  browserToolEvidenceLineage?: BrowserToolEvidenceLineageSummary;
+  browserToolCallTimeoutSummary?: BrowserToolCallTimeoutSummary;
+  browserRecoverySummary?: BrowserRecoverySummary;
+  browserActionEffectSummary?: BrowserActionEffectSummary;
+  adversarialEvidenceSummary: AdversarialEvidenceSummary;
+  acceptanceEvidenceGateSummary: AcceptanceEvidenceGateSummary;
+  browserProviderSummary?: BrowserProviderSummary;
+  browserProviderGaps?: BrowserProviderGapItem[];
+  failureSummary?: TestAgentFailureSummaryItem[];
+  keyEvidence: EvidenceItem[];
+  artifacts: {
+    artifactDir: string;
+    reportJsonPath?: string;
+    reportMarkdownPath?: string;
+    verdictJsonPath?: string;
+    manifestPath?: string;
+  };
+  metadata: Record<string, any>;
+}
+
+export interface TestAgentReport {
+  schema: "ccm-test-agent-report-v1";
+  agent: "test-agent";
+  id: string;
+  workOrderId: string;
+  taskId: string;
+  groupId: string;
+  originalUserGoal: string;
+  acceptanceCriteria: string[];
+  status: TestAgentStatus;
+  recommendation: TestAgentRecommendation;
+  summary: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  artifactDir: string;
+  requiredChecks: TestAgentRequiredCheck[];
+  commandResults: CommandRunResult[];
+  devServerResults: DevServerResult[];
+  httpResults: HttpCheckResult[];
+  browserResults: BrowserCheckResult[];
+  browserToolCalls: BrowserToolCallRecord[];
+  browserResourceLifecycleEvents: BrowserResourceLifecycleEvent[];
+  browserNetworkSummary: BrowserNetworkSummaryItem[];
+  httpConcurrencySummary?: HttpConcurrencySummary;
+  browserInteractionSummary: BrowserInteractionSummaryItem[];
+  browserFlowSummary?: BrowserFlowSummary;
+  browserMultiSessionSummary?: BrowserMultiSessionSummary;
+  browserStabilitySummary?: BrowserStabilitySummary;
+  browserCheckExecutionCoverage?: BrowserCheckExecutionCoverageSummary;
+  browserEvidenceTemporalIntegrity?: BrowserEvidenceTemporalIntegritySummary;
+  browserResourceLifecycleSummary?: BrowserResourceLifecycleSummary;
+  browserToolEvidenceLineage?: BrowserToolEvidenceLineageSummary;
+  browserToolCallTimeoutSummary?: BrowserToolCallTimeoutSummary;
+  browserRecoverySummary?: BrowserRecoverySummary;
+  browserActionEffectSummary?: BrowserActionEffectSummary;
+  adversarialEvidenceSummary: AdversarialEvidenceSummary;
+  acceptanceEvidenceGateSummary: AcceptanceEvidenceGateSummary;
+  browserProviderSummary: BrowserProviderSummary;
+  browserProviderGaps: BrowserProviderGapItem[];
+  failureSummary: TestAgentFailureSummaryItem[];
+  requiredCheckCoverage: RequiredCheckCoverageItem[];
+  acceptanceCoverage: AcceptanceCoverageItem[];
+  evidence: EvidenceItem[];
+  risks: string[];
+  blockedReasons: string[];
+  issues: WorkOrderIssue[];
+  metadata: Record<string, any>;
+}

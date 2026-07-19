@@ -26,6 +26,35 @@ const PET_WEB_ASSETS_DIR = path.join(PUBLIC_DIR, "pets");
 const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "..", "pet", "assets");
 const MAX_PET_ASSET_BYTES = 2 * 1024 * 1024;
 
+function syncGeneratedPetDisplayNames(customTypes: any[]) {
+  const list = Array.isArray(customTypes) ? customTypes : [];
+  for (const skin of list) {
+    const id = String(skin?.id || "").trim();
+    const name = String(skin?.name || "").trim();
+    if (!id || !name) continue;
+    if (!(skin?.generated || Number(skin?.spriteVersionNumber) === 2)) continue;
+
+    const relativeDir = path.join("generated", id);
+    const targets = [
+      path.join(PET_WEB_ASSETS_DIR, relativeDir, "pet.json"),
+      path.join(PET_DESKTOP_ASSETS_DIR, relativeDir, "pet.json"),
+    ];
+    const frontendRoot = path.resolve(PUBLIC_DIR, "..", "..", "frontend");
+    if (fs.existsSync(frontendRoot)) {
+      targets.push(path.join(frontendRoot, "public", "pets", relativeDir, "pet.json"));
+    }
+
+    for (const file of targets) {
+      try {
+        if (!fs.existsSync(file)) continue;
+        const manifest = JSON.parse(fs.readFileSync(file, "utf-8"));
+        if (String(manifest.displayName || "") === name) continue;
+        fs.writeFileSync(file, JSON.stringify({ ...manifest, displayName: name, id }, null, 2), "utf-8");
+      } catch {}
+    }
+  }
+}
+
 function isPetRunning() {
   if (!fs.existsSync(PET_PID_FILE_GLOBAL)) return false;
   const pid = fs.readFileSync(PET_PID_FILE_GLOBAL, "utf-8").trim();
@@ -265,7 +294,9 @@ export function handlePetsApi(
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        fs.writeFileSync(PETS_FILE, JSON.stringify(JSON.parse(body), null, 2));
+        const payload = JSON.parse(body);
+        fs.writeFileSync(PETS_FILE, JSON.stringify(payload, null, 2));
+        syncGeneratedPetDisplayNames(payload?.customTypes || []);
         ctx.broadcastPetConfigChanged();
         sendJson(res, { success: true });
       } catch (e: any) {

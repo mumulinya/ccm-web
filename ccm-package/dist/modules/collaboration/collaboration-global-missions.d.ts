@@ -37,10 +37,10 @@ export declare function controlGlobalDevelopmentMission(id: string, operation: s
     children: any[];
     success: boolean;
     operation: string;
-    continuation_kind: string;
+    continuation_kind: any;
     continuation_summary: {
         schema: string;
-        kind: string;
+        kind: any;
         source: string;
         replan_required: boolean;
         interrupt_current_run: boolean;

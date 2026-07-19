@@ -355,7 +355,16 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 </template>
 
 <style scoped>
-.knowledge-page { min-height: 100%; overflow-y: auto; background: var(--bg-primary, #f4f7fb); color: var(--text-primary, #0f172a); }
+.knowledge-page {
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
 .workspace-layout { display: grid; gap: 16px; width: min(1560px, 100%); margin: 0 auto; padding: 18px 24px 28px; box-sizing: border-box; }
 .top-grid { display: grid; grid-template-columns: minmax(360px, .82fr) minmax(480px, 1.18fr); gap: 16px; align-items: start; }
 @media (max-width: 1080px) { .top-grid { grid-template-columns: 1fr; } }

@@ -7,14 +7,29 @@ const emit = defineEmits(['switch-tab', 'played'])
 
 let stopPoller = null
 
+const syncMusicUi = () => {
+  try {
+    if (typeof window.__cc_global_sync_music_ui === 'function') window.__cc_global_sync_music_ui()
+  } catch {}
+}
+
 onMounted(() => {
   stopPoller = startMusicRemoteCommandPoller({
     onPlayed: (result, command) => {
       const title = result?.title || command?.keyword || '音乐'
       toast.success(`远程点歌已播放：${title}`)
       emit('played', { result, command })
-      // Optional: show the music UI after playback starts (not a prerequisite).
+      syncMusicUi()
       emit('switch-tab', 'music')
+      // Tab paint can lag one frame behind switch; sync again after show.
+      setTimeout(syncMusicUi, 50)
+      setTimeout(syncMusicUi, 300)
+    },
+    onStopped: () => {
+      toast.success('已停止音乐播放')
+      syncMusicUi()
+      emit('switch-tab', 'music')
+      setTimeout(syncMusicUi, 50)
     },
     onError: (error) => {
       if (error) toast.error(`远程点歌失败：${error}`)
@@ -26,14 +41,22 @@ onMounted(() => {
       mode: options.mode || getPreferredMusicMode(),
       ...options,
     })
-    if (result?.success) emit('switch-tab', 'music')
+    if (result?.success) {
+      syncMusicUi()
+      emit('switch-tab', 'music')
+      setTimeout(syncMusicUi, 50)
+      setTimeout(syncMusicUi, 300)
+    }
     return result
   }
+
+  document.addEventListener('visibilitychange', syncMusicUi)
 })
 
 onUnmounted(() => {
   if (typeof stopPoller === 'function') stopPoller()
   stopPoller = null
+  document.removeEventListener('visibilitychange', syncMusicUi)
   if (window.__cc_music_remote_play) delete window.__cc_music_remote_play
 })
 </script>

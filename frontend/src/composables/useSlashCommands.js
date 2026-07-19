@@ -177,7 +177,7 @@ function buildCommandResult(command, data, args, context, durationMs) {
     result.summary = data.message || 'Git 提交已完成。'
     addMetric('项目', context.project)
     addMetric('提交说明', args)
-  } else if (['new', 'clear', 'rename', 'sessions', 'copy', 'usage', 'stats', 'theme', 'status', 'help', 'export'].includes(command.name)) {
+  } else if (['new', 'compact', 'clear', 'rename', 'sessions', 'copy', 'usage', 'stats', 'theme', 'status', 'help', 'export'].includes(command.name)) {
     result.summary = data.summary || data.message || command.description
     Object.entries(data.metrics || {}).forEach(([label, value]) => addMetric(label, value))
     ;(data.items || []).forEach(item => addItem(item.title || item.label, item.detail || item.value, item.status))

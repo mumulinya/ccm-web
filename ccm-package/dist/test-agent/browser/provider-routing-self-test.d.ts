@@ -87,6 +87,6 @@ export declare function runTestAgentCapabilityAwareProviderRoutingSelfTest(): Pr
         toolName: string;
         input: Record<string, any>;
     }[];
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     reason?: undefined;
 }>;

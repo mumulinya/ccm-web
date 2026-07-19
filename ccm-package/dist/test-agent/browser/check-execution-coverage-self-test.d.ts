@@ -8,8 +8,8 @@ export declare function runTestAgentBrowserCheckExecutionCoverageSelfTest(): Pro
     reportContract: import("..").TestAgentReportContractValidation;
     verdictContract: import("..").TestAgentVerdictContractValidation;
     excessiveRunsContract: import("..").TestAgentReportContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     tamperedMissingContract: import("..").TestAgentReportContractValidation;
-    tamperedMissingVerification: import("../artifact-verifier").TestAgentArtifactVerification;
-    tamperedDuplicateVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    tamperedMissingVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    tamperedDuplicateVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
 }>;

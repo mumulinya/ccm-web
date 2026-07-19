@@ -1,0 +1,271 @@
+  <div class="project-manager">
+    <ProjectWorkspaceHeader
+      v-model="currentProject"
+      :projects="projects"
+      :page-info="pageInfo"
+      :busy-action="projectActionBusy"
+      :has-session="!!currentSession"
+      @select="selectProject"
+      @start="startProject($event.name)"
+      @stop="stopProject($event.name)"
+      @switch-agent="openSwitchAgent"
+      @edit="openEditModal"
+      @tools="loadProjectTools"
+      @files="loadProjectSharedFiles"
+      @save-knowledge="saveCurrentProjectSessionKnowledge"
+      @archive="deleteProject($event.name)"
+      @open-archives="showArchives = true"
+      @create="openCreateModal"
+    />
+
+    <div class="main-content">
+      <ProjectSessionSidebar
+        :project="currentProject || ''"
+        :sessions="sessions"
+        :current-session="currentSession || ''"
+        :open="mobileSessionsOpen"
+        @select="selectSession"
+        @create="createSession"
+        @refresh="loadSessions(currentProject)"
+        @rename="renameSession"
+        @delete="deleteSession"
+        @close="mobileSessionsOpen = false"
+      />
+
+      <div class="content">
+        <div class="content-header">
+          <button class="mobile-session-trigger" title="打开会话列表" @click="mobileSessionsOpen = true"><PanelLeft :size="18" /></button>
+          <span>{{ currentSession ? `${currentProject} · ${sessions.find(item => item.id === currentSession)?.name || '当前会话'}` : '项目对话' }}</span>
+        </div>
+        <div id="messages" ref="messagesEl" class="messages" @scroll="updateMessageScrollState">
+          <EmptyState
+            v-if="!currentSession"
+            large
+            icon="💬"
+            title="选择一个会话开始对话"
+            hint="在左侧新建或打开会话后即可开始"
+          />
+          <template v-else>
+            <div v-for="(msg, i) in messages" :key="getMessageKey(msg)" :id="'msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
+              <ChatAvatar v-if="msg.role === 'user'" role="user" class="message-avatar" />
+              <ChatAvatar v-else-if="msg.role === 'assistant'" role="agent" class="message-avatar" />
+              <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
+              <!-- 思考过程消息 -->
+              <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
+                <div class="thinking-header">
+                  <span>{{ msg.messageMode === 'task' ? '项目 Agent 正在处理任务...' : '项目 Agent 正在回复...' }}</span>
+                </div>
+                <span class="stream-cursor">▌</span>
+              </div>
+              <!-- 用户消息 -->
+              <div v-else-if="msg.role === 'user'" class="bubble">
+                <div>{{ msg.content }}</div>
+              </div>
+              <!-- Agent 回复 -->
+              <div v-else class="bubble">
+                <ProjectAgentMessage
+                  :message="msg"
+                  :task-card="getProjectTaskCard(msg)"
+                  :is-last-streaming="isStreaming && i === messages.length - 1"
+                  @task-action="handleProjectTaskAction(msg, $event)"
+                  @open-file-diff="openFileDiff"
+                />
+              </div>
+              <div class="msg-meta">{{ new Date(msg.timestamp).toLocaleString('zh-CN') }}</div>
+            </div>
+          </template>
+        </div>
+        <MessageNavigator
+          :items="navMessages"
+          :scroll-container="messagesEl"
+          target-id-prefix="msg-"
+          @navigate="scrollToMessage"
+        />
+        <ConversationTurnControls
+          :busy="isStreaming"
+          v-model:mode="projectTurnControl.mode.value"
+          :turns="projectTurnControl.turns.value"
+          :stopping="stoppingProjectTurn"
+          @stop="stopStreaming"
+          @cancel="projectTurnControl.cancel"
+          @retry="(turn) => projectTurnControl.retry(turn).then(() => drainProjectTurnQueue())"
+        />
+        <ChatComposer
+          v-model="chatInput"
+          input-id="projectChatInput"
+          placeholder="向项目 Agent 发送消息..."
+          :send-label="projectComposerSendLabel"
+          :files="chatFiles"
+          :slash="slash"
+          :templates-open="showTemplateSelector"
+          :templates="allTemplates"
+          :template-search-query="templateSearchQuery"
+          :active-template-index="activeTemplateIndex"
+          :recommended-template="recommendedTemplate"
+          :disabled="!currentProject || !currentSession"
+          :busy="isStreaming"
+          :allow-input-while-busy="true"
+          @files-selected="onChatFilesSelected"
+          @remove-file="removeChatFile"
+          @open-template="openTemplateSelector"
+          @update:template-search-query="templateSearchQuery = $event"
+          @select-template="selectChatTemplate"
+          @apply-recommendation="applyRecommendation"
+          @keydown="handleKeydown"
+          @input="handleInput"
+          @send="sendMessage"
+          @stop="stopStreaming"
+        >
+          <template #context>
+            <SessionContextUsage
+              :usage="projectContextUsage"
+              :loading="projectContextLoading"
+              :error="projectContextError"
+              :compacting="projectContextCompacting"
+              @refresh="refreshProjectContextUsage"
+            />
+          </template>
+        </ChatComposer>
+        <!-- 日志面板 -->
+        <div v-if="showLogsPanel" class="logs-panel">
+          <div class="logs-header" @click="showLogsPanel = false">
+            <span>📋 运行日志</span>
+            <span style="font-size:12px;color:var(--text-muted)">{{ currentProject }}</span>
+          </div>
+          <div class="logs-content">{{ logsContent }}</div>
+        </div>
+      </div>
+    </div>
+
+    <UnifiedDiffModal
+      :visible="diffViewer.visible"
+      :file="diffViewer.file"
+      @close="closeFileDiff"
+    />
+
+    <AgentCodeChangeDrawer
+      :visible="codeChangeDrawer.visible"
+      :title="codeChangeDrawer.title"
+      :subtitle="codeChangeDrawer.subtitle"
+      :project="codeChangeDrawer.project"
+      :fileChanges="codeChangeDrawer.fileChanges"
+      :files="codeChangeDrawer.files"
+      :selectedPath="codeChangeDrawer.selectedPath"
+      @close="closeCodeChangeDrawer"
+    />
+
+    <ProjectFormModal
+      v-if="showCreate"
+      mode="create"
+      :form="form"
+      :agent-options="agentOptions"
+      :platforms="platforms"
+      @update-field="updateProjectFormField"
+      @browse="openFolderBrowser"
+      @open-feishu="openFeishuQr"
+      @close="showCreate = false"
+      @submit="submitCreate"
+    />
+
+    <ProjectFormModal
+      v-if="showEdit"
+      mode="edit"
+      :project="editProject"
+      :form="form"
+      :agent-options="agentOptions"
+      :platforms="platforms"
+      @update-field="updateProjectFormField"
+      @browse="openFolderBrowser"
+      @open-feishu="openFeishuQr"
+      @close="showEdit = false"
+      @submit="submitEdit"
+    />
+
+    <ProjectFeishuQrModal
+      v-if="showFeishuQr"
+      :url="feishuQrUrl"
+      :status="feishuQrStatus"
+      :loading="feishuQrLoading"
+      @start="startFeishuQrSetup"
+      @close="showFeishuQr = false"
+    />
+
+    <ProjectFolderBrowserModal
+      v-if="showFolderBrowser"
+      :path="browsePath"
+      :items="browseItems"
+      :drives="drives"
+      @load="loadFolderContents"
+      @go-up="browseGoUp"
+      @refresh="loadFolderContents(browsePath)"
+      @select="selectFolder"
+      @close="showFolderBrowser = false"
+    />
+
+    <ProjectAgentSwitchModal
+      v-if="showSwitchAgent"
+      :project="editProject"
+      :agent-options="agentOptions"
+      @switch-agent="switchAgent"
+      @close="showSwitchAgent = false"
+    />
+
+    <ProjectToolsModal
+      v-if="showTools"
+      :project-name="currentProject"
+      :all-tools="allTools"
+      :project-tools="projectTools"
+      :tool-audit="projectToolAudit"
+      :authorization-readiness="projectAuthorizationReadiness"
+      :connection-preflight="projectConnectionPreflight"
+      :verification-status="projectToolVerification"
+      :responsibility="projectResponsibility"
+      :capabilities="projectCapabilities"
+      :writable-paths="projectWritablePaths"
+      :forbidden-paths="projectForbiddenPaths"
+      :delivery-contract="projectDeliveryContract"
+      :verification-commands="projectVerificationCommands"
+      :inferred-commands="inferredProjectVerificationCommands"
+      :verification-source="projectVerificationSource"
+      @update-field="updateProjectToolField"
+      @toggle-tool="toggleProjectTool"
+      @apply-inferred="applyInferredVerificationCommands"
+      @save="saveProjectTools"
+      @close="showTools = false"
+    />
+
+    <ProjectSharedFilesModal
+      :visible="showSharedFiles"
+      :project-name="currentProject"
+      :files="projectFiles"
+      :show-add="showAddFile"
+      :show-edit="showEditFile"
+      :edit-file-name="editFileName"
+      :edit-file-content="editFileContent"
+      @update-field="updateProjectSharedFileField"
+      @add-file="addProjectFile"
+      @edit-file="editProjectFile"
+      @delete-file="deleteProjectFile"
+      @submit-add="submitAddProjectFile"
+      @submit-edit="submitEditProjectFile"
+      @close-add="showAddFile = false"
+      @close-edit="showEditFile = false"
+      @close="showSharedFiles = false"
+    />
+
+    <ProjectArchiveManager
+      v-if="showArchives"
+      @close="showArchives = false"
+      @changed="loadProjects"
+      @notify="handleArchiveNotify"
+    />
+
+    <TemplateVariablesModal
+      v-if="showVariableModal && activeTemplate"
+      :template="activeTemplate"
+      :variables="templateVariables"
+      @update-variable="({ key, value }) => { templateVariables[key] = value }"
+      @apply="applyTemplateVariables"
+      @close="showVariableModal = false"
+    />
+  </div>

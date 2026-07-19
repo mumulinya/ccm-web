@@ -50,6 +50,7 @@ export declare function runSlashCommandSelfTest(): {
         skillsBecomeCommands: boolean;
         localQueriesDoNotInvokeModel: boolean;
         clientSessionCommandsAreExplicit: boolean;
+        groupCompactIsDirectAndExactSession: boolean;
         checkpointAndRollbackAreControlled: boolean;
         localMutationNeedsManagePermission: boolean;
         endpointArgumentsAreEncoded: any;

@@ -1,0 +1,908 @@
+  <div class="tools-config">
+    <!-- 顶部玻璃工具栏 -->
+    <div class="toolbar">
+      <div style="display:flex;gap:12px">
+        <button v-if="currentFilter === 'mcp'" class="btn btn-primary btn-sm" @click="openMcpEditor()">+ MCP 服务器</button>
+        <button v-if="currentFilter === 'custom-prompt'" class="btn btn-outline btn-sm" @click="showAddSkill = true">+ Prompt 技能</button>
+        <button class="btn btn-outline btn-sm" @click="reloadTools">🔄 重载工具</button>
+      </div>
+      <span class="count">
+        内置工具: {{ coreToolsList.length }} | 内部 MCP: {{ internalMcpCatalog.summary?.total || 0 }} | 内置 Skill: {{ internalSkills.length }} | 外部 MCP: {{ mcpTools.length }}
+      </span>
+    </div>
+
+    <div class="main-content">
+      <!-- 左侧分类侧边栏 -->
+      <div class="sidebar">
+        <div class="sidebar-header">🛠️ 工具与技能中心</div>
+        <div class="category-list">
+          <div class="category-group-label">总览</div>
+          <div class="category-item" :class="{ active: currentFilter === 'overview' }" @click="currentFilter = 'overview'">
+            <span>▦</span><span>运行概况</span>
+            <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
+          </div>
+
+          <div class="category-group-label">工具与连接</div>
+          <div class="category-item" :class="{ active: currentFilter === 'core' }" @click="currentFilter = 'core'">
+            <span>⚙️</span><span>内置核心工具</span>
+            <span class="badge">{{ coreToolsList.length }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'internal-mcp' }" @click="currentFilter = 'internal-mcp'">
+            <span>◆</span><span>内部 MCP</span>
+            <span class="badge">{{ internalMcpCatalog.summary?.ready || 0 }}/{{ internalMcpCatalog.summary?.total || 0 }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'mcp' }" @click="currentFilter = 'mcp'">
+            <span>🔌</span><span>外部 MCP</span>
+            <span class="badge">{{ mcpTools.length }}</span>
+          </div>
+
+          <div class="category-group-label">Skill</div>
+          <div class="category-item" :class="{ active: currentFilter === 'custom-prompt' }" @click="currentFilter = 'custom-prompt'">
+            <span>⚡</span><span>Skill 管理</span>
+            <span class="badge">{{ skills.length }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'custom-skills' }" @click="currentFilter = 'custom-skills'">
+            <span>🔮</span><span>外部 Skill 包</span>
+            <span class="badge">{{ customSkills.length }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'marketplace' }" @click="currentFilter = 'marketplace'">
+            <span>🛒</span><span>技能商城</span>
+          </div>
+
+          <div class="category-group-label">治理与验收</div>
+          <div class="category-item" :class="{ active: currentFilter === 'authorization' }" @click="currentFilter = 'authorization'">
+            <span>◈</span><span>授权总览</span>
+            <span class="badge">{{ authorizationConfiguredReady }}/{{ authorizationSummary.configuredScopes || 0 }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'chain-verification' }" @click="currentFilter = 'chain-verification'">
+            <span>◆</span><span>链路验收</span>
+            <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'invocation-audit' }" @click="openToolInvocationAudit()">
+            <span>◇</span><span>调用审计</span>
+            <span class="badge">{{ invocationAuditSummary.unauthorized || 0 }}/{{ invocationAuditSummary.totalReturned || 0 }}</span>
+          </div>
+          <div class="category-item" :class="{ active: currentFilter === 'runtime' }" @click="currentFilter = 'runtime'">
+            <span>◎</span><span>Agent 运行时</span>
+            <span class="badge">{{ businessRuntimeSummary.ready }}/{{ businessRuntimeSummary.total }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧内容展示面板 -->
+      <div class="content">
+        <div class="content-header">
+          <span>
+            {{ 
+              currentFilter === 'overview' ? '工具运行概况' :
+              currentFilter === 'core' ? '⚙️ 系统内置核心工具' : 
+              currentFilter === 'internal-mcp' ? '◆ 随项目安装的内部 MCP' :
+              currentFilter === 'mcp' ? '🔌 外部 MCP 服务与客户端连接中心' :
+              currentFilter === 'authorization' ? '◈ 项目 / 群聊 MCP 与 Skill 授权总览' :
+              currentFilter === 'chain-verification' ? '◆ MCP / Skill 子 Agent 链路验收报告' :
+              currentFilter === 'invocation-audit' ? '◇ 子 Agent MCP / Skill 调用审计' :
+              currentFilter === 'runtime' ? '◎ 子 Agent MCP / Skill 运行时就绪状态' :
+              currentFilter === 'custom-skills' ? '🔮 外部下载与本机 Skill 包' :
+              currentFilter === 'custom-prompt' ? '⚡ 内置与外部 Skill 管理' :
+              '🛒 技能与 MCP 一键安装市场' 
+            }}
+          </span>
+          <button class="btn btn-outline btn-sm" @click="loadTools()">↻ 刷新</button>
+        </div>
+
+        <div class="tool-list">
+          <ToolControlOverview
+            v-if="currentFilter === 'overview'"
+            :tool-status="toolStatus"
+            :authorization="authorizationInventory"
+            :verification="toolChainVerification"
+            :runtime="runtimeReadiness"
+            :goal-audit="goalAudit"
+            :loading="authorizationInventoryLoading || toolChainVerificationLoading || runtimeReadinessLoading || goalAuditLoading"
+            @open="currentFilter = $event"
+            @refresh="loadTools"
+          />
+
+          <InternalMcpCatalog
+            v-if="currentFilter === 'internal-mcp'"
+            :items="internalMcpCatalog.items || []"
+            :summary="internalMcpCatalog.summary || {}"
+            :loading="internalMcpLoading"
+            @refresh="loadTools"
+            @configure="emit('navigate', { tab: 'settings' })"
+          />
+
+          <!-- 1. ⚙️ 系统内置核心工具 -->
+          <template v-if="currentFilter === 'core'">
+            <div v-for="tool in coreToolsList" :key="tool.name" class="tool-card">
+              <div class="tool-header">
+                <div style="display:flex;align-items:flex-start;gap:12px;width:100%">
+                  <span style="font-size:24px;line-height:1">{{ tool.emoji }}</span>
+                  <div style="flex:1">
+                    <div class="tool-name">
+                      {{ tool.name }}
+                      <span class="badge" style="background:rgba(59,130,246,0.1);color:var(--accent-blue)">{{ tool.category }}</span>
+                      <span class="security-badge" :class="tool.securityClass">{{ tool.security }}</span>
+                    </div>
+                    <div class="tool-desc" style="margin-top:6px;font-size:12.5px;line-height:1.5;color:var(--text-secondary)">
+                      {{ tool.desc }}
+                    </div>
+
+                    <!-- 参数说明 -->
+                    <div class="core-tool-section">
+                      <div class="section-lbl">📋 参数规格:</div>
+                      <div class="params-grid">
+                        <div v-for="param in tool.params" :key="param.name" class="param-row">
+                          <span class="param-name font-mono">{{ param.name }}</span>
+                          <span class="param-type font-mono">{{ param.type }}</span>
+                          <span class="param-desc">{{ param.desc }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 代码示例 -->
+                    <div class="core-tool-section" style="margin-top:8px">
+                      <div class="section-lbl">💻 最佳调用代码用例:</div>
+                      <div class="tool-cmd font-mono" style="margin-top:4px">{{ tool.example }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 2. 项目 / 群聊授权总览 -->
+          <template v-if="currentFilter === 'authorization'">
+            <div class="runtime-summary authorization-summary">
+              <div><strong>{{ authorizationConfiguredReady }}</strong><span>已配置且可派发</span></div>
+              <div><strong>{{ authorizationSummary.needsAttention || 0 }}</strong><span>需处理范围</span></div>
+              <div><strong>{{ authorizationSummary.requestedMcp || 0 }}</strong><span>MCP 授权</span></div>
+              <div><strong>{{ authorizationSummary.requestedSkill || 0 }}</strong><span>Skill 授权</span></div>
+              <div><strong>{{ authorizationSummary.runtimeSnapshots || 0 }}</strong><span>运行时快照</span></div>
+              <div><strong>{{ authorizationSummary.runtimeNeedsResync || 0 }}</strong><span>运行时待处理</span></div>
+              <button v-if="(authorizationSummary.runtimeNeedsResync || 0) > 0" class="btn btn-primary btn-sm" :disabled="!!authorizationRuntimeResyncing" @click="resyncAuthorizationRuntime()">
+                {{ authorizationRuntimeResyncLabel() }}
+              </button>
+              <button class="btn btn-outline btn-sm" :disabled="authorizationInventoryLoading" @click="loadAuthorizationInventory">
+                {{ authorizationInventoryLoading ? '刷新中...' : '刷新授权清单' }}
+              </button>
+            </div>
+            <div class="authorization-status-strip" :class="{ warn: (authorizationSummary.needsAttention || 0) > 0 }">
+              <span>项目 {{ authorizationSummary.projects || 0 }} · 群聊 {{ authorizationSummary.groups || 0 }} · 已配置 {{ authorizationSummary.configuredScopes || 0 }} · 空授权 {{ authorizationSummary.emptyScopes || 0 }}</span>
+              <span>{{ authorizationMissingText({ audit_summary: { missing_mcp_servers: authorizationSummary.missingMcpServers, missing_mcp_tools: authorizationSummary.missingMcpTools, missing_skills: authorizationSummary.missingSkills, invalid_mcp_grants: authorizationSummary.invalidMcpGrants } }) }}</span>
+              <span>运行时覆盖 {{ authorizationSummary.scopesWithRuntime || 0 }}/{{ authorizationSummary.totalScopes || 0 }} · stale {{ authorizationSummary.runtimeCatalogStale || 0 }} · blocked {{ authorizationSummary.runtimeDispatchBlocked || 0 }}</span>
+            </div>
+            <EmptyState v-if="authorizationScopes.length === 0" icon="◈" title="暂无项目或群聊授权配置" />
+            <div v-for="scope in authorizationScopes" :key="`${scope.scope}:${scope.id}`" class="tool-card authorization-card">
+              <div class="runtime-card-head">
+                <div>
+                  <div class="tool-name">
+                    {{ authorizationScopeLabel(scope.scope) }} · {{ scope.name || scope.id }}
+                    <span class="conn-status" :class="{ connected: scope.authorization_readiness?.dispatchReady !== false, failed: scope.authorization_readiness?.dispatchReady === false }">{{ authorizationStatusLabel(scope) }}</span>
+                  </div>
+                  <div class="tool-desc font-mono">{{ scope.id }}</div>
+                </div>
+                <div class="authorization-card-side">
+                  <div class="runtime-counts">
+                    <span>MCP {{ scope.authorization_readiness?.available?.mcp || 0 }}/{{ scope.counts?.mcp || 0 }}</span>
+                    <span>Skill {{ scope.authorization_readiness?.available?.skill || 0 }}/{{ scope.counts?.skill || 0 }}</span>
+                    <span :class="{ danger: authorizationMissingTotal(scope) > 0 }">{{ authorizationMissingText(scope) }}</span>
+                    <span :class="{ danger: (scope.runtime?.summary?.needsResync || 0) > 0 }">{{ authorizationRuntimeSummaryText(scope) }}</span>
+                  </div>
+                  <button v-if="authorizationScopeRuntimeNeedsResync(scope)" class="btn btn-outline btn-sm" :disabled="!!authorizationRuntimeResyncing" @click="resyncAuthorizationRuntime(scope)">
+                    {{ authorizationRuntimeResyncLabel(scope) }}
+                  </button>
+                </div>
+              </div>
+              <div class="authorization-grants">
+                <div>
+                  <span>MCP</span>
+                  <code v-if="authorizationGrantPreview(scope, 'mcp').length" :title="authorizationGrantTitle(scope, 'mcp')">{{ authorizationGrantPreview(scope, 'mcp').join(', ') }}</code>
+                  <code v-else>未授权</code>
+                </div>
+                <div>
+                  <span>Skill</span>
+                  <code v-if="authorizationGrantPreview(scope, 'skill').length" :title="authorizationGrantTitle(scope, 'skill')">{{ authorizationGrantPreview(scope, 'skill').join(', ') }}</code>
+                  <code v-else>未授权</code>
+                </div>
+              </div>
+              <div v-if="authorizationUnavailableRows(scope).length" class="authorization-missing-list">
+                <div v-for="item in authorizationUnavailableRows(scope)" :key="`${item.type}:${item.name}:${item.state}`">
+                  <span>{{ item.type }}</span>
+                  <code>{{ item.name }}</code>
+                  <small>{{ item.state }}</small>
+                </div>
+              </div>
+              <div v-if="scope.runtime?.snapshots?.length" class="authorization-runtime-list">
+                <div v-for="snapshot in scope.runtime.snapshots.slice(0, 6)" :key="`${snapshot.runtime}:${snapshot.snapshotId}:${snapshot.projectName}:${snapshot.groupId}`" :class="authorizationRuntimeStatusClass(snapshot)" :title="authorizationRuntimeTooltip(snapshot)">
+                  <span>{{ snapshot.runtime || '-' }}</span>
+                  <code>{{ authorizationRuntimeTargetLabel(snapshot) }}</code>
+                  <small>{{ authorizationRuntimeStatusLabel(snapshot) }}</small>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 3. MCP / Skill 子 Agent 链路验收 -->
+          <template v-if="currentFilter === 'chain-verification'">
+            <div class="tool-card real-cli-matrix-card">
+              <div class="runtime-card-head">
+                <div>
+                  <div class="tool-name">第三方 Agent 真实工具验收</div>
+                  <div class="tool-desc">只有原生 Skill 被读取、MCP 服务端收到调用且授权快照通过，才算验收成功。</div>
+                </div>
+                <button class="btn btn-primary btn-sm" :disabled="realCliMatrixLoading || realCliMatrix.running" @click="runRealCliMatrix">
+                  {{ realCliMatrix.running ? '验收中...' : (realCliMatrixLoading ? '启动中...' : '运行真实验收') }}
+                </button>
+              </div>
+              <div class="real-cli-matrix-grid">
+                <div v-for="row in realCliMatrix.results" :key="row.runtime">
+                  <strong>{{ realCliRuntimeLabel(row.runtime) }}</strong>
+                  <span class="conn-status" :class="realCliResultClass(row)">{{ realCliResultLabel(row) }}</span>
+                  <small>MCP {{ row.mcpInvocationObserved ? '已调用' : '未验证' }} · Skill {{ row.skillInvocationObserved ? '已调用' : '未验证' }}</small>
+                </div>
+              </div>
+            </div>
+            <div class="runtime-summary chain-verification-summary">
+              <div><strong>{{ chainVerificationSummary.verified || 0 }}</strong><span>已验证可用</span></div>
+              <div><strong>{{ chainVerificationSummary.readyNotObserved || 0 }}</strong><span>就绪未调用</span></div>
+              <div><strong>{{ chainVerificationSummary.verificationIncomplete || 0 }}</strong><span>调用未通过</span></div>
+              <div><strong>{{ chainVerificationSummary.needsAttention || 0 }}</strong><span>需处理范围</span></div>
+              <div><strong>{{ chainVerificationSummary.runtimeNeedsResync || 0 }}</strong><span>待重同步</span></div>
+              <div><strong>{{ chainVerificationSummary.unauthorizedAttempts || 0 }}</strong><span>越权尝试</span></div>
+              <div><strong>{{ chainVerificationSummary.observedInvocations || 0 }}</strong><span>观察调用</span></div>
+              <button class="btn btn-outline btn-sm" :disabled="toolChainVerificationLoading" @click="loadToolChainVerification">
+                {{ toolChainVerificationLoading ? '刷新中...' : '刷新验收' }}
+              </button>
+            </div>
+            <div class="authorization-status-strip" :class="{ warn: (chainVerificationSummary.needsAttention || 0) > 0 }">
+              <span>授权阻断 {{ chainVerificationSummary.authorizationBlocked || 0 }} · 运行时缺失 {{ chainVerificationSummary.runtimeMissing || 0 }} · 运行时待处理 {{ chainVerificationSummary.runtimeNeedsResync || 0 }}</span>
+              <span>配置范围 {{ chainVerificationSummary.configuredScopes || 0 }}/{{ chainVerificationSummary.totalScopes || 0 }}</span>
+              <span>这份报告聚合授权清单、运行时快照和调用审计。</span>
+            </div>
+            <div class="authorization-status-strip chain-verification-gate-strip" :class="chainVerificationGateClass">
+              <span>派发门禁：{{ chainVerificationGateLabel }}</span>
+              <span>{{ chainVerificationGateText }}</span>
+              <span>阻断 {{ chainVerificationGate.counts?.blockingScopes || 0 }} · 待观察 {{ chainVerificationGate.counts?.pendingObservationScopes || 0 }} · 已验证 {{ chainVerificationGate.counts?.verifiedScopes || 0 }}</span>
+            </div>
+            <EmptyState v-if="chainVerificationRows.length === 0" icon="◆" title="暂无可验收的项目或群聊工具链路" />
+            <div v-for="row in chainVerificationRows" :key="`${row.scope}:${row.id}`" class="tool-card chain-verification-card">
+              <div class="runtime-card-head">
+                <div>
+                  <div class="tool-name">
+                    {{ chainVerificationScopeLabel(row) }} · {{ row.name || row.id }}
+                    <span class="conn-status" :class="chainVerificationStatusClass(row)">{{ row.statusLabel || row.status }}</span>
+                  </div>
+                  <div class="tool-desc font-mono">{{ row.id }}</div>
+                </div>
+                <div class="runtime-counts">
+                  <span>MCP {{ row.counts?.mcp || 0 }}</span>
+                  <span>Skill {{ row.counts?.skill || 0 }}</span>
+                  <span :class="{ danger: row.authorization?.dispatchReady === false }">{{ row.authorization?.dispatchReady === false ? '授权需处理' : '授权可派发' }}</span>
+                </div>
+              </div>
+              <div v-if="row.nextActions?.length" class="chain-verification-actions">
+                <button
+                  v-for="action in row.nextActions"
+                  :key="chainVerificationActionKey(row, action)"
+                  class="btn btn-sm"
+                  :class="chainVerificationActionClass(action)"
+                  :disabled="chainVerificationActionDisabled(row, action)"
+                  @click="runChainVerificationAction(row, action)"
+                >
+                  {{ chainVerificationActionLabel(row, action) }}
+                </button>
+              </div>
+              <div class="chain-verification-grid">
+                <div>
+                  <span>运行时</span>
+                  <strong>{{ chainVerificationRuntimeText(row) }}</strong>
+                </div>
+                <div>
+                  <span>调用审计</span>
+                  <strong>{{ chainVerificationInvocationText(row) }}</strong>
+                </div>
+                <div>
+                  <span>最近调用</span>
+                  <strong>{{ row.invocation?.summary?.lastObservedAt || '暂无' }}</strong>
+                </div>
+              </div>
+              <div v-if="row.invocation?.recent?.length" class="chain-verification-recent">
+                <div v-for="item in row.invocation.recent.slice(0, 4)" :key="`${item.source}:${item.at}:${item.type}:${item.tool || item.skill || item.taskId}`">
+                  <span>{{ invocationAuditTime(item) }}</span>
+                  <code>{{ chainVerificationRecentTitle(item) }}</code>
+                  <small>{{ invocationAuditStatusLabel(item) }}</small>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 4. 子 Agent 工具调用审计 -->
+          <template v-if="currentFilter === 'invocation-audit'">
+            <div class="runtime-summary invocation-audit-summary">
+              <div><strong>{{ invocationAuditSummary.totalReturned || 0 }}</strong><span>最近事件</span></div>
+              <div><strong>{{ invocationAuditSummary.toolCalls || 0 }}</strong><span>MCP/工具调用</span></div>
+              <div><strong>{{ invocationAuditSummary.skillInvocations || 0 }}</strong><span>Skill 调用</span></div>
+              <div><strong>{{ invocationAuditSummary.failedToolCalls || 0 }}</strong><span>工具失败</span></div>
+              <div><strong>{{ invocationAuditSummary.unauthorized || 0 }}</strong><span>越权拒绝</span></div>
+              <div><strong>{{ invocationAuditSummary.loopsFinished || 0 }}</strong><span>循环结束</span></div>
+              <button class="btn btn-outline btn-sm" :disabled="toolInvocationAuditLoading" @click="loadToolInvocationAudit()">
+                {{ toolInvocationAuditLoading ? '刷新中...' : '刷新审计' }}
+              </button>
+            </div>
+            <div v-if="hasInvocationAuditFilter" class="authorization-status-strip invocation-audit-filter-strip">
+              <span>当前筛选：{{ invocationAuditFilterText }}</span>
+              <button class="btn btn-outline btn-sm" :disabled="toolInvocationAuditLoading" @click="clearToolInvocationAuditFilter">
+                清除筛选
+              </button>
+            </div>
+            <div class="authorization-status-strip" :class="{ warn: (invocationAuditSummary.unauthorized || 0) > 0 }">
+              <span>成功工具调用 {{ invocationAuditSummary.successfulToolCalls || 0 }} · 失败工具调用 {{ invocationAuditSummary.failedToolCalls || 0 }}</span>
+              <span>Skill {{ invocationAuditSummary.skillInvocations || 0 }} · 越权拒绝 {{ invocationAuditSummary.unauthorized || 0 }}</span>
+              <span>返回最近 {{ invocationAuditSummary.totalReturned || 0 }} 条脱敏审计</span>
+            </div>
+            <EmptyState v-if="invocationAuditItems.length === 0" icon="◇" title="暂无子 Agent 工具调用审计" />
+            <div v-for="item in invocationAuditItems" :key="`${item.source}:${item.at}:${item.type}:${item.tool || item.skill || item.server || item.taskId}`" class="tool-card invocation-audit-card">
+              <div class="runtime-card-head">
+                <div>
+                  <div class="tool-name">
+                    {{ invocationAuditTitle(item) }}
+                    <span class="conn-status" :class="invocationAuditStatusClass(item)">{{ invocationAuditStatusLabel(item) }}</span>
+                  </div>
+                  <div class="tool-desc">{{ invocationAuditTime(item) }}</div>
+                </div>
+                <div class="runtime-counts">
+                  <span>{{ item.source || '-' }}</span>
+                  <span v-if="item.durationMs">{{ item.durationMs }}ms</span>
+                  <span v-if="item.nativeSession">native</span>
+                </div>
+              </div>
+              <div v-if="invocationAuditMeta(item).length" class="invocation-audit-meta">
+                <span v-for="meta in invocationAuditMeta(item)" :key="meta">{{ meta }}</span>
+              </div>
+            </div>
+          </template>
+
+          <!-- 5. 子 Agent 运行时就绪状态 -->
+          <template v-if="currentFilter === 'runtime'">
+            <div class="runtime-summary">
+              <div><strong>{{ runtimeReadiness.summary.ready }}</strong><span>完全可用</span></div>
+              <div><strong>{{ runtimeReadiness.summary.deliveryReady }}</strong><span>授权交付正常</span></div>
+              <div><strong>{{ runtimeReadiness.summary.runtimeReady }}</strong><span>CLI 可启动</span></div>
+              <button class="btn btn-outline btn-sm" :disabled="runtimeReadinessLoading" @click="loadRuntimeReadiness(true)">
+                {{ runtimeReadinessLoading ? '检查中...' : '执行深度探针' }}
+              </button>
+            </div>
+            <LoadingSkeleton v-if="runtimeReadinessLoading && runtimeReadiness.readiness.length === 0" :rows="4" />
+            <EmptyState v-else-if="runtimeReadiness.readiness.length === 0" icon="◎" title="尚无运行时授权快照" hint="群聊或项目 Agent 执行一次后会在这里显示" />
+            <div v-for="item in runtimeReadiness.readiness" :key="`${item.runtime}:${item.snapshotId}:${item.projectName}:${item.groupId}`" class="tool-card runtime-card">
+              <div class="runtime-card-head">
+                <div>
+                  <div class="tool-name">
+                    {{ item.runtime }}
+                    <span class="conn-status" :class="{ connected: item.overallReady, failed: !item.deliveryReady }">{{ runtimeStatusLabel(item) }}</span>
+                  </div>
+                  <div class="tool-desc">{{ item.projectName || '未关联项目' }}<span v-if="item.groupId"> · 群聊 {{ item.groupId }}</span></div>
+                </div>
+                <div class="runtime-counts">
+                  <span>MCP {{ item.synced.mcp.length }}/{{ item.requested.mcp.length }}</span>
+                  <span>Skill {{ item.synced.skill.length }}/{{ item.requested.skill.length }}</span>
+                </div>
+              </div>
+              <div class="mcp-runtime-status">
+                <span>snapshot: {{ item.snapshotId || '-' }}</span>
+                <span>CLI: {{ item.cli.command || '-' }}</span>
+                <span v-if="item.cli.version">{{ item.cli.version }}</span>
+                <span>checked: {{ item.checkedAt }}</span>
+              </div>
+              <div class="runtime-check-list">
+                <div v-for="check in item.checks" :key="check.id" :class="{ failed: !check.ok }">
+                  <span>{{ check.ok ? '通过' : '失败' }}</span>
+                  <code>{{ check.id }}</code>
+                  <small>{{ check.detail }}</small>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 4. 🔌 MCP 服务连接中心 -->
+          <template v-if="currentFilter === 'mcp'">
+            <EmptyState v-if="mcpTools.length === 0" icon="🔌" title="暂无 MCP 配置" hint="点击上方按钮新增" />
+            <div v-for="tool in mcpTools" :key="tool.name" class="tool-card">
+              <div class="tool-header">
+                <div style="display:flex;align-items:flex-start;gap:12px;width:100%">
+                  <span style="font-size:24px;line-height:1">🔌</span>
+                  <div style="flex:1">
+                    <div class="tool-name">
+                      {{ tool.name }}
+                      <span class="conn-status" :class="{ connected: getServerStatus(tool.name), failed: getServerStatusInfo(tool.name).state === 'failed', auth: getServerStatusInfo(tool.name).state === 'auth_required' }">
+                        {{ serverStatusLabel(getServerStatusInfo(tool.name)) }}
+                      </span>
+                    </div>
+                    <div class="tool-desc" style="margin-top:4px">{{ tool.description || '暂无描述' }}</div>
+                    <div class="tool-cmd font-mono" style="margin-top:8px">{{ tool.command }}</div>
+                    <div class="mcp-runtime-status">
+                      <span>state: {{ getServerStatusInfo(tool.name).state || 'unknown' }}</span>
+                      <span>tools: {{ getMcpToolsList(tool.name).length }}</span>
+                      <span>retry: {{ getServerStatusInfo(tool.name).retryCount || 0 }}</span>
+                      <span :class="{ danger: getAuthStatusInfo(tool.name).needsUserAuth }">{{ authStatusLabel(getAuthStatusInfo(tool.name)) }}</span>
+                      <span v-if="getAuthStatusInfo(tool.name).refreshConfigured">refresh: configured</span>
+                      <span v-if="getAuthStatusInfo(tool.name).tokenExpiresAt" :class="{ danger: getAuthStatusInfo(tool.name).tokenExpired }">expires: {{ getAuthStatusInfo(tool.name).tokenExpiresAt }}</span>
+                      <span v-if="getAuthStatusInfo(tool.name).elicitationRequired" class="danger">elicitation: blocked</span>
+                      <span v-if="getServerStatusInfo(tool.name).lastConnectedAt">connected: {{ getServerStatusInfo(tool.name).lastConnectedAt }}</span>
+                      <span v-if="getServerStatusInfo(tool.name).error" class="danger">error: {{ getServerStatusInfo(tool.name).error }}</span>
+                      <span v-if="getAuthStatusInfo(tool.name).message" :class="{ danger: getAuthStatusInfo(tool.name).needsUserAuth }">{{ getAuthStatusInfo(tool.name).message }}</span>
+                    </div>
+                    
+                    <!-- 展开的工具列表 -->
+                    <div v-if="getServerStatus(tool.name)" class="mcp-details-section">
+                      <button class="btn btn-outline btn-sm mcp-expand-btn" @click="toggleMcpExpanded(tool.name)">
+                        {{ expandedMcp[tool.name] ? '收起注册工具 ▲' : `查看注册工具 (${getMcpToolsList(tool.name).length} 个) ▼` }}
+                      </button>
+
+                      <div v-show="expandedMcp[tool.name]" class="mcp-tools-expand-box">
+                        <EmptyState v-if="getMcpToolsList(tool.name).length === 0" title="该服务器未向系统注册任何工具" />
+                        <div v-for="subt in getMcpToolsList(tool.name)" :key="subt.name" class="mcp-subtool-card">
+                          <div class="subtool-name font-mono">🔧 {{ subt.name }}</div>
+                          <div class="subtool-desc">{{ subt.description }}</div>
+                          
+                          <!-- schema参数表格 -->
+                          <div v-if="subt.schema?.properties" class="subtool-schema">
+                            <div class="schema-lbl font-mono">Arguments Schema:</div>
+                            <div class="params-grid font-mono">
+                              <div v-for="(val, key) in subt.schema.properties" :key="key" class="param-row">
+                                <span class="param-name">{{ key }}</span>
+                                <span class="param-type">{{ val.type || 'any' }}{{ subt.schema.required?.includes(key) ? ' (required)' : '' }}</span>
+                                <span class="param-desc" style="color:var(--text-muted)">{{ val.description || '-' }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div style="display:flex;gap:8px">
+                    <button class="btn btn-outline btn-sm" @click="testMcp(tool)">测试连接</button>
+                    <button class="btn btn-outline btn-sm" @click="openMcpEditor(tool)">编辑</button>
+                    <label class="toggle">
+                      <input type="checkbox" :checked="tool.enabled" @change="toggleEnabled('mcp', tool)">
+                      <span>启用</span>
+                    </label>
+                    <button class="btn btn-danger btn-sm" @click="deleteTool('mcp', tool.name)">删除</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 5. 外部物理 Skill 包 -->
+          <template v-if="currentFilter === 'custom-skills'">
+            <EmptyState v-if="customSkills.length === 0" icon="🔮" title="暂无外部 Skill 包" hint="暂无外部下载或本机加载的 Skill 包" />
+            <div class="custom-skills-grid">
+              <div v-for="skill in customSkills" :key="skill.id" class="skill-card-fancy">
+                <div class="skill-card-header">
+                  <span class="skill-icon">🔮</span>
+                  <div class="skill-meta">
+                    <div class="skill-name">{{ skill.name }}</div>
+                    <div class="skill-id font-mono">skills/{{ skill.id }}</div>
+                  </div>
+                  <span class="badge" style="background:rgba(168,85,247,0.1);color:var(--accent-purple)">外部 Skill</span>
+                </div>
+                <div class="skill-card-body">
+                  {{ skill.description || '暂无描述' }}
+                </div>
+                <div class="skill-card-footer">
+                  <button class="btn btn-primary btn-sm btn-block" @click="openSkillManual(skill)">
+                    📖 查看技能使用手册 (SKILL.md)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 6. 内置与外部 Skill 元数据 -->
+          <template v-if="currentFilter === 'custom-prompt'">
+            <section class="skill-management-section">
+              <div class="skill-section-heading">
+                <div>
+                  <strong>CCM 内置 Skill</strong>
+                  <span>随项目和 npm 包发布，系统自动维护，不能停用、编辑或删除</span>
+                </div>
+                <span class="badge">{{ internalSkills.length }}</span>
+              </div>
+              <EmptyState v-if="internalSkills.length === 0" title="内置 Skill 尚未完成初始化" />
+              <div v-for="tool in internalSkills" :key="tool.name" class="tool-card internal-skill-card">
+                <div class="tool-header">
+                  <div class="skill-card-row">
+                    <span class="skill-list-icon">⚙️</span>
+                    <div class="skill-card-content">
+                      <div class="tool-name">
+                        {{ tool.name }}
+                        <span class="security-badge sec-success">CCM 内置</span>
+                        <span class="security-badge immutable-badge">只读</span>
+                      </div>
+                      <div class="tool-desc">{{ tool.description || 'CCM 内部工作 Skill' }}</div>
+                      <div class="skill-source-note">来源：应用内置 templates/skills · 状态由系统维护</div>
+                    </div>
+                    <button
+                      class="btn btn-outline btn-sm internal-skill-view"
+                      :disabled="openingSkillManual === tool.name"
+                      @click="openCatalogSkillManual(tool)"
+                    >
+                      <BookOpen :size="14" />
+                      {{ openingSkillManual === tool.name ? '加载中' : '查看说明' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="skill-management-section external-skill-section">
+              <div class="skill-section-heading">
+                <div>
+                  <strong>外部与用户 Skill</strong>
+                  <span>商城下载和用户创建的 Skill 独立存放，可按需启停或删除</span>
+                </div>
+                <span class="badge">{{ externalSkills.length }}</span>
+              </div>
+              <EmptyState
+                v-if="externalSkills.length === 0"
+                icon="⚡"
+                title="暂无外部或用户 Skill"
+                hint="可从技能商城安装或点击上方按钮创建"
+              />
+              <div v-for="tool in externalSkills" :key="tool.name" class="tool-card">
+                <div class="tool-header">
+                  <div class="skill-card-row">
+                    <span class="skill-list-icon">⚡</span>
+                    <div class="skill-card-content">
+                      <div class="tool-name">
+                        {{ tool.name }}
+                        <span class="security-badge sec-success">{{ externalSkillLabel(tool) }}</span>
+                      </div>
+                      <div class="tool-desc">{{ tool.description || '暂无描述' }}</div>
+                      <div class="mcp-runtime-status">
+                        <span>invoke: {{ getSkillToolInfo(tool.name).invokeToolName || 'invoke_skill' }}</span>
+                        <span>tool: {{ getSkillToolInfo(tool.name).toolName || `skill:${tool.name}` }}</span>
+                        <span v-if="getSkillToolInfo(tool.name).contentHash">hash: {{ getSkillToolInfo(tool.name).contentHash }}</span>
+                        <span v-if="toolStatus.skillAuditFile">audit: {{ toolStatus.skillAuditFile }}</span>
+                      </div>
+                      <div class="tool-prompt">📝 {{ tool.prompt }}</div>
+                    </div>
+                    <div class="skill-card-actions">
+                      <label class="toggle">
+                        <input type="checkbox" :checked="tool.enabled" @change="toggleEnabled('skill', tool)">
+                        <span>启用</span>
+                      </label>
+                      <button class="btn btn-danger btn-sm" @click="deleteTool('skill', tool.name)">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </template>
+
+          <!-- 7. 🛒 技能与 MCP 一键安装市场 -->
+          <template v-if="currentFilter === 'marketplace'">
+            <div class="marketplace-source-selector">
+              <span class="marketplace-source-label">商城频道</span>
+              <select v-model="selectedSource" @change="onSourceChange">
+                <option value="skills-sh">Skills.sh · 全网 Skill</option>
+                <option value="smithery">Smithery · MCP 注册表</option>
+                <option value="local">CCM 本地精选</option>
+                <option value="github">CCM 社区精选</option>
+                <option v-for="source in marketplaceSources" :key="source.id" :value="source.id">
+                  已保存：{{ source.label }}
+                </option>
+                <option value="custom">外部 URL / GitHub / SKILL.md</option>
+              </select>
+              <button v-if="selectedSavedSource" class="btn btn-danger btn-sm" @click="deleteSelectedMarketplaceSource">删除来源</button>
+
+              <span v-if="!marketplaceOnlineSource" class="marketplace-filter-label">类型</span>
+              <div v-if="!marketplaceOnlineSource" class="mfilter-tab">
+                <button type="button" @click="marketplaceFilter = 'all'" :class="{ active: marketplaceFilter === 'all' }">全部</button>
+                <button type="button" @click="marketplaceFilter = 'mcp'" :class="{ active: marketplaceFilter === 'mcp' }">MCP 服务器</button>
+                <button type="button" @click="marketplaceFilter = 'skill'" :class="{ active: marketplaceFilter === 'skill' }">Skills</button>
+              </div>
+              <div v-if="selectedSavedSource" class="marketplace-saved-source">
+                <span>{{ selectedSavedSource.url }}</span>
+              </div>
+              <div v-if="selectedSource === 'custom'" class="marketplace-custom-source">
+                <input v-model="customSourceLabel" placeholder="来源名称，可选">
+                <input v-model="customSourceUrl" placeholder="HTTPS 商城 JSON、GitHub Skill 目录或 SKILL.md" @keyup.enter="loadTools">
+                <button class="btn btn-primary btn-sm" @click="loadTools">加载</button>
+                <button class="btn btn-outline btn-sm" :disabled="isSavingSource" @click="saveCustomMarketplaceSource">
+                  {{ isSavingSource ? '保存中' : '保存为来源' }}
+                </button>
+              </div>
+              <div v-if="customSourceNeedsSave" class="marketplace-source-gate">
+                <span>当前列表来自未保存的外部 URL。安装时会先保存来源，再由后端从该来源重新读取并校验条目。</span>
+              </div>
+            </div>
+
+            <div v-if="marketplaceOnlineSource" class="marketplace-online-browser">
+              <div class="marketplace-search-row">
+                <div class="marketplace-search-box">
+                  <Search :size="16" aria-hidden="true" />
+                  <input v-model="marketplaceQuery" :placeholder="marketplaceSearchPlaceholder" @keyup.enter="searchMarketplace">
+                  <button type="button" class="btn btn-primary btn-sm" :disabled="marketplaceLoading" @click="searchMarketplace">
+                    {{ marketplaceLoading ? '搜索中' : '搜索' }}
+                  </button>
+                </div>
+                <select v-model="marketplaceSort" class="marketplace-sort" aria-label="商城排序" @change="changeMarketplaceSort">
+                  <option value="popular">按热度</option>
+                  <option value="relevance">按相关度</option>
+                  <option value="name">按名称</option>
+                </select>
+                <button type="button" class="marketplace-icon-button" title="刷新当前结果" :disabled="marketplaceLoading" @click="loadMarketplace">
+                  <RefreshCw :size="16" :class="{ spinning: marketplaceLoading }" aria-hidden="true" />
+                </button>
+              </div>
+              <div class="marketplace-category-tabs" aria-label="商城分类">
+                <button
+                  v-for="category in marketplaceCategories"
+                  :key="category.id"
+                  type="button"
+                  :class="{ active: marketplaceCategory === category.id }"
+                  @click="selectMarketplaceCategory(category.id)"
+                >{{ category.label }}</button>
+              </div>
+              <div class="marketplace-source-status">
+                <span class="status-dot" :class="{ online: marketplaceSourceStatus?.online !== false }"></span>
+                <span>{{ marketplaceSourceStatus?.message || '正在连接官方注册表' }}</span>
+                <span v-if="marketplacePagination.total">共 {{ marketplacePagination.total }} 条</span>
+                <a v-if="marketplaceSourceStatus?.upstream" :href="marketplaceSourceStatus.upstream" target="_blank" rel="noreferrer">
+                  官方来源 <ExternalLink :size="12" aria-hidden="true" />
+                </a>
+              </div>
+            </div>
+
+            <div v-if="marketplaceLastImpact" class="marketplace-impact-banner" :class="{ muted: !hasMarketplaceImpact(marketplaceLastImpact) }">
+              <div class="marketplace-impact-head">
+                <span>{{ marketplaceImpactActionLabel(marketplaceLastImpact) }}影响</span>
+                <strong>{{ marketplaceImpactSummaryText(marketplaceLastImpact) }}</strong>
+              </div>
+              <div v-if="hasMarketplaceImpact(marketplaceLastImpact)" class="marketplace-impact-scopes">
+                <span v-for="scope in marketplaceLastImpact.scopes.slice(0, 4)" :key="`${scope.scope}:${scope.id}`">
+                  {{ marketplaceImpactScopeLabel(scope) }} · {{ scope.name || scope.id }}
+                </span>
+                <span v-if="marketplaceLastImpact.scopes.length > 4">+{{ marketplaceLastImpact.scopes.length - 4 }}</span>
+                <span v-if="marketplaceLastImpact.truncated">已截断</span>
+              </div>
+            </div>
+
+            <div v-if="marketplaceLastRuntimeImpact" class="marketplace-impact-banner runtime" :class="{ muted: !hasMarketplaceRuntimeImpact(marketplaceLastRuntimeImpact) }">
+              <div class="marketplace-impact-head">
+                <span>运行时同步</span>
+                <strong>{{ marketplaceRuntimeImpactSummaryText(marketplaceLastRuntimeImpact) }}</strong>
+                <button v-if="hasMarketplaceRuntimeImpact(marketplaceLastRuntimeImpact)" class="btn btn-outline btn-sm" :disabled="runtimeResyncing" @click="resyncRuntimeTools(marketplaceLastRuntimeImpact)">
+                  {{ runtimeResyncing ? '同步中' : '重同步' }}
+                </button>
+              </div>
+              <div v-if="hasMarketplaceRuntimeImpact(marketplaceLastRuntimeImpact)" class="marketplace-impact-scopes">
+                <span v-for="snapshot in marketplaceLastRuntimeImpact.snapshots.slice(0, 4)" :key="`${snapshot.runtime}:${snapshot.snapshotId}`">
+                  {{ snapshot.runtime }} · {{ snapshot.projectName || snapshot.groupId || snapshot.snapshotId }}
+                </span>
+                <span v-if="marketplaceLastRuntimeImpact.snapshots.length > 4">+{{ marketplaceLastRuntimeImpact.snapshots.length - 4 }}</span>
+              </div>
+            </div>
+
+            <div v-if="marketplaceLastRuntimeResync" class="marketplace-impact-banner runtime" :class="{ muted: !hasMarketplaceRuntimeResync(marketplaceLastRuntimeResync) }">
+              <div class="marketplace-impact-head">
+                <span>自动重同步</span>
+                <strong>{{ marketplaceRuntimeResyncSummaryText(marketplaceLastRuntimeResync) }}</strong>
+              </div>
+            </div>
+
+            <LoadingSkeleton v-if="marketplaceLoading" variant="cards" :cards="6" />
+            <div v-else-if="marketplaceError" class="marketplace-error-state">
+              <div>
+                <strong>商城暂时没有加载成功</strong>
+                <span>{{ marketplaceError }}</span>
+              </div>
+              <button type="button" class="btn btn-outline btn-sm" @click="loadMarketplace">重试</button>
+            </div>
+            <EmptyState
+              v-else-if="filteredTools().length === 0"
+              icon="📦"
+              :title="marketplaceQuery ? '没有找到匹配结果' : '当前频道暂无可用工具'"
+              :hint="marketplaceQuery ? '请换个关键词' : ''"
+            />
+            <div v-for="tool in (!marketplaceLoading && !marketplaceError ? filteredTools() : [])" :key="tool.id || `${tool.type}:${tool.name}`" class="tool-card marketplace-tool">
+              <div class="tool-header">
+                <div class="marketplace-tool-main">
+                  <span class="marketplace-tool-icon">
+                    <Server v-if="tool.type === 'mcp'" :size="18" aria-hidden="true" />
+                    <Package v-else :size="18" aria-hidden="true" />
+                  </span>
+                  <div class="marketplace-tool-copy">
+                    <div class="tool-name">
+                      {{ marketplaceDisplayName(tool) }}
+                      <span v-if="tool.author" style="font-size:11px;color:var(--text-muted);font-weight:normal;margin-left:6px">by {{ tool.author }}</span>
+                    </div>
+                    <div class="tool-desc">{{ tool.description || '' }}</div>
+                    <div class="marketplace-meta">
+                      <span>{{ tool.type === 'mcp' ? 'MCP' : 'Skill' }}</span>
+                      <span v-if="tool.verified" class="marketplace-verified"><ShieldCheck :size="12" aria-hidden="true" /> 已验证</span>
+                      <span v-if="tool.installs">{{ formatMarketplaceCount(tool.installs) }} 次安装</span>
+                      <span v-if="tool.useCount">{{ formatMarketplaceCount(tool.useCount) }} 次使用</span>
+                      <span :class="`trust-${tool.source?.trust || 'custom'}`">{{ sourceTrustLabel(tool) }}来源</span>
+                      <span v-if="isBundledInternalMcp(tool)" class="marketplace-verified"><ShieldCheck :size="12" aria-hidden="true" /> 项目内置</span>
+                      <span v-else-if="tool.installedVersion">已安装</span>
+                      <span v-if="tool.updateAvailable" class="update-ready">可更新</span>
+                      <a v-if="tool.homepage || tool.sourceUrl" :href="tool.homepage || tool.sourceUrl" target="_blank" rel="noreferrer">
+                        查看来源 <ExternalLink :size="11" aria-hidden="true" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+                <div class="marketplace-actions">
+                  <button class="btn btn-outline btn-sm" :disabled="tool.previewing" @click="previewMarketTool(tool)">
+                    {{ tool.previewing ? '读取中' : '预览' }}
+                  </button>
+                  <button v-if="isBundledInternalMcp(tool)" class="btn btn-outline btn-sm" @click="currentFilter = 'internal-mcp'">查看内部 MCP</button>
+                  <button v-else-if="!isInstalled(tool) || tool.updateAvailable || marketplaceCanRefresh(tool)" class="btn btn-primary btn-sm" :disabled="tool.installing" @click="installMarketTool(tool)">
+                    {{ installButtonText(tool) }}
+                  </button>
+                  <button v-if="isInstalled(tool) && !isBundledInternalMcp(tool)" class="btn btn-danger btn-sm" :disabled="tool.uninstalling" @click="uninstallMarketTool(tool)">
+                    {{ tool.uninstalling ? '卸载中' : '卸载' }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="tool.impactLoading" class="marketplace-impact-inline muted">正在检查项目/群聊授权影响...</div>
+              <div v-else-if="hasMarketplaceImpact(tool.authorizationImpact)" class="marketplace-impact-inline">
+                <div class="marketplace-impact-head">
+                  <span>{{ marketplaceImpactActionLabel(tool.authorizationImpact) }}预检</span>
+                  <strong>{{ marketplaceImpactSummaryText(tool.authorizationImpact) }}</strong>
+                </div>
+                <div class="marketplace-impact-scopes">
+                  <span v-for="scope in tool.authorizationImpact.scopes.slice(0, 3)" :key="`${scope.scope}:${scope.id}`" :title="marketplaceImpactScopeGrants(scope)">
+                    {{ marketplaceImpactScopeLabel(scope) }} · {{ scope.name || scope.id }}
+                  </span>
+                  <span v-if="tool.authorizationImpact.scopes.length > 3">+{{ tool.authorizationImpact.scopes.length - 3 }}</span>
+                </div>
+              </div>
+              <div v-if="hasMarketplaceRuntimeImpact(tool.runtimeImpact)" class="marketplace-impact-inline runtime">
+                <div class="marketplace-impact-head">
+                  <span>运行时同步</span>
+                  <strong>{{ marketplaceRuntimeImpactSummaryText(tool.runtimeImpact) }}</strong>
+                  <button class="btn btn-outline btn-sm" :disabled="runtimeResyncing" @click="resyncRuntimeTools(tool.runtimeImpact)">
+                    {{ runtimeResyncing ? '同步中' : '重同步' }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="tool.runtimeResync" class="marketplace-impact-inline runtime" :class="{ muted: !hasMarketplaceRuntimeResync(tool.runtimeResync) }">
+                <div class="marketplace-impact-head">
+                  <span>自动重同步</span>
+                  <strong>{{ marketplaceRuntimeResyncSummaryText(tool.runtimeResync) }}</strong>
+                </div>
+              </div>
+            </div>
+            <div v-if="marketplaceOnlineSource && !marketplaceLoading && !marketplaceError && marketplacePagination.totalPages > 1" class="marketplace-pagination">
+              <button type="button" class="marketplace-icon-button" title="上一页" :disabled="!marketplacePagination.hasPrevious" @click="changeMarketplacePage(marketplacePagination.page - 1)">
+                <ChevronLeft :size="16" aria-hidden="true" />
+              </button>
+              <span>第 {{ marketplacePagination.page }} / {{ marketplacePagination.totalPages }} 页</span>
+              <button type="button" class="marketplace-icon-button" title="下一页" :disabled="!marketplacePagination.hasNext" @click="changeMarketplacePage(marketplacePagination.page + 1)">
+                <ChevronRight :size="16" aria-hidden="true" />
+              </button>
+            </div>
+            <details v-if="marketplaceOperations.length || marketplaceOperationsLoading" class="marketplace-operations-panel marketplace-operations-after-results">
+              <summary class="marketplace-operations-header">
+                <div>
+                  <strong>最近商城操作</strong>
+                  <span>{{ marketplaceOperationsSummary.totalReturned || 0 }} 条记录 · 影响授权 {{ marketplaceOperationsSummary.impactedScopes || 0 }} 个范围 · 运行时快照 {{ marketplaceOperationsSummary.impactedRuntimeSnapshots || 0 }} 个 · 自动同步 {{ marketplaceOperationsSummary.runtimeResynced || 0 }} 个</span>
+                </div>
+                <span class="marketplace-operations-toggle">查看记录</span>
+              </summary>
+              <div class="marketplace-operations-actions">
+                <button v-if="marketplaceOperationsSummary.impactedRuntimeSnapshots" class="btn btn-outline btn-sm" :disabled="runtimeResyncing" @click="resyncRuntimeTools">
+                  {{ runtimeResyncing ? '同步中' : '重同步运行时' }}
+                </button>
+                <button class="btn btn-outline btn-sm" :disabled="marketplaceOperationsLoading" @click="loadMarketplaceOperations">
+                  {{ marketplaceOperationsLoading ? '刷新中' : '刷新' }}
+                </button>
+              </div>
+              <div class="marketplace-operation-list">
+                <div v-for="operation in marketplaceOperations.slice(0, 5)" :key="`${operation.at}:${operation.key}:${operation.action}`" class="marketplace-operation-row">
+                  <div class="marketplace-operation-main">
+                    <span class="marketplace-operation-title">{{ marketplaceOperationTitle(operation) }}</span>
+                    <span class="marketplace-operation-time">{{ marketplaceOperationTime(operation) }}</span>
+                  </div>
+                  <div class="marketplace-operation-meta">
+                    <span v-if="marketplaceOperationVersionText(operation)">v{{ marketplaceOperationVersionText(operation) }}</span>
+                    <span v-if="operation.source?.label">{{ operation.source.label }}</span>
+                    <span :class="{ warn: hasMarketplaceImpact(operation.authorizationImpact) }">{{ marketplaceImpactSummaryText(operation.authorizationImpact) }}</span>
+                    <span :class="{ warn: hasMarketplaceRuntimeImpact(operation.runtimeImpact) }">{{ marketplaceRuntimeImpactSummaryText(operation.runtimeImpact) }}</span>
+                    <span v-if="operation.runtimeResync" :class="{ warn: operation.runtimeResync.success === false || (operation.runtimeResync.summary?.failed || 0) > 0 }">{{ marketplaceRuntimeResyncSummaryText(operation.runtimeResync) }}</span>
+                  </div>
+                  <div v-if="hasMarketplaceImpact(operation.authorizationImpact)" class="marketplace-impact-scopes">
+                    <span v-for="scope in operation.authorizationImpact.scopes.slice(0, 3)" :key="`${scope.scope}:${scope.id}`" :title="marketplaceImpactScopeGrants(scope)">
+                      {{ marketplaceImpactScopeLabel(scope) }} · {{ scope.name || scope.id }}
+                    </span>
+                    <span v-if="operation.authorizationImpact.scopes.length > 3">+{{ operation.authorizationImpact.scopes.length - 3 }}</span>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showMarketplacePreview" class="modal-overlay" @click.self="showMarketplacePreview = false">
+      <div class="modal marketplace-preview-modal">
+        <button class="modal-close" @click="showMarketplacePreview = false">&times;</button>
+        <h3>{{ marketplacePreview?.item?.displayName || marketplacePreview?.item?.name || '工具预览' }}</h3>
+        <LoadingSkeleton v-if="previewLoading" :rows="4" />
+        <template v-else>
+          <div class="preview-summary">
+            <span>{{ marketplacePreview?.item?.type === 'mcp' ? 'MCP' : 'Skill' }}</span>
+            <span>v{{ marketplacePreview?.item?.version || '0.0.0' }}</span>
+            <span>{{ sourceTrustLabel(marketplacePreview?.item || {}) }}来源</span>
+          </div>
+          <div class="preview-table">
+            <div v-for="row in previewRows" :key="row[0]" class="preview-row">
+              <span>{{ row[0] }}</span>
+              <code>{{ row[1] }}</code>
+            </div>
+          </div>
+          <pre v-if="marketplacePreview?.preview?.content" class="preview-content">{{ marketplacePreview.preview.content }}</pre>
+          <div v-if="marketplacePreview?.preview?.note" class="form-hint">{{ marketplacePreview.preview.note }}</div>
+          <div class="form-actions">
+            <button class="btn btn-cancel" @click="showMarketplacePreview = false">关闭</button>
+            <button class="btn btn-primary" :disabled="marketplacePreview?.item?.installing" @click="installMarketTool(marketplacePreview.item); showMarketplacePreview = false">
+              {{ marketplacePreview?.item ? installButtonText(marketplacePreview.item) : '确认安装' }}
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 侧拉抽屉：用于展示高级技能手册 SKILL.md -->
+    <div v-if="showDrawer" class="drawer-overlay show" @click.self="showDrawer = false">
+      <div class="drawer show" role="dialog" aria-modal="true" aria-label="Skill 使用手册">
+        <div class="drawer-header">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:20px">📖</span>
+            <div>
+              <div class="drawer-title">{{ drawerSkill?.name }}</div>
+              <div class="drawer-subtitle font-mono">skills/{{ drawerSkill?.id }}/SKILL.md</div>
+            </div>
+          </div>
+          <button class="drawer-close" @click="showDrawer = false">&times;</button>
+        </div>
+        <div class="drawer-body">
+          <SkillMarkdownViewer :content="drawerSkill?.content || ''" />
+        </div>
+      </div>
+    </div>
+
+    <McpServerEditor :open="showAddMcp" :tool="editingMcp" @close="closeMcpEditor" @saved="handleMcpSaved" />
+
+    <!-- 添加 Skill 弹窗 -->
+    <div v-if="showAddSkill" class="modal-overlay" @click.self="showAddSkill = false">
+      <div class="modal">
+        <button class="modal-close" @click="showAddSkill = false">&times;</button>
+        <h3>添加自定义 Prompt 技能</h3>
+        <div class="form-group">
+          <label>名称</label>
+          <input v-model="newSkill.name" placeholder="如 code-review">
+        </div>
+        <div class="form-group">
+          <label>描述</label>
+          <input v-model="newSkill.description" placeholder="简要描述功能">
+        </div>
+        <div class="form-group">
+          <label>Prompt 模板</label>
+          <textarea v-model="newSkill.prompt" placeholder="请审查以下代码，关注安全性、性能 and 可维护性..." rows="5"></textarea>
+          <div class="form-hint">Skill 执行时注入到 Agent 上下文的 prompt 模板</div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-cancel" @click="showAddSkill = false">取消</button>
+          <button class="btn btn-primary" @click="submitAddSkill">添加</button>
+        </div>
+      </div>
+    </div>
+  </div>

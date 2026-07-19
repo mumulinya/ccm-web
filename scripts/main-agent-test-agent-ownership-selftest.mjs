@@ -4,10 +4,25 @@ import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
 const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf8')
+const readMany = (...relativePaths) => relativePaths.map(read).join('\n')
 
-const globalAgent = read('backend/modules/global/global-agent.ts')
+const globalAgent = readMany(
+  'backend/modules/global/global-agent.ts',
+  'backend/modules/global/global-agent-agentic-runtime.ts',
+  'backend/modules/global/global-agent-direct-dispatch.ts',
+  'backend/modules/global/global-agent-test-agent-relay.ts',
+  'backend/modules/global/global-agent-test-agent-display.ts',
+)
 const globalLoop = read('backend/agents/global/loop.ts')
-const collaboration = read('backend/modules/collaboration/collaboration.ts')
+const collaboration = readMany(
+  'backend/modules/collaboration/collaboration.ts',
+  'backend/modules/collaboration/collaboration-task-executor.ts',
+  'backend/modules/collaboration/collaboration-global-missions.ts',
+  'backend/modules/collaboration/collaboration-test-agent-runtime.ts',
+  'backend/modules/collaboration/collaboration-cross-agents-part-02-part-02-native-test.ts',
+  'backend/modules/collaboration/collaboration-runtime-coordinator-review-part-01.ts',
+  'backend/modules/collaboration/group-live-routes-part-02-part-02.ts',
+)
 const testAgentRunner = read('backend/modules/collaboration/test-agent-runner.ts')
 
 const checks = {

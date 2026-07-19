@@ -1,0 +1,304 @@
+  <div ref="pageRoot" class="auto-dev-page">
+    <header class="command-bar">
+      <div class="command-title">
+        <div class="title-line">
+          <h3>自动开发</h3>
+          <span :class="['readiness-badge', readinessTone]">
+            {{ readinessTone === 'ready' ? '可运行' : readinessTone === 'partial' ? '需关注' : readinessTone === 'checking' ? '检查中' : '暂不可用' }}
+          </span>
+        </div>
+        <p>主 Agent 认领需求、派发项目子 Agent，并在验收后生成报告。</p>
+      </div>
+      <div class="command-actions">
+        <button class="btn btn-outline" :disabled="isBusy" title="重新读取自动开发状态" @click="refreshAll">
+          {{ activeAction === 'refresh' ? '刷新中' : '刷新' }}
+        </button>
+        <button class="btn btn-primary" :disabled="isBusy || readinessLoading" @click="runAutopilot">
+          {{ activeAction === 'run' ? '正在运行' : '立即运行' }}
+        </button>
+      </div>
+    </header>
+
+    <nav class="view-tabs" role="tablist" aria-label="自动开发视图">
+      <button
+        v-for="view in views"
+        :key="view.id"
+        role="tab"
+        :aria-selected="activeView === view.id"
+        :class="{ active: activeView === view.id }"
+        @click="switchView(view.id)"
+      >
+        {{ view.label }}
+      </button>
+    </nav>
+
+    <main class="auto-dev-content">
+      <div v-if="activeView === 'overview'" class="overview-view">
+        <section :class="['readiness-strip', readinessTone]">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <strong>{{ readinessTitle }}</strong>
+            <p>{{ readinessDescription }}</p>
+          </div>
+          <button class="text-action" :disabled="readinessLoading" @click="loadDiagnostics()">
+            {{ readinessLoading ? '检查中' : '重新检查' }}
+          </button>
+        </section>
+
+        <section class="metric-strip" aria-label="今日自动开发概况">
+          <div>
+            <span>执行中</span>
+            <strong>{{ summary.running_tasks || 0 }}</strong>
+          </div>
+          <div>
+            <span>待处理需求</span>
+            <strong>{{ backlog.counts?.ready || 0 }}</strong>
+          </div>
+          <div>
+            <span>今日完成</span>
+            <strong>{{ summary.done_tasks || 0 }}</strong>
+          </div>
+          <div>
+            <span>需要关注</span>
+            <strong>{{ summary.blocked_tasks || 0 }}</strong>
+          </div>
+        </section>
+
+        <div class="overview-layout">
+          <div class="overview-main">
+            <section v-if="latestRun" class="section-block latest-run">
+              <div class="section-heading">
+                <div>
+                  <span class="eyebrow">最近一次手动运行</span>
+                  <h4>{{ friendlyAction(latestRun.outcome?.message || '运行已完成') }}</h4>
+                </div>
+                <button class="text-action" @click="emit('navigate', { tab: 'tasks' })">查看任务</button>
+              </div>
+              <div class="run-stats">
+                <span>续跑 <strong>{{ latestRun.continued || 0 }}</strong></span>
+                <span>整理资料 <strong>{{ latestRun.imported || 0 }}</strong></span>
+                <span>派发 <strong>{{ latestRun.dispatched || 0 }}</strong></span>
+                <span>入队 <strong>{{ latestRun.queued || latestRun.gap_queued || 0 }}</strong></span>
+              </div>
+            </section>
+
+            <section class="section-block">
+              <div class="section-heading">
+                <div>
+                  <span class="eyebrow">今日进展</span>
+                  <h4>开发活动</h4>
+                </div>
+                <span class="section-meta">{{ formatTime(overview?.today?.generated_at) }}</span>
+              </div>
+              <LoadingSkeleton v-if="overviewLoading" :rows="4" />
+              <EmptyState v-else-if="!activities.length" icon="🧭" title="今天还没有新的开发活动" hint="运行一次自动开发后，进展会出现在这里" />
+              <div v-else class="activity-list">
+                <article v-for="item in activities.slice(0, 8)" :key="item.id" class="activity-row">
+                  <div>
+                    <strong>{{ item.title }}</strong>
+                    <span>{{ item.actor_label || '系统记录' }} · {{ item.source_label }} · {{ item.location }}</span>
+                  </div>
+                  <span class="activity-status">{{ item.status_label }}</span>
+                </article>
+              </div>
+            </section>
+
+            <section class="section-block">
+              <div class="section-heading">
+                <div>
+                  <span class="eyebrow">待处理</span>
+                  <h4>阻塞与续跑</h4>
+                </div>
+              </div>
+              <EmptyState v-if="!blockers.length" icon="✓" title="当前没有需要处理的阻塞" />
+              <div v-else class="blocker-list">
+                <article v-for="item in blockers.slice(0, 6)" :key="item.id" class="blocker-row">
+                  <strong>{{ item.title }}</strong>
+                  <span>{{ friendlyAction(item.reason) }}</span>
+                </article>
+              </div>
+            </section>
+          </div>
+
+          <aside class="overview-side">
+            <section class="section-block readiness-panel">
+              <div class="section-heading">
+                <div>
+                  <span class="eyebrow">运行准备</span>
+                  <h4>自动开发链路</h4>
+                </div>
+              </div>
+              <div class="check-list">
+                <div v-for="check in readinessChecks" :key="check.id" class="check-row">
+                  <span :class="['check-indicator', check.state]"></span>
+                  <span>{{ check.label }}</span>
+                  <strong>{{ check.value }}</strong>
+                </div>
+              </div>
+              <div v-if="nextActions.length" class="next-actions">
+                <span>接下来</span>
+                <ol>
+                  <li v-for="action in nextActions" :key="action">{{ action }}</li>
+                </ol>
+              </div>
+            </section>
+
+            <section class="section-block unattended-panel">
+              <div class="section-heading compact">
+                <div>
+                  <span class="eyebrow">无人值守</span>
+                  <h4>{{ enabledDailyDevJobs.length ? `已启用 ${enabledDailyDevJobs.length} 个计划` : '尚未启用' }}</h4>
+                </div>
+                <button class="text-action" @click="emit('navigate', { tab: 'cron' })">管理</button>
+              </div>
+              <p>调度时间、启停和运行记录统一在定时任务页面管理。</p>
+            </section>
+
+            <section class="section-block backlog-panel">
+              <div class="section-heading compact">
+                <div>
+                  <span class="eyebrow">需求池</span>
+                  <h4>{{ backlog.total || 0 }} 条业务需求</h4>
+                </div>
+                <button class="text-action" @click="emit('navigate', { tab: 'tasks' })">查看</button>
+              </div>
+              <div class="backlog-summary">
+                <span>可接活 <strong>{{ backlog.counts?.ready || 0 }}</strong></span>
+                <span>待补充 <strong>{{ backlog.counts?.needs_user || 0 }}</strong></span>
+                <span>阻塞 <strong>{{ backlog.counts?.blocked || 0 }}</strong></span>
+                <span>完成 <strong>{{ backlog.counts?.done || 0 }}</strong></span>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <div v-else-if="activeView === 'reports'" class="reports-view">
+        <header class="view-heading">
+          <div>
+            <h4>工作复盘</h4>
+            <p>根据任务、对话、代码变更和验收记录还原真实工作。</p>
+          </div>
+          <div class="report-actions">
+            <button class="btn btn-outline" :disabled="isBusy" @click="reportKind === 'daily' ? generateDailyReport() : generateWeeklyReport()">
+              {{ activeAction.includes('report') ? '生成中' : '刷新复盘' }}
+            </button>
+            <button class="btn btn-primary" :disabled="isBusy || !feishu.notification_ready" @click="sendNotification(reportKind)">
+              {{ activeAction.startsWith('send-') ? '发送中' : '发送到飞书' }}
+            </button>
+          </div>
+        </header>
+
+        <div class="report-toolbar">
+          <div class="segmented-control" aria-label="报告类型">
+            <button :class="{ active: reportKind === 'daily' }" @click="reportKind = 'daily'">日报</button>
+            <button :class="{ active: reportKind === 'weekly' }" @click="reportKind = 'weekly'">周报</button>
+          </div>
+          <select v-if="reportKind === 'daily'" v-model="selectedDailyReportId" aria-label="选择日报日期">
+            <option v-for="item in dailyReports" :key="item.id" :value="item.id">{{ item.date }}</option>
+          </select>
+          <select v-else v-model="selectedWeeklyReportId" aria-label="选择周报周期">
+            <option v-for="item in weeklyReports" :key="item.id" :value="item.id">{{ item.start_date }} 至 {{ item.end_date }}</option>
+          </select>
+        </div>
+
+        <section v-if="activeReport" class="evidence-strip" aria-label="工作复盘数据依据">
+          <div>
+            <span>工作事件</span>
+            <strong>{{ reportEvidence.event_count || 0 }}</strong>
+          </div>
+          <div>
+            <span>强证据</span>
+            <strong>{{ reportEvidence.strong_evidence || 0 }}</strong>
+          </div>
+          <div>
+            <span>数据来源</span>
+            <strong>{{ reportEvidence.source_count || reportEvidenceSources.length || 0 }}</strong>
+          </div>
+          <div class="ownership-cell">
+            <span>工作归属</span>
+            <p>你 {{ reportOwnership.user_actions || 0 }} · Agent {{ reportOwnership.agent_actions || 0 }} · TestAgent {{ reportOwnership.test_agent_actions || 0 }} · 自动化 {{ reportOwnership.system_actions || 0 }}</p>
+          </div>
+        </section>
+
+        <section class="report-surface">
+          <AutoDevReportDocument
+            :markdown="activeReportMarkdown"
+            :empty-text="reportKind === 'daily' ? '暂无开发日报' : '暂无开发周报'"
+          />
+          <details v-if="reportHasTechnicalDetails" class="technical-details">
+            <summary>技术详情</summary>
+            <pre>{{ reportTechnicalDetails }}</pre>
+          </details>
+        </section>
+      </div>
+
+      <div v-else class="notifications-view">
+        <header class="view-heading">
+          <div>
+            <h4>报告通知</h4>
+            <p>日报和周报发送到固定飞书通知群。</p>
+          </div>
+          <span :class="['channel-state', feishu.notification_ready ? 'ready' : 'missing']">
+            {{ feishu.notification_ready ? '通道已就绪' : '通道待配置' }}
+          </span>
+        </header>
+
+        <div class="notification-layout">
+          <section class="notification-form">
+            <div class="field-row">
+              <label class="toggle-field">
+                <input v-model="notification.daily_enabled" type="checkbox">
+                <span>
+                  <strong>每日日报</strong>
+                  <small>自动发送当天开发进展</small>
+                </span>
+              </label>
+              <input v-model="notification.daily_time" type="time" aria-label="每日日报发送时间">
+            </div>
+            <div class="field-row weekly-field-row">
+              <label class="toggle-field">
+                <input v-model="notification.weekly_enabled" type="checkbox">
+                <span>
+                  <strong>每周周报</strong>
+                  <small>自动发送本周交付总结</small>
+                </span>
+              </label>
+              <select v-model.number="notification.weekly_day" aria-label="周报发送星期">
+                <option :value="1">周一</option><option :value="2">周二</option><option :value="3">周三</option>
+                <option :value="4">周四</option><option :value="5">周五</option><option :value="6">周六</option><option :value="0">周日</option>
+              </select>
+              <input v-model="notification.weekly_time" type="time" aria-label="周报发送时间">
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" :disabled="isBusy" @click="saveNotification">
+                {{ activeAction === 'save-notification' ? '保存中' : '保存通知计划' }}
+              </button>
+              <button class="btn btn-outline" :disabled="isBusy || !feishu.notification_ready" @click="sendNotification('daily')">发送今日日报</button>
+              <button class="btn btn-outline" :disabled="isBusy || !feishu.notification_ready" @click="sendNotification('weekly')">发送本周周报</button>
+            </div>
+            <p v-if="!feishu.notification_ready" class="channel-hint">请先到系统设置配置报告通知通道。</p>
+          </section>
+
+          <aside class="notification-history">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">最近发送</span>
+                <h4>通知记录</h4>
+              </div>
+            </div>
+            <EmptyState v-if="!notificationHistory.length" icon="📨" title="还没有通知记录" />
+            <div v-else class="history-list">
+              <article v-for="item in notificationHistory" :key="item.id">
+                <span :class="['history-dot', item.success ? 'ok' : 'fail']"></span>
+                <div>
+                  <strong>{{ item.kind === 'weekly' ? '周报' : '日报' }} · {{ item.success ? '发送成功' : '发送失败' }}</strong>
+                  <span>{{ formatShortTime(item.attempted_at) }}</span>
+                </div>
+              </article>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </div>

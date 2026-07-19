@@ -9,7 +9,11 @@ const {
   cancelTestAgentRunsForTask,
   purgeTestAgentRunnerRecordsForTask,
   runTestAgentCliJob,
+  upsertTestAgentRunnerRecordForSelfTest,
+  getTestAgentRunnerRecordForSelfTest,
+  reconcileTestAgentRunnerRecords,
 } = require("../ccm-package/dist/modules/collaboration/test-agent-runner.js");
+const { spawn } = require("node:child_process");
 const {
   pruneTestAgentArtifacts,
   purgeTestAgentArtifactsForTask,
@@ -58,7 +62,8 @@ function handoff(name, script, options = {}) {
       env: options.env || {},
     }],
     options: {
-      artifactDir: path.join(projectDir, "artifacts"),
+      // Keep artifacts outside workDir so idempotent replay fingerprints stay stable.
+      artifactDir: path.join(root, `${name}-artifacts`),
       browserProvider: "none",
       commandTimeoutMs: options.commandTimeoutMs || 15_000,
       requireAdversarialProbe: false,
@@ -135,8 +140,11 @@ async function runUrlBoundaryChecks(workDir) {
     await page.goto(`${baseUrl}/redirect-metadata`, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
     const playwrightRedirectTargetBlocked = blockedUrls.some(url => url.startsWith("http://169.254.169.254/"));
     blockedUrls.length = 0;
-    await page.goto(`${baseUrl}/subresource-metadata`, { waitUntil: "load", timeout: 10_000 }).catch(() => {});
-    await page.waitForTimeout(100);
+    await page.goto(`${baseUrl}/subresource-metadata`, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
+    const subresourceDeadline = Date.now() + 3_000;
+    while (Date.now() < subresourceDeadline && !blockedUrls.some(url => url.startsWith("http://169.254.169.254/"))) {
+      await page.waitForTimeout(50);
+    }
     const playwrightSubresourceTargetBlocked = blockedUrls.some(url => url.startsWith("http://169.254.169.254/"));
     await browserContext.close();
 
@@ -178,8 +186,15 @@ async function run() {
   await new Promise(resolve => setTimeout(resolve, 120));
   const eventLoopResponsive = timerFired;
   const [first, duplicate] = await Promise.all([firstPromise, duplicatePromise]);
-  const reportJsonPath = first.invocation?.report?.metadata?.artifactFiles?.reportJsonPath;
-  if (reportJsonPath) fs.appendFileSync(reportJsonPath, "\n", "utf8");
+  const artifactFiles = first.invocation?.report?.metadata?.artifactFiles || {};
+  const reportJsonPath = artifactFiles.reportJsonPath || artifactFiles.report_json_path || "";
+  const manifestPath = artifactFiles.manifestPath
+    || artifactFiles.manifest_path
+    || first.invocation?.artifactVerification?.manifestPath
+    || "";
+  // Tamper a hashed evidence file (not the self-referential manifest).
+  if (reportJsonPath && fs.existsSync(reportJsonPath)) fs.appendFileSync(reportJsonPath, "\n", "utf8");
+  else if (manifestPath && fs.existsSync(manifestPath)) fs.appendFileSync(manifestPath, "\n", "utf8");
   const tamperedReplay = await runTestAgentCliJob({
     mode: "invocation",
     handoff: normal,
@@ -204,6 +219,55 @@ async function run() {
   await new Promise(resolve => setTimeout(resolve, 350));
   const cancelledIds = cancelTestAgentRunsForTask(cancellable.taskId, "self-test cancellation");
   const cancelled = await cancelPromise;
+
+  // Orphan cancel: disk running record with live PID, not in activeChildren (post-restart).
+  const orphanTaskId = `hardening-task-orphan-${runSuffix}`;
+  const orphanId = `hardening-orphan-${runSuffix}`;
+  const orphanChild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const orphanPid = orphanChild.pid;
+  upsertTestAgentRunnerRecordForSelfTest({
+    id: orphanId,
+    taskId: orphanTaskId,
+    groupId: "hardening-group",
+    status: "running",
+    pid: orphanPid,
+    mode: "invocation",
+  });
+  const orphanCancelledIds = cancelTestAgentRunsForTask(orphanTaskId, "orphan self-test cancellation");
+  await new Promise(resolve => setTimeout(resolve, 200));
+  let orphanPidDead = false;
+  try {
+    process.kill(orphanPid, 0);
+    orphanPidDead = false;
+  } catch {
+    orphanPidDead = true;
+  }
+  const orphanRecord = getTestAgentRunnerRecordForSelfTest(orphanId);
+  try { orphanChild.kill("SIGKILL"); } catch {}
+
+  // Reconcile: dead PID left as running → interrupted + recoveredAfterRestart.
+  const reconcileTaskId = `hardening-task-reconcile-${runSuffix}`;
+  const reconcileId = `hardening-reconcile-${runSuffix}`;
+  const deadChild = spawn(process.execPath, ["-e", "process.exit(0)"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  await new Promise(resolve => deadChild.once("exit", resolve));
+  const deadPid = deadChild.pid;
+  upsertTestAgentRunnerRecordForSelfTest({
+    id: reconcileId,
+    taskId: reconcileTaskId,
+    groupId: "hardening-group",
+    status: "running",
+    pid: deadPid,
+    mode: "invocation",
+    exitCode: 1,
+  });
+  const reconcileSummary = reconcileTestAgentRunnerRecords();
+  const reconciled = getTestAgentRunnerRecordForSelfTest(reconcileId);
 
   const drift = handoff("source-drift", {
     name: "drift.cjs",
@@ -274,6 +338,12 @@ async function run() {
     cachedArtifactTamperRejected: tamperedReplay.invocation?.status === "runtime_error" && tamperedReplay.invocation?.canAccept === false,
     sourceBindingStableForReadOnlyVerification: first.record.sourceStable === true,
     cancellationStopsRunner: cancelledIds.length === 1 && cancelled.record.status === "cancelled",
+    orphanCancelKillsPid: orphanCancelledIds.includes(orphanId)
+      && orphanRecord?.status === "cancelled"
+      && orphanPidDead === true,
+    reconcileMarksInterrupted: reconciled?.status === "interrupted"
+      && reconciled?.recoveredAfterRestart === true
+      && !!reconcileSummary?.schema,
     sourceDriftDetected: drifted.record.sourceStable === false,
     shellInjectionBlocked: !!isUnsafeVerificationCommand("npm test && del /s /q C:\\temp"),
     dependencyInstallBlocked: !!isUnsafeVerificationCommand("npm install left-pad"),
@@ -296,6 +366,8 @@ async function run() {
   purgeTestAgentRunnerRecordsForTask(normal.taskId);
   purgeTestAgentRunnerRecordsForTask(cancellable.taskId);
   purgeTestAgentRunnerRecordsForTask(drift.taskId);
+  purgeTestAgentRunnerRecordsForTask(orphanTaskId);
+  purgeTestAgentRunnerRecordsForTask(reconcileTaskId);
 }
 
 try {

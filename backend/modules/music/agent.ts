@@ -18,7 +18,14 @@ export function extractMusicIntent(msg: string) {
   if (playMatch) return { type: "play", keyword: normalizeMusicActionKeyword(playMatch[1].trim(), true) };
   const searchMatch = msg.match(/(?:搜索|找|查找|有没有)(.+)/);
   if (searchMatch) return { type: "search", keyword: searchMatch[1].trim() };
-  if (/(?:转换|转码|下载|转成|转为)/.test(lower)) return { type: "convert", keyword: "" };
+  if (/(?:转换|转码|下载|转成|转为)/.test(lower)) {
+    const bvid = String(msg || "").match(/BV[\w]+/i)?.[0] || "";
+    const songId =
+      String(msg || "").match(/(?:song\?id=|id[=：:\s#]|网易云\s*[#]?)(\d{5,})/i)?.[1] ||
+      String(msg || "").match(/\b(\d{6,})\b/)?.[1] ||
+      "";
+    return { type: "convert", keyword: bvid || songId || "" };
+  }
   if (/[?？]|(?:怎么|如何|为什么|是什么|是啥|说明|介绍)/.test(msg)) return { type: "help", keyword: "" };
   const cleaned = msg.replace(/[，。！？、]/g, " ").replace(/我想听|帮我找|推荐|一些|一点|的歌|的音乐|吧|呗|听听/g, "").trim();
   if (cleaned.length >= 2) return { type: "search", keyword: cleaned };
@@ -63,12 +70,20 @@ export function normalizeMusicAgentAction(value: any, message: string, mode: str
               : fallback.type === "convert"
                 ? "convert_music"
                 : "none";
-  const rawKeyword = String(value?.keyword || value?.query || value?.song || (type === "play_music" || type === "search_music" ? fallback.keyword : "") || "").trim();
+  const rawKeyword = String(value?.keyword || value?.query || value?.song || (type === "play_music" || type === "search_music" || type === "convert_music" ? fallback.keyword : "") || "").trim();
+  const convertFromMessage = type === "convert_music"
+    ? (String(message || "").match(/BV[\w]+/i)?.[0]
+      || String(message || "").match(/(?:song\?id=|id[=：:\s#]|网易云\s*[#]?)(\d{5,})/i)?.[1]
+      || String(message || "").match(/\b(\d{6,})\b/)?.[1]
+      || "")
+    : "";
   return {
     type,
     keyword: type === "play_music"
       ? normalizeMusicActionKeyword(rawKeyword, true)
-      : normalizeMusicActionKeyword(rawKeyword, false),
+      : type === "convert_music"
+        ? String(rawKeyword || convertFromMessage || "").trim()
+        : normalizeMusicActionKeyword(rawKeyword, false),
     mode: mode || "cloud",
     source,
     confidence: Math.max(0, Math.min(1, Number(value?.confidence ?? (source === "agent" ? 0.75 : 0.45)) || 0)),

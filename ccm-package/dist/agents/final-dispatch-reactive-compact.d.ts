@@ -1,16 +1,6 @@
+export { projectFinalDispatchRecentContext } from "./final-dispatch-context-collapse";
 export declare const FINAL_DISPATCH_REACTIVE_COMPACT_SCHEMA = "ccm-final-dispatch-reactive-compact-v1";
 export declare function isProviderPromptTooLongFailure(value: any): boolean;
-export declare function projectFinalDispatchRecentContext(context: string, tokenBudget: number): {
-    text: string;
-    compacted: boolean;
-    original_tokens: number;
-    projected_tokens: number;
-    original_chars: number;
-    projected_chars: number;
-    omitted_lines: number;
-    source_checksum: string;
-    projection_checksum: string;
-};
 export declare function verifyFinalDispatchReactiveCompactReceipt(receipt: any, expected?: any): {
     valid: boolean;
     issues: string[];
@@ -22,41 +12,12 @@ export declare function recoverFinalWorkerDispatchPayload(input?: any): {
     gate: any;
     receipt: any;
     projection?: undefined;
+    contextCollapse?: undefined;
 } | {
     recovered: boolean;
     reason: string;
     prompt: string;
-    gate: {
-        gate_checksum: string;
-        schema: string;
-        version: number;
-        gate_id: string;
-        group_id: string;
-        group_session_id: string;
-        task_id: string;
-        task_agent_session_id: string;
-        worker_context_packet_id: string;
-        provider: string;
-        model: string;
-        model_context_window: number;
-        reserved_output_tokens: number;
-        effective_context_window: number;
-        auto_compact_buffer_tokens: number;
-        auto_compact_threshold: number;
-        estimated_prompt_tokens: number;
-        provider_envelope_tokens: number;
-        estimated_total_input_tokens: number;
-        remaining_tokens_before_auto_compact: number;
-        prompt_chars: number;
-        prompt_checksum: string;
-        worker_packet_estimated_tokens: number;
-        capacity_evidence_checksum: string;
-        capacity_source: string;
-        status: string;
-        action: string;
-        provider_call_allowed: boolean;
-        checked_at: string;
-    };
+    gate: any;
     receipt: {
         receipt_checksum: string;
         schema: string;
@@ -86,6 +47,8 @@ export declare function recoverFinalWorkerDispatchPayload(input?: any): {
         omitted_context_lines: number;
         recent_context_source_checksum: string;
         recent_context_projection_checksum: string;
+        context_collapse: any;
+        recovery_stages: string[];
         status: string;
         action: string;
         provider_call_allowed: boolean;
@@ -93,15 +56,6 @@ export declare function recoverFinalWorkerDispatchPayload(input?: any): {
         recovered_gate_issues: string[];
         created_at: string;
     };
-    projection: {
-        text: string;
-        compacted: boolean;
-        original_tokens: number;
-        projected_tokens: number;
-        original_chars: number;
-        projected_chars: number;
-        omitted_lines: number;
-        source_checksum: string;
-        projection_checksum: string;
-    };
+    projection: any;
+    contextCollapse: any;
 };

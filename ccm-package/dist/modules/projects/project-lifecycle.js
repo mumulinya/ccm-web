@@ -45,6 +45,8 @@ const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const sessions_1 = require("./sessions");
+const chat_runs_1 = require("../../projects/chat-runs");
+const project_session_agent_binding_1 = require("./project-session-agent-binding");
 const project_validation_1 = require("./project-validation");
 const ARCHIVE_DIR = path.join(utils_1.CONFIGS_DIR, "archived");
 const LIFECYCLE_DIR = path.join(utils_1.CCM_DIR, "project-lifecycle");
@@ -86,6 +88,14 @@ function countJsonFiles(dir) {
     if (!fs.existsSync(dir))
         return 0;
     return fs.readdirSync(dir).filter((item) => item.endsWith(".json") && fs.statSync(path.join(dir, item)).isFile()).length;
+}
+function projectWebSessionIds(project) {
+    const dir = (0, project_validation_1.resolveContainedPath)(sessions_1.WEB_SESSIONS_DIR, (0, project_validation_1.validateProjectName)(project));
+    if (!fs.existsSync(dir))
+        return [];
+    return fs.readdirSync(dir)
+        .filter(item => item.endsWith(".json") && fs.statSync((0, project_validation_1.resolveContainedPath)(dir, item)).isFile())
+        .map(item => item.slice(0, -5));
 }
 function fileDescriptor(label, target) {
     if (!fs.existsSync(target))
@@ -148,6 +158,9 @@ function archiveProject(name) {
         throw new Error("项目不存在或已经归档");
     if (fs.existsSync(destination))
         throw new Error("归档区已存在同名项目");
+    for (const sessionId of projectWebSessionIds(project)) {
+        (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, "项目已归档");
+    }
     ensureDirectories();
     fs.renameSync(source, destination);
     const state = readState();
@@ -189,6 +202,10 @@ function purgeArchivedProject(name, previewToken) {
         throw new Error("项目数据已变化，请重新预览后再删除");
     if (!fs.existsSync(configFile(impact.project, true)))
         throw new Error("归档项目不存在");
+    for (const sessionId of projectWebSessionIds(impact.project)) {
+        (0, project_session_agent_binding_1.purgeProjectSessionAgentBinding)(impact.project, sessionId);
+        (0, chat_runs_1.purgeProjectChatRunsForSession)(impact.project, sessionId);
+    }
     for (const item of impact.items) {
         if (!item.exists)
             continue;

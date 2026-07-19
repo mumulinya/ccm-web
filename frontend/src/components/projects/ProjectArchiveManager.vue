@@ -1,6 +1,8 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { AlertTriangle, ArchiveRestore, Clock3, FileText, RefreshCw, ShieldCheck, Trash2, X } from '@lucide/vue'
+import EmptyState from '../common/EmptyState.vue'
+import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import { projectsApi } from '../../api/index.js'
 
 const emit = defineEmits(['close', 'changed', 'notify'])
@@ -68,8 +70,8 @@ onMounted(load)
       </header>
 
       <div class="archive-content">
-        <div v-if="loading" class="empty">正在加载归档项目...</div>
-        <div v-else-if="projects.length === 0" class="empty"><ShieldCheck :size="28" /><strong>没有归档项目</strong><span>活动项目归档后会出现在这里。</span></div>
+        <LoadingSkeleton v-if="loading" :rows="4" />
+        <EmptyState v-else-if="projects.length === 0" large icon="🛡️" title="没有归档项目" hint="活动项目归档后会出现在这里。" />
         <div v-else class="archive-list">
           <article v-for="item in projects" :key="item.name">
             <div><strong>{{ item.name }}</strong><small><Clock3 :size="13" />归档于 {{ formatDate(item.archived_at) }}</small></div>
@@ -107,7 +109,6 @@ h2,h3,p { margin:0; } h2 { font-size:18px; } header p { margin-top:5px; color:va
 button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:34px; padding:0 11px; border:1px solid rgba(15,23,42,.12); border-radius:7px; background:var(--surface,#fff); color:var(--text-primary); cursor:pointer; }
 button:disabled { opacity:.5; cursor:not-allowed; }.head-actions button { width:34px; padding:0; }
 .archive-content { padding:16px 20px 28px; overflow:auto; }
-.empty { min-height:180px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:var(--text-muted); }
 .archive-list { display:flex; flex-direction:column; gap:7px; }
 article { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 13px; border:1px solid rgba(15,23,42,.09); border-radius:8px; }
 article>div:first-child { min-width:0; display:flex; flex-direction:column; gap:5px; } article strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

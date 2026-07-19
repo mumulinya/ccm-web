@@ -44,7 +44,7 @@ async function writePlaywrightFailureScreenshot(input) {
     const screenshotPath = path.join(screenshotDir, `${(0, utils_1.safeSegment)(input.projectName)}-${(0, utils_1.safeSegment)(input.checkName)}-${input.index + 1}-${stepName}.failure.png`);
     try {
         await input.page.screenshot({ path: screenshotPath, fullPage: true });
-        return [screenshotPath];
+        return [{ stepName, path: screenshotPath, kind: "failure" }];
     }
     catch {
         return [];

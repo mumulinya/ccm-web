@@ -1,5 +1,6 @@
 <script setup>
 import { MessageSquarePlus, Pencil, RefreshCw, Trash2, X } from '@lucide/vue'
+import EmptyState from '../common/EmptyState.vue'
 defineProps({ project: { type: String, default: '' }, sessions: { type: Array, default: () => [] }, currentSession: { type: String, default: '' }, open: { type: Boolean, default: false } })
 const emit = defineEmits(['select', 'create', 'refresh', 'rename', 'delete', 'close'])
 </script>
@@ -16,8 +17,8 @@ const emit = defineEmits(['select', 'create', 'refresh', 'rename', 'delete', 'cl
       </div>
     </header>
     <div class="session-list">
-      <div v-if="!project" class="empty">选择项目后查看会话</div>
-      <div v-else-if="sessions.length === 0" class="empty">暂无会话，新建一个开始工作</div>
+      <EmptyState v-if="!project" icon="📂" title="选择项目后查看会话" />
+      <EmptyState v-else-if="sessions.length === 0" icon="💬" title="暂无会话" hint="新建一个开始工作" />
       <template v-else>
         <div
           v-for="session in sessions"
@@ -47,7 +48,6 @@ header button,.session-actions button { width:30px; height:30px; display:inline-
 header button:hover,.session-actions button:hover { background:rgba(37,99,235,.08); color:#2563eb; }
 .mobile-close { display:none; }
 .session-list { flex:1; overflow:auto; padding:8px; }
-.empty { padding:28px 14px; text-align:center; color:var(--text-muted); font-size:13px; line-height:1.6; }
 .session-item { width:100%; min-height:56px; display:flex; align-items:center; gap:8px; margin:2px 0; padding:9px 9px 9px 11px; border:0; border-radius:7px; background:transparent; color:var(--text-primary); text-align:left; cursor:pointer; }
 .session-item:hover { background:rgba(15,23,42,.045); }
 .session-item.active { background:rgba(37,99,235,.09); box-shadow:inset 2px 0 #2563eb; }

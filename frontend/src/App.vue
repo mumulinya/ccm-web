@@ -30,6 +30,8 @@ import {
   X,
 } from '@lucide/vue'
 import UsabilityWorkbench from './components/common/UsabilityWorkbench.vue'
+import PageLoadingOverlay from './components/common/PageLoadingOverlay.vue'
+import PageLoadError from './components/common/PageLoadError.vue'
 import {
   MENU_CONFIG_EVENT,
   MENU_CONFIG_KEY,
@@ -37,26 +39,41 @@ import {
   loadMenuConfiguration,
 } from './utils/menuConfiguration.js'
 
-const ProjectManager = defineAsyncComponent(() => import('./components/projects/ProjectManager.vue'))
-const GroupChat = defineAsyncComponent(() => import('./components/collaboration/GroupChat.vue'))
-const ToolsConfig = defineAsyncComponent(() => import('./components/tools/ToolsConfig.vue'))
-const TaskManager = defineAsyncComponent(() => import('./components/tasks/TaskManager.vue'))
-const AutoDevOps = defineAsyncComponent(() => import('./components/tools/AutoDevOps.vue'))
-const Terminal = defineAsyncComponent(() => import('./components/tools/Terminal.vue'))
-const Settings = defineAsyncComponent(() => import('./components/settings/Settings.vue'))
-const CodeChanges = defineAsyncComponent(() => import('./components/tools/CodeChanges.vue'))
-const CronJobs = defineAsyncComponent(() => import('./components/tools/CronJobs.vue'))
-const AgentMetrics = defineAsyncComponent(() => import('./components/agents/AgentMetrics.vue'))
-const SearchHistory = defineAsyncComponent(() => import('./components/workspace/SearchHistory.vue'))
-const MusicPlayer = defineAsyncComponent(() => import('./components/music/MusicPlayer.vue'))
+const definePageComponent = loader => defineAsyncComponent({
+  loader,
+  loadingComponent: PageLoadingOverlay,
+  errorComponent: PageLoadError,
+  delay: 0,
+  timeout: 30_000,
+  onError(error, retry, fail, attempts) {
+    if (attempts < 2 && /fetch|network|loading|chunk/i.test(String(error?.message || error))) {
+      window.setTimeout(retry, 350)
+      return
+    }
+    fail()
+  },
+})
+
+const ProjectManager = definePageComponent(() => import('./components/projects/ProjectManager.vue'))
+const GroupChat = definePageComponent(() => import('./components/collaboration/GroupChat.vue'))
+const ToolsConfig = definePageComponent(() => import('./components/tools/ToolsConfig.vue'))
+const TaskManager = definePageComponent(() => import('./components/tasks/TaskManager.vue'))
+const AutoDevOps = definePageComponent(() => import('./components/tools/AutoDevOps.vue'))
+const Terminal = definePageComponent(() => import('./components/tools/Terminal.vue'))
+const Settings = definePageComponent(() => import('./components/settings/Settings.vue'))
+const CodeChanges = definePageComponent(() => import('./components/tools/CodeChanges.vue'))
+const CronJobs = definePageComponent(() => import('./components/tools/CronJobs.vue'))
+const AgentMetrics = definePageComponent(() => import('./components/agents/AgentMetrics.vue'))
+const SearchHistory = definePageComponent(() => import('./components/workspace/SearchHistory.vue'))
+const MusicPlayer = definePageComponent(() => import('./components/music/MusicPlayer.vue'))
 const MusicRemoteHost = defineAsyncComponent(() => import('./components/music/MusicRemoteHost.vue'))
-const MenuManager = defineAsyncComponent(() => import('./components/workspace/MenuManager.vue'))
-const PetMenu = defineAsyncComponent(() => import('./components/pets/PetMenu.vue'))
-const GlobalAgent = defineAsyncComponent(() => import('./components/global/GlobalAgent.vue'))
-const KnowledgeBase = defineAsyncComponent(() => import('./components/knowledge/KnowledgeBase.vue'))
-const MemoryCenter = defineAsyncComponent(() => import('./components/knowledge/MemoryCenter.vue'))
-const CleanupCenter = defineAsyncComponent(() => import('./components/system/cleanup/CleanupCenter.vue'))
-const TraceReplay = defineAsyncComponent(() => import('./components/system/TraceReplay.vue'))
+const MenuManager = definePageComponent(() => import('./components/workspace/MenuManager.vue'))
+const PetMenu = definePageComponent(() => import('./components/pets/PetMenu.vue'))
+const GlobalAgent = definePageComponent(() => import('./components/global/GlobalAgent.vue'))
+const KnowledgeBase = definePageComponent(() => import('./components/knowledge/KnowledgeBase.vue'))
+const MemoryCenter = definePageComponent(() => import('./components/knowledge/MemoryCenter.vue'))
+const CleanupCenter = definePageComponent(() => import('./components/system/cleanup/CleanupCenter.vue'))
+const TraceReplay = definePageComponent(() => import('./components/system/TraceReplay.vue'))
 
 const currentTab = ref('')
 const RETIRED_TAB_REDIRECTS = {
@@ -285,6 +302,7 @@ const connectPetNavigationStream = () => {
         })
       } else if (data.type === 'config') {
         refreshMusicPetAgent()
+        window.dispatchEvent(new CustomEvent('ccm-pets-config-changed'))
       }
       if (data.type === 'navigate') {
         applyPetNavigationTarget(data.target)
@@ -311,32 +329,41 @@ window.addEventListener('keydown', (e) => {
   }
 })
 
-const toggleTheme = () => {
-  isDark.value = !isDark.value
-  document.documentElement.setAttribute('data-theme', isDark.value ? 'dark' : 'light')
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
-
-  // 若处于自定义的科技霓虹预设主题中，切换明暗时自动平滑退回到默认主题，保障全站色彩渲染无错
-  const preset = localStorage.getItem('theme-preset') || 'default'
-  if (preset !== 'default') {
-    localStorage.setItem('theme-preset', 'default')
-    document.documentElement.setAttribute('data-theme-preset', 'default')
-    window.dispatchEvent(new Event('storage'))
-  }
-}
-
+/** 深色专用预设；aurora 为浅色专用。default 跟随用户浅/深选择。 */
 const DARK_THEME_PRESETS = new Set(['deep-void', 'cyberpunk', 'deep-ocean'])
+const LIGHT_THEME_PRESETS = new Set(['aurora'])
 
 const applyStoredThemePreferences = () => {
   const preset = localStorage.getItem('theme-preset') || 'default'
   const storedTheme = localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'
   const effectiveTheme = DARK_THEME_PRESETS.has(preset)
     ? 'dark'
-    : (preset === 'aurora' ? 'light' : storedTheme)
+    : (LIGHT_THEME_PRESETS.has(preset) ? 'light' : storedTheme)
 
   isDark.value = effectiveTheme === 'dark'
   document.documentElement.setAttribute('data-theme', effectiveTheme)
   document.documentElement.setAttribute('data-theme-preset', preset)
+}
+
+const toggleTheme = () => {
+  const nextDark = !isDark.value
+  const preset = localStorage.getItem('theme-preset') || 'default'
+  // 仅当当前预设锁定了相反色相时才退回 default；其余预设保留
+  const conflicts = nextDark
+    ? LIGHT_THEME_PRESETS.has(preset)
+    : DARK_THEME_PRESETS.has(preset)
+  if (conflicts) {
+    localStorage.setItem('theme-preset', 'default')
+    document.documentElement.setAttribute('data-theme-preset', 'default')
+  }
+  isDark.value = nextDark
+  const theme = nextDark ? 'dark' : 'light'
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem('theme', theme)
+  window.dispatchEvent(new StorageEvent('storage', { key: 'theme', newValue: theme }))
+  if (conflicts) {
+    window.dispatchEvent(new StorageEvent('storage', { key: 'theme-preset', newValue: 'default' }))
+  }
 }
 
 // 防止页面滚动（音乐播放器等场景）
@@ -630,11 +657,11 @@ const closeTab = (tabId, event) => {
       </div>
 
       <div class="content-area" :class="{ 'has-bottom-bar': isMobile, 'pets-content-area': currentTab === 'pets' }" @wheel.stop>
-        <div v-if="isTabOpen('projects')" v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
-        <div v-if="isTabOpen('groups')" v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
-        <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent :navigate-to="navigateTo" @navigated="navigateTo = null" @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
+        <div v-if="isTabOpen('projects')" v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :active="currentTab === 'projects'" :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('groups')" v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :active="currentTab === 'groups'" :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent :active="currentTab === 'global-agent'" :navigate-to="navigateTo" @navigated="navigateTo = null" @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
         <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig @navigate="applyPetNavigationTarget" /></div>
-        <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
+        <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :active="currentTab === 'pets'" :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
         <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
         <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
@@ -645,7 +672,7 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('terminal')" v-show="currentTab === 'terminal'" class="tab-pane"><Terminal /></div>
         <div v-if="isTabOpen('dashboard')" v-show="currentTab === 'dashboard'" class="tab-pane scrollable-pane"><UsabilityWorkbench @navigate="handleWorkbenchNavigate" /></div>
-        <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics /></div>
+        <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics :active="currentTab === 'metrics'" @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
         <!-- MusicPlayer stays mounted so global/Feishu point-song works from any tab -->
         <div v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :agent-label="musicPetLabel" /></div>

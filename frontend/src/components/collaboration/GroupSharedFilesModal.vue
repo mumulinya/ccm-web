@@ -1,4 +1,6 @@
 <script setup>
+import EmptyState from '../common/EmptyState.vue'
+
 defineProps({
   groupName: { type: String, default: '' },
   files: { type: Array, default: () => [] }
@@ -17,7 +19,7 @@ const emit = defineEmits(['close', 'add-file', 'delete-file'])
         <button class="btn btn-primary btn-sm" @click="emit('add-file')">+ 新建文件</button>
       </div>
       <div class="resource-body">
-        <div v-if="files.length === 0" class="resource-empty centered">暂无共享文件</div>
+        <EmptyState v-if="files.length === 0" icon="📁" title="暂无共享文件" />
         <div v-for="file in files" :key="file.name" class="file-row">
           <div>
             <div class="file-name">📄 {{ file.name }}</div>
@@ -39,11 +41,9 @@ const emit = defineEmits(['close', 'add-file', 'delete-file'])
 .modal-close { position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.05); background: rgba(0,0,0,0.02); color: var(--text-secondary); cursor: pointer; }
 .resource-modal { min-width: 500px; max-height: 80vh; display: flex; flex-direction: column; }
 .modal h3 { margin: 0 0 8px; font-size: 16px; color: var(--text-primary); }
-.modal-desc, .resource-empty { font-size: 12px; color: var(--text-muted); }
-.modal-desc { margin-bottom: 16px; }
+.modal-desc { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; }
 .file-actions { margin-bottom: 12px; }
 .resource-body { flex: 1; overflow-y: auto; }
-.resource-empty.centered { text-align: center; padding: 40px; }
 .file-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px; }
 .file-name { font-size: 13px; color: var(--text-primary); }
 .file-time { font-size: 11px; color: var(--text-muted); }

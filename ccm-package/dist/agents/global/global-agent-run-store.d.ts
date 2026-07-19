@@ -1,0 +1,43 @@
+import type { GlobalAgentRun, GlobalAgentRunStatus, GlobalAgentToolRisk, GlobalAgentToolSpec, GlobalAgentUserSteer, GlobalAgentUserSteerStatus } from "./loop";
+export declare const STORE_DIR: string;
+export declare const STORE_FILE: string;
+export declare const STORE_BACKUP: string;
+export declare const MAX_STORED_RUNS = 120;
+export declare const MAX_OBSERVATION_CHARS = 4000;
+export declare const GLOBAL_DISPATCH_TOOL_NAMES: string[];
+/** 浏览器 UI 副作用：按轻量 reply 展示，不挂交付脚手架 */
+export declare const LIGHT_UI_TOOL_NAMES: string[];
+export type GlobalAgentRunPresentation = "reply" | "plan" | "delivery";
+export declare const activeRuns: Set<string>;
+export declare const pauseRequests: Set<string>;
+export declare const cancelRequests: Set<string>;
+export declare const volatileRuns: Map<string, GlobalAgentRun>;
+export declare const activeRunObjects: Map<string, GlobalAgentRun>;
+export declare function invalidateGlobalAgentRunStoreCache(): void;
+export declare function destructiveOperation(args: any): boolean;
+export declare function writeJsonAtomic(file: string, value: any): void;
+export declare function normalizeGlobalAgentUserSteer(value: any): GlobalAgentUserSteer | null;
+export declare function normalizeGlobalAgentUserSteers(value: any, status?: GlobalAgentUserSteerStatus, limit?: number): GlobalAgentUserSteer[];
+export declare function normalizeRun(run: any): GlobalAgentRun;
+export declare function loadStore(): {
+    version: 1;
+    runs: GlobalAgentRun[];
+};
+export declare function saveRun(run: GlobalAgentRun, persist?: boolean): void;
+export declare function getGlobalAgentRun(id: string): GlobalAgentRun;
+export declare function listGlobalAgentRuns(options?: {
+    sessionId?: string;
+    status?: string;
+    limit?: number;
+}): GlobalAgentRun[];
+export declare function findWaitingGlobalAgentRun(sessionId: string): GlobalAgentRun;
+export declare function findClarifyingGlobalAgentRun(sessionId: string, maxAgeMs?: number): GlobalAgentRun;
+export declare function getGlobalAgentToolSpec(name: string): GlobalAgentToolSpec;
+export declare function classifyGlobalAgentToolRisk(name: string, args: any): GlobalAgentToolRisk;
+export declare function hasUserVisibleGlobalPlan(run: GlobalAgentRun | any): boolean;
+export declare function classifyGlobalAgentRunPresentation(run: GlobalAgentRun | any, status?: GlobalAgentRunStatus | string): GlobalAgentRunPresentation;
+export declare function isReadOnlyGlobalConsultation(run: GlobalAgentRun, status: GlobalAgentRunStatus): boolean;
+export declare function stable(value: any): any;
+export declare function toolSignature(name: string, args: any): string;
+export declare function validateTool(name: string, args: any): any;
+export declare const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[];

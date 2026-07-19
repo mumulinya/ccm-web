@@ -31,6 +31,8 @@ function serializableProjectChatRun(run: any) {
     workflow_decision: run.workflow_decision || null,
     workEvents: Array.isArray(run.workEvents) ? run.workEvents.slice(-80) : [],
     parent_run_id: run.parent_run_id || "",
+    project_session_id: run.project_session_id || "",
+    project_session_generation: Number(run.project_session_generation || 0),
     task_session_scope_id: run.task_session_scope_id || "",
     task_agent_session_id: run.task_agent_session_id || "",
     native_session_id: run.native_session_id || "",
@@ -68,7 +70,7 @@ export function loadProjectChatRuns() {
   }
 }
 
-export function createProjectChatRun(project: string, message: string, workDir: string, parentRunId = "") {
+export function createProjectChatRun(project: string, message: string, workDir: string, parentRunId = "", projectSessionId = "") {
   const now = new Date().toISOString();
   const runId = "pchat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   const traceId = "project_chat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
@@ -78,7 +80,7 @@ export function createProjectChatRun(project: string, message: string, workDir: 
   } catch (error: any) {
     checkpoint = { success: false, error: error?.message || String(error) };
   }
-  const run: any = { id: runId, trace_id: traceId, project, message, workDir, status: "running", checkpoint_id: checkpoint?.checkpointId || checkpoint?.id || "", checkpoint, parent_run_id: parentRunId, task_session_scope_id: "", task_agent_session_id: "", native_session_id: "", resume_mode: "", created_at: now, updated_at: now, child: null, fileChanges: null, workEvents: [] };
+  const run: any = { id: runId, trace_id: traceId, project, message, workDir, status: "running", checkpoint_id: checkpoint?.checkpointId || checkpoint?.id || "", checkpoint, parent_run_id: parentRunId, project_session_id: projectSessionId, project_session_generation: 0, task_session_scope_id: "", task_agent_session_id: "", native_session_id: "", resume_mode: "", created_at: now, updated_at: now, child: null, fileChanges: null, workEvents: [] };
   projectChatRuns.set(runId, run);
   saveProjectChatRuns();
   return run;
@@ -96,6 +98,8 @@ export function publicProjectChatRun(run: any) {
     checkpoint_id: run.checkpoint_id || "",
     rollback_available: !!run.checkpoint_id,
     parent_run_id: run.parent_run_id || "",
+    project_session_id: run.project_session_id || "",
+    project_session_generation: Number(run.project_session_generation || 0),
     task_session_scope_id: run.task_session_scope_id || "",
     task_agent_session_id: run.task_agent_session_id || "",
     native_session_id: run.native_session_id || "",
@@ -132,10 +136,10 @@ export function purgeProjectChatRun(id: string) {
   if (run.child) {
     try { terminateManagedChildProcess(run.child); } catch { try { run.child.kill(); } catch {} }
   }
+  const sharedProjectSessionBinding = !!String(run.project_session_id || "").trim();
   const cleanupIds = Array.from(new Set([
     run.id,
-    run.task_session_scope_id,
-    run.task_agent_session_id,
+    ...(sharedProjectSessionBinding ? [] : [run.task_session_scope_id, run.task_agent_session_id]),
   ].map(value => String(value || "").trim()).filter(Boolean)));
   const cleanup = { sessions: 0, executions: 0, checkpoints: 0, outputs: 0 };
   for (const cleanupId of cleanupIds) {
@@ -150,4 +154,13 @@ export function purgeProjectChatRun(id: string) {
   projectChatRuns.delete(runId);
   saveProjectChatRuns();
   return { run, cleanup };
+}
+
+export function purgeProjectChatRunsForSession(project: string, projectSessionId: string) {
+  const ids = [...projectChatRuns.values()]
+    .filter(run => String(run.project || "") === String(project || "") && String(run.project_session_id || "") === String(projectSessionId || ""))
+    .map(run => String(run.id || ""))
+    .filter(Boolean);
+  const removed = ids.map(id => purgeProjectChatRun(id)).filter(Boolean);
+  return { ids, removed };
 }

@@ -6,7 +6,7 @@ export declare function runTestAgentBrowserEvidenceTemporalIntegritySelfTest(): 
     secondPlan: BrowserCheckExecutionPlan;
     reportContract: import("..").TestAgentReportContractValidation;
     verdictContract: import("..").TestAgentVerdictContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     crossRunSummary: import("..").BrowserEvidenceTemporalIntegritySummary;
     crossRunContract: import("..").TestAgentReportContractValidation;
     outsideReportSummary: import("..").BrowserEvidenceTemporalIntegritySummary;
@@ -15,5 +15,5 @@ export declare function runTestAgentBrowserEvidenceTemporalIntegritySelfTest(): 
     durationContract: import("..").TestAgentReportContractValidation;
     toolWindowSummary: import("..").BrowserEvidenceTemporalIntegritySummary;
     toolWindowContract: import("..").TestAgentReportContractValidation;
-    crossRunArtifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    crossRunArtifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
 }>;

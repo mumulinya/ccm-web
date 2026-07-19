@@ -1,0 +1,718 @@
+  <div class="task-manager">
+    <TaskDispatchHeader
+      :stats="stats"
+      :archived-count="archivedTaskCount"
+      :active-view="activeTaskView"
+      @change-view="changeTaskView"
+      @create="handleCreateType"
+      @open-backlog="openBacklog"
+    />
+
+    <section v-if="activeTaskView === 'overview'" class="execution-dashboard">
+      <div class="dashboard-head">
+        <div>
+          <div class="dashboard-kicker">执行进度</div>
+          <h3>正在推进和需要你处理的任务</h3>
+        </div>
+        <div class="dashboard-head-actions">
+          <span v-if="executionDashboard?.generated_at" class="dashboard-updated">更新 {{ new Date(executionDashboard.generated_at).toLocaleTimeString('zh-CN') }}</span>
+          <button class="btn btn-outline btn-sm" :disabled="executionDashboardLoading" @click="refreshTaskWork">{{ executionDashboardLoading ? '刷新中...' : '刷新' }}</button>
+        </div>
+      </div>
+
+      <div class="dashboard-filter-row">
+        <div class="dashboard-filter-tabs" role="tablist" aria-label="任务驾驶舱筛选">
+          <button
+            v-for="option in dashboardFilterOptions()"
+            :key="option.key"
+            type="button"
+            :class="['dashboard-filter-tab', { active: dashboardFilter === option.key }]"
+            @click="setDashboardFilter(option.key)"
+          >
+            <span>{{ option.label }}</span>
+            <strong>{{ option.count }}</strong>
+          </button>
+        </div>
+        <span class="dashboard-filter-count">显示 {{ filteredDashboardItems().length }} / {{ dashboardItems().length }} 条最近执行记录</span>
+      </div>
+
+      <LoadingSkeleton v-if="executionDashboardLoading && !filteredDashboardItems().length" variant="cards" :cards="4" />
+      <EmptyState
+        v-else-if="!filteredDashboardItems().length"
+        icon="📊"
+        title="当前筛选下没有可展示的执行任务"
+      />
+      <div v-else class="dashboard-task-list">
+        <article v-for="item in filteredDashboardItems()" :key="item.id" :class="['dashboard-task', phaseTone(item.phase), { expanded: isDashboardItemExpanded(item) }]">
+          <div class="dashboard-task-top">
+            <div class="dashboard-task-title">
+              <span :class="['dashboard-phase', phaseTone(item.phase)]">{{ phaseLabel(item.phase) }}</span>
+              <strong>{{ item.title }}</strong>
+            </div>
+            <div class="dashboard-task-meta">
+              <span>{{ item.workflow_type === 'daily_dev' ? '日常开发' : item.assign_type || '任务' }}</span>
+              <span>{{ item.target_project || item.group_id || '未指定目标' }}</span>
+              <span>{{ item.updated_at ? new Date(item.updated_at).toLocaleString('zh-CN') : '未记录更新时间' }}</span>
+              <button type="button" class="dashboard-expand-button" @click="toggleDashboardItem(item)">{{ isDashboardItemExpanded(item) ? '收起' : '查看详情' }}</button>
+            </div>
+          </div>
+
+          <div v-if="!isDashboardItemExpanded(item)" class="dashboard-compact-line" @click="toggleDashboardItem(item)">
+            <span>{{ compactDashboardText(item.status_detail || item.headline || '暂无执行摘要', 150) }}</span>
+            <strong>{{ item.workers?.length || item.assignments?.length || 0 }} 个执行成员 · 验证 {{ item.evidence?.verification_executed?.length || 0 }} · 实变 {{ item.evidence?.actual_file_change_count || 0 }}</strong>
+          </div>
+
+          <div v-else class="dashboard-detail-body">
+            <div v-if="item.status_detail || item.headline" class="dashboard-status-line">
+              {{ compactDashboardText(item.status_detail || item.headline, 220) }}
+            </div>
+
+            <div class="dashboard-work-grid">
+            <div class="dashboard-panel">
+              <div class="dashboard-panel-title">执行计划</div>
+              <div class="dashboard-panel-count">{{ item.main_plan?.count || 0 }} 条计划证据</div>
+              <ul v-if="item.main_plan?.phases?.length" class="dashboard-list">
+                <li v-for="(phase, index) in item.main_plan.phases.slice(0, 4)" :key="index">{{ compactDashboardText(phase.title || phase.name || phase.phase || phase, 90) }}</li>
+              </ul>
+              <div v-else class="dashboard-muted">等待生成执行计划。</div>
+            </div>
+
+            <div class="dashboard-panel">
+              <div class="dashboard-panel-title">协作进展</div>
+              <div class="dashboard-panel-count">{{ item.workers?.length || item.assignments?.length || 0 }} 个执行成员</div>
+              <div v-if="item.workers?.length" class="dashboard-agent-stack">
+                <span v-for="worker in item.workers.slice(0, 5)" :key="worker.agent" :class="['dashboard-agent', workflowStatusTone(worker.status)]">
+                  {{ worker.agent }} · {{ receiptStatusText(worker.status) }}
+                </span>
+              </div>
+              <div v-else class="dashboard-muted">等待派发或结果说明。</div>
+            </div>
+
+            <div class="dashboard-panel evidence">
+              <div class="dashboard-panel-title">验收证据</div>
+              <div class="dashboard-evidence-grid">
+                <span>实变 <strong>{{ item.evidence?.actual_file_change_count || 0 }}</strong></span>
+                <span>结果说明 <strong>{{ item.evidence?.receipt_count || 0 }}</strong></span>
+                <span>验证 <strong>{{ item.evidence?.verification_executed?.length || 0 }}</strong></span>
+                <span>返工 <strong>{{ item.rework_records?.length || 0 }}</strong></span>
+              </div>
+              <div v-if="item.evidence?.actual_file_changes?.length" class="dashboard-evidence-detail">
+                <span>文件</span>
+                <code v-for="file in item.evidence.actual_file_changes.slice(0, 3)" :key="file.path || file">{{ file.path || file }}</code>
+              </div>
+              <div v-if="item.evidence?.verification_executed?.length" class="dashboard-evidence-detail ok">
+                <span>验证</span>
+                <code v-for="verify in item.evidence.verification_executed.slice(0, 2)" :key="verify.command || verify">{{ compactDashboardText(verify.command || verify, 80) }}</code>
+              </div>
+              <div v-if="item.rework_records?.length" class="dashboard-evidence-detail warn">
+                <span>返工</span>
+                <code v-for="record in item.rework_records.slice(0, 2)" :key="record.time || record.summary || record.reason">{{ compactDashboardText(record.summary || record.reason || record.message || record.source, 90) }}</code>
+              </div>
+              <div v-if="item.evidence?.verification_failed?.length || item.evidence?.verification_required_missing?.length" class="dashboard-warning-line">
+                验证问题 {{ (item.evidence.verification_failed?.length || 0) + (item.evidence.verification_required_missing?.length || 0) }} 项
+              </div>
+            </div>
+
+            <div class="dashboard-panel blockers">
+              <div class="dashboard-panel-title">需要关注</div>
+              <ul v-if="item.blockers?.length" class="dashboard-list warn">
+                <li v-for="blocker in item.blockers.slice(0, 4)" :key="blocker">{{ compactDashboardText(blocker, 110) }}</li>
+              </ul>
+              <div v-else class="dashboard-muted">暂无需要处理的问题。</div>
+            </div>
+          </div>
+
+            <div class="dashboard-actions">
+              <button
+                v-for="action in item.actions"
+                :key="action.id"
+                :class="actionClass(action)"
+                @click.stop="handleDashboardAction(item, action)"
+              >{{ action.label }}</button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section v-else-if="activeTaskView === 'advanced'" class="task-runtime-management">
+      <div class="runtime-management-head">
+        <div>
+          <span>高级操作</span>
+          <h3>队列与执行通道</h3>
+          <p>这些操作会影响任务调度或底层执行进程，仅在任务卡住或排障时使用。</p>
+        </div>
+        <button class="btn btn-outline btn-sm" @click="showQueueStatus()">查看队列详情</button>
+      </div>
+
+      <div class="runtime-status-strip">
+        <span><small>队列中</small><strong>{{ dashboardQueue().total_queued || 0 }}</strong></span>
+        <span><small>运行目标</small><strong>{{ dashboardQueue().running_targets || 0 }}</strong></span>
+        <span><small>待处理</small><strong>{{ dashboardQueue().pending_tasks || 0 }}</strong></span>
+        <span><small>执行失败</small><strong>{{ dashboardQueue().failed_tasks || 0 }}</strong></span>
+      </div>
+
+      <div class="runtime-command-row">
+        <button class="btn btn-outline" @click="resumeQueue()">恢复队列</button>
+        <button class="btn btn-outline" @click="retryRuntimeFailures()">恢复执行失败</button>
+        <button class="btn btn-outline" @click="addAllToQueue()">全部加入队列</button>
+        <button class="btn btn-outline" @click="runDashboardProbe">复检执行通道</button>
+      </div>
+
+      <div class="runtime-governance-card">
+        <div class="runtime-governance-head">
+          <div>
+            <strong>Agent 运行治理</strong>
+            <span>查看正在运行的底层 Agent CLI，必要时停止进程；清理旧的无租约任务不会删除数据。</span>
+          </div>
+          <div class="runtime-governance-actions">
+            <button class="btn btn-outline btn-sm" :disabled="activeAgentRunsLoading" @click="loadActiveAgentRuns">{{ activeAgentRunsLoading ? '刷新中...' : '刷新运行' }}</button>
+            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading" @click="previewRuntimeDebtCleanup">预览运行债务</button>
+            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading || !(runtimeDebtPreview?.total > 0)" @click="cleanupRuntimeDebt">清理运行债务</button>
+          </div>
+        </div>
+        <div v-if="activeAgentRuns.length" class="runtime-run-list">
+          <div v-for="run in activeAgentRuns" :key="run.id" class="runtime-run-row">
+            <div>
+              <strong>{{ run.project || 'Agent' }} · {{ run.agentType || 'runtime' }}</strong>
+              <span>{{ run.source || 'agent' }} · PID {{ run.pid || '未知' }} · 已运行 {{ formatDuration(run.ageMs) }}</span>
+              <small>{{ run.title || run.cwd || run.id }}</small>
+            </div>
+            <button class="btn btn-outline btn-sm danger" @click="stopAgentRun(run)">停止</button>
+          </div>
+        </div>
+        <EmptyState v-else icon="🤖" title="当前没有正在运行的底层 Agent" />
+        <div v-if="runtimeDebtPreview" class="runtime-debt-result">
+          <span>可清理 {{ runtimeDebtPreview.total || 0 }}</span>
+          <span>已清理 {{ runtimeDebtPreview.cleaned || 0 }}</span>
+          <span>{{ runtimeDebtPreview.dry_run ? '预览模式' : '已执行清理' }}</span>
+        </div>
+      </div>
+    </section>
+
+    <TaskBacklogModal
+      v-if="showBacklog"
+      :backlogs="dailyDevBacklogs"
+      :counts="backlogCounts"
+      :import-loading="backlogImportLoading"
+      :bulk-dispatch-loading="backlogBulkDispatchLoading"
+      :import-result="backlogImportResult"
+      :bulk-dispatch-result="backlogBulkDispatchResult"
+      :status-label="backlogStatusLabel"
+      :priority-label="priorityLabel"
+      :backlog-state="backlogState"
+      :backlog-count="backlogCount"
+      :backlog-quality-text="backlogQualityText"
+      :backlog-latest-history="backlogLatestHistory"
+      :backlog-can-dispatch="backlogCanDispatch"
+      :backlog-can-restore-ready="backlogCanRestoreReady"
+      :daily-dev-group-can-execute="dailyDevGroupCanExecute"
+      :daily-dev-group-readiness-message="dailyDevGroupReadinessMessage"
+      :format-backlog-time="formatBacklogTime"
+      @import-shared-docs="importSharedDocsToBacklog"
+      @dispatch-ready="dispatchReadyBacklogs"
+      @dispatch="dispatchBacklog"
+      @restore-ready="(item) => updateBacklogStatus(item, 'ready')"
+      @mark-blocked="(item) => updateBacklogStatus(item, 'blocked')"
+      @close="showBacklog = false"
+    />
+
+    <!-- 任务列表 -->
+    <div v-if="activeTaskView === 'all'" class="content task-list-view">
+      <div class="task-list-toolbar">
+        <div class="task-list-filters">
+          <input v-model="taskSearch" type="search" placeholder="搜索任务标题、内容或目标" aria-label="搜索任务">
+          <select v-model="taskStatusFilter" aria-label="任务状态">
+            <option value="all">全部状态</option>
+            <option value="pending">待处理</option>
+            <option value="in_progress">进行中</option>
+            <option value="done">已完成</option>
+            <option value="failed">失败</option>
+            <option value="cancelled">已取消</option>
+          </select>
+        </div>
+        <div class="task-list-actions">
+          <button class="btn btn-outline btn-sm" @click="toggleArchivedTasks">{{ showArchivedTasks ? '返回活动任务' : `查看归档 (${archivedTaskCount})` }}</button>
+          <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-outline btn-sm" @click="runBulkTaskAction('pause')">批量暂停</button>
+          <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('archive')">批量归档</button>
+          <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-primary btn-sm" @click="runBulkTaskAction('restore')">批量恢复</button>
+          <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('purge')">永久清除</button>
+        </div>
+      </div>
+      <EmptyState
+        v-if="visibleTasks.length === 0"
+        large
+        icon="📋"
+        :title="tasks.length ? '没有符合筛选条件的任务' : '暂无任务'"
+        hint="可以调整筛选条件，或者从顶部新建任务"
+      />
+      <div v-else class="task-list">
+        <TaskListItem
+          v-for="task in visibleTasks"
+          :key="task.id"
+          :task="task"
+          :selected="selectedTaskIds.includes(task.id)"
+          :show-archived="showArchivedTasks"
+          :group-name="groups.find(g => g.id === task.group_id)?.name || task.group_id"
+          :priority-text="priorityLabel[task.priority] || task.priority"
+          :workflow-items="workflowSummaryItems(task)"
+          :agent-preview="workflowAgentPreview(task)"
+          :evidence-items="deliveryEvidenceItems(task)"
+          :execution-blocked="isExecutionBlockedTask(task)"
+          :execution-blocked-text="executionBlockedMessage(task)"
+          :execution-fix-actions="executionFixActions(task)"
+          :kernel-state="taskKernelState(task)"
+          :kernel-state-text="executionStateLabel(taskKernelState(task))"
+          :kernel-green="taskKernelGreen(task)"
+          :kernel-green-text="greenLevelLabel(taskKernelGreen(task))"
+          :can-manual-complete="canManualCompleteDailyDev(task)"
+          :can-cancel="canCancelTask(task)"
+          @toggle-selected="toggleTaskSelection"
+          @status-change="updateStatus"
+          @restore="restoreTask"
+          @purge="purgeTask"
+          @cancel="cancelTask"
+          @queue="addToQueue"
+          @report="viewReport"
+          @pipeline="viewPipeline"
+          @continue="openContinueTask"
+          @logs="viewTaskLogs"
+          @resend="resendTask"
+          @edit="editTask"
+          @delete="deleteTask"
+        />
+      </div>
+    </div>
+
+    <DailyDevTaskModal
+      v-if="showDailyDevCreate"
+      :task="dailyDevTask"
+      :groups="groups"
+      :quality="dailyDevIntakeQuality()"
+      :group-can-execute="selectedDailyDevGroupCanExecute()"
+      :group-message="selectedDailyDevGroupMessage()"
+      @update-field="updateDailyDevTaskField"
+      @submit="submitDailyDevTask"
+      @close="showDailyDevCreate = false"
+    />
+
+    <!-- 新建任务弹窗 -->
+    <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
+      <div class="modal" style="min-width:500px">
+        <button class="modal-close" @click="showCreate = false">&times;</button>
+        <h3>{{ editingTaskId ? '编辑任务' : '📋 新建任务' }}</h3>
+        <div class="form-group">
+          <label>任务标题</label>
+          <input v-model="newTask.title" placeholder="简要描述任务">
+        </div>
+        <div class="form-group">
+          <label>详细描述</label>
+          <textarea v-model="newTask.description" rows="3" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="可选，详细描述任务需求"></textarea>
+        </div>
+        <div class="form-group">
+          <label>分配方式</label>
+          <select v-model="newTask.assignType">
+            <option value="group">分配给群聊（由主 Agent 协调）</option>
+            <option value="project">直接分配给项目 Agent</option>
+          </select>
+        </div>
+        <div v-if="newTask.assignType === 'group'" class="form-group">
+          <label>选择群聊</label>
+          <select v-model="newTask.groupId">
+            <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+          </select>
+        </div>
+        <div v-else class="form-group">
+          <label>选择项目</label>
+          <select v-model="newTask.projectId">
+            <option v-for="p in projects" :key="p.name" :value="p.name">{{ p.name }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>优先级</label>
+          <select v-model="newTask.priority">
+            <option value="high">🔴 高</option>
+            <option value="normal">🟡 中</option>
+            <option value="low">⚪ 低</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" v-model="newTask.autoExecute" style="accent-color:var(--accent-blue)">
+            创建后立即加入执行队列
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-cancel" @click="showCreate = false">取消</button>
+          <button class="btn btn-primary" @click="submitCreateTask">{{ editingTaskId ? '保存修改' : newTask.autoExecute ? '创建并加入队列' : '仅创建任务' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 队列状态弹窗 -->
+    <div v-if="showQueue" class="modal-overlay" @click.self="showQueue = false">
+      <div class="modal" style="min-width:450px">
+        <button class="modal-close" @click="showQueue = false">&times;</button>
+        <h3>📊 任务队列状态</h3>
+        <div style="margin-top:16px">
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+            <div style="padding:16px;background:var(--bg-glass);border-radius:8px;text-align:center">
+              <div style="font-size:28px;font-weight:600;color:var(--accent-blue)">{{ queueStatus?.total_queued || 0 }}</div>
+              <div style="font-size:12px;color:var(--text-muted)">队列中</div>
+            </div>
+            <div style="padding:16px;background:var(--bg-glass);border-radius:8px;text-align:center">
+              <div style="font-size:28px;font-weight:600;color:var(--accent-green)">{{ queueStatus?.running_targets || 0 }}</div>
+              <div style="font-size:12px;color:var(--text-muted)">并行执行</div>
+            </div>
+          </div>
+          <div class="watchdog-box">
+            <div class="watchdog-title">任务看门狗</div>
+            <div class="watchdog-grid">
+              <span>待入队卡住：{{ watchdogStatus?.stale_pending?.length || 0 }}</span>
+              <span>执行中断：{{ watchdogStatus?.stalled_in_progress?.length || 0 }}</span>
+              <span>长时间运行：{{ watchdogStatus?.running_long?.length || 0 }}</span>
+              <span>执行通道失败：{{ watchdogStatus?.runtime_failed?.length || 0 }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions" style="margin-top:20px">
+          <button class="btn btn-outline" @click="resumeQueue()">恢复自动任务</button>
+          <button class="btn btn-outline" @click="resumeWatchdog()">看门狗恢复</button>
+          <button class="btn btn-outline" @click="retryRuntimeFailures()">恢复执行失败</button>
+          <button class="btn btn-primary" @click="showQueue = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务报告弹窗 -->
+    <!-- Agent 协作流 Pipeline 弹窗 -->
+    <div v-if="showPipeline" class="modal-overlay" style="z-index: 999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(12px);" @click.self="showPipeline = false">
+      <div class="modal" style="width: 860px; max-width: 90vw; background: rgba(18, 22, 33, 0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; max-height: 90vh;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h3 style="margin: 0; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
+            Agent 协作看板
+          </h3>
+          <button class="modal-close" style="background: none; border: none; color: #888; font-size: 24px; cursor: pointer; line-height: 1;" @click="showPipeline = false">&times;</button>
+        </div>
+        <div style="flex: 1; overflow-y: auto;">
+          <AgentPipeline
+            :task="currentPipelineTask"
+            :deliverySummary="currentPipelineTask?.delivery_summary || null"
+            :assignments="currentPipelineTask?.delivery_summary?.assignment_evidence || []"
+            :coordinationPlan="currentPipelineTask?.delivery_summary?.latest_coordination_plan || null"
+            :taskStatus="currentPipelineTask?.status || 'pending'"
+            :fileChanges="currentPipelineTask?.delivery_summary ? { count: currentPipelineTask.delivery_summary.actual_file_change_count || 0, files: currentPipelineTask.delivery_summary.actual_file_changes || [] } : null"
+            :receipts="currentPipelineTask?.delivery_summary?.receipts || currentPipelineTask?.delivery_summary?.receipt_statuses || []"
+            :title="currentPipelineTask?.title || 'Agent 协作看板'"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showReport" class="modal-overlay" @click.self="showReport = false">
+      <div class="modal report-modal">
+        <button class="modal-close" @click="showReport = false">&times;</button>
+        <h3>📄 任务执行报告</h3>
+        <div class="modal-body" style="flex: 1; overflow-y: auto; padding-right: 4px; margin-top: 12px; display: flex; flex-direction: column; gap: 16px;">
+        <div class="report-meta">
+          <div><strong>{{ visibleTaskTitle() }}</strong></div>
+          <div>{{ visibleTaskStatusDetail() }}</div>
+        </div>
+        <details v-if="currentTaskReport?.trace_id || taskTraceLoading || currentTaskTrace?.events?.length" class="technical-report-details">
+          <summary>Trace 技术详情</summary>
+          <div v-if="currentTaskReport?.trace_id" class="trace-identity">
+            <span>执行记录</span>
+            <code>已关联</code>
+          </div>
+          <div v-if="taskTraceLoading" class="trace-panel muted">正在读取全链路记录…</div>
+          <div v-else-if="currentTaskTrace?.events?.length" class="trace-panel">
+            <div class="trace-panel-head">
+              <strong>全链路 Trace</strong>
+              <span>{{ currentTaskTrace.events.length }} 个事件</span>
+            </div>
+            <div class="kernel-timeline trace-events">
+              <div v-for="event in currentTaskTrace.events.slice(-16)" :key="event.id" class="kernel-event">
+                <div><strong>{{ event.type }}</strong><span>{{ new Date(event.at).toLocaleString('zh-CN') }}</span></div>
+                <p>{{ event.message || event.status }}</p>
+              </div>
+            </div>
+          </div>
+        </details>
+        <div v-if="currentDeliverySummary()" class="delivery-summary">
+          <div class="delivery-grid">
+            <div>
+              <span class="delivery-label">交付状态</span>
+              <strong>{{ currentDeliverySummary().headline || '交付状态已整理。' }}</strong>
+            </div>
+            <div>
+              <span class="delivery-label">参与 Agent</span>
+              <strong>{{ currentDeliverySummary().agents?.join('、') || '暂无' }}</strong>
+            </div>
+            <div>
+              <span class="delivery-label">文件变更</span>
+              <strong>{{ currentDeliverySummary().files_changed?.length || 0 }} 个</strong>
+            </div>
+            <div>
+              <span class="delivery-label">实际捕获</span>
+              <strong>{{ currentDeliverySummary().actual_file_change_count || 0 }} 个</strong>
+            </div>
+            <div>
+              <span class="delivery-label">验证记录</span>
+              <strong>{{ currentDeliverySummary().verification?.length || 0 }} 条</strong>
+            </div>
+            <div>
+              <span class="delivery-label">已执行验证</span>
+              <strong>{{ currentDeliverySummary().verification_executed?.length || 0 }} 条</strong>
+            </div>
+            <div>
+              <span class="delivery-label">失败验证</span>
+              <strong>{{ currentDeliverySummary().verification_failed?.length || 0 }} 条</strong>
+            </div>
+          </div>
+          <div v-if="currentDeliverySummary().actual_file_changes?.length" class="delivery-list">
+            <span class="delivery-label">实际文件变更</span>
+            <code v-for="file in currentDeliverySummary().actual_file_changes" :key="`${file.agent || ''}:${file.path}:${file.status_kind || file.status}`">
+              {{ file.agent ? `${file.agent} · ` : '' }}{{ file.path }}{{ file.status ? ` (${file.status})` : '' }}
+            </code>
+          </div>
+          <div v-if="currentDeliverySummary().files_changed?.length" class="delivery-list">
+            <span class="delivery-label">变更文件</span>
+            <code v-for="file in currentDeliverySummary().files_changed" :key="file">{{ file }}</code>
+          </div>
+          <div v-if="currentDeliverySummary().verification_executed?.length" class="delivery-list ok">
+            <span class="delivery-label">已执行验证</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification_executed, '验证结果已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
+          </div>
+          <div v-if="currentDeliverySummary().verification_suggested?.length" class="delivery-list muted">
+            <span class="delivery-label">建议/未执行</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification_suggested, '建议验证已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
+          </div>
+          <div v-if="currentDeliverySummary().verification_failed?.length" class="delivery-list danger">
+            <span class="delivery-label">失败验证</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification_failed, '失败验证已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
+          </div>
+          <div v-if="currentDeliverySummary().verification_required_missing?.length" class="delivery-list warning">
+            <span class="delivery-label">缺命令验证</span>
+            <span v-for="item in currentDeliverySummary().verification_required_missing" :key="item.agent" class="delivery-pill">
+              {{ visibleRequiredVerification(item) }}
+            </span>
+          </div>
+          <div v-if="!hasCategorizedVerification(currentDeliverySummary()) && currentDeliverySummary().verification?.length" class="delivery-list">
+            <span class="delivery-label">验证</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification, '验证结果已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
+          </div>
+          <div v-if="visibleDeliveryBlockers().length" class="delivery-list warning">
+            <span class="delivery-label">阻塞/待补充</span>
+            <span v-for="item in visibleDeliveryBlockers()" :key="item" class="delivery-pill">{{ item }}</span>
+          </div>
+          <div v-if="currentDeliverySummary()?.user_report" class="report-section user-delivery-report">
+            <h4>交付报告</h4>
+            <pre class="report-block">{{ visibleUserDeliveryReport() }}</pre>
+          </div>
+          <details class="technical-report-details">
+            <summary>技术执行详情</summary>
+          <div v-if="currentDeliverySummary().latest_coordination_plan?.phases?.length" class="delivery-list">
+            <span class="delivery-label">主 Agent 计划</span>
+            <span v-for="phase in visibleReportList(currentDeliverySummary().latest_coordination_plan.phases, '计划阶段已整理。', 180)" :key="phase" class="delivery-pill plan-pill">{{ phase }}</span>
+          </div>
+          <div v-if="currentDeliverySummary().assignment_evidence?.length" class="delivery-list">
+            <span class="delivery-label">派发证据</span>
+            <span
+              v-for="item in currentDeliverySummary().assignment_evidence"
+              :key="`${item.project || ''}:${item.message_id || ''}:${item.task}`"
+              class="delivery-pill plan-pill"
+            >
+              {{ visibleReportText(item.project || '未知 Agent', '未知 Agent', 80) }}{{ item.status ? ` · ${item.statusText || item.status}` : '' }}{{ item.dependsOn ? ` · 依赖 ${item.dependsOn}` : '' }}{{ continuationStrategyLabel(item) ? ` · ${continuationStrategyLabel(item)}` : '' }}
+            </span>
+          </div>
+          <div v-if="currentDeliverySummary().dependency_evidence?.length" class="delivery-list warning">
+            <span class="delivery-label">依赖证据</span>
+            <span
+              v-for="item in currentDeliverySummary().dependency_evidence"
+              :key="`${item.project || ''}:${item.dependsOn}:${item.task}`"
+              class="delivery-pill"
+            >
+              {{ visibleReportText(item.project || '未知 Agent', '未知 Agent', 80) }} 等待 {{ item.dependsOn }}{{ item.status ? ` · ${item.statusText || item.status}` : '' }}
+            </span>
+          </div>
+          <div v-if="currentDeliverySummary().rework_evidence?.length" class="delivery-list warning">
+            <span class="delivery-label">返工证据</span>
+            <span
+              v-for="item in currentDeliverySummary().rework_evidence"
+              :key="`${item.project || ''}:${item.message_id || ''}:${item.task || item.reason}`"
+              class="delivery-pill"
+            >
+              {{ item.project ? `${visibleReportText(item.project, '子 Agent', 80)}：` : '' }}{{ item.attempt ? `第 ${item.attempt} 轮 ` : '' }}{{ visibleReportText(item.reason || item.task, '返工信息已整理。', 180) }}
+            </span>
+          </div>
+          </details>
+        </div>
+        <details class="technical-report-details">
+          <summary>Agent、执行器与原始结果说明</summary>
+        <div v-if="hasExecutionEvidence(currentTaskReport)" class="execution-evidence">
+          <div class="evidence-head">
+            <strong>Agent 执行证据</strong>
+            <span>主 Agent 复盘、子 Agent 结果说明和实际变更会共同决定任务能否完成</span>
+          </div>
+          <div v-if="currentWorkerNotifications().length" class="receipt-card-list">
+            <div
+              v-for="item in currentWorkerNotifications()"
+              :key="`${item.task_id}:${item.status}:${item.summary}`"
+              class="receipt-card"
+              :class="receiptTone(item.receipt_status === 'done' ? 'done' : item.status)"
+            >
+              <div class="receipt-top">
+                <strong>{{ item.task_id || 'Worker' }}</strong>
+                <span>通知 {{ item.status || 'unknown' }} · 结果说明 {{ item.receipt_status || 'missing' }}</span>
+              </div>
+              <div v-if="item.summary" class="receipt-summary">{{ item.summary }}</div>
+              <div v-if="item.result" class="receipt-row">
+                <span class="receipt-label">结果</span>
+                <span class="delivery-pill">{{ item.result }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="receiptEvidenceItems(currentTaskReport).length" class="receipt-card-list">
+            <div v-for="item in receiptEvidenceItems(currentTaskReport)" :key="`${item.agent}:${item.status}:${item.summary}`" class="receipt-card" :class="receiptTone(item.status)">
+              <div class="receipt-top">
+                <strong>{{ item.agent }}</strong>
+                <span>{{ receiptStatusText(item.status) }}</span>
+              </div>
+              <div v-if="item.summary" class="receipt-summary">{{ item.summary }}</div>
+              <div v-if="item.actions.length" class="receipt-row">
+                <span class="receipt-label">动作</span>
+                <span v-for="action in item.actions" :key="action" class="delivery-pill">{{ action }}</span>
+              </div>
+              <div v-if="item.filesChanged.length" class="receipt-row">
+                <span class="receipt-label">文件</span>
+                <code v-for="file in item.filesChanged" :key="file">{{ file }}</code>
+              </div>
+              <div v-if="item.verification.length" class="receipt-row">
+                <span class="receipt-label">验证</span>
+                <span v-for="verify in item.verification" :key="verify" class="delivery-pill">{{ verify }}</span>
+              </div>
+              <div v-if="item.memoryUsed.length || item.memoryIgnored.length" class="receipt-row memory">
+                <span class="receipt-label">记忆</span>
+                <span v-for="memory in item.memoryUsed" :key="memory" class="delivery-pill">{{ memory }}</span>
+                <span v-for="memory in item.memoryIgnored" :key="`ignored:${memory}`" class="delivery-pill muted">未用：{{ memory }}</span>
+              </div>
+              <div v-if="item.blockers.length || item.needs.length" class="receipt-row warning">
+                <span class="receipt-label">阻塞</span>
+                <span v-for="need in [...item.blockers, ...item.needs]" :key="need" class="delivery-pill">{{ need }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="currentReviewSummary()" class="review-card">
+            <div class="receipt-top">
+              <strong>主 Agent 复盘</strong>
+              <span>{{ currentReviewSummary().status || '已记录' }}</span>
+            </div>
+            <div class="receipt-summary">{{ currentReviewSummary().content || currentReviewSummary().summary || '暂无复盘摘要' }}</div>
+          </div>
+        </div>
+        <div v-if="currentExecutions().length" class="kernel-execution-section">
+          <div class="evidence-head">
+            <strong>开发执行内核</strong>
+            <span>真实进程、检查点、验收绿灯与 worktree 生命周期</span>
+          </div>
+          <div class="kernel-execution-list">
+            <div v-for="execution in currentExecutions()" :key="execution.id" class="kernel-execution-card">
+              <div class="kernel-execution-head">
+                <div>
+                  <strong>{{ execution.project }}</strong>
+                  <span>{{ execution.id }}</span>
+                </div>
+                <div class="kernel-summary-row">
+                  <span :class="['kernel-chip', execution.state]">{{ executionStateLabel(execution.state) }}</span>
+                  <span :class="['kernel-chip', 'green-' + (execution.green?.level || 'none')]">{{ greenLevelLabel(execution.green?.level) }}</span>
+                </div>
+              </div>
+              <div class="kernel-facts">
+                <span>工作区：{{ execution.workspace?.mode === 'worktree' ? '独立 worktree' : '共享目录' }}</span>
+                <span v-if="execution.processIds?.length">进程：{{ execution.processIds.join('、') }}</span>
+                <span>检查点：{{ execution.checkpointIds?.length || 0 }}</span>
+              </div>
+              <code v-if="execution.workspace?.worktreePath" class="kernel-path">{{ execution.workspace.worktreePath }}</code>
+              <div v-if="execution.failure" class="kernel-failure">{{ execution.failure.failureClass || 'unknown' }}：{{ execution.failure.message }}</div>
+              <div v-if="execution.events?.length" class="kernel-timeline">
+                <div v-for="event in execution.events.slice(-8).reverse()" :key="event.id" class="kernel-event">
+                  <span>{{ new Date(event.at).toLocaleTimeString('zh-CN') }}</span>
+                  <strong>{{ event.message }}</strong>
+                </div>
+              </div>
+              <div class="kernel-actions">
+                <button v-if="execution.checkpointIds?.length && !['running', 'spawning', 'cancel_requested'].includes(execution.state)" class="btn btn-outline btn-sm" :disabled="!!executionActionBusy" @click="rollbackExecution(execution)">回滚检查点</button>
+                <button v-if="execution.workspace?.mode === 'worktree' && execution.workspace?.mergeOwner !== false && execution.green?.level === 'merge_ready' && !execution.workspace?.mergedAt" class="btn btn-primary btn-sm" :disabled="!!executionActionBusy" @click="mergeExecution(execution)">安全合并</button>
+                <button v-if="execution.workspace?.mergedAt && !execution.workspace?.cleanedAt" class="btn btn-outline btn-sm" :disabled="!!executionActionBusy" @click="cleanupExecution(execution)">清理 worktree</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <pre class="report-block">{{ currentTaskReport?.final_report || currentTaskReport?.result || '暂无执行报告' }}</pre>
+        <div v-if="currentTaskReport?.receipt" class="report-section">
+          <h4>结构化结果说明</h4>
+          <pre class="report-block">{{ JSON.stringify(currentTaskReport.receipt, null, 2) }}</pre>
+        </div>
+        <div v-if="currentTaskReport?.review" class="report-section">
+          <h4>主 Agent 复盘</h4>
+          <pre class="report-block">{{ JSON.stringify(currentTaskReport.review, null, 2) }}</pre>
+        </div>
+        <div v-if="currentTaskReport?.followups?.length" class="report-section">
+          <h4>补充说明历史</h4>
+          <pre class="report-block">{{ JSON.stringify(currentTaskReport.followups, null, 2) }}</pre>
+        </div>
+          </details>
+        <div class="form-actions">
+          <button v-if="canCancelTask(currentTaskReport)" class="btn btn-danger" @click="cancelTask(currentTaskReport)">停止任务</button>
+          <button v-if="currentTaskReport?.status !== 'done'" class="btn btn-primary" @click="autoContinueFromReport">按缺口自动继续</button>
+          <button v-if="currentTaskReport?.status !== 'done'" class="btn btn-outline" @click="continueFromReport">按阻塞项继续</button>
+          <button class="btn btn-primary" @click="showReport = false">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- 继续执行弹窗 -->
+    <div v-if="showContinue" class="modal-overlay" @click.self="showContinue = false">
+      <div class="modal continue-modal">
+        <button class="modal-close" @click="showContinue = false">&times;</button>
+        <h3>补充说明并继续执行</h3>
+        <div class="report-meta">
+          <div><strong>{{ currentContinueTask?.title }}</strong></div>
+          <div>{{ currentContinueTask?.status_detail || '把主 Agent 需要的信息补齐后继续推进同一任务' }}</div>
+        </div>
+        <div class="form-group">
+          <label>补充说明</label>
+          <textarea v-model="continueMessage" rows="5" placeholder="补充接口字段、业务规则、验收要求、用户确认结果或返工方向"></textarea>
+          <div class="continue-hint">已根据任务阻塞、子 Agent 结果说明和主 Agent 复盘生成草稿，可直接修改后继续执行。</div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-cancel" @click="showContinue = false">取消</button>
+          <button class="btn btn-primary" @click="submitTaskContinuation">提交并继续</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务日志弹窗 -->
+    <div v-if="showLogs" class="modal-overlay" @click.self="showLogs = false">
+      <div class="modal" style="min-width:600px;max-height:80vh;display:flex;flex-direction:column">
+        <button class="modal-close" @click="showLogs = false">&times;</button>
+        <h3>📋 任务日志</h3>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">共 {{ currentTaskLogs.length }} 条日志</div>
+        <div style="flex:1;overflow-y:auto;background:rgba(255,255,255,0.85);border-radius:8px;border:1px solid var(--border-color);padding:12px;font-family:monospace;font-size:12px;line-height:1.6;color:var(--text-primary)">
+          <EmptyState v-if="currentTaskLogs.length === 0" icon="📋" title="暂无日志" />
+          <div v-for="(log, i) in currentTaskLogs" :key="i" style="margin-bottom:8px;padding:8px;border-radius:4px;border-left:3px solid" :style="{ borderColor: log.level === 'error' ? 'var(--accent-red)' : log.level === 'success' ? 'var(--accent-green)' : log.level === 'warning' ? 'var(--accent-yellow)' : 'var(--accent-blue)' }">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span>{{ log.level === 'error' ? '❌' : log.level === 'success' ? '✅' : log.level === 'warning' ? '⚠️' : 'ℹ️' }}</span>
+              <span style="font-weight:500" :style="{ color: log.level === 'error' ? 'var(--accent-red)' : log.level === 'success' ? 'var(--accent-green)' : log.level === 'warning' ? 'var(--accent-yellow)' : 'var(--accent-blue)' }">{{ log.level?.toUpperCase() }}</span>
+              <span style="color:var(--text-muted);margin-left:auto">{{ new Date(log.timestamp).toLocaleString('zh-CN') }}</span>
+            </div>
+            <div style="color:var(--text-secondary);white-space:pre-wrap;word-break:break-all">{{ log.message }}</div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border-color)">
+          <button class="btn btn-primary" @click="showLogs = false">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>

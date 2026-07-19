@@ -17,12 +17,12 @@ export declare function buildDispatchLaunchSummary(input: {
     rows: {
         id: any;
         agent: string;
-        role: string;
-        task: string;
-        reason: string;
+        role: any;
+        task: any;
+        reason: any;
         depends_on: any;
-        status: string;
-        status_label: string;
+        status: any;
+        status_label: any;
     }[];
     acceptance: string[];
     next_action: string;

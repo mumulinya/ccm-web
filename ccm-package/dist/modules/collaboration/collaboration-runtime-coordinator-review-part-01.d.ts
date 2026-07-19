@@ -1,0 +1,32 @@
+import { CollabCtx } from "./collaboration-runtime-plan-tools";
+export declare function runCoordinatorReviewLoop(input: {
+    groupId: string;
+    group: any;
+    userMessage: string;
+    coordinatorOutput: string;
+    crossOutputs: string[];
+    configs: any[];
+    ctx: CollabCtx;
+    streamRes?: any;
+    executionOrder?: string;
+    taskId?: string;
+    groupSessionId?: string;
+}): Promise<any>;
+export declare function finalizeTaskKernel(task: any, execution: any, deliverySummary: any, state: "succeeded" | "failed" | "reviewing" | "cancelled", message: string): any;
+export declare function processTargetQueue(targetKey: string, ctx: CollabCtx): Promise<void>;
+export declare function enqueueTask(taskId: string, ctx: CollabCtx): any;
+export declare function createAndQueueTask(task: any, ctx: CollabCtx): any;
+export declare function backfillTaskTraceIds(): number;
+export declare function resumeTaskQueues(ctx: CollabCtx, options?: any): any;
+export declare function getQueueStatus(taskSnapshot?: any[]): {
+    total_queued: number;
+    running_targets: number;
+    target_status: any;
+    pending_tasks: number;
+    in_progress_tasks: number;
+    failed_tasks: number;
+    running_task_ids: string[];
+};
+export declare function getTaskTargetKeyFromTask(task: any): string;
+export declare function isTaskQueuedInMemory(taskId: string): boolean;
+export declare function getTaskAgeMs(task: any, now?: number): number;

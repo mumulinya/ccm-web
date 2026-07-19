@@ -5,9 +5,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentHistoryRuntime = createGlobalAgentHistoryRuntime;
 const fs_1 = __importDefault(require("fs"));
+const global_agent_attachments_1 = require("./global-agent-attachments");
 // Persistent Web/Feishu conversation history and session routing.
 function createGlobalAgentHistoryRuntime(deps) {
     const { GLOBAL_AGENT_HISTORY_FILE, GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_AGENT_SESSION_LIMIT, buildGlobalVisibleReplyContent, ingestGlobalAgentConversation, writeGlobalJsonAtomic } = deps;
+    const generateSessionTitle = typeof deps.generateSessionTitle === "function"
+        ? deps.generateSessionTitle
+        : async () => ({ title: "", source: "skipped" });
+    const isSessionTitlePlaceholder = typeof deps.isSessionTitlePlaceholder === "function"
+        ? deps.isSessionTitlePlaceholder
+        : (title, origin = "") => String(origin || "").toLowerCase() !== "manual"
+            && ["", "新会话", "默认会话", "全局 Agent 会话", "飞书全局 Agent"].includes(String(title || "").trim());
+    const isMeaningfulSessionTitleInput = typeof deps.isMeaningfulSessionTitleInput === "function"
+        ? deps.isMeaningfulSessionTitleInput
+        : (value) => /\p{L}/u.test(String(value || ""));
+    const globalSessionTitleJobs = new Map();
     const GLOBAL_AGENT_HISTORY_METADATA_KEYS = [
         "type",
         "source",
@@ -58,7 +70,9 @@ function createGlobalAgentHistoryRuntime(deps) {
         const metadata = {};
         for (const key of GLOBAL_AGENT_HISTORY_METADATA_KEYS) {
             if (message?.[key] !== undefined) {
-                const value = truncateGlobalHistoryValue(message[key]);
+                const value = key === "files"
+                    ? (0, global_agent_attachments_1.sanitizeGlobalHistoryAttachments)(message[key], message?.role)
+                    : truncateGlobalHistoryValue(message[key]);
                 if (value !== undefined)
                     metadata[key] = value;
             }
@@ -176,13 +190,26 @@ function createGlobalAgentHistoryRuntime(deps) {
         try {
             if (fs_1.default.existsSync(GLOBAL_AGENT_HISTORY_FILE)) {
                 const data = JSON.parse(fs_1.default.readFileSync(GLOBAL_AGENT_HISTORY_FILE, "utf-8"));
-                return { sessions: [], ...data };
+                return {
+                    ...data,
+                    sessions: (Array.isArray(data.sessions) ? data.sessions : []).map((session) => ({
+                        ...session,
+                        messages: normalizeGlobalAgentMessages(session.messages || []),
+                    })),
+                };
             }
         }
         catch { }
         try {
             const recovered = JSON.parse(fs_1.default.readFileSync(`${GLOBAL_AGENT_HISTORY_FILE}.bak`, "utf-8"));
-            return { sessions: [], ...recovered, storage_recovery: { recovered_from_backup: true, recovered_at: new Date().toISOString() } };
+            return {
+                ...recovered,
+                sessions: (Array.isArray(recovered.sessions) ? recovered.sessions : []).map((session) => ({
+                    ...session,
+                    messages: normalizeGlobalAgentMessages(session.messages || []),
+                })),
+                storage_recovery: { recovered_from_backup: true, recovered_at: new Date().toISOString() },
+            };
         }
         catch { }
         return { current_session_id: "", sessions: [] };
@@ -200,6 +227,46 @@ function createGlobalAgentHistoryRuntime(deps) {
             .slice(0, GLOBAL_AGENT_SESSION_LIMIT);
         writeGlobalJsonAtomic(GLOBAL_AGENT_HISTORY_FILE, store);
     }
+    function scheduleGlobalSessionAutoTitle(sessionId) {
+        const existingJob = globalSessionTitleJobs.get(sessionId);
+        if (existingJob)
+            return existingJob;
+        const job = (async () => {
+            const store = loadGlobalAgentHistoryStore();
+            const session = (store.sessions || []).find((item) => String(item.id) === sessionId);
+            if (!session || !isSessionTitlePlaceholder(session.name, session.titleOrigin))
+                return { renamed: false, reason: "title_already_set", session };
+            const messages = normalizeGlobalAgentMessages(session.messages || []);
+            const userIndex = messages.findIndex((message) => message.role === "user"
+                && (isMeaningfulSessionTitleInput(message.content) || (message.files || []).length));
+            if (userIndex < 0)
+                return { renamed: false, reason: "user_message_missing", session };
+            const userMessage = messages[userIndex];
+            const assistantMessage = messages.slice(userIndex + 1).find((message) => message.role === "assistant" && String(message.content || "").trim());
+            if (!assistantMessage)
+                return { renamed: false, reason: "assistant_reply_missing", session };
+            const generated = await generateSessionTitle({
+                scope: "global",
+                userMessage: String(userMessage.content || ""),
+                assistantMessage: String(assistantMessage.content || ""),
+                attachmentNames: (userMessage.files || []).map((file) => String(file?.name || "")).filter(Boolean),
+            });
+            if (!generated?.title)
+                return { renamed: false, reason: "title_input_skipped", generated };
+            const latestStore = loadGlobalAgentHistoryStore();
+            const current = (latestStore.sessions || []).find((item) => String(item.id) === sessionId);
+            if (!current || !isSessionTitlePlaceholder(current.name, current.titleOrigin))
+                return { renamed: false, reason: "title_changed_during_generation", session: current };
+            current.name = generated.title;
+            current.titleOrigin = generated.source === "model" ? "model" : "fallback";
+            current.titleGeneratedAt = new Date().toISOString();
+            current.updatedAt = current.titleGeneratedAt;
+            saveGlobalAgentHistoryStore(latestStore);
+            return { renamed: true, session: current, generated };
+        })().finally(() => globalSessionTitleJobs.delete(sessionId));
+        globalSessionTitleJobs.set(sessionId, job);
+        return job;
+    }
     function reconcileGlobalAgentWebHistory(store, payload) {
         const incomingSessions = Array.isArray(payload.sessions) ? payload.sessions : [];
         const preservedSessions = (Array.isArray(store.sessions) ? store.sessions : [])
@@ -215,9 +282,17 @@ function createGlobalAgentHistoryRuntime(deps) {
             const existing = existingWebSessions.get(id);
             const incomingMessages = Array.isArray(session.messages) ? session.messages : [];
             const lastMessageAt = incomingMessages[incomingMessages.length - 1]?.timestamp || "";
+            const incomingName = String(session.name || "").trim();
+            const existingName = String(existing?.name || "").trim();
+            const keepExistingTitle = !!existingName
+                && !isSessionTitlePlaceholder(existingName, existing?.titleOrigin)
+                && isSessionTitlePlaceholder(incomingName, session.titleOrigin);
+            const resolvedName = keepExistingTitle ? existingName : incomingName || existingName || "全局 Agent 会话";
             webSessions.push({
                 id,
-                name: session.name || existing?.name || "全局 Agent 会话",
+                name: resolvedName,
+                titleOrigin: keepExistingTitle ? existing?.titleOrigin : session.titleOrigin || existing?.titleOrigin || (isSessionTitlePlaceholder(resolvedName) ? "placeholder" : "manual"),
+                titleGeneratedAt: keepExistingTitle ? existing?.titleGeneratedAt || "" : session.titleGeneratedAt || existing?.titleGeneratedAt || "",
                 source: "web",
                 createdAt: existing?.createdAt || session.createdAt || new Date().toISOString(),
                 updatedAt: session.updatedAt || session.updated_at || lastMessageAt || existing?.updatedAt || new Date().toISOString(),
@@ -249,6 +324,13 @@ function createGlobalAgentHistoryRuntime(deps) {
         }
         const reconciled = reconcileGlobalAgentWebHistory(store, payload);
         saveGlobalAgentHistoryStore(reconciled);
+        for (const session of reconciled.sessions || []) {
+            if (String(session.source || "") !== "web")
+                continue;
+            void scheduleGlobalSessionAutoTitle(String(session.id || "")).catch((error) => {
+                console.warn(`[全局会话] 自动命名失败 (${session.id})：${error?.message || error}`);
+            });
+        }
         return reconciled;
     }
     function getBaseGlobalAgentMessages(store) {
@@ -273,6 +355,7 @@ function createGlobalAgentHistoryRuntime(deps) {
             session = {
                 id: sessionId,
                 name: source === "feishu" ? "飞书全局 Agent" : "全局 Agent 会话",
+                titleOrigin: "placeholder",
                 source,
                 createdAt: new Date().toISOString(),
                 messages: getBaseGlobalAgentMessages(store),
@@ -290,6 +373,11 @@ function createGlobalAgentHistoryRuntime(deps) {
         session.updatedAt = new Date().toISOString();
         store.sessions = sessions;
         saveGlobalAgentHistoryStore(store);
+        if (role === "assistant") {
+            void scheduleGlobalSessionAutoTitle(sessionId).catch((error) => {
+                console.warn(`[全局会话] 自动命名失败 (${sessionId})：${error?.message || error}`);
+            });
+        }
     }
     function buildFeishuConversationId(payload) {
         const raw = payload?.session_id || payload?.sessionId || payload?.sessionKey || payload?.conversation_id || payload?.conversationId || payload?.message?.session_id || payload?.data?.session_id || "default";
@@ -331,6 +419,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         syncGlobalAgentWebHistory,
         getGlobalAgentConversationMessages,
         appendGlobalAgentConversationMessage,
+        scheduleGlobalSessionAutoTitle,
         resolveFeishuGlobalAgentSessionId,
         runFeishuGlobalAgentSessionRoutingSelfTest,
     };

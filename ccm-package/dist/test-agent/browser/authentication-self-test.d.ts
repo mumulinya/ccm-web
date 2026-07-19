@@ -104,10 +104,10 @@ export declare function runTestAgentPlaywrightAuthenticationSelfTest(): Promise<
     plan: import("..").TestAgentExecutionPlan;
     report: import("..").TestAgentReport;
     reportValidation: import("..").TestAgentReportContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     missingReport: import("..").TestAgentReport;
     tamperedContract: import("..").TestAgentReportContractValidation;
-    tamperedVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    tamperedVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     textEvidenceSafe: boolean;
     reason?: undefined;
 }>;
@@ -200,7 +200,7 @@ export declare function runTestAgentPlaywrightMultiSessionAuthenticationSelfTest
     plan: import("..").TestAgentExecutionPlan;
     report: import("..").TestAgentReport;
     reportValidation: import("..").TestAgentReportContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     textEvidenceSafe: boolean;
     reason?: undefined;
 }>;

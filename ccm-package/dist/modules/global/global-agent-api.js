@@ -3,9 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentApi = createGlobalAgentApi;
 const child_process_1 = require("child_process");
 const workflow_decision_1 = require("../../agents/workflow-decision");
+const global_agent_attachments_1 = require("./global-agent-attachments");
 // HTTP transport adapter for the global Agent feature surface.
 function createGlobalAgentApi(deps) {
-    const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, completeGlobalAgentSupervision, completeIdempotency, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createMissionSupervisorRuntime, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processedFeishuMessageIds, processFeishuControlledMessage, publicGlobalAgentRun, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps;
+    const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, compactGlobalAgentSessionWithModel, completeGlobalAgentSupervision, completeIdempotency, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createMissionSupervisorRuntime, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processedFeishuMessageIds, processFeishuControlledMessage, publicGlobalAgentRun, publicGlobalAgentRunSummary, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps;
     const requirementTargets = () => [
         ...loadGroups().map((group) => ({
             type: "group",
@@ -23,6 +24,7 @@ function createGlobalAgentApi(deps) {
                 try {
                     const payload = body ? JSON.parse(body) : {};
                     const store = syncGlobalAgentWebHistory(payload);
+                    require("../../agents/global/memory").pruneDeletedGlobalWebSessionMemory((store.sessions || []).filter((session) => String(session.source || "web") === "web").map((session) => String(session.id || "")));
                     sendJson(res, { success: true, sessions: store.sessions?.length || 0, current_session_id: store.current_session_id || "" });
                 }
                 catch (error) {
@@ -34,6 +36,48 @@ function createGlobalAgentApi(deps) {
         if (pathname === "/api/global-agent/history" && req.method === "GET") {
             const store = loadGlobalAgentHistoryStore();
             sendJson(res, { success: true, ...store });
+            return true;
+        }
+        if (pathname === "/api/global-agent/memory/compact" && req.method === "POST") {
+            let body = "";
+            req.on("data", (chunk) => body += chunk);
+            req.on("end", async () => {
+                try {
+                    const payload = body ? JSON.parse(body) : {};
+                    const sessionId = String(payload.session_id || payload.sessionId || "").trim();
+                    if (!sessionId)
+                        return sendJson(res, { success: false, error: "缺少当前全局 Agent 会话 ID" }, 400);
+                    const known = (loadGlobalAgentHistoryStore().sessions || []).some((session) => String(session.id) === sessionId);
+                    if (!known)
+                        return sendJson(res, { success: false, error: "全局 Agent 会话不存在" }, 404);
+                    const result = await compactGlobalAgentSessionWithModel(sessionId, {
+                        force: true,
+                        reason: "manual_slash_compact",
+                        customInstructions: String(payload.custom_instructions || payload.customInstructions || "").trim(),
+                    });
+                    sendJson(res, {
+                        success: true,
+                        session_id: sessionId,
+                        mode: "model_required",
+                        compacted: result.compacted === true,
+                        reason: result.reason || "manual_slash_compact",
+                        archive_id: result.archive?.id || "",
+                        before_tokens: Number(result.session?.preCompactTokenCount || result.tokenCount || 0),
+                        after_tokens: Number(result.session?.postCompactTokenCount || 0),
+                        preserved_messages: Number(result.session?.boundary?.preservedMessageCount || 0),
+                        summary_source: result.session?.summarySource || "model",
+                        token_measurement: result.session?.compaction?.tokenMeasurement || null,
+                        auto_compact_threshold: Number(result.session?.compaction?.postCompactGate?.threshold || 0),
+                        post_compact_gate: result.session?.compaction?.postCompactGate || null,
+                        session_memory: result.session?.compaction?.sessionMemoryState || null,
+                        consecutive_failures: Number(result.session?.compaction?.consecutiveFailures || 0),
+                        model_context_capacity: result.archive?.model?.modelContextCapacity || null,
+                    });
+                }
+                catch (error) {
+                    sendJson(res, { success: false, error: error?.message || "全局 Agent 会话压缩失败" }, 400);
+                }
+            });
             return true;
         }
         if (pathname === "/api/global-agent/bridge/pending" && req.method === "GET") {
@@ -568,7 +612,11 @@ function createGlobalAgentApi(deps) {
             }
             const sessionId = String(parsed.query.session_id || parsed.query.sessionId || "").trim();
             const status = String(parsed.query.status || "").trim();
-            sendJson(res, { success: true, runs: listGlobalAgentRuns({ sessionId: sessionId || undefined, status: status || undefined, limit: Number(parsed.query.limit || 30) }).map(run => publicGlobalAgentRun(run)) });
+            const detail = String(parsed.query.detail || "").trim().toLowerCase();
+            const project = detail === "full"
+                ? (run) => publicGlobalAgentRun(run)
+                : (run) => publicGlobalAgentRunSummary(run);
+            sendJson(res, { success: true, runs: listGlobalAgentRuns({ sessionId: sessionId || undefined, status: status || undefined, limit: Number(parsed.query.limit || 30) }).map(project) });
             return true;
         }
         if (pathname === "/api/global-agent/runs/steer" && req.method === "POST") {
@@ -814,6 +862,7 @@ function createGlobalAgentApi(deps) {
                     if (sourceIngestion.agent_context) {
                         message = message ? `${message}${sourceIngestion.agent_context}` : `请处理以下资料：${sourceIngestion.agent_context}`;
                     }
+                    const sourceFiles = (0, global_agent_attachments_1.serializeGlobalRequestAttachments)(files);
                     if (!message)
                         throw new Error("消息不能为空");
                     let history = [];
@@ -837,12 +886,12 @@ function createGlobalAgentApi(deps) {
                         if (!result)
                             throw new Error(settled?.error || "重复请求仍在处理中");
                         if (isStream) {
-                            emit({ type: "result", run: result, duplicate: true });
+                            emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles, duplicate: true });
                             emit({ type: "done" });
                             res.end();
                         }
                         else
-                            sendJson(res, { success: true, run: result, duplicate: true });
+                            sendJson(res, { success: true, run: result, source_files: sourceFiles, files: sourceFiles, duplicate: true });
                         return;
                     }
                     let finalPetEventRelayed = false;
@@ -869,12 +918,12 @@ function createGlobalAgentApi(deps) {
                         relayGlobalPetEvent(ctx, { type: run.status === "failed" ? "failed" : "completed", run }, { finalRun: result });
                     }
                     if (isStream) {
-                        emit({ type: "result", run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
+                        emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles });
                         emit({ type: "done" });
                         res.end();
                     }
                     else
-                        sendJson(res, { success: true, run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
+                        sendJson(res, { success: true, run: result, source_files: sourceFiles, files: sourceFiles });
                 }
                 catch (error) {
                     if (reliabilityOperationKey && reliabilityOperationAcquired) {
@@ -965,14 +1014,14 @@ function createGlobalAgentApi(deps) {
                         onEvent: emit,
                     });
                     const result = publicGlobalAgentRun(run);
-                    const responseFiles = files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath }));
+                    const sourceFiles = (0, global_agent_attachments_1.serializeGlobalRequestAttachments)(files);
                     if (isStream) {
-                        emit({ type: "result", run: result, files: responseFiles });
+                        emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles });
                         emit({ type: "done" });
                         res.end();
                     }
                     else {
-                        sendJson(res, { success: true, reply: globalRunVisibleReply(run, ""), run: result, files: responseFiles, agentic: true });
+                        sendJson(res, { success: true, reply: globalRunVisibleReply(run, ""), run: result, source_files: sourceFiles, files: sourceFiles, agentic: true });
                     }
                 }
                 catch (error) {

@@ -61,12 +61,15 @@ export function normalizeLlmTokenUsage(value: any, provider: "openai" | "anthrop
   const cacheReadTokens = provider === "anthropic"
     ? Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens))
     : 0;
-  const inputTokens = directInputTokens + cacheCreationTokens + cacheReadTokens;
-  const reported = inputTokens > 0 || outputTokens > 0;
+  // Anthropic reports uncached input and cache buckets separately. Keep
+  // inputTokens as the direct-input component so the shared CC-style
+  // measurement can add each bucket exactly once.
+  const inputTokens = directInputTokens;
+  const reported = inputTokens > 0 || cacheCreationTokens > 0 || cacheReadTokens > 0 || outputTokens > 0;
   return {
     inputTokens,
     outputTokens,
-    totalTokens: inputTokens + outputTokens,
+    totalTokens: inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens,
     reported,
     directInputTokens,
     cacheCreationInputTokens: cacheCreationTokens,
@@ -129,6 +132,41 @@ function resolveTimeoutMs(config: any, defaultTimeoutMs: number) {
 
 function resolveTemperature(config: any, fallback: number) {
   return Number.isFinite(Number(config.temperature)) ? Number(config.temperature) : fallback;
+}
+
+const REASONING_EFFORTS = new Set(["low", "medium", "high"]);
+const ANTHROPIC_THINKING_BUDGETS: Record<string, number> = {
+  low: 1024,
+  medium: 4096,
+  high: 16000,
+};
+
+export function resolveReasoningEffort(config: any) {
+  const effort = String(config?.reasoningEffort ?? config?.reasoning_effort ?? "off").trim().toLowerCase();
+  return REASONING_EFFORTS.has(effort) ? effort : "off";
+}
+
+export function buildOpenAiReasoningFields(config: any) {
+  const effort = resolveReasoningEffort(config);
+  if (effort === "off") return {};
+  // Chat Completions historically used flat reasoning_effort; GPT-5 / many relays
+  // also accept (or only honor) the nested Responses-style reasoning.effort.
+  // Send both with lowercase values — OpenAI enums are lowercase, not "High".
+  return {
+    reasoning_effort: effort,
+    reasoning: { effort },
+  };
+}
+
+export function buildAnthropicThinkingFields(config: any) {
+  const effort = resolveReasoningEffort(config);
+  if (effort === "off") return {};
+  return {
+    thinking: {
+      type: "enabled",
+      budget_tokens: ANTHROPIC_THINKING_BUDGETS[effort] || ANTHROPIC_THINKING_BUDGETS.medium,
+    },
+  };
 }
 
 function assertLlmConfig(config: any, endpoint: string) {
@@ -339,6 +377,7 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
         model: config.model,
         temperature: options.temperature ?? resolveTemperature(config, 0.2),
         ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+        ...buildOpenAiReasoningFields(config),
         messages: options.messages,
       }),
       signal: controller.signal,
@@ -374,6 +413,7 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
       temperature: options.temperature ?? resolveTemperature(config, 0.2),
       system,
       messages: userMessages,
+      ...buildAnthropicThinkingFields(config),
     }, {
       "Content-Type": "application/json",
       "x-api-key": config.apiKey,

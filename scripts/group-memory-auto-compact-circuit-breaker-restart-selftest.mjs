@@ -35,9 +35,8 @@ async function childFail(groupId, sessionId, siblingId, sentinel) {
   const { storage, circuit } = modules();
   storage.saveGroupMessages(groupId, messages(sessionId, sentinel), sessionId);
   storage.saveGroupMessages(groupId, messages(siblingId, "PHASE302_SIBLING"), siblingId);
-  const compaction = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-memory-compaction.js"));
   let compactCalls = 0;
-  compaction.compactGroupConversationMemory = async () => {
+  const failingCompact = async () => {
     compactCalls += 1;
     const error = new Error(`${sentinel}: simulated prompt too long`);
     error.name = "PromptTooLongError";
@@ -50,6 +49,7 @@ async function childFail(groupId, sessionId, siblingId, sentinel) {
       sessionId,
       reason: `phase302-failure-${index + 1}`,
       messageId: `failure-${index + 1}`,
+      compactGroupConversationMemory: failingCompact,
     }));
   }
   const blockedRun = await memory.runGroupMemoryAutoCompactionNow(groupId, { sessionId, reason: "phase302-fourth-run" });

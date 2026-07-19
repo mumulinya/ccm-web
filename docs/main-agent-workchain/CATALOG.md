@@ -1,6 +1,6 @@
 # Main Agent Workchain 文档总目录
 
-> 共 309 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
+> 共 310 篇功能与验收记录。该文件由 `node scripts/generate-main-agent-doc-catalog.mjs` 生成。
 
 ## global-agent/conversation-and-ui (21)
 
@@ -372,6 +372,10 @@
 - [任务管理页执行报告可见文本清洗 v1](./shared-workchain/user-experience/2026-07-07-task-manager-visible-report-sanitizer-v1.md)
 - [任务卡改动明细 v1](./shared-workchain/user-experience/2026-07-07-task-card-change-summary-v1.md)
 - [前端历史可见文本兜底清洗 v1](./shared-workchain/user-experience/2026-07-07-frontend-legacy-visible-text-sanitizer-v1.md)
+
+## test-agent (1)
+
+- [Test Agent 运维短手册](./test-agent/ops-runbook.md)
 
 ## test-agent/acceptance-bridge (7)
 

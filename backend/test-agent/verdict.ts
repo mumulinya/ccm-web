@@ -34,6 +34,13 @@ function artifactFiles(report: TestAgentReport) {
 }
 
 function nextActionsFor(report: TestAgentReport, failedRequired: TestAgentVerdict["failedRequiredChecks"], unknownRequired: TestAgentVerdict["unknownRequiredChecks"]) {
+  const flakyGroups = report.browserStabilitySummary?.statusCounts?.flaky || 0;
+  if (flakyGroups > 0) {
+    return [
+      `Re-run ${flakyGroups} flaky browser stability group(s) until results are stable_pass or stable_fail.`,
+      "Do not accept the delivery while browser stability remains flaky.",
+    ];
+  }
   if ((report.browserToolCallTimeoutSummary?.timedOutCalls || 0) > 0) {
     return [
       `Investigate ${report.browserToolCallTimeoutSummary!.timedOutCalls} timed-out browser tool call(s) before accepting the delivery.`,
@@ -127,6 +134,7 @@ export function buildTestAgentVerdict(report: TestAgentReport): TestAgentVerdict
   const unknownRequiredChecks = report.requiredCheckCoverage.filter(item => item.status === "unknown");
   const failedAcceptanceCriteria = report.acceptanceCoverage.filter(item => item.status === "not_verified");
   const unknownAcceptanceCriteria = report.acceptanceCoverage.filter(item => item.status === "unknown");
+  const flakyStabilityGroups = report.browserStabilitySummary?.statusCounts?.flaky || 0;
   const canAccept = report.status === "passed"
     && report.recommendation === "accept"
     && ["verified", "waived"].includes(report.adversarialEvidenceSummary.status)
@@ -134,7 +142,8 @@ export function buildTestAgentVerdict(report: TestAgentReport): TestAgentVerdict
     && report.browserEvidenceTemporalIntegrity?.status === "complete"
     && report.browserResourceLifecycleSummary?.status === "complete"
     && (!report.browserToolEvidenceLineage || report.browserToolEvidenceLineage.status === "complete")
-    && report.acceptanceEvidenceGateSummary.canAccept;
+    && report.acceptanceEvidenceGateSummary.canAccept
+    && flakyStabilityGroups === 0;
   const requiredCheckSummary = buildRequiredCheckSummary(report.requiredCheckCoverage);
   const acceptanceSummary = buildAcceptanceSummary(report.acceptanceCoverage);
   return {

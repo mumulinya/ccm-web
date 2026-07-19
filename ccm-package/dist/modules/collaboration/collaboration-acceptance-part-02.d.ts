@@ -1,0 +1,56 @@
+import type { TestAgentReport, TestAgentVerdict } from "../../test-agent/types";
+export declare function getTaskExecutionFromReceipt(response: string, receipt: any, details?: any): {
+    status: import("./collaboration-runtime-status-helpers-part-01").TaskExecutionStatus;
+    result: string;
+    report: string;
+    detail: any;
+    receipt: any;
+    review: any;
+    fileChanges: any;
+    deliverySummary: any;
+    assignments: any;
+    coordinationPlan: any;
+    dispatchPolicy: any;
+    executionOrder: any;
+    coordinatorRuntime: any;
+    coordinatorAgent: any;
+    runtimeToolSync: any;
+    runtimeTooling: any;
+    invokedSkills: any;
+};
+export declare function buildEvidenceGateFollowUps(group: any, outputs: string[]): any[];
+export declare function buildIndependentReviewGateFollowUps(input: {
+    group: any;
+    taskId?: string;
+    task?: any;
+    outputs?: string[];
+    existingFollowUps?: any[];
+    execution?: any;
+}): any[];
+export declare function buildFailedIndependentReviewReworkFollowUps(input: {
+    group: any;
+    taskId?: string;
+    task?: any;
+    outputs?: string[];
+    existingFollowUps?: any[];
+    execution?: any;
+}): any[];
+export declare function testAgentDecisionReceiptStatus(report: TestAgentReport, verdict: TestAgentVerdict | null): "failed" | "blocked" | "done" | "partial";
+export declare function buildNativeTestAgentReceipt(targetName: string, report: TestAgentReport, handoff?: any, workOrder?: any, invocationResult?: any): any;
+export declare function buildNativeTestAgentPlanBlockedReceipt(targetName: string, plan: any, dispatch?: any, handoff?: any): any;
+export declare function runtimeToolDispatchBlockedReceipt(projectName: string, runtimeToolContext?: any): {
+    agent: string;
+    status: string;
+    summary: string;
+    actions: any[];
+    filesChanged: any[];
+    verification: any[];
+    blockers: string[];
+    needs: string[];
+    runtimeToolDispatchGate: any;
+};
+export declare function canCompleteDailyDevFromDeliverySummary(task: any, execution: any, summary: any): boolean;
+export declare function buildTaskGapContinuationDraft(task: any): string;
+export declare function getTaskGapItems(task: any): string[];
+export declare function getTaskGapFingerprint(task: any): string;
+export declare function canAutoContinueTaskGaps(task: any): boolean;

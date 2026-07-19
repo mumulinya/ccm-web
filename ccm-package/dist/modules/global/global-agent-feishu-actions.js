@@ -27,7 +27,10 @@ function createGlobalAgentFeishuActions(deps) {
         const command = result.command || null;
         return {
             success: result.success !== false,
-            message: `已把${label}交给音乐播放器，CCM Web 在任意页面都会自动检索并播放。${command?.id ? `\n- 指令 ID：${command.id}` : ""}`,
+            // 用户气泡只给短确认；指令 ID 仅放 client_effect 给前端领取，不展示
+            message: normalizedKeyword === RANDOM_MUSIC_KEYWORD
+                ? "已开始随机播放。"
+                : `已把${label}交给音乐播放器播放。`,
             keyword: normalizedKeyword,
             mode,
             command,
@@ -36,6 +39,26 @@ function createGlobalAgentFeishuActions(deps) {
                 params: {
                     keyword: normalizedKeyword,
                     mode,
+                    command_id: command?.id || "",
+                },
+            },
+        };
+    }
+    async function executeStopMusic(baseUrl, input = {}) {
+        const source = String(input.source || "global-agent").trim() || "global-agent";
+        const result = await postLocalApi(baseUrl, "/api/music/remote-command", {
+            type: "stop",
+            keyword: "__stop__",
+            source,
+        });
+        const command = result.command || null;
+        return {
+            success: result.success !== false,
+            message: "已停止播放。",
+            command,
+            client_effect: {
+                type: "stop_music",
+                params: {
                     command_id: command?.id || "",
                 },
             },
@@ -186,6 +209,12 @@ function createGlobalAgentFeishuActions(deps) {
             });
             return played.message;
         }
+        if (action.type === "stop_music") {
+            const stopped = await executeStopMusic(baseUrl, {
+                source: options.source || "feishu-global-agent",
+            });
+            return stopped.message;
+        }
         if (action.type === "toggle_pet") {
             const operation = params.action || params.operation || "open";
             const result = await postLocalApi(baseUrl, operation === "close" ? "/api/pets/close" : "/api/pets/launch", {});
@@ -326,6 +355,6 @@ function createGlobalAgentFeishuActions(deps) {
         }
         return `已识别动作 ${action.type}，但它不适合从飞书远程执行。`;
     }
-    return { queueMusicPlayback, executePlayMusic, fillCronParams, executeFeishuManagementAction, executeFeishuAction };
+    return { queueMusicPlayback, executePlayMusic, executeStopMusic, fillCronParams, executeFeishuManagementAction, executeFeishuAction };
 }
 //# sourceMappingURL=global-agent-feishu-actions.js.map

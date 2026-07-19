@@ -1,0 +1,55 @@
+export declare function collectTaskTypedMemoryRecallDocs(task?: any, context?: any): any[];
+export declare function collectReceiptTypedMemoryUsageRows(receipt?: any): any;
+export declare function configuredProjectWorkDir(project: string): string;
+export declare function verifyTypedMemoryCurrentSourceEvidence(evidence?: any, project?: string, context?: any): {
+    schema: string;
+    valid: boolean;
+    status: string;
+    evidence_type: string;
+    relative_path: string;
+    claimed_checksum: string;
+    observed_checksum: string;
+    proof_id: string;
+};
+export declare function typedMemoryUsageStateFromReceipt(doc: any, receipt?: any, context?: any): {
+    usage_state: any;
+    claimed_usage_state: any;
+    current_source_verified: boolean;
+    current_source_proof: {
+        schema: string;
+        valid: boolean;
+        status: string;
+        evidence_type: string;
+        relative_path: string;
+        claimed_checksum: string;
+        observed_checksum: string;
+        proof_id: string;
+    };
+    direct_reference: boolean;
+    evidence_tier: string;
+    evidence_confidence: number;
+    anomaly_codes: string[];
+    reason: any;
+    conflict_detected: boolean;
+    conflict_kind: any;
+    recommended_memory_action: any;
+    conflict_reason: any;
+    replacement_memory: any;
+} | {
+    usage_state: string;
+    claimed_usage_state: string;
+    current_source_verified: boolean;
+    current_source_proof: any;
+    direct_reference: boolean;
+    evidence_tier: string;
+    evidence_confidence: number;
+    anomaly_codes: string[];
+    reason: string;
+    conflict_detected?: undefined;
+    conflict_kind?: undefined;
+    recommended_memory_action?: undefined;
+    conflict_reason?: undefined;
+    replacement_memory?: undefined;
+};
+export declare function collectTaskTypedMemoryConsumptionRows(task?: any, receipts?: any[], context?: any): any[];
+export declare function normalizeTypedMemoryPressureUsageState(value: any): string;

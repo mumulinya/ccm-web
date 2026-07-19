@@ -40,6 +40,7 @@ exports.createProjectChatRun = createProjectChatRun;
 exports.publicProjectChatRun = publicProjectChatRun;
 exports.archiveProjectChatRun = archiveProjectChatRun;
 exports.purgeProjectChatRun = purgeProjectChatRun;
+exports.purgeProjectChatRunsForSession = purgeProjectChatRunsForSession;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const agent_sessions_1 = require("../tasks/agent-sessions");
@@ -65,6 +66,8 @@ function serializableProjectChatRun(run) {
         workflow_decision: run.workflow_decision || null,
         workEvents: Array.isArray(run.workEvents) ? run.workEvents.slice(-80) : [],
         parent_run_id: run.parent_run_id || "",
+        project_session_id: run.project_session_id || "",
+        project_session_generation: Number(run.project_session_generation || 0),
         task_session_scope_id: run.task_session_scope_id || "",
         task_agent_session_id: run.task_agent_session_id || "",
         native_session_id: run.native_session_id || "",
@@ -103,7 +106,7 @@ function loadProjectChatRuns() {
         console.warn("[项目聊天运行] 读取持久化记录失败", error);
     }
 }
-function createProjectChatRun(project, message, workDir, parentRunId = "") {
+function createProjectChatRun(project, message, workDir, parentRunId = "", projectSessionId = "") {
     const now = new Date().toISOString();
     const runId = "pchat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
     const traceId = "project_chat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
@@ -115,7 +118,7 @@ function createProjectChatRun(project, message, workDir, parentRunId = "") {
     catch (error) {
         checkpoint = { success: false, error: error?.message || String(error) };
     }
-    const run = { id: runId, trace_id: traceId, project, message, workDir, status: "running", checkpoint_id: checkpoint?.checkpointId || checkpoint?.id || "", checkpoint, parent_run_id: parentRunId, task_session_scope_id: "", task_agent_session_id: "", native_session_id: "", resume_mode: "", created_at: now, updated_at: now, child: null, fileChanges: null, workEvents: [] };
+    const run = { id: runId, trace_id: traceId, project, message, workDir, status: "running", checkpoint_id: checkpoint?.checkpointId || checkpoint?.id || "", checkpoint, parent_run_id: parentRunId, project_session_id: projectSessionId, project_session_generation: 0, task_session_scope_id: "", task_agent_session_id: "", native_session_id: "", resume_mode: "", created_at: now, updated_at: now, child: null, fileChanges: null, workEvents: [] };
     exports.projectChatRuns.set(runId, run);
     saveProjectChatRuns();
     return run;
@@ -133,6 +136,8 @@ function publicProjectChatRun(run) {
         checkpoint_id: run.checkpoint_id || "",
         rollback_available: !!run.checkpoint_id,
         parent_run_id: run.parent_run_id || "",
+        project_session_id: run.project_session_id || "",
+        project_session_generation: Number(run.project_session_generation || 0),
         task_session_scope_id: run.task_session_scope_id || "",
         task_agent_session_id: run.task_agent_session_id || "",
         native_session_id: run.native_session_id || "",
@@ -185,10 +190,10 @@ function purgeProjectChatRun(id) {
             catch { }
         }
     }
+    const sharedProjectSessionBinding = !!String(run.project_session_id || "").trim();
     const cleanupIds = Array.from(new Set([
         run.id,
-        run.task_session_scope_id,
-        run.task_agent_session_id,
+        ...(sharedProjectSessionBinding ? [] : [run.task_session_scope_id, run.task_agent_session_id]),
     ].map(value => String(value || "").trim()).filter(Boolean)));
     const cleanup = { sessions: 0, executions: 0, checkpoints: 0, outputs: 0 };
     for (const cleanupId of cleanupIds) {
@@ -207,5 +212,13 @@ function purgeProjectChatRun(id) {
     exports.projectChatRuns.delete(runId);
     saveProjectChatRuns();
     return { run, cleanup };
+}
+function purgeProjectChatRunsForSession(project, projectSessionId) {
+    const ids = [...exports.projectChatRuns.values()]
+        .filter(run => String(run.project || "") === String(project || "") && String(run.project_session_id || "") === String(projectSessionId || ""))
+        .map(run => String(run.id || ""))
+        .filter(Boolean);
+    const removed = ids.map(id => purgeProjectChatRun(id)).filter(Boolean);
+    return { ids, removed };
 }
 //# sourceMappingURL=chat-runs.js.map

@@ -1,0 +1,112 @@
+import { type RuntimeToolSyncAudit, type RuntimeToolSyncOptions, type RuntimeToolSyncCatalog, type RuntimeToolResyncResult, type RuntimeMissingToolResyncResult, type RuntimeInvokedSkill, type RuntimeMcpStatus, type RuntimeToolPermissionRule } from "./runtime-tool-sync-part-01";
+export declare function getRuntimeExecutionEnv(agentType: string): Record<string, string>;
+export declare function runRuntimeToolSyncSelfTest(): {
+    pass: boolean;
+    checks: {
+        unifiedGatewayConfigured: boolean;
+        webSearchDisabled: boolean;
+        secretUsesEnvironment: boolean;
+        secretNotPersisted: boolean;
+        codexSkillPathRegistered: boolean;
+        permissionRulesSupportToolScope: boolean;
+        toolScopedMcpStaysProxyOnly: boolean;
+        nativeStyleToolScopedMcpStaysProxyOnly: boolean;
+        fullServerMcpCanUseNative: boolean;
+        grantServerMatchingKeepsToolGrant: boolean;
+        nativeStyleGrantServerMatchingKeepsToolGrant: boolean;
+        nativeAndProxyOnlyAuditNames: boolean;
+        runtimeSyncIntegration: boolean;
+        authorizationReadinessPromptWarnsChildAgent: boolean;
+        authorizationReadinessBlocksDelivery: boolean;
+        runtimeReadinessChecksDispatchGate: boolean;
+        dispatchGateBlocksMissingAuthorization: boolean;
+        snapshotPersistsDispatchGate: boolean;
+        runtimeResyncSupportsSnapshotFilter: boolean;
+        cursorRuntimeSyncSucceeded: boolean;
+        cursorPluginMcpContainsOnlyNativeSafeServers: boolean;
+        cursorReadinessChecksPluginMcpInheritance: boolean;
+        cursorDoesNotPolluteProjectWorkspace: boolean;
+        invokedSkillDetected: boolean;
+    };
+    rules: RuntimeToolPermissionRule[];
+    invoked: RuntimeInvokedSkill[];
+    integration: {
+        pass: boolean;
+        checks: {
+            integrationSyncSucceeded: boolean;
+            toolScopedMcpIsProxyOnly: boolean;
+            toolScopedMcpNotInNativeConfig: boolean;
+            fullServerMcpInNativeConfig: boolean;
+            exactPermissionRulePersisted: boolean;
+            snapshotCarriesCatalogRevision: boolean;
+            readinessChecksCatalogRevision: boolean;
+            staleCatalogRevisionBlocksDelivery: boolean;
+            runtimeResyncRefreshesStaleSnapshot: boolean;
+            runtimeResyncSupportsSnapshotFilter: boolean;
+            authorizationReadinessPromptWarnsChildAgent: boolean;
+            authorizationReadinessBlocksDelivery: boolean;
+            runtimeReadinessChecksDispatchGate: boolean;
+            dispatchGateBlocksMissingAuthorization: boolean;
+            skillSyncedToCodexHome: boolean;
+            marketplacePackageSkillCopiedToCodexHome: boolean;
+            marketplacePackageSkillRegistered: boolean;
+            snapshotPersistsNativeAndProxyDelivery: any;
+            snapshotPersistsPackageSkillStatus: any;
+            snapshotPersistsDispatchGate: boolean;
+            gatewaySecretNotPersisted: boolean;
+            claudeRuntimeSyncSucceeded: boolean;
+            claudePluginManifestDeclaresSkillsAndMcp: boolean;
+            claudePluginMcpContainsOnlyNativeSafeServers: boolean;
+            claudeStrictMcpConfigMatchesPluginNativeScope: boolean;
+            claudePluginSkillsCopiedForChildAgents: boolean;
+            claudeSnapshotPersistsPluginDir: boolean;
+            claudeReadinessChecksPluginMcpInheritance: boolean;
+            codexSkillRuntimeAliasPersisted: boolean;
+            claudeSkillRuntimeAliasPersisted: boolean;
+            runtimePromptIncludesSkillAliasMapping: boolean;
+            cursorRuntimeSyncSucceeded: boolean;
+            cursorPluginManifestDeclaresSkillsAndMcp: boolean;
+            cursorPluginMcpContainsOnlyNativeSafeServers: boolean;
+            cursorPluginSkillsCopiedForChildAgents: boolean;
+            cursorSnapshotPersistsPluginDir: boolean;
+            cursorReadinessChecksPluginMcpInheritance: boolean;
+            cursorDoesNotPolluteProjectWorkspace: boolean;
+            cursorSkillRuntimeAliasPersisted: boolean;
+            cursorPromptIncludesSkillAliasMapping: boolean;
+        };
+        audit: {
+            mode: "failed" | "native-and-proxy" | "ccm-proxy-only";
+            configFormat: string;
+            mcp_statuses: RuntimeMcpStatus[];
+            skill_statuses: {
+                name: string;
+                state: "missing" | "synced";
+            }[];
+        };
+        claudeAudit: {
+            mode: "failed" | "native-and-proxy" | "ccm-proxy-only";
+            configFormat: string;
+            mcp_statuses: RuntimeMcpStatus[];
+            skill_statuses: {
+                name: string;
+                state: "missing" | "synced";
+            }[];
+        };
+        cursorAudit: {
+            mode: "failed" | "native-and-proxy" | "ccm-proxy-only";
+            configFormat: string;
+            mcp_statuses: RuntimeMcpStatus[];
+            skill_statuses: {
+                name: string;
+                state: "missing" | "synced";
+            }[];
+        };
+    };
+};
+export declare function syncRuntimeToolsWithCatalog(workDir: string, agentType: string, allowedTools: any, catalog?: RuntimeToolSyncCatalog, options?: RuntimeToolSyncOptions): RuntimeToolSyncAudit;
+export declare function syncRuntimeTools(workDir: string, agentType: string, allowedTools: any, options?: RuntimeToolSyncOptions): RuntimeToolSyncAudit;
+export declare function resyncMissingRuntimeToolSnapshots(options?: any): RuntimeMissingToolResyncResult;
+export declare function resyncRecentRuntimeToolSnapshots(options?: any): RuntimeToolResyncResult;
+export declare function buildRuntimeToolSyncPrompt(audit: RuntimeToolSyncAudit): string;
+export declare function detectInvokedSkillsFromText(text: string, allowedTools?: any, skills?: any[]): RuntimeInvokedSkill[];
+export declare function recordRuntimeToolSyncAudit(audit: RuntimeToolSyncAudit, projectName?: string, groupId?: string): void;

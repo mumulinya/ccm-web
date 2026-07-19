@@ -5,8 +5,8 @@ export declare function formatDeliveryAssignmentItem(item: any): string;
 export declare function buildUserDeliveryReport(task: any, summary: any, status: DeliveryStatus, detail?: string): string;
 export declare function buildTaskDeliveryReport(task: any, summary: any, status: DeliveryStatus, detail?: string): {
     schema: string;
-    surface: import("../../agents/delivery-report").MainAgentDeliverySurface;
-    status: import("../../agents/delivery-report").MainAgentDeliveryStatus;
+    surface: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliverySurface;
+    status: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliveryStatus;
     status_label: string;
     title: string;
     headline: string;
@@ -127,8 +127,8 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
     completion_card: {
         schema: string;
         title: string;
-        surface: import("../../agents/delivery-report").MainAgentDeliverySurface;
-        status: import("../../agents/delivery-report").MainAgentDeliveryStatus;
+        surface: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliverySurface;
+        status: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliveryStatus;
         status_label: string;
         headline: string;
         metrics: ({
@@ -168,8 +168,8 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
     completionCard: {
         schema: string;
         title: string;
-        surface: import("../../agents/delivery-report").MainAgentDeliverySurface;
-        status: import("../../agents/delivery-report").MainAgentDeliveryStatus;
+        surface: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliverySurface;
+        status: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliveryStatus;
         status_label: string;
         headline: string;
         metrics: ({
@@ -209,7 +209,7 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
     pickup_summary: {
         schema: string;
         title: string;
-        status: import("../../agents/delivery-report").MainAgentDeliveryStatus;
+        status: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliveryStatus;
         status_label: string;
         headline: string;
         current_state: string;
@@ -222,12 +222,12 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
             hide_internal_protocols: boolean;
             show_for_ordinary_conversation: boolean;
         };
-        source: import("../../agents/delivery-report").MainAgentDeliverySurface;
+        source: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliverySurface;
     };
     pickupSummary: {
         schema: string;
         title: string;
-        status: import("../../agents/delivery-report").MainAgentDeliveryStatus;
+        status: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliveryStatus;
         status_label: string;
         headline: string;
         current_state: string;
@@ -240,12 +240,12 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
             hide_internal_protocols: boolean;
             show_for_ordinary_conversation: boolean;
         };
-        source: import("../../agents/delivery-report").MainAgentDeliverySurface;
+        source: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliverySurface;
     };
     user_handoff: {
         schema: string;
         title: string;
-        surface: import("../../agents/delivery-report").MainAgentDeliverySurface;
+        surface: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliverySurface;
         status: string;
         status_label: string;
         headline: string;
@@ -267,7 +267,7 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
     userHandoff: {
         schema: string;
         title: string;
-        surface: import("../../agents/delivery-report").MainAgentDeliverySurface;
+        surface: import("../../agents/delivery-report-part-01-part-01").MainAgentDeliverySurface;
         status: string;
         status_label: string;
         headline: string;

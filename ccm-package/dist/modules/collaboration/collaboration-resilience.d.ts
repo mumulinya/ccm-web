@@ -25,6 +25,8 @@ export type ConflictLaneInput = {
     task: string;
     workDir: string;
     writablePaths?: string[];
+    /** Verification-only lanes (e.g. native TestAgent) serialize after writers on the same repo. */
+    verificationOnly?: boolean;
 };
 export declare function buildCollaborationConflictPlan(inputs: ConflictLaneInput[], requestedOrder?: string): {
     requestedOrder: string;
@@ -34,7 +36,9 @@ export declare function buildCollaborationConflictPlan(inputs: ConflictLaneInput
         conflictWorkspaceKey: string;
         conflictGroup: string;
         mergeOwner: boolean;
+        runAfterWriters: boolean;
         index: number;
+        verificationOnly: boolean;
         repoKey: string;
         scopes: string[];
         key: string;
@@ -45,6 +49,10 @@ export declare function buildCollaborationConflictPlan(inputs: ConflictLaneInput
     }[];
     protected: boolean;
 };
+/** Stable order: writers first, then verification-only (TestAgent) lanes in the same conflict group. */
+export declare function orderMentionsForConflictPlan(mentions: any[], conflictPlan?: {
+    lanes?: any[];
+}): any[];
 export declare function runCollaborationResilienceSelfTest(): {
     pass: boolean;
     checks: {
@@ -56,6 +64,7 @@ export declare function runCollaborationResilienceSelfTest(): {
         authenticationFailureSwitchesRuntime: boolean;
         serializesOverlappingRepoLanes: boolean;
         keepsSeparateReposParallel: boolean;
+        serializesSameRepoWriteThenVerify: boolean;
         recoveryPromptPreservesOriginalTask: boolean;
     };
 };

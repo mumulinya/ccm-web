@@ -14,4 +14,7 @@ export declare function getSessions(projectName: string): {
     updated_at: any;
 }[];
 export declare function getSessionDetail(projectName: string, sessionId: string): any;
+export declare function scheduleProjectSessionAutoTitle(project: string, sessionId: string, options?: {
+    modelCall?: (request: any) => Promise<any>;
+}): Promise<any>;
 export declare function handleSessionsApi(pathname: string, req: any, res: any, parsed: any): boolean;

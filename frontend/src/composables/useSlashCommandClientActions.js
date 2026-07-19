@@ -143,6 +143,7 @@ export function createSlashCommandClientActions(options = {}) {
     }
 
     if (action === 'new_session') return options.newSession?.(payload)
+    if (action === 'compact_session') return options.compactSession?.(payload)
     if (action === 'clear_session') return options.clearSession?.(payload)
     if (action === 'rename_session') return options.renameSession?.(args, payload)
     throw new Error(`当前入口未实现客户端命令：${action}`)

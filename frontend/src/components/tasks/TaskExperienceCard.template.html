@@ -1,0 +1,915 @@
+  <section class="task-experience-card" :class="[`context-${context}`, `phase-${card.phase}`]">
+    <header class="task-card-head">
+      <div>
+        <span class="task-card-kicker">{{ kicker }}</span>
+        <h4>{{ card.title || '开发任务' }}</h4>
+      </div>
+      <span class="task-card-phase">{{ card.phase_label || '正在处理' }}</span>
+    </header>
+
+    <div v-if="visibleTaskGoal" class="task-card-goal">{{ visibleTaskGoal }}</div>
+    <div class="task-card-streamlined">
+      <strong>{{ streamlinedText }}</strong>
+      <small>{{ streamlinedToolSummary }}</small>
+    </div>
+    <div v-if="requirementEpicItems.length" class="task-card-section requirement-epic-plan">
+      <div class="section-head">
+        <label>需求拆单任务图</label>
+        <span>{{ requirementEpicItems.length }} 个任务 · {{ requirementEpicDependencyCount }} 条依赖</span>
+      </div>
+      <div class="requirement-epic-items">
+        <article v-for="item in requirementEpicItems" :key="item.item_key" :class="['requirement-epic-item', item.status]">
+          <div>
+            <strong>{{ item.title }}</strong>
+            <small>{{ item.target_id || (item.target_type === 'auto' ? '由主 Agent 分派' : item.target_type) }}</small>
+          </div>
+          <span>{{ agentLabel(item.status) }}</span>
+          <p v-if="item.depends_on?.length">前置：{{ item.depends_on.join('、') }}</p>
+          <p v-if="item.branch_detail" :class="['requirement-epic-branch', item.branch_state]">{{ item.branch_detail }}</p>
+          <p v-if="item.status_detail">{{ item.status_detail }}</p>
+          <p v-if="item.acceptance_criteria?.length">验收：{{ item.acceptance_criteria.slice(0, 2).join('；') }}</p>
+        </article>
+      </div>
+      <small v-if="card.phase === 'needs_user'">确认一次任务图后，系统会原子创建全部子任务并按依赖派发。</small>
+    </div>
+    <div v-if="workchainStages.length" class="task-card-workchain" aria-label="处理链路">
+      <div v-for="stage in workchainStages" :key="stage.id" :class="['workchain-stage', stage.status]">
+        <span>{{ stage.label }}</span>
+        <small>{{ stage.status === 'completed' ? '完成' : stage.status === 'in_progress' ? '进行中' : stage.status === 'needs_confirmation' ? '待确认' : stage.status === 'failed' ? '失败' : stage.status === 'cancelled' ? '已停止' : '等待' }}</small>
+      </div>
+    </div>
+    <div v-if="progressCheckpoints.length" class="task-card-section progress-checkpoints">
+      <div class="section-head">
+        <label>{{ progressCheckpointSource?.title || '关键进展' }}</label>
+        <span>{{ progressCheckpoints.length }} 条</span>
+      </div>
+      <ol>
+        <li v-for="checkpoint in progressCheckpoints" :key="checkpoint.id || checkpoint.label" :class="checkpoint.status">
+          <span class="checkpoint-dot"></span>
+          <div>
+            <strong>{{ checkpoint.label }}</strong>
+            <small v-if="checkpoint.detail">{{ checkpoint.detail }}</small>
+          </div>
+          <em>{{ timelineStatusLabel(checkpoint.status) }}</em>
+        </li>
+      </ol>
+    </div>
+    <div v-if="recoverySummary" class="task-card-section recovery-summary" :class="recoverySummary.status">
+      <div class="section-head">
+        <label>{{ recoverySummary.title || '恢复接续' }}</label>
+        <span>{{ recoverySummary.status_label || recoveryStatusLabel(recoverySummary.status) }}</span>
+      </div>
+      <p v-if="recoverySummary.headline">{{ recoverySummary.headline }}</p>
+      <div class="recovery-checks">
+        <span :class="{ ok: recoverySummary.revalidated?.goal }">目标</span>
+        <span :class="{ ok: recoverySummary.revalidated?.state }">状态</span>
+        <span :class="{ ok: recoverySummary.revalidated?.acceptance }">验收</span>
+      </div>
+      <ul v-if="recoverySummary.preserved?.length || recoverySummary.remaining_gaps?.length">
+        <li v-for="item in recoverySummary.preserved?.slice(0, 3)" :key="`preserved-${item}`">{{ item }}</li>
+        <li v-for="item in recoverySummary.remaining_gaps?.slice(0, 3)" :key="`gap-${item}`">仍待补齐：{{ item }}</li>
+      </ul>
+      <small v-if="recoverySummary.next_action">下一步：{{ recoverySummary.next_action }}</small>
+    </div>
+    <div v-if="continuationStatus" class="task-card-section continuation-status" :class="[continuationStatus.status, { 'needs-replan': continuationNeedsReplan }]">
+      <div class="section-head">
+        <label>{{ continuationStatus.title || '接续状态' }}</label>
+        <span>{{ continuationStatus.status_label || continuationStatusLabel(continuationStatus.status) }}</span>
+      </div>
+      <p v-if="continuationStatus.headline">{{ continuationStatus.headline }}</p>
+      <div v-if="continuationStatus.kind_label || continuationStatus.target || continuationStatus.reason" class="continuation-meta">
+        <span v-if="continuationStatus.kind_label">类型：{{ continuationStatus.kind_label }}</span>
+        <span v-if="continuationStatus.target">目标：{{ continuationStatus.target }}</span>
+        <span v-if="continuationStatus.reason">原因：{{ continuationStatus.reason }}</span>
+      </div>
+      <ol v-if="continuationSteps.length" class="continuation-steps">
+        <li v-for="step in continuationSteps" :key="step.id || step.label || step">
+          <strong>{{ step.label || step }}</strong>
+          <small v-if="step.detail">{{ step.detail }}</small>
+        </li>
+      </ol>
+      <small v-if="continuationStatus.next_action">下一步：{{ continuationStatus.next_action }}</small>
+    </div>
+    <div v-if="agentProgressRows.length" class="task-card-section agent-progress-summary" :class="agentProgressSummary.status">
+      <div class="section-head">
+        <label>{{ agentProgressSummary.title || '执行成员进展' }}</label>
+        <span>{{ agentProgressSummary.status_label || agentProgressStatusLabel(agentProgressSummary.status) }}</span>
+      </div>
+      <p v-if="agentProgressSummary.headline">{{ agentProgressSummary.headline }}</p>
+      <div class="agent-progress-rows">
+        <article v-for="row in agentProgressRows" :key="row.agent" :class="['agent-progress-row', row.status]">
+          <header>
+            <strong>{{ row.role ? `${row.role} · ${row.agent}` : row.agent }}</strong>
+            <em>{{ visibleAgentProgressStatusLabel(row) }}</em>
+          </header>
+          <p v-if="row.summary || row.current_focus">{{ row.agent }}：{{ row.summary || row.current_focus }}</p>
+          <small v-if="row.current_focus">当前重点：{{ row.current_focus }}</small>
+          <div v-if="asList(row.evidence).length" class="agent-progress-evidence">
+            <span v-for="item in asList(row.evidence).slice(0, 4)" :key="item.id || `${row.agent}-${item.label}`">
+              {{ item.label }}：{{ visibleAgentProgressEvidenceValue(row, item) }}<small v-if="item.detail"> · {{ item.detail }}</small>
+            </span>
+          </div>
+          <ul v-if="row.blockers?.length">
+            <li v-for="item in row.blockers.slice(0, 3)" :key="`${row.agent}-${item}`">{{ item }}</li>
+          </ul>
+          <small v-if="row.next_action" class="agent-progress-next">下一步：{{ row.next_action }}</small>
+        </article>
+      </div>
+      <small v-if="agentProgressSummary.next_action" class="agent-progress-summary-next">下一步：{{ agentProgressSummary.next_action }}</small>
+    </div>
+    <div v-if="workItemUnlockSummary" class="task-card-section work-item-unlock-summary" :class="workItemUnlockSummary.status">
+      <div class="section-head">
+        <label>{{ workItemUnlockSummary.title || '前置完成，下一步已解锁' }}</label>
+        <span>{{ workItemUnlockSummary.status_label || workItemUnlockStatusLabel(workItemUnlockSummary.status) }}</span>
+      </div>
+      <p v-if="workItemUnlockSummary.headline">{{ workItemUnlockSummary.headline }}</p>
+      <ul v-if="asList(workItemUnlockSummary.rows).length">
+        <li v-for="row in asList(workItemUnlockSummary.rows).slice(0, 4)" :key="row.id || row.label">
+          {{ row.label || `${row.target || row.owner || '执行成员'} 的前置依赖已完成` }}
+        </li>
+      </ul>
+      <small v-if="workItemUnlockSummary.next_action || workItemUnlockSummary.nextAction">下一步：{{ workItemUnlockSummary.next_action || workItemUnlockSummary.nextAction }}</small>
+    </div>
+
+    <div v-if="workItemClaimSummary" class="task-card-section work-item-claim-summary" :class="workItemClaimSummary.status">
+      <div class="section-head">
+        <label>{{ workItemClaimSummary.title || '派发状态' }}</label>
+        <span>{{ workItemClaimSummary.status_label || workItemClaimStatusLabel(workItemClaimSummary.status) }}</span>
+      </div>
+      <p v-if="workItemClaimSummary.headline">{{ workItemClaimSummary.headline }}</p>
+      <small v-if="workItemClaimSummary.next_action || workItemClaimSummary.nextAction">下一步：{{ workItemClaimSummary.next_action || workItemClaimSummary.nextAction }}</small>
+    </div>
+
+    <div v-if="workItems.length" class="task-card-section work-items">
+      <div class="section-head">
+        <label>执行队列</label>
+        <span>{{ workItemSummary.counts?.completed || 0 }}/{{ workItemSummary.total || workItems.length }} 完成</span>
+      </div>
+      <div class="work-item-list">
+        <article v-for="item in workItems.slice(0, 6)" :key="item.id || item.target || item.subject" :class="['work-item', item.status]">
+          <header>
+            <strong>{{ workItemHeadline(item) }}</strong>
+            <em>{{ workItemStatusLabel(item.status) }}</em>
+          </header>
+          <small v-if="workItemMeta(item)">{{ workItemMeta(item) }}</small>
+          <small v-if="workItemActiveForm(item)" class="work-item-active-form">当前：{{ workItemActiveForm(item) }}</small>
+          <p v-if="item.evidence?.length || item.blockers?.length">{{ (item.evidence?.[0] || item.blockers?.[0] || '').slice(0, 140) }}</p>
+        </article>
+      </div>
+      <div v-if="workItemDependencySummary" class="work-item-dependencies" :class="workItemDependencySummary.status">
+        <header>
+          <strong>{{ workItemDependencySummary.title || '依赖与派发' }}</strong>
+          <em>{{ workItemDependencySummary.status_label || workItemDependencyStatusLabel(workItemDependencySummary.status) }}</em>
+        </header>
+        <p v-if="workItemDependencySummary.headline">{{ workItemDependencySummary.headline }}</p>
+        <ul v-if="workItemDependencyRows.length">
+          <li v-for="row in workItemDependencyRows" :key="row.id || row.label">
+            <span>{{ row.label }}</span>
+            <small v-if="row.next_action">{{ row.next_action }}</small>
+          </li>
+        </ul>
+        <small v-if="workItemDependencySummary.next_action || workItemDependencySummary.nextAction" class="work-item-dependency-next">下一步：{{ workItemDependencySummary.next_action || workItemDependencySummary.nextAction }}</small>
+      </div>
+      <div v-if="nextClaimableWorkItems.length" class="work-item-next">
+        <strong>下一步可派发</strong>
+        <div v-for="item in nextClaimableWorkItems" :key="item.id || item.target || item.subject">
+          <span>
+            <b>{{ item.target || item.owner || '执行成员' }}：{{ item.subject || item.title || '继续处理已解锁工作项' }}</b>
+            <small v-if="workItemActiveForm(item)" class="work-item-active-form">当前：{{ workItemActiveForm(item) }}</small>
+          </span>
+          <button type="button" :disabled="busy" @click="emit('action', { kind: 'continue_work_item', label: '继续派发', tone: 'primary', work_item_id: item.id, target: item.target || item.owner || '', reason: item.subject || item.title || '' })">继续派发</button>
+        </div>
+      </div>
+      <div v-if="workItemVerificationReminder" class="work-item-verification-reminder">
+        <strong>{{ workItemVerificationReminder.title || '执行队列还缺验收' }}</strong>
+        <small>{{ workItemVerificationReminder.headline || '工作项都完成了，但还没有看到专门的验证/验收工作项或验证证据。' }}</small>
+        <small v-if="workItemVerificationReminder.next_action || workItemVerificationReminder.nextAction" class="work-item-verification-next">下一步：{{ workItemVerificationReminder.next_action || workItemVerificationReminder.nextAction }}</small>
+      </div>
+    </div>
+    <div class="task-card-progress"><span :style="{ width: `${Math.max(0, Math.min(100, Number(card.progress || 0)))}%` }"></span></div>
+    <div class="task-card-progress-label"><span>总体进度</span><strong>{{ Math.max(0, Math.min(100, Number(card.progress || 0))) }}%</strong></div>
+
+    <div v-if="completionOverview" class="task-card-section completion-overview" :class="completionOverview.status">
+      <div class="section-head">
+        <label>{{ completionOverview.title || '最终交付总览' }}</label>
+        <span>{{ completionOverview.status_label || '已整理' }}</span>
+      </div>
+      <p v-if="completionOverview.headline">{{ completionOverview.headline }}</p>
+      <div v-if="completionOverviewMetrics.length" class="completion-metrics">
+        <div v-for="metric in completionOverviewMetrics" :key="metric.id || metric.label" :class="metric.tone">
+          <small>{{ metric.label }}</small>
+          <strong>{{ metric.value }}</strong>
+          <em v-if="metric.detail">{{ metric.detail }}</em>
+        </div>
+      </div>
+      <div v-if="completionOverviewHighlights.length || completionOverviewVerification.length || completionOverviewAcceptance.length || completionOverviewRisks.length" class="completion-lists">
+        <section v-if="completionOverviewHighlights.length">
+          <strong>{{ completionOverview.status === 'failed' ? '处理结果' : completionOverview.status === 'cancelled' ? '停止说明' : '完成内容' }}</strong>
+          <small v-for="item in completionOverviewHighlights" :key="`highlight-${item}`">{{ item }}</small>
+        </section>
+        <section v-if="completionOverviewVerification.length">
+          <strong>验证结果</strong>
+          <small v-for="item in completionOverviewVerification" :key="`verify-${item}`">{{ item }}</small>
+        </section>
+        <section v-if="completionOverviewAcceptance.length">
+          <strong>验收结论</strong>
+          <small v-for="item in completionOverviewAcceptance" :key="`acceptance-${item}`">{{ item }}</small>
+        </section>
+        <section v-if="completionOverviewRisks.length">
+          <strong>{{ ['cancelled', 'canceled'].includes(String(completionOverview.status || '').toLowerCase()) ? '停止原因' : completionOverview.status === 'failed' ? '未完成原因' : '风险与待确认' }}</strong>
+          <small v-for="item in completionOverviewRisks" :key="`risk-${item}`">{{ item }}</small>
+        </section>
+      </div>
+      <small v-if="completionOverview.next_action" class="completion-next">下一步：{{ completionOverview.next_action }}</small>
+      <small v-if="completionOverview.technical_hint" class="completion-tech-hint">{{ completionOverview.technical_hint }}</small>
+    </div>
+
+    <div v-if="qualityFollowup" class="task-card-section quality-followup" :class="qualityFollowup.status">
+      <div class="section-head">
+        <label>{{ qualityFollowup.title || '交付总结还需补齐' }}</label>
+        <span>{{ qualityFollowup.status_label || '需补齐' }}</span>
+      </div>
+      <p v-if="qualityFollowup.headline">{{ qualityFollowup.headline }}</p>
+      <div v-if="qualityFollowupMissing.length || qualityFollowupEvidence.length" class="quality-followup-grid">
+        <section v-if="qualityFollowupMissing.length">
+          <strong>缺少内容</strong>
+          <small v-for="item in qualityFollowupMissing" :key="`missing-${item}`">{{ item }}</small>
+        </section>
+        <section v-if="qualityFollowupEvidence.length">
+          <strong>已有线索</strong>
+          <small v-for="item in qualityFollowupEvidence" :key="`evidence-${item}`">{{ item }}</small>
+        </section>
+      </div>
+      <small v-if="qualityFollowup.next_action || qualityFollowup.nextAction" class="quality-followup-next">下一步：{{ qualityFollowup.next_action || qualityFollowup.nextAction }}</small>
+      <div v-if="qualityFollowupAction" class="task-card-actions quality-followup-actions">
+        <button type="button" :disabled="busy" class="task-card-button primary" @click="emit('action', qualityFollowupAction)">{{ qualityFollowupAction.label }}</button>
+      </div>
+    </div>
+
+    <div v-if="userRequestSummary" class="task-card-section user-request-summary" :class="[userRequestSummary.status, userRequestSummary.kind]">
+      <div class="section-head">
+        <label>{{ userRequestSummary.title || '需要你处理' }}</label>
+        <span>{{ userRequestSummary.status_label || '等待你回复' }}</span>
+      </div>
+      <p v-if="userRequestSummary.headline">{{ userRequestSummary.headline }}</p>
+      <div v-if="userRequestSummary.question" class="user-request-question">
+        <small>{{ userRequestSummary.kind === 'confirmation' ? '确认项' : '问题' }}</small>
+        <strong>{{ userRequestSummary.question }}</strong>
+      </div>
+      <div v-if="userRequestSummary.action || userRequestSummary.target || userRequestSummary.risk_label" class="user-request-meta">
+        <span v-if="userRequestSummary.action">动作：{{ userRequestSummary.action }}</span>
+        <span v-if="userRequestSummary.target">目标：{{ userRequestSummary.target }}</span>
+        <span v-if="userRequestSummary.risk_label">风险：{{ userRequestSummary.risk_label }}</span>
+      </div>
+      <p v-if="userRequestSummary.reason" class="user-request-reason">{{ userRequestSummary.reason }}</p>
+      <ul v-if="userRequestSuggestions.length" class="user-request-suggestions">
+        <li v-for="item in userRequestSuggestions" :key="item">{{ item }}</li>
+      </ul>
+      <small v-if="userRequestSummary.next_action" class="user-request-next">下一步：{{ userRequestSummary.next_action }}</small>
+    </div>
+
+    <div v-if="userHandoff" class="task-card-section user-handoff" :class="userHandoff.status">
+      <div class="section-head">
+        <label>{{ userHandoff.title || '接下来建议' }}</label>
+        <span>{{ userHandoff.status_label || '已整理' }}</span>
+      </div>
+      <p v-if="userHandoff.headline">{{ userHandoff.headline }}</p>
+      <div v-if="userHandoffSummaryCards.length" class="handoff-summary-cards">
+        <article v-for="item in userHandoffSummaryCards" :key="item.id || item.label" :class="item.tone">
+          <small>{{ item.label || '交接摘要' }}</small>
+          <strong>{{ item.value || item.detail || item.summary || '已整理' }}</strong>
+        </article>
+      </div>
+      <article v-if="userHandoff.primary_action" class="handoff-primary-action">
+        <div>
+          <strong>{{ userHandoff.primary_action.label || '继续跟进' }}</strong>
+          <small v-if="userHandoff.primary_action.detail">{{ userHandoff.primary_action.detail }}</small>
+        </div>
+        <button
+          v-if="handoffActionCanEmit(userHandoff.primary_action)"
+          type="button"
+          :disabled="busy"
+          :class="userHandoff.primary_action.tone || 'primary'"
+          @click="emit('action', handoffActionPayload(userHandoff.primary_action))"
+        >{{ userHandoff.primary_action.label || '处理' }}</button>
+      </article>
+      <div v-if="userHandoffSecondaryActions.length" class="handoff-secondary-actions">
+        <article v-for="action in userHandoffSecondaryActions" :key="action.id || action.label">
+          <div>
+            <strong>{{ action.label }}</strong>
+            <small v-if="action.detail">{{ action.detail }}</small>
+          </div>
+          <button
+            v-if="handoffActionCanEmit(action)"
+            type="button"
+            :disabled="busy"
+            :class="action.tone || 'outline'"
+            @click="emit('action', handoffActionPayload(action))"
+          >{{ action.label }}</button>
+        </article>
+      </div>
+      <div v-if="userHandoffEvidence.length" class="handoff-evidence">
+        <span v-for="item in userHandoffEvidence" :key="item">{{ item }}</span>
+      </div>
+      <ul v-if="userHandoffUnresolved.length" class="handoff-unresolved">
+        <li v-for="item in userHandoffUnresolved" :key="item">{{ item }}</li>
+      </ul>
+      <small v-if="userHandoff.technical_hint" class="handoff-tech-hint">{{ userHandoff.technical_hint }}</small>
+    </div>
+
+    <div v-if="changeSummary && topChangeFiles.length" class="task-card-section change-summary">
+      <div class="section-head">
+        <label>{{ changeSummary.title || '改动明细' }}</label>
+        <span>{{ changeSummary.status_label || `${topChangeFiles.length} 个文件` }}</span>
+      </div>
+      <p v-if="changeSummary.headline">{{ changeSummary.headline }}</p>
+      <div class="change-file-list">
+        <button
+          v-for="file in topChangeFiles"
+          :key="`${file.project || file.agent || 'file'}-${file.path}`"
+          type="button"
+          :disabled="busy"
+          class="change-file-row"
+          @click="emitChangeAction(file)"
+        >
+          <span>
+            <strong>{{ file.path }}</strong>
+            <small>{{ file.agent || file.project || '项目' }} · {{ file.statusText || '变更' }}</small>
+          </span>
+          <em v-if="file.additions || file.deletions">+{{ file.additions || 0 }} -{{ file.deletions || 0 }}</em>
+          <em v-else>查看</em>
+        </button>
+      </div>
+      <small v-if="changeSummary.next_action" class="change-summary-next">下一步：{{ changeSummary.next_action }}</small>
+    </div>
+
+    <div v-if="planMode" class="task-card-section plan-mode">
+      <div class="plan-mode-head">
+        <label>{{ planMode.title || '执行前计划' }}</label>
+        <span :class="['plan-risk', planMode.risk?.level || 'low']">{{ riskLabel(planMode.risk?.level) }}</span>
+      </div>
+      <p v-if="planRiskSummary">{{ planRiskSummary }}</p>
+      <div v-if="planApprovalRequest" class="plan-approval-request">
+        <div class="section-head">
+          <label>{{ planApprovalRequest.title || '等待你确认计划' }}</label>
+          <span>{{ planApprovalRequest.status_label || '待确认' }}</span>
+        </div>
+        <p>{{ planApprovalRequest.headline || '确认后我才会按这份计划开始执行。' }}</p>
+        <ul v-if="planApprovalRows.length">
+          <li v-for="item in planApprovalRows" :key="item">{{ item }}</li>
+        </ul>
+        <small v-if="planApprovalRequest.feedback_hint || planApprovalRequest.feedbackHint">{{ planApprovalRequest.feedback_hint || planApprovalRequest.feedbackHint }}</small>
+      </div>
+      <div v-if="planMode.revision" class="plan-mode-revision">
+        <strong>计划调整</strong>
+        <small>第 {{ planMode.revision.count || 1 }} 次：{{ planMode.revision.feedback || '用户要求调整执行前计划。' }}</small>
+        <small v-if="planMode.revision.next_step">下一步：{{ planMode.revision.next_step }}</small>
+      </div>
+      <div v-if="planMode.accepted_feedback" class="plan-mode-accepted">
+        <strong>确认补充</strong>
+        <small>{{ planMode.accepted_feedback }}</small>
+      </div>
+      <div v-if="planExecutionFollowup" class="plan-mode-followup">
+        <strong>{{ planExecutionFollowup.title || '计划已确认，正在按计划执行' }}</strong>
+        <small>{{ planExecutionFollowup.headline || '我会按这份计划推进执行，并在最终总结前逐项核对验收标准。' }}</small>
+        <small v-if="planExecutionFollowup.next_action || planExecutionFollowup.nextAction" class="plan-mode-followup-next">下一步：{{ planExecutionFollowup.next_action || planExecutionFollowup.nextAction }}</small>
+      </div>
+      <div v-if="planMode.clarification_questions?.length" class="plan-mode-questions">
+        <strong>{{ planMode.needs_clarification ? '需要确认' : '已按反馈确认' }}</strong>
+        <ul>
+          <li v-for="question in planMode.clarification_questions.slice(0, 5)" :key="question.id || question.question">
+            <span>{{ question.question }}</span>
+            <small v-if="question.answer">已记录：{{ question.answer }}</small>
+            <small v-else-if="question.reason">{{ question.reason }}</small>
+            <em v-if="question.examples?.length">例如：{{ question.examples.join(' / ') }}</em>
+          </li>
+        </ul>
+      </div>
+      <div v-if="planModeSteps.length" class="plan-mode-steps">
+        <strong>执行步骤</strong>
+        <ol>
+          <li v-for="(step, stepIndex) in planModeSteps" :key="step.id || step.label || step.content || stepIndex" :class="step.status">
+            <span>{{ stepIndex + 1 }}</span>
+            <div>
+              <b>{{ step.label || step.content || step }}</b>
+              <small v-if="step.detail || step.activeForm">{{ step.detail || step.activeForm }}</small>
+            </div>
+          </li>
+        </ol>
+      </div>
+      <div class="plan-mode-grid">
+        <div v-if="planMode.impact_scope?.projects?.length || planMode.impact_scope?.areas?.length">
+          <strong>影响范围</strong>
+          <small v-if="planMode.impact_scope?.projects?.length">项目：{{ planMode.impact_scope.projects.join('、') }}</small>
+          <small v-if="planMode.impact_scope?.areas?.length">区域：{{ planMode.impact_scope.areas.join('、') }}</small>
+        </div>
+        <div v-if="planMode.read_only_exploration?.summary">
+          <strong>只读探索</strong>
+          <small>{{ planMode.read_only_exploration.summary }}</small>
+        </div>
+      </div>
+      <div v-if="planAcceptanceItems.length" class="plan-mode-list">
+        <strong>验收标准</strong>
+        <ul><li v-for="item in planAcceptanceItems" :key="item">{{ item }}</li></ul>
+      </div>
+      <div v-if="planPermissionBoundaries.length && card.phase === 'needs_user'" class="plan-mode-list permission">
+        <strong>执行边界</strong>
+        <ul><li v-for="item in planPermissionBoundaries" :key="item">{{ item }}</li></ul>
+      </div>
+      <div v-if="hasPlanConfirmAction" class="plan-mode-accept-feedback">
+        <label :for="planAcceptFeedbackId">确认执行时补充要求</label>
+        <textarea
+          :id="planAcceptFeedbackId"
+          v-model="planAcceptFeedback"
+          :disabled="busy"
+          maxlength="600"
+          rows="2"
+          placeholder="可选：例如同时更新 README、保留旧接口兼容"
+        ></textarea>
+      </div>
+    </div>
+
+    <div v-if="planAlignment && planAlignmentChecks.length" class="task-card-section plan-alignment" :class="planAlignment.status">
+      <div class="section-head">
+        <label>{{ planAlignment.title || '计划执行核对' }}</label>
+        <span>{{ planAlignment.status_label || planAlignmentStatusLabel(planAlignment.status) }}</span>
+      </div>
+      <p v-if="planAlignment.headline">{{ planAlignment.headline }}</p>
+      <div class="plan-alignment-checks">
+        <article v-for="check in planAlignmentChecks" :key="check.id || check.label" :class="{ ok: check.ok }">
+          <span>{{ check.ok ? '✓' : '!' }}</span>
+          <div>
+            <strong>{{ check.label }}</strong>
+            <small v-if="check.detail">{{ check.detail }}</small>
+            <em v-if="asList(check.evidence).length">{{ asList(check.evidence).slice(0, 3).join('；') }}</em>
+          </div>
+        </article>
+      </div>
+      <ul v-if="planAlignmentDeviations.length" class="plan-alignment-deviations">
+        <li v-for="item in planAlignmentDeviations" :key="item.id || item.label">
+          <strong>{{ item.label }}</strong>
+          <small>{{ item.reason || '需要补齐证据或调整计划。' }}</small>
+        </li>
+      </ul>
+      <small v-if="planAlignment.next_action" class="plan-alignment-next">下一步：{{ planAlignment.next_action }}</small>
+    </div>
+
+    <div v-if="workOrderPreview?.orders?.length" class="task-card-section work-orders">
+      <div class="section-head">
+        <label>{{ workOrderPreview.title || '执行成员任务' }}</label>
+        <span>{{ workOrderPreview.requires_confirmation ? '确认后派发' : '可执行' }}</span>
+      </div>
+      <p v-if="workOrderPreview.summary">{{ workOrderPreview.summary }}</p>
+      <div class="work-order-list">
+        <article v-for="order in workOrderPreview.orders" :key="order.id || order.project" class="work-order">
+          <header>
+            <strong>{{ order.title || order.project }}</strong>
+            <em>{{ workOrderStatusLabel(order.status) }}</em>
+          </header>
+          <small v-if="order.objective">{{ order.objective }}</small>
+          <div class="work-order-cols">
+            <div v-if="order.allowed_scope?.length">
+              <b>允许范围</b>
+              <ul><li v-for="item in order.allowed_scope.slice(0, 4)" :key="item">{{ item }}</li></ul>
+            </div>
+            <div v-if="order.forbidden_scope?.length">
+              <b>不要做</b>
+              <ul><li v-for="item in order.forbidden_scope.slice(0, 4)" :key="item">{{ item }}</li></ul>
+            </div>
+            <div v-if="order.acceptance?.length">
+              <b>验收</b>
+              <ul><li v-for="item in order.acceptance.slice(0, 4)" :key="item">{{ item }}</li></ul>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <div v-if="agentCoordination" class="task-card-section agent-coordination" :class="agentCoordination.status">
+      <div class="section-head">
+        <label>{{ agentCoordination.title || '协作状态' }}</label>
+        <span>{{ coordinationStatusLabel(agentCoordination.status) }} · {{ agentCoordination.health || 0 }}</span>
+      </div>
+      <div v-if="childAgentPlanReviewRows.length" class="child-plan-review" :class="childAgentPlanReview.status">
+        <div class="section-head">
+          <label>{{ childAgentPlanReview.title || '执行成员接单计划' }}</label>
+          <span>{{ childAgentPlanReview.status_label || childPlanReviewStatusLabel(childAgentPlanReview.status) }}</span>
+        </div>
+        <p v-if="childAgentPlanReview.headline">{{ childAgentPlanReview.headline }}</p>
+        <div class="child-plan-review-rows">
+          <article v-for="row in childAgentPlanReviewRows" :key="row.agent" :class="row.status">
+            <header>
+              <strong>{{ row.agent }}</strong>
+              <em>{{ row.status_label || childPlanReviewStatusLabel(row.status) }}</em>
+            </header>
+            <small v-if="row.understood_goal">目标：{{ row.understood_goal }}</small>
+            <small v-if="asList(row.planned_scope).length">范围：{{ asList(row.planned_scope).slice(0, 3).join('、') }}</small>
+            <small v-if="asList(row.verification_plan).length">验证：{{ asList(row.verification_plan).slice(0, 3).join('、') }}</small>
+            <small v-if="asList(row.unclear).length">待澄清：{{ asList(row.unclear).slice(0, 2).join('、') }}</small>
+            <small v-if="row.reason" class="child-plan-reason">{{ row.reason }}</small>
+          </article>
+        </div>
+        <small v-if="childAgentPlanReview.next_action" class="child-plan-next">下一步：{{ childAgentPlanReview.next_action }}</small>
+      </div>
+      <div class="coord-grid">
+        <div v-if="agentCoordination.handoff?.length">
+          <strong>任务交接</strong>
+          <small v-for="item in agentCoordination.handoff.slice(0, 4)" :key="item.agent">{{ item.agent }}：{{ item.detail }}</small>
+        </div>
+        <div v-if="agentCoordination.heartbeat?.length">
+          <strong>进度</strong>
+          <small v-for="item in agentCoordination.heartbeat.slice(0, 4)" :key="item.id">{{ item.text }}</small>
+        </div>
+        <div v-if="agentCoordination.contract_sync">
+          <strong>接口约定同步</strong>
+          <small>{{ agentCoordination.contract_sync.summary }}</small>
+        </div>
+        <div v-if="agentCoordination.ack_review?.rows?.length">
+          <strong>结果说明检查</strong>
+          <small v-for="row in agentCoordination.ack_review.rows.slice(0, 4)" :key="row.agent">{{ row.agent }}：{{ row.reason }}</small>
+        </div>
+        <div v-if="agentCoordination.contract_transfer?.rows?.length">
+          <strong>任务交接同步</strong>
+          <small v-if="agentCoordination.contract_injection_gate">{{ agentCoordination.contract_injection_gate.summary }}</small>
+          <small v-for="row in (agentCoordination.contract_injection_gate?.rows?.length ? agentCoordination.contract_injection_gate.rows : agentCoordination.contract_transfer.rows).slice(0, 4)" :key="row.id || row.injection_id">
+            {{ row.target }}：{{ row.endpoint || row.type }} · {{ contractInjectionLabel(contractRowStatus(row)) }}
+            <code v-if="row.injection_id">{{ row.injection_id }}</code>
+            <span v-if="row.consumption_reason"> · {{ row.consumption_reason }}</span>
+          </small>
+        </div>
+      </div>
+      <div v-if="agentCoordination.receipt_quality?.length" class="receipt-quality">
+        <strong>结果说明质量</strong>
+        <span v-for="row in agentCoordination.receipt_quality.slice(0, 5)" :key="row.agent">
+          {{ row.agent || 'Agent' }} · {{ row.quality?.score || 0 }} · {{ receiptGradeLabel(row.quality?.grade) }}
+        </span>
+      </div>
+      <div v-if="memoryGateSummary?.required" class="memory-gate-status" :class="memoryGateSummary.status">
+        <strong>记忆使用声明</strong>
+        <small>{{ memoryGateSummary.summary || memoryGateStatusLabel(memoryGateSummary.status) }}</small>
+        <small v-for="row in (memoryGateSummary.rows || []).slice(0, 4)" :key="`${row.agent || 'agent'}-${(row.gate_ids || row.missing_gate_ids || []).join('-')}`">
+          {{ row.agent || 'Agent' }}：{{ row.reason || memoryGateStatusLabel(row.status) }}
+        </small>
+      </div>
+      <div v-if="reinjectionGateSummary?.required" class="memory-gate-status reinjection" :class="reinjectionGateSummary.status">
+        <strong>压缩后上下文恢复</strong>
+        <small>{{ reinjectionGateSummary.summary || reinjectionGateStatusLabel(reinjectionGateSummary.status) }}</small>
+        <small v-if="reinjectionGateSummary.candidate_usage_counts">
+          候选状态：已使用 {{ reinjectionGateSummary.candidate_usage_counts.used || 0 }} · 未使用 {{ reinjectionGateSummary.candidate_usage_counts.ignored || 0 }} · 已核对 {{ reinjectionGateSummary.candidate_usage_counts.verified || 0 }}<template v-if="reinjectionGateSummary.candidate_usage_counts.mentioned"> · 待声明 {{ reinjectionGateSummary.candidate_usage_counts.mentioned }}</template>
+        </small>
+        <small v-for="row in (reinjectionGateSummary.rows || []).slice(0, 4)" :key="`${row.agent || 'agent'}-${(row.gate_ids || row.missing_gate_ids || []).join('-')}`">
+          {{ row.agent || 'Agent' }}：{{ row.reason || reinjectionGateStatusLabel(row.status) }}<template v-if="row.candidate_usage_counts">（已使用 {{ row.candidate_usage_counts.used || 0 }} / 未使用 {{ row.candidate_usage_counts.ignored || 0 }} / 已核对 {{ row.candidate_usage_counts.verified || 0 }}）</template>
+        </small>
+      </div>
+      <div v-if="postCompactDispatchSummary?.required" class="memory-gate-status dispatch-marker" :class="postCompactDispatchSummary.status">
+        <strong>压缩派发标记</strong>
+        <small>{{ postCompactDispatchSummary.summary || postCompactDispatchStatusLabel(postCompactDispatchSummary.status) }}</small>
+        <small v-for="row in (postCompactDispatchSummary.rows || []).slice(0, 4)" :key="`${row.agent || 'agent'}-${row.marker_id || row.boundary_id}`">
+          {{ row.agent || 'Agent' }}：{{ row.reason || postCompactDispatchStatusLabel(row.status) }}
+        </small>
+      </div>
+      <div v-if="agentCoordination.targeted_rework?.length" class="targeted-rework">
+        <strong>定向补充建议</strong>
+        <ul>
+          <li v-for="item in agentCoordination.targeted_rework.slice(0, 5)" :key="`${item.id}-${item.target}`">
+            <span>{{ item.title }}<small v-if="item.target"> · {{ item.target }}</small>：{{ item.reason }}</span>
+            <button type="button" :disabled="busy" @click="emit('action', { ...item, kind: 'targeted_rework', label: item.title || '定向补充', tone: item.tone || 'warning' })">执行</button>
+          </li>
+        </ul>
+      </div>
+      <div v-if="agentCoordination.coordination_events?.length" class="coord-events">
+        <strong>协作记录</strong>
+        <ol>
+          <li v-for="event in agentCoordination.coordination_events.slice(-8)" :key="event.id" :class="event.status">
+            <span>{{ event.label }}</span>
+            <small v-if="event.detail">{{ event.detail }}</small>
+          </li>
+        </ol>
+      </div>
+      <small v-if="agentCoordination.next_action" class="coord-next">下一步：{{ agentCoordination.next_action }}</small>
+    </div>
+
+    <div v-if="receiptReworkSummary?.gaps?.length || receiptReworkSummary?.active_rework?.length || receiptReworkSummary?.resolved?.length" class="task-card-section receipt-rework-summary" :class="receiptReworkSummary.status">
+      <div class="section-head">
+        <label>{{ receiptReworkSummary.title || '结果复检' }}</label>
+        <span>{{ receiptReworkSummary.status_label || `${receiptReworkSummary.gaps?.length || 0} 个缺口` }}</span>
+      </div>
+      <p v-if="receiptReworkSummary.headline">{{ receiptReworkSummary.headline }}</p>
+      <ul v-if="receiptReworkSummary.active_rework?.length" class="receipt-rework-active">
+        <li v-for="item in receiptReworkSummary.active_rework.slice(0, 4)" :key="`active-${item.target}-${item.at || item.reason}`">
+          <span>
+            <strong>{{ item.target || '执行成员' }}：{{ item.title || '已要求补充结果说明' }}</strong>
+            <small>{{ item.reason || '等待执行成员补齐证据后重新验收' }}</small>
+          </span>
+          <em>等待说明</em>
+        </li>
+      </ul>
+      <ul v-if="receiptReworkSummary.gaps?.length">
+        <li v-for="gap in receiptReworkSummary.gaps.slice(0, 5)" :key="`${gap.id}-${gap.target}-${gap.reason}`">
+          <span>
+            <strong>{{ gap.target || '执行成员' }}：{{ gap.title || '要求补充结果说明' }}</strong>
+            <small>{{ gap.reason || gap.missing?.join('、') || '缺少可验收证据' }}</small>
+          </span>
+          <button type="button" :disabled="busy" @click="emit('action', { ...(gap.action || gap), kind: 'targeted_rework', label: gap.action?.label || gap.title || '要求补充', tone: gap.tone || 'warning' })">补充</button>
+        </li>
+      </ul>
+      <ul v-if="receiptReworkSummary.resolved?.length" class="receipt-rework-resolved">
+        <li v-for="item in receiptReworkSummary.resolved.slice(0, 4)" :key="`resolved-${item.target}-${item.at || item.reason}`">
+          <span>
+            <strong>{{ item.target || '执行成员' }}：{{ item.title || '结果说明已补齐' }}</strong>
+            <small>{{ item.reason || '我已重新验收这条结果说明。' }}</small>
+          </span>
+          <em>已复检</em>
+        </li>
+      </ul>
+      <small v-if="receiptReworkSummary.next_action" class="receipt-rework-next">下一步：{{ receiptReworkSummary.next_action }}</small>
+    </div>
+
+    <details v-if="runtimeKernel" class="task-card-section runtime-kernel" :class="{ active: runtimeKernel.ack_only?.active }">
+      <summary class="runtime-kernel-summary">
+        <strong>技术详情</strong>
+        <span>可展开排查</span>
+      </summary>
+      <div class="runtime-grid">
+        <div>
+          <strong>生命周期</strong>
+          <small>{{ runtimeKernel.lifecycle_count || 0 }} 条 · 阻塞 {{ runtimeKernel.blocked_count || 0 }}</small>
+        </div>
+        <div>
+          <strong>接单说明检查</strong>
+          <small>{{ runtimeKernel.ack_only?.active ? '只允许补齐接单说明' : '未限制接单说明补齐' }} · {{ runtimeKernel.ack_only?.count || 0 }}</small>
+        </div>
+        <div>
+          <strong>派发</strong>
+          <small>dispatch_worker {{ runtimeKernel.dispatch_worker_count || 0 }}</small>
+        </div>
+        <div>
+          <strong>上下文</strong>
+          <small>压力 {{ formatRuntimePressure(runtimeKernel.context_budget?.max_pressure) }}{{ runtimeKernel.context_budget?.compact_recommended ? ' · 建议压缩' : '' }}</small>
+        </div>
+        <div v-if="postCompactDispatchSummary?.required">
+          <strong>压缩派发</strong>
+          <small>{{ postCompactDispatchStatusLabel(postCompactDispatchSummary.status) }} · 首次 {{ postCompactDispatchSummary.first_dispatch_count || 0 }}/{{ postCompactDispatchSummary.marker_count || 0 }}</small>
+        </div>
+        <div v-if="runtimeTooling">
+          <strong>MCP/Skill Gate</strong>
+          <small>{{ runtimeToolingLabel(runtimeTooling.status) }} · 快照 {{ runtimeTooling.snapshots?.length || 0 }} · Skill {{ runtimeTooling.invoked_skills?.length || 0 }}</small>
+        </div>
+      </div>
+      <div v-if="runtimeKernel.worker_context_packet_ids?.length || runtimeKernel.injection_ids?.length || postCompactDispatchSummary?.marker_ids?.length || runtimeTooling?.snapshots?.length || runtimeTooling?.invoked_skills?.length" class="runtime-tags">
+        <code v-for="id in runtimeKernel.worker_context_packet_ids?.slice(0, 4)" :key="`packet-${id}`">{{ id }}</code>
+        <code v-for="id in runtimeKernel.injection_ids?.slice(0, 6)" :key="`inject-${id}`">{{ id }}</code>
+        <code v-for="id in postCompactDispatchSummary?.marker_ids?.slice(0, 4)" :key="`pcfd-${id}`">{{ id }}</code>
+        <code v-for="id in runtimeTooling?.snapshots?.slice(0, 4)" :key="`runtime-snapshot-${id}`">snapshot:{{ id }}</code>
+        <code v-for="skill in runtimeTooling?.invoked_skills?.slice(0, 4)" :key="`runtime-skill-${skill.name || skill}`">Skill:{{ skill.name || skill }}</code>
+      </div>
+      <div v-if="runtimeTooling?.missing?.mcp?.length || runtimeTooling?.missing?.skill?.length || runtimeTooling?.errors?.length" class="runtime-tool-warnings">
+        <small v-for="item in runtimeTooling.missing?.mcp?.slice(0, 3)" :key="`missing-mcp-${item}`">缺 MCP：{{ item }}</small>
+        <small v-for="item in runtimeTooling.missing?.skill?.slice(0, 3)" :key="`missing-skill-${item}`">缺 Skill：{{ item }}</small>
+        <small v-for="item in runtimeTooling.errors?.slice(0, 2)" :key="`runtime-error-${item}`">{{ item }}</small>
+      </div>
+      <ol v-if="runtimeKernel.latest_lifecycle?.length" class="runtime-events">
+        <li v-for="event in runtimeKernel.latest_lifecycle.slice(-4)" :key="event.id || event.trace_event_id || `${event.action}-${event.phase}`">
+          <span>{{ event.action || 'runtime' }}</span>
+          <small>{{ event.phase || 'execute' }} · {{ event.status || 'planned' }}</small>
+        </li>
+      </ol>
+    </details>
+
+    <div v-if="card.active_agents?.length" class="task-card-section">
+      <label>正在工作</label>
+      <div class="task-card-pills"><span v-for="agent in card.active_agents" :key="agent">{{ agent }}</span></div>
+    </div>
+
+    <div v-if="card.agents?.length" class="task-card-agents">
+      <div v-for="agent in card.agents" :key="agent.id || agent.name" class="task-card-agent">
+        <strong>{{ agent.name }}</strong><span>{{ agentLabel(agent.status) }}</span>
+        <small v-if="agent.summary">{{ agent.summary }}</small>
+      </div>
+    </div>
+
+    <div v-if="executionStory?.steps?.length" class="task-card-section execution-story">
+      <label>{{ executionStory.title || '执行过程' }}</label>
+      <div class="execution-steps">
+        <div v-for="step in executionStory.steps" :key="step.id" :class="['execution-step', step.status]">
+          <span></span>
+          <div>
+            <strong>{{ step.label }}</strong>
+            <small>{{ step.detail }}</small>
+            <code v-if="step.evidence">{{ step.evidence }}</code>
+          </div>
+          <em>{{ timelineStatusLabel(step.status) }}</em>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="card.workflow_timeline?.length" class="task-card-section task-card-flow">
+      <label>协作流程</label>
+      <ol>
+        <li v-for="step in card.workflow_timeline" :key="step.id" :class="step.status">
+          <span class="flow-dot"></span>
+          <div>
+            <strong>{{ step.label }}</strong>
+            <small v-if="step.detail">{{ step.detail }}</small>
+          </div>
+          <em>{{ timelineStatusLabel(step.status) }}</em>
+        </li>
+      </ol>
+    </div>
+
+    <div v-if="card.agent_questions?.length" class="task-card-section task-card-qa">
+      <label>协作问答</label>
+      <div v-for="qa in card.agent_questions" :key="qa.id" class="task-card-qa-row" :class="qa.status">
+        <strong>{{ qa.from }} → {{ qa.to }}</strong>
+        <span>{{ qa.label }}</span>
+        <small v-if="qa.summary" class="qa-summary">{{ qa.summary }}</small>
+        <small v-if="qa.question">问：{{ qa.question }}</small>
+        <small v-if="qa.answer">答：{{ qa.answer }}</small>
+        <small v-if="qa.next_action" class="qa-next">下一步：{{ qa.next_action }}</small>
+        <div v-if="qa.badges?.length" class="qa-badges">
+          <em v-for="badge in qa.badges" :key="badge">{{ badge }}</em>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="card.conflict_warnings?.length" class="task-card-section task-card-conflicts">
+      <label>冲突保护</label>
+      <div v-for="conflict in card.conflict_warnings" :key="conflict.id" class="task-card-conflict">
+        <strong>{{ conflict.title }}</strong>
+        <span>{{ conflict.detail }}</span>
+        <code v-if="conflict.scopes?.length">{{ conflict.scopes.join('、') }}</code>
+      </div>
+    </div>
+
+    <div v-if="card.completed?.length" class="task-card-section completed">
+      <label>已完成</label>
+      <ul><li v-for="item in card.completed" :key="item">{{ item }}</li></ul>
+    </div>
+
+    <div v-if="card.blockers?.length" class="task-card-section blockers">
+      <label>{{ card.phase === 'needs_user' ? '需要你的决定' : '当前阻塞' }}</label>
+      <ul><li v-for="item in card.blockers" :key="item">{{ item }}</li></ul>
+    </div>
+
+    <div v-if="visibleTaskNextAction" class="task-card-next"><span>下一步</span><strong>{{ visibleTaskNextAction }}</strong></div>
+
+    <div v-if="showArchivedDispatchLaunch" class="task-card-section task-dispatch-launch-summary">
+      <div class="dispatch-launch-head">
+        <label>{{ dispatchLaunchSummary.title || '已派发的工作' }}</label>
+        <span>{{ dispatchLaunchSummary.count_label || `${dispatchLaunchRows.length} 个执行目标` }}</span>
+      </div>
+      <p v-if="dispatchLaunchSummary.headline">{{ dispatchLaunchSummary.headline }}</p>
+      <div class="dispatch-launch-list">
+        <article v-for="row in dispatchLaunchRows" :key="row.id || row.agent">
+          <header>
+            <strong>{{ row.role || '执行成员' }} · {{ row.agent }}</strong>
+            <em>{{ row.status_label || '已派发' }}</em>
+          </header>
+          <span>{{ row.task }}</span>
+          <small v-if="row.reason">{{ row.reason }}</small>
+          <small v-if="row.depends_on?.length">依赖：{{ row.depends_on.join('、') }}</small>
+        </article>
+      </div>
+      <small v-if="dispatchLaunchSummary.next_action" class="dispatch-launch-next">下一步：{{ dispatchLaunchSummary.next_action }}</small>
+    </div>
+
+    <MainAgentDecisionCard v-if="showMainAgentDecision" :decision="mainAgentDecision" compact @step-action="emit('action', $event)" />
+    <MainAgentDecisionCard v-if="showWorkchainTodoDecision" :decision="workchainTodoDecision" compact @step-action="emit('action', $event)" />
+
+    <div v-if="testAgentExecutionPlanSummary" class="task-card-section test-agent-plan-summary" :class="testAgentExecutionPlanSummary.status">
+      <div class="section-head">
+        <label>{{ testAgentExecutionPlanSummary.title || 'TestAgent 复核计划' }}</label>
+        <span>{{ testAgentExecutionPlanSummary.status_label || '已生成' }}</span>
+      </div>
+      <p v-if="testAgentExecutionPlanSummary.headline">{{ testAgentExecutionPlanSummary.headline }}</p>
+      <ul v-if="testAgentExecutionPlanRows.length">
+        <li v-for="item in testAgentExecutionPlanRows" :key="item">{{ item }}</li>
+      </ul>
+      <div v-if="testAgentExecutionPlanIssues.length" class="test-agent-plan-issues">
+        <strong>预检提示</strong>
+        <small v-for="item in testAgentExecutionPlanIssues" :key="item">{{ item }}</small>
+      </div>
+      <small v-if="testAgentExecutionPlanSummary.next_action" class="test-agent-plan-next">下一步：{{ testAgentExecutionPlanSummary.next_action }}</small>
+    </div>
+
+    <div v-if="completionReadinessSummary" class="task-card-section completion-readiness" :class="completionReadinessSummary.status">
+      <div class="section-head">
+        <label>{{ completionReadinessSummary.title || '完成前收尾' }}</label>
+        <span>{{ completionReadinessSummary.status_label || completionReadinessStatusLabel(completionReadinessSummary.status) }}</span>
+      </div>
+      <p v-if="completionReadinessSummary.headline">{{ completionReadinessSummary.headline }}</p>
+      <ul v-if="completionReadinessRows.length">
+        <li v-for="row in completionReadinessRows" :key="`${row.target || row.owner}-${row.subject}`">
+          <strong>{{ row.target || row.owner || '执行成员' }}</strong>
+          <span>{{ row.subject || '未完成工作项' }}</span>
+          <em>{{ row.status_label || workItemStatusLabel(row.status) }}</em>
+        </li>
+      </ul>
+      <small v-if="completionReadinessSummary.next_action || completionReadinessSummary.nextAction">下一步：{{ completionReadinessSummary.next_action || completionReadinessSummary.nextAction }}</small>
+    </div>
+
+    <div v-if="acceptanceReview" class="task-card-section acceptance-review" :class="acceptanceReview.status">
+      <div class="section-head">
+        <label>{{ acceptanceReview.title || '最终验收' }}</label>
+        <span>{{ acceptanceStatusLabel(acceptanceReview.status) }}</span>
+      </div>
+      <p>{{ acceptanceReview.headline }}</p>
+      <div class="acceptance-checks">
+        <div v-for="check in acceptanceReview.checks" :key="check.id" :class="{ ok: check.ok }">
+          <span>{{ check.ok ? '✓' : '!' }}</span>
+          <strong>{{ check.label }}</strong>
+          <small>{{ check.detail }}</small>
+        </div>
+      </div>
+      <small v-if="acceptanceReview.next_action" class="acceptance-next">下一步：{{ acceptanceReview.next_action }}</small>
+    </div>
+
+    <div v-if="independentReviewSummary" class="task-card-section independent-review-summary" :class="independentReviewSummary.status">
+      <div class="section-head">
+        <label>{{ independentReviewSummary.title || '独立复核' }}</label>
+        <span>{{ independentReviewSummary.status_label || '已记录' }}</span>
+      </div>
+      <p v-if="independentReviewSummary.headline">{{ independentReviewSummary.headline }}</p>
+      <ul v-if="independentReviewRows.length">
+        <li v-for="item in independentReviewRows" :key="item">{{ item }}</li>
+      </ul>
+      <small v-if="independentReviewSummary.next_action">下一步：{{ independentReviewSummary.next_action }}</small>
+    </div>
+
+    <div v-if="postReviewSpotCheckSummary" class="task-card-section post-review-spot-check-summary" :class="postReviewSpotCheckSummary.status">
+      <div class="section-head">
+        <label>{{ postReviewSpotCheckSummary.title || '完成前抽查' }}</label>
+        <span>{{ postReviewSpotCheckSummary.status_label || '已记录' }}</span>
+      </div>
+      <p v-if="postReviewSpotCheckSummary.headline">{{ postReviewSpotCheckSummary.headline }}</p>
+      <ul v-if="postReviewSpotCheckRows.length">
+        <li v-for="item in postReviewSpotCheckRows" :key="item">{{ item }}</li>
+      </ul>
+      <small v-if="postReviewSpotCheckSummary.next_action">下一步：{{ postReviewSpotCheckSummary.next_action }}</small>
+    </div>
+
+    <div v-if="hasDelivery && !completionOverview" class="task-card-delivery">
+      <span>{{ card.delivery?.headline || (card.delivery?.acceptance_passed ? '改动和检查均已完成' : '已有交付进展') }}</span>
+      <strong>{{ card.delivery?.files?.length || 0 }} 个文件 · {{ card.delivery?.verification?.length || 0 }} 项检查</strong>
+    </div>
+
+    <div v-if="deliveryReport" class="task-card-section delivery-report">
+      <div class="section-head">
+        <label>{{ deliveryReport.title || '交付总结' }}</label>
+        <span>{{ deliveryReport.status_label || '已整理' }}</span>
+      </div>
+      <p v-if="deliveryReport.headline">{{ deliveryReport.headline }}</p>
+      <div v-if="pickupSummary" class="pickup-summary" :class="pickupSummary.status">
+        <header>
+          <strong>{{ pickupSummary.title || '回来继续看这里' }}</strong>
+          <span>{{ pickupSummary.status_label || '已整理' }}</span>
+        </header>
+        <p v-if="pickupSummary.current_state">{{ pickupSummary.current_state }}</p>
+        <ul v-if="pickupReviewItems.length">
+          <li v-for="item in pickupReviewItems" :key="item">{{ item }}</li>
+        </ul>
+        <small v-if="pickupSummary.resume_action">下一步：{{ pickupSummary.resume_action }}</small>
+      </div>
+      <div v-if="deliveryReportSections.length" class="delivery-report-grid">
+        <section v-for="section in deliveryReportSections.slice(0, 10)" :key="section.id || section.title">
+          <strong>{{ section.title }}</strong>
+          <small v-for="item in section.items.slice(0, 4)" :key="`${section.id}-${item}`">{{ item }}</small>
+        </section>
+      </div>
+    </div>
+
+    <div v-if="card.delivery?.risks?.length" class="task-card-section blockers">
+      <label>需要留意</label>
+      <ul><li v-for="item in card.delivery.risks" :key="item">{{ item }}</li></ul>
+    </div>
+
+    <div v-if="card.actions?.length" class="task-card-actions">
+      <button v-for="action in card.actions" :key="action.id" type="button" :disabled="busy" :class="['task-card-button', action.tone]" @click="emit('action', taskActionPayload(action))">{{ action.label }}</button>
+    </div>
+
+    <details v-if="card.technical" class="task-card-technical">
+      <summary>技术详情</summary>
+      <section v-for="section in technicalSections" :key="section.id" class="technical-section">
+        <strong>{{ section.title }}</strong>
+        <div v-for="item in section.items" :key="`${section.id}-${item.label}-${item.value}`">
+          <span>{{ item.label }}</span>
+          <code>{{ item.value }}</code>
+          <button v-if="item.label === '执行记录' && card.technical.trace_id" type="button" :disabled="busy" @click="emit('action', { kind: 'view_trace', label: '任务回放', task_id: card.task_id, trace_id: card.technical.trace_id })">回放</button>
+        </div>
+      </section>
+      <section v-if="archivedMainAgentDecision" class="technical-section archived-decision-summary">
+        <strong>历史计划</strong>
+        <div><span>状态</span><code>任务已进入终态，旧执行计划已收起</code></div>
+        <div><span>模式</span><code>{{ archivedMainAgentDecision.mode || 'task' }}</code></div>
+        <div v-if="archivedDecisionActions"><span>动作</span><code>{{ archivedDecisionActions }}</code></div>
+        <div><span>验收</span><code>{{ archivedMainAgentDecision.verify?.passed ? 'verified' : 'needs-check' }}</code></div>
+      </section>
+      <section class="technical-section">
+        <strong>任务记录</strong>
+        <div v-if="card.task_id"><span>Task</span><code>{{ card.task_id }}</code></div>
+        <div v-if="mainAgentDecision"><span>主Agent</span><code>{{ mainAgentDecision.mode }} / {{ mainAgentDecision.verify?.passed ? 'verified' : 'needs-check' }}</code></div>
+        <div v-if="continuationStatus?.route_label"><span>处理方式</span><code>{{ continuationStatus.route_label }}</code></div>
+        <div v-if="recoverySummary"><span>恢复</span><code>{{ recoverySummary.technical?.recovery_checks || 0 }} checks / {{ recoverySummary.technical?.lease_recovery_count || 0 }} resumes</code></div>
+      </section>
+    </details>
+  </section>

@@ -18,6 +18,7 @@ export declare function findGroupChatSessionContainingMessage(groupId: string, m
 export declare function createGroupChatSession(groupId: string, title?: string): {
     id: string;
     title: string;
+    titleOrigin: string;
     createdAt: string;
     updatedAt: string;
     messageCount: number;
@@ -25,6 +26,9 @@ export declare function createGroupChatSession(groupId: string, title?: string):
 };
 export declare function selectGroupChatSession(groupId: string, sessionId: string): any;
 export declare function renameGroupChatSession(groupId: string, sessionId: string, title: string): any;
+export declare function scheduleGroupSessionAutoTitle(groupId: string, sessionId: string, options?: {
+    modelCall?: (request: any) => Promise<any>;
+}): Promise<any>;
 export declare function archiveGroupChatSession(groupId: string, sessionId: string, archived?: boolean): any;
 export declare function findActiveGroupSessionTasks(groupId: string, sessionId: string, tasks?: any[]): any[];
 export declare function reconcileGroupSessionLifecycleAgentCancellations(tasks?: any[]): {
@@ -116,6 +120,7 @@ export declare function purgeLegacyDefaultGroupChatSession(groupId: string, opti
     replacement: {
         id: string;
         title: string;
+        titleOrigin: string;
         createdAt: string;
         updatedAt: string;
         messageCount: number;
@@ -229,6 +234,7 @@ export declare function runGroupChatSessionsSelfTest(): {
     first: {
         id: string;
         title: string;
+        titleOrigin: string;
         createdAt: string;
         updatedAt: string;
         messageCount: number;
@@ -237,6 +243,7 @@ export declare function runGroupChatSessionsSelfTest(): {
     second: {
         id: string;
         title: string;
+        titleOrigin: string;
         createdAt: string;
         updatedAt: string;
         messageCount: number;

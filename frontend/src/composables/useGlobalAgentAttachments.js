@@ -1,4 +1,8 @@
 import { ref } from 'vue'
+import {
+  extractClipboardAttachmentFiles,
+  mergeUniqueAttachmentFiles,
+} from '../utils/clipboardAttachments.js'
 
 export function useGlobalAgentAttachments(options = {}) {
   const onToggleReport = options.onToggleReport || (() => {})
@@ -11,34 +15,46 @@ export function useGlobalAgentAttachments(options = {}) {
     if (fileInput.value) fileInput.value.click()
   }
 
-  const handleFileChange = (e) => {
-    const files = Array.from(e.target.files || [])
-    files.forEach(f => {
+  const addFiles = (files) => {
+    const currentFiles = selectedFiles.value.map(item => item.file)
+    const additions = mergeUniqueAttachmentFiles(currentFiles, files).slice(currentFiles.length)
+    const addedItems = []
+    additions.forEach(f => {
       if (f.size > 25 * 1024 * 1024) return
-      if (selectedFiles.value.some(existing => existing.name === f.name && existing.size === f.size)) return
-      if (f.type.startsWith('image/')) {
+      const item = {
+        file: f,
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        preview: null
+      }
+      selectedFiles.value.push(item)
+      addedItems.push(item)
+      if (String(f.type || '').startsWith('image/')) {
         const reader = new FileReader()
         reader.onload = (event) => {
-          selectedFiles.value.push({
-            file: f,
-            name: f.name,
-            size: f.size,
-            type: f.type,
-            preview: event.target.result
-          })
+          item.preview = event.target.result
         }
         reader.readAsDataURL(f)
-      } else {
-        selectedFiles.value.push({
-          file: f,
-          name: f.name,
-          size: f.size,
-          type: f.type,
-          preview: null
-        })
       }
     })
+    return addedItems
+  }
+
+  const handleFileChange = (e) => {
+    addFiles(Array.from(e.target.files || []))
     e.target.value = ''
+  }
+
+  const handleAttachmentPaste = (event) => {
+    if (typeof options.canAttach === 'function' && !options.canAttach()) return
+    const files = extractClipboardAttachmentFiles(event)
+    if (!files.length) return
+    event.preventDefault()
+    const addedItems = addFiles(files)
+    if (addedItems.length && typeof options.onFilesPasted === 'function') {
+      options.onFilesPasted(addedItems)
+    }
   }
 
   const removeSelectedFile = (idx) => {
@@ -76,7 +92,9 @@ export function useGlobalAgentAttachments(options = {}) {
     zoomedImage,
     openReports,
     triggerFileUpload,
+    addFiles,
     handleFileChange,
+    handleAttachmentPaste,
     removeSelectedFile,
     formatSize,
     zoomImage,

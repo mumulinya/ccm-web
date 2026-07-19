@@ -61,12 +61,12 @@ export declare function runTestAgentBrowserResourceLifecycleSelfTest(): Promise<
     failedContract: import("..").TestAgentReportContractValidation;
     mcpContract: import("..").TestAgentReportContractValidation;
     verdictContract: import("..").TestAgentVerdictContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     openSummary: import("..").BrowserResourceLifecycleSummary;
     cleanupFailedSummary: import("..").BrowserResourceLifecycleSummary;
     foreignPlanSummary: import("..").BrowserResourceLifecycleSummary;
     duplicateSummary: import("..").BrowserResourceLifecycleSummary;
-    tamperedArtifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    tamperedArtifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     availability?: undefined;
     reason?: undefined;
 }>;

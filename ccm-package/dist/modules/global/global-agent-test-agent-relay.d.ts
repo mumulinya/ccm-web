@@ -44,7 +44,7 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
         independent_review_summary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -55,11 +55,13 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
         independentReviewSummary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -70,11 +72,13 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
         test_agent_review_summary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -85,11 +89,13 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
         testAgentReviewSummary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -100,19 +106,11 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
-        independent_review: {
-            reviewer: any;
-            verdict: string;
-            summary: any;
-            evidence: any[];
-        }[];
-        independentReview: {
-            reviewer: any;
-            verdict: string;
-            summary: any;
-            evidence: any[];
-        }[];
+        independent_review: any[];
+        independentReview: any[];
         test_agent_report: any;
         testAgentReport: any;
         test_agent_verdict: any;
@@ -126,6 +124,16 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
             test_agent_verdict: any;
             post_review_spot_check: any;
             group_task_id: any;
+            independent_review_objects: {
+                reviewer: any;
+                verdict: any;
+                summary: any;
+                evidence: any[];
+            }[];
+            browser_provider_gaps: any;
+            failure_step_screenshots: any;
+            failure_step_screenshot_rows: any;
+            test_agent_environment_prep: any;
         };
     };
     relayGlobalTestAgentEventFromGroup: (event?: any, options?: {
@@ -168,7 +176,7 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
         independent_review_summary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -179,11 +187,13 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
         independentReviewSummary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -194,11 +204,13 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
         test_agent_review_summary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -209,11 +221,13 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
         testAgentReviewSummary: {
             schema: string;
             title: string;
-            status: string;
+            status: any;
             status_label: string;
             headline: any;
             rows: any[];
@@ -224,19 +238,11 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
                 hide_internal_protocols: boolean;
                 show_for_ordinary_conversation: boolean;
             };
+            test_agent_environment_prep: any;
+            testAgentEnvironmentPrep: any;
         };
-        independent_review: {
-            reviewer: any;
-            verdict: string;
-            summary: any;
-            evidence: any[];
-        }[];
-        independentReview: {
-            reviewer: any;
-            verdict: string;
-            summary: any;
-            evidence: any[];
-        }[];
+        independent_review: any[];
+        independentReview: any[];
         test_agent_report: any;
         testAgentReport: any;
         test_agent_verdict: any;
@@ -250,6 +256,16 @@ export declare function createGlobalAgentTestAgentRelay(deps: any): {
             test_agent_verdict: any;
             post_review_spot_check: any;
             group_task_id: any;
+            independent_review_objects: {
+                reviewer: any;
+                verdict: any;
+                summary: any;
+                evidence: any[];
+            }[];
+            browser_provider_gaps: any;
+            failure_step_screenshots: any;
+            failure_step_screenshot_rows: any;
+            test_agent_environment_prep: any;
         };
     };
 };

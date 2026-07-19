@@ -1,4 +1,6 @@
 <script setup>
+import EmptyState from '../common/EmptyState.vue'
+
 defineProps({
   groupName: { type: String, default: '' },
   members: { type: Array, default: () => [] },
@@ -40,7 +42,7 @@ const emit = defineEmits(['close', 'add-member', 'remove-member'])
           </button>
         </div>
       </div>
-      <div v-else class="empty">所有项目都已加入群聊</div>
+      <EmptyState v-else icon="✓" title="所有项目都已加入群聊" />
 
       <div class="modal-footer">
         <button class="btn btn-primary" @click="emit('close')">关闭</button>
@@ -62,7 +64,6 @@ const emit = defineEmits(['close', 'add-member', 'remove-member'])
 .tag.coordinator { background: rgba(56,189,248,0.1); color: var(--accent-blue); padding: 6px 12px; }
 .tag.removable { padding: 6px 8px 6px 12px; display: flex; align-items: center; gap: 4px; }
 .tag.removable button { border: none; background: transparent; color: var(--accent-red); cursor: pointer; font-size: 14px; }
-.empty { color: var(--text-muted); font-size: 13px; padding: 8px 0; }
 .modal-footer { display: flex; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color); }
 .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; transition: all 0.2s; }
 .btn-sm { padding: 5px 10px; font-size: 12px; }

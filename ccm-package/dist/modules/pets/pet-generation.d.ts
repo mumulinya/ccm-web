@@ -37,7 +37,7 @@ export declare function toPublicPetGenerationJob(job: PetGenerationJob | null): 
     name: string;
     description: string;
     style: string;
-    targetAgent: "global-agent" | "music-agent";
+    targetAgent: "music-agent" | "global-agent";
     status: PetGenerationStatus;
     stageLabel: string;
     progress: number;

@@ -1,9 +1,11 @@
 # 群聊记忆 CC 对齐阶段目录
 
-> 群聊记忆、压缩、恢复和会话连续性的分阶段实现记录。共 363 篇。该文件由 `node scripts/generate-doc-catalogs.mjs` 生成。
+> 群聊记忆、压缩、恢复和会话连续性的分阶段实现记录。共 321 篇。该文件由 `node scripts/generate-doc-catalogs.mjs` 生成。
 
-## . (37)
+## . (39)
 
+- [CCM 记忆系统实施与文档审计](./IMPLEMENTATION-AUDIT.md)
+- [CCM 记忆系统当前状态](./CURRENT-STATE.md)
 - [CCM Group Memory CC-Parity Phase 9](./2026-07-07-cc-parity-memory-phase-9.md)
 - [CCM Group Memory CC Parity Phase 8](./2026-07-07-cc-parity-memory-phase-8.md)
 - [CCM Group Memory CC Parity Phase 7](./2026-07-07-cc-parity-memory-phase-7.md)
@@ -273,162 +275,6 @@
 ## phase-157-provider-switch-decision-receipt (1)
 
 - [Phase 157 - Provider Switch Decision Receipt](./phase-157-provider-switch-decision-receipt/2026-07-10-cc-parity-memory-phase-157.md)
-
-## phase-173-provider-ranking-memory-usage-receipt-required-docs (1)
-
-- [CCM Group Memory CC Parity - Phase 173](./phase-173-provider-ranking-memory-usage-receipt-required-docs/2026-07-10-cc-parity-memory-phase-173.md)
-
-## phase-174-provider-ranking-memory-usage-receipt-brief-required-docs (1)
-
-- [CCM Group Memory CC Parity - Phase 174](./phase-174-provider-ranking-memory-usage-receipt-brief-required-docs/2026-07-10-cc-parity-memory-phase-174.md)
-
-## phase-175-pressure-provenance-receipt-brief-required-docs (1)
-
-- [CCM Group Memory CC Parity - Phase 175](./phase-175-pressure-provenance-receipt-brief-required-docs/2026-07-10-cc-parity-memory-phase-175.md)
-
-## phase-176-compact-read-plan-revalidation-repair-dispatch (1)
-
-- [CCM Group Memory CC Parity - Phase 176](./phase-176-compact-read-plan-revalidation-repair-dispatch/2026-07-10-cc-parity-memory-phase-176.md)
-
-## phase-177-post-compact-reinjection-repair-dispatch (1)
-
-- [CCM Group Memory CC Parity - Phase 177](./phase-177-post-compact-reinjection-repair-dispatch/2026-07-10-cc-parity-memory-phase-177.md)
-
-## phase-178-post-compact-reinjection-repair-receipt-consumption (1)
-
-- [CCM Group Memory CC Parity - Phase 178](./phase-178-post-compact-reinjection-repair-receipt-consumption/2026-07-10-cc-parity-memory-phase-178.md)
-
-## phase-179-post-compact-reinjection-repair-receipt-typed-memory (1)
-
-- [CCM Group Memory CC Parity - Phase 179](./phase-179-post-compact-reinjection-repair-receipt-typed-memory/2026-07-10-cc-parity-memory-phase-179.md)
-
-## phase-180-post-compact-repair-receipt-worker-context-usage (1)
-
-- [CCM Group Memory CC Parity - Phase 180](./phase-180-post-compact-repair-receipt-worker-context-usage/2026-07-10-cc-parity-memory-phase-180.md)
-
-## phase-181-post-compact-receipt-memory-usage-repair (1)
-
-- [CCM Group Memory CC Parity - Phase 181](./phase-181-post-compact-receipt-memory-usage-repair/2026-07-11-cc-parity-memory-phase-181.md)
-
-## phase-182-post-compact-receipt-memory-usage-repair-completion-typed-memory (1)
-
-- [CCM Group Memory CC Parity - Phase 182](./phase-182-post-compact-receipt-memory-usage-repair-completion-typed-memory/2026-07-11-cc-parity-memory-phase-182.md)
-
-## phase-183-post-compact-receipt-memory-usage-repair-completion-worker-context (1)
-
-- [CCM Group Memory CC Parity - Phase 183](./phase-183-post-compact-receipt-memory-usage-repair-completion-worker-context/2026-07-11-cc-parity-memory-phase-183.md)
-
-## phase-184-post-compact-receipt-memory-usage-repair-completion-compaction-preservation (1)
-
-- [CCM Group Memory CC Parity - Phase 184](./phase-184-post-compact-receipt-memory-usage-repair-completion-compaction-preservation/2026-07-11-cc-parity-memory-phase-184.md)
-
-## phase-185-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair (1)
-
-- [Phase 185: Completion-Memory Compaction Preservation Repair](./phase-185-post-compact-receipt-memory-usage-repair-completion-compaction-preservation-repair/2026-07-12-cc-parity-memory-phase-185.md)
-
-## phase-186-post-compact-completion-memory-preservation-repair-closure-typed-memory-worker-context (1)
-
-- [Phase 186: Preservation Repair Closure Typed Memory And WorkerContext Recall](./phase-186-post-compact-completion-memory-preservation-repair-closure-typed-memory-worker-context/2026-07-12-cc-parity-memory-phase-186.md)
-
-## phase-187-post-compact-completion-memory-preservation-closure-usage-feedback (1)
-
-- [Phase 187: Closure Memory Usage Feedback And Recall Priority](./phase-187-post-compact-completion-memory-preservation-closure-usage-feedback/2026-07-12-cc-parity-memory-phase-187.md)
-
-## phase-188-closure-feedback-aging-task-family-relevance (1)
-
-- [Phase 188: Closure Feedback Aging And Task-Family Relevance](./phase-188-closure-feedback-aging-task-family-relevance/2026-07-12-cc-parity-memory-phase-188.md)
-
-## phase-189-closure-feedback-independent-evidence-confidence (1)
-
-- [Phase 189: Closure Feedback Independent Evidence Confidence](./phase-189-closure-feedback-independent-evidence-confidence/2026-07-12-cc-parity-memory-phase-189.md)
-
-## phase-190-closure-feedback-conflict-arbitration (1)
-
-- [Phase 190: Closure Feedback Conflict Arbitration](./phase-190-closure-feedback-conflict-arbitration/2026-07-12-cc-parity-memory-phase-190.md)
-
-## phase-191-closure-conflict-resolution-typed-memory (1)
-
-- [Phase 191: Closure Conflict Resolution Typed Memory](./phase-191-closure-conflict-resolution-typed-memory/2026-07-12-cc-parity-memory-phase-191.md)
-
-## phase-192-closure-conflict-resolution-compaction-preservation (1)
-
-- [Phase 192: Closure Conflict Resolution Compaction Preservation](./phase-192-closure-conflict-resolution-compaction-preservation/2026-07-12-cc-parity-memory-phase-192.md)
-
-## phase-193-closure-conflict-resolution-compaction-preservation-repair (1)
-
-- [Phase 193: Closure Conflict Resolution Compaction Preservation Repair](./phase-193-closure-conflict-resolution-compaction-preservation-repair/2026-07-12-cc-parity-memory-phase-193.md)
-
-## phase-194-repair-outcome-resolution-retention-safety (1)
-
-- [Phase 194: Repair, Outcome and Resolution Retention Safety](./phase-194-repair-outcome-resolution-retention-safety/2026-07-12-cc-parity-memory-phase-194.md)
-
-## phase-195-conflict-resolution-cold-archive (1)
-
-- [Phase 195: Conflict Resolution Checksum-Addressed Cold Archive](./phase-195-conflict-resolution-cold-archive/2026-07-12-cc-parity-memory-phase-195.md)
-
-## phase-196-cold-archive-manifest-generations-and-gc (1)
-
-- [Phase 196: Cold Archive Manifest Generations And Conservative GC](./phase-196-cold-archive-manifest-generations-and-gc/2026-07-12-cc-parity-memory-phase-196.md)
-
-## phase-197-cold-archive-maintenance-controller (1)
-
-- [Phase 197: Cold Archive Maintenance Controller And GC Approval Receipts](./phase-197-cold-archive-maintenance-controller/2026-07-12-cc-parity-memory-phase-197.md)
-
-## phase-198-read-only-maintenance-scheduler (1)
-
-- [Phase 198: Read-Only Maintenance Scheduler, Idempotency And Notifications](./phase-198-read-only-maintenance-scheduler/2026-07-12-cc-parity-memory-phase-198.md)
-
-## phase-199-maintenance-notification-context-and-receipts (1)
-
-- [Phase 199: Maintenance Notification Context And Visibility Receipts](./phase-199-maintenance-notification-context-and-receipts/2026-07-12-cc-parity-memory-phase-199.md)
-
-## phase-200-maintenance-notification-delivery-health (1)
-
-- [Phase 200: Maintenance Notification Delivery Health And Real-Path Soak](./phase-200-maintenance-notification-delivery-health/2026-07-12-cc-parity-memory-phase-200.md)
-
-## phase-201-delivery-retention-and-aging (1)
-
-- [Phase 201: Delivery Retention, Recurrence Freshness And Restart Safety](./phase-201-delivery-retention-and-aging/2026-07-12-cc-parity-memory-phase-201.md)
-
-## phase-202-delivery-ledger-recovery-and-quarantine (1)
-
-- [Phase 202: Delivery Ledger Recovery And Interrupted-Write Quarantine](./phase-202-delivery-ledger-recovery-and-quarantine/2026-07-12-cc-parity-memory-phase-202.md)
-
-## phase-203-evidence-retention-and-cleanup-receipts (1)
-
-- [Phase 203: Recovery Evidence Retention And Explicit Cleanup Receipts](./phase-203-evidence-retention-and-cleanup-receipts/2026-07-12-cc-parity-memory-phase-203.md)
-
-## phase-204-cleanup-revocation-and-crash-journal (1)
-
-- [Phase 204: Cleanup Receipt Revocation And Crash-Safe Execution Journal](./phase-204-cleanup-revocation-and-crash-journal/2026-07-12-cc-parity-memory-phase-204.md)
-
-## phase-205-cleanup-journal-execution-leases (1)
-
-- [Phase 205: Cleanup Journal Execution Leases And Fencing](./phase-205-cleanup-journal-execution-leases/2026-07-12-cc-parity-memory-phase-205.md)
-
-## phase-206-shared-cleanup-ledger-cas (1)
-
-- [Phase 206: Shared Cleanup Ledger CAS And Candidate Claims](./phase-206-shared-cleanup-ledger-cas/2026-07-12-cc-parity-memory-phase-206.md)
-
-## phase-207-cleanup-finalization-commit-wal (1)
-
-- [Phase 207: Cleanup Finalization Commit WAL](./phase-207-cleanup-finalization-commit-wal/2026-07-12-cc-parity-memory-phase-207.md)
-
-## phase-208-startup-wal-discovery-and-repair (1)
-
-- [Phase 208: Startup WAL Discovery And Repair Artifacts](./phase-208-startup-wal-discovery-and-repair/2026-07-12-cc-parity-memory-phase-208.md)
-
-## phase-209-repair-lifecycle-and-agent-context (1)
-
-- [Phase 209: Repair Lifecycle And Agent Context](./phase-209-repair-lifecycle-and-agent-context/2026-07-12-cc-parity-memory-phase-209.md)
-
-## phase-210-repair-resolution-transaction-recovery (1)
-
-- [Phase 210: Repair Resolution Transaction Recovery](./phase-210-repair-resolution-transaction-recovery/2026-07-12-cc-parity-memory-phase-210.md)
-
-## phase-211-resolution-transaction-startup-discovery (1)
-
-- [Phase 211: Resolution Transaction Startup Discovery](./phase-211-resolution-transaction-startup-discovery/2026-07-12-cc-parity-memory-phase-211.md)
 
 ## phase-212-model-capacity-and-group-chat-session-boundaries (1)
 
@@ -974,118 +820,6 @@
 
 - [CCM Memory Phase 347: Manual Full-Session Refresh](./phase-347-manual-full-session-refresh/2026-07-16-cc-parity-memory-phase-347.md)
 
-## phase-348-provider-tool-access-consumption-lifecycle (1)
-
-- [Phase 348 - Provider Tool Access And Consumption Lifecycle](./phase-348-provider-tool-access-consumption-lifecycle/2026-07-16-cc-parity-memory-phase-348.md)
-
-## phase-349-task-agent-memory-snapshot-sync (1)
-
-- [Phase 349 - Task Agent Memory Snapshot Sync](./phase-349-task-agent-memory-snapshot-sync/2026-07-16-cc-parity-memory-phase-349.md)
-
-## phase-350-task-agent-memory-snapshot-sync-commit (1)
-
-- [Phase 350 - Task Agent Memory Snapshot Sync Commit](./phase-350-task-agent-memory-snapshot-sync-commit/2026-07-16-cc-parity-memory-phase-350.md)
-
-## phase-351-task-agent-memory-snapshot-monotonic-commit (1)
-
-- [Phase 351 - Task Agent Memory Snapshot Monotonic Commit](./phase-351-task-agent-memory-snapshot-monotonic-commit/2026-07-16-cc-parity-memory-phase-351.md)
-
-## phase-352-task-agent-memory-prompt-injection-proof (1)
-
-- [Phase 352 - Task Agent Memory Prompt Injection Proof](./phase-352-task-agent-memory-prompt-injection-proof/2026-07-16-cc-parity-memory-phase-352.md)
-
-## phase-353-task-agent-memory-continuation-baseline-proof (1)
-
-- [Phase 353 - Task Agent Memory Continuation Baseline Proof](./phase-353-task-agent-memory-continuation-baseline-proof/2026-07-16-cc-parity-memory-phase-353.md)
-
-## phase-354-task-agent-memory-trusted-prompt-envelope (1)
-
-- [Phase 354 - Task Agent Memory Trusted Prompt Envelope](./phase-354-task-agent-memory-trusted-prompt-envelope/2026-07-16-cc-parity-memory-phase-354.md)
-
-## phase-355-provider-memory-authority-channel-proof (1)
-
-- [Phase 355 - Provider Memory Authority Channel Proof](./phase-355-provider-memory-authority-channel-proof/2026-07-16-cc-parity-memory-phase-355.md)
-
-## phase-356-codex-developer-memory-authority-channel (1)
-
-- [Phase 356: Codex developer memory authority channel](./phase-356-codex-developer-memory-authority-channel/2026-07-16-cc-parity-memory-phase-356.md)
-
-## phase-357-provider-memory-channel-post-launch-acknowledgement (1)
-
-- [Phase 357: Provider memory channel post-launch acknowledgement](./phase-357-provider-memory-channel-post-launch-acknowledgement/2026-07-16-cc-parity-memory-phase-357.md)
-
-## phase-358-model-side-memory-context-load-receipt (1)
-
-- [Phase 358: Model-side memory context load receipt](./phase-358-model-side-memory-context-load-receipt/2026-07-16-cc-parity-memory-phase-358.md)
-
-## phase-359-model-memory-receipt-lifecycle-reconciliation (1)
-
-- [Phase 359: Model memory receipt lifecycle reconciliation](./phase-359-model-memory-receipt-lifecycle-reconciliation/2026-07-16-cc-parity-memory-phase-359.md)
-
-## phase-360-same-native-session-memory-load-receipt-recovery (1)
-
-- [Phase 360: Same-native-session memory load receipt recovery](./phase-360-same-native-session-memory-load-receipt-recovery/2026-07-16-cc-parity-memory-phase-360.md)
-
-## phase-361-memory-load-recovery-ledger-lifecycle (1)
-
-- [Phase 361: Memory-load recovery ledger lifecycle](./phase-361-memory-load-recovery-ledger-lifecycle/2026-07-16-cc-parity-memory-phase-361.md)
-
-## phase-362-memory-recovery-provider-fault-soak (1)
-
-- [Phase 362: Memory recovery Provider fault soak](./phase-362-memory-recovery-provider-fault-soak/2026-07-16-cc-parity-memory-phase-362.md)
-
-## phase-363-live-provider-native-memory-soak-governance (1)
-
-- [Phase 363: Live Provider native-memory soak governance](./phase-363-live-provider-native-memory-soak-governance/2026-07-16-cc-parity-memory-phase-363.md)
-
-## phase-364-account-backed-codex-memory-receipt-recovery (1)
-
-- [Phase 364: Account-backed Codex memory receipt recovery](./phase-364-account-backed-codex-memory-receipt-recovery/2026-07-16-cc-parity-memory-phase-364.md)
-
-## phase-365-account-backed-multi-group-receipt-recovery (1)
-
-- [Phase 365: Account-backed multi-group receipt recovery](./phase-365-account-backed-multi-group-receipt-recovery/2026-07-16-cc-parity-memory-phase-365.md)
-
-## phase-366-live-provider-memory-report-retention (1)
-
-- [Phase 366: Live Provider memory report retention](./phase-366-live-provider-memory-report-retention/2026-07-16-cc-parity-memory-phase-366.md)
-
-## phase-367-live-report-set-coordination-and-concurrent-codex-soak (1)
-
-- [Phase 367: Live report-set coordination and concurrent Codex soak](./phase-367-live-report-set-coordination-and-concurrent-codex-soak/2026-07-16-cc-parity-memory-phase-367.md)
-
-## phase-368-live-memory-endurance-attribution (1)
-
-- [Phase 368: Live memory endurance attribution](./phase-368-live-memory-endurance-attribution/2026-07-16-cc-parity-memory-phase-368.md)
-
-## phase-369-endurance-scheduler-provider-version-advisory (1)
-
-- [Phase 369: Endurance scheduler and Provider version advisory](./phase-369-endurance-scheduler-provider-version-advisory/2026-07-16-cc-parity-memory-phase-369.md)
-
-## phase-370-explicit-approved-live-memory-wave (1)
-
-- [Phase 370: Explicit-approved live memory wave](./phase-370-explicit-approved-live-memory-wave/2026-07-16-cc-parity-memory-phase-370.md)
-
-## phase-371-live-memory-wave-approval-retention (1)
-
-- [Phase 371: Live memory wave approval retention](./phase-371-live-memory-wave-approval-retention/2026-07-16-cc-parity-memory-phase-371.md)
-
-## phase-372-provider-version-memory-transition-ledger (1)
-
-- [Phase 372: Provider version memory transition ledger](./phase-372-provider-version-memory-transition-ledger/2026-07-16-cc-parity-memory-phase-372.md)
-
-## phase-373-explicit-provider-transition-memory-canary (1)
-
-- [Phase 373: Explicit Provider transition memory canary](./phase-373-explicit-provider-transition-memory-canary/2026-07-16-cc-parity-memory-phase-373.md)
-
-## phase-374-cross-provider-transition-memory-canary (1)
-
-- [Phase 374: Cross-Provider transition memory canary](./phase-374-cross-provider-transition-memory-canary/2026-07-16-cc-parity-memory-phase-374.md)
-
-## phase-375-explicit-initial-provider-memory-baseline (1)
-
-- [Phase 375: Explicit initial Provider memory baseline](./phase-375-explicit-initial-provider-memory-baseline/2026-07-16-cc-parity-memory-phase-375.md)
-
 ## phase-376-task-agent-memory-entry-delta-sync (1)
 
 - [Phase 376: Task-Agent memory entry delta sync](./phase-376-task-agent-memory-entry-delta-sync/2026-07-16-cc-parity-memory-phase-376.md)
@@ -1098,13 +832,105 @@
 
 - [Phase 378: Task-Agent memory render contention retry](./phase-378-task-agent-memory-render-contention-retry/2026-07-16-cc-parity-memory-phase-378.md)
 
+## phase-379-task-agent-memory-transport-provider-usage (1)
+
+- [Phase 379: Task-Agent memory transport Provider usage](./phase-379-task-agent-memory-transport-provider-usage/2026-07-17-cc-parity-memory-phase-379.md)
+
 ## phase-38-post-compact-candidate-discipline-trend (1)
 
 - [Phase 38: Post-Compact Candidate Discipline Trend](./phase-38-post-compact-candidate-discipline-trend/2026-07-07-cc-parity-memory-phase-38.md)
 
+## phase-380-task-agent-memory-transport-usage-cohorts (1)
+
+- [Phase 380: Task-Agent memory transport usage cohorts](./phase-380-task-agent-memory-transport-usage-cohorts/2026-07-17-cc-parity-memory-phase-380.md)
+
+## phase-381-live-provider-memory-usage-baseline-gate (1)
+
+- [Phase 381: Live Provider memory usage baseline gate](./phase-381-live-provider-memory-usage-baseline-gate/2026-07-17-cc-parity-memory-phase-381.md)
+
+## phase-382-live-provider-memory-usage-authorization (1)
+
+- [Phase 382: Live Provider memory usage authorization](./phase-382-live-provider-memory-usage-authorization/2026-07-17-cc-parity-memory-phase-382.md)
+
+## phase-383-live-provider-memory-usage-execution-admission (1)
+
+- [Phase 383: Live Provider memory usage execution admission](./phase-383-live-provider-memory-usage-execution-admission/2026-07-17-cc-parity-memory-phase-383.md)
+
+## phase-384-live-memory-wave-execution-admission (1)
+
+- [Phase 384: Live memory wave execution admission](./phase-384-live-memory-wave-execution-admission/2026-07-17-cc-parity-memory-phase-384.md)
+
+## phase-385-memory-center-custom-live-cost-plans (1)
+
+- [Phase 385: Memory Center custom live cost plans](./phase-385-memory-center-custom-live-cost-plans/2026-07-17-cc-parity-memory-phase-385.md)
+
+## phase-386-compaction-session-lifecycle-commit-fence (1)
+
+- [Phase 386: Compaction session lifecycle commit fence](./phase-386-compaction-session-lifecycle-commit-fence/2026-07-17-cc-parity-memory-phase-386.md)
+
+## phase-387-compaction-activity-keepalive (1)
+
+- [Phase 387: Compaction activity keep-alive](./phase-387-compaction-activity-keepalive/2026-07-17-cc-parity-memory-phase-387.md)
+
+## phase-388-exact-session-compaction-cancellation (1)
+
+- [Phase 388: Exact-session compaction cancellation](./phase-388-exact-session-compaction-cancellation/2026-07-17-cc-parity-memory-phase-388.md)
+
+## phase-389-cancellation-atomic-commit-fence (1)
+
+- [Phase 389: Cancellation atomic commit fence](./phase-389-cancellation-atomic-commit-fence/2026-07-17-cc-parity-memory-phase-389.md)
+
 ## phase-39-post-compact-first-dispatch-telemetry (1)
 
 - [Phase 39: Post-Compact First Dispatch Telemetry](./phase-39-post-compact-first-dispatch-telemetry/2026-07-07-cc-parity-memory-phase-39.md)
+
+## phase-390-durable-final-dispatch-context-collapse (1)
+
+- [Phase 390: Durable final-dispatch context collapse](./phase-390-durable-final-dispatch-context-collapse/2026-07-17-cc-parity-memory-phase-390.md)
+
+## phase-391-context-collapse-lifecycle-fence (1)
+
+- [Phase 391: Context-collapse lifecycle fence](./phase-391-context-collapse-lifecycle-fence/2026-07-17-cc-parity-memory-phase-391.md)
+
+## phase-392-exact-session-model-visible-context (1)
+
+- [Phase 392: Exact-session model-visible context](./phase-392-exact-session-model-visible-context/2026-07-17-cc-parity-memory-phase-392.md)
+
+## phase-393-provider-observed-model-context (1)
+
+- [Phase 393: Provider-observed model context](./phase-393-provider-observed-model-context/2026-07-18-cc-parity-memory-phase-393.md)
+
+## phase-394-provider-usage-preflight-feedback (1)
+
+- [Phase 394: Provider usage preflight feedback](./phase-394-provider-usage-preflight-feedback/2026-07-18-cc-parity-memory-phase-394.md)
+
+## phase-395-cc-compaction-core-alignment (1)
+
+- [Phase 395: Claude Code compaction core alignment](./phase-395-cc-compaction-core-alignment/2026-07-18-cc-parity-memory-phase-395.md)
+
+## phase-395-provider-model-runtime-identity-gate (1)
+
+- [Phase 395: Provider model and runtime identity gate](./phase-395-provider-model-runtime-identity-gate/2026-07-18-cc-parity-memory-phase-395.md)
+
+## phase-396-memory-center-scroll-global-model-compaction (1)
+
+- [Phase 396: Memory Center Scroll And Global Session Model Compaction](./phase-396-memory-center-scroll-global-model-compaction/2026-07-18-cc-parity-memory-phase-396.md)
+
+## phase-396-provider-usage-compact-lineage (1)
+
+- [Phase 396: Provider usage compact lineage](./phase-396-provider-usage-compact-lineage/2026-07-18-cc-parity-memory-phase-396.md)
+
+## phase-397-post-compact-provider-usage-atomic-replace (1)
+
+- [Phase 397: Post-compact Provider usage atomic replace](./phase-397-post-compact-provider-usage-atomic-replace/2026-07-18-cc-parity-memory-phase-397.md)
+
+## phase-397-project-session-native-agent-binding (1)
+
+- [Phase 397: Project Session Native Agent Binding And Model Compaction](./phase-397-project-session-native-agent-binding/2026-07-18-cc-parity-memory-phase-397.md)
+
+## phase-399-memory-center-complexity-consolidation (1)
+
+- [Phase 399: Memory Center complexity consolidation](./phase-399-memory-center-complexity-consolidation/2026-07-18-cc-parity-memory-phase-399.md)
 
 ## phase-40-child-agent-memory-reliability (1)
 

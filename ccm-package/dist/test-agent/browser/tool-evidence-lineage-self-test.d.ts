@@ -8,7 +8,7 @@ export declare function runTestAgentBrowserToolEvidenceLineageSelfTest(): Promis
     unscopedSummary: import("..").BrowserToolEvidenceLineageSummary;
     reportContract: import("..").TestAgentReportContractValidation;
     verdictContract: import("..").TestAgentVerdictContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
-    tamperedMissingVerification: import("../artifact-verifier").TestAgentArtifactVerification;
-    tamperedTranscriptVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    tamperedMissingVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    tamperedTranscriptVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
 }>;

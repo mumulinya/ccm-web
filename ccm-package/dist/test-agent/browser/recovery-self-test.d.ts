@@ -6,9 +6,9 @@ export declare function runTestAgentClaudeChromeRecoverySelfTest(): Promise<{
     pass: boolean;
     report: import("..").TestAgentReport;
     contract: import("..").TestAgentReportContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     tamperedContract: import("..").TestAgentReportContractValidation;
-    tamperedArtifacts: import("../artifact-verifier").TestAgentArtifactVerification;
+    tamperedArtifacts: import("../artifact-verifier-core").TestAgentArtifactVerification;
     calls: ToolCall[];
     plan: import("..").TestAgentExecutionPlan;
 }>;

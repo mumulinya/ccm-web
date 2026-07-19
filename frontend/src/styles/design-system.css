@@ -10,11 +10,15 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+  --radius-xl: 12px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
+  --space-6: 24px;
+  --control-height: 34px;
+  --control-height-sm: 28px;
   --shell-nav-width: 232px;
   --shell-header-height: 48px;
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 20%, transparent);
@@ -67,6 +71,180 @@ samp {
 [data-theme="dark"] {
   color-scheme: dark;
   --text-muted: #9da89e;
+}
+
+/* Shared control sizes — consume tokens; colors come from style.css 2026 layer */
+.ds-control,
+.ds-input,
+.ds-select,
+.ds-textarea {
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  box-shadow: none;
+  outline: none;
+}
+
+.ds-textarea {
+  min-height: 88px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.ds-control:focus,
+.ds-input:focus,
+.ds-select:focus,
+.ds-textarea:focus {
+  border-color: var(--accent-blue);
+  box-shadow: var(--focus-ring);
+}
+
+.ds-btn {
+  height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--font-size-md);
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.ds-btn:hover {
+  background: var(--control-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.ds-btn-primary {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+
+.ds-btn-primary:hover {
+  background: color-mix(in srgb, var(--accent-blue) 86%, #000);
+  border-color: color-mix(in srgb, var(--accent-blue) 86%, #000);
+  color: #fff;
+}
+
+.ds-btn-sm {
+  height: var(--control-height-sm);
+  padding: 0 9px;
+  font-size: var(--font-size-sm);
+}
+
+/* Empty state */
+.ds-empty,
+.ccm-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+  line-height: 1.55;
+}
+
+.ds-empty__title,
+.ccm-empty-state__title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-body);
+  font-weight: 650;
+}
+
+.ds-empty__hint,
+.ccm-empty-state__hint {
+  margin: 0;
+  max-width: 36em;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.ds-empty__icon,
+.ccm-empty-state__icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--panel-muted);
+  color: var(--text-muted);
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+/* Loading skeleton */
+@keyframes ds-skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.ds-skeleton,
+.ccm-skeleton {
+  display: block;
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--panel-muted) 92%, var(--border-color)) 0%,
+    color-mix(in srgb, var(--surface) 70%, var(--panel-muted)) 45%,
+    color-mix(in srgb, var(--panel-muted) 92%, var(--border-color)) 100%
+  );
+  background-size: 220% 100%;
+  animation: ds-skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+.ds-skeleton-line,
+.ccm-skeleton-line {
+  height: 12px;
+  margin-bottom: 8px;
+}
+
+.ds-skeleton-line:last-child,
+.ccm-skeleton-line:last-child {
+  margin-bottom: 0;
+  width: 62%;
+}
+
+.ds-skeleton-card,
+.ccm-skeleton-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ds-skeleton-grid,
+.ccm-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+html.low-perf .ds-skeleton,
+html.low-perf .ccm-skeleton {
+  animation: none;
+  background: var(--panel-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

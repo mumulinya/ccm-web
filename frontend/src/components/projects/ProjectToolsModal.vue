@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import EmptyState from '../common/EmptyState.vue'
 
 const props = defineProps({
   projectName: { type: String, default: '' },
@@ -115,7 +116,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
       <div class="tools-body">
         <div class="tool-section">
           <div class="tool-section-title">🔌 MCP 服务器</div>
-          <div v-if="allTools.mcp.length === 0" class="empty-row">暂无 MCP 服务器，请先在工具配置页面添加</div>
+          <EmptyState v-if="allTools.mcp.length === 0" icon="🔌" title="暂无 MCP 服务器" hint="请先在工具配置页面添加" />
           <div
             v-for="tool in allTools.mcp"
             :key="tool.name"
@@ -154,7 +155,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
 
         <div class="tool-section">
           <div class="tool-section-title">⚡ Skills</div>
-          <div v-if="allTools.skill.length === 0" class="empty-row">暂无 Skills，请先在工具配置页面添加</div>
+          <EmptyState v-if="allTools.skill.length === 0" icon="⚡" title="暂无 Skills" hint="请先在工具配置页面添加" />
           <label
             v-for="tool in allTools.skill"
             :key="tool.name"
@@ -310,12 +311,6 @@ const updateField = (field, event) => emit('update-field', { field, value: event
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
-}
-
-.empty-row {
-  padding: 8px;
-  color: var(--text-muted);
-  font-size: 12px;
 }
 
 .tool-row {

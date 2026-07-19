@@ -155,6 +155,55 @@ export function listTestAgentRunnerRecords(options: { taskIds?: string[]; limit?
     .slice(0, limit);
 }
 
+/** Test-only helper: persist a runner record without registering activeChildren (orphan simulation). */
+export function upsertTestAgentRunnerRecordForSelfTest( partial: Partial<TestAgentRunnerRecord> & { id: string; taskId: string }) {
+  ensureDirs();
+  const now = nowIso();
+  const record: TestAgentRunnerRecord = {
+    schema: "ccm-test-agent-runner-record-v1",
+    id: partial.id,
+    key: partial.key || partial.id,
+    mode: partial.mode || "invocation",
+    taskId: partial.taskId,
+    groupId: partial.groupId || "",
+    handoffId: partial.handoffId || "",
+    handoffHash: partial.handoffHash || "",
+    status: partial.status || "running",
+    pid: Number(partial.pid || 0),
+    createdAt: partial.createdAt || now,
+    startedAt: partial.startedAt || now,
+    heartbeatAt: partial.heartbeatAt || now,
+    finishedAt: partial.finishedAt || "",
+    deadlineAt: partial.deadlineAt || "",
+    timeoutMs: Number(partial.timeoutMs || 60_000),
+    handoffPath: partial.handoffPath || "",
+    stdoutPath: partial.stdoutPath || "",
+    stderrPath: partial.stderrPath || "",
+    exitCode: partial.exitCode === undefined ? null : partial.exitCode,
+    signal: partial.signal || "",
+    error: partial.error || "",
+    cancelledReason: partial.cancelledReason || "",
+    recoveredAfterRestart: partial.recoveredAfterRestart === true,
+    sourceBefore: partial.sourceBefore || {
+      schema: "ccm-test-agent-source-binding-v1",
+      capturedAt: now,
+      fingerprint: "self-test",
+      projects: [],
+    },
+    ...(partial.sourceAfter ? { sourceAfter: partial.sourceAfter } : {}),
+    ...(partial.sourceStable !== undefined ? { sourceStable: partial.sourceStable } : {}),
+    ...(partial.result ? { result: partial.result } : {}),
+  };
+  saveRecord(record);
+  return record;
+}
+
+export function getTestAgentRunnerRecordForSelfTest(id: string) {
+  const safe = safeId(id, "");
+  if (!safe) return null;
+  return loadRecords().find(record => record.id === id || record.id === safe) || null;
+}
+
 function readLimited(file: string, max = 32 * 1024 * 1024) {
   if (!file || !fs.existsSync(file)) return "";
   const stat = fs.statSync(file);
@@ -329,7 +378,15 @@ async function waitForRecoveredRecord(record: TestAgentRunnerRecord) {
   record.finishedAt = nowIso();
   record.heartbeatAt = record.finishedAt;
   record.recoveredAfterRestart = true;
-  if (record.status !== "failed") record.status = parsed ? "completed" : "interrupted";
+  if (record.status !== "failed" && record.status !== "cancelled") {
+    const exitOk = record.exitCode === 0 || record.exitCode === null;
+    // Recovered waiters rarely know exitCode; require parsed contract and no kill/timeout failure.
+    record.status = parsed && exitOk ? "completed" : "interrupted";
+    if (parsed && record.exitCode !== 0 && record.exitCode !== null) {
+      record.status = "failed";
+      record.error = record.error || `TestAgent process exited with code ${record.exitCode}.`;
+    }
+  }
   if (!parsed && !record.error) record.error = "TestAgent process ended without a contract-valid result.";
   saveRecord(record);
   const result = resultFromRecord(record, true);
@@ -346,7 +403,18 @@ function finalizeRecord(record: TestAgentRunnerRecord, status: TestAgentRunnerSt
   record.result = parsed;
   record.sourceAfter = captureTestAgentSourceBinding({ projects: record.sourceBefore.projects.map(item => ({ name: item.name, workDir: item.realWorkDir, changedFiles: item.declaredFiles })) });
   record.sourceStable = record.sourceBefore.fingerprint === record.sourceAfter.fingerprint;
-  record.status = status === "cancelled" ? "cancelled" : parsed ? "completed" : status;
+  if (status === "cancelled") {
+    record.status = "cancelled";
+  } else if (parsed && exitCode === 0) {
+    record.status = "completed";
+  } else if (status === "interrupted") {
+    record.status = "interrupted";
+  } else {
+    record.status = "failed";
+    if (parsed && exitCode !== 0 && exitCode !== null && !record.error) {
+      record.error = `TestAgent process exited with code ${exitCode}.`;
+    }
+  }
   record.finishedAt = nowIso();
   record.heartbeatAt = record.finishedAt;
   saveRecord(record);
@@ -466,7 +534,15 @@ export async function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<T
   if (active) return active;
 
   const existing = loadRecords().filter(record => record.key === key).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  if (existing?.status === "completed" && existing.result && existing.sourceStable !== false) return resultFromRecord(existing, true);
+  // Reuse completed or failed terminal records that still have a contract result.
+  // Failed often means canAccept=false (CLI exit 1), not a missing invocation payload.
+  if (
+    existing?.result
+    && existing.sourceStable !== false
+    && (existing.status === "completed" || existing.status === "failed")
+  ) {
+    return resultFromRecord(existing, true);
+  }
   if (existing?.status === "running" && processAlive(existing.pid)) {
     const recovered = waitForRecoveredRecord(existing);
     activeByKey.set(key, recovered);
@@ -480,14 +556,24 @@ export async function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<T
 
 export function cancelTestAgentRunsForTask(taskId: string, reason = "Task cancelled") {
   const cancelled: string[] = [];
-  for (const { record } of activeChildren.values()) {
-    if (record.taskId !== taskId || record.status !== "running") continue;
+  const markCancelled = (record: TestAgentRunnerRecord) => {
+    if (cancelled.includes(record.id)) return;
     record.status = "cancelled";
     record.cancelledReason = reason;
     record.heartbeatAt = nowIso();
+    record.finishedAt = record.finishedAt || nowIso();
     saveRecord(record);
-    killProcessTree(record.pid);
+    if (record.pid) killProcessTree(record.pid);
     cancelled.push(record.id);
+  };
+  for (const { record } of activeChildren.values()) {
+    if (record.taskId !== taskId || record.status !== "running") continue;
+    markCancelled(record);
+  }
+  // Also kill orphaned running records after server restart (not in activeChildren).
+  for (const record of loadRecords()) {
+    if (record.taskId !== taskId || record.status !== "running") continue;
+    markCancelled(record);
   }
   return cancelled;
 }
@@ -504,13 +590,19 @@ export function reconcileTestAgentRunnerRecords() {
     }
     const parsed = parseResult(record.mode, readLimited(record.stdoutPath));
     record.result = parsed;
-    record.status = parsed ? "completed" : "interrupted";
-    record.error = parsed ? "" : (record.error || "TestAgent process ended before the server could collect a valid result.");
+    // Dead process after restart: only completed when contract-valid AND prior exit was success.
+    const exitOk = record.exitCode === 0;
+    record.status = parsed && exitOk ? "completed" : "interrupted";
+    record.error = parsed && exitOk
+      ? ""
+      : (record.error || (parsed
+        ? `TestAgent process ended with exit code ${record.exitCode ?? "unknown"}.`
+        : "TestAgent process ended before the server could collect a valid result."));
     record.finishedAt = record.finishedAt || nowIso();
     record.heartbeatAt = record.finishedAt;
     record.recoveredAfterRestart = true;
     saveRecord(record);
-    interrupted += parsed ? 0 : 1;
+    interrupted += record.status === "interrupted" ? 1 : 0;
   }
   const retention = pruneTestAgentRunnerRecords();
   return { schema: "ccm-test-agent-runner-reconciliation-v1", total: records.length, running, interrupted, retention };

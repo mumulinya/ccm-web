@@ -135,3 +135,9 @@ export declare function validateGroupSessionLifecycleRuntimeFence(input?: any): 
         lifecycleHeadChecksum: string;
     };
 };
+export declare function withGroupSessionLifecycleCommitFence<T>(input: any, operation: (state: any) => T): T;
+export declare function buildGroupCompactionLifecycleCommitProof(input?: any): any;
+export declare function verifyGroupCompactionLifecycleCommitProof(proof: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+};

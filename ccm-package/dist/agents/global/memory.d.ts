@@ -20,6 +20,14 @@ export interface GlobalMemoryItem {
     expiresAt?: string;
 }
 export declare const GLOBAL_AGENT_MEMORY_FILE: string;
+export declare function getGlobalAgentSessionCompactionActivity(sessionId: string): {
+    active: boolean;
+    status: string;
+    stage: string;
+    reason: string;
+    startedAt: string;
+    updatedAt: string;
+};
 export declare function acquireGlobalAgentMemorySelfTestLock(label?: string, options?: any): () => void;
 export declare function scanGlobalAgentMemorySelfTestContamination(options?: any): {
     schema: string;
@@ -104,30 +112,66 @@ export declare function loadGlobalAgentTranscript(sessionId: string): {
 export declare function loadGlobalAgentMemory(options?: {
     recover?: boolean;
 }): any;
+export declare function pruneDeletedGlobalWebSessionMemory(activeSessionIds: string[]): {
+    removed: any;
+    transcriptFilesRemoved: number;
+};
+export declare function recordGlobalAgentSessionProviderUsage(sessionId: string, input?: any): import("../../system/session-compaction-core").SessionProviderUsageBaseline;
 export declare function setGlobalAgentMemoryPolicy(input: any): any;
 export declare function extractGlobalMemoryCandidates(messages: any[], sessionId: string): {
     candidates: GlobalMemoryItem[];
     rejected: number;
 };
-export declare function compactGlobalAgentSession(sessionId: string, options?: {
+export declare function compactGlobalAgentSessionWithModel(sessionId: string, options?: {
     force?: boolean;
     reason?: string;
+    customInstructions?: string;
+    modelCall?: (request: any) => Promise<any>;
+    currentRequest?: any;
+    fixedContext?: any;
+    tools?: any;
+    recoveryContext?: any;
+}): any;
+export declare function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, options?: {
+    modelCall?: (request: any) => Promise<any>;
 }): {
-    compacted: boolean;
+    scheduled: boolean;
     reason: string;
-    tokenCount: any;
-    messageCount: any;
-    memory: any;
-    archive?: undefined;
-    session?: undefined;
+    cadence?: undefined;
 } | {
-    compacted: boolean;
-    archive: any;
-    session: any;
-    memory: any;
-    reason?: undefined;
-    tokenCount?: undefined;
-    messageCount?: undefined;
+    scheduled: boolean;
+    reason: string;
+    cadence: {
+        schema: string;
+        shouldExtract: boolean;
+        reason: string;
+        totalTokens: any;
+        priorTokens: number;
+        growthTokens: number;
+        toolCallsSinceLastExtraction: any;
+        cursorIndex: number;
+        cursorValid: boolean;
+        sourceLastMessageId: string;
+        sourceMessageIds: string[];
+    };
+} | {
+    cadence: {
+        schema: string;
+        shouldExtract: boolean;
+        reason: string;
+        totalTokens: any;
+        priorTokens: number;
+        growthTokens: number;
+        toolCallsSinceLastExtraction: any;
+        cursorIndex: number;
+        cursorValid: boolean;
+        sourceLastMessageId: string;
+        sourceMessageIds: string[];
+    };
+    scheduled: boolean;
+    reason: string;
+    startedAt: string;
+    identity: any;
 };
 export declare function ingestGlobalAgentConversation(input: {
     sessionId: string;
@@ -143,21 +187,9 @@ export declare function ingestGlobalAgentConversation(input: {
     extracted: number;
     rejected: number;
     compaction: {
-        compacted: boolean;
-        reason: string;
-        tokenCount: any;
-        messageCount: any;
-        memory: any;
-        archive?: undefined;
-        session?: undefined;
-    } | {
-        compacted: boolean;
-        archive: any;
-        session: any;
-        memory: any;
-        reason?: undefined;
-        tokenCount?: undefined;
-        messageCount?: undefined;
+        scheduled: boolean;
+        mode: string;
+        sessionId: string;
     };
 };
 export declare function recallGlobalAgentMemory(query: string, options?: {
@@ -176,6 +208,51 @@ export declare function recallGlobalAgentMemory(query: string, options?: {
     sessionSummary: any;
     boundary: any;
     citations: any[];
+};
+export declare function buildGlobalAgentSessionContinuation(sessionId: string): {
+    schema: string;
+    sessionId: string;
+    summary: any;
+    messages: any[];
+    boundary: any;
+    summaryChecksum?: undefined;
+    recentWindow?: undefined;
+    tokenMeasurement?: undefined;
+    postCompactGate?: undefined;
+    consecutiveFailures?: undefined;
+} | {
+    schema: string;
+    sessionId: string;
+    summary: any;
+    summaryChecksum: string;
+    messages: any;
+    boundary: any;
+    recentWindow: {
+        schema: string;
+        strategy: string;
+        startIndex: number;
+        floorIndex: number;
+        preservedMessageCount: number;
+        preservedTextMessageCount: number;
+        preservedTokenCount: number;
+        minTokens: number;
+        minTextMessages: number;
+        maxTokens: number;
+        lastSummarizedMessageId: string;
+        lastSummarizedMessageIndex: number;
+        cursorValid: boolean;
+        tokenSelectedStartIndex: number;
+        expandedForConversationTurn: boolean;
+        maxExceededForAtomicBoundary: boolean;
+        minimumSatisfied: boolean;
+    } | {
+        startIndex: number;
+        preservedTokenCount: any;
+        preservedTextMessageCount: number;
+    };
+    tokenMeasurement: any;
+    postCompactGate: any;
+    consecutiveFailures: number;
 };
 export declare function buildGlobalAgentMemoryPacket(query: string, options?: {
     sessionId?: string;

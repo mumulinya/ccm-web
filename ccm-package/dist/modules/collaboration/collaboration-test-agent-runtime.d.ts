@@ -42,6 +42,8 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
     reworkRoute?: any;
     userMessage?: string;
     coordinatorOutput?: string;
+    forcePlaywrightProvider?: boolean;
+    providerGapReroute?: boolean;
 }): {
     schema: string;
     id: string;
@@ -56,6 +58,8 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
     projects: any[];
     options: any;
     metadata: {
+        providerGapReroute?: boolean;
+        providerGapRerouteReason?: string;
         handoffWarnings?: string[];
         handoffSource: string;
         route: any;
@@ -233,7 +237,7 @@ export declare function buildNativeTestAgentReceipt(targetName: string, report: 
 export declare function buildNativeTestAgentReviewSummary(targetName: string, report: TestAgentReport, receipt: any): {
     schema: string;
     title: string;
-    status: string;
+    status: any;
     status_label: string;
     headline: string;
     rows: string[];
@@ -243,6 +247,15 @@ export declare function buildNativeTestAgentReviewSummary(targetName: string, re
         technical_default_collapsed: boolean;
         hide_internal_protocols: boolean;
         show_for_ordinary_conversation: boolean;
+    };
+    review_route: any;
+    browser_provider_gap_count: any;
+    test_agent_environment_prep: any;
+    testAgentEnvironmentPrep: any;
+    technical: {
+        failure_step_screenshots: any;
+        failure_step_screenshot_rows: any;
+        test_agent_environment_prep: any;
     };
 };
 export declare function formatNativeTestAgentOutput(targetName: string, report: TestAgentReport, receipt: any, handoff?: any): string;

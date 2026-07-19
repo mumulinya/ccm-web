@@ -1,0 +1,15 @@
+{
+  "schema": "ccm-group-session-lifecycle-head-v1",
+  "version": 1,
+  "lifecycle_head_id": "gslh_2188bc9fe2cb3a63d1a60ca7",
+  "group_id": "group-business-chain",
+  "group_session_id": "gcs_mrqjdsz5_yf62an",
+  "generation": 1,
+  "status": "active",
+  "reason": "group_chat_session_created",
+  "previous_status": "",
+  "previous_head_checksum": "",
+  "created_at": "2026-07-18T15:43:30.545Z",
+  "transitioned_at": "2026-07-18T15:43:30.557Z",
+  "head_checksum": "7186298843553864e04aca6a4403496dc2acb2705ee90d3ee88b224589acc530"
+}

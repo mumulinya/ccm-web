@@ -109,27 +109,12 @@ export function createGlobalAgentTestAgentRelay(deps: any) {
       spotCheckNeedsRecheck || spotCheckNeedsUser ? [postReviewSpotCheckSummary?.headline || "完成前抽查尚未通过"] : []
     );
     const verification = Array.isArray(receipt?.verification) ? receipt.verification : [];
-    const canAccept = !hasFailedCoverage
-      && !hasUnknownCoverage
-      && !hasWeakAcceptance
-      && !hasFailedBrowserFlows
-      && !hasIncompleteBrowserFlows
-      && !hasFailedMultiSessionBrowser
-      && !hasIncompleteMultiSessionBrowser
-      && !hasFailedBrowserAuthentication
-      && !hasIncompleteBrowserAuthentication
-      && !hasFailedBrowserActionEffects
-      && !hasIncompleteBrowserActionEffects
-      && !hasIncompleteBrowserRecovery
-      && !hasFailedAdversarialEvidence
-      && !hasIncompleteAdversarialEvidence
-      && !hasBlockedAdversarialEvidence
-      && !failureSummaries.hasRework
-      && !failureSummaries.hasNeedsUser
-      && spotCheckPassed
-      && blockers.length === 0
-      && (verdict?.canAccept === true || rawRecommendation === "accept" || rawStatus === "passed");
-    const needsRework = hasFailedCoverage
+    const {
+      summarizeTestAgentBrowserProviderGaps,
+      deriveIndependentReviewDecision,
+    } = require("../collaboration/test-agent-independent-review-decision");
+    const providerGaps = summarizeTestAgentBrowserProviderGaps(report, verdict);
+    const forceRework = hasFailedCoverage
       || hasFailedBrowserFlows
       || hasFailedMultiSessionBrowser
       || hasFailedBrowserAuthentication
@@ -139,51 +124,75 @@ export function createGlobalAgentTestAgentRelay(deps: any) {
       || verdict?.needsRework === true
       || rawRecommendation.includes("rework")
       || rawStatus === "failed";
-    const needsRecheck = !needsRework && (
+    const forceRecheck = !forceRework && (
       spotCheckNeedsRecheck
       || hasIncompleteBrowserActionEffects
       || hasIncompleteBrowserRecovery
       || hasIncompleteAdversarialEvidence
+      || providerGaps.hasGaps
       || verdict?.needsRecheck === true
     );
-    const needsEnvironment = !needsRework && !needsRecheck && (
+    const forceEnvironment = !forceRework && !forceRecheck && (
       hasBlockedAdversarialEvidence
+      || hasIncompleteBrowserAuthentication
       || verdict?.needsEnvironment === true
     );
-    const needsHuman = !needsRework && !needsRecheck && !needsEnvironment && (
+    const forceHuman = !forceRework && !forceRecheck && !forceEnvironment && (
       hasUnknownCoverage
       || hasWeakAcceptance
       || hasIncompleteBrowserFlows
       || hasIncompleteMultiSessionBrowser
-      || hasIncompleteBrowserAuthentication
       || failureSummaries.hasNeedsUser
       || spotCheckNeedsUser
       || verdict?.needsHuman === true
       || rawRecommendation.includes("human")
       || rawStatus === "blocked"
+      || blockers.length > 0
     );
-    const status = needsRework
-      ? "needs_rework"
-      : needsRecheck
-        ? "needs_recheck"
-        : needsEnvironment || needsHuman
-          ? "needs_user"
-          : canAccept
-            ? "passed"
-            : "recorded";
+    const preAccept = !forceRework
+      && !forceRecheck
+      && !forceEnvironment
+      && !forceHuman
+      && spotCheckPassed
+      && (verdict?.canAccept === true || rawRecommendation === "accept" || rawStatus === "passed");
+    const decision = deriveIndependentReviewDecision({
+      report,
+      verdict,
+      receiptStatus: preAccept ? "done" : forceRework ? "failed" : undefined,
+      postReviewSpotCheck,
+      forceReworkSignals: forceRework,
+      forceRecheckSignals: forceRecheck,
+      forceEnvironmentSignals: forceEnvironment,
+      forceHumanSignals: forceHuman,
+    });
+    const needsRework = decision.needsRework;
+    const needsRecheck = decision.needsRecheck;
+    const needsEnvironment = decision.needsEnvironment || decision.status === "needs_environment";
+    const needsHuman = decision.needsHuman;
+    const canAccept = decision.canAccept;
+    const status = decision.status;
+    const {
+      buildTestAgentEnvironmentPrepChecklist,
+      collectTestAgentFailureScreenshotRefs,
+      formatFailureScreenshotTechnicalRows,
+      formatTestAgentEnvironmentPrepUserLines,
+    } = require("../collaboration/test-agent-environment-prep");
+    const environmentPrep = needsEnvironment
+      ? buildTestAgentEnvironmentPrepChecklist(report, verdict)
+      : null;
+    const failureScreenshotRefs = collectTestAgentFailureScreenshotRefs(report);
     const statusLabel = status === "passed"
       ? "已通过"
       : status === "needs_recheck"
         ? "需复验"
         : status === "needs_rework"
           ? "需返工"
-          : status === "needs_user"
-            ? needsEnvironment
-              ? "补条件"
-              : "等你确认"
-            : "已记录";
+          : needsEnvironment || status === "needs_environment"
+            ? "补条件"
+            : "等你确认";
     const reviewer = event.agent || receipt?.reviewer || receipt?.agent || "TestAgent";
     const detail = globalVisibleText(event.detail || receipt?.summary || event.text || "", "TestAgent 已提交独立复核结论，我会纳入最终验收。", 320);
+    const prepUserLines = formatTestAgentEnvironmentPrepUserLines(environmentPrep);
     const evidence = [
       `${reviewer}：${statusLabel}`,
       ...(Array.isArray(postReviewSpotCheckSummary?.rows) ? postReviewSpotCheckSummary.rows.slice(0, 3) : []),
@@ -193,11 +202,14 @@ export function createGlobalAgentTestAgentRelay(deps: any) {
       ...(adversarialEvidence?.evidenceLines || []).slice(0, 4),
       ...(multiSessionBrowser?.evidenceLines || []).slice(0, 4),
       ...(browserFlows?.evidenceLines || []).slice(0, 4),
+      ...(needsEnvironment ? prepUserLines.slice(0, 2) : []),
       verification.length ? `验证证据：${globalVisibleText(verification[0], "已记录验证证据。", 180)}` : "",
       ...failureSummaries.failureLines.slice(0, 3).map((item: any) => `返工重点：${globalVisibleText(item, "复核发现待处理问题。", 180)}`),
       ...failureSummaries.diagnosticLines.slice(0, 2).map((item: any) => `排查建议：${globalVisibleText(item, "按复核诊断先排查。", 180)}`),
       ...blockers.slice(0, 3).map((item: any) => `待处理：${globalVisibleText(item, "复核发现待处理缺口。", 180)}`),
       ...coverageGaps.weakLines.slice(0, 2).map((item: any) => `待确认：${globalVisibleText(item, "复核证据强度仍需确认。", 180)}`),
+      ...providerGaps.lines.slice(0, 3).map((item: any) => `Provider缺口：${globalVisibleText(item, "浏览器 Provider 能力不足。", 180)}`),
+      decision.flakyStabilityGroups > 0 ? `浏览器稳定性 flaky：${decision.flakyStabilityGroups} 组` : "",
     ].filter(Boolean);
     const summary = {
       schema: "ccm-main-agent-independent-review-summary-v1",
@@ -213,11 +225,15 @@ export function createGlobalAgentTestAgentRelay(deps: any) {
           : status === "needs_recheck"
             ? spotCheckNeedsRecheck
               ? "TestAgent 已通过，但我的完成前抽查尚未一致，我会先重新复验。"
-              : "TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验，不会直接要求原实现成员返工。"
-          : status === "needs_user"
-            ? needsEnvironment
-              ? "TestAgent 的复核受环境或登录条件阻塞，我会先补齐条件再继续验收。"
-              : "独立复核需要人工确认，我会先暂停最终验收。"
+              : providerGaps.hasGaps
+                ? "TestAgent 碰到浏览器 Provider 能力缺口，我会改走 Playwright 后重新复验，不会误走代码返工路线。"
+                : decision.flakyStabilityGroups > 0
+                  ? "TestAgent 发现浏览器稳定性 flaky，我会先重新复验，不会直接验收。"
+                : "TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验，不会直接要求原实现成员返工。"
+          : needsEnvironment || status === "needs_environment"
+            ? `TestAgent 的复核受环境或登录条件阻塞（${environmentPrep?.userSummary || "缺登录态/运行条件"}），我会先补齐条件再继续验收。`
+            : status === "needs_user"
+              ? "独立复核需要人工确认，我会先暂停最终验收。"
             : detail,
       rows: evidence.length ? evidence : [detail],
       next_action: status === "passed"
@@ -227,20 +243,24 @@ export function createGlobalAgentTestAgentRelay(deps: any) {
           : status === "needs_recheck"
             ? spotCheckNeedsRecheck
               ? "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。"
-              : "补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。"
-          : status === "needs_user"
-            ? needsEnvironment
-              ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核。"
-              : "等待你确认复核标记的问题。"
+              : providerGaps.hasGaps
+                ? "Switch browser provider to Playwright，然后重新运行 TestAgent。"
+                : decision.flakyStabilityGroups > 0
+                  ? `先消除 ${decision.flakyStabilityGroups} 组 flaky 稳定性结果，再重新运行 TestAgent。`
+                : "补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。"
+          : needsEnvironment || status === "needs_environment"
+            ? environmentPrep?.missingEnvNames?.length
+              ? `先补齐环境变量名 ${environmentPrep.missingEnvNames.join("、")} 等条件，再继续 TestAgent 复核。`
+              : "先补齐环境、登录或运行条件，再继续 TestAgent 复核。"
+            : status === "needs_user"
+              ? "等待你确认复核标记的问题。"
             : "继续等待完整复核证据或最终总结。",
       display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+      test_agent_environment_prep: environmentPrep,
+      testAgentEnvironmentPrep: environmentPrep,
     };
-    const reviewRows = [{
-      reviewer,
-      verdict: status,
-      summary: detail,
-      evidence: evidence.slice(0, 8),
-    }];
+    // Keep independent_review as string rows (same as group SSE); structured objects live under technical.
+    const reviewRows = summary.rows;
     return {
       type: "test_agent_review_ready",
       source: "group-main-agent",
@@ -271,6 +291,16 @@ export function createGlobalAgentTestAgentRelay(deps: any) {
         test_agent_verdict: verdict,
         post_review_spot_check: postReviewSpotCheck,
         group_task_id: event.task_id || event.taskId || "",
+        independent_review_objects: [{
+          reviewer,
+          verdict: status,
+          summary: detail,
+          evidence: evidence.slice(0, 8),
+        }],
+        browser_provider_gaps: providerGaps.lines,
+        failure_step_screenshots: failureScreenshotRefs,
+        failure_step_screenshot_rows: formatFailureScreenshotTechnicalRows(failureScreenshotRefs),
+        test_agent_environment_prep: environmentPrep,
       },
     };
   }

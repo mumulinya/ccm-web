@@ -4,6 +4,10 @@ import {
   sanitizeUserFacingPlanText,
   sanitizeUserFacingStructure,
 } from "./agentDisplay.js";
+import {
+  classifyGlobalAgentRunPresentation,
+  PRESENTATION_REPLY,
+} from "./resultPresentation.js";
 
 export const visibleGlobalText = (value, fallback = '信息已整理。', max = 420) => (
   sanitizeUserFacingAgentText(value, fallback, max)
@@ -168,6 +172,10 @@ export const globalEventConfirmsExecution = (event = {}) => {
 export const globalExecutionIntentConfirmed = (msg = {}) => {
   if (msg.executionIntentConfirmed === true) return true
   const run = msg.agenticRun || msg.agentic_run || {}
+  // 轻量 reply（点歌/问答/只读）：不进重型 stream / 技术详情
+  if (classifyGlobalAgentRunPresentation(run, msg) === PRESENTATION_REPLY) {
+    return false
+  }
   const intent = run.decision_summary?.intent || run.decisionSummary?.intent || null
   if (intent?.action_required === true || Number(run.tool_calls || run.toolCalls || 0) > 0) return true
   if (run.mission_id || run.missionId || run.supervisor_id || run.supervisorId || run.pending_tool || run.pendingTool) return true
@@ -539,6 +547,7 @@ export const globalToolLabels = {
   git_commit: '提交代码',
   create_template: '创建模板',
   play_music: '播放音乐',
+  stop_music: '停止音乐',
   toggle_pet: '控制桌面宠物',
   navigate: '切换页面'
 }

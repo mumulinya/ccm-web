@@ -44,7 +44,7 @@ const clarificationSummary = () => props.msg.clarification_summary || props.msg.
     :class="['agent-state-' + status.tone]"
     :style="accentStyle"
   >
-    <div class="agent-message-head">
+    <div v-if="!mainAgent || msg.agent === 'system'" class="agent-message-head">
       <div class="agent-identity">
         <span class="agent-avatar">{{ msg.agent === 'system' ? '!' : agentInitials }}</span>
         <span class="agent-title">{{ msg.agent === 'system' ? '系统' : agentDisplayName }}</span>

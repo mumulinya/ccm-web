@@ -174,7 +174,7 @@ export declare class ToolManager {
             name: string;
             connected: boolean;
             toolsCount: number;
-            state: "pending" | "connected" | "disconnected" | "failed" | "auth_required";
+            state: "failed" | "pending" | "connected" | "disconnected" | "auth_required";
             error: string;
             lastConnectedAt: string;
             lastErrorAt: string;

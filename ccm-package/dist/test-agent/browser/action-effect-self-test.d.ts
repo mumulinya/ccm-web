@@ -3,11 +3,11 @@ export declare function runTestAgentPlaywrightActionEffectSelfTest(): Promise<{
     report: import("..").TestAgentReport;
     plan: import("..").TestAgentExecutionPlan;
     contract: import("..").TestAgentReportContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
-    digestTamper: import("../artifact-verifier").TestAgentArtifactVerification;
-    countTamper: import("../artifact-verifier").TestAgentArtifactVerification;
-    summaryTamper: import("../artifact-verifier").TestAgentArtifactVerification;
-    rawDetailTamper: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    digestTamper: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    countTamper: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    summaryTamper: import("../artifact-verifier-core").TestAgentArtifactVerification;
+    rawDetailTamper: import("../artifact-verifier-core").TestAgentArtifactVerification;
     generatedChecks: import("..").BrowserCheckSpec[];
 }>;
 export declare function runTestAgentMultiSessionActionEffectSelfTest(): Promise<{
@@ -15,14 +15,14 @@ export declare function runTestAgentMultiSessionActionEffectSelfTest(): Promise<
     report: import("..").TestAgentReport;
     plan: import("..").TestAgentExecutionPlan;
     contract: import("..").TestAgentReportContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     missingSessionTamper: {
         contract: import("..").TestAgentReportContractValidation;
-        artifact: import("../artifact-verifier").TestAgentArtifactVerification;
+        artifact: import("../artifact-verifier-core").TestAgentArtifactVerification;
     };
     mismatchedSessionTamper: {
         contract: import("..").TestAgentReportContractValidation;
-        artifact: import("../artifact-verifier").TestAgentArtifactVerification;
+        artifact: import("../artifact-verifier-core").TestAgentArtifactVerification;
     };
 }>;
 export declare function runTestAgentCrossSessionActionEffectSelfTest(): Promise<{
@@ -34,14 +34,14 @@ export declare function runTestAgentCrossSessionActionEffectSelfTest(): Promise<
     passContract: import("..").TestAgentReportContractValidation;
     failContract: import("..").TestAgentReportContractValidation;
     verdictContract: import("..").TestAgentVerdictContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     missingTargetTamper: {
         contract: import("..").TestAgentReportContractValidation;
-        artifact: import("../artifact-verifier").TestAgentArtifactVerification;
+        artifact: import("../artifact-verifier-core").TestAgentArtifactVerification;
     };
     mismatchedTargetTamper: {
         contract: import("..").TestAgentReportContractValidation;
-        artifact: import("../artifact-verifier").TestAgentArtifactVerification;
+        artifact: import("../artifact-verifier-core").TestAgentArtifactVerification;
     };
     invalidSingleSession: {
         workOrder: import("..").NormalizedTestAgentWorkOrder;
@@ -65,7 +65,7 @@ export declare function runTestAgentMcpActionEffectSelfTest(): Promise<{
     report: import("..").TestAgentReport;
     plan: import("..").TestAgentExecutionPlan;
     contract: import("..").TestAgentReportContractValidation;
-    artifactVerification: import("../artifact-verifier").TestAgentArtifactVerification;
+    artifactVerification: import("../artifact-verifier-core").TestAgentArtifactVerification;
     calls: {
         toolName: string;
         input: Record<string, any>;

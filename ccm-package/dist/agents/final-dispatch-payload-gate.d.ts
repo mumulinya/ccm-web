@@ -1,4 +1,41 @@
 export declare const FINAL_WORKER_DISPATCH_PAYLOAD_GATE_SCHEMA = "ccm-final-worker-dispatch-payload-gate-v1";
+export declare const FINAL_DISPATCH_PROVIDER_USAGE_BASELINE_SCHEMA = "ccm-final-dispatch-provider-usage-baseline-v1";
+export declare function buildFinalDispatchProviderUsageBaseline(input?: any): {
+    baseline_checksum: string;
+    schema: string;
+    version: number;
+    baseline_id: string;
+    status: string;
+    body_free: boolean;
+    measurement_scope: string;
+    group_id: string;
+    group_session_id: string;
+    task_id: string;
+    task_agent_session_id: string;
+    provider: import("./runtime").AgentRuntimeId;
+    model: string;
+    provider_contract_id: string;
+    provider_runtime_version: string;
+    source_compact_epoch: string;
+    source_compact_head_id: string;
+    source_compact_head_generation: number;
+    source_compact_head_checksum: string;
+    source_usage_checksum: string;
+    source_snapshot_id: string;
+    source_snapshot_checksum: string;
+    estimated_context_tokens: number;
+    observed_context_tokens: number;
+    direct_input_tokens: number;
+    cache_read_input_tokens: number;
+    cache_creation_input_tokens: number;
+    positive_drift_tokens: number;
+    observed_to_estimated_ratio: number;
+    observed_at: string;
+};
+export declare function verifyFinalDispatchProviderUsageBaseline(baseline: any, expected?: any): {
+    valid: boolean;
+    issues: string[];
+};
 export declare function verifyFinalWorkerDispatchPayloadGate(gate: any, expected?: any): {
     valid: boolean;
     issues: string[];
@@ -15,6 +52,13 @@ export declare function buildFinalWorkerDispatchPayloadGate(input?: any): {
     worker_context_packet_id: string;
     provider: string;
     model: string;
+    provider_contract_id: string;
+    provider_runtime_version: string;
+    compact_epoch: string;
+    compact_head_id: string;
+    compact_head_generation: number;
+    compact_head_checksum: string;
+    memory_binding_checksum: string;
     model_context_window: number;
     reserved_output_tokens: number;
     effective_context_window: number;
@@ -23,6 +67,11 @@ export declare function buildFinalWorkerDispatchPayloadGate(input?: any): {
     estimated_prompt_tokens: number;
     provider_envelope_tokens: number;
     estimated_total_input_tokens: number;
+    model_visible_input_tokens: number;
+    token_basis: string;
+    provider_usage_baseline_status: string;
+    provider_usage_baseline_bias_tokens: number;
+    provider_usage_baseline: any;
     remaining_tokens_before_auto_compact: number;
     prompt_chars: number;
     prompt_checksum: string;

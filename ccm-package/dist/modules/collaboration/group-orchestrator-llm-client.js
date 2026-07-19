@@ -38,6 +38,9 @@ exports.normalizeChatCompletionsUrl = normalizeChatCompletionsUrl;
 exports.normalizeAnthropicMessagesUrl = normalizeAnthropicMessagesUrl;
 exports.shouldUseAnthropic = shouldUseAnthropic;
 exports.extractJsonObject = extractJsonObject;
+exports.resolveReasoningEffort = resolveReasoningEffort;
+exports.buildOpenAiReasoningFields = buildOpenAiReasoningFields;
+exports.buildAnthropicThinkingFields = buildAnthropicThinkingFields;
 exports.fetchWithNodeHttpFallback = fetchWithNodeHttpFallback;
 exports.callOpenAiCompatibleChat = callOpenAiCompatibleChat;
 exports.callAnthropicCompatibleChat = callAnthropicCompatibleChat;
@@ -64,12 +67,15 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
     const cacheReadTokens = provider === "anthropic"
         ? Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens))
         : 0;
-    const inputTokens = directInputTokens + cacheCreationTokens + cacheReadTokens;
-    const reported = inputTokens > 0 || outputTokens > 0;
+    // Anthropic reports uncached input and cache buckets separately. Keep
+    // inputTokens as the direct-input component so the shared CC-style
+    // measurement can add each bucket exactly once.
+    const inputTokens = directInputTokens;
+    const reported = inputTokens > 0 || cacheCreationTokens > 0 || cacheReadTokens > 0 || outputTokens > 0;
     return {
         inputTokens,
         outputTokens,
-        totalTokens: inputTokens + outputTokens,
+        totalTokens: inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens,
         reported,
         directInputTokens,
         cacheCreationInputTokens: cacheCreationTokens,
@@ -141,6 +147,39 @@ function resolveTimeoutMs(config, defaultTimeoutMs) {
 }
 function resolveTemperature(config, fallback) {
     return Number.isFinite(Number(config.temperature)) ? Number(config.temperature) : fallback;
+}
+const REASONING_EFFORTS = new Set(["low", "medium", "high"]);
+const ANTHROPIC_THINKING_BUDGETS = {
+    low: 1024,
+    medium: 4096,
+    high: 16000,
+};
+function resolveReasoningEffort(config) {
+    const effort = String(config?.reasoningEffort ?? config?.reasoning_effort ?? "off").trim().toLowerCase();
+    return REASONING_EFFORTS.has(effort) ? effort : "off";
+}
+function buildOpenAiReasoningFields(config) {
+    const effort = resolveReasoningEffort(config);
+    if (effort === "off")
+        return {};
+    // Chat Completions historically used flat reasoning_effort; GPT-5 / many relays
+    // also accept (or only honor) the nested Responses-style reasoning.effort.
+    // Send both with lowercase values — OpenAI enums are lowercase, not "High".
+    return {
+        reasoning_effort: effort,
+        reasoning: { effort },
+    };
+}
+function buildAnthropicThinkingFields(config) {
+    const effort = resolveReasoningEffort(config);
+    if (effort === "off")
+        return {};
+    return {
+        thinking: {
+            type: "enabled",
+            budget_tokens: ANTHROPIC_THINKING_BUDGETS[effort] || ANTHROPIC_THINKING_BUDGETS.medium,
+        },
+    };
 }
 function assertLlmConfig(config, endpoint) {
     if (!endpoint)
@@ -358,6 +397,7 @@ async function callOpenAiCompatibleChat(config, options) {
                 model: config.model,
                 temperature: options.temperature ?? resolveTemperature(config, 0.2),
                 ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+                ...buildOpenAiReasoningFields(config),
                 messages: options.messages,
             }),
             signal: controller.signal,
@@ -391,6 +431,7 @@ async function callAnthropicCompatibleChat(config, options) {
             temperature: options.temperature ?? resolveTemperature(config, 0.2),
             system,
             messages: userMessages,
+            ...buildAnthropicThinkingFields(config),
         }, {
             "Content-Type": "application/json",
             "x-api-key": config.apiKey,

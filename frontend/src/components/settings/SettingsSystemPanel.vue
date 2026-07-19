@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { Activity, Clock3, Info, RotateCcw, ShieldCheck } from '@lucide/vue'
 import { projectsApi } from '../../api/index.js'
 import { confirmDialog, toast } from '../../utils/toast.js'
+import { CHAT_IDENTITY_STORAGE_KEY } from '../../composables/useChatIdentity.js'
 
 const props = defineProps({ initialStatus: { type: Object, default: null } })
 const emit = defineEmits(['status'])
@@ -41,7 +42,8 @@ const resetPreferences = async () => {
   resetting.value = true
   const keys = [
     'theme', 'theme-preset', 'app-polling-interval', 'app-low-perf',
-    'tab-order', 'menu-custom-links', 'menu-groups', 'menu-tab-groups'
+    'tab-order', 'menu-custom-links', 'menu-groups', 'menu-tab-groups',
+    CHAT_IDENTITY_STORAGE_KEY
   ]
   keys.forEach(key => localStorage.removeItem(key))
   document.documentElement.setAttribute('data-theme', 'light')
@@ -87,7 +89,7 @@ onMounted(load)
       <div class="settings-inline-status reset-row">
         <div>
           <strong>恢复界面默认设置</strong>
-          <span>重置主题、刷新周期、自定义菜单和菜单顺序，不会删除任何业务数据或密钥。</span>
+          <span>重置主题、头像、刷新周期、自定义菜单和菜单顺序，不会删除任何业务数据或密钥。</span>
         </div>
         <button type="button" class="settings-button danger" :disabled="resetting" @click="resetPreferences"><RotateCcw :size="15" /> 恢复默认</button>
       </div>

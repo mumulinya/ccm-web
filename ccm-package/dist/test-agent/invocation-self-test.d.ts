@@ -52,7 +52,7 @@ export declare function runTestAgentInvocationSelfTest(): Promise<{
     rejectedPayloadContract?: undefined;
 } | {
     pass: boolean;
-    report: import("./types").TestAgentReport;
+    report: import("./types-report").TestAgentReport;
     requestContract: import("./contract").TestAgentInvocationContractValidation;
     passed: import("./invocation").TestAgentInvocationResult;
     passedContract: import("./contract").TestAgentInvocationContractValidation;

@@ -69,6 +69,12 @@ export declare function listTestAgentRunnerRecords(options?: {
     taskIds?: string[];
     limit?: number;
 }): TestAgentRunnerRecord[];
+/** Test-only helper: persist a runner record without registering activeChildren (orphan simulation). */
+export declare function upsertTestAgentRunnerRecordForSelfTest(partial: Partial<TestAgentRunnerRecord> & {
+    id: string;
+    taskId: string;
+}): TestAgentRunnerRecord;
+export declare function getTestAgentRunnerRecordForSelfTest(id: string): TestAgentRunnerRecord;
 export declare function captureTestAgentSourceBinding(handoff: any): TestAgentSourceBinding;
 export declare function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<TestAgentRunnerResult>;
 export declare function cancelTestAgentRunsForTask(taskId: string, reason?: string): string[];

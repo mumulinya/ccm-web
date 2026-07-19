@@ -671,6 +671,8 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
   reworkRoute?: any;
   userMessage?: string;
   coordinatorOutput?: string;
+  forcePlaywrightProvider?: boolean;
+  providerGapReroute?: boolean;
 }) {
   const targetName = String(item?.targetName || item?.project || "").trim();
   const originalTarget = String(item?.reviewSubject || item?.originalTarget || item?.continuationOf || input.previousLedger?.project || "").trim();
@@ -734,11 +736,16 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
     }],
     options: {
       verificationOnly: true,
-      browserProvider: "auto",
+      browserProvider: input.forcePlaywrightProvider === true || input.providerGapReroute === true
+        ? "playwright"
+        : "auto",
       autoDiscoverVerificationCommands: true,
       collectBrowserArtifacts: true,
       ...commandOnlyAdversarialPolicy,
       ...testAgentReviewConfig.options,
+      ...(input.forcePlaywrightProvider === true || input.providerGapReroute === true
+        ? { browserProvider: "playwright" }
+        : {}),
     },
     metadata: {
       handoffSource: "group-main-agent-independent-review-gate",
@@ -754,6 +761,9 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
         "如果验证无法执行，明确写 blocked/needs，不能写成已通过。",
       ],
       ...(warnings.length ? { handoffWarnings: warnings } : {}),
+      ...(input.forcePlaywrightProvider === true || input.providerGapReroute === true
+        ? { providerGapReroute: true, providerGapRerouteReason: "handoff_builder_force_playwright" }
+        : {}),
     },
     target: targetName,
     review_subject: originalTarget,
@@ -902,12 +912,12 @@ export function buildNativeTestAgentReceipt(targetName: string, report: TestAgen
 }
 
 export function buildNativeTestAgentReviewSummary(targetName: string, report: TestAgentReport, receipt: any) {
+  const { deriveIndependentReviewDecision } = require("./test-agent-independent-review-decision");
   const verdict = receipt?.testAgentReport?.verdict || resolveTestAgentDecisionVerdict(report);
   const postReviewSpotCheck = receipt?.post_review_spot_check || receipt?.postReviewSpotCheck || null;
   const postReviewSpotCheckSummary = receipt?.post_review_spot_check_summary
     || receipt?.postReviewSpotCheckSummary
     || buildPostReviewSpotCheckSummary(postReviewSpotCheck);
-  const spotCheckNeedsRecheck = postReviewSpotCheck?.required === true && postReviewSpotCheck?.pass !== true;
   const reviewer = isCoordinatorTestAgentName(targetName) ? "TestAgent" : sanitizeMainAgentUserText(targetName, "TestAgent", 60);
   const browserFlows = summarizeTestAgentBrowserFlows(report, verdict);
   const multiSessionBrowser = summarizeTestAgentMultiSessionBrowser(report, verdict);
@@ -915,28 +925,31 @@ export function buildNativeTestAgentReviewSummary(targetName: string, report: Te
   const browserActionEffects = summarizeTestAgentBrowserActionEffects(report, verdict);
   const browserRecovery = summarizeTestAgentBrowserRecovery(report, verdict);
   const adversarialEvidence = summarizeTestAgentAdversarialEvidence(report, verdict);
-  const implementationRework = receipt?.status === "failed"
-    || verdict?.needsRework === true
-    || !!browserActionEffects?.failedLines.length
-    || !!adversarialEvidence?.failedLines.length;
-  const evidenceRecheck = !implementationRework && (
-    spotCheckNeedsRecheck
-    || (verdict as any)?.needsRecheck === true
-    || !!browserActionEffects?.recheckLines.length
-    || !!browserRecovery?.recheckLines.length
-    || !!adversarialEvidence?.recheckLines.length
-  );
-  const environmentBlocked = !implementationRework && !evidenceRecheck && (
-    (verdict as any)?.needsEnvironment === true
-    || !!adversarialEvidence?.blockedLines.length
-  );
-  const status = receipt?.status === "done" && !spotCheckNeedsRecheck
-    ? "passed"
-    : implementationRework
-      ? "needs_rework"
-      : evidenceRecheck
-        ? "needs_recheck"
-        : "needs_user";
+  const {
+    buildTestAgentEnvironmentPrepChecklist,
+    collectTestAgentFailureScreenshotRefs,
+    formatFailureScreenshotTechnicalRows,
+    formatTestAgentEnvironmentPrepUserLines,
+  } = require("./test-agent-environment-prep");
+  const decision = deriveIndependentReviewDecision({
+    report,
+    verdict,
+    receiptStatus: receipt?.status,
+    postReviewSpotCheck,
+    forceReworkSignals: !!browserActionEffects?.failedLines?.length || !!adversarialEvidence?.failedLines?.length,
+    forceRecheckSignals: !!browserActionEffects?.recheckLines?.length
+      || !!browserRecovery?.recheckLines?.length
+      || !!adversarialEvidence?.recheckLines?.length,
+    forceEnvironmentSignals: !!adversarialEvidence?.blockedLines?.length
+      || !!browserAuthentication?.incompleteLines?.length,
+  });
+  const status = decision.status;
+  const spotCheckNeedsRecheck = decision.spotCheckNeedsRecheck;
+  const environmentBlocked = decision.needsEnvironment || status === "needs_environment";
+  const environmentPrep = environmentBlocked
+    ? buildTestAgentEnvironmentPrepChecklist(report, verdict)
+    : null;
+  const failureScreenshotRefs = collectTestAgentFailureScreenshotRefs(report);
   const failureLines = collectTestAgentFailureSummaryLines(report, verdict);
   const diagnosticLines = collectTestAgentFailureDiagnosticLines(report, verdict);
   const gapLines = collectTestAgentVerdictGapLines(verdict);
@@ -950,6 +963,13 @@ export function buildNativeTestAgentReviewSummary(targetName: string, report: Te
           ? "补条件"
           : "等你确认";
   const gapPrefix = status === "needs_rework" ? "待返工" : status === "needs_recheck" ? "待复验" : environmentBlocked ? "待补条件" : "待确认";
+  const providerGapNext = decision.providerGapCount
+    ? "检测到浏览器 Provider 能力缺口，请改走 Playwright 后重新复验。"
+    : "";
+  const flakyNext = decision.flakyStabilityGroups > 0
+    ? `浏览器稳定性有 ${decision.flakyStabilityGroups} 组 flaky，必须重新复验后再验收。`
+    : "";
+  const prepUserLines = formatTestAgentEnvironmentPrepUserLines(environmentPrep);
   const rows = uniqueStrings([
     `${reviewer}：${statusLabel}`,
     ...(Array.isArray(postReviewSpotCheckSummary?.rows) ? postReviewSpotCheckSummary.rows : []),
@@ -959,6 +979,9 @@ export function buildNativeTestAgentReviewSummary(targetName: string, report: Te
     ...(adversarialEvidence?.evidenceLines || []),
     ...(multiSessionBrowser?.evidenceLines || []),
     ...(browserFlows?.evidenceLines || []),
+    ...(environmentBlocked ? prepUserLines.slice(0, 2) : []),
+    ...decision.providerGapLines.map(item => `Provider缺口：${item}`),
+    flakyNext,
     ...failureLines.map(item => `返工重点：${item}`),
     ...diagnosticLines.map(item => `排查建议：${item}`),
     ...gapLines.map(item => `${gapPrefix}：${item}`),
@@ -979,9 +1002,13 @@ export function buildNativeTestAgentReviewSummary(targetName: string, report: Te
         : status === "needs_recheck"
           ? spotCheckNeedsRecheck
             ? "TestAgent 已通过，但我的完成前抽查尚未一致，我会先重新复验。"
-            : "TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验，不会误走代码返工路线。"
+            : decision.providerGapCount
+              ? "TestAgent 碰到浏览器 Provider 能力缺口，我会改走 Playwright 后重新复验，不会误走代码返工路线。"
+              : decision.flakyStabilityGroups > 0
+                ? "TestAgent 发现浏览器稳定性 flaky，我会先重新复验，不会直接验收。"
+              : "TestAgent 的复核证据还没有闭环，我会先补齐检查并重新复验，不会误走代码返工路线。"
           : environmentBlocked
-            ? "TestAgent 的复核受环境或登录条件阻塞，我会先补齐条件再继续验收。"
+            ? `TestAgent 的复核受环境或登录条件阻塞（${environmentPrep?.userSummary || "缺登录态/运行条件"}），我会先补齐条件再继续验收。`
             : "TestAgent 还有无法确认的验收项，我会先暂停最终验收。",
     rows,
     next_action: status === "passed"
@@ -991,15 +1018,26 @@ export function buildNativeTestAgentReviewSummary(targetName: string, report: Te
         : status === "needs_recheck"
           ? spotCheckNeedsRecheck
             ? "沿用原复核工作单重新运行 TestAgent，并再次抽查关键验证。"
-            : "补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。"
+            : providerGapNext || flakyNext || "补齐可观察结果或目标关联的边界检查后，重新运行 TestAgent 复核。"
           : environmentBlocked
-            ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核和最终验收。"
+            ? environmentPrep?.missingEnvNames?.length
+              ? `先补齐环境变量名 ${environmentPrep.missingEnvNames.join("、")} 等条件，再继续 TestAgent 复核和最终验收。`
+              : "先补齐环境、登录或运行条件，再继续 TestAgent 复核和最终验收。"
             : "先补齐受阻或待确认的验证条件，再继续最终验收。",
     display_policy: {
       user_text_first: true,
       technical_default_collapsed: true,
       hide_internal_protocols: true,
       show_for_ordinary_conversation: false,
+    },
+    review_route: decision.reviewRoute,
+    browser_provider_gap_count: decision.providerGapCount,
+    test_agent_environment_prep: environmentPrep,
+    testAgentEnvironmentPrep: environmentPrep,
+    technical: {
+      failure_step_screenshots: failureScreenshotRefs,
+      failure_step_screenshot_rows: formatFailureScreenshotTechnicalRows(failureScreenshotRefs),
+      test_agent_environment_prep: environmentPrep,
     },
   };
 }
@@ -1378,9 +1416,19 @@ export function scheduleTestAgentRecheckAfterFollowUps(followUps: any[] = [], ou
       || followUp?.testAgentHandoff
       || followUp?.test_agent_handoff
       || null;
+    const report = followUp?.testAgentReport
+      || followUp?.test_agent_report
+      || followUp?.failedReviewEvidence?.[0]?.report
+      || null;
+    const verdict = followUp?.testAgentVerdict
+      || followUp?.test_agent_verdict
+      || report?.verdict
+      || null;
     const recheck = buildTestAgentReviewRecheckFollowUp({
       subject,
       handoff,
+      report,
+      verdict,
       reason: `${followUp?.summary || "上一轮缺口已处理"}；需要基于最新状态重新运行 TestAgent`,
       source: followUp?.rework_kind || "coordinator_rework_completed",
     });

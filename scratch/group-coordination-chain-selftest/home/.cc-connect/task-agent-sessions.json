@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "sessions": [
+    {
+      "id": "tas_mrqjduvo_68b80e",
+      "scopeId": "mrqjdt0vsxzy",
+      "taskId": "mrqjdt0vsxzy",
+      "groupId": "",
+      "project": "backend-agent",
+      "agentType": "codex",
+      "nativeSessionId": "",
+      "resumeMode": "native",
+      "status": "open",
+      "turnCount": 0,
+      "lastTurnSucceeded": null,
+      "createdAt": "2026-07-18T15:43:33.012Z",
+      "lastUsedAt": "2026-07-18T15:43:33.012Z",
+      "closedAt": "",
+      "closeReason": "",
+      "nativeCaptureFailures": 0,
+      "nativeRecoveryAttempts": 0,
+      "nativeSessionHistory": [],
+      "lastNativeRecoveryAt": "",
+      "lastError": ""
+    }
+  ]
+}

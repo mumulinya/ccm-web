@@ -61,9 +61,7 @@ export function validateTestAgentWorkDir(workDir: string) {
   const resolved = path.resolve(String(workDir || ""));
   const allowedRoots = configuredAllowedWorkDirs().map(realPathOrResolved);
   if (!resolved || !fs.existsSync(resolved)) {
-    return allowedRoots.length
-      ? { valid: false, resolved, error: "workDir does not exist" }
-      : { valid: true, resolved, error: "" };
+    return { valid: false, resolved, error: "workDir does not exist" };
   }
   let stat: fs.Stats;
   try { stat = fs.statSync(resolved); } catch { return { valid: false, resolved, error: "workDir cannot be read" }; }

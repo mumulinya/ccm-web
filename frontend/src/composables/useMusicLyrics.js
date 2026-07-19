@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 export function useMusicLyrics(options = {}) {
   const currentTime = options.currentTime || { value: 0 }
@@ -7,14 +7,28 @@ export function useMusicLyrics(options = {}) {
 
   const lyrics = ref([])
   const currentLyricIndex = ref(-1)
+  const compactViewport = ref(false)
   let lastPetLyricIndex = -1
+  let compactViewportQuery = null
+
+  const updateViewportMetrics = () => {
+    compactViewport.value = compactViewportQuery?.matches === true
+  }
 
   const lyricsOffset = computed(() => {
-    const lineH = 28
-    const wrapH = 90
+    const lineH = compactViewport.value ? 30 : 38
+    const wrapH = compactViewport.value ? 112 : 190
     if (currentLyricIndex.value < 0) return 0
     return (wrapH / 2) - (currentLyricIndex.value * lineH) - (lineH / 2)
   })
+
+  onMounted(() => {
+    compactViewportQuery = window.matchMedia('(max-width: 760px)')
+    updateViewportMetrics()
+    compactViewportQuery.addEventListener?.('change', updateViewportMetrics)
+  })
+
+  onUnmounted(() => compactViewportQuery?.removeEventListener?.('change', updateViewportMetrics))
 
   const resetPetLyricIndex = () => {
     lastPetLyricIndex = -1
