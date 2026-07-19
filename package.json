@@ -156,6 +156,7 @@
     "test:true-post-compact-payload-recompact-restart": "npm run build:backend && node scripts/true-post-compact-payload-recompact-restart-selftest.mjs",
     "test:final-worker-dispatch-payload-gate-restart": "npm run build:backend && node scripts/final-worker-dispatch-payload-gate-restart-selftest.mjs",
     "test:child-parent-session-cc-context": "npm run build:backend && node scripts/child-parent-session-cc-context-selftest.mjs",
+    "test:group-main-uncompacted-cc-context": "npm run build:backend && node scripts/group-main-uncompacted-cc-context-selftest.mjs",
     "test:final-worker-dispatch-reactive-compact-restart": "npm run build:backend && node scripts/final-worker-dispatch-reactive-compact-restart-selftest.mjs",
     "test:final-worker-dispatch-reactive-compact-circuit-breaker-restart": "npm run build:backend && node scripts/final-worker-dispatch-reactive-compact-circuit-breaker-restart-selftest.mjs",
     "test:group-time-based-tool-result-microcompact-restart": "npm run build:backend && node scripts/group-time-based-tool-result-microcompact-restart-selftest.mjs",
