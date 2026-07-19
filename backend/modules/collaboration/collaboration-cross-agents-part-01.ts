@@ -4,7 +4,7 @@ import type { TestAgentReport } from "../../test-agent/types";
 import { buildDependencyOutputPacket } from "./collaboration-cross-agents-helpers";
 import { executeMentionJobTryA } from "./collaboration-cross-agents-part-02";
 import { runGroupMemoryAutoCompactionNow } from "./group-memory-context-part-01";
-import { buildChildParentSessionContextPacket } from "./group-memory-context-part-05";
+import { buildChildParentSessionContextPacket } from "./group-session-model-context";
 
 export type CrossAgentEnv = {
   deps: any;
