@@ -38,6 +38,41 @@ const PET_TOP_OVERSHOOT_MIN = 32;
 const MUSIC_PET_AGENT_NAME = 'music-agent';
 const BUILTIN_FALLBACK_PET_TYPE = 'yuexinmiao';
 const ALLOWED_BUILTIN_PET_TYPES = new Set(['clawd', 'yuexinmiao', 'cloudling', 'calico', 'ghost', 'robot']);
+const BUILTIN_PET_SKINS = {
+  yuexinmiao: {
+    id: 'yuexinmiao',
+    name: '月薪喵',
+    spriteVersionNumber: 2,
+    spriteRows: 9,
+    spritesheetPath: 'yuexinmiao1/spritesheet.webp',
+    format: 'hybrid',
+    pixelated: true,
+    disableLegacyAmbient: true,
+    sourceCreator: 'kiffin',
+    sourceUrl: 'https://codex-pet.org/zh/pets/yuexinmiao1/',
+    supplementalStateFiles: {
+      thinking: 'yuexinmiao1/thinking.svg',
+      planning: 'yuexinmiao1/planning.svg',
+      working: 'yuexinmiao1/working.svg',
+      building: 'yuexinmiao1/building.svg',
+      debugging: 'yuexinmiao1/debugging.svg',
+      reviewing: 'yuexinmiao1/reviewing.svg',
+      waiting: 'yuexinmiao1/waiting.svg',
+      juggling: 'yuexinmiao1/juggling.svg',
+      sweeping: 'yuexinmiao1/sweeping.svg',
+      carrying: 'yuexinmiao1/carrying.svg',
+      notification: 'yuexinmiao1/notification.svg',
+      attention: 'yuexinmiao1/attention.svg',
+      happy: 'yuexinmiao1/happy.svg',
+      error: 'yuexinmiao1/error.svg',
+      yawning: 'yuexinmiao1/yawning.svg',
+      dozing: 'yuexinmiao1/dozing.svg',
+      collapsing: 'yuexinmiao1/collapsing.svg',
+      sleeping: 'yuexinmiao1/sleeping.svg',
+      waking: 'yuexinmiao1/waking.svg',
+    },
+  },
+};
 
 function normalizePetType(type) {
   const value = String(type || '').trim();
@@ -48,13 +83,21 @@ function normalizePetType(type) {
 
 function getPetTypeMetadata(type) {
   const customTypes = Array.isArray(config.customTypes) ? config.customTypes : [];
-  const skin = customTypes.find(item => item && item.id === type);
+  const skin = customTypes.find(item => item && item.id === type) || BUILTIN_PET_SKINS[type];
   if (!skin) return null;
   return {
     id: skin.id,
     name: skin.name || skin.id,
     spriteVersionNumber: Number(skin.spriteVersionNumber || 1),
+    spriteRows: Number(skin.spriteRows || 11),
     spritesheetPath: String(skin.spritesheetPath || ''),
+    format: String(skin.format || ''),
+    generationEngine: String(skin.generationEngine || ''),
+    pixelated: skin.pixelated === true,
+    disableLegacyAmbient: skin.disableLegacyAmbient === true,
+    supplementalStateFiles: { ...(skin.supplementalStateFiles || {}) },
+    sourceCreator: String(skin.sourceCreator || ''),
+    sourceUrl: String(skin.sourceUrl || ''),
   };
 }
 

@@ -336,7 +336,6 @@ function getGlobalToolDisplayName(toolName) {
         play_music: "播放音乐",
         stop_music: "停止音乐",
         toggle_pet: "控制桌面宠物",
-        create_pet_from_image: "根据参考图创建宠物",
         navigate: "切换页面",
     };
     const key = String(toolName || "").trim();

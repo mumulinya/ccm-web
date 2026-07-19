@@ -38,8 +38,10 @@ exports.normalizeChatCompletionsUrl = normalizeChatCompletionsUrl;
 exports.normalizeAnthropicMessagesUrl = normalizeAnthropicMessagesUrl;
 exports.shouldUseAnthropic = shouldUseAnthropic;
 exports.extractJsonObject = extractJsonObject;
+exports.resolveLlmTimeoutMs = resolveLlmTimeoutMs;
 exports.resolveReasoningEffort = resolveReasoningEffort;
 exports.buildOpenAiReasoningFields = buildOpenAiReasoningFields;
+exports.parseOpenAiStreamText = parseOpenAiStreamText;
 exports.buildAnthropicThinkingFields = buildAnthropicThinkingFields;
 exports.fetchWithNodeHttpFallback = fetchWithNodeHttpFallback;
 exports.callOpenAiCompatibleChat = callOpenAiCompatibleChat;
@@ -142,7 +144,10 @@ function extractJsonObject(text) {
     }
     return null;
 }
-function resolveTimeoutMs(config, defaultTimeoutMs) {
+function resolveLlmTimeoutMs(config, defaultTimeoutMs, callTimeoutMs) {
+    const scopedTimeout = Number(callTimeoutMs);
+    if (Number.isFinite(scopedTimeout) && scopedTimeout > 0)
+        return Math.max(5000, scopedTimeout);
     return Math.max(5000, Number(config.timeoutMs) || defaultTimeoutMs);
 }
 function resolveTemperature(config, fallback) {
@@ -169,6 +174,41 @@ function buildOpenAiReasoningFields(config) {
         reasoning_effort: effort,
         reasoning: { effort },
     };
+}
+function callReasoningConfig(config, options) {
+    const effort = String(options.reasoningEffort || "").trim().toLowerCase();
+    return effort ? { ...config, reasoningEffort: effort, reasoning_effort: effort } : config;
+}
+function streamDeltaText(value) {
+    if (typeof value === "string")
+        return value;
+    if (!Array.isArray(value))
+        return "";
+    return value.map(item => typeof item === "string" ? item : String(item?.text || item?.content || "")).join("");
+}
+function parseOpenAiStreamText(text) {
+    const raw = String(text || "");
+    if (!/^\s*(?:data:|event:)/m.test(raw))
+        return null;
+    let content = "";
+    let usage = null;
+    for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:"))
+            continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === "[DONE]")
+            continue;
+        try {
+            const event = JSON.parse(payload);
+            const choice = event?.choices?.[0];
+            content += streamDeltaText(choice?.delta?.content ?? choice?.message?.content ?? "");
+            if (event?.usage)
+                usage = event.usage;
+        }
+        catch { }
+    }
+    return { content, usage };
 }
 function buildAnthropicThinkingFields(config) {
     const effort = resolveReasoningEffort(config);
@@ -385,7 +425,7 @@ async function callOpenAiCompatibleChat(config, options) {
     const endpoint = normalizeChatCompletionsUrl(config.apiUrl);
     assertLlmConfig(config, endpoint);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolveTimeoutMs(config, options.defaultTimeoutMs || 30000));
+    const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     try {
         const response = await fetchWithNodeHttpFallback(endpoint, {
             method: "POST",
@@ -397,7 +437,8 @@ async function callOpenAiCompatibleChat(config, options) {
                 model: config.model,
                 temperature: options.temperature ?? resolveTemperature(config, 0.2),
                 ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
-                ...buildOpenAiReasoningFields(config),
+                ...(options.stream ? { stream: true } : {}),
+                ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
                 messages: options.messages,
             }),
             signal: controller.signal,
@@ -405,6 +446,11 @@ async function callOpenAiCompatibleChat(config, options) {
         const text = await response.text();
         if (!response.ok) {
             throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
+        }
+        const streamed = options.stream ? parseOpenAiStreamText(text) : null;
+        if (streamed) {
+            reportTokenUsage(options, normalizeLlmTokenUsage(streamed.usage, "openai"));
+            return streamed.content;
         }
         const data = JSON.parse(text);
         reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "openai"));
@@ -423,7 +469,7 @@ async function callAnthropicCompatibleChat(config, options) {
         .filter((m) => m.role !== "system")
         .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolveTimeoutMs(config, options.defaultTimeoutMs || 30000));
+    const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     try {
         const patched = applyApiMicrocompactNativeRequestPatch({
             model: config.model,
@@ -431,7 +477,7 @@ async function callAnthropicCompatibleChat(config, options) {
             temperature: options.temperature ?? resolveTemperature(config, 0.2),
             system,
             messages: userMessages,
-            ...buildAnthropicThinkingFields(config),
+            ...buildAnthropicThinkingFields(callReasoningConfig(config, options)),
         }, {
             "Content-Type": "application/json",
             "x-api-key": config.apiKey,

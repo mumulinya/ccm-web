@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import ChatComposer from '../common/ChatComposer.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import ConversationTurnControls from '../common/ConversationTurnControls.vue'
@@ -17,6 +17,7 @@ import AgentQaMessage from '../agents/AgentQaMessage.vue'
 import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import GroupChatHeader from './GroupChatHeader.vue'
+import GroupChatSessionSidebar from './GroupChatSessionSidebar.vue'
 import GroupLogsModal from './GroupLogsModal.vue'
 import GroupToolsModal from './GroupToolsModal.vue'
 import GroupSharedFilesModal from './GroupSharedFilesModal.vue'
@@ -89,6 +90,12 @@ const {
   getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
   startGroupPolling, stopGroupPolling, origSelectGroup, activeSelectedTemplate, pendingTemplateToApply,
 } = useGroupChat(props, emit)
+
+const groupSessionSidebarOpen = ref(typeof window === 'undefined' || window.innerWidth > 768)
+const selectSessionFromSidebar = async (sessionId) => {
+  await selectGroupSession(sessionId)
+  if (typeof window !== 'undefined' && window.innerWidth <= 768) groupSessionSidebarOpen.value = false
+}
 
 const groupContextScopeId = computed(() => currentGroup.value?.id && currentGroupSessionId.value
   ? `${currentGroup.value.id}::${currentGroupSessionId.value}`

@@ -1,7 +1,9 @@
 <script setup>
+import { computed } from 'vue'
 import MainAgentDecisionCard from './MainAgentDecisionCard.vue'
 import TaskCollaborationCard from '../collaboration/TaskCollaborationCard.vue'
 import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
+import { isQuietMainAgentDecision } from '../../composables/useMainAgentDisplay.js'
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -36,12 +38,21 @@ const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-f
 
 const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySummary || null
 const clarificationSummary = () => props.msg.clarification_summary || props.msg.clarificationSummary || null
+const textOnly = computed(() => !(
+  clarificationSummary()
+  || (props.mainAgentDecision && !isQuietMainAgentDecision(props.mainAgentDecision))
+  || props.primaryTaskCard
+  || deliverySummary()
+  || props.showOrchestrationPlan
+  || props.workEvents.length
+  || Number(props.msg?.fileChanges?.count || 0) > 0
+))
 </script>
 
 <template>
   <div
     class="bubble agent-exec-bubble"
-    :class="['agent-state-' + status.tone]"
+    :class="['agent-state-' + status.tone, { 'text-only': textOnly }]"
     :style="accentStyle"
   >
     <div v-if="!mainAgent || msg.agent === 'system'" class="agent-message-head">
@@ -160,7 +171,16 @@ const clarificationSummary = () => props.msg.clarification_summary || props.msg.
 <style scoped>
 .agent-exec-bubble {
   position: relative;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  max-width: 100%;
   border-left: 3px solid var(--agent-accent) !important;
+}
+.agent-exec-bubble.text-only {
+  display: inline-block;
+  width: fit-content;
 }
 .agent-exec-bubble::before {
   content: '';

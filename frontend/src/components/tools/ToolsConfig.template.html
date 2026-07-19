@@ -1,70 +1,78 @@
   <div class="tools-config">
-    <!-- 顶部玻璃工具栏 -->
     <div class="toolbar">
-      <div style="display:flex;gap:12px">
-        <button v-if="currentFilter === 'mcp'" class="btn btn-primary btn-sm" @click="openMcpEditor()">+ MCP 服务器</button>
-        <button v-if="currentFilter === 'custom-prompt'" class="btn btn-outline btn-sm" @click="showAddSkill = true">+ Prompt 技能</button>
-        <button class="btn btn-outline btn-sm" @click="reloadTools">🔄 重载工具</button>
+      <div class="toolbar-identity">
+        <span class="toolbar-icon"><Wrench :size="18" /></span>
+        <div>
+          <strong>工具与技能</strong>
+          <span>管理 Agent 的连接、能力与运行状态</span>
+        </div>
       </div>
-      <span class="count">
-        内置工具: {{ coreToolsList.length }} | 内部 MCP: {{ internalMcpCatalog.summary?.total || 0 }} | 内置 Skill: {{ internalSkills.length }} | 外部 MCP: {{ mcpTools.length }}
-      </span>
+      <div class="toolbar-actions">
+        <div class="resource-counts" aria-label="资源统计">
+          <span>工具 {{ coreToolsList.length }}</span>
+          <span>MCP {{ (internalMcpCatalog.summary?.total || 0) + mcpTools.length }}</span>
+          <span>Skill {{ internalSkills.length + customSkills.length }}</span>
+        </div>
+        <button v-if="currentFilter === 'mcp'" class="btn btn-primary btn-sm" @click="openMcpEditor()">新增 MCP</button>
+        <button v-if="currentFilter === 'custom-prompt'" class="btn btn-primary btn-sm" @click="showAddSkill = true">新增 Skill</button>
+        <button class="btn btn-outline btn-sm toolbar-reload" title="重新加载工具" @click="reloadTools"><RefreshCw :size="14" />重载</button>
+      </div>
     </div>
 
     <div class="main-content">
       <!-- 左侧分类侧边栏 -->
       <div class="sidebar">
-        <div class="sidebar-header">🛠️ 工具与技能中心</div>
+        <div class="sidebar-header">管理范围</div>
         <div class="category-list">
           <div class="category-group-label">总览</div>
           <div class="category-item" :class="{ active: currentFilter === 'overview' }" @click="currentFilter = 'overview'">
-            <span>▦</span><span>运行概况</span>
+            <LayoutDashboard :size="15" /><span>运行概况</span>
             <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
           </div>
 
           <div class="category-group-label">工具与连接</div>
           <div class="category-item" :class="{ active: currentFilter === 'core' }" @click="currentFilter = 'core'">
-            <span>⚙️</span><span>内置核心工具</span>
+            <Wrench :size="15" /><span>内置工具</span>
             <span class="badge">{{ coreToolsList.length }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'internal-mcp' }" @click="currentFilter = 'internal-mcp'">
-            <span>◆</span><span>内部 MCP</span>
+            <Blocks :size="15" /><span>内部 MCP</span>
             <span class="badge">{{ internalMcpCatalog.summary?.ready || 0 }}/{{ internalMcpCatalog.summary?.total || 0 }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'mcp' }" @click="currentFilter = 'mcp'">
-            <span>🔌</span><span>外部 MCP</span>
+            <Plug :size="15" /><span>外部 MCP</span>
             <span class="badge">{{ mcpTools.length }}</span>
           </div>
 
           <div class="category-group-label">Skill</div>
           <div class="category-item" :class="{ active: currentFilter === 'custom-prompt' }" @click="currentFilter = 'custom-prompt'">
-            <span>⚡</span><span>Skill 管理</span>
+            <Sparkles :size="15" /><span>Skill 管理</span>
             <span class="badge">{{ skills.length }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'custom-skills' }" @click="currentFilter = 'custom-skills'">
-            <span>🔮</span><span>外部 Skill 包</span>
+            <PackageOpen :size="15" /><span>外部 Skill 包</span>
             <span class="badge">{{ customSkills.length }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'marketplace' }" @click="currentFilter = 'marketplace'">
-            <span>🛒</span><span>技能商城</span>
+            <ShoppingBag :size="15" /><span>技能商城</span>
           </div>
 
           <div class="category-group-label">治理与验收</div>
           <div class="category-item" :class="{ active: currentFilter === 'authorization' }" @click="currentFilter = 'authorization'">
-            <span>◈</span><span>授权总览</span>
+            <ShieldCheck :size="15" /><span>授权总览</span>
             <span class="badge">{{ authorizationConfiguredReady }}/{{ authorizationSummary.configuredScopes || 0 }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'chain-verification' }" @click="currentFilter = 'chain-verification'">
-            <span>◆</span><span>链路验收</span>
+            <ListChecks :size="15" /><span>链路验收</span>
             <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'invocation-audit' }" @click="openToolInvocationAudit()">
-            <span>◇</span><span>调用审计</span>
+            <ScrollText :size="15" /><span>调用审计</span>
             <span class="badge">{{ invocationAuditSummary.unauthorized || 0 }}/{{ invocationAuditSummary.totalReturned || 0 }}</span>
           </div>
           <div class="category-item" :class="{ active: currentFilter === 'runtime' }" @click="currentFilter = 'runtime'">
-            <span>◎</span><span>Agent 运行时</span>
-            <span class="badge">{{ businessRuntimeSummary.ready }}/{{ businessRuntimeSummary.total }}</span>
+            <Cpu :size="15" /><span>Agent 运行时</span>
+            <span class="badge">{{ runtimeReadiness.summary.ready || 0 }}/{{ runtimeReadiness.summary.total || 0 }}</span>
           </div>
         </div>
       </div>
@@ -72,22 +80,11 @@
       <!-- 右侧内容展示面板 -->
       <div class="content">
         <div class="content-header">
-          <span>
-            {{ 
-              currentFilter === 'overview' ? '工具运行概况' :
-              currentFilter === 'core' ? '⚙️ 系统内置核心工具' : 
-              currentFilter === 'internal-mcp' ? '◆ 随项目安装的内部 MCP' :
-              currentFilter === 'mcp' ? '🔌 外部 MCP 服务与客户端连接中心' :
-              currentFilter === 'authorization' ? '◈ 项目 / 群聊 MCP 与 Skill 授权总览' :
-              currentFilter === 'chain-verification' ? '◆ MCP / Skill 子 Agent 链路验收报告' :
-              currentFilter === 'invocation-audit' ? '◇ 子 Agent MCP / Skill 调用审计' :
-              currentFilter === 'runtime' ? '◎ 子 Agent MCP / Skill 运行时就绪状态' :
-              currentFilter === 'custom-skills' ? '🔮 外部下载与本机 Skill 包' :
-              currentFilter === 'custom-prompt' ? '⚡ 内置与外部 Skill 管理' :
-              '🛒 技能与 MCP 一键安装市场' 
-            }}
-          </span>
-          <button class="btn btn-outline btn-sm" @click="loadTools()">↻ 刷新</button>
+          <div>
+            <strong>{{ sectionMeta[0] }}</strong>
+            <span>{{ sectionMeta[1] }}</span>
+          </div>
+          <button class="icon-button" title="刷新当前数据" aria-label="刷新当前数据" @click="loadTools()"><RefreshCw :size="15" /></button>
         </div>
 
         <div class="tool-list">
@@ -365,44 +362,83 @@
 
           <!-- 5. 子 Agent 运行时就绪状态 -->
           <template v-if="currentFilter === 'runtime'">
-            <div class="runtime-summary">
-              <div><strong>{{ runtimeReadiness.summary.ready }}</strong><span>完全可用</span></div>
-              <div><strong>{{ runtimeReadiness.summary.deliveryReady }}</strong><span>授权交付正常</span></div>
-              <div><strong>{{ runtimeReadiness.summary.runtimeReady }}</strong><span>CLI 可启动</span></div>
-              <button class="btn btn-outline btn-sm" :disabled="runtimeReadinessLoading" @click="loadRuntimeReadiness(true)">
-                {{ runtimeReadinessLoading ? '检查中...' : '执行深度探针' }}
-              </button>
-            </div>
+            <section class="runtime-workspace">
+              <div class="runtime-overview-head">
+                <div>
+                  <span class="section-kicker"><Activity :size="14" />运行状态</span>
+                  <strong>第三方 Agent 就绪检查</strong>
+                  <p>异常运行时优先显示；展开卡片可查看逐项探针和本机路径。</p>
+                </div>
+                <button class="btn btn-outline btn-sm probe-button" :disabled="runtimeReadinessLoading" @click="loadRuntimeReadiness(true)">
+                  <RefreshCw :size="14" :class="{ spinning: runtimeReadinessLoading }" />
+                  {{ runtimeReadinessLoading ? '检查中' : '重新检查' }}
+                </button>
+              </div>
+              <div class="runtime-metrics">
+                <div class="runtime-metric">
+                  <CircleGauge :size="18" />
+                  <span><strong>{{ runtimeReadiness.summary.total || 0 }}</strong><small>运行时总数</small></span>
+                </div>
+                <div class="runtime-metric ready">
+                  <CheckCircle2 :size="18" />
+                  <span><strong>{{ runtimeReadiness.summary.ready || 0 }}</strong><small>完全可用</small></span>
+                </div>
+                <div class="runtime-metric" :class="{ warning: runtimeNeedsAttention > 0 }">
+                  <TriangleAlert :size="18" />
+                  <span><strong>{{ runtimeNeedsAttention }}</strong><small>需要处理</small></span>
+                </div>
+                <div class="runtime-metric">
+                  <Cpu :size="18" />
+                  <span><strong>{{ runtimeReadiness.summary.runtimeReady || 0 }}</strong><small>CLI 就绪</small></span>
+                </div>
+              </div>
             <LoadingSkeleton v-if="runtimeReadinessLoading && runtimeReadiness.readiness.length === 0" :rows="4" />
             <EmptyState v-else-if="runtimeReadiness.readiness.length === 0" icon="◎" title="尚无运行时授权快照" hint="群聊或项目 Agent 执行一次后会在这里显示" />
-            <div v-for="item in runtimeReadiness.readiness" :key="`${item.runtime}:${item.snapshotId}:${item.projectName}:${item.groupId}`" class="tool-card runtime-card">
-              <div class="runtime-card-head">
-                <div>
-                  <div class="tool-name">
-                    {{ item.runtime }}
-                    <span class="conn-status" :class="{ connected: item.overallReady, failed: !item.deliveryReady }">{{ runtimeStatusLabel(item) }}</span>
+            <div v-else class="runtime-list">
+              <details v-for="item in runtimeRows" :key="`${item.runtime}:${item.snapshotId}:${item.projectName}:${item.groupId}`" class="runtime-card" :class="{ 'needs-attention': !item.overallReady }">
+                <summary class="runtime-card-summary">
+                  <span class="runtime-status-icon" :class="{ ready: item.overallReady }">
+                    <CheckCircle2 v-if="item.overallReady" :size="17" />
+                    <TriangleAlert v-else :size="17" />
+                  </span>
+                  <div class="runtime-card-title">
+                    <div>
+                      <strong>{{ item.runtime }}</strong>
+                      <span>{{ item.projectName || '未关联项目' }}<template v-if="item.groupId"> · 群聊 {{ item.groupId }}</template></span>
+                    </div>
+                    <div class="runtime-card-summary-counts">
+                      <span :class="{ danger: runtimeFailedChecks(item).length > 0 }">{{ runtimePassingChecks(item) }}/{{ runtimeChecks(item).length }} 项通过</span>
+                      <span>MCP {{ item.synced.mcp.length }}/{{ item.requested.mcp.length }}</span>
+                      <span>Skill {{ item.synced.skill.length }}/{{ item.requested.skill.length }}</span>
+                    </div>
                   </div>
-                  <div class="tool-desc">{{ item.projectName || '未关联项目' }}<span v-if="item.groupId"> · 群聊 {{ item.groupId }}</span></div>
+                  <span class="runtime-state-label" :class="{ ready: item.overallReady }">{{ runtimeStatusLabel(item) }}</span>
+                  <ChevronDown class="runtime-chevron" :size="18" />
+                </summary>
+                <div class="runtime-card-body">
+                  <div v-if="runtimeFailedChecks(item).length" class="runtime-alert">
+                    <TriangleAlert :size="17" />
+                    <div>
+                      <strong>{{ runtimeFailedChecks(item).length }} 项检查需要处理</strong>
+                      <span>{{ runtimeFailedChecks(item)[0]?.detail }}</span>
+                    </div>
+                  </div>
+                  <div class="runtime-technical-meta">
+                    <div><span>CLI</span><code>{{ item.cli.command || '-' }}<template v-if="item.cli.version"> · {{ item.cli.version }}</template></code></div>
+                    <div><span>快照</span><code>{{ item.snapshotId || '-' }}</code></div>
+                    <div><span>检查时间</span><code>{{ item.checkedAt || '-' }}</code></div>
+                  </div>
+                  <div class="runtime-check-list">
+                    <div v-for="check in runtimeOrderedChecks(item)" :key="check.id" :class="{ failed: !check.ok }">
+                      <span class="check-state">{{ check.ok ? '通过' : '失败' }}</span>
+                      <code>{{ check.id }}</code>
+                      <small>{{ check.detail }}</small>
+                    </div>
+                  </div>
                 </div>
-                <div class="runtime-counts">
-                  <span>MCP {{ item.synced.mcp.length }}/{{ item.requested.mcp.length }}</span>
-                  <span>Skill {{ item.synced.skill.length }}/{{ item.requested.skill.length }}</span>
-                </div>
-              </div>
-              <div class="mcp-runtime-status">
-                <span>snapshot: {{ item.snapshotId || '-' }}</span>
-                <span>CLI: {{ item.cli.command || '-' }}</span>
-                <span v-if="item.cli.version">{{ item.cli.version }}</span>
-                <span>checked: {{ item.checkedAt }}</span>
-              </div>
-              <div class="runtime-check-list">
-                <div v-for="check in item.checks" :key="check.id" :class="{ failed: !check.ok }">
-                  <span>{{ check.ok ? '通过' : '失败' }}</span>
-                  <code>{{ check.id }}</code>
-                  <small>{{ check.detail }}</small>
-                </div>
-              </div>
+              </details>
             </div>
+            </section>
           </template>
 
           <!-- 4. 🔌 MCP 服务连接中心 -->

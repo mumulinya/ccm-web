@@ -1,7 +1,7 @@
 {
   "schema": "ccm-test-agent-report-v1",
   "agent": "test-agent",
-  "id": "test-agent-report-mrkmk8r2-278520ec",
+  "id": "test-agent-report-mrrkjbv8-744d01da",
   "workOrderId": "role-skills-test-agent-probe",
   "taskId": "role-skills-test-agent-probe",
   "groupId": "",
@@ -12,9 +12,9 @@
   "status": "partial",
   "recommendation": "need_human",
   "summary": "TestAgent execution passed, but acceptance criteria have only report-status fallback evidence and are not independently verified.",
-  "startedAt": "2026-07-14T12:25:52.538Z",
-  "finishedAt": "2026-07-14T12:25:52.710Z",
-  "durationMs": 172,
+  "startedAt": "2026-07-19T09:03:33.913Z",
+  "finishedAt": "2026-07-19T09:03:34.091Z",
+  "durationMs": 178,
   "artifactDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts",
   "requiredChecks": [
     "commands"
@@ -27,9 +27,9 @@
       "status": "passed",
       "exitCode": 0,
       "signal": null,
-      "startedAt": "2026-07-14T12:25:52.549Z",
-      "finishedAt": "2026-07-14T12:25:52.707Z",
-      "durationMs": 158,
+      "startedAt": "2026-07-19T09:03:33.920Z",
+      "finishedAt": "2026-07-19T09:03:34.089Z",
+      "durationMs": 169,
       "stdout": "v22.22.0\r\n",
       "stderr": "",
       "output": "v22.22.0\r\n",
@@ -111,7 +111,7 @@
   "browserEvidenceTemporalIntegrity": {
     "status": "complete",
     "toleranceMs": 100,
-    "reportDurationMs": 172,
+    "reportDurationMs": 178,
     "browserResultCount": 0,
     "browserToolCallCount": 0,
     "invalidItemCount": 0,
@@ -124,9 +124,9 @@
       {
         "kind": "report",
         "id": "report",
-        "startedAt": "2026-07-14T12:25:52.538Z",
-        "finishedAt": "2026-07-14T12:25:52.710Z",
-        "durationMs": 172,
+        "startedAt": "2026-07-19T09:03:33.913Z",
+        "finishedAt": "2026-07-19T09:03:34.091Z",
+        "durationMs": 178,
         "status": "complete",
         "errors": []
       }
@@ -279,8 +279,8 @@
       "criterion": "安全验证命令能够执行并记录结果",
       "status": "verified",
       "evidence": [
-        "ccm-role-skill-probe: command node --version: exit=0; duration=158ms",
-        "ccm-role-skill-probe: node --version: exit=0; duration=158ms"
+        "ccm-role-skill-probe: command node --version: exit=0; duration=169ms",
+        "ccm-role-skill-probe: node --version: exit=0; duration=169ms"
       ],
       "matchStrength": "fallback",
       "matchScore": 0,
@@ -293,7 +293,7 @@
       "project": "ccm-role-skill-probe",
       "title": "node --version",
       "status": "passed",
-      "detail": "exit=0; duration=158ms"
+      "detail": "exit=0; duration=169ms"
     },
     {
       "type": "artifact",

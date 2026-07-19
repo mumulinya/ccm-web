@@ -14,10 +14,15 @@ defineProps({
   systemAgentNames: { type: Array, default: () => [] }
 })
 
-const emit = defineEmits(['select-agent', 'toggle-agent', 'toggle-all', 'create-pet'])
+const emit = defineEmits(['select-agent', 'toggle-agent', 'toggle-all'])
 
 const getPetTypeName = (petTypes, type) => petTypes.find(pet => pet.id === type)?.name || '月薪喵'
 const getPetType = (petTypes, type) => petTypes.find(pet => pet.id === type) || null
+const builtinStatefulTypes = new Set(['clawd', 'yuexinmiao', 'cloudling', 'calico', 'ghost', 'robot'])
+const usesStatefulPreview = pet => builtinStatefulTypes.has(pet?.id)
+  || Number(pet?.spriteVersionNumber) === 2
+  || String(pet?.format || '').toLowerCase() === 'svg'
+  || pet?.generationEngine === 'global-agent-svg'
 </script>
 
 <template>
@@ -27,9 +32,6 @@ const getPetType = (petTypes, type) => petTypes.find(pet => pet.id === type) || 
       <div class="section-actions">
         <button v-if="agents.length > 0" class="btn btn-outline btn-sm" @click="emit('toggle-all')">
           {{ allEnabled ? '全部隐藏' : '全部显示' }}
-        </button>
-        <button class="btn btn-primary btn-sm" @click="emit('create-pet')">
-          从图片创建
         </button>
       </div>
     </div>
@@ -44,7 +46,7 @@ const getPetType = (petTypes, type) => petTypes.find(pet => pet.id === type) || 
       >
         <div class="pet-preview-wrap">
           <PetSprite
-            v-if="Number(getPetType(petTypes, getConfig(agent.name).type)?.spriteVersionNumber) === 2"
+            v-if="usesStatefulPreview(getPetType(petTypes, getConfig(agent.name).type))"
             :type="getConfig(agent.name).type"
             :skin="getPetType(petTypes, getConfig(agent.name).type)"
             :state="agent.state || 'idle'"
@@ -112,7 +114,6 @@ const getPetType = (petTypes, type) => petTypes.find(pet => pet.id === type) || 
 .empty-state-text .sub { font-size: 11.5px; margin-top: 4px; }
 .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; transition: all 0.2s; }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
-.btn-primary { background: var(--gradient-blue); color: white; }
 .btn-outline { background: transparent; border: 1px solid rgba(0, 0, 0, 0.08); color: var(--text-secondary); }
 :global([data-theme="dark"] .glass-panel), :global([data-theme="dark"] .pet-list-item){ background: rgba(10, 10, 20, 0.38); border-color: rgba(255,255,255,0.06); }
 </style>

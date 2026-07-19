@@ -6,6 +6,7 @@ const props = defineProps({
   state: { type: String, default: 'idle' },
   size: { type: Number, default: 64 },
   direction: { type: String, default: '' },
+  rows: { type: Number, default: 11 },
 })
 
 const ROWS = {
@@ -43,8 +44,8 @@ const frameStyle = computed(() => ({
   width: `${Math.round(props.size * 192 / 208)}px`,
   height: `${props.size}px`,
   backgroundImage: `url("${props.src.replace(/["\\]/g, '')}")`,
-  backgroundSize: '800% 1100%',
-  backgroundPosition: `${(frame.value / 7) * 100}% ${(rowSpec.value.row / 10) * 100}%`,
+  backgroundSize: `800% ${Math.max(9, props.rows) * 100}%`,
+  backgroundPosition: `${(frame.value / 7) * 100}% ${(rowSpec.value.row / (Math.max(9, props.rows) - 1)) * 100}%`,
 }))
 
 function stop() {

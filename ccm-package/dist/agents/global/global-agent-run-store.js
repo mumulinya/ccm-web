@@ -435,7 +435,6 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "play_music", description: "搜索并播放音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。keyword 可为歌名/歌手，或 __random__ 表示随机播放。", required: ["keyword"], risk: "read" },
     { name: "stop_music", description: "停止当前正在播放的音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。用于用户说关闭/停止/关掉音乐、停歌等。", required: [], risk: "read" },
     { name: "toggle_pet", description: "打开或关闭桌面宠物。", required: ["action"], risk: "write" },
-    { name: "create_pet_from_image", description: "使用本次消息上传的参考图片创建动作齐全的 Codex v2 宠物皮肤。reference_path 必须是本次上传附件的本地路径；生成是持久化异步任务。", required: ["reference_path"], risk: "write" },
     { name: "navigate", description: "通知 Web 客户端切换页面；不改变项目数据。", required: ["tab"], risk: "read" },
 ];
 //# sourceMappingURL=global-agent-run-store.js.map

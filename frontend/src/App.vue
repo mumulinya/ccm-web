@@ -193,6 +193,11 @@ const readNavigationTargetFromUrl = () => {
   return { tab }
 }
 
+const navigationEntry = typeof performance !== 'undefined'
+  ? performance.getEntriesByType?.('navigation')?.[0]
+  : null
+const isPageReload = navigationEntry?.type === 'reload'
+
 const applyPetNavigationTarget = async (target) => {
   if (!target || !target.tab) return
   navigateTo.value = null
@@ -403,7 +408,7 @@ onMounted(async () => {
     projects.value = data.projects || []
   } catch {}
   await refreshMusicPetAgent()
-  const initialNavigation = readNavigationTargetFromUrl()
+  const initialNavigation = startupNavigationTarget
   if (initialNavigation) {
     await applyPetNavigationTarget(initialNavigation)
     cleanNavigationUrl()
@@ -482,12 +487,13 @@ const GROUP_ICONS = {
 
 const menuConfig = ref(loadMenuConfiguration(DEFAULT_TABS))
 const tabs = ref(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value))
-const startupNavigationTarget = readNavigationTargetFromUrl()
+// 工作台是首页：普通深链接仍可直达，浏览器刷新统一回到工作台。
+const startupNavigationTarget = isPageReload ? { tab: 'dashboard' } : readNavigationTargetFromUrl()
 const startupTabId = RETIRED_TAB_REDIRECTS[startupNavigationTarget?.tab] || startupNavigationTarget?.tab
 const startupTab = tabs.value.find(tab => tab.id === startupTabId && !tab.isExternal)
   || tabs.value.find(tab => tab.id === 'dashboard')
   || tabs.value[0]
-currentTab.value = startupTab?.id || 'projects'
+currentTab.value = startupTab?.id || 'dashboard'
 
 const currentTabInfo = () => tabs.value.find(t => t.id === currentTab.value)
 const getTabIcon = (tabId) => TAB_ICONS[tabId] || Link
@@ -574,8 +580,11 @@ const closeTab = (tabId, event) => {
     <!-- 左侧导航栏 -->
     <nav class="nav-sidebar">
       <div class="nav-logo">
-        <h1>cc-web</h1>
-        <div class="info">v1.0.0 <button class="menu-edit-btn" @click="switchTab('menumanager')" title="打开导航配置中心"><Menu :size="13" /></button></div>
+        <button class="brand-home" title="返回我的工作台" @click="switchTab('dashboard')">
+          <span class="brand-mark"><Sparkles :size="18" /></span>
+          <span class="brand-copy"><strong>CCM</strong><small>Agent Workspace</small></span>
+        </button>
+        <span class="brand-version">v1.0.0</span>
       </div>
       <div class="nav-menu">
         <template v-if="pinnedTabs.length">
@@ -748,36 +757,67 @@ const closeTab = (tabId, event) => {
 }
 
 .nav-logo {
-  padding: 8px 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 14px;
   border-bottom: 1px solid var(--border-color);
   margin-bottom: 10px;
 }
 
-.nav-logo h1 {
-  font-family: inherit;
-  font-size: 18px;
-  font-weight: 780;
-  text-transform: none;
-  color: var(--text-primary);
-  background: none;
-  -webkit-text-fill-color: currentColor;
-  animation: none;
-  filter: none;
-  letter-spacing: 0;
-  line-height: 1.2;
-}
-
-.nav-logo .info {
+.brand-home {
+  min-width: 0;
+  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-family: inherit;
-  font-size: 12px;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.brand-mark {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 28%, var(--border-color));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-blue) 9%, var(--surface));
+  color: var(--accent-blue);
+}
+
+.brand-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.brand-copy strong {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 820;
+}
+
+.brand-copy small {
+  overflow: hidden;
   color: var(--text-muted);
-  opacity: 1;
-  margin-top: 6px;
-  letter-spacing: 0;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-version {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 9px;
 }
 
 .nav-menu {
@@ -1189,18 +1229,4 @@ const closeTab = (tabId, event) => {
 .group-icon { flex: 0 0 auto; opacity: 0.82; }
 .nav-group-items { display: flex; flex-direction: column; gap: 2px; }
 
-.menu-edit-btn {
-  width: 24px;
-  height: 24px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  opacity: 1;
-  transition: all 0.15s;
-  padding: 0;
-}
-.menu-edit-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
 </style>

@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { ArrowUpRight, Bookmark, Copy, FileText, Paperclip } from '@lucide/vue'
 import SafeHighlightedText from './SafeHighlightedText.vue'
 
 const props = defineProps({ item: { type: Object, required: true }, terms: { type: Array, default: () => [] }, favorite: { type: Boolean, default: false } })
@@ -31,8 +32,8 @@ const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { mo
     <button class="message-preview" @click="$emit('open', item)"><SafeHighlightedText :text="snippet" :terms="terms" /></button>
 
     <div v-if="item.taskId || item.attachments?.length" class="relations">
-      <button v-if="item.taskId" class="relation-button" @click="$emit('task', item)">任务 · {{ item.taskTitle || item.taskId }}</button>
-      <span v-for="attachment in item.attachments || []" :key="attachment.name" class="attachment-chip">附件 · {{ attachment.name }}</span>
+      <button v-if="item.taskId" class="relation-button" @click="$emit('task', item)"><FileText :size="12" />{{ item.taskTitle || item.taskId }}</button>
+      <span v-for="attachment in item.attachments || []" :key="attachment.name" class="attachment-chip"><Paperclip :size="12" />{{ attachment.name }}</span>
     </div>
 
     <details v-if="item.context?.before?.length || item.context?.after?.length" class="context-details">
@@ -45,11 +46,11 @@ const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { mo
     </details>
 
     <footer>
-      <button class="open-button" @click="$emit('open', item)">进入会话</button>
+      <button class="open-button" @click="$emit('open', item)">进入会话<ArrowUpRight :size="13" /></button>
       <div>
-        <button class="icon-action" :title="favorite ? '取消收藏' : '收藏消息'" :aria-label="favorite ? '取消收藏' : '收藏消息'" @click="$emit('favorite', item)">{{ favorite ? '★' : '☆' }}</button>
-        <button class="text-action" @click="$emit('copy', item)">复制</button>
-        <button class="text-action" @click="$emit('copy-markdown', item)">Markdown</button>
+        <button class="icon-action" :class="{ favorite }" :title="favorite ? '取消收藏' : '收藏消息'" :aria-label="favorite ? '取消收藏' : '收藏消息'" @click="$emit('favorite', item)"><Bookmark :size="14" :fill="favorite ? 'currentColor' : 'none'" /></button>
+        <button class="text-action" @click="$emit('copy', item)"><Copy :size="12" />复制</button>
+        <button class="text-action" @click="$emit('copy-markdown', item)"><FileText :size="12" />Markdown</button>
       </div>
     </footer>
   </article>
@@ -68,7 +69,7 @@ time { flex: 0 0 auto; color: var(--text-muted); font-size: 10.5px; }
 .role-dot.user { background: #3b82f6; }.role-dot.assistant { background: #22c55e; }
 .message-preview { display: block; width: 100%; margin-top: 7px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12.5px; line-height: 1.65; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
 .relations { flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.relation-button, .attachment-chip { max-width: 100%; padding: 3px 7px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); font: inherit; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relation-button, .attachment-chip { max-width: 100%; display:inline-flex; align-items:center; gap:4px; padding: 3px 7px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); font: inherit; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .relation-button { color: var(--accent-blue); cursor: pointer; }
 .context-details { margin-top: 9px; }
 .context-details summary { color: var(--text-muted); font-size: 10.5px; font-weight: 700; cursor: pointer; }
@@ -78,10 +79,13 @@ time { flex: 0 0 auto; color: var(--text-muted); font-size: 10.5px; }
 .context-list span { overflow-wrap: anywhere; }
 footer { justify-content: space-between; gap: 12px; margin-top: 10px; }
 footer > div { gap: 3px; }
-footer button { min-height: 28px; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 10.5px; cursor: pointer; }
-.open-button { padding: 4px 9px; border: 1px solid var(--border-color) !important; border-radius: 5px; color: var(--accent-blue) !important; font-weight: 700 !important; }
-.icon-action { width: 28px; padding: 0; font-size: 16px !important; }
+footer button { min-height: 28px; display:inline-flex; align-items:center; justify-content:center; gap:4px; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 10.5px; cursor: pointer; }
+.open-button { padding: 4px 8px; border: 1px solid var(--border-color) !important; border-radius: 5px; color: var(--accent-blue) !important; font-weight: 700 !important; }
+.open-button:hover { background:color-mix(in srgb,var(--accent-blue) 6%,transparent); }
+.icon-action { width: 28px; padding: 0; }
+.icon-action.favorite { color:#b45309; }
 .text-action { padding: 4px 6px; }
+.text-action:hover,.icon-action:hover { color:var(--text-primary); }
 @media (max-width: 640px) {
   header { align-items: flex-start; }
   .result-identity { flex-wrap: wrap; }

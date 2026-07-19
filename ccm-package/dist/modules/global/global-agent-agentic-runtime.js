@@ -38,7 +38,7 @@ const crypto = __importStar(require("crypto"));
 const source_ingestion_1 = require("../requirements/source-ingestion");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 function createGlobalAgentAgenticRuntime(deps) {
-    const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createPetGenerationJob, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
+    const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
     function safeProjectRows() {
         return getConfigs().map((config) => {
             const info = getConfigInfo(config.path)?.[0] || {};
@@ -777,35 +777,6 @@ function createGlobalAgentAgenticRuntime(deps) {
             }
             else if (name === "git_commit") {
                 observation = await postLocalApi(baseUrl, "/api/git/commit", { project: args.project, message: args.message || "chore: 由全局 Agent 提交变更", files: args.files || [] });
-            }
-            else if (name === "create_pet_from_image") {
-                const attachments = Array.isArray(run.source_attachments)
-                    ? run.source_attachments
-                    : Array.isArray(run.sourceAttachments) ? run.sourceAttachments : [];
-                const imageAttachment = attachments.find((item) => {
-                    const kind = String(item?.kind || item?.type || item?.mime_type || item?.mimeType || "").toLowerCase();
-                    const filePath = item?.path || item?.savedPath || item?.localPath || item?.filePath;
-                    return Boolean(filePath) && (kind === "image" || kind.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(String(filePath)));
-                });
-                const attachmentPath = imageAttachment?.path || imageAttachment?.savedPath || imageAttachment?.localPath || imageAttachment?.filePath;
-                const referencePath = String(args.reference_path || args.referencePath || attachmentPath || "").trim();
-                if (!referencePath)
-                    throw new Error("请先上传一张 PNG、JPG 或 WebP 参考图片");
-                const job = createPetGenerationJob({
-                    referencePath,
-                    name: args.name || args.pet_name || args.petName || imageAttachment?.name || "我的宠物",
-                    description: args.description || args.prompt || "",
-                    style: args.style || "auto",
-                    targetAgent: args.target_agent || args.targetAgent || "global-agent",
-                });
-                ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "building", `正在根据参考图创建宠物「${job.name}」`, { tab: "pets" }, 30 * 60 * 1000);
-                ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "status", text: `宠物「${job.name}」已开始生成，我会制作并校验完整动作。`, source: "global" });
-                observation = {
-                    success: true,
-                    message: `宠物「${job.name}」已经进入生成队列。生成完成并通过动作校验后会自动应用到全局 Agent。`,
-                    job: { id: job.id, name: job.name, status: job.status, progress: job.progress, targetAgent: job.targetAgent },
-                    client_effect: { type: "navigate", params: { tab: "pets" } },
-                };
             }
             else if (name === "create_template") {
                 observation = await postLocalApi(baseUrl, "/api/templates", { name: args.name, category: args.category || "custom", prompt: args.content || args.prompt || "" });

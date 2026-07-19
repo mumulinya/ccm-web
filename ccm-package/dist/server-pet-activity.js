@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPetActivityRuntime = createPetActivityRuntime;
 // Mechanically extracted from server.ts; preserves pet activity state and callbacks.
 function createPetActivityRuntime(deps) {
-    const { CCM_DIR, GlobalPetActivityCoordinator, PETS_FILE, PID_DIR, bindProjectSessionAgentExecution, fs, getConfigs, getPort, getTaskAgentSessionOptions, loadProjectChatRuns, openTaskAgentSession, path, projectChatRuns, saveProjectChatRuns, setPetGenerationLifecycleNotifier, url } = deps;
+    const { CCM_DIR, GlobalPetActivityCoordinator, PETS_FILE, PID_DIR, bindProjectSessionAgentExecution, fs, getConfigs, getPort, getTaskAgentSessionOptions, loadProjectChatRuns, openTaskAgentSession, path, projectChatRuns, saveProjectChatRuns, url } = deps;
     const petStatusClients = new Set();
     const petWorkspaceClients = new Set();
     const stateCache = new Map();
@@ -447,19 +447,6 @@ function createPetActivityRuntime(deps) {
             runtime: coordinated?.runtime || "",
         };
     }
-    setPetGenerationLifecycleNotifier(job => {
-        const terminal = new Set(["completed", "failed", "cancelled"]);
-        const state = job.status === "completed"
-            ? "happy"
-            : job.status === "failed"
-                ? "error"
-                : job.status === "validating" || job.status === "installing"
-                    ? "reviewing"
-                    : job.status === "cancelled"
-                        ? "idle"
-                        : "building";
-        setAgentActivity(GLOBAL_PET_AGENT_NAME, state, job.stageLabel, { tab: "pets" }, terminal.has(job.status) ? (job.status === "cancelled" ? 1000 : 12000) : 30 * 60 * 1000, { actorKind: "global", source: "pet-generation", displayName: "宠物生成" });
-    });
     function getPetAgents() {
         return [getGlobalPetAgent(), getMusicPetAgent()];
     }

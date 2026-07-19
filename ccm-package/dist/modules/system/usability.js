@@ -76,15 +76,15 @@ function taskPhase(task) {
     ];
     if (task.intake_state === "awaiting_confirmation")
         return "needs_user";
-    if (["paused", "waiting_user", "needs_confirmation"].includes(status) || blocking.length > 0)
+    if (["paused", "waiting_user", "waiting_input", "needs_confirmation", "needs_input", "awaiting_user", "blocked"].includes(status) || blocking.length > 0)
         return "needs_user";
     if (status === "failed" || delivery.status === "failed")
         return "failed";
-    if (["in_progress", "running", "queued", "cancelling"].includes(status))
+    if (["in_progress", "running", "cancelling", "reviewing", "reworking"].includes(status))
         return "in_progress";
-    if (["pending", "waiting"].includes(status))
+    if (["pending", "waiting", "queued"].includes(status))
         return "queued";
-    if (status === "done")
+    if (["done", "completed", "succeeded"].includes(status))
         return Date.now() - timeOf(task.completed_at || task.updated_at) <= DAY ? "recently_completed" : "history";
     return "history";
 }
@@ -114,6 +114,49 @@ function taskActions(task, phase) {
         return ["view_report", "archive"];
     return ["view"];
 }
+function textFromValue(value) {
+    if (typeof value === "string" || typeof value === "number")
+        return String(value).trim();
+    if (!value || typeof value !== "object")
+        return "";
+    return firstText(value.content, value.title, value.label, value.summary, value.detail, value.description, value.name);
+}
+function latestWorkflowEvent(task) {
+    const rows = [
+        ...(Array.isArray(task.workflow_timeline) ? task.workflow_timeline : []),
+        ...(Array.isArray(task.timeline) ? task.timeline : []),
+        ...(Array.isArray(task.activity_log) ? task.activity_log : []),
+    ];
+    return rows.sort((a, b) => timeOf(b.at || b.timestamp || b.updated_at || b.created_at) - timeOf(a.at || a.timestamp || a.updated_at || a.created_at))[0] || null;
+}
+function taskProgress(task, phase) {
+    const delivery = task.delivery_summary || {};
+    const reasoning = task.reasoning_loop || delivery.reasoning_loop || {};
+    const kernel = task.execution_kernel || {};
+    const latest = latestWorkflowEvent(task);
+    const rawPercent = [task.progress_percent, task.progress_percentage, task.progress, kernel.progress_percent, reasoning.progress_percent]
+        .find(value => Number.isFinite(Number(value)));
+    const percent = rawPercent == null ? null : Math.max(0, Math.min(100, Number(rawPercent)));
+    const currentStep = firstText(textFromValue(task.current_step), textFromValue(task.currentStep), textFromValue(kernel.current_step), textFromValue(reasoning.current_step), textFromValue(task.execution_plan?.current_step), phase === "queued" ? "等待执行资源" : "");
+    const startedAt = firstText(task.started_at, task.execution_started_at, task.queued_at);
+    const startedMs = timeOf(startedAt);
+    return {
+        current_step: currentStep,
+        percent,
+        started_at: startedAt,
+        elapsed_ms: startedMs > 0 ? Math.max(0, Date.now() - startedMs) : 0,
+        last_action: firstText(textFromValue(latest), task.status_detail, delivery.detail),
+        last_action_at: firstText(latest?.at, latest?.timestamp, latest?.updated_at, latest?.created_at, task.updated_at),
+        waiting_reason: phase === "needs_user" || phase === "failed" || phase === "queued" ? taskReason(task, phase) : "",
+    };
+}
+function taskAttentionKind(task, phase) {
+    if (phase === "failed")
+        return "failed";
+    if (task.intake_state === "awaiting_confirmation" || ["needs_confirmation"].includes(String(task.status || "")))
+        return "confirmation";
+    return phase === "needs_user" ? "supplement" : "";
+}
 function publicTask(task) {
     const phase = taskPhase(task);
     const delivery = task.delivery_summary || {};
@@ -132,6 +175,8 @@ function publicTask(task) {
         updated_at: task.updated_at || task.created_at || "",
         created_at: task.created_at || "",
         actions: taskActions(task, phase),
+        attention_kind: taskAttentionKind(task, phase),
+        progress: taskProgress(task, phase),
         delivery: { files_changed: changed, verification_count: verified, report: delivery.user_report || task.final_report || "" },
         intake: task.intake_draft || null,
     };
@@ -174,8 +219,8 @@ function runUsabilityGovernance() {
         appendGovernanceAudit({ type: "stale_session_cleanup", closed: sessions.closed, session_ids: sessions.sessions.map((item) => item.id) });
     return { archive, sessions: { closed: sessions.closed }, audit_file: GOVERNANCE_AUDIT_FILE };
 }
-function buildUsabilityWorkbench() {
-    const archive = archiveOldUsabilityHistory();
+function buildUsabilityWorkbench(options = {}) {
+    const archive = options.runArchive === false ? { changed: 0, retention_days: AUTO_ARCHIVE_DAYS } : archiveOldUsabilityHistory();
     const tasks = (0, db_1.loadTasks)().filter((item) => !item.archived && !item.deleted_at).map(publicTask)
         .sort((a, b) => timeOf(b.updated_at) - timeOf(a.updated_at));
     const buckets = { needs_user: [], failed: [], in_progress: [], queued: [], recently_completed: [], history: [] };
@@ -187,16 +232,24 @@ function buildUsabilityWorkbench() {
     }));
     const projects = (0, db_1.getConfigs)().map((config) => {
         const info = (0, db_1.getConfigInfo)(config.path)?.[0] || {};
-        return { name: config.name, running: (0, db_1.isRunning)(config.name), agent: info.agent || "claudecode", work_dir: info.workDir || "" };
+        const running = (0, db_1.isRunning)(config.name);
+        return { name: config.name, running, agent: info.agent || "claudecode", work_dir: info.workDir || "", actions: running ? ["open", "stop"] : ["open", "start"] };
     });
     const groups = (0, collaboration_1.loadGroups)().map((group) => ({ id: group.id, name: group.name, members: Array.isArray(group.members) ? group.members.length : 0 }));
     const cron = (0, db_1.loadCronJobs)().filter((job) => !job.archived && !job.deleted_at).map((job) => ({
-        id: job.id, name: job.name || job.title || "定时任务", enabled: job.enabled !== false && job.status !== "paused", next_run: job.next_run || job.nextRun || "", last_status: job.last_status || job.lastStatus || "",
+        id: job.id, name: job.name || job.title || "定时任务", enabled: job.enabled !== false && job.status !== "paused", next_run: job.next_run || job.nextRun || "", last_status: job.last_status || job.lastStatus || "", actions: ["open", "toggle"],
     }));
+    const attentionCounts = { confirmation: 0, failed: 0, supplement: 0 };
+    [...buckets.failed, ...buckets.needs_user].forEach((task) => {
+        const key = task.attention_kind;
+        if (key && key in attentionCounts)
+            attentionCounts[key]++;
+    });
     return {
         generated_at: new Date().toISOString(),
         archive,
         counts: Object.fromEntries(Object.entries(buckets).map(([key, value]) => [key, value.length])),
+        attention_counts: attentionCounts,
         attention: [...buckets.failed, ...buckets.needs_user].slice(0, 5),
         active: [...buckets.in_progress, ...buckets.queued],
         completed: buckets.recently_completed,
@@ -204,6 +257,13 @@ function buildUsabilityWorkbench() {
         resources: { projects, groups, cron },
         onboarding: { empty: projects.length === 0 && groups.length === 0, has_tasks: tasks.length > 0 },
     };
+}
+function sendWorkbenchEvent(res, payload) {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+function workbenchSignature(snapshot) {
+    const { generated_at: _generatedAt, archive: _archive, ...stable } = snapshot || {};
+    return JSON.stringify(stable);
 }
 function startUsabilityArchiveScheduler() {
     runUsabilityGovernance();
@@ -220,6 +280,38 @@ function stopUsabilityArchiveScheduler() {
 function handleUsabilityApi(pathname, req, res) {
     if (pathname === "/api/usability/workbench" && req.method === "GET") {
         (0, utils_1.sendJson)(res, buildUsabilityWorkbench());
+        return true;
+    }
+    if (pathname === "/api/usability/workbench/stream" && req.method === "GET") {
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        });
+        let snapshot = buildUsabilityWorkbench({ runArchive: false });
+        let signature = workbenchSignature(snapshot);
+        let ticks = 0;
+        sendWorkbenchEvent(res, { type: "snapshot", data: snapshot });
+        const interval = setInterval(() => {
+            try {
+                ticks++;
+                const next = buildUsabilityWorkbench({ runArchive: false });
+                const nextSignature = workbenchSignature(next);
+                if (nextSignature !== signature) {
+                    snapshot = next;
+                    signature = nextSignature;
+                    sendWorkbenchEvent(res, { type: "update", data: snapshot });
+                }
+                else if (ticks % 5 === 0) {
+                    sendWorkbenchEvent(res, { type: "heartbeat", generated_at: new Date().toISOString() });
+                }
+            }
+            catch (error) {
+                sendWorkbenchEvent(res, { type: "warning", message: error?.message || String(error) });
+            }
+        }, 2000);
+        req.on("close", () => clearInterval(interval));
         return true;
     }
     if (pathname === "/api/usability/archive-history" && req.method === "POST") {

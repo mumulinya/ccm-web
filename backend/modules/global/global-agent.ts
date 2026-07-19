@@ -32,7 +32,6 @@ import {
   normalizeChatCompletionsUrl,
   shouldUseAnthropic,
 } from "../collaboration/group-orchestrator-llm-client";
-import { createPetGenerationJob } from "../pets/pet-generation";
 import { getConfigs, getConfigInfo, loadCronJobs, loadTasks, loadMcpTools, loadSkills, loadFeishuConfig } from "../../core/db";
 import {
   loadGroups,
@@ -477,7 +476,6 @@ const globalAgentAgenticRuntime = createGlobalAgentAgenticRuntime({
   controlGlobalMissionSupervisor,
   createGlobalDevelopmentMission,
   createRequirementEpicWithChildren,
-  createPetGenerationJob,
   executeFeishuAction,
   executePlayMusic,
   executeStopMusic,

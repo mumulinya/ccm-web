@@ -19,6 +19,7 @@ import {
   GROUP_INTERNAL_PROTOCOL_FALLBACK,
   GROUP_STREAM_ERROR_FALLBACK,
   sanitizeGroupVisibleText,
+  escapeGroupMessageHtml,
   buildGroupStreamErrorText,
   getVisibleGroupMessageContent,
   isCoordinatorProject,
@@ -710,13 +711,13 @@ export function useGroupChat(props, emit) {
     }
   }
 
-  const renameGroupSession = async () => {
-    if (!currentGroup.value || !currentGroupSessionId.value) return
-    const current = groupSessions.value.find(item => item.id === currentGroupSessionId.value)
+  const renameGroupSession = async (sessionId = currentGroupSessionId.value) => {
+    if (!currentGroup.value || !sessionId) return
+    const current = groupSessions.value.find(item => item.id === sessionId)
     const title = window.prompt('会话名称', current?.title || '新会话')
     if (!title?.trim()) return
     try {
-      const data = await groupsApi.sessionAction(currentGroup.value.id, currentGroupSessionId.value, 'rename', { title: title.trim() })
+      const data = await groupsApi.sessionAction(currentGroup.value.id, sessionId, 'rename', { title: title.trim() })
       groupSessions.value = data.sessions || groupSessions.value
       toast.success('会话已重命名')
     } catch (error) {
@@ -724,31 +725,38 @@ export function useGroupChat(props, emit) {
     }
   }
 
-  const archiveGroupSession = async () => {
-    if (!currentGroup.value || !currentGroupSessionId.value) return
-    if (!await confirmDialog('归档当前会话？归档后会切换到其他可用会话。')) return
+  const archiveGroupSession = async (sessionId = currentGroupSessionId.value) => {
+    if (!currentGroup.value || !sessionId) return
+    const current = groupSessions.value.find(item => item.id === sessionId)
+    const isCurrent = sessionId === currentGroupSessionId.value
+    if (!await confirmDialog(`归档会话“${current?.title || '当前会话'}”？${isCurrent ? '归档后会切换到其他可用会话。' : ''}`)) return
     try {
-      const data = await groupsApi.sessionAction(currentGroup.value.id, currentGroupSessionId.value, 'archive')
+      const data = await groupsApi.sessionAction(currentGroup.value.id, sessionId, 'archive')
       groupSessions.value = data.sessions || []
-      currentGroupSessionId.value = data.activeSessionId || groupSessions.value.find(item => !item.archived)?.id || ''
-      messages.value = []
-      await loadMessages()
+      if (isCurrent) {
+        currentGroupSessionId.value = data.activeSessionId || groupSessions.value.find(item => !item.archived)?.id || ''
+        messages.value = []
+        await loadMessages()
+      }
       toast.success('会话已归档')
     } catch (error) {
       toast.error(error.message || '归档会话失败')
     }
   }
 
-  const deleteGroupSession = async () => {
-    if (!currentGroup.value || !currentGroupSessionId.value) return
-    const current = groupSessions.value.find(item => item.id === currentGroupSessionId.value)
+  const deleteGroupSession = async (sessionId = currentGroupSessionId.value) => {
+    if (!currentGroup.value || !sessionId) return
+    const current = groupSessions.value.find(item => item.id === sessionId)
+    const isCurrent = sessionId === currentGroupSessionId.value
     if (!await confirmDialog(`确定删除会话“${current?.title || '当前会话'}”？消息、压缩状态和会话记忆将一起删除。`)) return
     try {
-      const data = await groupsApi.sessionAction(currentGroup.value.id, currentGroupSessionId.value, 'delete')
+      const data = await groupsApi.sessionAction(currentGroup.value.id, sessionId, 'delete')
       groupSessions.value = data.sessions || []
-      currentGroupSessionId.value = data.activeSessionId || groupSessions.value.find(item => !item.archived)?.id || groupSessions.value[0]?.id || ''
-      messages.value = []
-      await loadMessages()
+      if (isCurrent) {
+        currentGroupSessionId.value = data.activeSessionId || groupSessions.value.find(item => !item.archived)?.id || groupSessions.value[0]?.id || ''
+        messages.value = []
+        await loadMessages()
+      }
       toast.success('会话及其记忆已删除')
     } catch (error) {
       toast.error(error.message || '删除会话失败')
@@ -798,7 +806,7 @@ export function useGroupChat(props, emit) {
   // 高亮 @mentions
   const highlightMentions = (text) => {
     if (!text) return ''
-    return text.replace(/@([\w-]+)/g, (_match, name) => {
+    return escapeGroupMessageHtml(text).replace(/@([\w-]+)/g, (_match, name) => {
       const label = getAgentDisplayName(name)
       return `<span style="color:var(--accent-blue);font-weight:600">@${label}</span>`
     })

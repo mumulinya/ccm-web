@@ -2,20 +2,12 @@
     <GroupChatHeader
       :groups="groups"
       :current-group="currentGroup"
-      :sessions="groupSessions"
-      :current-session-id="currentGroupSessionId"
       :collaboration-protocol="collaborationProtocol"
       :memory-active="hasCompressedMemory()"
       :memory-label="getMemoryCompressionLabel()"
       :memory-meta="getMemoryCompressionMeta()"
       :memory-title="getMemoryCompressionTitle()"
-      :get-member-count-label="getMemberCountLabel"
       @select-group="selectGroup"
-      @select-session="selectGroupSession"
-      @create-session="createGroupSession"
-      @rename-session="renameGroupSession"
-      @archive-session="archiveGroupSession"
-      @delete-session="deleteGroupSession"
       @create-group="showCreate = true"
       @load-tools="loadGroupTools"
       @load-files="loadGroupFiles"
@@ -30,10 +22,24 @@
 
     <!-- 主内容区 -->
     <div class="main-content">
+      <GroupChatSessionSidebar
+        v-if="currentGroup"
+        :group-name="currentGroup.name"
+        :sessions="groupSessions"
+        :current-session-id="currentGroupSessionId"
+        :open="groupSessionSidebarOpen"
+        @create="createGroupSession"
+        @toggle="groupSessionSidebarOpen = !groupSessionSidebarOpen"
+        @expand="groupSessionSidebarOpen = true"
+        @select="selectSessionFromSidebar"
+        @rename="renameGroupSession"
+        @archive="archiveGroupSession"
+        @delete="deleteGroupSession"
+      />
       <div class="content">
         <!-- 消息区域 -->
         <div id="groupMessages" ref="groupMessagesEl" class="messages" @scroll="updateGroupMessageScrollState">
-          <div ref="groupMessagesContentEl" style="display: flex; flex-direction: column; width: 100%; min-height: 100%;">
+          <div ref="groupMessagesContentEl" class="messages-content">
             <EmptyState
               v-if="!currentGroup"
               large
@@ -41,7 +47,7 @@
               title="开始群聊协作"
               hint="创建群聊并添加 Agent 成员"
             />
-            <div v-else class="messages-flow" :key="`${currentGroup?.id}:${currentGroupSessionId}`" style="width: 100%; display: flex; flex-direction: column;">
+            <div v-else class="messages-flow" :key="`${currentGroup?.id}:${currentGroupSessionId}`">
               <GroupMainAgentStatusCard
                 v-if="hasMainAgentStatusDetail"
                 :status="mainAgentStatus"
@@ -55,7 +61,18 @@
                   v-if="contextCompactionEvent?.insertIndex === i"
                   :event="contextCompactionEvent"
                 />
-                <div v-show="shouldShowGroupMessage(msg, i)" :id="'gc-msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
+                <div
+                  v-show="shouldShowGroupMessage(msg, i)"
+                  :id="'gc-msg-' + i"
+                  class="message"
+                  :class="[
+                    msg.role,
+                    {
+                      'msg-highlight': highlightMsgIndex === i,
+                      'message-error': msg.role === 'assistant' && getAgentMessageStatus(msg)?.tone === 'fail',
+                    },
+                  ]"
+                >
                 <ChatAvatar v-if="msg.role === 'user'" role="user" class="message-avatar" />
                 <ChatAvatar v-else-if="msg.role === 'assistant'" role="agent" class="message-avatar" />
                 <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
@@ -94,6 +111,7 @@
                 <AgentExecutionMessage
                   v-else
                   :msg="msg"
+                  :display-content="getVisibleGroupMessageContent(msg, '回复已整理，技术细节已放入技术详情。')"
                   :accent-style="getAgentAccentStyle(msg.agent)"
                   :status="getAgentMessageStatus(msg)"
                   :agent-initials="getAgentInitials(msg.agent)"
@@ -149,69 +167,72 @@
         </div>
 
         <!-- 输入栏 -->
-        <ConversationTurnControls
-          v-if="currentGroup"
-          :busy="isStreaming"
-          v-model:mode="groupTurnControl.mode.value"
-          :turns="groupTurnControl.turns.value"
-          :stopping="stoppingGroupTurn"
-          @stop="stopGroupCurrentWork()"
-          @cancel="groupTurnControl.cancel"
-          @retry="(turn) => groupTurnControl.retry(turn).then(() => drainGroupTurnQueue())"
-        />
-        <ChatComposer
-          v-if="currentGroup"
-          v-model="newMessage"
-          input-id="groupChatInput"
-          :placeholder="groupComposerPlaceholder"
-          :send-label="isStreaming ? (groupTurnControl.mode.value === 'steer' ? '引导' : '排队') : groupComposerSendLabel"
-          :disabled="false"
-          :busy="isStreaming"
-          :allow-input-while-busy="true"
-          :files="messageFiles"
-          :slash="slash"
-          :templates-open="showTemplateSelector"
-          :templates="allTemplates"
-          :template-search-query="templateSearchQuery"
-          :active-template-index="activeTemplateIndex"
-          :recommended-template="recommendedTemplate"
-          @files-selected="onMessageFilesSelected"
-          @remove-file="removeMessageFile"
-          @open-template="openTemplateSelector"
-          @update:template-search-query="templateSearchQuery = $event"
-          @select-template="selectChatTemplate"
-          @apply-recommendation="applyRecommendation"
-          @keydown="handleKeydown"
-          @input="handleInput"
-          @send="sendMessage"
-        >
-          <template #prefix>
-            <div v-if="isTaskSupplementMode" class="task-supplement-context" aria-live="polite">
-              <span class="task-supplement-label">正在补充</span>
-              <strong :title="pendingGroupTaskInput?.title">{{ pendingGroupTaskInput?.title }}</strong>
-              <button type="button" title="取消补充" aria-label="取消补充" @click="cancelTaskSupplementInput">×</button>
-            </div>
-            <div v-else-if="isClarificationResponseMode" class="task-supplement-context clarification-response-context" aria-live="polite">
-              <span class="task-supplement-label">正在回答</span>
-              <strong :title="pendingGroupClarificationInput?.title">{{ pendingGroupClarificationInput?.title }}</strong>
-              <button type="button" title="取消回答并发送新消息" aria-label="取消回答并发送新消息" @click="cancelGroupClarificationInput">×</button>
-            </div>
-            <div v-else class="message-mode" aria-label="消息模式">
-              <button type="button" :class="{ active: messageMode === 'conversation' }" @click="messageMode = 'conversation'">对话</button>
-              <button type="button" :class="{ active: messageMode === 'project_analysis' }" @click="messageMode = 'project_analysis'">项目分析</button>
-              <button type="button" :class="{ active: messageMode === 'project_task' }" @click="messageMode = 'project_task'">项目任务</button>
-            </div>
-          </template>
-          <template #context>
-            <SessionContextUsage
-              :usage="groupContextUsage"
-              :loading="groupContextLoading"
-              :error="groupContextError"
-              :compacting="groupContextCompacting"
-              @refresh="refreshGroupContextUsage"
+        <div v-if="currentGroup" class="composer-region">
+          <div class="composer-inner">
+            <ConversationTurnControls
+              :busy="isStreaming"
+              v-model:mode="groupTurnControl.mode.value"
+              :turns="groupTurnControl.turns.value"
+              :stopping="stoppingGroupTurn"
+              @stop="stopGroupCurrentWork()"
+              @cancel="groupTurnControl.cancel"
+              @retry="(turn) => groupTurnControl.retry(turn).then(() => drainGroupTurnQueue())"
             />
-          </template>
-        </ChatComposer>
+            <ChatComposer
+              v-model="newMessage"
+              input-id="groupChatInput"
+              :placeholder="groupComposerPlaceholder"
+              :send-label="isStreaming ? (groupTurnControl.mode.value === 'steer' ? '引导' : '排队') : groupComposerSendLabel"
+              :disabled="false"
+              :busy="isStreaming"
+              :allow-input-while-busy="true"
+              :show-template-button="false"
+              :files="messageFiles"
+              :slash="slash"
+              :templates-open="showTemplateSelector"
+              :templates="allTemplates"
+              :template-search-query="templateSearchQuery"
+              :active-template-index="activeTemplateIndex"
+              :recommended-template="recommendedTemplate"
+              @files-selected="onMessageFilesSelected"
+              @remove-file="removeMessageFile"
+              @open-template="openTemplateSelector"
+              @update:template-search-query="templateSearchQuery = $event"
+              @select-template="selectChatTemplate"
+              @apply-recommendation="applyRecommendation"
+              @keydown="handleKeydown"
+              @input="handleInput"
+              @send="sendMessage"
+            >
+              <template #prefix>
+                <div v-if="isTaskSupplementMode" class="task-supplement-context" aria-live="polite">
+                  <span class="task-supplement-label">正在补充</span>
+                  <strong :title="pendingGroupTaskInput?.title">{{ pendingGroupTaskInput?.title }}</strong>
+                  <button type="button" title="取消补充" aria-label="取消补充" @click="cancelTaskSupplementInput">×</button>
+                </div>
+                <div v-else-if="isClarificationResponseMode" class="task-supplement-context clarification-response-context" aria-live="polite">
+                  <span class="task-supplement-label">正在回答</span>
+                  <strong :title="pendingGroupClarificationInput?.title">{{ pendingGroupClarificationInput?.title }}</strong>
+                  <button type="button" title="取消回答并发送新消息" aria-label="取消回答并发送新消息" @click="cancelGroupClarificationInput">×</button>
+                </div>
+                <div v-else class="message-mode" aria-label="消息模式">
+                  <button type="button" :class="{ active: messageMode === 'conversation' }" @click="messageMode = 'conversation'">对话</button>
+                  <button type="button" :class="{ active: messageMode === 'project_analysis' }" @click="messageMode = 'project_analysis'">项目分析</button>
+                  <button type="button" :class="{ active: messageMode === 'project_task' }" @click="messageMode = 'project_task'">项目任务</button>
+                </div>
+              </template>
+              <template #context>
+                <SessionContextUsage
+                  :usage="groupContextUsage"
+                  :loading="groupContextLoading"
+                  :error="groupContextError"
+                  :compacting="groupContextCompacting"
+                  @refresh="refreshGroupContextUsage"
+                />
+              </template>
+            </ChatComposer>
+          </div>
+        </div>
       </div>
     </div>
 

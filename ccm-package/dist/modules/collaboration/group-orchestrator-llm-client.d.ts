@@ -17,6 +17,9 @@ type LlmCallOptions = {
     temperature?: number;
     maxTokens?: number;
     defaultTimeoutMs?: number;
+    timeoutMs?: number;
+    stream?: boolean;
+    reasoningEffort?: "low" | "medium" | "high" | "off";
     httpErrorPrefix?: string;
     invalidJsonMessage?: string;
     apiMicrocompactNativeApplyPlan?: any;
@@ -32,6 +35,7 @@ export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
 export declare function normalizeAnthropicMessagesUrl(apiUrl: string): string;
 export declare function shouldUseAnthropic(config: any): boolean;
 export declare function extractJsonObject(text: string): any;
+export declare function resolveLlmTimeoutMs(config: any, defaultTimeoutMs: number, callTimeoutMs?: number): number;
 export declare function resolveReasoningEffort(config: any): string;
 export declare function buildOpenAiReasoningFields(config: any): {
     reasoning_effort?: undefined;
@@ -41,6 +45,10 @@ export declare function buildOpenAiReasoningFields(config: any): {
     reasoning: {
         effort: string;
     };
+};
+export declare function parseOpenAiStreamText(text: string): {
+    content: string;
+    usage: any;
 };
 export declare function buildAnthropicThinkingFields(config: any): {
     thinking?: undefined;

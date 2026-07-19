@@ -11,16 +11,17 @@
     <section v-if="activeTaskView === 'overview'" class="execution-dashboard">
       <div class="dashboard-head">
         <div>
-          <div class="dashboard-kicker">执行进度</div>
-          <h3>正在推进和需要你处理的任务</h3>
+          <div class="dashboard-kicker">实时执行</div>
+          <h3>当前任务流</h3>
+          <p>追踪任务从派发、执行到验收的完整状态。</p>
         </div>
         <div class="dashboard-head-actions">
           <span v-if="executionDashboard?.generated_at" class="dashboard-updated">更新 {{ new Date(executionDashboard.generated_at).toLocaleTimeString('zh-CN') }}</span>
-          <button class="btn btn-outline btn-sm" :disabled="executionDashboardLoading" @click="refreshTaskWork">{{ executionDashboardLoading ? '刷新中...' : '刷新' }}</button>
+          <button class="dashboard-refresh" :disabled="executionDashboardLoading" title="刷新任务流" @click="refreshTaskWork"><RefreshCw :size="15" :class="{ spinning: executionDashboardLoading }" />{{ executionDashboardLoading ? '刷新中' : '刷新' }}</button>
         </div>
       </div>
 
-      <div class="dashboard-filter-row">
+      <div v-if="dashboardItems().length" class="dashboard-filter-row">
         <div class="dashboard-filter-tabs" role="tablist" aria-label="任务驾驶舱筛选">
           <button
             v-for="option in dashboardFilterOptions()"
@@ -37,11 +38,20 @@
       </div>
 
       <LoadingSkeleton v-if="executionDashboardLoading && !filteredDashboardItems().length" variant="cards" :cards="4" />
-      <EmptyState
-        v-else-if="!filteredDashboardItems().length"
-        icon="📊"
-        title="当前筛选下没有可展示的执行任务"
-      />
+      <div v-else-if="!filteredDashboardItems().length" class="dashboard-zero-state">
+        <div class="zero-state-main">
+          <span class="zero-state-icon"><ListTodo :size="24" /></span>
+          <div><span class="zero-state-kicker">任务队列已就绪</span><h4>从一个清晰目标开始</h4><p>创建任务后，这里会实时展示当前步骤、执行成员、验证证据和需要你处理的问题。</p></div>
+          <div class="zero-state-actions"><button class="zero-primary" @click="handleCreateType('business')"><Plus :size="15" />新建任务</button><button class="zero-secondary" @click="openBacklog"><Inbox :size="15" />打开需求池</button></div>
+        </div>
+        <div class="zero-state-flow" aria-label="任务执行流程">
+          <span><i><Sparkles :size="14" /></i><strong>整理目标</strong><small>明确范围与验收</small></span>
+          <b>→</b>
+          <span><i><Route :size="14" /></i><strong>分派执行</strong><small>主 Agent 协调成员</small></span>
+          <b>→</b>
+          <span><i><ListTodo :size="14" /></i><strong>验证交付</strong><small>核对变更与证据</small></span>
+        </div>
+      </div>
       <div v-else class="dashboard-task-list">
         <article v-for="item in filteredDashboardItems()" :key="item.id" :class="['dashboard-task', phaseTone(item.phase), { expanded: isDashboardItemExpanded(item) }]">
           <div class="dashboard-task-top">

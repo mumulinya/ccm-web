@@ -1,6 +1,6 @@
 {
   "schema": "ccm-test-agent-artifact-manifest-v1",
-  "reportId": "test-agent-report-mrkmk8r2-278520ec",
+  "reportId": "test-agent-report-mrrkjbv8-744d01da",
   "workOrderId": "role-skills-test-agent-probe",
   "taskId": "role-skills-test-agent-probe",
   "groupId": "",
@@ -10,7 +10,7 @@
   ],
   "status": "partial",
   "artifactDir": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\role-skills-selftest\\latest-run\\test-agent-artifacts",
-  "generatedAt": "2026-07-14T12:25:52.734Z",
+  "generatedAt": "2026-07-19T09:03:34.118Z",
   "summary": {
     "reports": 2,
     "screenshots": 0,
@@ -38,7 +38,7 @@
       "integrity": {
         "exists": true,
         "sizeBytes": 10351,
-        "sha256": "eee14b04c75339f752927b891ac31c59d87178931d30a8971cc555748653dca0"
+        "sha256": "bdc6b01b959bf55ad15e17e3338770b5d57371e0b0be2217b1482971281c0fd4"
       }
     },
     {
@@ -50,7 +50,7 @@
       "integrity": {
         "exists": true,
         "sizeBytes": 5545,
-        "sha256": "dc34f8f568b6e10a82014775d9b82b17c8e3dfaee8a264d021b56ee4eb6a33aa"
+        "sha256": "96acbafdd76d8ec6955108f8f7c1d8a31a3e36713f82338209afebd3dab74349"
       }
     },
     {
@@ -62,7 +62,7 @@
       "integrity": {
         "exists": true,
         "sizeBytes": 11854,
-        "sha256": "d8e0a501b2e2ff73bffac04d372434397f6c2a6cc4adbde89d95349945b9a6bc"
+        "sha256": "7db9084a96bc99be64f7ec4d547eab1a1be98564e45457d4e7547c550ef39ddc"
       }
     },
     {
@@ -86,7 +86,7 @@
       "integrity": {
         "exists": true,
         "sizeBytes": 10351,
-        "sha256": "eee14b04c75339f752927b891ac31c59d87178931d30a8971cc555748653dca0"
+        "sha256": "bdc6b01b959bf55ad15e17e3338770b5d57371e0b0be2217b1482971281c0fd4"
       }
     },
     {
@@ -98,7 +98,7 @@
       "integrity": {
         "exists": true,
         "sizeBytes": 5545,
-        "sha256": "dc34f8f568b6e10a82014775d9b82b17c8e3dfaee8a264d021b56ee4eb6a33aa"
+        "sha256": "96acbafdd76d8ec6955108f8f7c1d8a31a3e36713f82338209afebd3dab74349"
       }
     },
     {
@@ -110,7 +110,7 @@
       "integrity": {
         "exists": true,
         "sizeBytes": 11854,
-        "sha256": "d8e0a501b2e2ff73bffac04d372434397f6c2a6cc4adbde89d95349945b9a6bc"
+        "sha256": "7db9084a96bc99be64f7ec4d547eab1a1be98564e45457d4e7547c550ef39ddc"
       }
     },
     {

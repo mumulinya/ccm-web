@@ -3,14 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.bootstrapServerRuntime = bootstrapServerRuntime;
 // Mechanically extracted startup recovery and scheduler bootstrap.
 function bootstrapServerRuntime(startupCollabCtx, port, deps) {
-    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, recoverPetGenerationJobs, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startCronScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
+    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startCronScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
     const recoveredConversationTurns = conversationTurnControl.recoverInterrupted();
     if (recoveredConversationTurns.recovered > 0) {
         console.log(`[会话消息队列] 已恢复 ${recoveredConversationTurns.recovered} 条服务重启前发送中的消息`);
     }
-    const petGenerationRecovery = recoverPetGenerationJobs();
-    if (petGenerationRecovery.recovered > 0)
-        console.log(`[宠物生成] 标记 ${petGenerationRecovery.recovered} 个中断任务等待重试`);
     refreshEnvPath();
     const roleSkills = ensureRoleSkillsInstalled({ force: true });
     console.log(`[角色 Skill] 已就绪 ${roleSkills.available.length} 个${roleSkills.installed.length ? `，更新 ${roleSkills.installed.length} 个` : ""}`);

@@ -13,7 +13,9 @@ export declare function runUsabilityGovernance(): {
     };
     audit_file: string;
 };
-export declare function buildUsabilityWorkbench(): {
+export declare function buildUsabilityWorkbench(options?: {
+    runArchive?: boolean;
+}): {
     generated_at: string;
     archive: {
         changed: number;
@@ -21,6 +23,11 @@ export declare function buildUsabilityWorkbench(): {
     };
     counts: {
         [k: string]: number;
+    };
+    attention_counts: {
+        confirmation: number;
+        failed: number;
+        supplement: number;
     };
     attention: any[];
     active: any[];
@@ -36,6 +43,7 @@ export declare function buildUsabilityWorkbench(): {
             running: boolean;
             agent: any;
             work_dir: any;
+            actions: string[];
         }[];
         groups: {
             id: any;
@@ -48,6 +56,7 @@ export declare function buildUsabilityWorkbench(): {
             enabled: boolean;
             next_run: any;
             last_status: any;
+            actions: string[];
         }[];
     };
     onboarding: {

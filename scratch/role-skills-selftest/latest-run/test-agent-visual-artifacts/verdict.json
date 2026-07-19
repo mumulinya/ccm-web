@@ -1,7 +1,7 @@
 {
   "schema": "ccm-test-agent-verdict-v1",
   "agent": "test-agent",
-  "reportId": "test-agent-report-mrkmk8zz-9008e3c9",
+  "reportId": "test-agent-report-mrrkjbzz-3a2249e1",
   "workOrderId": "role-skills-visual-test-agent-probe",
   "taskId": "role-skills-visual-test-agent-probe",
   "groupId": "",
@@ -57,8 +57,8 @@
         "criterion": "桌面和移动端页面没有遮挡，并保留截图证据",
         "status": "verified",
         "evidence": [
-          "ccm-role-skill-visual-probe: command node --version: exit=0; duration=105ms",
-          "ccm-role-skill-visual-probe: node --version: exit=0; duration=105ms"
+          "ccm-role-skill-visual-probe: command node --version: exit=0; duration=147ms",
+          "ccm-role-skill-visual-probe: node --version: exit=0; duration=147ms"
         ],
         "matchStrength": "fallback",
         "matchScore": 0,
@@ -218,7 +218,7 @@
   "browserEvidenceTemporalIntegrity": {
     "status": "complete",
     "toleranceMs": 100,
-    "reportDurationMs": 107,
+    "reportDurationMs": 151,
     "browserResultCount": 0,
     "browserToolCallCount": 0,
     "invalidItemCount": 0,
@@ -231,9 +231,9 @@
       {
         "kind": "report",
         "id": "report",
-        "startedAt": "2026-07-14T12:25:52.931Z",
-        "finishedAt": "2026-07-14T12:25:53.038Z",
-        "durationMs": 107,
+        "startedAt": "2026-07-19T09:03:34.119Z",
+        "finishedAt": "2026-07-19T09:03:34.270Z",
+        "durationMs": 151,
         "status": "complete",
         "errors": []
       }
@@ -402,7 +402,7 @@
       "project": "ccm-role-skill-visual-probe",
       "title": "node --version",
       "status": "passed",
-      "detail": "exit=0; duration=105ms"
+      "detail": "exit=0; duration=147ms"
     }
   ],
   "artifacts": {

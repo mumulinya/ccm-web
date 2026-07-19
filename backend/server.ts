@@ -140,7 +140,6 @@ import { handleToolsAndMetricsApi } from "./modules/tools/tools";
 import { stopAllTerminalRuns } from "./modules/tools/terminal";
 import { handlePetsApi } from "./modules/pets/pets";
 import { GlobalPetActivityCoordinator } from "./modules/pets/pet-activity-coordinator";
-import { recoverPetGenerationJobs, setPetGenerationLifecycleNotifier } from "./modules/pets/pet-generation";
 import { handleMusicApi } from "./modules/music/music";
 import { handleCollaborationApi, resumeTaskQueues, startAgentRecoveryMonitor, startTaskWatchdog, stopAgentRecoveryMonitor, stopTaskWatchdog } from "./modules/collaboration/collaboration";
 import { reconcileGroupSessionLifecycleAgentCancellations } from "./modules/collaboration/storage";
@@ -231,7 +230,6 @@ const {
   path,
   projectChatRuns,
   saveProjectChatRuns,
-  setPetGenerationLifecycleNotifier,
   url
 });
 
@@ -932,7 +930,6 @@ function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
     reconcileTaskAgentInvocationRecovery,
     recoverChildTypedMemoryDispatchWal,
     recoverGroupTypedMemoryArtifactTransactionsFleet,
-    recoverPetGenerationJobs,
     refreshEnvPath,
     resumeSoakTest,
     resumeTaskQueues,

@@ -1,5 +1,18 @@
 <script setup>
 import { computed, nextTick, onUnmounted, ref } from 'vue'
+import {
+  Bookmark,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  LoaderCircle,
+  MessageSquareText,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from '@lucide/vue'
 import ConversationSearchResult from './search/ConversationSearchResult.vue'
 import { toast } from '../../utils/toast.js'
 
@@ -172,32 +185,51 @@ const copyMarkdown = item => copyText(`### ${item.sourceLabel} · ${item.session
 const goTo = item => emit('go-to', { ...item, query: query.value.trim() || (item.matchTerms || []).join(' ') })
 const goToTask = item => emit('go-to', { conversationType: 'task', taskId: item.taskId })
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'
+const sourceLabel = value => ({ all: '全部来源', global: '全局助手', group: '群聊', project: '项目', feishu: '飞书' }[value] || '全部来源')
+const recentMeta = item => [
+  sourceLabel(item?.source),
+  item?.role === 'user' ? '用户消息' : item?.role === 'assistant' ? 'Agent 回复' : '',
+  item?.timeRange && item.timeRange !== 'all' ? '限定时间' : '',
+].filter(Boolean).join(' · ')
 
 onUnmounted(() => activeRequest?.abort())
 </script>
 
 <template>
   <div class="conversation-search-page">
-    <header class="search-command-bar">
-      <div class="search-input-wrap">
-        <span class="search-symbol" aria-hidden="true">⌕</span>
-        <input v-model="query" type="search" placeholder="搜索对话" aria-label="搜索对话" autofocus @keydown.enter="search(1)">
-        <button v-if="query" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch">×</button>
+    <header class="search-workspace-header">
+      <div class="search-heading">
+        <span class="heading-icon"><MessageSquareText :size="19" /></span>
+        <div><strong>对话搜索</strong><span>跨会话查找消息、任务与附件记录</span></div>
       </div>
-      <button class="filter-button" :class="{ active: showFilters || activeFilterCount }" @click="showFilters = !showFilters">
-        筛选<span v-if="activeFilterCount"> {{ activeFilterCount }}</span>
-      </button>
-      <button class="primary-button" :disabled="loading || !query.trim()" @click="search(1)">{{ loading ? '搜索中' : '搜索' }}</button>
+      <div class="search-command-bar">
+        <div class="search-input-wrap">
+          <Search class="search-symbol" :size="17" aria-hidden="true" />
+          <input v-model="query" type="search" placeholder="输入关键词搜索对话" aria-label="搜索对话" autofocus @keydown.enter="search(1)">
+          <button v-if="query" class="icon-button" title="清空搜索" aria-label="清空搜索" @click="clearSearch"><X :size="15" /></button>
+        </div>
+        <button class="filter-button" :class="{ active: showFilters || activeFilterCount }" @click="showFilters = !showFilters">
+          <SlidersHorizontal :size="15" />筛选<span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+        </button>
+        <button class="primary-button" :disabled="loading || !query.trim()" @click="search(1)">
+          <LoaderCircle v-if="loading" :size="15" class="spinning" /><Search v-else :size="15" />{{ loading ? '搜索中' : '搜索' }}
+        </button>
+      </div>
     </header>
 
     <nav class="source-tabs" aria-label="对话来源">
       <button v-for="item in [{ id: 'all', label: '全部' }, { id: 'global', label: '全局助手' }, { id: 'group', label: '群聊' }, { id: 'project', label: '项目' }, { id: 'feishu', label: '飞书' }]" :key="item.id" :class="{ active: source === item.id }" @click="source = item.id; searched && search(1, { remember: false })">
         {{ item.label }}
       </button>
-      <button class="favorites-tab" :class="{ active: viewMode === 'favorites' }" @click="viewMode = 'favorites'">收藏 {{ favorites.length || '' }}</button>
+      <button class="favorites-tab" :class="{ active: viewMode === 'favorites' }" @click="viewMode = 'favorites'"><Bookmark :size="14" />收藏<span v-if="favorites.length" class="tab-count">{{ favorites.length }}</span></button>
     </nav>
 
     <section v-if="showFilters" class="filter-panel">
+      <div class="filter-panel-head">
+        <div><SlidersHorizontal :size="15" /><strong>高级筛选</strong><span v-if="activeFilterCount">已启用 {{ activeFilterCount }} 项</span></div>
+        <button :disabled="!activeFilterCount" @click="resetFilters"><RefreshCw :size="13" />重置</button>
+      </div>
+      <div class="filter-grid">
       <label><span>匹配方式</span><select v-model="matchMode"><option value="all">包含全部词</option><option value="phrase">完整短语</option><option value="any">包含任一词</option></select></label>
       <label><span>发送角色</span><select v-model="role"><option value="">全部角色</option><option value="user">用户</option><option value="assistant">Agent</option><option value="system">系统</option></select></label>
       <label><span>Agent</span><input v-model="agent" placeholder="全部 Agent"></label>
@@ -205,13 +237,14 @@ onUnmounted(() => activeRequest?.abort())
       <label><span>时间</span><select v-model="timeRange"><option value="all">全部时间</option><option value="today">今天</option><option value="3days">最近 3 天</option><option value="week">最近 7 天</option><option value="month">最近 30 天</option><option value="custom">自定义</option></select></label>
       <label><span>排序</span><select v-model="sort"><option value="newest">最新在前</option><option value="oldest">最早在前</option></select></label>
       <template v-if="timeRange === 'custom'"><label><span>开始日期</span><input v-model="startDate" type="date"></label><label><span>结束日期</span><input v-model="endDate" type="date"></label></template>
-      <div class="filter-actions"><button @click="resetFilters">重置</button><button class="apply-filter" :disabled="!query.trim()" @click="search(1)">应用筛选</button></div>
+      </div>
+      <div class="filter-actions"><button class="apply-filter" :disabled="!query.trim()" @click="search(1)"><Search :size="14" />应用筛选</button></div>
     </section>
 
     <main class="search-content">
       <section v-if="viewMode === 'favorites'" class="saved-view">
-        <div class="result-summary"><strong>收藏消息</strong><span>{{ favorites.length }} 条</span></div>
-        <p v-if="!favorites.length" class="empty-state">还没有收藏消息</p>
+        <div class="result-summary"><div><Bookmark :size="16" /><strong>收藏消息</strong></div><span>{{ favorites.length }} 条</span></div>
+        <div v-if="!favorites.length" class="empty-state"><Bookmark :size="24" /><strong>还没有收藏消息</strong><span>搜索结果中的收藏内容会出现在这里</span></div>
         <div v-else class="result-list">
           <ConversationSearchResult v-for="item in favorites" :key="item.id" :item="item" :terms="item.matchTerms || []" favorite @open="goTo" @task="goToTask" @favorite="toggleFavorite" @copy="copyResult" @copy-markdown="copyMarkdown" />
         </div>
@@ -220,24 +253,34 @@ onUnmounted(() => activeRequest?.abort())
       <template v-else>
         <section v-if="!searched" class="start-view">
           <div v-if="recentSearches.length" class="recent-section">
-            <div class="result-summary"><strong>最近搜索</strong><button @click="recentSearches = []; persist(RECENT_KEY, [])">清除</button></div>
-            <div class="recent-list"><button v-for="item in recentSearches" :key="item.id" @click="applyRecent(item)"><span>{{ item.query }}</span><small>{{ formatTime(item.searchedAt) }}</small></button></div>
+            <div class="result-summary">
+              <div><Clock3 :size="16" /><strong>最近搜索</strong><span>{{ recentSearches.length }} 条</span></div>
+              <button class="clear-history" @click="recentSearches = []; persist(RECENT_KEY, [])"><Trash2 :size="13" />清除记录</button>
+            </div>
+            <div class="recent-list">
+              <button v-for="item in recentSearches" :key="item.id" @click="applyRecent(item)">
+                <span class="recent-icon"><Search :size="15" /></span>
+                <span class="recent-copy"><strong>{{ item.query }}</strong><small>{{ recentMeta(item) }}</small></span>
+                <time>{{ formatTime(item.searchedAt) }}</time>
+                <ChevronRight :size="16" />
+              </button>
+            </div>
           </div>
-          <p v-else class="empty-state">暂无搜索记录</p>
+          <div v-else class="empty-state"><Search :size="24" /><strong>输入关键词开始搜索</strong><span>暂无最近搜索记录</span></div>
         </section>
 
-        <p v-else-if="errorMessage" class="error-state">{{ errorMessage }} <button @click="search(response.page || 1, { remember: false })">重试</button></p>
-        <p v-else-if="loading && !results.length" class="empty-state">正在搜索...</p>
+        <div v-else-if="errorMessage" class="error-state"><strong>搜索暂时不可用</strong><span>{{ errorMessage }}</span><button @click="search(response.page || 1, { remember: false })"><RefreshCw :size="14" />重试</button></div>
+        <div v-else-if="loading && !results.length" class="empty-state"><LoaderCircle :size="24" class="spinning" /><strong>正在搜索</strong><span>正在整理匹配消息</span></div>
         <section v-else class="results-view">
-          <div class="result-summary"><strong>{{ response.total || 0 }} 条结果</strong><span v-if="response.total">第 {{ response.page }} / {{ response.page_count }} 页</span></div>
-          <p v-if="!results.length" class="empty-state">没有找到匹配消息</p>
+          <div class="result-summary"><div><Search :size="16" /><strong>搜索结果</strong><span>{{ response.total || 0 }} 条</span></div><span v-if="response.total">第 {{ response.page }} / {{ response.page_count }} 页</span></div>
+          <div v-if="!results.length" class="empty-state"><Search :size="24" /><strong>没有找到匹配消息</strong><span>调整关键词或筛选条件后重新搜索</span></div>
           <div v-else class="result-list">
             <ConversationSearchResult v-for="item in results" :key="item.id" :item="item" :terms="terms" :favorite="favoriteIds.has(item.id)" @open="goTo" @task="goToTask" @favorite="toggleFavorite" @copy="copyResult" @copy-markdown="copyMarkdown" />
           </div>
           <nav v-if="response.page_count > 1" class="pagination" aria-label="搜索结果分页">
-            <button :disabled="response.page <= 1 || loading" @click="search(response.page - 1, { remember: false })">上一页</button>
+            <button :disabled="response.page <= 1 || loading" @click="search(response.page - 1, { remember: false })"><ChevronLeft :size="14" />上一页</button>
             <span>{{ response.page }} / {{ response.page_count }}</span>
-            <button :disabled="!response.has_more || loading" @click="search(response.page + 1, { remember: false })">下一页</button>
+            <button :disabled="!response.has_more || loading" @click="search(response.page + 1, { remember: false })">下一页<ChevronRight :size="14" /></button>
           </nav>
         </section>
       </template>
@@ -293,5 +336,98 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .filter-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px; }
   .filter-actions { grid-column: 1 / -1; }
   .start-view, .results-view, .saved-view { padding: 10px 10px 90px; }
+}
+
+/* Search workspace redesign */
+.conversation-search-page { background:var(--bg-secondary); }
+.search-workspace-header { display:grid; gap:14px; padding:18px 24px 14px; border-bottom:1px solid var(--border-color); background:var(--bg-primary); }
+.search-heading { display:flex; align-items:center; gap:10px; }
+.heading-icon { width:34px; height:34px; display:flex; align-items:center; justify-content:center; flex:0 0 auto; border-radius:7px; color:#0f766e; background:rgba(13,148,136,.09); border:1px solid rgba(13,148,136,.14); }
+.search-heading > div { display:grid; gap:2px; min-width:0; }
+.search-heading strong { color:var(--text-primary); font-size:14px; }
+.search-heading span:not(.heading-icon) { color:var(--text-muted); font-size:10.5px; }
+.search-command-bar { width:100%; max-width:1180px; display:grid; grid-template-columns:minmax(240px,1fr) auto auto; gap:8px; padding:0; border:0; background:transparent; }
+.search-input-wrap { height:42px; }
+.search-symbol { position:absolute; left:13px; color:var(--text-muted); pointer-events:none; }
+.search-input-wrap input { min-height:42px; padding:9px 40px; border-radius:7px; background:var(--surface); font-size:12.5px; }
+.search-input-wrap input::placeholder { color:var(--text-muted); }
+.search-input-wrap input:focus { border-color:rgba(37,99,235,.45); outline:3px solid rgba(37,99,235,.08); }
+.icon-button { display:flex; align-items:center; justify-content:center; border-radius:5px; }
+.icon-button:hover { background:var(--bg-secondary); color:var(--text-primary); }
+.filter-button,.primary-button { min-height:42px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:8px 14px; border-radius:7px; }
+.filter-button:hover { background:var(--bg-secondary); color:var(--text-primary); }
+.filter-count,.tab-count { min-width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; padding:0 5px; border-radius:9px; background:rgba(37,99,235,.1); color:#2563eb; font-size:9.5px; }
+.primary-button { min-width:84px; background:#2563eb; border-color:#2563eb; }
+.primary-button:hover:not(:disabled) { background:#1d4ed8; }
+.source-tabs { min-height:44px; align-items:center; gap:4px; padding:0 24px; background:var(--bg-primary); }
+.source-tabs button { min-height:32px; display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:6px; }
+.source-tabs button:hover { color:var(--text-primary); background:var(--bg-secondary); }
+.source-tabs button.active { color:#1d4ed8; background:rgba(37,99,235,.07); }
+.source-tabs button.active::after { display:none; }
+.source-tabs .favorites-tab { margin-left:auto; }
+.filter-panel { display:grid; grid-template-columns:1fr auto; gap:12px 16px; padding:14px 24px 16px; background:var(--bg-primary); box-shadow:0 7px 18px rgba(15,23,42,.035); }
+.filter-panel-head { grid-column:1 / -1; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.filter-panel-head > div { display:flex; align-items:center; gap:7px; color:var(--text-muted); }
+.filter-panel-head strong { color:var(--text-primary); font-size:11.5px; }
+.filter-panel-head span { font-size:10px; }
+.filter-panel-head button { display:inline-flex; align-items:center; gap:5px; padding:4px 7px; border:0; background:transparent; color:var(--text-muted); font:inherit; font-size:10.5px; cursor:pointer; }
+.filter-grid { display:grid; grid-template-columns:repeat(6,minmax(110px,1fr)); gap:10px; min-width:0; }
+.filter-panel label { gap:6px; }
+.filter-panel label span { font-size:10px; }
+.filter-panel input,.filter-panel select { min-height:36px; border-radius:6px; background:var(--surface); }
+.filter-actions { align-items:end; }
+.filter-actions .apply-filter { min-height:36px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; border-radius:6px; }
+.search-content { background:var(--bg-secondary); scrollbar-gutter:stable; }
+.start-view,.results-view,.saved-view { width:min(100%,1040px); padding:22px 24px 48px; }
+.result-summary { min-height:38px; margin-bottom:8px; }
+.result-summary > div { display:flex; align-items:center; gap:7px; color:var(--text-muted); }
+.result-summary strong { font-size:12.5px; }
+.result-summary > div > span { padding-left:7px; border-left:1px solid var(--border-color); font-size:10.5px; }
+.clear-history { display:inline-flex; align-items:center; gap:5px; padding:5px 7px !important; border-radius:5px !important; color:var(--text-muted) !important; font-size:10.5px !important; }
+.clear-history:hover { background:var(--bg-primary) !important; color:#b91c1c !important; }
+.recent-section { max-width:900px; }
+.recent-list { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; border:0; }
+.recent-list button { min-width:0; display:grid; grid-template-columns:30px minmax(0,1fr) auto 16px; align-items:center; gap:10px; padding:11px 12px; border:1px solid var(--border-color); border-radius:7px; background:var(--bg-primary); transition:border-color .18s,background .18s,transform .18s; }
+.recent-list button:hover { border-color:rgba(37,99,235,.26); background:var(--surface); transform:translateY(-1px); }
+.recent-icon { width:30px; height:30px; display:flex; align-items:center; justify-content:center; border-radius:6px; color:#0f766e; background:rgba(13,148,136,.08); }
+.recent-copy { display:grid; gap:3px; min-width:0; }
+.recent-copy strong { overflow:hidden; color:var(--text-primary); font-size:11.5px; text-overflow:ellipsis; white-space:nowrap; }
+.recent-copy small { overflow:hidden; color:var(--text-muted); font-size:9.5px; text-overflow:ellipsis; white-space:nowrap; }
+.recent-list time { color:var(--text-muted); font-size:9.5px; white-space:nowrap; }
+.recent-list button > svg { color:var(--text-muted); }
+.result-list { display:grid; gap:9px; border:0; }
+.result-list :deep(.search-result-row) { padding:14px 15px 12px; border:1px solid var(--border-color); border-radius:7px; background:var(--bg-primary); transition:border-color .18s,box-shadow .18s; }
+.result-list :deep(.search-result-row:hover) { border-color:rgba(37,99,235,.24); box-shadow:0 5px 16px rgba(15,23,42,.035); }
+.empty-state,.error-state { min-height:260px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; margin:0; padding:48px 20px; color:var(--text-muted); text-align:center; }
+.empty-state > svg { color:#94a3b8; }
+.empty-state strong,.error-state strong { color:var(--text-primary); font-size:12.5px; }
+.empty-state span,.error-state span { font-size:10.5px; }
+.error-state { color:#b91c1c; }
+.error-state button { display:inline-flex; align-items:center; gap:5px; margin:5px 0 0; padding:6px 9px; border:1px solid rgba(185,28,28,.18); border-radius:6px; background:rgba(239,68,68,.06); color:#b91c1c; }
+.pagination button { display:inline-flex; align-items:center; gap:4px; border-radius:6px; }
+.spinning { animation:search-spin .85s linear infinite; }
+@keyframes search-spin { to { transform:rotate(360deg); } }
+
+@media (max-width:980px) {
+  .filter-panel { grid-template-columns:1fr; }
+  .filter-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .filter-actions { justify-content:flex-end; }
+}
+
+@media (max-width:640px) {
+  .search-workspace-header { padding:12px 10px 10px; gap:10px; }
+  .search-heading span:not(.heading-icon) { display:none; }
+  .search-command-bar { grid-template-columns:minmax(0,1fr) auto; padding:0; }
+  .search-command-bar .search-input-wrap { grid-column:1 / -1; }
+  .filter-button,.primary-button { min-height:36px; }
+  .source-tabs { padding:5px 8px; }
+  .source-tabs .favorites-tab { margin-left:0; }
+  .filter-panel { padding:12px 10px; }
+  .filter-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .filter-actions .apply-filter { width:100%; justify-content:center; }
+  .start-view,.results-view,.saved-view { padding:14px 10px 90px; }
+  .recent-list { grid-template-columns:1fr; }
+  .recent-list time { display:none; }
+  .result-list :deep(.search-result-row) { padding:12px; }
 }
 </style>

@@ -68,7 +68,6 @@ const crypto = __importStar(require("crypto"));
 const rag_1 = require("../knowledge/rag");
 const utils_1 = require("../../core/utils");
 const group_orchestrator_1 = require("../collaboration/group-orchestrator");
-const pet_generation_1 = require("../pets/pet-generation");
 const db_1 = require("../../core/db");
 const collaboration_1 = require("../collaboration/collaboration");
 const display_1 = require("../collaboration/display");
@@ -376,7 +375,6 @@ const globalAgentAgenticRuntime = (0, global_agent_agentic_runtime_1.createGloba
     controlGlobalMissionSupervisor: mission_supervisor_1.controlGlobalMissionSupervisor,
     createGlobalDevelopmentMission: collaboration_1.createGlobalDevelopmentMission,
     createRequirementEpicWithChildren: collaboration_1.createRequirementEpicWithChildren,
-    createPetGenerationJob: pet_generation_1.createPetGenerationJob,
     executeFeishuAction,
     executePlayMusic,
     executeStopMusic,

@@ -58,6 +58,7 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
           <div class="asset-title-row">
             <span class="asset-title">{{ row.label }}</span>
             <span class="asset-group">{{ row.group }}</span>
+            <span v-if="imageErrors[row.assetPath]" class="asset-missing">资源缺失</span>
           </div>
           <div class="asset-path" :title="row.assetPath">{{ row.assetPath }}</div>
           <div class="asset-file">{{ row.useV2Preview ? (row.previewState || 'preview') : assetFileName(row.assetPath) }}</div>
@@ -103,6 +104,7 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
 .asset-title-row { display: flex; align-items: center; gap: 8px; }
 .asset-title { color: var(--text-primary); font-weight: 800; font-size: 13px; }
 .asset-group { padding: 2px 6px; border-radius: 999px; background: rgba(100,116,139,0.1); color: var(--text-muted); font-size: 10px; font-weight: 800; }
+.asset-missing { flex:0 0 auto;padding:2px 5px;border-radius:5px;background:rgba(239,68,68,.1);color:#b42318;font-size:9px;font-weight:800; }
 .asset-path, .asset-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .asset-path { color: var(--text-secondary); margin-top: 4px; }
 .asset-file { color: var(--text-muted); margin-top: 2px; }

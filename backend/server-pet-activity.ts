@@ -15,7 +15,6 @@ export function createPetActivityRuntime(deps: any) {
     path,
     projectChatRuns,
     saveProjectChatRuns,
-    setPetGenerationLifecycleNotifier,
     url
   } = deps;
 
@@ -461,27 +460,6 @@ export function createPetActivityRuntime(deps: any) {
       runtime: coordinated?.runtime || "",
     };
   }
-  
-  setPetGenerationLifecycleNotifier(job => {
-    const terminal = new Set(["completed", "failed", "cancelled"]);
-    const state = job.status === "completed"
-      ? "happy"
-      : job.status === "failed"
-        ? "error"
-        : job.status === "validating" || job.status === "installing"
-          ? "reviewing"
-          : job.status === "cancelled"
-            ? "idle"
-            : "building";
-    setAgentActivity(
-      GLOBAL_PET_AGENT_NAME,
-      state,
-      job.stageLabel,
-      { tab: "pets" },
-      terminal.has(job.status) ? (job.status === "cancelled" ? 1000 : 12000) : 30 * 60 * 1000,
-      { actorKind: "global", source: "pet-generation", displayName: "宠物生成" },
-    );
-  });
   
   function getPetAgents() {
     return [getGlobalPetAgent(), getMusicPetAgent()];

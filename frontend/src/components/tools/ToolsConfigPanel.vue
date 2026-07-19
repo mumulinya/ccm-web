@@ -1,6 +1,31 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { BookOpen, ChevronLeft, ChevronRight, ExternalLink, Package, RefreshCw, Search, Server, ShieldCheck } from '@lucide/vue'
+import {
+  Activity,
+  Blocks,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleGauge,
+  Cpu,
+  ExternalLink,
+  LayoutDashboard,
+  ListChecks,
+  Package,
+  PackageOpen,
+  Plug,
+  RefreshCw,
+  ScrollText,
+  Search,
+  Server,
+  ShieldCheck,
+  ShoppingBag,
+  Sparkles,
+  TriangleAlert,
+  Wrench,
+} from '@lucide/vue'
 import { toolsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import EmptyState from '../common/EmptyState.vue'
@@ -90,6 +115,33 @@ const isBundledInternalMcp = (item) => item?.type === 'mcp' && internalMcpNames.
 const externalSkillLabel = (skill) => skill?.origin === 'external' || skill?.sourceType === 'marketplace'
   ? '外部下载'
   : '用户创建'
+
+const sectionMeta = computed(() => ({
+  overview: ['工具运行概况', '查看连接、授权与 Agent 执行链路的整体健康状态'],
+  core: ['内置核心工具', '由 CCM 提供并受系统管理的基础工具'],
+  'internal-mcp': ['内部 MCP', '随项目安装并由 CCM 管理的 MCP 服务'],
+  mcp: ['外部 MCP', '配置外部服务及客户端连接'],
+  authorization: ['授权总览', '核对项目与群聊可使用的 MCP 和 Skill'],
+  'chain-verification': ['链路验收', '验证授权、运行时与真实调用是否完整贯通'],
+  'invocation-audit': ['调用审计', '查看子 Agent 最近的工具与 Skill 调用记录'],
+  runtime: ['Agent 运行时', '检查第三方 Agent 的 CLI、授权交付与目录同步状态'],
+  'custom-skills': ['外部 Skill 包', '管理下载到本机的 Skill 包'],
+  'custom-prompt': ['Skill 管理', '管理内置和外部 Prompt Skill'],
+  marketplace: ['技能商城', '发现并安装可用的 Skill 与 MCP'],
+}[currentFilter.value] || ['工具与技能', '管理 Agent 可使用的能力']))
+
+const runtimeNeedsAttention = computed(() => Math.max(
+  0,
+  Number(runtimeReadiness.value.summary?.total || 0) - Number(runtimeReadiness.value.summary?.ready || 0),
+))
+const runtimeRows = computed(() => [...(runtimeReadiness.value.readiness || [])].sort((left, right) => {
+  if (left.overallReady !== right.overallReady) return left.overallReady ? 1 : -1
+  return String(left.runtime || '').localeCompare(String(right.runtime || ''))
+}))
+const runtimeChecks = (item) => Array.isArray(item?.checks) ? item.checks : []
+const runtimePassingChecks = (item) => runtimeChecks(item).filter(check => check?.ok).length
+const runtimeFailedChecks = (item) => runtimeChecks(item).filter(check => !check?.ok)
+const runtimeOrderedChecks = (item) => [...runtimeChecks(item)].sort((left, right) => Number(left?.ok) - Number(right?.ok))
 
 // 静态定义的系统核心内置工具列表
 const coreToolsList = [

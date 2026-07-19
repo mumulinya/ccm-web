@@ -3,7 +3,6 @@ import { toast } from '../../utils/toast.js'
 import PetAgentList from './PetAgentList.vue'
 import PetSkinGrid from './PetSkinGrid.vue'
 import PetAssetGrid from './PetAssetGrid.vue'
-import PetGenerationModal from './PetGenerationModal.vue'
 import PetSprite from './PetSprite.vue'
 
 export function usePetMenu(props, emit) {
@@ -22,6 +21,14 @@ export function usePetMenu(props, emit) {
   const MUSIC_PET_AGENT_NAME = 'music-agent'
   const renamingSkinId = ref('')
   const skinNameDrafts = ref({})
+  const skinSearch = ref('')
+  const skinFilter = ref('all')
+  const libraryPetType = ref('yuexinmiao')
+  const previewState = ref('idle')
+  const detailOpen = ref(false)
+  const configsLoading = ref(true)
+  const configsError = ref('')
+  const engineBusy = ref(false)
 
   const customPetTypes = ref([])
   const imageErrors = ref({})
@@ -32,16 +39,22 @@ export function usePetMenu(props, emit) {
 
   // 加载宠物配置
   const loadConfigs = async () => {
+    configsLoading.value = true
+    configsError.value = ''
     try {
       const res = await fetch('/api/pets/config')
+      if (!res.ok) throw new Error(`宠物配置请求失败 (${res.status})`)
       const data = await res.json()
       customPetTypes.value = data.customTypes || []
       petConfigs.value = normalizePetConfigs(data.configs || {})
       petPositions.value = data.positions || {}
-    } catch {
+    } catch (error) {
       petConfigs.value = {}
       petPositions.value = {}
       customPetTypes.value = []
+      configsError.value = error?.message || '宠物配置加载失败'
+    } finally {
+      configsLoading.value = false
     }
   }
 
@@ -65,7 +78,7 @@ export function usePetMenu(props, emit) {
           customPetTypes.value = merged
         } catch {}
       }
-      await fetch('/api/pets/config', {
+      const response = await fetch('/api/pets/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -74,7 +87,13 @@ export function usePetMenu(props, emit) {
           customTypes: customTypesToSave
         })
       })
-    } catch {}
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok || result.success === false) throw new Error(result.error || `保存失败 (${response.status})`)
+      return true
+    } catch (error) {
+      toast.error(error?.message || '宠物配置保存失败')
+      return false
+    }
   }
 
   // 检查桌面宠物状态
@@ -87,37 +106,78 @@ export function usePetMenu(props, emit) {
   }
 
   const launchDesktopPet = async () => {
+    engineBusy.value = true
     try {
       const res = await fetch('/api/pets/launch', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
         desktopPetRunning.value = true
+        toast.success('桌面宠物引擎已启动')
       } else {
-        alert(data.error || '启动失败')
+        throw new Error(data.error || '启动失败')
       }
     } catch (e) {
-      alert('启动失败: ' + e.message)
+      toast.error(`启动失败：${e.message}`)
+    } finally {
+      engineBusy.value = false
     }
   }
 
   const closeDesktopPet = async () => {
+    engineBusy.value = true
     try {
       const res = await fetch('/api/pets/close', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
         desktopPetRunning.value = false
+        toast.success('桌面宠物引擎已关闭')
       } else {
-        alert(data.error || '关闭失败')
+        throw new Error(data.error || '关闭失败')
       }
     } catch (e) {
-      alert('关闭失败: ' + e.message)
+      toast.error(`关闭失败：${e.message}`)
+    } finally {
+      engineBusy.value = false
     }
   }
 
   const BUILTIN_FALLBACK_PET_TYPE = 'yuexinmiao'
   const fallbackPetTypes = [
     { id: 'clawd', name: 'Clawd', emoji: '🦀', color: '#f97316' },
-    { id: 'yuexinmiao', name: '月薪喵', emoji: '🐱', color: '#22c55e' },
+    {
+      id: 'yuexinmiao',
+      name: '月薪喵',
+      emoji: '🐱',
+      color: '#b98268',
+      spriteVersionNumber: 2,
+      spriteRows: 9,
+      spritesheetPath: 'yuexinmiao1/spritesheet.webp',
+      format: 'hybrid',
+      pixelated: true,
+      sourceCreator: 'kiffin',
+      sourceUrl: 'https://codex-pet.org/zh/pets/yuexinmiao1/',
+      supplementalStateFiles: {
+        thinking: 'yuexinmiao1/thinking.svg',
+        planning: 'yuexinmiao1/planning.svg',
+        working: 'yuexinmiao1/working.svg',
+        building: 'yuexinmiao1/building.svg',
+        debugging: 'yuexinmiao1/debugging.svg',
+        reviewing: 'yuexinmiao1/reviewing.svg',
+        waiting: 'yuexinmiao1/waiting.svg',
+        juggling: 'yuexinmiao1/juggling.svg',
+        sweeping: 'yuexinmiao1/sweeping.svg',
+        carrying: 'yuexinmiao1/carrying.svg',
+        notification: 'yuexinmiao1/notification.svg',
+        attention: 'yuexinmiao1/attention.svg',
+        happy: 'yuexinmiao1/happy.svg',
+        error: 'yuexinmiao1/error.svg',
+        yawning: 'yuexinmiao1/yawning.svg',
+        dozing: 'yuexinmiao1/dozing.svg',
+        collapsing: 'yuexinmiao1/collapsing.svg',
+        sleeping: 'yuexinmiao1/sleeping.svg',
+        waking: 'yuexinmiao1/waking.svg',
+      },
+    },
     { id: 'cloudling', name: '小云朵', emoji: '☁️', color: '#38bdf8' },
     { id: 'calico', name: '三花猫', emoji: '🐱', color: '#d97706' },
     { id: 'ghost', name: '小幽灵', emoji: '👻', color: '#B39DDB' },
@@ -127,13 +187,31 @@ export function usePetMenu(props, emit) {
   const petTypes = computed(() => {
     return [...fallbackPetTypes, ...customPetTypes.value]
   })
+  const filteredPetTypes = computed(() => {
+    const keyword = skinSearch.value.trim().toLowerCase()
+    return petTypes.value.filter((pet) => {
+      const custom = customPetTypes.value.some(item => item.id === pet.id)
+      if (skinFilter.value === 'builtin' && custom) return false
+      if (skinFilter.value === 'custom' && !custom) return false
+      if (skinFilter.value === 'active' && !Object.values(petConfigs.value).some(config => config?.type === pet.id)) return false
+      return !keyword || `${pet.name || ''} ${pet.id || ''}`.toLowerCase().includes(keyword)
+    })
+  })
+  const selectedLibrarySkin = computed(() => petTypes.value.find(pet => pet.id === libraryPetType.value) || petTypes.value[0] || null)
   // 动作资源需包含生成宠（v2）；上传能力另由 canUploadAsset / 只读说明控制
   const editablePetTypes = computed(() => petTypes.value)
   const getPetTypeInfo = (type) => petTypes.value.find(pet => pet.id === type) || null
   const isV2PetType = (type) => Number(getPetTypeInfo(type)?.spriteVersionNumber) === 2
+  const usesStatefulPetRenderer = (type) => {
+    const pet = getPetTypeInfo(type)
+    return fallbackPetTypes.some(item => item.id === type)
+      || Number(pet?.spriteVersionNumber) === 2
+      || String(pet?.format || '').toLowerCase() === 'svg'
+      || pet?.generationEngine === 'global-agent-svg'
+  }
   const assetsReadonlyNotice = computed(() => (
     isV2PetType(actionPetType.value)
-      ? '生成宠从整表 spritesheet 按状态预览动作（与工作台策略对应）；不可按单动作上传 SVG/PNG'
+      ? '当前皮肤使用整表 spritesheet 按状态预览动作（与工作台策略对应）；不可按单动作上传 SVG/PNG'
       : ''
   ))
   const actionPetSkin = computed(() => getPetTypeInfo(actionPetType.value))
@@ -469,7 +547,8 @@ export function usePetMenu(props, emit) {
     const type = normalizePetType(actionPetType.value)
     const custom = customPetTypes.value.find(c => c.id === type)
     if (Number(custom?.spriteVersionNumber) === 2 || isV2PetType(type)) {
-      const sheet = custom?.spritesheetPath || `generated/${type}/spritesheet.webp`
+      const skin = getPetTypeInfo(type)
+      const sheet = skin?.spritesheetPath || `generated/${type}/spritesheet.webp`
       const rows = [{
         key: `${type}:spritesheet`,
         group: '整表',
@@ -478,13 +557,14 @@ export function usePetMenu(props, emit) {
         readonly: true,
       }]
       for (const action of stateActions) {
+        const supplementalFile = skin?.supplementalStateFiles?.[action.state]
         rows.push({
           key: `${type}:state:${action.state}`,
           group: '状态预览',
           label: action.label,
           state: action.state,
           previewState: action.state,
-          assetPath: `${sheet} · ${action.state}`,
+          assetPath: supplementalFile || `${sheet} · ${action.state}`,
           readonly: true,
           useV2Preview: true,
         })
@@ -493,12 +573,13 @@ export function usePetMenu(props, emit) {
         const previewState = action.key === 'drag'
           ? 'drag'
           : (action.key === 'double' ? 'happy' : 'attention')
+        const supplementalFile = skin?.supplementalStateFiles?.[previewState]
         rows.push({
           key: `${type}:reaction:${action.key}`,
           group: '交互预览',
           label: action.label,
           previewState,
-          assetPath: `${sheet} · ${previewState}`,
+          assetPath: supplementalFile || `${sheet} · ${previewState}`,
           readonly: true,
           useV2Preview: true,
         })
@@ -667,27 +748,66 @@ export function usePetMenu(props, emit) {
     }
     const config = getConfig(selectedAgent.value)
     petConfigs.value = { ...petConfigs.value, [selectedAgent.value]: { ...config, label } }
-    await saveConfigs()
+    if (!await saveConfigs()) return
     emit('agents-updated')
     toast.success('名称已保存')
   }
 
-  const updatePetType = (agent, type) => {
+  const updatePetType = async (agent, type) => {
     const config = getConfig(agent)
     petConfigs.value = { ...petConfigs.value, [agent]: { ...config, type } }
-    saveConfigs()
+    return await saveConfigs()
   }
 
-  const togglePet = (agent) => {
+  const togglePet = async (agent) => {
     const config = getConfig(agent)
     petConfigs.value = { ...petConfigs.value, [agent]: { ...config, enabled: !config.enabled } }
-    saveConfigs()
+    return await saveConfigs()
   }
 
   const selectAgent = (agent) => {
     selectedAgent.value = agent
+    libraryPetType.value = getConfig(agent).type
+    actionPetType.value = libraryPetType.value
+    previewState.value = 'idle'
+    detailOpen.value = true
     syncAgentLabelDraft()
     rightTab.value = 'config'
+  }
+
+  const selectLibraryPet = (type) => {
+    libraryPetType.value = normalizePetType(type)
+    actionPetType.value = libraryPetType.value
+    previewState.value = 'idle'
+    rightTab.value = 'config'
+    detailOpen.value = true
+  }
+
+  const applyLibraryPet = async () => {
+    if (!selectedAgent.value || !selectedLibrarySkin.value) return
+    if (!await updatePetType(selectedAgent.value, selectedLibrarySkin.value.id)) return
+    toast.success(`已为 ${getAgentLabel(selectedAgentInfo.value)} 应用 ${selectedLibrarySkin.value.name}`)
+  }
+
+  const exportSelectedPet = () => {
+    if (!selectedLibrarySkin.value) return
+    const payload = {
+      schema: 'ccm-pet-selection-v1',
+      exported_at: new Date().toISOString(),
+      agent: selectedAgent.value,
+      agent_label: getAgentLabel(selectedAgentInfo.value),
+      config: selectedAgent.value ? getConfig(selectedAgent.value) : null,
+      skin: selectedLibrarySkin.value,
+      assets: getPetAssetSpec(selectedLibrarySkin.value.id),
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${selectedLibrarySkin.value.id}-pet-config.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    toast.success('宠物配置已导出')
   }
 
   const allEnabled = computed(() => {
@@ -695,27 +815,20 @@ export function usePetMenu(props, emit) {
     return allPetAgents.value.every(a => getConfig(a.name).enabled !== false)
   })
 
-  const toggleAll = () => {
+  const toggleAll = async () => {
     const nextVal = !allEnabled.value
     const newConfigs = { ...petConfigs.value }
     for (const p of allPetAgents.value) {
       newConfigs[p.name] = { ...(newConfigs[p.name] || { type: getDefaultType(p.name) }), enabled: nextVal }
     }
     petConfigs.value = newConfigs
-    saveConfigs()
+    return await saveConfigs()
   }
-
-  const showGenerationModal = ref(false)
 
   const allPetAgents = computed(() => {
     const systemPetNames = new Set([GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME])
     return props.agents.filter(agent => systemPetNames.has(agent.name))
   })
-
-  const handleGenerationCompleted = async () => {
-    await loadConfigs()
-    emit('agents-updated')
-  }
 
   const isCustomSkin = (type) => {
     return customPetTypes.value.some(c => c.id === type)
@@ -730,7 +843,8 @@ export function usePetMenu(props, emit) {
       }
     }
     if (renamingSkinId.value === type) renamingSkinId.value = ''
-    await saveConfigs({ replaceCustomTypes: true })
+    if (libraryPetType.value === type) libraryPetType.value = BUILTIN_FALLBACK_PET_TYPE
+    if (!await saveConfigs({ replaceCustomTypes: true })) return
     toast.success('外观分类已彻底删除')
   }
 
@@ -761,7 +875,7 @@ export function usePetMenu(props, emit) {
     customPetTypes.value = customPetTypes.value.map((item) => (
       item.id === id ? { ...item, name } : item
     ))
-    await saveConfigs()
+    if (!await saveConfigs()) return
     renamingSkinId.value = ''
     toast.success('皮肤名称已保存')
   }
@@ -784,6 +898,8 @@ export function usePetMenu(props, emit) {
     // 宠物空间只保留两个系统工作伴侣。
     if (allPetAgents.value.length > 0) {
       selectedAgent.value = allPetAgents.value[0].name
+      libraryPetType.value = getConfig(selectedAgent.value).type
+      actionPetType.value = libraryPetType.value
       syncAgentLabelDraft()
     }
   })
@@ -794,19 +910,21 @@ export function usePetMenu(props, emit) {
   })
 
   return {
-    PetAgentList, PetSkinGrid, PetAssetGrid, PetGenerationModal, PetSprite, rightTab,
+    PetAgentList, PetSkinGrid, PetAssetGrid, PetSprite, rightTab,
     selectedAgent, agentLabelDraft, desktopPetRunning, petConfigs, petPositions, actionPetType,
     assetVersion, uploadInputs, uploadingAsset, projectPetStrategy, GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME,
     customPetTypes, imageErrors, handleImageError, isPixelated, loadConfigs, saveConfigs,
     checkDesktopPet, launchDesktopPet, closeDesktopPet, BUILTIN_FALLBACK_PET_TYPE, fallbackPetTypes, petTypes,
-    editablePetTypes, getPetTypeInfo, isV2PetType, assetsReadonlyNotice, actionPetSkin, normalizePetType, normalizePetConfigs, getPetIconPath,
+    editablePetTypes, getPetTypeInfo, isV2PetType, usesStatefulPetRenderer, assetsReadonlyNotice, actionPetSkin, normalizePetType, normalizePetConfigs, getPetIconPath,
     stateActions, reactionActions, fallbackProjectPetStrategy, getStateLabel, formatStrategyDuration, loadPetActionStrategy,
     stateFileMap, defaultReactions, specialPetAssets, getPetAssetSpec, makeAssetPath, actionAssetRows,
     assetUrl, assetFileName, canUploadAsset, setUploadInput, chooseAssetFile, uploadAssetFile,
     getAgentLabel, agentStateLabels, getAgentStateLabel, getAgentStateDetail, getDefaultType, getConfig,
     selectedAgentInfo, isMusicAgentSelected, isSystemAgentSelected, workspaceMood, companionSignals, syncAgentLabelDraft,
     saveAgentLabel, updatePetType, togglePet, selectAgent, allEnabled, toggleAll,
-    showGenerationModal, allPetAgents, handleGenerationCompleted, isCustomSkin, deleteCustomSkin,
+    allPetAgents, isCustomSkin, deleteCustomSkin,
     skinNameDrafts, beginRenameSkin, setSkinNameDraft, saveCustomSkinName, cancelRenameSkin, renamingSkinId,
+    skinSearch, skinFilter, libraryPetType, previewState, detailOpen, configsLoading, configsError, engineBusy,
+    filteredPetTypes, selectedLibrarySkin, selectLibraryPet, applyLibraryPet, exportSelectedPet,
   }
 }

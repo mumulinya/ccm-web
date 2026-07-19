@@ -75,7 +75,6 @@ const tools_1 = require("./modules/tools/tools");
 const terminal_1 = require("./modules/tools/terminal");
 const pets_1 = require("./modules/pets/pets");
 const pet_activity_coordinator_1 = require("./modules/pets/pet-activity-coordinator");
-const pet_generation_1 = require("./modules/pets/pet-generation");
 const music_1 = require("./modules/music/music");
 const collaboration_1 = require("./modules/collaboration/collaboration");
 const storage_1 = require("./modules/collaboration/storage");
@@ -123,7 +122,6 @@ const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, M
     path,
     projectChatRuns: chat_runs_1.projectChatRuns,
     saveProjectChatRuns: chat_runs_1.saveProjectChatRuns,
-    setPetGenerationLifecycleNotifier: pet_generation_1.setPetGenerationLifecycleNotifier,
     url
 });
 // === Agent 并行/同步调用底座 ===
@@ -861,7 +859,6 @@ function bootstrapServerRuntime(startupCollabCtx, port) {
         reconcileTaskAgentInvocationRecovery: task_agent_invocation_lineage_1.reconcileTaskAgentInvocationRecovery,
         recoverChildTypedMemoryDispatchWal: memory_2.recoverChildTypedMemoryDispatchWal,
         recoverGroupTypedMemoryArtifactTransactionsFleet: group_memory_index_1.recoverGroupTypedMemoryArtifactTransactionsFleet,
-        recoverPetGenerationJobs: pet_generation_1.recoverPetGenerationJobs,
         refreshEnvPath: utils_1.refreshEnvPath,
         resumeSoakTest: soak_test_1.resumeSoakTest,
         resumeTaskQueues: collaboration_1.resumeTaskQueues,

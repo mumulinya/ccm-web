@@ -2,14 +2,15 @@
   "pass": true,
   "checks": {
     "exactlyTwoPets": true,
-    "actorDetailVisible": true,
-    "v2AtlasVisible": true,
-    "generationJobsVisible": true,
+    "existingGeneratedPetStillVisible": true,
+    "imageGenerationEntryRemoved": true,
+    "skinGenerationEntryRemoved": true,
+    "generationModalRemoved": true,
+    "desktopResponsive": true,
     "mobileResponsive": true
   },
   "screenshots": [
-    "01-two-system-pets-desktop.png",
-    "02-generation-jobs-desktop.png",
-    "03-generation-mobile.png"
+    "01-pet-space-without-generator-desktop.png",
+    "02-pet-space-without-generator-mobile.png"
   ]
 }

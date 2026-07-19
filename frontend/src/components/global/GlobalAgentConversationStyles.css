@@ -1228,3 +1228,28 @@
   color: #f87171;
 }
 
+/* Ordinary text bubbles follow content; rich Agent cards keep their work area. */
+.chat-bubble-wrapper {
+  width: fit-content;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  align-items: flex-start;
+}
+
+.chat-bubble-wrapper .chat-bubble {
+  width: fit-content;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  max-width: 100%;
+}
+
+.chat-bubble-wrapper.structured-message {
+  width: min(85%, 960px);
+}
+
+.chat-bubble-wrapper.structured-message .chat-bubble {
+  width: 100%;
+}
+

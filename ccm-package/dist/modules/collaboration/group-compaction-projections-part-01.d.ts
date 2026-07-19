@@ -46,7 +46,7 @@ export declare function extractBlockedTaskSignals(messages: any[]): {
     text: string;
 }[];
 export declare function addQualityCheck(checks: GroupMemoryQualityCheck[], check: Omit<GroupMemoryQualityCheck, "score">): void;
-export declare function qualityPenalty(severity: GroupMemoryQualitySeverity): 8 | 45 | 30 | 16;
+export declare function qualityPenalty(severity: GroupMemoryQualitySeverity): 8 | 45 | 16 | 30;
 export declare function evaluateGroupMemorySummaryQuality(summary: ConversationSummary, fallback: ConversationSummary, messages: any[], memory?: any, options?: any): GroupMemoryQualityReport;
 export declare function extractFactAnchors(messages: any[]): FactAnchor[];
 export declare function mergeFactAnchors(existing?: any[], incoming?: FactAnchor[]): FactAnchor[];

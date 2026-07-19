@@ -6,9 +6,9 @@
 - Task: role-skills-test-agent-probe
 - Group: (none)
 - Original goal: 确认 TestAgent 的角色 Skill 已进入真实 work order
-- Started: 2026-07-14T12:25:52.538Z
-- Finished: 2026-07-14T12:25:52.710Z
-- Duration: 172ms
+- Started: 2026-07-19T09:03:33.913Z
+- Finished: 2026-07-19T09:03:34.091Z
+- Duration: 178ms
 
 ## Summary
 
@@ -20,7 +20,7 @@ TestAgent execution passed, but acceptance criteria have only report-status fall
 
 ## Commands
 
-- ccm-role-skill-probe command `node --version`: passed - exit=0; duration=158ms
+- ccm-role-skill-probe command `node --version`: passed - exit=0; duration=169ms
 
 ## HTTP
 
@@ -78,7 +78,7 @@ TestAgent execution passed, but acceptance criteria have only report-status fall
 ## Browser Evidence Temporal Integrity
 
 - status=complete; items=1; timestamps=0; durations=0; reportWindow=0; resultWindow=0; planMismatch=0; toleranceMs=100
-- report / report: complete - startedAt=2026-07-14T12:25:52.538Z; finishedAt=2026-07-14T12:25:52.710Z; durationMs=172
+- report / report: complete - startedAt=2026-07-19T09:03:33.913Z; finishedAt=2026-07-19T09:03:34.091Z; durationMs=178
 
 ## Browser Resource Lifecycle
 
@@ -124,7 +124,7 @@ TestAgent execution passed, but acceptance criteria have only report-status fall
 - Match strength counts: direct:0, token:0, fallback:1, none:0
 - Evidence source counts: matched_evidence:0, single_criterion_report_status:1, none:0
 - Attention: none
-- Verified 安全验证命令能够执行并记录结果 [fallback/single_criterion_report_status]: ccm-role-skill-probe: command node --version: exit=0; duration=158ms
+- Verified 安全验证命令能够执行并记录结果 [fallback/single_criterion_report_status]: ccm-role-skill-probe: command node --version: exit=0; duration=169ms
 
 ## Required Acceptance Evidence Gate
 
@@ -133,7 +133,7 @@ TestAgent execution passed, but acceptance criteria have only report-status fall
 
 ## Acceptance Coverage
 
-- 安全验证命令能够执行并记录结果: verified - ccm-role-skill-probe: command node --version: exit=0; duration=158ms; ccm-role-skill-probe: node --version: exit=0; duration=158ms
+- 安全验证命令能够执行并记录结果: verified - ccm-role-skill-probe: command node --version: exit=0; duration=169ms; ccm-role-skill-probe: node --version: exit=0; duration=169ms
 
 ## Risks
 
@@ -146,7 +146,7 @@ TestAgent execution passed, but acceptance criteria have only report-status fall
 
 ## Evidence
 
-- node --version: passed - exit=0; duration=158ms
+- node --version: passed - exit=0; duration=169ms
 - TestAgent JSON report: partial - C:\Users\admin\.cc-connect\ccm\scratch\role-skills-selftest\latest-run\test-agent-artifacts\report.json
 - TestAgent Markdown report: partial - C:\Users\admin\.cc-connect\ccm\scratch\role-skills-selftest\latest-run\test-agent-artifacts\report.md
 - TestAgent verdict JSON: partial - C:\Users\admin\.cc-connect\ccm\scratch\role-skills-selftest\latest-run\test-agent-artifacts\verdict.json
@@ -163,7 +163,7 @@ TestAgent execution passed, but acceptance criteria have only report-status fall
 - Status: passed
 - CWD: C:\Users\admin\.cc-connect\ccm
 - Exit code: 0
-- Duration: 158ms
+- Duration: 169ms
 
 **Command run:**
 ```text

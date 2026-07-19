@@ -55,10 +55,33 @@ const stateAliases = {
 }
 
 const BUILTIN_FALLBACK_PET_TYPE = 'yuexinmiao'
-const normalizePetType = (type) => petTypes[type] ? type : BUILTIN_FALLBACK_PET_TYPE
+const isV2 = computed(() => Number(props.skin?.spriteVersionNumber) === 2)
+const failedSupplemental = ref('')
+const supplementalStateFile = computed(() => (
+  String(props.skin?.supplementalStateFiles?.[props.state] || '').replace(/^\/+/, '')
+))
+const useSupplementalState = computed(() => (
+  isV2.value
+  && supplementalStateFile.value
+  && failedSupplemental.value !== supplementalStateFile.value
+))
+const supplementalStateUrl = computed(() => `/pets/${supplementalStateFile.value}`)
+const isGeneratedSvg = computed(() => (
+  String(props.skin?.format || '').toLowerCase() === 'svg'
+  || props.skin?.generationEngine === 'global-agent-svg'
+))
+const normalizePetType = (type) => (
+  petTypes[type] || (props.skin?.id && props.skin.id === type)
+    ? type
+    : BUILTIN_FALLBACK_PET_TYPE
+)
 const pet = computed(() => petTypes[normalizePetType(props.type)])
 
 const specialStateFiles = {
+  clawd: {
+    dir: 'clawd',
+    files: clawdStateFiles,
+  },
   yuexinmiao: {
     dir: '',
     files: {
@@ -142,6 +165,41 @@ const specialStateFiles = {
 const getSvgUrl = computed(() => {
   const t = normalizePetType(props.type);
   const s = props.state || 'idle';
+
+  if (isGeneratedSvg.value) {
+    const idlePhase = Math.floor(frame.value / 16) % 4
+    const generatedState = s === 'idle' && idlePhase === 1
+      ? 'idle_look'
+      : s === 'idle' && idlePhase === 3
+        ? 'idle_play'
+        : s
+    const generatedFiles = {
+      idle: `${t}-idle.svg`,
+      idle_look: `${t}-idle-action1.svg`,
+      idle_play: `${t}-idle-action2.svg`,
+      thinking: `${t}-thinking.svg`,
+      planning: `${t}-planning.svg`,
+      working: `${t}-working.svg`,
+      building: `${t}-building.svg`,
+      debugging: `${t}-debugging.svg`,
+      reviewing: `${t}-reviewing.svg`,
+      waiting: `${t}-waiting.svg`,
+      drag: `${t}-drag.svg`,
+      error: `${t}-error.svg`,
+      happy: `${t}-happy.svg`,
+      sleeping: `${t}-sleeping.svg`,
+      attention: `${t}-attention.svg`,
+      notification: `${t}-notification.svg`,
+      carrying: `${t}-carrying.svg`,
+      sweeping: `${t}-sweeping.svg`,
+      juggling: `${t}-juggling.svg`,
+      yawning: `${t}-yawning.svg`,
+      dozing: `${t}-dozing.svg`,
+      collapsing: `${t}-collapsing.svg`,
+      waking: `${t}-waking.svg`,
+    }
+    return `/pets/${generatedFiles[generatedState] || generatedFiles[stateAliases[generatedState]] || generatedFiles.idle}`
+  }
   
   if (specialStateFiles[t]) {
     const spec = specialStateFiles[t]
@@ -179,6 +237,24 @@ const getSvgUrl = computed(() => {
   }
 });
 
+const fallbackSvgUrl = computed(() => {
+  const t = normalizePetType(props.type)
+  const spec = specialStateFiles[t]
+  if (spec?.files?.idle) {
+    const prefix = spec.dir ? `${spec.dir}/` : ''
+    return `/pets/${prefix}${spec.files.idle}`
+  }
+  return isGeneratedSvg.value ? `/pets/${t}-idle.svg` : `/pets/${t}.svg`
+})
+
+const handleImageError = (event) => {
+  const target = event.currentTarget
+  const fallback = fallbackSvgUrl.value
+  if (!target || target.dataset.petFallback === fallback) return
+  target.dataset.petFallback = fallback
+  target.src = fallback
+}
+
 const stateStyles = computed(() => {
   const states = {
     idle: { transform: 'translateY(0)', filter: 'none' },
@@ -198,12 +274,24 @@ const stateStyles = computed(() => {
 })
 
 const animClass = computed(() => `pet-anim-${props.state}`)
-const imageRendering = computed(() => normalizePetType(props.type) === 'clawd' ? 'pixelated' : 'auto')
-const isV2 = computed(() => Number(props.skin?.spriteVersionNumber) === 2)
+const imageRendering = computed(() => (
+  normalizePetType(props.type) === 'clawd' || props.skin?.pixelated === true ? 'pixelated' : 'auto'
+))
+const showStateBadge = computed(() => (
+  props.state !== 'idle'
+  && !isV2.value
+  && !isGeneratedSvg.value
+  && !['clawd', 'cloudling', 'calico'].includes(normalizePetType(props.type))
+))
 const v2Source = computed(() => {
   const source = String(props.skin?.spritesheetPath || '').replace(/^\/+/, '')
   return source ? `/pets/${source}` : `/pets/generated/${props.type}/spritesheet.webp`
 })
+const v2Rows = computed(() => Math.max(9, Number(props.skin?.spriteRows || 11)))
+
+const handleSupplementalError = () => {
+  failedSupplemental.value = supplementalStateFile.value
+}
 
 onMounted(() => {
   animTimer = setInterval(() => { frame.value++ }, 500)
@@ -213,10 +301,11 @@ onUnmounted(() => { if (animTimer) clearInterval(animTimer) })
 
 <template>
   <div class="pet-sprite" :class="animClass" :style="{ width: size + 'px', height: size + 'px', ...stateStyles }">
-    <PetV2Sprite v-if="isV2" :src="v2Source" :state="state" :size="size" />
-    <img v-else :src="getSvgUrl" alt="" aria-hidden="true" :width="size" :height="size" draggable="false" :style="{ imageRendering }" @error="$event.target.src = '/pets/yuexinmiao.svg'" />
+    <img v-if="useSupplementalState" :key="supplementalStateUrl" :src="supplementalStateUrl" alt="" aria-hidden="true" :width="size" :height="size" draggable="false" :style="{ imageRendering }" @error="handleSupplementalError" />
+    <PetV2Sprite v-else-if="isV2" :src="v2Source" :state="state" :size="size" :rows="v2Rows" />
+    <img v-else :key="getSvgUrl" :src="getSvgUrl" alt="" aria-hidden="true" :width="size" :height="size" draggable="false" :style="{ imageRendering }" @error="handleImageError" />
     <!-- 状态指示器 -->
-    <div class="state-badge" v-if="state !== 'idle'">
+    <div class="state-badge" v-if="showStateBadge">
       <span v-if="state === 'working'">⚡</span>
       <span v-else-if="state === 'building'">🛠️</span>
       <span v-else-if="state === 'thinking'">💭</span>

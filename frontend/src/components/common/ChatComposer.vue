@@ -28,6 +28,7 @@ const props = defineProps({
   attachTitle: { type: String, default: '添加附件' },
   accept: { type: String, default: 'image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx' },
   templateTitle: { type: String, default: '插入对话模板' },
+  showTemplateButton: { type: Boolean, default: true },
 })
 
 const emit = defineEmits([
@@ -83,7 +84,7 @@ const onInput = (event) => {
     <slot name="prefix" />
     <input ref="fileInput" type="file" multiple class="hidden-file-input" :accept="props.accept" @change="onFilesSelected">
     <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.attachTitle" @click="chooseFiles">📎</button>
-    <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.templateTitle" @click="emit('open-template')">📚</button>
+    <button v-if="props.showTemplateButton" class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.templateTitle" @click="emit('open-template')">📚</button>
     <div class="chat-input-wrap" :class="{ 'has-context-usage': !!slots.context }">
       <div
         v-if="props.recommendedTemplate"

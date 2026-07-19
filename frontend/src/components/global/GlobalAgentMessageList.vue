@@ -75,7 +75,7 @@ defineProps({
               :key="index"
               :id="'msg-' + index"
               class="chat-bubble-wrapper"
-              :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index }]"
+              :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index, 'structured-message': !!msg.type && msg.type !== 'text' }]"
               :data-message-type="msg.type || undefined"
               :data-message-id="msg.id || undefined"
             >

@@ -2,6 +2,10 @@
 import EmptyState from '../common/EmptyState.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import { useAutoDevOps } from './useAutoDevOps.js'
+import {
+  Activity, AlertTriangle, Bell, CheckCircle2, Clock3, FileText,
+  Play, RefreshCw, ShieldCheck, Workflow,
+} from '@lucide/vue'
 
 const emit = defineEmits(['navigate'])
 
@@ -53,6 +57,8 @@ const {
   formatShortTime,
   switchView,
 } = useAutoDevOps(emit)
+
+const viewIcons = { overview: Activity, reports: FileText, notifications: Bell }
 </script>
 
 <template src="./AutoDevOps.template.html"></template>

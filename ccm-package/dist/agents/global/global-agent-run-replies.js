@@ -154,7 +154,6 @@ function getGlobalToolUserLabel(toolName) {
         play_music: "播放音乐",
         stop_music: "停止音乐",
         toggle_pet: "控制桌面宠物",
-        create_pet_from_image: "根据参考图创建宠物",
         navigate: "切换页面",
     };
     return labels[String(toolName || "").trim()] || String(toolName || "工具操作");

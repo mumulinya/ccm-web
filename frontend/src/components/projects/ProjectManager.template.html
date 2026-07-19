@@ -46,7 +46,19 @@
             hint="在左侧新建或打开会话后即可开始"
           />
           <template v-else>
-            <div v-for="(msg, i) in messages" :key="getMessageKey(msg)" :id="'msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
+            <div
+              v-for="(msg, i) in messages"
+              :key="getMessageKey(msg)"
+              :id="'msg-' + i"
+              class="message"
+              :class="[
+                msg.role,
+                {
+                  'msg-highlight': highlightMsgIndex === i,
+                  'structured-message': !!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0,
+                },
+              ]"
+            >
               <ChatAvatar v-if="msg.role === 'user'" role="user" class="message-avatar" />
               <ChatAvatar v-else-if="msg.role === 'assistant'" role="agent" class="message-avatar" />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />

@@ -25,6 +25,9 @@ type LlmCallOptions = {
   temperature?: number;
   maxTokens?: number;
   defaultTimeoutMs?: number;
+  timeoutMs?: number;
+  stream?: boolean;
+  reasoningEffort?: "low" | "medium" | "high" | "off";
   httpErrorPrefix?: string;
   invalidJsonMessage?: string;
   apiMicrocompactNativeApplyPlan?: any;
@@ -126,7 +129,9 @@ export function extractJsonObject(text: string) {
   return null;
 }
 
-function resolveTimeoutMs(config: any, defaultTimeoutMs: number) {
+export function resolveLlmTimeoutMs(config: any, defaultTimeoutMs: number, callTimeoutMs?: number) {
+  const scopedTimeout = Number(callTimeoutMs);
+  if (Number.isFinite(scopedTimeout) && scopedTimeout > 0) return Math.max(5000, scopedTimeout);
   return Math.max(5000, Number(config.timeoutMs) || defaultTimeoutMs);
 }
 
@@ -156,6 +161,37 @@ export function buildOpenAiReasoningFields(config: any) {
     reasoning_effort: effort,
     reasoning: { effort },
   };
+}
+
+function callReasoningConfig(config: any, options: LlmCallOptions) {
+  const effort = String(options.reasoningEffort || "").trim().toLowerCase();
+  return effort ? { ...config, reasoningEffort: effort, reasoning_effort: effort } : config;
+}
+
+function streamDeltaText(value: any) {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map(item => typeof item === "string" ? item : String(item?.text || item?.content || "")).join("");
+}
+
+export function parseOpenAiStreamText(text: string) {
+  const raw = String(text || "");
+  if (!/^\s*(?:data:|event:)/m.test(raw)) return null;
+  let content = "";
+  let usage: any = null;
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+    const payload = trimmed.slice(5).trim();
+    if (!payload || payload === "[DONE]") continue;
+    try {
+      const event = JSON.parse(payload);
+      const choice = event?.choices?.[0];
+      content += streamDeltaText(choice?.delta?.content ?? choice?.message?.content ?? "");
+      if (event?.usage) usage = event.usage;
+    } catch {}
+  }
+  return { content, usage };
 }
 
 export function buildAnthropicThinkingFields(config: any) {
@@ -365,7 +401,7 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
   assertLlmConfig(config, endpoint);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), resolveTimeoutMs(config, options.defaultTimeoutMs || 30000));
+  const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
   try {
     const response = await fetchWithNodeHttpFallback(endpoint, {
       method: "POST",
@@ -377,7 +413,8 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
         model: config.model,
         temperature: options.temperature ?? resolveTemperature(config, 0.2),
         ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
-        ...buildOpenAiReasoningFields(config),
+        ...(options.stream ? { stream: true } : {}),
+        ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
         messages: options.messages,
       }),
       signal: controller.signal,
@@ -385,6 +422,11 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
     const text = await response.text();
     if (!response.ok) {
       throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
+    }
+    const streamed = options.stream ? parseOpenAiStreamText(text) : null;
+    if (streamed) {
+      reportTokenUsage(options, normalizeLlmTokenUsage(streamed.usage, "openai"));
+      return streamed.content;
     }
     const data = JSON.parse(text);
     reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "openai"));
@@ -405,7 +447,7 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
     .map((m: any) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), resolveTimeoutMs(config, options.defaultTimeoutMs || 30000));
+  const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
   try {
     const patched = applyApiMicrocompactNativeRequestPatch({
       model: config.model,
@@ -413,7 +455,7 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
       temperature: options.temperature ?? resolveTemperature(config, 0.2),
       system,
       messages: userMessages,
-      ...buildAnthropicThinkingFields(config),
+      ...buildAnthropicThinkingFields(callReasoningConfig(config, options)),
     }, {
       "Content-Type": "application/json",
       "x-api-key": config.apiKey,

@@ -1,4 +1,6 @@
 .auto-dev-page {
+  box-sizing: border-box;
+  width: 100%;
   height: 100%;
   min-height: 0;
   overflow: auto;
@@ -9,8 +11,10 @@
 .command-bar,
 .view-tabs,
 .auto-dev-content {
-  width: min(100%, 1280px);
-  margin: 0 auto;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 .command-bar {
@@ -18,7 +22,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 20px 22px 16px;
+  padding: 24px 28px 18px;
+  background: var(--surface);
 }
 
 .command-title {
@@ -31,6 +36,14 @@
   gap: 10px;
 }
 
+.command-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--accent-blue);
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .command-title h3,
 .view-heading h4,
 .section-heading h4 {
@@ -39,7 +52,8 @@
 }
 
 .command-title h3 {
-  font-size: 20px;
+  font-size: 24px;
+  line-height: 1.2;
 }
 
 .command-title p,
@@ -88,6 +102,16 @@
   gap: 8px;
 }
 
+.command-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.spinning { animation: auto-dev-spin .8s linear infinite; }
+@keyframes auto-dev-spin { to { transform: rotate(360deg); } }
+
 .btn {
   min-height: 36px;
   padding: 8px 14px;
@@ -119,7 +143,8 @@
 .view-tabs {
   display: flex;
   gap: 4px;
-  padding: 0 22px;
+  padding: 0 28px;
+  background: var(--surface);
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -133,6 +158,9 @@
 
 .view-tabs button {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 10px 14px 12px;
   color: var(--text-muted);
   background: transparent;
@@ -155,7 +183,7 @@
 }
 
 .auto-dev-content {
-  padding: 18px 22px 28px;
+  padding: 22px 28px 48px;
 }
 
 .readiness-strip {
@@ -166,6 +194,7 @@
   padding: 14px 16px;
   border: 1px solid var(--border-color);
   border-left-width: 3px;
+  border-radius: 8px;
   background: var(--surface);
 }
 
@@ -174,16 +203,8 @@
 .readiness-strip.checking { border-left-color: #eab308; }
 .readiness-strip.blocked { border-left-color: #ef4444; }
 
-.status-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #ef4444;
-}
-
-.readiness-strip.ready .status-dot { background: #22c55e; }
-.readiness-strip.partial .status-dot,
-.readiness-strip.checking .status-dot { background: #eab308; }
+.readiness-icon { width:34px;height:34px;display:grid;place-items:center;border-radius:7px;background:rgba(239,68,68,.08);color:#b91c1c }
+.readiness-strip.ready .readiness-icon{background:rgba(34,197,94,.1);color:#15803d}.readiness-strip.partial .readiness-icon,.readiness-strip.checking .readiness-icon{background:rgba(234,179,8,.12);color:#a16207}
 
 .readiness-strip strong {
   font-size: 13px;
@@ -210,10 +231,15 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 14px;
   border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
   background: var(--surface);
 }
 
 .metric-strip > div {
+  display: flex;
+  align-items: center;
+  gap: 11px;
   min-width: 0;
   padding: 14px 16px;
   border-right: 1px solid var(--border-color);
@@ -221,7 +247,7 @@
 
 .metric-strip > div:last-child { border-right: 0; }
 
-.metric-strip span,
+.metric-strip .metric-copy > span,
 .eyebrow,
 .section-meta {
   color: var(--text-muted);
@@ -233,11 +259,12 @@
   margin-top: 5px;
   font-size: 22px;
 }
+.metric-icon{flex:0 0 auto;width:32px;height:32px;display:grid;place-items:center;border-radius:7px;background:var(--panel-muted);color:var(--text-muted)}.metric-copy{min-width:0;display:grid}.metric-strip .running .metric-icon,.metric-strip .running strong{color:var(--accent-blue)}.metric-strip .pending .metric-icon,.metric-strip .pending strong{color:#b54708}.metric-strip .done .metric-icon,.metric-strip .done strong{color:#067647}.metric-strip .blocked .metric-icon,.metric-strip .blocked strong{color:#b42318}
 
 .overview-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  gap: 18px;
   margin-top: 16px;
 }
 
@@ -248,6 +275,7 @@
   gap: 14px;
   min-width: 0;
 }
+.overview-main{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-main .latest-run{grid-column:1/-1}
 
 .section-block,
 .report-surface,
@@ -255,6 +283,7 @@
 .notification-history {
   min-width: 0;
   border: 1px solid var(--border-color);
+  border-radius: 8px;
   background: var(--surface);
 }
 
@@ -281,6 +310,7 @@
   margin-top: 3px;
   font-size: 14px;
 }
+.readiness-panel .section-heading h4{display:flex;align-items:center;gap:6px}
 
 .section-heading.compact {
   align-items: center;
@@ -384,6 +414,8 @@
 }
 
 .empty-state.success { color: #15803d; }
+
+.operational-empty{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;min-height:92px;margin-top:12px;padding:14px;border:1px dashed var(--border-color);border-radius:7px;background:var(--panel-muted)}.operational-empty>span{width:38px;height:38px;display:grid;place-items:center;border-radius:7px;background:var(--surface);color:var(--accent-blue)}.operational-empty.success>span{color:#067647}.operational-empty>div{min-width:0;display:grid;gap:3px}.operational-empty strong{color:var(--text-primary);font-size:12px}.operational-empty small{color:var(--text-muted);font-size:10.5px;line-height:1.45}.operational-empty button{display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:6px 9px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--accent-blue);font-size:10.5px;font-weight:800;cursor:pointer}
 
 .check-list {
   display: grid;
@@ -664,11 +696,18 @@
   }
 }
 
+@media (max-width: 760px) {
+  .overview-main { grid-template-columns: 1fr; }
+  .overview-main .latest-run { grid-column: auto; }
+}
+
 @media (max-width: 640px) {
   .command-bar {
     align-items: flex-start;
     padding: 15px 14px 12px;
   }
+
+  .command-eyebrow { display:none; }
 
   .command-title p {
     display: none;
@@ -703,6 +742,8 @@
     padding: 12px;
   }
 
+  .readiness-icon{width:30px;height:30px}
+
   .readiness-strip .text-action {
     grid-column: 2;
     justify-self: start;
@@ -719,6 +760,8 @@
   .overview-side {
     grid-template-columns: 1fr;
   }
+
+  .operational-empty{grid-template-columns:auto minmax(0,1fr);min-height:0}.operational-empty button{grid-column:1/-1;justify-self:stretch;justify-content:center}
 
   .readiness-panel {
     grid-column: auto;

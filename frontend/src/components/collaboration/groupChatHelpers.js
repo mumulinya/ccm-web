@@ -11,8 +11,26 @@ export const GROUP_VISIBLE_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_
 export const GROUP_INTERNAL_PROTOCOL_FALLBACK = '执行成员已提交技术执行信息，我正在整理用户可读结论。'
 export const GROUP_STREAM_ERROR_FALLBACK = '请求没有完成，我会保留当前进度；排障信息已放入技术详情。'
 
-export const sanitizeGroupVisibleText = (value, fallback = '我正在处理当前请求。', max = 4000) => {
+export const stripProviderHtmlErrorPayload = (value) => {
   const raw = String(value || '')
+  const marker = raw.search(/<!doctype\s+html|<!--\s*\[if\b|<html\b/i)
+  if (marker < 0) return raw
+  const before = raw.slice(0, marker).replace(/[:：\s]+$/, '').trimEnd()
+  const hiddenPayload = raw.slice(marker)
+  const recovery = hiddenPayload.match(/(?:\r?\n[\t ]*){2,}((?:请检查|请确认|建议|下一步)[\s\S]*)$/i)?.[1]?.trim() || ''
+  const headline = before ? `${before}${/[。.!！?？]$/.test(before) ? '' : '。'}` : 'Provider 返回了无法显示的 HTML 错误页。'
+  return recovery ? `${headline}\n\n${recovery}` : headline
+}
+
+export const escapeGroupMessageHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
+
+export const sanitizeGroupVisibleText = (value, fallback = '我正在处理当前请求。', max = 4000) => {
+  const raw = stripProviderHtmlErrorPayload(value).replace(/(?:\r?\n[\t ]*){3,}/g, '\n\n').trim()
   if (!raw) return ''
   if (GROUP_VISIBLE_INTERNAL_TEXT_PATTERN.test(raw)) {
     const visible = sanitizeUserFacingLegacyTerminology(sanitizeUserFacingAgentText(raw, GROUP_INTERNAL_PROTOCOL_FALLBACK, Math.min(max, 1200)))

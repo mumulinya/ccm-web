@@ -9,7 +9,7 @@
 .group-card:hover { border-color: rgba(59, 130, 246, 0.2); background: rgba(59, 130, 246, 0.02); }
 .group-card.active { border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.03); }
 .badge { font-size: 9.5px; padding: 2px 6px; background: rgba(0,0,0,0.04); border-radius: 4px; color: var(--text-muted); font-family: 'Share Tech Mono', monospace; }
-.main-content { flex: 1; display: flex; overflow: hidden; }
+.main-content { position: relative; flex: 1; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
 .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: transparent; position: relative; }
 .content-header { padding: 14px 20px; border-bottom: 1px solid rgba(0, 0, 0, 0.05); font-size: 13px; font-weight: 600; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .group-title-line { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
@@ -652,18 +652,6 @@
     gap: 10px;
     flex-wrap: wrap;
   }
-  .group-chat .session-switcher {
-    width: 100%;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-  .group-chat .session-switcher select {
-    flex: 1;
-    min-width: 0;
-    width: 100%;
-    min-height: 40px;
-  }
   .group-chat .header-actions {
     width: 100%;
     flex-wrap: wrap;
@@ -678,4 +666,173 @@
   .group-chat .message {
     max-width: 96%;
   }
+}
+
+/* Group workspace reading layout */
+.group-chat .content {
+  background: color-mix(in srgb, var(--panel-muted) 42%, var(--surface));
+}
+
+.group-chat .messages {
+  padding: 24px 22px 32px;
+  background: transparent;
+  scrollbar-gutter: stable;
+}
+
+.messages-content {
+  display: flex;
+  width: 100%;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.messages-flow {
+  display: flex;
+  width: 100%;
+  flex: 1;
+  flex-direction: column;
+}
+
+.group-chat .message {
+  align-self: flex-start;
+  width: fit-content;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  max-width: min(80%, 900px);
+  margin-bottom: 20px;
+}
+
+.group-chat .message.user {
+  align-self: flex-end;
+  max-width: min(62%, 620px);
+}
+
+.group-chat .message.message-error {
+  max-width: min(72%, 760px);
+}
+
+.group-chat .message:has(.task-experience-card),
+.group-chat .message:has(.project-task-intake),
+.group-chat .message:has(.orchestration-plan),
+.group-chat .message:has(.agent-work-events),
+.group-chat .message:has(.file-changes) {
+  width: min(80%, 900px);
+}
+
+.group-chat .message .bubble {
+  display: inline-flex;
+  width: fit-content;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  max-width: 100%;
+  flex-direction: column;
+  align-self: flex-start;
+  padding: 12px 14px;
+  border-radius: 10px;
+  line-height: 1.65;
+}
+
+.group-chat .message:has(.task-experience-card) .bubble,
+.group-chat .message:has(.project-task-intake) .bubble,
+.group-chat .message:has(.orchestration-plan) .bubble,
+.group-chat .message:has(.agent-work-events) .bubble,
+.group-chat .message:has(.file-changes) .bubble {
+  width: 100%;
+}
+
+.group-chat .message.user .bubble {
+  border-color: color-mix(in srgb, var(--accent-blue) 20%, var(--border-color));
+  border-bottom-right-radius: 4px;
+  background: color-mix(in srgb, var(--accent-soft) 62%, var(--surface));
+}
+
+.group-chat .message.assistant .bubble {
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.035);
+}
+
+.group-chat .message.message-error :deep(.agent-exec-bubble) {
+  border-color: color-mix(in srgb, var(--accent-red) 34%, var(--border-color)) !important;
+  background: color-mix(in srgb, var(--accent-red) 3%, var(--surface));
+  box-shadow: none !important;
+}
+
+.group-chat .message.message-error :deep(.agent-message-content) {
+  white-space: pre-line;
+}
+
+.group-chat .message.user .msg-meta {
+  text-align: right;
+}
+
+.group-chat .msg-meta {
+  margin-top: 5px;
+  padding: 0 2px;
+  font-size: 9.5px;
+  opacity: .82;
+}
+
+.composer-region {
+  flex: 0 0 auto;
+  padding: 9px 14px 12px;
+  border-top: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.composer-inner {
+  width: 100%;
+}
+
+.group-chat .composer-inner :deep(.chat-composer) {
+  padding: 0;
+  border-top: 0;
+  background: transparent;
+}
+
+.group-chat .composer-inner :deep(.composer-button),
+.group-chat .composer-inner :deep(.send-button),
+.group-chat .composer-inner :deep(textarea) {
+  height: 46px;
+  border-radius: 8px;
+}
+
+.group-chat .composer-inner :deep(.composer-button) {
+  width: 42px;
+  min-width: 42px;
+  background: var(--surface);
+}
+
+.group-chat .composer-inner :deep(textarea) {
+  min-height: 46px;
+  padding: 12px 14px;
+  background: var(--surface);
+}
+
+.group-chat .message-mode {
+  padding: 3px;
+  border-color: var(--border-color);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.group-chat .message-mode button {
+  min-height: 34px;
+  border-radius: 6px;
+}
+
+@media (max-width: 900px) {
+  .group-chat .messages { padding: 20px 14px 28px; }
+  .group-chat .message,
+  .group-chat .message.user,
+  .group-chat .message.message-error { max-width: 94%; }
+  .composer-region { padding: 8px 10px 10px; }
+}
+
+@media (max-width: 720px) {
+  .group-chat .message { padding-left: 38px; }
+  .group-chat .message.user { padding-right: 38px; padding-left: 0; }
+  .group-chat .message-mode { width: 100%; }
+  .group-chat .message-mode button { flex: 1; }
 }

@@ -2,6 +2,7 @@
 import EmptyState from '../common/EmptyState.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import { useTaskManager } from './useTaskManager.js'
+import { Inbox, ListTodo, Plus, RefreshCw, Route, Sparkles } from '@lucide/vue'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])

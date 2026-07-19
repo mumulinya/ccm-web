@@ -218,6 +218,32 @@ function stateFileMap(type) {
   };
 }
 
+function generatedSvgStateFileMap(type) {
+  return {
+    idle: `${type}-idle.svg`,
+    thinking: `${type}-thinking.svg`,
+    planning: `${type}-planning.svg`,
+    working: `${type}-working.svg`,
+    building: `${type}-building.svg`,
+    debugging: `${type}-debugging.svg`,
+    reviewing: `${type}-reviewing.svg`,
+    waiting: `${type}-waiting.svg`,
+    drag: `${type}-drag.svg`,
+    error: `${type}-error.svg`,
+    attention: `${type}-attention.svg`,
+    happy: `${type}-happy.svg`,
+    notification: `${type}-notification.svg`,
+    carrying: `${type}-carrying.svg`,
+    sweeping: `${type}-sweeping.svg`,
+    juggling: `${type}-juggling.svg`,
+    yawning: `${type}-yawning.svg`,
+    dozing: `${type}-dozing.svg`,
+    collapsing: `${type}-collapsing.svg`,
+    sleeping: `${type}-sleeping.svg`,
+    waking: `${type}-waking.svg`,
+  };
+}
+
 function stateFileMapPng(type) {
   return {
     idle: `${type}-idle.png`,
@@ -406,15 +432,23 @@ const petThemes = {
 
 function getTheme(type = petType) {
   if (!petThemes[type]) {
-    // 动态初始化未注册的自定义宠物主题，使其采用默认配置
+    const customFormat = String(petSkin?.format || '').toLowerCase();
+    const isGeneratedSvg = customFormat === 'svg' || petSkin?.generationEngine === 'global-agent-svg';
+    const ext = isGeneratedSvg ? 'svg' : 'png';
+    // 动态初始化未注册的自定义宠物主题。
     petThemes[type] = {
-      files: stateFileMapPng(type), // 默认以 png 形式加载动作
+      files: isGeneratedSvg ? generatedSvgStateFileMap(type) : stateFileMapPng(type),
+      hideBadge: isGeneratedSvg,
+      idleAnimations: isGeneratedSvg ? [
+        { file: `${type}-idle-action1.svg`, weight: 0.7, duration: 7200 },
+        { file: `${type}-idle-action2.svg`, weight: 0.55, duration: 7600 },
+      ] : undefined,
       bodyHitBox: { x: 0.13, y: 0.1, w: 0.74, h: 0.82 },
       reactions: {
-        drag: { file: `${type}-react-drag.png` },
-        clickLeft: { file: `${type}-react-left.png`, duration: 2500 },
-        clickRight: { file: `${type}-react-right.png`, duration: 2500 },
-        double: { file: `${type}-react-double.png`, duration: 2500 },
+        drag: { file: `${type}-react-drag.${ext}` },
+        clickLeft: { file: `${type}-react-left.${ext}`, duration: 2500 },
+        clickRight: { file: `${type}-react-right.${ext}`, duration: 2500 },
+        double: { file: `${type}-react-double.${ext}`, duration: 2500 },
       }
     };
   }
@@ -487,7 +521,20 @@ function clearV2FrameTimer() {
 
 async function loadV2Sprite(state) {
   clearV2FrameTimer();
-  const key = v2StateRows[normalizeState(state)] || 'idle';
+  const normalizedState = normalizeState(state);
+  const supplementalFile = String(petSkin?.supplementalStateFiles?.[normalizedState] || '');
+  if (supplementalFile) {
+    const supplementalPath = await window.petBridge.getAssetPath(supplementalFile);
+    if (supplementalPath) {
+      const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
+      setPetSpriteSizeVar(spriteSize);
+      const imageRendering = petSkin?.pixelated ? 'pixelated' : 'auto';
+      svgContainer.innerHTML = `<img data-pet-visual="true" src="file:///${supplementalPath.replace(/\\/g, '/')}" alt="" aria-hidden="true" draggable="false" style="width:${spriteSize}px;height:${spriteSize}px;image-rendering:${imageRendering};object-fit:contain;">`;
+      requestAnimationFrame(positionResizeHandle);
+      return true;
+    }
+  }
+  const key = v2StateRows[normalizedState] || 'idle';
   const spec = v2Rows[key];
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
   setPetSpriteSizeVar(spriteSize);
@@ -495,13 +542,14 @@ async function loadV2Sprite(state) {
   if (!atlasPath) return false;
   const source = `file:///${atlasPath.replace(/\\/g, '/')}`;
   const spriteWidth = Math.round(spriteSize * 192 / 208);
-  svgContainer.innerHTML = `<div data-pet-visual="true" aria-hidden="true" style="width:${spriteWidth}px;height:${spriteSize}px;margin:0 auto;background-image:url('${source}');background-repeat:no-repeat;background-size:800% 1100%;"></div>`;
+  const spriteRows = Math.max(9, Number(petSkin?.spriteRows || 11));
+  svgContainer.innerHTML = `<div data-pet-visual="true" aria-hidden="true" style="width:${spriteWidth}px;height:${spriteSize}px;margin:0 auto;background-image:url('${source}');background-repeat:no-repeat;background-size:800% ${spriteRows * 100}%;image-rendering:${petSkin?.pixelated ? 'pixelated' : 'auto'};"></div>`;
   v2Frame = 0;
   const renderFrame = () => {
     if (!isV2Pet()) return;
     const visual = svgContainer.querySelector('[data-pet-visual]');
     if (!visual) return;
-    visual.style.backgroundPosition = `${(v2Frame / 7) * 100}% ${(spec.row / 10) * 100}%`;
+    visual.style.backgroundPosition = `${(v2Frame / 7) * 100}% ${(spec.row / (spriteRows - 1)) * 100}%`;
     const delay = spec.durations[v2Frame];
     v2Frame = (v2Frame + 1) % spec.durations.length;
     v2FrameTimer = setTimeout(renderFrame, delay);
@@ -681,6 +729,7 @@ function themeHasState(theme, state) {
 }
 
 function getAmbientActions(theme, logicalState) {
+  if (petSkin?.disableLegacyAmbient === true) return [];
   if (logicalState !== 'idle') return [];
   const pool = theme.ambientStatePools?.[logicalState] || ambientStatePools[logicalState];
   if (!pool) return [];

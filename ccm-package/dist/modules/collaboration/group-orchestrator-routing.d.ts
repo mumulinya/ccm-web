@@ -481,6 +481,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     };
     content: string;
 }>;
+export declare function summarizeGroupOrchestratorProviderError(error: any): string;
 export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<{
     selectedRoleSkills: string[];
     usage: LlmTokenUsage;

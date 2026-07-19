@@ -62,6 +62,7 @@ exports.inferCoordinatorStrategy = inferCoordinatorStrategy;
 exports.buildCoordinatorPlan = buildCoordinatorPlan;
 exports.isStructuredCoordinatorFallbackAllowed = isStructuredCoordinatorFallbackAllowed;
 exports.runGroupOrchestratorCore = runGroupOrchestratorCore;
+exports.summarizeGroupOrchestratorProviderError = summarizeGroupOrchestratorProviderError;
 exports.runGroupOrchestrator = runGroupOrchestrator;
 exports.isContextLimitError = isContextLimitError;
 exports.buildReactiveCompactionContext = buildReactiveCompactionContext;
@@ -684,6 +685,7 @@ async function runGroupOrchestratorCore(input) {
                     error = (0, group_orchestrator_llm_1.attachLlmTokenUsage)(recoveryError, firstAttemptUsage);
                 }
         }
+        const providerErrorSummary = summarizeGroupOrchestratorProviderError(error);
         if (config.fallbackToRules && safeCodedFallback) {
             const fallback = (0, group_orchestrator_coded_1.runCodedGroupOrchestrator)({
                 ...enrichedInput,
@@ -696,7 +698,7 @@ async function runGroupOrchestratorCore(input) {
                 usage: error?.usage || null,
                 contextRecovery: reactiveCompactOwnership ? { type: "reactive-compact-not-retried", ownership: reactiveCompactOwnership } : undefined,
                 agentBoundary: (0, group_orchestrator_config_1.buildGroupMainAgentBoundary)("coded_fallback"),
-                content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${error.message}`,
+                content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${providerErrorSummary}`,
             };
         }
         return {
@@ -710,12 +712,25 @@ async function runGroupOrchestratorCore(input) {
             content: [
                 "主 Agent 大模型调用失败，本轮不分派子 Agent。",
                 "",
-                `错误：${error.message}`,
+                `错误：${providerErrorSummary}`,
                 "",
                 "请检查主 Agent API 配置、网络、模型名或 Key 是否有效。"
             ].join("\n"),
         };
     }
+}
+function summarizeGroupOrchestratorProviderError(error) {
+    const raw = String(error?.message || error || "主 Agent Provider 调用失败").trim();
+    const status = raw.match(/\bHTTP\s+\d{3}\b/i);
+    if (status?.index !== undefined) {
+        return raw.slice(0, status.index + status[0].length).replace(/\s+/g, " ").replace(/[:：\s]+$/, "").slice(0, 220);
+    }
+    const firstLine = raw.split(/\r?\n/, 1)[0]
+        .replace(/<!doctype[\s\S]*$/i, "")
+        .replace(/<[^>]*>/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    return (firstLine || "主 Agent Provider 调用失败").slice(0, 220);
 }
 async function runGroupOrchestrator(input) {
     const startedAt = Date.now();

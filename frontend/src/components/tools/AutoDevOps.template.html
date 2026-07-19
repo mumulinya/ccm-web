@@ -1,8 +1,9 @@
   <div ref="pageRoot" class="auto-dev-page">
     <header class="command-bar">
       <div class="command-title">
+        <span class="command-eyebrow">Agent Automation</span>
         <div class="title-line">
-          <h3>自动开发</h3>
+          <h3>自动开发控制台</h3>
           <span :class="['readiness-badge', readinessTone]">
             {{ readinessTone === 'ready' ? '可运行' : readinessTone === 'partial' ? '需关注' : readinessTone === 'checking' ? '检查中' : '暂不可用' }}
           </span>
@@ -11,10 +12,10 @@
       </div>
       <div class="command-actions">
         <button class="btn btn-outline" :disabled="isBusy" title="重新读取自动开发状态" @click="refreshAll">
-          {{ activeAction === 'refresh' ? '刷新中' : '刷新' }}
+          <RefreshCw :size="15" :class="{ spinning: activeAction === 'refresh' }" />{{ activeAction === 'refresh' ? '刷新中' : '刷新' }}
         </button>
         <button class="btn btn-primary" :disabled="isBusy || readinessLoading" @click="runAutopilot">
-          {{ activeAction === 'run' ? '正在运行' : '立即运行' }}
+          <Play :size="15" />{{ activeAction === 'run' ? '正在运行' : '立即运行' }}
         </button>
       </div>
     </header>
@@ -28,14 +29,14 @@
         :class="{ active: activeView === view.id }"
         @click="switchView(view.id)"
       >
-        {{ view.label }}
+        <component :is="viewIcons[view.id]" :size="15" />{{ view.label }}
       </button>
     </nav>
 
     <main class="auto-dev-content">
       <div v-if="activeView === 'overview'" class="overview-view">
         <section :class="['readiness-strip', readinessTone]">
-          <span class="status-dot" aria-hidden="true"></span>
+          <span class="readiness-icon" aria-hidden="true"><ShieldCheck :size="18" /></span>
           <div>
             <strong>{{ readinessTitle }}</strong>
             <p>{{ readinessDescription }}</p>
@@ -46,21 +47,17 @@
         </section>
 
         <section class="metric-strip" aria-label="今日自动开发概况">
-          <div>
-            <span>执行中</span>
-            <strong>{{ summary.running_tasks || 0 }}</strong>
+          <div class="running">
+            <span class="metric-icon"><Activity :size="16" /></span><span class="metric-copy"><span>执行中</span><strong>{{ summary.running_tasks || 0 }}</strong></span>
           </div>
-          <div>
-            <span>待处理需求</span>
-            <strong>{{ backlog.counts?.ready || 0 }}</strong>
+          <div class="pending">
+            <span class="metric-icon"><Clock3 :size="16" /></span><span class="metric-copy"><span>待处理需求</span><strong>{{ backlog.counts?.ready || 0 }}</strong></span>
           </div>
-          <div>
-            <span>今日完成</span>
-            <strong>{{ summary.done_tasks || 0 }}</strong>
+          <div class="done">
+            <span class="metric-icon"><CheckCircle2 :size="16" /></span><span class="metric-copy"><span>今日完成</span><strong>{{ summary.done_tasks || 0 }}</strong></span>
           </div>
-          <div>
-            <span>需要关注</span>
-            <strong>{{ summary.blocked_tasks || 0 }}</strong>
+          <div class="blocked">
+            <span class="metric-icon"><AlertTriangle :size="16" /></span><span class="metric-copy"><span>需要关注</span><strong>{{ summary.blocked_tasks || 0 }}</strong></span>
           </div>
         </section>
 
@@ -82,7 +79,7 @@
               </div>
             </section>
 
-            <section class="section-block">
+            <section class="section-block activity-panel">
               <div class="section-heading">
                 <div>
                   <span class="eyebrow">今日进展</span>
@@ -91,7 +88,7 @@
                 <span class="section-meta">{{ formatTime(overview?.today?.generated_at) }}</span>
               </div>
               <LoadingSkeleton v-if="overviewLoading" :rows="4" />
-              <EmptyState v-else-if="!activities.length" icon="🧭" title="今天还没有新的开发活动" hint="运行一次自动开发后，进展会出现在这里" />
+              <div v-else-if="!activities.length" class="operational-empty"><span><Activity :size="20" /></span><div><strong>今天还没有新的开发活动</strong><small>运行一次自动开发后，任务进展会实时出现在这里。</small></div><button @click="runAutopilot"><Play :size="14" />开始运行</button></div>
               <div v-else class="activity-list">
                 <article v-for="item in activities.slice(0, 8)" :key="item.id" class="activity-row">
                   <div>
@@ -103,14 +100,14 @@
               </div>
             </section>
 
-            <section class="section-block">
+            <section class="section-block blocker-panel">
               <div class="section-heading">
                 <div>
                   <span class="eyebrow">待处理</span>
                   <h4>阻塞与续跑</h4>
                 </div>
               </div>
-              <EmptyState v-if="!blockers.length" icon="✓" title="当前没有需要处理的阻塞" />
+              <div v-if="!blockers.length" class="operational-empty success"><span><CheckCircle2 :size="20" /></span><div><strong>当前没有需要处理的阻塞</strong><small>新的失败、等待输入或验收缺口会集中显示在这里。</small></div></div>
               <div v-else class="blocker-list">
                 <article v-for="item in blockers.slice(0, 6)" :key="item.id" class="blocker-row">
                   <strong>{{ item.title }}</strong>
@@ -125,7 +122,7 @@
               <div class="section-heading">
                 <div>
                   <span class="eyebrow">运行准备</span>
-                  <h4>自动开发链路</h4>
+                  <h4><Workflow :size="15" />自动开发链路</h4>
                 </div>
               </div>
               <div class="check-list">
