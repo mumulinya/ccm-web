@@ -47,6 +47,9 @@ import {
   recordGroupTypedMemoryPressureRecallUsageLedger,
 } from "./group-memory-index";
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
+import { buildModelVisiblePayloadSnapshot } from "../../system/session-compaction-core";
+import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "./group-compaction-strategy";
+import { buildExactGroupSessionModelContextPacket } from "./group-session-model-context";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
 import {
   WORKFLOW_DECISION_GUIDANCE,
@@ -79,6 +82,7 @@ import {
 } from "./group-orchestrator-coded";
 import {
   attachLlmTokenUsage,
+  buildLlmCoordinatorMessages,
   mergeLlmTokenUsage,
   runLlmGroupOrchestrator,
 } from "./group-orchestrator-llm";
@@ -746,10 +750,74 @@ export type GroupOrchestratorInput = {
 
 
 
+export function measureGroupMainAgentPayload(input: any) {
+  const messages = buildLlmCoordinatorMessages(input);
+  const snapshot = buildModelVisiblePayloadSnapshot({
+    scope: "group",
+    sessionId: `${String(input?.group?.id || "")}:${String(input?.groupSessionId || input?.group_session_id || "")}`,
+    recentMessages: messages,
+  });
+  return { messages, snapshot, tokens: snapshot.totalTokens };
+}
+
+export async function prepareExactGroupMainAgentInput(input: any, group: any, groupSessionId: string, config: any, runtime: any = {}) {
+  if (!groupSessionId.startsWith("gcs_")) return { input, compacted: false, measurement: measureGroupMainAgentPayload(input) };
+  const buildProjection = typeof runtime.buildProjection === "function"
+    ? runtime.buildProjection
+    : buildExactGroupSessionModelContextPacket;
+  const runCompaction = typeof runtime.runCompaction === "function"
+    ? runtime.runCompaction
+    : (groupId: string, options: any) => {
+        const memoryContextApi = require("./group-memory-context") as typeof import("./group-memory-context");
+        return memoryContextApi.runGroupMemoryAutoCompactionNow(groupId, options);
+      };
+  let projection = buildProjection(group.id, { groupSessionId });
+  let preparedInput = { ...input, group, context: projection.rendered, groupSessionId };
+  let measurement = measureGroupMainAgentPayload(preparedInput);
+  const capacity = resolveGroupModelContextCapacity(config);
+  const threshold = getGroupAutoCompactThreshold(config);
+  const fixedPayload = measureGroupMainAgentPayload({ ...preparedInput, context: "" });
+  const compactResult: any = await runCompaction(group.id, {
+    sessionId: groupSessionId,
+    reason: "group_main_final_payload_capacity",
+    config: {
+      ...config,
+      memoryCompactionUseModel: true,
+      memoryCompactionMode: "model-required",
+      modelContextWindow: capacity.contextWindow,
+      modelMaxOutputTokens: capacity.reservedOutputTokens,
+      modelAutoCompactTokenLimit: threshold,
+      modelVisibleSystemContext: fixedPayload.messages,
+    },
+  });
+  if (compactResult?.success === true && compactResult?.compacted !== true && measurement.tokens < threshold) {
+    return { input: preparedInput, compacted: false, projection, measurement, capacity, threshold, compactResult };
+  }
+  if (compactResult?.success !== true || compactResult?.compacted !== true) {
+    throw new Error(`GROUP_MAIN_FORMAL_COMPACTION_FAILED:${compactResult?.error || compactResult?.reason || "formal_compaction_not_committed"}`);
+  }
+
+  projection = buildProjection(group.id, { groupSessionId });
+  if (projection.canonicalSummary !== true) {
+    throw new Error("GROUP_MAIN_FORMAL_COMPACTION_FAILED:canonical_summary_missing");
+  }
+  preparedInput = { ...preparedInput, context: projection.rendered };
+  measurement = measureGroupMainAgentPayload(preparedInput);
+  if (measurement.tokens >= threshold) {
+    throw new Error(`GROUP_MAIN_POST_COMPACT_PAYLOAD_BLOCKED:${measurement.tokens}/${threshold}`);
+  }
+  return { input: preparedInput, compacted: true, projection, measurement, capacity, threshold, compactResult };
+}
+
 export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
-  const raggedInput = withGroupRagContext(input);
-  const group = normalizeGroupOrchestrator(raggedInput.group);
-  const groupSessionId = String(raggedInput.groupSessionId || raggedInput.group_session_id || "").trim();
+  const initialInput = withGroupRagContext(input);
+  const group = normalizeGroupOrchestrator(initialInput.group);
+  const groupSessionId = String(initialInput.groupSessionId || initialInput.group_session_id || "").trim();
+  const config = loadOrchestratorConfig();
+  const configIssue = getLlmConfigIssue(config);
+  const raggedInput = groupSessionId.startsWith("gcs_")
+    ? { ...initialInput, group, context: buildExactGroupSessionModelContextPacket(group.id, { groupSessionId }).rendered, groupSessionId }
+    : initialInput;
   const replayRepairContext = buildCoordinatorReplayRepairDispatchContext(group);
   const contextId = String(raggedInput.contextId || raggedInput.context_id || `group-main-agent-context:${hashCoordinator([
     group?.id || "",
@@ -766,14 +834,15 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
     recordDelivery: false,
     channel: "run-group-orchestrator",
   });
-  const enrichedInput = {
+  let enrichedInput = {
     ...raggedInput,
     group,
     extraInstructions: [raggedInput.extraInstructions || "", replayRepairContext, maintenanceNotificationContext.text].filter(Boolean).join("\n\n"),
   };
+  if (!configIssue) {
+    enrichedInput = (await prepareExactGroupMainAgentInput(enrichedInput, group, groupSessionId, config)).input;
+  }
   const coordinator = getCoordinatorMember(group);
-  const config = loadOrchestratorConfig();
-  const configIssue = getLlmConfigIssue(config);
   const informationalFallback = false;
   // 规则编排只允许继续已经结构化、已授权的内部工作单；自动对话入口模型失败时安全停止。
   const safeCodedFallback = isStructuredCoordinatorFallbackAllowed(enrichedInput);
@@ -861,11 +930,39 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
           recordDelivery: true,
           channel: "run-group-orchestrator-llm-context-retry",
         });
-        const recoveredContext = buildReactiveCompactionContext(enrichedInput.context || "");
+        const capacity = resolveGroupModelContextCapacity(config);
+        const threshold = getGroupAutoCompactThreshold(config);
+        const fixedPayload = measureGroupMainAgentPayload({ ...enrichedInput, context: "" });
+        const memoryContextApi = require("./group-memory-context") as typeof import("./group-memory-context");
+        const compactResult: any = await memoryContextApi.runGroupMemoryAutoCompactionNow(group.id, {
+          sessionId: groupSessionId,
+          reason: "group_main_provider_prompt_too_long",
+          config: {
+            ...config,
+            memoryCompactionUseModel: true,
+            memoryCompactionMode: "model-required",
+            modelContextWindow: capacity.contextWindow,
+            modelMaxOutputTokens: capacity.reservedOutputTokens,
+            modelAutoCompactTokenLimit: Math.min(threshold, 18_000),
+            modelVisibleSystemContext: fixedPayload.messages,
+          },
+        });
+        if (compactResult?.success !== true || compactResult?.compacted !== true) {
+          throw new Error(`GROUP_MAIN_REACTIVE_FORMAL_COMPACTION_FAILED:${compactResult?.error || compactResult?.reason || "formal_compaction_not_committed"}`);
+        }
+        const recoveredProjection = buildExactGroupSessionModelContextPacket(group.id, { groupSessionId });
+        if (recoveredProjection.canonicalSummary !== true) {
+          throw new Error("GROUP_MAIN_REACTIVE_FORMAL_COMPACTION_FAILED:canonical_summary_missing");
+        }
+        const recoveredInput = { ...enrichedInput, context: recoveredProjection.rendered };
+        const recoveredMeasurement = measureGroupMainAgentPayload(recoveredInput);
+        if (recoveredMeasurement.tokens >= threshold) {
+          throw new Error(`GROUP_MAIN_REACTIVE_POST_COMPACT_PAYLOAD_BLOCKED:${recoveredMeasurement.tokens}/${threshold}`);
+        }
+        const recoveredContext = recoveredProjection.rendered;
         const recovered = await runLlmGroupOrchestrator({
-          ...enrichedInput,
+          ...recoveredInput,
           group,
-          context: recoveredContext,
         });
         const completion = completeGroupReactiveCompactRetry({
           groupId: group.id,
@@ -887,7 +984,7 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
           ...recovered,
           usage: mergeLlmTokenUsage(firstAttemptUsage, recovered?.usage),
           contextRecovery: {
-            type: "reactive-compact",
+              type: "formal-model-compact",
             originalChars: String(enrichedInput.context || "").length,
             recoveredChars: recoveredContext.length,
             ownership: reactiveCompactOwnership,

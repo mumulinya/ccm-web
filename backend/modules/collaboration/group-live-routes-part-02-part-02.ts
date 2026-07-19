@@ -28,6 +28,8 @@ import { acquireIdempotency, completeIdempotency, failIdempotency } from "../../
 import { sanitizeMainAgentRoleLanguage } from "../../agents/user-facing-text";
 import { ingestRequirementSources } from "../requirements/source-ingestion";
 import { buildGroupDirectMemoryAction, commitGroupDirectMemoryAction } from "./group-memory-index";
+import { buildExactGroupSessionModelContextPacket, prepareExactGroupSessionRenderedPayload } from "./group-session-model-context";
+import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 
 import {
   GroupLiveRoutesDeps,
@@ -79,7 +81,6 @@ export function handleGroupLiveRoutes(
     getCoordinatorActionMentions,
     processCrossAgents,
     runCoordinatorReviewLoop,
-    buildGroupContextPacket,
     buildAgentToolContext,
     prepareAgentRuntimeTools,
     getProjectExtraConfig,
@@ -568,7 +569,7 @@ export function handleGroupLiveRoutes(
               nextAction: "我会先判断是否需要安排执行成员",
             }),
           });
-          const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6, groupSessionId });
+          const context = buildExactGroupSessionModelContextPacket(group_id, { groupSessionId }).rendered;
           const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group);
           const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
           const coordinatorResult = await runGroupOrchestrator({
@@ -739,40 +740,68 @@ export function handleGroupLiveRoutes(
           }
 
           const getAgentPrompt = async (member: any) => {
-            const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
-
             const memberList = group.members.map((m: any) => m.project).filter((p: string) => p !== member.project && p !== "coordinator").join(", ");
             const collaborationInstructions = buildMemberCollaborationInstructions(member.project, memberList);
             const sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
-
             const toolContext = buildAgentToolContext(ctx, group, member.project);
             const memberConfig = configs.find(c => c.name === member.project);
-            const memberWorkDir = memberConfig ? getConfigInfo(memberConfig.path)[0]?.workDir : "";
-            const memberAgentType = memberConfig ? (getConfigInfo(memberConfig.path)[0]?.agent || member.agent || "claudecode") : (member.agent || "claudecode");
-            const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, messageForAgent, {
-              workDir: memberWorkDir,
-              groupSessionId,
-              requireExactGroupSession: true,
-            });
-            const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, messageForAgent, { groupSessionId });
-            const developmentContract = buildChildAgentDevelopmentContract(member.project, messageForAgent, {
-              source: "群聊广播",
-              verification_hints: buildProjectVerificationHints(member.project, memberWorkDir),
-              work_dir: memberWorkDir,
-              agent_type: memberAgentType,
-              group,
-              memory: memoryBundle,
-            });
-
-            return {
-              prompt: `${collaborationInstructions}${buildAgentQaProtocolInstructions(member.project, memberList)}${toolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是群聊最近的消息记录：\n${context}\n\n用户刚才把这条消息发给了群聊所有成员，请从 ${member.project} 的职责视角回复：${messageForAgent}`,
-              allowedTools: toolContext.allowedTools,
+            const memberInfo = memberConfig ? getConfigInfo(memberConfig.path)[0] || {} : {};
+            const memberWorkDir = memberInfo.workDir || "";
+            const memberAgentType = memberInfo.agent || member.agent || "claudecode";
+            const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, memberWorkDir, memberAgentType, toolContext.allowedTools, res, {
               toolAudit: toolContext.toolAudit,
               authorizationReadiness: toolContext.authorizationReadiness,
-
+              groupSessionId,
+            });
+            if (runtimeToolContext.dispatchBlocked) {
+              return { blocked: true, runtimeToolContext, allowedTools: toolContext.allowedTools, memberWorkDir, memberAgentType };
+            }
+            const capacity = resolveTrustedModelContextCapacity({
+              provider: memberAgentType,
+              model: memberInfo.model || memberInfo.modelId || "",
+              modelContextWindow: memberInfo.modelContextWindow || memberInfo.model_context_window,
+            });
+            const prepared = await prepareExactGroupSessionRenderedPayload({
+              groupId: group_id,
+              groupSessionId,
+              modelCapacity: capacity,
+              reason: "group_broadcast_member_final_payload_capacity",
+              renderPayload: async (projection: any) => {
+                const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, messageForAgent, {
+                  workDir: memberWorkDir,
+                  groupSessionId,
+                  requireExactGroupSession: true,
+                  dedicatedParentSessionContext: true,
+                });
+                const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, messageForAgent, { groupSessionId });
+                const developmentContract = buildChildAgentDevelopmentContract(member.project, messageForAgent, {
+                  source: "群聊广播",
+                  verification_hints: buildProjectVerificationHints(member.project, memberWorkDir),
+                  work_dir: memberWorkDir,
+                  agent_type: memberAgentType,
+                  group,
+                  memory: memoryBundle,
+                });
+                return {
+                  prompt: `${collaborationInstructions}${buildAgentQaProtocolInstructions(member.project, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是当前精确群聊会话连续性：\n${projection.rendered}\n\n用户刚才把这条消息发给了群聊所有成员，请从 ${member.project} 的职责视角回复：${messageForAgent}`,
+                  memoryBundle,
+                  developmentContract,
+                };
+              },
+            });
+            return {
+              ...prepared.rendered,
+              prompt: prepared.payload,
+              allowedTools: toolContext.allowedTools,
+              runtimeToolContext,
+              memberWorkDir,
+              memberAgentType,
+              contextGate: { tokens: prepared.tokens, threshold: prepared.threshold, compacted: prepared.compacted },
             };
           };
 
+          const preparedAgentPrompts = new Map<string, any>();
+          for (const member of targetMembers) preparedAgentPrompts.set(member.project, await getAgentPrompt(member));
           const agentPromises = targetMembers.map(member => {
             return new Promise<void>(async (resolve) => {
               const config = configs.find(c => c.name === member.project);
@@ -784,13 +813,10 @@ export function handleGroupLiveRoutes(
               const info = getConfigInfo(config.path);
               const workDir = info[0]?.workDir;
               const agentType = info[0]?.agent || "claudecode";
-              const agentPrompt = await getAgentPrompt(member);
+              const agentPrompt = preparedAgentPrompts.get(member.project);
 
               try {
-                const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, workDir, agentType, agentPrompt.allowedTools, res, {
-                  toolAudit: agentPrompt.toolAudit,
-                  authorizationReadiness: agentPrompt.authorizationReadiness,
-                });
+                const runtimeToolContext = agentPrompt.runtimeToolContext;
                 if (runtimeToolContext.dispatchBlocked) {
                   const reason = runtimeToolContext.dispatchGate?.reason || `${member.project} MCP/Skill 授权未就绪，已阻止安排执行成员`;
                   addGroupLog(group_id, "warning", "runtime-tool-dispatch-blocked", reason, { agent: member.project, runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate });
@@ -801,7 +827,7 @@ export function handleGroupLiveRoutes(
                 const responseMessageId = "m" + Date.now().toString(36) + member.project + crypto.randomBytes(2).toString("hex");
                 let memberFileChanges = null;
                 let memberWorkEvents: any[] = [];
-                const text = await ctx.callAgentForGroupStream(member.project, `${agentPrompt.prompt}${runtimeToolContext.prompt}`, workDir, agentType, {
+                const text = await ctx.callAgentForGroupStream(member.project, agentPrompt.prompt, workDir, agentType, {
                   res,
                   groupId: group_id,
                   timeoutMs: 300000,
@@ -858,7 +884,7 @@ export function handleGroupLiveRoutes(
             reason: target_project_actual,
             nextAction: "我会判断是否直接答复或安排执行成员",
           });
-          const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6, groupSessionId });
+          const context = buildExactGroupSessionModelContextPacket(group_id, { groupSessionId }).rendered;
           const coordinatorResult = await runGroupOrchestrator({
             group,
             message: messageForAgent,
@@ -954,7 +980,6 @@ export function handleGroupLiveRoutes(
         const workDir = runtime.workDir;
         const agentType = runtime.agentType;
 
-        const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
         const memberList = group.members.map((m: any) => m.project).filter((p: string) => p !== target_project_actual).join(", ");
         let atInstructions = "";
         if (target_project_actual === coordinatorProject) {
@@ -995,21 +1020,38 @@ export function handleGroupLiveRoutes(
           sharedFilesContext += ctx.buildFilesContext(projectConfig.shared_files, "[项目共享文件]");
         }
 
-        const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, target_project_actual, messageForAgent, {
-          workDir,
+        const runtimeConfig = configs.find((item: any) => item.name === target_project_actual);
+        const runtimeInfo = runtimeConfig ? getConfigInfo(runtimeConfig.path)[0] || {} : {};
+        const capacity = resolveTrustedModelContextCapacity({
+          provider: agentType,
+          model: runtimeInfo.model || runtimeInfo.modelId || "",
+          modelContextWindow: runtimeInfo.modelContextWindow || runtimeInfo.model_context_window,
+        });
+        const preparedDirectPayload = await prepareExactGroupSessionRenderedPayload({
+          groupId: group_id,
           groupSessionId,
-          requireExactGroupSession: true,
+          modelCapacity: capacity,
+          reason: "group_direct_member_final_payload_capacity",
+          renderPayload: async (projection: any) => {
+            const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, target_project_actual, messageForAgent, {
+              workDir,
+              groupSessionId,
+              requireExactGroupSession: true,
+              dedicatedParentSessionContext: true,
+            });
+            const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, target_project_actual, messageForAgent, { groupSessionId });
+            const developmentContract = buildChildAgentDevelopmentContract(target_project_actual, messageForAgent, {
+              source: "群聊点名",
+              verification_hints: buildProjectVerificationHints(target_project_actual, workDir),
+              work_dir: workDir,
+              agent_type: agentType,
+              group,
+              memory: memoryBundle,
+            });
+            return `${atInstructions}${buildAgentQaProtocolInstructions(target_project_actual, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是当前精确群聊会话连续性：\n${projection.rendered}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
+          },
         });
-        const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, target_project_actual, messageForAgent, { groupSessionId });
-        const developmentContract = buildChildAgentDevelopmentContract(target_project_actual, messageForAgent, {
-          source: "群聊点名",
-          verification_hints: buildProjectVerificationHints(target_project_actual, workDir),
-          work_dir: workDir,
-          agent_type: agentType,
-          group,
-          memory: memoryBundle,
-        });
-        const fullPrompt = `${atInstructions}${buildAgentQaProtocolInstructions(target_project_actual, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
+        const fullPrompt = preparedDirectPayload.payload;
 
         if (useStream) {
           const responseMessageId = "m" + Date.now().toString(36) + "a" + crypto.randomBytes(2).toString("hex");
@@ -1186,8 +1228,6 @@ export function handleGroupLiveRoutes(
           const workDir = info[0]?.workDir;
           const agentType = info[0]?.agent || "claudecode";
 
-          const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5, groupSessionId });
-
           const sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
           const toolContext = buildAgentToolContext(ctx, group, member.project);
           const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, workDir, agentType, toolContext.allowedTools, null, {
@@ -1203,22 +1243,37 @@ export function handleGroupLiveRoutes(
 
           const memberList = group.members.map((m: any) => m.project).filter((p: string) => p !== member.project && p !== "coordinator").join(", ");
           const memberInstructions = buildMemberCollaborationInstructions(member.project, memberList);
-          const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, message, {
-            workDir,
+          const capacity = resolveTrustedModelContextCapacity({
+            provider: agentType,
+            model: info[0]?.model || info[0]?.modelId || "",
+            modelContextWindow: info[0]?.modelContextWindow || info[0]?.model_context_window,
+          });
+          const preparedBroadcastPayload = await prepareExactGroupSessionRenderedPayload({
+            groupId: group_id,
             groupSessionId,
-            requireExactGroupSession: true,
+            modelCapacity: capacity,
+            reason: "group_broadcast_api_member_final_payload_capacity",
+            renderPayload: async (projection: any) => {
+              const memoryBundle = await deps.buildAgentMemoryContextBundleWithManifestSelection(group_id, member.project, message, {
+                workDir,
+                groupSessionId,
+                requireExactGroupSession: true,
+                dedicatedParentSessionContext: true,
+              });
+              const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, message, { groupSessionId });
+              const developmentContract = buildChildAgentDevelopmentContract(member.project, message, {
+                source: "群聊广播 API",
+                verification_hints: buildProjectVerificationHints(member.project, workDir),
+                work_dir: workDir,
+                agent_type: agentType,
+                group,
+                memory: memoryBundle,
+                requires_code_changes: false,
+              });
+              return `${memberInstructions}${buildAgentQaProtocolInstructions(member.project, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n当前精确群聊会话连续性：\n${projection.rendered}\n\n请从 ${member.project} 的职责视角回复：${message}`;
+            },
           });
-          const memoryPacket = memoryBundle.rendered_text || buildAgentMemoryPacket(group_id, member.project, message, { groupSessionId });
-          const developmentContract = buildChildAgentDevelopmentContract(member.project, message, {
-            source: "群聊广播 API",
-            verification_hints: buildProjectVerificationHints(member.project, workDir),
-            work_dir: workDir,
-            agent_type: agentType,
-            group,
-            memory: memoryBundle,
-            requires_code_changes: false,
-          });
-          const fullPrompt = `${memberInstructions}${buildAgentQaProtocolInstructions(member.project, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n群聊记录：\n${context}\n\n请从 ${member.project} 的职责视角回复：${message}`;
+          const fullPrompt = preparedBroadcastPayload.payload;
 
           const output = await ctx.callAgent(member.project, fullPrompt, workDir, agentType, 300000, {
             tab: "groups",

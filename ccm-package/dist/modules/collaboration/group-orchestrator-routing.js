@@ -61,6 +61,8 @@ exports.buildVisibleAssignmentLine = buildVisibleAssignmentLine;
 exports.inferCoordinatorStrategy = inferCoordinatorStrategy;
 exports.buildCoordinatorPlan = buildCoordinatorPlan;
 exports.isStructuredCoordinatorFallbackAllowed = isStructuredCoordinatorFallbackAllowed;
+exports.measureGroupMainAgentPayload = measureGroupMainAgentPayload;
+exports.prepareExactGroupMainAgentInput = prepareExactGroupMainAgentInput;
 exports.runGroupOrchestratorCore = runGroupOrchestratorCore;
 exports.summarizeGroupOrchestratorProviderError = summarizeGroupOrchestratorProviderError;
 exports.runGroupOrchestrator = runGroupOrchestrator;
@@ -68,6 +70,9 @@ exports.isContextLimitError = isContextLimitError;
 exports.buildReactiveCompactionContext = buildReactiveCompactionContext;
 const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
+const session_compaction_core_1 = require("../../system/session-compaction-core");
+const group_compaction_strategy_1 = require("./group-compaction-strategy");
+const group_session_model_context_1 = require("./group-session-model-context");
 const role_skills_1 = require("../../skills/role-skills");
 const group_reactive_compact_retry_ownership_1 = require("./group-reactive-compact-retry-ownership");
 const group_orchestrator_config_1 = require("./group-orchestrator-config");
@@ -505,10 +510,72 @@ function isStructuredCoordinatorFallbackAllowed(input) {
         && /验收标准[:：]/.test(message);
     return trustedSource && structuredPacket;
 }
+function measureGroupMainAgentPayload(input) {
+    const messages = (0, group_orchestrator_llm_1.buildLlmCoordinatorMessages)(input);
+    const snapshot = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+        scope: "group",
+        sessionId: `${String(input?.group?.id || "")}:${String(input?.groupSessionId || input?.group_session_id || "")}`,
+        recentMessages: messages,
+    });
+    return { messages, snapshot, tokens: snapshot.totalTokens };
+}
+async function prepareExactGroupMainAgentInput(input, group, groupSessionId, config, runtime = {}) {
+    if (!groupSessionId.startsWith("gcs_"))
+        return { input, compacted: false, measurement: measureGroupMainAgentPayload(input) };
+    const buildProjection = typeof runtime.buildProjection === "function"
+        ? runtime.buildProjection
+        : group_session_model_context_1.buildExactGroupSessionModelContextPacket;
+    const runCompaction = typeof runtime.runCompaction === "function"
+        ? runtime.runCompaction
+        : (groupId, options) => {
+            const memoryContextApi = require("./group-memory-context");
+            return memoryContextApi.runGroupMemoryAutoCompactionNow(groupId, options);
+        };
+    let projection = buildProjection(group.id, { groupSessionId });
+    let preparedInput = { ...input, group, context: projection.rendered, groupSessionId };
+    let measurement = measureGroupMainAgentPayload(preparedInput);
+    const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
+    const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
+    const fixedPayload = measureGroupMainAgentPayload({ ...preparedInput, context: "" });
+    const compactResult = await runCompaction(group.id, {
+        sessionId: groupSessionId,
+        reason: "group_main_final_payload_capacity",
+        config: {
+            ...config,
+            memoryCompactionUseModel: true,
+            memoryCompactionMode: "model-required",
+            modelContextWindow: capacity.contextWindow,
+            modelMaxOutputTokens: capacity.reservedOutputTokens,
+            modelAutoCompactTokenLimit: threshold,
+            modelVisibleSystemContext: fixedPayload.messages,
+        },
+    });
+    if (compactResult?.success === true && compactResult?.compacted !== true && measurement.tokens < threshold) {
+        return { input: preparedInput, compacted: false, projection, measurement, capacity, threshold, compactResult };
+    }
+    if (compactResult?.success !== true || compactResult?.compacted !== true) {
+        throw new Error(`GROUP_MAIN_FORMAL_COMPACTION_FAILED:${compactResult?.error || compactResult?.reason || "formal_compaction_not_committed"}`);
+    }
+    projection = buildProjection(group.id, { groupSessionId });
+    if (projection.canonicalSummary !== true) {
+        throw new Error("GROUP_MAIN_FORMAL_COMPACTION_FAILED:canonical_summary_missing");
+    }
+    preparedInput = { ...preparedInput, context: projection.rendered };
+    measurement = measureGroupMainAgentPayload(preparedInput);
+    if (measurement.tokens >= threshold) {
+        throw new Error(`GROUP_MAIN_POST_COMPACT_PAYLOAD_BLOCKED:${measurement.tokens}/${threshold}`);
+    }
+    return { input: preparedInput, compacted: true, projection, measurement, capacity, threshold, compactResult };
+}
 async function runGroupOrchestratorCore(input) {
-    const raggedInput = (0, group_orchestrator_coded_1.withGroupRagContext)(input);
-    const group = normalizeGroupOrchestrator(raggedInput.group);
-    const groupSessionId = String(raggedInput.groupSessionId || raggedInput.group_session_id || "").trim();
+    const initialInput = (0, group_orchestrator_coded_1.withGroupRagContext)(input);
+    const group = normalizeGroupOrchestrator(initialInput.group);
+    const groupSessionId = String(initialInput.groupSessionId || initialInput.group_session_id || "").trim();
+    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const configIssue = getLlmConfigIssue(config);
+    const raggedInput = groupSessionId.startsWith("gcs_")
+        ? { ...initialInput, group, context: (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(group.id, { groupSessionId }).rendered, groupSessionId }
+        : initialInput;
     const replayRepairContext = (0, group_orchestrator_prompts_1.buildCoordinatorReplayRepairDispatchContext)(group);
     const contextId = String(raggedInput.contextId || raggedInput.context_id || `group-main-agent-context:${(0, group_orchestrator_coded_1.hashCoordinator)([
         group?.id || "",
@@ -525,14 +592,15 @@ async function runGroupOrchestratorCore(input) {
         recordDelivery: false,
         channel: "run-group-orchestrator",
     });
-    const enrichedInput = {
+    let enrichedInput = {
         ...raggedInput,
         group,
         extraInstructions: [raggedInput.extraInstructions || "", replayRepairContext, maintenanceNotificationContext.text].filter(Boolean).join("\n\n"),
     };
+    if (!configIssue) {
+        enrichedInput = (await prepareExactGroupMainAgentInput(enrichedInput, group, groupSessionId, config)).input;
+    }
     const coordinator = getCoordinatorMember(group);
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
-    const configIssue = getLlmConfigIssue(config);
     const informationalFallback = false;
     // 规则编排只允许继续已经结构化、已授权的内部工作单；自动对话入口模型失败时安全停止。
     const safeCodedFallback = isStructuredCoordinatorFallbackAllowed(enrichedInput);
@@ -622,11 +690,39 @@ async function runGroupOrchestratorCore(input) {
                         recordDelivery: true,
                         channel: "run-group-orchestrator-llm-context-retry",
                     });
-                    const recoveredContext = buildReactiveCompactionContext(enrichedInput.context || "");
+                    const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
+                    const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
+                    const fixedPayload = measureGroupMainAgentPayload({ ...enrichedInput, context: "" });
+                    const memoryContextApi = require("./group-memory-context");
+                    const compactResult = await memoryContextApi.runGroupMemoryAutoCompactionNow(group.id, {
+                        sessionId: groupSessionId,
+                        reason: "group_main_provider_prompt_too_long",
+                        config: {
+                            ...config,
+                            memoryCompactionUseModel: true,
+                            memoryCompactionMode: "model-required",
+                            modelContextWindow: capacity.contextWindow,
+                            modelMaxOutputTokens: capacity.reservedOutputTokens,
+                            modelAutoCompactTokenLimit: Math.min(threshold, 18_000),
+                            modelVisibleSystemContext: fixedPayload.messages,
+                        },
+                    });
+                    if (compactResult?.success !== true || compactResult?.compacted !== true) {
+                        throw new Error(`GROUP_MAIN_REACTIVE_FORMAL_COMPACTION_FAILED:${compactResult?.error || compactResult?.reason || "formal_compaction_not_committed"}`);
+                    }
+                    const recoveredProjection = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(group.id, { groupSessionId });
+                    if (recoveredProjection.canonicalSummary !== true) {
+                        throw new Error("GROUP_MAIN_REACTIVE_FORMAL_COMPACTION_FAILED:canonical_summary_missing");
+                    }
+                    const recoveredInput = { ...enrichedInput, context: recoveredProjection.rendered };
+                    const recoveredMeasurement = measureGroupMainAgentPayload(recoveredInput);
+                    if (recoveredMeasurement.tokens >= threshold) {
+                        throw new Error(`GROUP_MAIN_REACTIVE_POST_COMPACT_PAYLOAD_BLOCKED:${recoveredMeasurement.tokens}/${threshold}`);
+                    }
+                    const recoveredContext = recoveredProjection.rendered;
                     const recovered = await (0, group_orchestrator_llm_1.runLlmGroupOrchestrator)({
-                        ...enrichedInput,
+                        ...recoveredInput,
                         group,
-                        context: recoveredContext,
                     });
                     const completion = (0, group_reactive_compact_retry_ownership_1.completeGroupReactiveCompactRetry)({
                         groupId: group.id,
@@ -648,7 +744,7 @@ async function runGroupOrchestratorCore(input) {
                         ...recovered,
                         usage: (0, group_orchestrator_llm_1.mergeLlmTokenUsage)(firstAttemptUsage, recovered?.usage),
                         contextRecovery: {
-                            type: "reactive-compact",
+                            type: "formal-model-compact",
                             originalChars: String(enrichedInput.context || "").length,
                             recoveredChars: recoveredContext.length,
                             ownership: reactiveCompactOwnership,

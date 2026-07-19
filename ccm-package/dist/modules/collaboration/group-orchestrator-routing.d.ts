@@ -113,6 +113,124 @@ export type GroupOrchestratorInput = {
     workerContextRetryOptions?: any;
     worker_context_retry_options?: any;
 };
+export declare function measureGroupMainAgentPayload(input: any): {
+    messages: {
+        role: string;
+        content: string;
+    }[];
+    snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
+    tokens: number;
+};
+export declare function prepareExactGroupMainAgentInput(input: any, group: any, groupSessionId: string, config: any, runtime?: any): Promise<{
+    input: any;
+    compacted: boolean;
+    measurement: {
+        messages: {
+            role: string;
+            content: string;
+        }[];
+        snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
+        tokens: number;
+    };
+    projection?: undefined;
+    capacity?: undefined;
+    threshold?: undefined;
+    compactResult?: undefined;
+} | {
+    input: any;
+    compacted: boolean;
+    projection: any;
+    measurement: {
+        messages: {
+            role: string;
+            content: string;
+        }[];
+        snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
+        tokens: number;
+    };
+    capacity: {
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        conservativeFallback: boolean;
+        fallbackReason: string;
+        staleEvidenceId: any;
+        staleEvidenceSource: any;
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        schema: string;
+        provider: string;
+        model: string;
+        contextWindow: number;
+        maxOutputTokens: number;
+        source: string;
+        confidence: number;
+        checkedAt: string;
+        expiresAt: string;
+        evidenceId: string;
+        evidenceChecksum: string;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+        fallbackReason: string;
+    };
+    threshold: number;
+    compactResult: any;
+}>;
 export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput): Promise<{
     usage: LlmTokenUsage;
     agent: any;

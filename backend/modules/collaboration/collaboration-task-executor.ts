@@ -1,4 +1,6 @@
 // Mechanically extracted from collaboration.ts; keep orchestration behavior unchanged.
+import { buildExactGroupSessionModelContextPacket } from "./group-session-model-context";
+
 type CollabCtx = any;
 
 export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
@@ -23,7 +25,6 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
     buildChildAgentWorkerHandoff,
     buildChildAgentWorktreeNotice,
     buildCoordinatorSharedFilesContext,
-    buildGroupContextPacket,
     buildProjectVerificationHints,
     buildQueuedGroupTaskMessage,
     buildTaskProviderSwitchRequests,
@@ -134,7 +135,7 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
       reason: task.title,
       nextAction: "主 Agent 拆分任务并协调子 Agent",
     });
-    const context = buildGroupContextPacket(task.group_id, { recentLimit: 12, olderLimit: 30, fullCount: 5, groupSessionId: task.group_session_id || task.groupSessionId || "" });
+    const context = buildExactGroupSessionModelContextPacket(task.group_id, { groupSessionId: task.group_session_id || task.groupSessionId || "" }).rendered;
     const sharedFilesContext = mergeCoordinatorDocumentContexts(
       buildCoordinatorSharedFilesContext(ctx, group),
       buildTaskSourceDocumentsContext(task)

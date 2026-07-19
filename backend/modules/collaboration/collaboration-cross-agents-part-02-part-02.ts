@@ -5,6 +5,8 @@ import * as crypto from "crypto";
 import type { TestAgentReport } from "../../test-agent/types";
 import { buildDependencyOutputPacket } from "./collaboration-cross-agents-helpers";
 import { executeMentionJobTryB, handleExecuteMentionJobCatch } from "./collaboration-cross-agents-part-03";
+import { runGroupMemoryAutoCompactionNow } from "./group-memory-context-part-01";
+import { buildChildParentSessionContextPacket } from "./group-session-model-context";
 
 import type {
   CrossAgentEnv,
@@ -143,6 +145,13 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
   let responseMessageId = L.responseMessageId || "";
   let providerSwitchExecutionReceipt: any = L.providerSwitchExecutionReceipt || null;
   let targetProviderToolAccessEvidence: any = L.targetProviderToolAccessEvidence || null;
+  const renderCurrentCrossAgentPrompt = (options: any = {}) => renderCrossAgentPrompt({
+    ...options,
+    developmentContract,
+    workerMemoryPacket,
+    runtimeToolContext,
+    activeTaskSession,
+  });
 
   try {
       const responseMessageId = "m" + Date.now().toString(36) + "cross" + crypto.randomBytes(2).toString("hex");
@@ -277,6 +286,8 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
             retryOfInvocationEdgeId: previousInvocationEdge?.invocation_edge_id || "",
             forkReason: sameRuntimeResume ? "native_session_recovery" : `${previousRuntime}_to_${activeRuntime}`,
           }) : null;
+          let fallbackContextReady = false;
+          for (let contextBuildPass = 0; contextBuildPass < 2; contextBuildPass++) {
           groupMemoryBundle = await buildAgentMemoryContextBundleWithManifestSelection(groupId, targetName, childTaskText, {
             taskId,
             traceId: sourceTask?.trace_id || "",
@@ -288,6 +299,7 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
             modelContextWindow: activeTaskSession?.modelContextWindow || 0,
             groupSessionId: activeGroupSessionId,
             requireExactGroupSession: true,
+            dedicatedParentSessionContext: true,
             parentRunId: sourceTask?.parent_run_id || sourceTask?.global_mission_id || "",
             task: sourceTask,
             ...taskAgentInvocationMemoryOptions(activeInvocationEdge),
@@ -355,7 +367,126 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
             continuation: workerContinuation,
             handoff: workerHandoff,
           });
-          tPrompt = renderCrossAgentPrompt();
+          tPrompt = renderCurrentCrossAgentPrompt();
+          const fallbackCapacityGate = buildFinalWorkerDispatchPayloadGate({
+            renderedPrompt: tPrompt,
+            workerHandoff,
+            provider: activeRuntime,
+            model: activeTaskSession?.modelId || "",
+            providerContractId: activeTaskSession?.providerContractId || "",
+            providerRuntimeVersion: activeTaskSession?.providerRuntimeVersion || "",
+            groupId,
+            groupSessionId: activeGroupSessionId,
+            taskId,
+            taskAgentSessionId: activeTaskSession?.id || "",
+          });
+          if (fallbackCapacityGate.provider_call_allowed === true) {
+            fallbackContextReady = true;
+            break;
+          }
+          if (contextBuildPass > 0 || fallbackCapacityGate.status !== "recompact_required") {
+            if (activeTaskSession && fallbackCapacityGate.status === "recompact_required") {
+              recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+                groupId,
+                groupSessionId: activeGroupSessionId,
+                taskId,
+                attemptId: `${fallbackCapacityGate.gate_id}:fallback_post_compact_blocked`,
+                outcome: "failure",
+                reason: "fallback_post_compact_payload_over_threshold",
+                error: `prompt_tokens=${fallbackCapacityGate.model_visible_input_tokens};threshold=${fallbackCapacityGate.auto_compact_threshold}`,
+              });
+            }
+            return failChildDispatch("切换项目子 Agent 后的上下文仍超过模型容量，已阻止 Provider 调用", [
+              `scope=${groupId}::${activeGroupSessionId}`,
+              `tokens=${fallbackCapacityGate.model_visible_input_tokens}/${fallbackCapacityGate.auto_compact_threshold}`,
+              "原始 transcript 保持不变，不使用字符截断绕过门禁",
+            ]);
+          }
+          const fallbackCircuit = activeTaskSession
+            ? inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(activeTaskSession.id, { groupId, groupSessionId: activeGroupSessionId, taskId })
+            : null;
+          if (fallbackCircuit?.blocked === true) {
+            return failChildDispatch("切换项目子 Agent 后的父会话压缩熔断已开启", [
+              `scope=${groupId}::${activeGroupSessionId}`,
+              `failures=${fallbackCircuit.consecutive_failures || 0}`,
+            ]);
+          }
+          const fallbackCompactAttemptId = `${fallbackCapacityGate.gate_id}:fallback_formal_parent_compact`;
+          const fixedPrompt = tPrompt.includes(tContext) ? tPrompt.replace(tContext, "") : tPrompt;
+          let fallbackCompactResult: any = null;
+          try {
+            fallbackCompactResult = await runGroupMemoryAutoCompactionNow(groupId, {
+              sessionId: activeGroupSessionId,
+              force: true,
+              reason: "child_agent_fallback_model_capacity",
+              config: {
+                memoryCompactionUseModel: true,
+                memoryCompactionMode: "model-required",
+                modelContextWindow: fallbackCapacityGate.model_context_window,
+                modelMaxOutputTokens: fallbackCapacityGate.reserved_output_tokens,
+                modelAutoCompactTokenLimit: fallbackCapacityGate.auto_compact_threshold,
+                modelVisibleSystemContext: fixedPrompt,
+              },
+            });
+          } catch (error: any) {
+            fallbackCompactResult = { success: false, compacted: false, error: error?.message || String(error) };
+          }
+          if (fallbackCompactResult?.success !== true || fallbackCompactResult?.compacted !== true) {
+            if (activeTaskSession) {
+              recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+                groupId,
+                groupSessionId: activeGroupSessionId,
+                taskId,
+                attemptId: fallbackCompactAttemptId,
+                outcome: "failure",
+                reason: "fallback_formal_parent_compaction_failed",
+                error: fallbackCompactResult?.error || fallbackCompactResult?.reason || "formal_parent_compaction_not_committed",
+              });
+            }
+            return failChildDispatch("切换项目子 Agent 后的父会话正式模型压缩失败，已阻止 Provider 调用", [
+              `scope=${groupId}::${activeGroupSessionId}`,
+              fallbackCompactResult?.error || fallbackCompactResult?.reason || "formal_parent_compaction_not_committed",
+            ]);
+          }
+          const fallbackParentSessionContext = buildChildParentSessionContextPacket(groupId, { groupSessionId: activeGroupSessionId });
+          if (fallbackParentSessionContext.canonicalSummary !== true) {
+            return failChildDispatch("切换项目子 Agent 后未生成可信正式摘要，已阻止 Provider 调用", [
+              `scope=${groupId}::${activeGroupSessionId}`,
+            ]);
+          }
+          tContext = fallbackParentSessionContext.rendered;
+          activeInvocationEdge = activeTaskSession ? prepareTaskAgentInvocationEdge({
+            groupId,
+            groupSessionId: activeGroupSessionId,
+            taskId,
+            targetProject: targetName,
+            taskAgentSessionId: activeTaskSession.id,
+            nativeSessionId: activeTaskSession.nativeSessionId || "",
+            executionId: laneExecutionId,
+            attemptSequence: retryAttemptSequence,
+            providerAttempt: attemptIndex + 1,
+            invocationKind: retryAttemptSequence > 1 ? "resume" : "spawn",
+            branchKind: sameRuntimeResume ? "native_recovery" : "provider_switch",
+            parentInvocationEdge: previousInvocationEdge,
+            retryOfInvocationEdgeId: previousInvocationEdge?.invocation_edge_id || "",
+            forkReason: "fallback_parent_compaction_rebuild",
+          }) : null;
+          if (activeTaskSession) {
+            recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+              groupId,
+              groupSessionId: activeGroupSessionId,
+              taskId,
+              attemptId: fallbackCompactAttemptId,
+              outcome: "success",
+              reason: "fallback_formal_parent_compaction_committed",
+            });
+          }
+          }
+          if (!fallbackContextReady) {
+            return failChildDispatch("切换项目子 Agent 后无法构建容量内上下文，已阻止 Provider 调用", [
+              `scope=${groupId}::${activeGroupSessionId}`,
+            ]);
+          }
           activeMemoryContextDelivery = null;
           activeMemoryContextSnapshot = null;
           if (activeTaskSession) {
@@ -487,9 +618,9 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
         ].join("\n") : "";
         const currentMemoryAttemptSequence = activeTaskSession ? activeTaskSession.turnCount + 1 : memoryDeliveryAttemptSequence;
         const renderAttemptPrompt = (recentGroupContext: string) => attemptIndex === 0
-          ? renderCrossAgentPrompt({ recentGroupContext })
+          ? renderCurrentCrossAgentPrompt({ recentGroupContext })
           : `${buildRuntimeRecoveryPrompt({
-          originalPrompt: renderCrossAgentPrompt({ recentGroupContext }),
+          originalPrompt: renderCurrentCrossAgentPrompt({ recentGroupContext }),
           previousOutput,
           previousReceipt,
           failure: previousOutput,

@@ -37,6 +37,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.executeMentionJobTryA = executeMentionJobTryA;
 const crypto = __importStar(require("crypto"));
 const collaboration_cross_agents_part_03_1 = require("./collaboration-cross-agents-part-03");
+const group_memory_context_part_01_1 = require("./group-memory-context-part-01");
+const group_session_model_context_1 = require("./group-session-model-context");
 const collaboration_cross_agents_part_02_part_02_native_test_1 = require("./collaboration-cross-agents-part-02-part-02-native-test");
 async function executeMentionJobTryA(mention, env) {
     const { deps, groupId, group, sourceProject, output, configs, ctx, streamRes, depth, seenMentions, executionOrder, planMessageId, taskId, sourceTask, completedOutputsByAgent, processCrossAgents } = env;
@@ -131,6 +133,13 @@ async function executeMentionJobTryA(mention, env) {
     let responseMessageId = L.responseMessageId || "";
     let providerSwitchExecutionReceipt = L.providerSwitchExecutionReceipt || null;
     let targetProviderToolAccessEvidence = L.targetProviderToolAccessEvidence || null;
+    const renderCurrentCrossAgentPrompt = (options = {}) => renderCrossAgentPrompt({
+        ...options,
+        developmentContract,
+        workerMemoryPacket,
+        runtimeToolContext,
+        activeTaskSession,
+    });
     try {
         const responseMessageId = "m" + Date.now().toString(36) + "cross" + crypto.randomBytes(2).toString("hex");
         let targetFileChanges = null;
@@ -263,86 +272,209 @@ async function executeMentionJobTryA(mention, env) {
                         retryOfInvocationEdgeId: previousInvocationEdge?.invocation_edge_id || "",
                         forkReason: sameRuntimeResume ? "native_session_recovery" : `${previousRuntime}_to_${activeRuntime}`,
                     }) : null;
-                    groupMemoryBundle = await buildAgentMemoryContextBundleWithManifestSelection(groupId, targetName, childTaskText, {
-                        taskId,
-                        traceId: sourceTask?.trace_id || "",
-                        executionId: laneExecutionId,
-                        taskAgentSessionId: activeTaskSession?.id || "",
-                        nativeSessionId: activeTaskSession?.nativeSessionId || "",
-                        taskAgentSessionTurn: retryAttemptSequence,
-                        agentType: activeRuntime,
-                        modelContextWindow: activeTaskSession?.modelContextWindow || 0,
-                        groupSessionId: activeGroupSessionId,
-                        requireExactGroupSession: true,
-                        parentRunId: sourceTask?.parent_run_id || sourceTask?.global_mission_id || "",
-                        task: sourceTask,
-                        ...taskAgentInvocationMemoryOptions(activeInvocationEdge),
-                    });
-                    memoryPacket = groupMemoryBundle.rendered_text || buildAgentMemoryPacket(groupId, targetName, childTaskText, { groupSessionId: activeGroupSessionId });
-                    const resumedInvokedSkillAttachmentText = String(groupMemoryBundle.invoked_skill_attachment_text || renderGroupPostCompactInvokedSkillAttachments(groupMemoryBundle)).trim();
-                    if (resumedInvokedSkillAttachmentText && !memoryPacket.includes(resumedInvokedSkillAttachmentText)) {
-                        memoryPacket = `${resumedInvokedSkillAttachmentText}\n\n${memoryPacket}`;
+                    let fallbackContextReady = false;
+                    for (let contextBuildPass = 0; contextBuildPass < 2; contextBuildPass++) {
+                        groupMemoryBundle = await buildAgentMemoryContextBundleWithManifestSelection(groupId, targetName, childTaskText, {
+                            taskId,
+                            traceId: sourceTask?.trace_id || "",
+                            executionId: laneExecutionId,
+                            taskAgentSessionId: activeTaskSession?.id || "",
+                            nativeSessionId: activeTaskSession?.nativeSessionId || "",
+                            taskAgentSessionTurn: retryAttemptSequence,
+                            agentType: activeRuntime,
+                            modelContextWindow: activeTaskSession?.modelContextWindow || 0,
+                            groupSessionId: activeGroupSessionId,
+                            requireExactGroupSession: true,
+                            dedicatedParentSessionContext: true,
+                            parentRunId: sourceTask?.parent_run_id || sourceTask?.global_mission_id || "",
+                            task: sourceTask,
+                            ...taskAgentInvocationMemoryOptions(activeInvocationEdge),
+                        });
+                        memoryPacket = groupMemoryBundle.rendered_text || buildAgentMemoryPacket(groupId, targetName, childTaskText, { groupSessionId: activeGroupSessionId });
+                        const resumedInvokedSkillAttachmentText = String(groupMemoryBundle.invoked_skill_attachment_text || renderGroupPostCompactInvokedSkillAttachments(groupMemoryBundle)).trim();
+                        if (resumedInvokedSkillAttachmentText && !memoryPacket.includes(resumedInvokedSkillAttachmentText)) {
+                            memoryPacket = `${resumedInvokedSkillAttachmentText}\n\n${memoryPacket}`;
+                        }
+                        const resumedPlanAttachmentText = String(groupMemoryBundle.plan_attachment_text || renderGroupPostCompactPlanAttachment(groupMemoryBundle)).trim();
+                        if (resumedPlanAttachmentText && !memoryPacket.includes(resumedPlanAttachmentText)) {
+                            memoryPacket = `${resumedPlanAttachmentText}\n\n${memoryPacket}`;
+                        }
+                        const resumedDynamicContextDeltaText = String(groupMemoryBundle.dynamic_context_delta_text || renderGroupPostCompactDynamicContextDelta(groupMemoryBundle)).trim();
+                        if (resumedDynamicContextDeltaText && !memoryPacket.includes(resumedDynamicContextDeltaText)) {
+                            memoryPacket = `${resumedDynamicContextDeltaText}\n\n${memoryPacket}`;
+                        }
+                        workerMemoryPacket = [memoryPacket, globalMissionMemory].filter(Boolean).join("\n\n");
+                        workerMemoryContext = globalMissionMemory
+                            ? { schema: "ccm-worker-memory-context-v1", group_memory: groupMemoryBundle, global_mission_memory: globalMissionMemory }
+                            : groupMemoryBundle;
+                        if (memoryConsumptionChallenge)
+                            workerMemoryContext = attachMemoryContextConsumptionChallenge(workerMemoryContext, memoryConsumptionChallenge);
+                        workerHandoff = buildChildAgentWorkerHandoff(targetName, childTaskText, {
+                            source: `${sourceProject} @ 协作`,
+                            reason: typeof mention === "string" ? "" : String(mention.reason || "").trim(),
+                            acceptance: sourceTask?.acceptance_criteria || "",
+                            requires_code_changes: nativeTestAgentDispatch ? false : (advisoryOnly ? false : (sourceTask ? taskRequiresCodeChanges(sourceTask) : true)),
+                            verification_hints: buildProjectVerificationHints(targetName, tWorkDir),
+                            work_dir: tWorkDir,
+                            agent_type: activeRuntime,
+                            model: activeTaskSession?.modelId || "",
+                            task_id: taskId,
+                            task_agent_session_id: activeTaskSession?.id || "",
+                            trace_id: sourceTask?.trace_id || "",
+                            task: sourceTask,
+                            group,
+                            dependsOn: typeof mention === "string" ? "" : String(mention.dependsOn || "").trim(),
+                            worker_context_packet: null,
+                            memory: workerMemoryContext,
+                            analysis: globalMissionHandoff ? {
+                                constraints: Array.isArray(globalMissionHandoff.done_criteria) ? globalMissionHandoff.done_criteria : [],
+                                documentFindings: Array.isArray(globalMissionHandoff.references?.document_findings) ? globalMissionHandoff.references.document_findings : [],
+                            } : undefined,
+                            advisoryOnly,
+                            continuation: workerContinuation,
+                        });
+                        workerMemoryPacket = renderMemoryContextForWorker(workerHandoff?.worker_context_packet?.memory || workerMemoryContext);
+                        workerHandoffSummary = summarizeWorkerHandoffForUser(workerHandoff);
+                        developmentContract = buildChildAgentDevelopmentContract(targetName, childTaskText, {
+                            source: `${sourceProject} @ 协作`,
+                            reason: typeof mention === "string" ? "" : String(mention.reason || "").trim(),
+                            acceptance: sourceTask?.acceptance_criteria || "",
+                            requires_code_changes: nativeTestAgentDispatch ? false : (advisoryOnly ? false : (sourceTask ? taskRequiresCodeChanges(sourceTask) : true)),
+                            verification_hints: buildProjectVerificationHints(targetName, tWorkDir),
+                            work_dir: tWorkDir,
+                            agent_type: activeRuntime,
+                            task_id: taskId,
+                            trace_id: sourceTask?.trace_id || "",
+                            task: sourceTask,
+                            group,
+                            dependsOn: typeof mention === "string" ? "" : String(mention.dependsOn || "").trim(),
+                            worker_context_packet: workerHandoff.worker_context_packet,
+                            memory: workerMemoryContext,
+                            advisoryOnly,
+                            continuation: workerContinuation,
+                            handoff: workerHandoff,
+                        });
+                        tPrompt = renderCurrentCrossAgentPrompt();
+                        const fallbackCapacityGate = buildFinalWorkerDispatchPayloadGate({
+                            renderedPrompt: tPrompt,
+                            workerHandoff,
+                            provider: activeRuntime,
+                            model: activeTaskSession?.modelId || "",
+                            providerContractId: activeTaskSession?.providerContractId || "",
+                            providerRuntimeVersion: activeTaskSession?.providerRuntimeVersion || "",
+                            groupId,
+                            groupSessionId: activeGroupSessionId,
+                            taskId,
+                            taskAgentSessionId: activeTaskSession?.id || "",
+                        });
+                        if (fallbackCapacityGate.provider_call_allowed === true) {
+                            fallbackContextReady = true;
+                            break;
+                        }
+                        if (contextBuildPass > 0 || fallbackCapacityGate.status !== "recompact_required") {
+                            if (activeTaskSession && fallbackCapacityGate.status === "recompact_required") {
+                                recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+                                    groupId,
+                                    groupSessionId: activeGroupSessionId,
+                                    taskId,
+                                    attemptId: `${fallbackCapacityGate.gate_id}:fallback_post_compact_blocked`,
+                                    outcome: "failure",
+                                    reason: "fallback_post_compact_payload_over_threshold",
+                                    error: `prompt_tokens=${fallbackCapacityGate.model_visible_input_tokens};threshold=${fallbackCapacityGate.auto_compact_threshold}`,
+                                });
+                            }
+                            return failChildDispatch("切换项目子 Agent 后的上下文仍超过模型容量，已阻止 Provider 调用", [
+                                `scope=${groupId}::${activeGroupSessionId}`,
+                                `tokens=${fallbackCapacityGate.model_visible_input_tokens}/${fallbackCapacityGate.auto_compact_threshold}`,
+                                "原始 transcript 保持不变，不使用字符截断绕过门禁",
+                            ]);
+                        }
+                        const fallbackCircuit = activeTaskSession
+                            ? inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(activeTaskSession.id, { groupId, groupSessionId: activeGroupSessionId, taskId })
+                            : null;
+                        if (fallbackCircuit?.blocked === true) {
+                            return failChildDispatch("切换项目子 Agent 后的父会话压缩熔断已开启", [
+                                `scope=${groupId}::${activeGroupSessionId}`,
+                                `failures=${fallbackCircuit.consecutive_failures || 0}`,
+                            ]);
+                        }
+                        const fallbackCompactAttemptId = `${fallbackCapacityGate.gate_id}:fallback_formal_parent_compact`;
+                        const fixedPrompt = tPrompt.includes(tContext) ? tPrompt.replace(tContext, "") : tPrompt;
+                        let fallbackCompactResult = null;
+                        try {
+                            fallbackCompactResult = await (0, group_memory_context_part_01_1.runGroupMemoryAutoCompactionNow)(groupId, {
+                                sessionId: activeGroupSessionId,
+                                force: true,
+                                reason: "child_agent_fallback_model_capacity",
+                                config: {
+                                    memoryCompactionUseModel: true,
+                                    memoryCompactionMode: "model-required",
+                                    modelContextWindow: fallbackCapacityGate.model_context_window,
+                                    modelMaxOutputTokens: fallbackCapacityGate.reserved_output_tokens,
+                                    modelAutoCompactTokenLimit: fallbackCapacityGate.auto_compact_threshold,
+                                    modelVisibleSystemContext: fixedPrompt,
+                                },
+                            });
+                        }
+                        catch (error) {
+                            fallbackCompactResult = { success: false, compacted: false, error: error?.message || String(error) };
+                        }
+                        if (fallbackCompactResult?.success !== true || fallbackCompactResult?.compacted !== true) {
+                            if (activeTaskSession) {
+                                recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+                                    groupId,
+                                    groupSessionId: activeGroupSessionId,
+                                    taskId,
+                                    attemptId: fallbackCompactAttemptId,
+                                    outcome: "failure",
+                                    reason: "fallback_formal_parent_compaction_failed",
+                                    error: fallbackCompactResult?.error || fallbackCompactResult?.reason || "formal_parent_compaction_not_committed",
+                                });
+                            }
+                            return failChildDispatch("切换项目子 Agent 后的父会话正式模型压缩失败，已阻止 Provider 调用", [
+                                `scope=${groupId}::${activeGroupSessionId}`,
+                                fallbackCompactResult?.error || fallbackCompactResult?.reason || "formal_parent_compaction_not_committed",
+                            ]);
+                        }
+                        const fallbackParentSessionContext = (0, group_session_model_context_1.buildChildParentSessionContextPacket)(groupId, { groupSessionId: activeGroupSessionId });
+                        if (fallbackParentSessionContext.canonicalSummary !== true) {
+                            return failChildDispatch("切换项目子 Agent 后未生成可信正式摘要，已阻止 Provider 调用", [
+                                `scope=${groupId}::${activeGroupSessionId}`,
+                            ]);
+                        }
+                        tContext = fallbackParentSessionContext.rendered;
+                        activeInvocationEdge = activeTaskSession ? prepareTaskAgentInvocationEdge({
+                            groupId,
+                            groupSessionId: activeGroupSessionId,
+                            taskId,
+                            targetProject: targetName,
+                            taskAgentSessionId: activeTaskSession.id,
+                            nativeSessionId: activeTaskSession.nativeSessionId || "",
+                            executionId: laneExecutionId,
+                            attemptSequence: retryAttemptSequence,
+                            providerAttempt: attemptIndex + 1,
+                            invocationKind: retryAttemptSequence > 1 ? "resume" : "spawn",
+                            branchKind: sameRuntimeResume ? "native_recovery" : "provider_switch",
+                            parentInvocationEdge: previousInvocationEdge,
+                            retryOfInvocationEdgeId: previousInvocationEdge?.invocation_edge_id || "",
+                            forkReason: "fallback_parent_compaction_rebuild",
+                        }) : null;
+                        if (activeTaskSession) {
+                            recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome(activeTaskSession.id, {
+                                groupId,
+                                groupSessionId: activeGroupSessionId,
+                                taskId,
+                                attemptId: fallbackCompactAttemptId,
+                                outcome: "success",
+                                reason: "fallback_formal_parent_compaction_committed",
+                            });
+                        }
                     }
-                    const resumedPlanAttachmentText = String(groupMemoryBundle.plan_attachment_text || renderGroupPostCompactPlanAttachment(groupMemoryBundle)).trim();
-                    if (resumedPlanAttachmentText && !memoryPacket.includes(resumedPlanAttachmentText)) {
-                        memoryPacket = `${resumedPlanAttachmentText}\n\n${memoryPacket}`;
+                    if (!fallbackContextReady) {
+                        return failChildDispatch("切换项目子 Agent 后无法构建容量内上下文，已阻止 Provider 调用", [
+                            `scope=${groupId}::${activeGroupSessionId}`,
+                        ]);
                     }
-                    const resumedDynamicContextDeltaText = String(groupMemoryBundle.dynamic_context_delta_text || renderGroupPostCompactDynamicContextDelta(groupMemoryBundle)).trim();
-                    if (resumedDynamicContextDeltaText && !memoryPacket.includes(resumedDynamicContextDeltaText)) {
-                        memoryPacket = `${resumedDynamicContextDeltaText}\n\n${memoryPacket}`;
-                    }
-                    workerMemoryPacket = [memoryPacket, globalMissionMemory].filter(Boolean).join("\n\n");
-                    workerMemoryContext = globalMissionMemory
-                        ? { schema: "ccm-worker-memory-context-v1", group_memory: groupMemoryBundle, global_mission_memory: globalMissionMemory }
-                        : groupMemoryBundle;
-                    if (memoryConsumptionChallenge)
-                        workerMemoryContext = attachMemoryContextConsumptionChallenge(workerMemoryContext, memoryConsumptionChallenge);
-                    workerHandoff = buildChildAgentWorkerHandoff(targetName, childTaskText, {
-                        source: `${sourceProject} @ 协作`,
-                        reason: typeof mention === "string" ? "" : String(mention.reason || "").trim(),
-                        acceptance: sourceTask?.acceptance_criteria || "",
-                        requires_code_changes: nativeTestAgentDispatch ? false : (advisoryOnly ? false : (sourceTask ? taskRequiresCodeChanges(sourceTask) : true)),
-                        verification_hints: buildProjectVerificationHints(targetName, tWorkDir),
-                        work_dir: tWorkDir,
-                        agent_type: activeRuntime,
-                        model: activeTaskSession?.modelId || "",
-                        task_id: taskId,
-                        task_agent_session_id: activeTaskSession?.id || "",
-                        trace_id: sourceTask?.trace_id || "",
-                        task: sourceTask,
-                        group,
-                        dependsOn: typeof mention === "string" ? "" : String(mention.dependsOn || "").trim(),
-                        worker_context_packet: null,
-                        memory: workerMemoryContext,
-                        analysis: globalMissionHandoff ? {
-                            constraints: Array.isArray(globalMissionHandoff.done_criteria) ? globalMissionHandoff.done_criteria : [],
-                            documentFindings: Array.isArray(globalMissionHandoff.references?.document_findings) ? globalMissionHandoff.references.document_findings : [],
-                        } : undefined,
-                        advisoryOnly,
-                        continuation: workerContinuation,
-                    });
-                    workerMemoryPacket = renderMemoryContextForWorker(workerHandoff?.worker_context_packet?.memory || workerMemoryContext);
-                    workerHandoffSummary = summarizeWorkerHandoffForUser(workerHandoff);
-                    developmentContract = buildChildAgentDevelopmentContract(targetName, childTaskText, {
-                        source: `${sourceProject} @ 协作`,
-                        reason: typeof mention === "string" ? "" : String(mention.reason || "").trim(),
-                        acceptance: sourceTask?.acceptance_criteria || "",
-                        requires_code_changes: nativeTestAgentDispatch ? false : (advisoryOnly ? false : (sourceTask ? taskRequiresCodeChanges(sourceTask) : true)),
-                        verification_hints: buildProjectVerificationHints(targetName, tWorkDir),
-                        work_dir: tWorkDir,
-                        agent_type: activeRuntime,
-                        task_id: taskId,
-                        trace_id: sourceTask?.trace_id || "",
-                        task: sourceTask,
-                        group,
-                        dependsOn: typeof mention === "string" ? "" : String(mention.dependsOn || "").trim(),
-                        worker_context_packet: workerHandoff.worker_context_packet,
-                        memory: workerMemoryContext,
-                        advisoryOnly,
-                        continuation: workerContinuation,
-                        handoff: workerHandoff,
-                    });
-                    tPrompt = renderCrossAgentPrompt();
                     activeMemoryContextDelivery = null;
                     activeMemoryContextSnapshot = null;
                     if (activeTaskSession) {
@@ -476,9 +608,9 @@ async function executeMentionJobTryA(mention, env) {
                 ].join("\n") : "";
                 const currentMemoryAttemptSequence = activeTaskSession ? activeTaskSession.turnCount + 1 : memoryDeliveryAttemptSequence;
                 const renderAttemptPrompt = (recentGroupContext) => attemptIndex === 0
-                    ? renderCrossAgentPrompt({ recentGroupContext })
+                    ? renderCurrentCrossAgentPrompt({ recentGroupContext })
                     : `${buildRuntimeRecoveryPrompt({
-                        originalPrompt: renderCrossAgentPrompt({ recentGroupContext }),
+                        originalPrompt: renderCurrentCrossAgentPrompt({ recentGroupContext }),
                         previousOutput,
                         previousReceipt,
                         failure: previousOutput,
