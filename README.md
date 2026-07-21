@@ -15,11 +15,53 @@
 
 ---
 
+## 📑 目录导航
+
+<details>
+<summary><b>点击展开完整目录</b></summary>
+
+- [🌟 核心理念与亮点](#-核心理念与亮点)
+- [🤖 多 Agent 分级协作体系](#-多-agent-分级协作体系)
+- [🚀 全量功能特性详解](#-全量功能特性详解)
+  - [1. ⚙️ 自动开发与看门狗](#1-️-自动开发与看门狗-autodevops--watchdog)
+  - [2. 💻 任务流水线与原生代码审查](#2--任务流水线与原生代码审查-task-pipeline--code-review)
+  - [3. 📊 系统自检与就绪大盘](#3--系统自检与就绪大盘-system-diagnostics-dashboard)
+  - [4. 🧠 记忆控制中心](#4--记忆控制中心-memory-center)
+  - [5. 🌐 全局智能助手](#5--全局智能助手-global-agent)
+  - [6. 🔌 MCP 生态与插件市场](#6--mcp-生态深度集成与插件市场-mcp-ecosystem--marketplace)
+  - [7. 📚 RAG 本地知识库引擎](#7--rag-本地知识库引擎-local-knowledge-base)
+  - [8. 📋 需求分析与智能分解](#8--需求分析与智能分解-requirement-analysis--decomposition)
+  - [9. 💬 多端社交平台聚合协作](#9--多端社交平台聚合协作-multi-channel-integrations)
+  - [10. 🔍 全域对话搜索引擎](#10--全域对话搜索引擎-unified-conversation-search)
+  - [11. 📅 定时任务与工作日志](#11--定时任务与工作日志-cron-scheduling--work-journal)
+  - [12. 📝 提示词模板库](#12--提示词模板库-prompt-template-library)
+  - [13. 🎮 极客彩蛋与沉浸式陪伴](#13--极客彩蛋与沉浸式陪伴-geek-perks--desktop-pets)
+  - [14. 🗄️ 纯本地无痕存储](#14-️-纯本地无痕存储-database-free-architecture)
+  - [15. 🔧 多 Agent 运行时统一适配](#15--多-agent-运行时统一适配-multi-runtime-compatibility)
+  - [16. 📊 我的工作台与拖拽看板](#16--我的工作台与拖拽看板-dashboard--kanban)
+  - [17. 🧹 清理中心与存储治理](#17--清理中心与存储治理-cleanup-center)
+  - [18. 🧭 导航菜单自定义管理器](#18--导航菜单自定义管理器-menu-manager)
+  - [19. 🔧 项目管理与会话生命周期](#19--项目管理与会话生命周期-project-management)
+- [🏗️ 核心架构与工作流](#️-核心架构与工作流)
+- [📦 如何安装与启动](#-如何安装与启动)
+- [💻 开发者指南](#-开发者指南-参与贡献源码)
+- [📈 规划与 Roadmap](#-规划与-roadmap-敬请期待)
+
+</details>
+
+---
+
 ## 🌟 核心理念与亮点
 
 **cc-web** 不仅仅是一个套壳的前端面板，它是一整套**企业级单机 AI 协作基础设施**。它打破了传统"单体 LLM 对话框"的限制，通过引入流水线式的多 Agent 协同机制，结合本地真实的执行环境，让 AI 真正成为您的**全自动外包开发团队**。
 
 ### 🎨 极致的极客风 UI 设计 (Glassmorphism & Cyberpunk)
+
+<p align="center">
+  <img src="docs/images/music.png" width="800" alt="CCM 极客暗黑风 UI 界面">
+  <br><em>沉浸式音乐播放器 — Glassmorphism 暗黑风设计示例</em>
+</p>
+
 摒弃传统的后台管理系统样式，我们采用了次世代的设计语言：
 - **全息玻璃态界面 (Glassmorphism)**：底层模糊、自适应光效卡片，所有界面如悬浮玻璃般通透。午夜蓝深色底色 (`#0a0e1a`)，电光蓝 (`#00d4ff`) 高亮点缀，紫罗兰梯度过渡。
 - **动态微交互与暗黑模式**：流光按钮，数据加载微动效，`backdrop-filter: blur()` 半透明卡片。支持多套预设色调（`cyberpunk`、`aurora`、`deep-void`）与低性能设备友好模式。
@@ -59,6 +101,12 @@
 - **真实试运行与闭环演练 (Smoke Test)**：一键自动跑通"派发→执行→回执→验收"全闭环链路。
 
 ### 2. 💻 任务流水线与原生代码审查 (Task Pipeline & Code Review)
+
+<p align="center">
+  <img src="docs/images/tasks.png" width="800" alt="任务流水线控制台">
+  <br><em>任务派发控制台 — 派发、跟进与验收</em>
+</p>
+
 从需求到交付的全链路可视化：
 - **需求 Epic 拆解**：复杂需求自动拆解为拓扑依赖 (DAG) 的多层次子任务，建立依赖图谱 (`dependency_edges`)。需求文档版本升级时，自动 Diff 计算新增/变更/移除的子任务，保留旧版交付历史。
 - **结构化执行报告**：任务详情页一键查看 Agent 交付总结、实际修改文件列表、失败验证命令、Token 消耗与费用估算。
@@ -67,6 +115,12 @@
 - **Trace 重放诊断**：输入 Task ID 或 Trace ID，沿时间轴查看 `需求 → 计划 → 派发 → 执行 → 测试 → 验收` 完整 Event 链条。支持展开 Playwright 截图、浏览器日志或错误 Traceback 等法医式证据。
 
 ### 3. 📊 系统自检与就绪大盘 (System Diagnostics Dashboard)
+
+<p align="center">
+  <img src="docs/images/metrics.png" width="800" alt="系统诊断大盘">
+  <br><em>系统自检与就绪大盘 — 探针矩阵与资源监控</em>
+</p>
+
 运维级的数据大盘，随时掌握 AI 团队的健康状态：
 - **探针矩阵 (Probe Matrix)**：实时探测所有 Agent CLI（Claude Code、Codex、Cursor、Gemini CLI、OpenCode）的安装路径、版本号、SHA256 身份 Hash 与启动耗时。
 - **MCP 服务健康度**：监控所有已连接 MCP 服务器的连通性、工具发现状态、鉴权有效期（OAuth Token 过期检测）。
@@ -83,6 +137,12 @@
 - **群组记忆自治**：群聊对话的 Post-Turn Summary（轮后摘要）、Boundary Journal（边界日记）、Compaction Projection（压缩投影）等多级记忆管理机制，确保长期协作中上下文始终精准。
 
 ### 5. 🌐 全局智能助手 (Global Agent)
+
+<p align="center">
+  <img src="docs/images/global_agent.png" width="800" alt="全局智能助手">
+  <br><em>全局智能助手 — Agentic Loop 引擎控制中枢</em>
+</p>
+
 系统级 AI 控制中枢，不止是聊天：
 - **后端 Agentic Loop 引擎**：所有交互在服务端持久化执行，无需浏览器保持打开。模型拥有完整的工具调用能力（文件读写、项目管理、任务创建、知识检索、MCP 工具调用）。
 - **写授权与高风险拦截**：只读工具自动执行；写操作需用户授权；高风险操作（如删除项目、数据库迁移）挂起 `waiting_confirmation` 并渲染确认卡片，确认后仅执行原挂起的精确操作。
@@ -91,6 +151,12 @@
 - **跨项目路由**：智能识别用户意图涉及的项目、群组或系统功能，自动路由到对应模块执行。
 
 ### 6. 🔌 MCP 生态深度集成与插件市场 (MCP Ecosystem & Marketplace)
+
+<p align="center">
+  <img src="docs/images/tools.png" width="800" alt="MCP 工具管理">
+  <br><em>MCP 工具配置与 Skills 技能包管理</em>
+</p>
+
 AI 的感官与手脚无限延伸：
 - **MCP 协议客户端**：标准 JSON-RPC 2.0 over Stdio 实现，支持工具发现、工具调用、反向请求安全拦截（`elicitation`/`consent`/`auth` 请求返回 `-32000` 错误码，防止外部 MCP 绕过 CCM UI 擅自触发用户交互）。
 - **运行时工具同步与门禁系统**：在 Agent 启动前，将 MCP 工具和 Skills 根据权限作用域物理投影到隔离目录（`~/.cc-connect/agent-runtime/<runtime>/<snapshotId>/`）。全量授权的服务器直接 Native 加载；仅部分授权的服务器自动回退为 Proxy-only 代理模式，防止权限溢出。通过 Catalog Revision Hash 检测工具快照过期并自动 Resync。
@@ -99,6 +165,12 @@ AI 的感官与手脚无限延伸：
 - **Skills 技能包**：可复用的 Prompt 指令片段，支持 CRUD 管理与别名映射，可按项目粒度分配。
 
 ### 7. 📚 RAG 本地知识库引擎 (Local Knowledge Base)
+
+<p align="center">
+  <img src="docs/images/knowledge.png" width="800" alt="RAG 知识库">
+  <br><em>RAG 本地知识库 — 文档索引与检索</em>
+</p>
+
 让 AI 真正懂你的代码：
 - **TF/TF-IDF 轻量级检索引擎**：无需依赖外部重型向量数据库（无 Pinecone/Weaviate 依赖），使用词频/逆文档频率算法完成文档切片、索引与相似度匹配。
 - **多格式文档支持**：Markdown、TXT、PDF（pdf-parse）、Word DOCX（内置 OOXML 解析器，免依赖解压直读）、CSV、JSON。还支持从在线 URL 导入文档。
@@ -114,6 +186,12 @@ AI 的感官与手脚无限延伸：
 - **Plan Mode 安全预检**：高风险操作（破坏性修改、数据库迁移、跨项目操作）强制进入 Plan Mode，生成执行前计划与澄清问题 (Clarification Questions)，等待用户确认后方可派发。
 
 ### 9. 💬 多端社交平台聚合协作 (Multi-Channel Integrations)
+
+<p align="center">
+  <img src="docs/images/settings.png" width="800" alt="设置中心">
+  <br><em>系统设置 — Agent Provider 管理与飞书通道配置</em>
+</p>
+
 打破内部协作的信息孤岛：
 - **飞书深度集成 (mcp-feishu)**：独立的 ESM MCP Server（`@modelcontextprotocol/sdk` + `StdioServerTransport`），支持：
   - QR 扫码快捷认证 OAuth 登录。
@@ -134,6 +212,12 @@ AI 的感官与手脚无限延伸：
 - **深度链接导航**：搜索结果支持点击直接跳转到对应的项目/群聊/消息位置并高亮。
 
 ### 11. 📅 定时任务与工作日志 (Cron Scheduling & Work Journal)
+
+<p align="center">
+  <img src="docs/images/cron.png" width="800" alt="定时任务管理">
+  <br><em>Cron 定时任务调度与工作日志</em>
+</p>
+
 无人值守的自动化调度：
 - **Cron 调度引擎**：内存级秒/分精准触发器，支持标准 Cron 表达式。可视化编辑器配置调度规则。
 - **每日开发日报自动生成**：自动扫描完成的任务与 Git 提交，汇总生成每日工作日志（Work Journal）。通过配置自动将日报/周报通过飞书推送给指定接收人。
@@ -148,6 +232,12 @@ AI 的感官与手脚无限延伸：
 - **智能升级**：用户自定义修改过的模板被保留，未修改的旧版本自动升级到最新代码预设。
 
 ### 13. 🎮 极客彩蛋与沉浸式陪伴 (Geek Perks & Desktop Pets)
+
+<p align="center">
+  <img src="docs/images/pets.png" width="800" alt="桌面宠物">
+  <br><em>Electron 桌面宠物 — 陪伴你的全自动开发流</em>
+</p>
+
 开发也可以很优雅：
 - **Electron 桌面宠物**：
   - 独立 Electron 进程控制，桌面悬浮交互式挂件。
@@ -180,6 +270,45 @@ AI 的感官与手脚无限延伸：
 - **Qoder CLI**：自定义/替代 Agent 运行时。
 - **统一输出契约**：每种 Agent 的 JSON 行输出进行漂移检测（Drift Detection），防范 CLI 输出格式非预期变化。
 - **版本快照**：捕获 CLI 可执行文件路径、SHA256 身份 Hash、语义化版本号，确保运行时一致性。
+
+### 16. 📊 我的工作台与拖拽看板 (Dashboard & Kanban)
+你的个人任务总控中心：
+- **可视化拖拽看板**：Drag-and-Drop 拖拽任务卡片，在 Pending → In Progress → Done → Failed 四列之间流转。
+- **快捷动作入口**：集成需求智能分解 Modal 与代码审查 Modal 的快速入口，一键启动工作流。
+- **全局概览**：汇聚所有项目、群聊的实时任务状态，提供统一的工作鸟瞰视图。
+- **Agent 流水线可视化卡片**：直观展示多 Agent 协作任务在 Intake → Dispatch → Execute → Review 各阶段的节点状态流转。
+
+### 17. 🧹 清理中心与存储治理 (Cleanup Center)
+保持系统整洁如新：
+- **存储空间概览**：可视化磁盘占用、临时文件、缓存与无效工件的空间分布。
+- **清理操作预检与效果预览**：在执行清理前预览将要清除的文件和释放的空间。
+- **一键智能清理**：清理临时日志、过期 Worktree、已归档任务产物、Runner 历史记录。
+- **清理历史追溯**：完整记录每次清理操作的时间、类型与释放空间。
+
+### 18. 🧭 导航菜单自定义管理器 (Menu Manager)
+打造你自己的专属工作台布局：
+- **自由定制导航排序**：拖拽调整顶部导航栏的 Tab 排序、分组与显示/隐藏状态。
+- **常用功能固定 (Pin)**：将高频使用的功能固定到导航栏首位。
+- **自定义外部链接**：支持添加自定义外部 URL 链接作为菜单项。
+- **导航配置导出/导入**：JSON 格式的配置备份与一键恢复。
+
+### 19. 🔧 项目管理与会话生命周期 (Project Management)
+
+<p align="center">
+  <img src="docs/images/projects.png" width="800" alt="项目管理">
+  <br><em>项目管理 — 会话、Agent 控制与代码对话</em>
+</p>
+
+每个项目的完整生命周期管理：
+- **项目创建向导**：步骤化项目设置（名称、路径、Agent 类型、模型选择），支持 Git URL 直接克隆建项。
+- **TOML 配置在线编辑**：浏览器内直接编辑 `.toml` 项目配置文件。
+- **Agent 控制面板**：Start/Stop/Restart 按钮实时控制每个项目的 Agent 进程，配合红/绿/黄状态指示灯。
+- **多 Agent 绑定**：单个项目支持同时配置多个不同类型的 Agent。
+- **会话管理与世代轮转**：管理项目会话的创建、压缩（`/compact`）、消息删除与回滚时的世代旋转。
+- **项目归档与恢复**：软删除/归档、恢复、预览彻底清除的完整项目生命周期操作。
+- **上下文 Token 占用度量**：实时显示当前会话的 Token 消耗量与剩余 Context Window 空间。
+- **会话内查找 (Ctrl+F)**：支持在长会话中对消息内容进行实时高亮定位与前后跳转。
+- **斜杠命令菜单**：输入 `/` 快速唤起提示词模板与命令动作菜单（如 `/compact`、`/help`、`/clear`）。
 
 ---
 
@@ -311,6 +440,19 @@ ccm start
 ```
 
 启动后在浏览器打开：`http://localhost:3080`。
+
+### 💡 初次使用指南 (Quick Start)
+
+完成启动后，您可以按照以下步骤体验 Agent 自动开发流：
+
+1. **配置大模型密钥**：点击左侧导航栏的「系统设置」，在 Provider 配置中填入您的大模型 API Key（支持 Claude / OpenAI / Gemini 等）。
+2. **连接本地项目**：进入「项目管理」页面，点击“新建项目”，输入您本地某个待开发的代码仓库绝对路径。
+3. **唤醒群聊主 Agent**：在项目中发起对话，输入您的需求，例如：*“帮我在项目中添加一个深色模式切换按钮”*。
+4. **全自动流水线**：
+   - 🌐 **全局助手** 会评估该意图，并将其转交。
+   - 👨‍💼 **群聊主 Agent** 将自动把这个大需求拆解为若干个开发步骤（例如：更新 CSS、修改 Vue 组件、增加状态管理）。
+   - 👷 **项目子 Agent** 们将被分配到独立的 Worktree 中并行编写代码。
+   - 最终等待 🧪 **Test Agent** 独立复核完成后，您可以在「任务派发」面板一键查看代码 Diff 并合并！
 
 ---
 
