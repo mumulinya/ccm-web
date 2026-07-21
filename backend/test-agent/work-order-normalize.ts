@@ -128,6 +128,7 @@ export function normalizeTestAgentWorkOrder(input: TestAgentWorkOrder, overrides
   options.collectBrowserVideo = options.collectBrowserVideo === true;
   options.requireAdversarialProbe = options.requireAdversarialProbe !== false;
   options.adversarialProbeWaiver = text(options.adversarialProbeWaiver);
+  options.agenticPlanning = options.agenticPlanning === true;
   if (!["auto", "playwright", "mcp", "none"].includes(String(options.browserProvider || ""))) options.browserProvider = "auto";
   if (!options.requireAdversarialProbe && !options.adversarialProbeWaiver) {
     issues.push({

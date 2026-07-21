@@ -95,7 +95,8 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
       let decision: GlobalAgentDecision;
       const decisionStarted = now;
       try {
-        const messages = await buildGlobalAgentModelMessages(run, runtime);
+        let messages = await buildGlobalAgentModelMessages(run, runtime);
+        if (runtime.prepareModelMessages) messages = await runtime.prepareModelMessages(messages, run);
         run.model_calls += 1;
         const rawDecision = await runtime.callModel(messages, run);
         if (applyPendingGlobalAgentUserSteers(run, runtime).length) continue;

@@ -4,7 +4,7 @@ export declare const SESSION_MEMORY_INITIAL_TOKENS = 10000;
 export declare const SESSION_MEMORY_UPDATE_GROWTH_TOKENS = 5000;
 export declare const SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES = 3;
 export declare const SESSION_MEMORY_EXTRACTION_WAIT_MS = 15000;
-export type SessionCompactionScope = "global" | "group" | "project" | "task_agent";
+export type SessionCompactionScope = "global" | "group" | "project" | "task_agent" | "music";
 export type SessionCompactionHookPhase = "pre_compact" | "session_start" | "post_compact";
 export type SessionProviderUsageBaseline = {
     scope?: SessionCompactionScope;

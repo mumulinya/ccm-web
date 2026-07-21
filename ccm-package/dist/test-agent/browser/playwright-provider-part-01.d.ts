@@ -196,6 +196,6 @@ export interface PngPixelStats {
     nonTransparentPixels: number;
     nonWhitePixels: number;
 }
-export declare function pngChannelCount(colorType: number): 0 | 1 | 2 | 4 | 3;
+export declare function pngChannelCount(colorType: number): 1 | 2 | 0 | 3 | 4;
 export declare function pngPaeth(left: number, up: number, upperLeft: number): number;
 export {};

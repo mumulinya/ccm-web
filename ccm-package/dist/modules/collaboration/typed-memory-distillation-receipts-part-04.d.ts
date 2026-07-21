@@ -456,7 +456,7 @@ export declare function ptlEmergencyTypedArchive(groupId: string, input?: any, o
 export declare function renderPtlEmergencyTypedBody(archive?: any, options?: any): string;
 export declare function distillPtlEmergencyDowngradeToTypedMemory(groupId: string, input?: any, options?: any): any;
 export declare function addDistillationQualityCheck(checks: any[], input: any): void;
-export declare function distillationQualityPenalty(severity: string): 7 | 45 | 14 | 28;
+export declare function distillationQualityPenalty(severity: string): 7 | 14 | 28 | 45;
 export declare function collectDistilledFacts(ledger: any): any[];
 export declare function evaluateGroupTypedMemoryDistillationQuality(groupId: string, options?: any): any;
 export declare function groupTypedMemoryDistillationArchiveFingerprint(archive?: any): string;

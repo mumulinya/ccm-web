@@ -33,6 +33,7 @@ exports.DEFAULT_OPTIONS = {
     collectBrowserVideo: false,
     requireAdversarialProbe: true,
     adversarialProbeWaiver: "",
+    agenticPlanning: false,
 };
 function text(value) {
     return String(value || "").trim();

@@ -36,6 +36,13 @@
         <div class="content-header">
           <button class="mobile-session-trigger" title="打开会话列表" @click="mobileSessionsOpen = true"><PanelLeft :size="18" /></button>
           <span>{{ currentSession ? `${currentProject} · ${sessions.find(item => item.id === currentSession)?.name || '当前会话'}` : '项目对话' }}</span>
+          <ConversationFindBar
+            :messages="messages"
+            :scroll-container="messagesEl"
+            target-id-prefix="msg-"
+            :scope-key="`${currentProject || ''}::${currentSession || ''}`"
+            :active="active && !!currentSession"
+          />
         </div>
         <div id="messages" ref="messagesEl" class="messages" @scroll="updateMessageScrollState">
           <EmptyState
@@ -175,6 +182,7 @@
       @update-field="updateProjectFormField"
       @browse="openFolderBrowser"
       @open-feishu="openFeishuQr"
+      @refresh-git="loadProjectGitStatus"
       @close="showCreate = false"
       @submit="submitCreate"
     />
@@ -189,6 +197,7 @@
       @update-field="updateProjectFormField"
       @browse="openFolderBrowser"
       @open-feishu="openFeishuQr"
+      @refresh-git="loadProjectGitStatus"
       @close="showEdit = false"
       @submit="submitEdit"
     />

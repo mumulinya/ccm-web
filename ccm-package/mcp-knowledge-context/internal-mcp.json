@@ -2,17 +2,22 @@
   "schema": "ccm-internal-mcp-v1",
   "name": "ccm__knowledge_context",
   "display_name": "知识上下文 MCP",
-  "description": "按任务、群聊和项目权限检索知识库、读取文档并返回可追溯引用。",
+  "description": "按签名任务或项目会话权限读取 CCM 会话连续性、长期记忆和知识文档。",
   "version": "1.0.0",
   "entry": "../dist/integrations/knowledge-context-mcp.js",
   "lifecycle": "task_scoped",
   "lifecycle_label": "按知识范围注入",
-  "scopes": ["全局 Agent", "群聊主 Agent", "项目子 Agent", "TestAgent"],
+  "scopes": ["全局 Agent", "群聊主 Agent", "独立项目 Agent", "项目子 Agent", "TestAgent"],
   "tools": [
     { "name": "get_project_context", "label": "提取项目上下文", "description": "按当前任务目标自动提取相关知识。" },
     { "name": "search_knowledge", "label": "检索知识", "description": "检索允许范围内的知识片段和来源。" },
     { "name": "read_knowledge_document", "label": "读取知识文档", "description": "分页读取允许范围内的已解析文档。" },
     { "name": "list_citations", "label": "列出引用", "description": "列出可用于交付说明的文档和引用标识。" },
-    { "name": "acknowledge_memory_context", "label": "确认记忆已加载", "description": "用一次性 challenge 生成模型侧记忆加载回执。" }
+    { "name": "acknowledge_memory_context", "label": "确认记忆已加载", "description": "必需上下文读取完成后，用一次性 challenge 生成模型侧回执。" },
+    { "name": "get_context_manifest", "label": "读取记忆清单", "description": "读取当前签名作用域的会话与长期记忆快照清单。" },
+    { "name": "read_session_context", "label": "读取会话上下文", "description": "按完整对话轮次分页读取当前精确会话。" },
+    { "name": "search_memory", "label": "检索 CCM 记忆", "description": "使用现有群聊和项目召回逻辑检索长期记忆。" },
+    { "name": "read_memory_items", "label": "读取记忆条目", "description": "读取当前快照或检索结果中的记忆原文。" },
+    { "name": "report_memory_usage", "label": "报告记忆使用", "description": "提交使用、忽略、冲突和候选记忆报告，不直接写正式记忆。" }
   ]
 }

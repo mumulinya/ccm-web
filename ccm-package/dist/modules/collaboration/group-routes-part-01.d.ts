@@ -11,7 +11,7 @@ export type BasicGroupRouteDeps = {
 export declare function compactGroupMessageTaskRuntime(runtime: any): any;
 export declare function compactGroupStatusText(value: any, max?: number): string;
 export declare function taskUpdatedMs(task: any): number;
-export declare function checkpointStatus(status: any): "failed" | "pending" | "done" | "active" | "warning";
+export declare function checkpointStatus(status: any): "done" | "pending" | "failed" | "active" | "warning";
 export declare function groupTaskStatusMeta(status: any): {
     phase: string;
     label: string;

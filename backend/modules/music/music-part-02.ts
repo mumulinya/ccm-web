@@ -29,6 +29,7 @@ import {
   runMusicRemoteCommandQueueSelfTest,
   takeMusicRemoteCommand,
 } from "./state";
+import { prepareMusicAgentTurn } from "./memory";
 import {
   callClaudeAgent,
   classifyMusicAgentAction,
@@ -340,11 +341,12 @@ export function handleMusicApiPartB(pathname: string, req: any, res: any, parsed
     req.on("data", (chunk) => body += chunk);
     req.on("end", async () => {
       try {
-        const { message, mode: chatMode, history } = JSON.parse(body);
+        const { message, mode: chatMode } = JSON.parse(body);
         const cfg = loadMusicAgentConfig();
+        const memoryContext = await prepareMusicAgentTurn(message, chatMode);
         let action: any;
         try {
-          action = await classifyMusicAgentAction(cfg, message, chatMode, history || []);
+          action = await classifyMusicAgentAction(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
         } catch {
           const intent = extractMusicIntent(message);
           action = normalizeMusicAgentAction(

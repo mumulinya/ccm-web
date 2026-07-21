@@ -1,4 +1,4 @@
-export type InternalMcpAgentRole = "global-agent" | "group-main-agent" | "project-child-agent" | "test-agent";
+export type InternalMcpAgentRole = "global-agent" | "group-main-agent" | "project-agent" | "project-child-agent" | "test-agent";
 export type InternalMcpProjectBinding = {
     name: string;
     workDir: string;
@@ -6,11 +6,13 @@ export type InternalMcpProjectBinding = {
     targetUrl?: string;
 };
 export type InternalMcpTaskContext = {
-    schema: "ccm-internal-mcp-task-context-v1";
+    schema: "ccm-internal-mcp-task-context-v1" | "ccm-internal-mcp-context-v2";
+    bindingKind?: "task" | "project_session";
     taskId: string;
     groupId: string;
     groupSessionId?: string;
     project: string;
+    projectSessionId?: string;
     role: InternalMcpAgentRole;
     agentType?: string;
     taskAgentSessionId?: string;
@@ -20,6 +22,12 @@ export type InternalMcpTaskContext = {
     projects?: InternalMcpProjectBinding[];
     memoryReceiptChallenge?: any;
     memoryReceiptFile?: string;
+    memorySnapshotId?: string;
+    memorySnapshotChecksum?: string;
+    boundaryGeneration?: number;
+    nativeGeneration?: number;
+    requestText?: string;
+    memoryReadBudgetTokens?: number;
     issuedAt: string;
     expiresAt: string;
 };

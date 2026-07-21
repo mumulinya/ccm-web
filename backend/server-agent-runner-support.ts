@@ -1,5 +1,6 @@
 // Support helpers extracted from server-agent-runner.ts (behavior-freeze).
 // Contains tool/verification/external-runner plumbing used by the three orchestrators.
+import { THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } from "./integrations/third-party-memory-snapshot";
 
 export function createAgentRunnerSupport(deps: any) {
   const {
@@ -337,10 +338,13 @@ export function createAgentRunnerSupport(deps: any) {
   
   
   
-  function buildProjectToolContext(projectName: string, workDir = "", agentType = "claudecode") {
+  function buildProjectToolContext(projectName: string, workDir = "", agentType = "claudecode", options: any = {}) {
     const toolAuth = buildToolAuthorizationPayload(getProjectToolSelection(projectName));
     const allowedTools = toolAuth.tools;
-    const audit = syncRuntimeTools(workDir, agentType, allowedTools, { authorizationReadiness: toolAuth.authorization_readiness });
+    const audit = syncRuntimeTools(workDir, agentType, allowedTools, {
+      authorizationReadiness: toolAuth.authorization_readiness,
+      internalMcpServers: options.internalMcpServers || {},
+    });
     audit.authorization_readiness = toolAuth.authorization_readiness;
     audit.dispatch_gate = buildRuntimeToolDispatchGate(audit);
     recordRuntimeToolSyncAudit(audit, projectName);
@@ -428,7 +432,7 @@ export function createAgentRunnerSupport(deps: any) {
       cliAllowedTools: Array.from(new Set([
         ...buildAgentCliAllowedTools(projectName, message),
         ...(executionInfo?.memoryContextConsumptionReceiptRequired === true
-          ? ["mcp__ccm__knowledge_context__acknowledge_memory_context"]
+          ? THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES
           : []),
       ])),
       message,

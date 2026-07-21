@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "codex": {
+    "enabled": true,
+    "authMode": "cli_login"
+  },
+  "cursor": {
+    "enabled": true,
+    "authMode": "cli_login"
+  },
+  "claudecode": {
+    "enabled": true,
+    "authMode": "api",
+    "apiUrl": "https://gateway.example.test",
+    "apiKey": "ccm-secret://development-agent-claudecode:apikey-51d7edf3ac1b",
+    "credentialType": "auth_token",
+    "model": "claude-test"
+  },
+  "updatedAt": "2026-07-20T15:41:21.424Z"
+}

@@ -1,0 +1,7 @@
+{
+  "pass": true,
+  "checks": 15,
+  "geminiConfig": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\gemini-opencode-agent-integration-selftest\\project\\.gemini\\settings.json",
+  "openCodeConfig": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\gemini-opencode-agent-integration-selftest\\runtime\\opencode\\d8c026af8c54a6ea\\opencode.json",
+  "paidProviderCalls": 0
+}

@@ -54,28 +54,57 @@ const definePageComponent = loader => defineAsyncComponent({
   },
 })
 
-const ProjectManager = definePageComponent(() => import('./components/projects/ProjectManager.vue'))
-const GroupChat = definePageComponent(() => import('./components/collaboration/GroupChat.vue'))
-const ToolsConfig = definePageComponent(() => import('./components/tools/ToolsConfig.vue'))
-const TaskManager = definePageComponent(() => import('./components/tasks/TaskManager.vue'))
-const AutoDevOps = definePageComponent(() => import('./components/tools/AutoDevOps.vue'))
-const Terminal = definePageComponent(() => import('./components/tools/Terminal.vue'))
-const Settings = definePageComponent(() => import('./components/settings/Settings.vue'))
-const CodeChanges = definePageComponent(() => import('./components/tools/CodeChanges.vue'))
-const CronJobs = definePageComponent(() => import('./components/tools/CronJobs.vue'))
-const AgentMetrics = definePageComponent(() => import('./components/agents/AgentMetrics.vue'))
-const SearchHistory = definePageComponent(() => import('./components/workspace/SearchHistory.vue'))
-const MusicPlayer = definePageComponent(() => import('./components/music/MusicPlayer.vue'))
+const PAGE_LOADERS = {
+  projects: () => import('./components/projects/ProjectManager.vue'),
+  groups: () => import('./components/collaboration/GroupChat.vue'),
+  tools: () => import('./components/tools/ToolsConfig.vue'),
+  tasks: () => import('./components/tasks/TaskManager.vue'),
+  autodev: () => import('./components/tools/AutoDevOps.vue'),
+  terminal: () => import('./components/tools/Terminal.vue'),
+  settings: () => import('./components/settings/Settings.vue'),
+  changes: () => import('./components/tools/CodeChanges.vue'),
+  cron: () => import('./components/tools/CronJobs.vue'),
+  metrics: () => import('./components/agents/AgentMetrics.vue'),
+  search: () => import('./components/workspace/SearchHistory.vue'),
+  music: () => import('./components/music/MusicPlayer.vue'),
+  menumanager: () => import('./components/workspace/MenuManager.vue'),
+  pets: () => import('./components/pets/PetMenu.vue'),
+  'global-agent': () => import('./components/global/GlobalAgent.vue'),
+  knowledge: () => import('./components/knowledge/KnowledgeBase.vue'),
+  'memory-center': () => import('./components/knowledge/MemoryCenter.vue'),
+  'cleanup-center': () => import('./components/system/cleanup/CleanupCenter.vue'),
+  'trace-replay': () => import('./components/system/TraceReplay.vue'),
+}
+const ProjectManager = definePageComponent(PAGE_LOADERS.projects)
+const GroupChat = definePageComponent(PAGE_LOADERS.groups)
+const ToolsConfig = definePageComponent(PAGE_LOADERS.tools)
+const TaskManager = definePageComponent(PAGE_LOADERS.tasks)
+const AutoDevOps = definePageComponent(PAGE_LOADERS.autodev)
+const Terminal = definePageComponent(PAGE_LOADERS.terminal)
+const Settings = definePageComponent(PAGE_LOADERS.settings)
+const CodeChanges = definePageComponent(PAGE_LOADERS.changes)
+const CronJobs = definePageComponent(PAGE_LOADERS.cron)
+const AgentMetrics = definePageComponent(PAGE_LOADERS.metrics)
+const SearchHistory = definePageComponent(PAGE_LOADERS.search)
+const MusicPlayer = definePageComponent(PAGE_LOADERS.music)
 const MusicRemoteHost = defineAsyncComponent(() => import('./components/music/MusicRemoteHost.vue'))
-const MenuManager = definePageComponent(() => import('./components/workspace/MenuManager.vue'))
-const PetMenu = definePageComponent(() => import('./components/pets/PetMenu.vue'))
-const GlobalAgent = definePageComponent(() => import('./components/global/GlobalAgent.vue'))
-const KnowledgeBase = definePageComponent(() => import('./components/knowledge/KnowledgeBase.vue'))
-const MemoryCenter = definePageComponent(() => import('./components/knowledge/MemoryCenter.vue'))
-const CleanupCenter = definePageComponent(() => import('./components/system/cleanup/CleanupCenter.vue'))
-const TraceReplay = definePageComponent(() => import('./components/system/TraceReplay.vue'))
+const MenuManager = definePageComponent(PAGE_LOADERS.menumanager)
+const PetMenu = definePageComponent(PAGE_LOADERS.pets)
+const GlobalAgent = definePageComponent(PAGE_LOADERS['global-agent'])
+const KnowledgeBase = definePageComponent(PAGE_LOADERS.knowledge)
+const MemoryCenter = definePageComponent(PAGE_LOADERS['memory-center'])
+const CleanupCenter = definePageComponent(PAGE_LOADERS['cleanup-center'])
+const TraceReplay = definePageComponent(PAGE_LOADERS['trace-replay'])
 
 const currentTab = ref('')
+const musicPlayerActivated = ref(false)
+const preloadedTabs = new Set()
+const preloadTab = tabId => {
+  const loader = PAGE_LOADERS[tabId]
+  if (!loader || preloadedTabs.has(tabId)) return
+  preloadedTabs.add(tabId)
+  loader().catch(() => preloadedTabs.delete(tabId))
+}
 const RETIRED_TAB_REDIRECTS = {
   diagnostics: 'settings',
   templates: 'dashboard',
@@ -377,6 +406,7 @@ const preventPageScroll = () => {
 }
 watch(currentTab, () => {
   if (currentTab.value === 'music') {
+    musicPlayerActivated.value = true
     window.addEventListener('scroll', preventPageScroll)
   } else {
     window.removeEventListener('scroll', preventPageScroll)
@@ -402,12 +432,10 @@ onMounted(async () => {
   window.addEventListener('storage', handleSettingsStorage)
   window.addEventListener(MENU_CONFIG_EVENT, handleMenuConfigurationEvent)
 
-  try {
-    const res = await fetch('/api/projects')
-    const data = await res.json()
-    projects.value = data.projects || []
-  } catch {}
-  await refreshMusicPetAgent()
+  await Promise.all([
+    fetch('/api/projects').then(res => res.json()).then(data => { projects.value = data.projects || [] }).catch(() => {}),
+    refreshMusicPetAgent(),
+  ])
   const initialNavigation = startupNavigationTarget
   if (initialNavigation) {
     await applyPetNavigationTarget(initialNavigation)
@@ -584,7 +612,7 @@ const closeTab = (tabId, event) => {
           <span class="brand-mark"><Sparkles :size="18" /></span>
           <span class="brand-copy"><strong>CCM</strong><small>Agent Workspace</small></span>
         </button>
-        <span class="brand-version">v1.0.0</span>
+        <span class="brand-version">v1.0.10</span>
       </div>
       <div class="nav-menu">
         <template v-if="pinnedTabs.length">
@@ -594,7 +622,7 @@ const closeTab = (tabId, event) => {
             <span>常用</span>
           </div>
           <div v-show="!collapsedGroups.pinned" class="nav-group-items">
-            <div v-for="tab in pinnedTabs" :key="tab.id" class="nav-item" :class="{ active: currentTab === tab.id }" @click="switchTab(tab.id)">
+            <div v-for="tab in pinnedTabs" :key="tab.id" class="nav-item" :class="{ active: currentTab === tab.id }" @mouseenter="preloadTab(tab.id)" @focusin="preloadTab(tab.id)" @click="switchTab(tab.id)">
               <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
               <span>{{ tab.label }}</span>
             </div>
@@ -612,6 +640,8 @@ const closeTab = (tabId, event) => {
               :key="tab.id"
               class="nav-item"
               :class="{ active: currentTab === tab.id }"
+              @mouseenter="preloadTab(tab.id)"
+              @focusin="preloadTab(tab.id)"
               @click="switchTab(tab.id)"
             >
               <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
@@ -632,6 +662,8 @@ const closeTab = (tabId, event) => {
               :key="tab.id"
               class="nav-item"
               :class="{ active: currentTab === tab.id }"
+              @mouseenter="preloadTab(tab.id)"
+              @focusin="preloadTab(tab.id)"
               @click="switchTab(tab.id)"
             >
               <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
@@ -652,6 +684,8 @@ const closeTab = (tabId, event) => {
         <div class="tab-bar" v-if="openTabs.length > 0">
           <div v-for="tab in openTabs" :key="tab.id"
             class="tab-item" :class="{ active: currentTab === tab.id }"
+            @mouseenter="preloadTab(tab.id)"
+            @focusin="preloadTab(tab.id)"
             @click="switchTab(tab.id)"
             @contextmenu.prevent="closeTab(tab.id, $event)">
             <component :is="getTabIcon(tab.id)" class="tab-icon" :size="14" />
@@ -683,8 +717,8 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('dashboard')" v-show="currentTab === 'dashboard'" class="tab-pane scrollable-pane"><UsabilityWorkbench @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics :active="currentTab === 'metrics'" @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
-        <!-- MusicPlayer stays mounted so global/Feishu point-song works from any tab -->
-        <div v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :agent-label="musicPetLabel" /></div>
+        <!-- Load the audio engine on first use; keep it mounted afterwards for cross-page playback. -->
+        <div v-if="musicPlayerActivated" v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :active="currentTab === 'music'" :agent-label="musicPetLabel" /></div>
         <MusicRemoteHost @switch-tab="switchTab" />
         <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
         <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" :config="menuConfig" @update-config="updateMenuConfiguration" /></div>
@@ -707,6 +741,8 @@ const closeTab = (tabId, event) => {
           :key="tab.id"
           type="button"
           :class="{ active: currentTab === tab.id }"
+          @mouseenter="preloadTab(tab.id)"
+          @focus="preloadTab(tab.id)"
           @click="openMobileTab(tab.id)"
         >
           <component :is="getTabIcon(tab.id)" :size="19" />
@@ -722,6 +758,8 @@ const closeTab = (tabId, event) => {
         class="bottom-item"
         :class="{ active: currentTab === tab.id }"
         type="button"
+        @mouseenter="preloadTab(tab.id)"
+        @focus="preloadTab(tab.id)"
         @click="openMobileTab(tab.id)"
       >
         <component :is="getTabIcon(tab.id)" class="bottom-icon" :size="19" />

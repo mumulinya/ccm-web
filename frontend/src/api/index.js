@@ -18,6 +18,7 @@ export const projectsApi = {
   list: () => api('/api/projects'),
   create: (data) => api('/api/projects/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   update: (data) => api('/api/projects/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  gitStatus: (name) => api(`/api/projects/git-status?project=${encodeURIComponent(name)}`),
   delete: (name) => api('/api/projects/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   archive: (name) => api('/api/projects/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   archived: () => api('/api/projects/archived'),
@@ -58,6 +59,9 @@ export const groupsApi = {
     ? fetch('/api/groups/send?stream=1', { method: 'POST', body: data, signal: options.signal })
     : fetch('/api/groups/send?stream=1', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal: options.signal }),
   members: (data) => api('/api/groups/members', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  testTargets: (id) => api(`/api/groups/test-targets?id=${encodeURIComponent(id)}`),
+  saveTestTarget: (groupId, target) => api('/api/groups/test-targets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: groupId, target }) }),
+  deleteTestTarget: (groupId, targetId) => api('/api/groups/test-targets/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: groupId, target_id: targetId }) }),
 };
 
 // Agent 工作中消息控制：后端持久化，刷新或重启后仍可恢复。

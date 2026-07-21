@@ -23,7 +23,6 @@ export function useGroupChatStream({
   lastGroupMsgCount,
   newMessage,
   messageFiles,
-  targetAgent,
   messageMode,
   pendingGroupTaskInput,
   pendingGroupClarificationInput,
@@ -190,7 +189,6 @@ export function useGroupChatStream({
       metadata: {
         group_id: currentGroup.value.id,
         group_session_id: currentGroupSessionId.value,
-        target_project: targetAgent.value,
         message_mode: messageMode.value,
         continuation_task_id: activeGroupTaskId.value,
         requested_mode: requestedMode,
@@ -234,7 +232,7 @@ export function useGroupChatStream({
     } : null)
     const retrySignature = groupSendRetrySignature({
       groupId: currentGroup.value.id,
-      target: queuedTurn?.metadata?.target_project || targetAgent.value,
+      target: 'coordinator',
       mode: directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value,
       message: msg,
       files: filesToSend,
@@ -257,7 +255,7 @@ export function useGroupChatStream({
       messages.value.push({
         id: clientMessageId,
         role: 'user',
-        target: (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? 'coordinator' : (queuedTurn?.metadata?.target_project || targetAgent.value),
+        target: 'coordinator',
         content: `${msg || '请处理附件'}${attachmentText}`,
         timestamp: new Date().toISOString(),
         ...(taskSupplementTarget ? { task_id: taskSupplementTarget.taskId } : {}),
@@ -280,7 +278,7 @@ export function useGroupChatStream({
     // 创建 Agent 回复消息
     const agentMsg = {
       role: 'assistant',
-      agent: (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? 'coordinator' : (queuedTurn?.metadata?.target_project || targetAgent.value),
+      agent: 'coordinator',
       content: '',
       timestamp: new Date().toISOString()
     }
@@ -303,7 +301,6 @@ export function useGroupChatStream({
       payload = new FormData()
       payload.append('group_id', currentGroup.value.id)
       payload.append('group_session_id', currentGroupSessionId.value)
-      payload.append('target_project', (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? 'all' : (queuedTurn?.metadata?.target_project || targetAgent.value))
       payload.append('message', msg)
       payload.append('client_message_id', clientMessageId)
       payload.append('message_mode', directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value)
@@ -317,7 +314,6 @@ export function useGroupChatStream({
       payload = {
         group_id: currentGroup.value.id,
         group_session_id: currentGroupSessionId.value,
-        target_project: (queuedTurn?.metadata?.target_project || targetAgent.value) === 'all' ? undefined : (queuedTurn?.metadata?.target_project || targetAgent.value),
         message: msg,
         client_message_id: clientMessageId,
         message_mode: queuedTurn?.metadata?.message_mode || messageMode.value,

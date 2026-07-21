@@ -44,7 +44,7 @@ export declare function compactGroupConversationMemory(input: {
         };
         quality: {
             score: number;
-            status: "failed" | "pass" | "degraded";
+            status: "failed" | "degraded" | "pass";
             pass: boolean;
             driftDetected: boolean;
         };

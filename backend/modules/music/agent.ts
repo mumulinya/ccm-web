@@ -12,6 +12,153 @@ import {
 
 export const RANDOM_MUSIC_KEYWORD = "__random__";
 
+export type MusicPlaybackStrategy = "exact_song" | "artist_random" | "mood_recommendation" | "genre_recommendation" | "random";
+
+export type MusicPlaybackPlan = {
+  schema: "ccm-music-playback-plan-v1";
+  strategy: MusicPlaybackStrategy;
+  originalRequest: string;
+  searchQuery: string;
+  artist: string;
+  mood: string;
+  genre: string;
+  randomize: boolean;
+  strictMatch: boolean;
+  source: "model" | "fallback";
+  reason: string;
+};
+
+const MOOD_PLAYBACK_RULES = [
+  { pattern: /心情不好|不开心|难过|伤心|低落|失落|失恋|想哭|emo|郁闷|烦躁/i, mood: "低落", query: "治愈 温柔 放松" },
+  { pattern: /心情很好|开心|高兴|快乐|兴奋|庆祝|元气满满/i, mood: "开心", query: "欢快 快乐 元气" },
+  { pattern: /焦虑|紧张|压力|疲惫|很累|累了|放松|静一静/i, mood: "舒缓", query: "舒缓 放松 轻音乐" },
+  { pattern: /睡觉|睡眠|失眠|助眠|晚安/i, mood: "助眠", query: "助眠 安静 轻音乐" },
+  { pattern: /学习|写作业|看书|专注|工作|写代码|编程/i, mood: "专注", query: "专注 学习 轻音乐" },
+  { pattern: /运动|健身|跑步|开车|提神/i, mood: "动感", query: "动感 节奏 提神" },
+  { pattern: /浪漫|约会|表白|恋爱/i, mood: "浪漫", query: "浪漫 温柔 情歌" },
+];
+
+const MUSIC_GENRES = ["摇滚", "民谣", "古典", "爵士", "电子", "说唱", "嘻哈", "国风", "流行", "蓝调", "钢琴", "纯音乐", "轻音乐", "粤语", "日语", "英语", "华语"];
+
+function cleanPlaybackSubject(value: string) {
+  return String(value || "")
+    .replace(/[，。！？、]/g, " ")
+    .replace(/^(?:请|麻烦)?(?:你)?(?:帮我|给我)?\s*/g, "")
+    .replace(/^(?:随机|随便|任意)?\s*(?:播放|放一首?|放|来一首?|来点|听一首?|听|我想听|我要听|想听)\s*/g, "")
+    .replace(/(?:给我)?(?:播放|放一首?|来一首?|听一首?)\s*$/g, "")
+    .replace(/\s*(?:吧|呗|呀|啊|可以吗|行吗)$/g, "")
+    .trim();
+}
+
+export function resolveMusicPlaybackRequestFallback(requestText: string, keyword = ""): MusicPlaybackPlan {
+  const originalRequest = String(requestText || keyword || "").trim();
+  const rawKeyword = String(keyword || "").trim();
+  const generic = rawKeyword === RANDOM_MUSIC_KEYWORD
+    || /^(?:播放|放|听|来)(?:一首|点)?(?:音乐|歌曲|歌)?(?:吧|呗)?$/i.test(originalRequest)
+    || /随机|随便|任意/.test(originalRequest);
+  const base = {
+    schema: "ccm-music-playback-plan-v1" as const,
+    originalRequest,
+    artist: "",
+    mood: "",
+    genre: "",
+    source: "fallback" as const,
+  };
+  const moodRule = MOOD_PLAYBACK_RULES.find((item) => item.pattern.test(originalRequest));
+  if (moodRule) {
+    return { ...base, strategy: "mood_recommendation", searchQuery: moodRule.query, mood: moodRule.mood, randomize: true, strictMatch: false, reason: `根据${moodRule.mood}情绪推荐` };
+  }
+
+  const genre = MUSIC_GENRES.find((item) => originalRequest.includes(item)) || "";
+  if (genre && /(?:来|放|播放|听|想听|推荐)/.test(originalRequest)) {
+    return { ...base, strategy: "genre_recommendation", searchQuery: genre, genre, randomize: true, strictMatch: false, reason: `按${genre}风格选曲` };
+  }
+
+  if (generic) {
+    return { ...base, strategy: "random", searchQuery: RANDOM_MUSIC_KEYWORD, randomize: true, strictMatch: false, reason: "用户没有限定歌曲，随机播放" };
+  }
+
+  const artistOnlySource = cleanPlaybackSubject(originalRequest || rawKeyword);
+  const artistMatch = artistOnlySource.match(/^(.+?)(?:的歌|的音乐|歌曲|音乐)$/)
+    || originalRequest.match(/(?:播放|放|听|来一首|我想听|我要听)\s*([^，。！？]+?)(?:的歌|的音乐)(?:吧|呗|呀|啊)?$/);
+  if (artistMatch?.[1]) {
+    const artist = cleanPlaybackSubject(artistMatch[1]).replace(/(?:一首|一些|几首)$/g, "").trim();
+    if (artist) {
+      return { ...base, strategy: "artist_random", searchQuery: artist, artist, randomize: true, strictMatch: false, reason: `按歌手${artist}随机选曲` };
+    }
+  }
+
+  const searchQuery = cleanPlaybackSubject(rawKeyword && rawKeyword !== RANDOM_MUSIC_KEYWORD ? rawKeyword : originalRequest);
+  if (!searchQuery) {
+    return { ...base, strategy: "random", searchQuery: RANDOM_MUSIC_KEYWORD, randomize: true, strictMatch: false, reason: "没有可用的点歌限定，随机播放" };
+  }
+  return { ...base, strategy: "exact_song", searchQuery, randomize: false, strictMatch: true, reason: "按明确歌名或歌手与歌名严格点歌" };
+}
+
+function normalizeMusicPlaybackPlan(value: any, requestText: string, keyword = "", source: "model" | "fallback" = "model"): MusicPlaybackPlan {
+  const fallback = resolveMusicPlaybackRequestFallback(requestText, keyword);
+  const allowed = new Set<MusicPlaybackStrategy>(["exact_song", "artist_random", "mood_recommendation", "genre_recommendation", "random"]);
+  const strategy = allowed.has(value?.strategy) ? value.strategy as MusicPlaybackStrategy : fallback.strategy;
+  const artist = String(value?.artist || (strategy === "artist_random" ? fallback.artist : "")).trim().slice(0, 100);
+  const mood = String(value?.mood || (strategy === "mood_recommendation" ? fallback.mood : "")).trim().slice(0, 100);
+  const genre = String(value?.genre || (strategy === "genre_recommendation" ? fallback.genre : "")).trim().slice(0, 100);
+  let searchQuery = String(value?.searchQuery || value?.search_query || "").trim().slice(0, 160);
+  if (strategy === "random") searchQuery = RANDOM_MUSIC_KEYWORD;
+  if (!searchQuery) searchQuery = artist || genre || fallback.searchQuery;
+  return {
+    schema: "ccm-music-playback-plan-v1",
+    strategy,
+    originalRequest: String(requestText || keyword || "").trim(),
+    searchQuery,
+    artist,
+    mood,
+    genre,
+    randomize: strategy !== "exact_song",
+    strictMatch: strategy === "exact_song",
+    source,
+    reason: String(value?.reason || fallback.reason).trim().slice(0, 300),
+  };
+}
+
+export async function resolveMusicPlaybackRequest(cfg: any, requestText: string, keyword = ""): Promise<MusicPlaybackPlan> {
+  const fallback = resolveMusicPlaybackRequestFallback(requestText, keyword);
+  if (!cfg?.enabled || !cfg?.apiKey || !cfg?.model) return fallback;
+  const system = `你是 CCM 音乐播放意图规划器。把用户请求转换成选歌策略，只输出 JSON，不要 Markdown。
+策略只能是：
+- exact_song：明确指定了歌曲名，必须严格匹配。
+- artist_random：只指定歌手，没有指定歌曲，从该歌手作品中随机播放。
+- mood_recommendation：用户描述心情、活动或场景，生成适合音乐搜索 API 的简短中文 searchQuery。
+- genre_recommendation：只指定曲风、语言或音乐类型。
+- random：没有任何限制，随机播放。
+不得把“我心情不好”“适合写代码”等整句当成歌曲名。用户只说歌手的歌时不得猜一首固定歌名。
+返回格式：{"strategy":"exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","reason":"一句话"}`;
+  const user = `播放器已提取关键词：${keyword || "无"}\n用户完整原话：${requestText || keyword}`;
+  try {
+    const requestConfig = { ...cfg, timeoutMs: Math.min(8_000, Math.max(5_000, Number(cfg.timeoutMs) || 8_000)) };
+    const content = shouldUseAnthropicMusicApi(requestConfig)
+      ? await callAnthropicCompatibleChat(requestConfig, {
+        system,
+        messages: [{ role: "user", content: user }],
+        maxTokens: 260,
+        temperature: 0,
+        defaultTimeoutMs: 8_000,
+        httpErrorPrefix: "音乐播放意图识别失败",
+      })
+      : await callOpenAiCompatibleChat(requestConfig, {
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        maxTokens: 260,
+        temperature: 0,
+        defaultTimeoutMs: 8_000,
+        httpErrorPrefix: "音乐播放意图识别失败",
+      });
+    const parsed = extractJsonObject(content);
+    if (!parsed) throw new Error("模型未返回 JSON 播放计划");
+    return normalizeMusicPlaybackPlan(parsed, requestText, keyword, "model");
+  } catch (error: any) {
+    return { ...fallback, reason: `${fallback.reason}；模型识别不可用：${error?.message || error}`.slice(0, 300) };
+  }
+}
+
 export function extractMusicIntent(msg: string) {
   const lower = msg.toLowerCase();
   const playMatch = msg.match(/(?:播放|放一首?|听一首?|来一首?|来点|来些|我想听|我要听|想听)(.*)/);
@@ -466,6 +613,11 @@ export function runMusicAgentIntentSelfTest() {
     { role: "agent", content: [{ type: "output_text", text: "找到一些结果" }] },
   ], "继续推荐");
   const queueSelfTest = runMusicRemoteCommandQueueSelfTest();
+  const exactPlan = resolveMusicPlaybackRequestFallback("播放周杰伦的晴天", "周杰伦 晴天");
+  const sadPlan = resolveMusicPlaybackRequestFallback("我心情不好，给我播放一首歌", RANDOM_MUSIC_KEYWORD);
+  const happyPlan = resolveMusicPlaybackRequestFallback("我今天心情很好，放首歌吧", RANDOM_MUSIC_KEYWORD);
+  const artistPlan = resolveMusicPlaybackRequestFallback("播放周杰伦的歌", "周杰伦");
+  const genrePlan = resolveMusicPlaybackRequestFallback("来一首摇滚音乐", "摇滚");
   const playMusicSpec = (() => {
     try {
       const { GLOBAL_AGENT_TOOL_SPECS } = require("../../agents/global/loop");
@@ -487,6 +639,12 @@ export function runMusicAgentIntentSelfTest() {
     openAiBaseUrlUsesUnifiedEndpoint: normalizeChatCompletionsUrl("https://provider.example") === "https://provider.example/v1/chat/completions",
     anthropicBaseUrlUsesUnifiedEndpoint: normalizeAnthropicMessagesUrl("https://provider.example") === "https://provider.example/v1/messages",
     remoteCommandQueue: queueSelfTest.success === true,
+    remoteCommandKeepsOriginalRequest: queueSelfTest.checks?.requestTextPreserved === true,
+    exactSongStaysStrict: exactPlan.strategy === "exact_song" && exactPlan.strictMatch === true,
+    sadMoodBeatsRandomKeyword: sadPlan.strategy === "mood_recommendation" && sadPlan.searchQuery.includes("治愈"),
+    happyMoodRecommendation: happyPlan.strategy === "mood_recommendation" && happyPlan.searchQuery.includes("欢快"),
+    artistOnlyRandomizes: artistPlan.strategy === "artist_random" && artistPlan.artist === "周杰伦" && artistPlan.randomize === true,
+    genreRecommendation: genrePlan.strategy === "genre_recommendation" && genrePlan.genre === "摇滚",
     playMusicIsReadRisk: !playMusicSpec || playMusicSpec.risk === "read",
   };
   return { pass: Object.values(checks).every(Boolean), checks, samples: { playSpecific, playRandom, searchOnly, questionOnly, normalizedHistory, structuredHistory, queueSelfTest } };

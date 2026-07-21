@@ -1,7 +1,10 @@
 import * as crypto from "crypto";
 import type { CollabCtx } from "../collaboration/collaboration";
 import type { GlobalAgentDecision, GlobalAgentLoopRuntime, GlobalAgentRun } from "../../agents/global/loop";
+import { buildGlobalAgentModelMessages } from "../../agents/global/global-agent-run-projection";
 import type { GlobalMissionSupervisorRuntime } from "../../agents/global/mission-supervisor";
+import { buildModelVisiblePayloadSnapshot, buildSessionPostCompactGate } from "../../system/session-compaction-core";
+import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import {
   decomposeRequirementToTaskPlan,
   ingestRequirementSources,
@@ -210,6 +213,79 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     const validation = verifyGlobalAgentContextBoundary(context);
     if (!validation.valid) throw new Error(`global agent context boundary failed: ${validation.issues.join(", ")}`);
     return context;
+  }
+
+  function buildGlobalProviderPayloadSnapshot(messages: Array<{ role: string; content: string }>, sessionId: string) {
+    return buildModelVisiblePayloadSnapshot({
+      scope: "global",
+      sessionId,
+      system: messages.filter(message => message.role === "system"),
+      recentMessages: messages.filter(message => message.role !== "system"),
+    });
+  }
+
+  function isGlobalPromptTooLongError(error: any) {
+    return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String(error?.message || error || ""));
+  }
+
+  async function prepareGlobalProviderMessages(
+    messages: Array<{ role: string; content: string }>,
+    run: GlobalAgentRun,
+    runtime: GlobalAgentLoopRuntime,
+    options: { promptTooLong?: boolean } = {},
+  ) {
+    const sessionId = String(run.session_id || "").trim();
+    if (!sessionId) throw new Error("全局 Agent Provider 调用缺少精确会话 ID");
+    const config = loadOrchestratorConfig();
+    const modelCapacity = resolveGroupModelContextCapacity(config);
+    const threshold = getGroupAutoCompactThreshold(config);
+    const triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId);
+    if (!options.promptTooLong && triggerPayload.totalTokens < threshold) return messages;
+
+    const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
+      reason: options.promptTooLong ? "provider_prompt_too_long" : "provider_payload_preflight",
+      promptTooLong: options.promptTooLong === true,
+      currentRequest: { role: "user", content: run.reasoning_loop?.effective_goal || run.user_message },
+      fixedContext: messages.filter(message => message.role === "system"),
+      modelVisiblePayload: triggerPayload,
+      postCompactPayloadBuilder: async ({ summary, preservedMessages, boundaryMarker, recoveryContext, hookResults }: any) => {
+        const continuation = {
+          schema: "ccm-global-session-continuation-v2",
+          sessionId,
+          summary,
+          messages: preservedMessages.map((message: any) => ({
+            id: String(message.id || ""),
+            role: message.role === "assistant" ? "assistant" : "user",
+            content: String(message.content || ""),
+            timestamp: String(message.timestamp || ""),
+          })),
+          boundary: boundaryMarker,
+          recoveryContext,
+          hookResults,
+        };
+        const rebuiltMessages = await buildGlobalAgentModelMessages(run, runtime, { sessionContinuationOverride: continuation });
+        return {
+          messages: rebuiltMessages,
+          modelVisiblePayload: buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId),
+        };
+      },
+    });
+    if (compaction?.reason === "circuit_breaker") {
+      throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
+    }
+    if (compaction?.compacted !== true) {
+      throw new Error(`全局 Agent 上下文已达到模型门禁，但无法形成可提交的正式压缩：${compaction?.reason || "unknown"}`);
+    }
+
+    const rebuiltMessages = Array.isArray(compaction.preparedModelMessages)
+      ? compaction.preparedModelMessages
+      : await buildGlobalAgentModelMessages(run, runtime);
+    const rebuiltPayload = buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId);
+    const postCompactGate = buildSessionPostCompactGate({ modelVisiblePayload: rebuiltPayload, threshold });
+    if (postCompactGate.providerCallAllowed !== true || rebuiltPayload.totalTokens >= modelCapacity.contextWindow) {
+      throw new Error(`全局 Agent 正式压缩后的真实 Provider Payload 仍超限：${rebuiltPayload.totalTokens}/${threshold}`);
+    }
+    return rebuiltMessages;
   }
   
   function localActionToAgenticDecision(localIntent: LocalIntentResult | null, run: GlobalAgentRun): GlobalAgentDecision | null {
@@ -738,18 +814,26 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
   
   function createAgenticRuntime(baseUrl: string, ctx: CollabCtx, input: { localIntent?: LocalIntentResult | null; onEvent?: (event: any) => void; sourceIngestion?: RequirementIngestionResult | null } = {}): GlobalAgentLoopRuntime {
     const config = loadOrchestratorConfig();
-    return {
+    const runtime: GlobalAgentLoopRuntime = {
       callModel: async (messages, run) => {
         attachGlobalRunRequirementSources(run, input.sourceIngestion);
         if (!config.apiKey || !config.apiUrl || !config.model) throw new Error("统一大模型尚未配置");
         const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
-        return callGlobalModelWithRetry(config, messages, {
+        const invoke = (providerMessages: Array<{ role: string; content: string }>) => callGlobalModelWithRetry(config, providerMessages, {
           onUsage: (usage: any) => {
             (run as any).latest_context_usage = usage;
             accumulateGlobalAgentRunUsage(run, usage);
           },
         });
+        try {
+          return await invoke(messages);
+        } catch (error: any) {
+          if (!isGlobalPromptTooLongError(error)) throw error;
+          const recoveredMessages = await prepareGlobalProviderMessages(messages, run, runtime, { promptTooLong: true });
+          return invoke(recoveredMessages);
+        }
       },
+      prepareModelMessages: (messages, run) => prepareGlobalProviderMessages(messages, run, runtime),
       getContext: (run) => buildAgenticContext(run.user_message, run.session_id),
       verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
       executeTool: (name, args, run) => {
@@ -765,6 +849,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       },
       onEvent: input.onEvent ? (event) => input.onEvent!(event) : undefined,
     };
+    return runtime;
   }
   
   async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {

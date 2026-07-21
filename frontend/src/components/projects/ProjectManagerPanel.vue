@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import ChatAvatar from '../common/ChatAvatar.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
+import ConversationFindBar from '../common/ConversationFindBar.vue'
 import { useProjectManager } from './useProjectManager.js'
 import { useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
 
@@ -23,13 +24,13 @@ const {
   showTemplateSelector, allTemplates, templateSearchQuery, activeTemplateIndex, recommendedTemplate, activeTemplate,
   templateVariables, showVariableModal, openTemplateSelector, selectChatTemplate, applyTemplateVariables, detectRecommendation,
   applyRecommendation, handleTemplateKeydown, hideTemplateAssist, chatFiles, diffViewer, pageInfo,
-  fallbackAgents, agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
+  agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
   showCreate, showEdit, showSwitchAgent, showTools, showSharedFiles, showArchives,
   mobileSessionsOpen, projectActionBusy, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
   feishuQrLoading, feishuProjectSetupToken, browsePath, browseItems, browseTarget, drives,
   showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, activeSelectedTemplate,
   pendingTemplateToApply, selectProject, loadSessions, selectSession, startProject, stopProject,
-  deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit,
+  deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit, loadProjectGitStatus,
   openSwitchAgent, switchAgent, startProjectWithAgent, createSession, renameSession, deleteSession,
   saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
   thinkingMessages, pendingProjectParentRunId, streamController, activeProjectRunId, stoppingProjectTurn, makeProjectMessageId,

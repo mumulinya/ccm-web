@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "task_id": "e2e-task-1784562073947-f20676",
+  "trace_id": "e2e_mrte6kws_4535ffc6749a",
+  "status": "released",
+  "owner_id": "DESKTOP-MN23N8A:31264:32eab987",
+  "owner_pid": 31264,
+  "acquired_at": "2026-07-20T15:41:14.551Z",
+  "renewed_at": "2026-07-20T15:41:14.551Z",
+  "recovery_count": 0,
+  "final_status": "done",
+  "released_at": "2026-07-20T15:41:16.544Z",
+  "updated_at": "2026-07-20T15:41:16.544Z"
+}

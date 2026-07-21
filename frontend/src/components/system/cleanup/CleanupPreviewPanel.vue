@@ -36,7 +36,7 @@ const canExecute = () => props.selectedIds.length > 0
     </div>
 
     <div class="cleanup-preview-meta">
-      <span><Clock3 :size="14" /> 预览 10 分钟内有效</span>
+      <span><Clock3 :size="14" /> 有效至 {{ formatDate(preview.expires_at) }}</span>
       <strong>已选 {{ selectedIds.length }} / {{ preview.preview.items.length }} 项</strong>
     </div>
 
@@ -56,7 +56,7 @@ const canExecute = () => props.selectedIds.length > 0
     <div v-else class="cleanup-empty">这个保留范围内没有可处理的数据</div>
 
     <div v-if="preview.action.irreversible && preview.preview.items.length" class="cleanup-confirmation">
-      <label for="cleanup-confirmation-input">输入“永久删除”确认本次操作</label>
+      <label for="cleanup-confirmation-input"><AlertTriangle :size="14" />输入“永久删除”确认本次操作</label>
       <input
         id="cleanup-confirmation-input"
         :value="confirmationText"

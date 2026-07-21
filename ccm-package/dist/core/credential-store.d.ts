@@ -1,6 +1,7 @@
 export declare function isCredentialReference(value: any): boolean;
 export declare function protectCredential(scope: string, field: string, value: any): string;
 export declare function resolveCredential(value: any): string;
+export declare function deleteCredential(value: any): boolean;
 export declare function protectObjectSecrets(value: any, scope?: string): any;
 export declare function resolveObjectSecrets(value: any): any;
 export declare function migrateTomlCredentials(file: string): {

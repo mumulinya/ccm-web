@@ -45,6 +45,7 @@ const bilibili_1 = require("./bilibili");
 const netease_1 = require("./netease");
 const library_1 = require("./library");
 const state_1 = require("./state");
+const memory_1 = require("./memory");
 const agent_1 = require("./agent");
 const cover_1 = require("./cover");
 const llm_client_1 = require("./llm-client");
@@ -374,11 +375,12 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { message, mode: chatMode, history } = JSON.parse(body);
+                const { message, mode: chatMode } = JSON.parse(body);
                 const cfg = (0, state_1.loadMusicAgentConfig)();
+                const memoryContext = await (0, memory_1.prepareMusicAgentTurn)(message, chatMode);
                 let action;
                 try {
-                    action = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, history || []);
+                    action = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
                 }
                 catch {
                     const intent = (0, agent_1.extractMusicIntent)(message);

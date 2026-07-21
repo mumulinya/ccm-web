@@ -260,25 +260,14 @@ export function getMemberNames(group: any, excludeProject = "") {
 export function selectGroupTargets(group: any, targetProject: string | undefined | null) {
   const normalized = normalizeGroupOrchestrator(group);
   const target = String(targetProject || "").trim();
-  const isBroadcast = !target || target === "all";
   const coordinator = getCoordinatorMember(normalized);
-
-  if (isBroadcast) {
-    const orchestrated = isOrchestratorEnabled(normalized);
-    return {
-      isBroadcast: true,
-      orchestrated,
-      targetLabel: orchestrated ? coordinator.project : "all",
-      members: orchestrated ? [coordinator] : getRoutableMembers(normalized),
-    };
-  }
-
-  const member = normalized.members.find((m: any) => m.project === target);
+  const mainAgentTarget = !target || target === "all" || target === coordinator.project;
   return {
-    isBroadcast: false,
-    orchestrated: member ? isCoordinatorMember(member, normalized) : false,
-    targetLabel: target,
-    members: member ? [member] : [],
+    isBroadcast: mainAgentTarget,
+    orchestrated: mainAgentTarget,
+    targetLabel: coordinator.project,
+    members: mainAgentTarget ? [coordinator] : [],
+    rejectedDirectTarget: mainAgentTarget ? "" : target,
   };
 }
 

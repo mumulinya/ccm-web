@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { DEVELOPMENT_AGENT_CATALOG } from "../agents/catalog";
 import * as os from "os";
 import { isCredentialReference, protectCredential, protectObjectSecrets, resolveObjectSecrets } from "./credential-store";
 import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
@@ -74,11 +75,7 @@ function writeJsonAtomic(file: string, value: any) {
 
 // === 代理类型定义 ===
 export const AGENTS = [
-  { type: "claudecode", name: "Claude Code" },
-  { type: "cursor", name: "Cursor" },
-  { type: "gemini", name: "Gemini CLI" },
-  { type: "codex", name: "Codex" },
-  { type: "qoder", name: "Qoder CLI" },
+  ...DEVELOPMENT_AGENT_CATALOG.map(agent => ({ type: agent.id, name: agent.label })),
 ];
 
 // === 获取配置列表 ===

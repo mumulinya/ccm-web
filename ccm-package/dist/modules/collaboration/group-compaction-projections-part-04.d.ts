@@ -131,7 +131,7 @@ export declare function buildGroupPartialCompactSidecarSegment(input: any): {
     };
     quality: {
         score: number;
-        status: "failed" | "pass" | "degraded";
+        status: "failed" | "degraded" | "pass";
         pass: boolean;
         driftDetected: boolean;
     };

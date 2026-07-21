@@ -162,4 +162,27 @@ const emit = defineEmits(['close', 'start'])
   padding-top: 12px;
   border-top: 1px solid var(--border-color);
 }
+
+@media (max-width: 640px) {
+  .qr-layout {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .qr-preview {
+    width: 100%;
+  }
+
+  .qr-box {
+    width: min(200px, 100%);
+    aspect-ratio: 1;
+    height: auto;
+  }
+
+  .qr-box img {
+    width: min(180px, calc(100% - 20px));
+    height: auto;
+    aspect-ratio: 1;
+  }
+}
 </style>

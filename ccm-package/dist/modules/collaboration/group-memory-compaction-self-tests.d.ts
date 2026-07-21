@@ -493,11 +493,11 @@ export declare function runGroupMemoryQualityGateSelfTest(): {
     };
     good: {
         score: number;
-        status: "failed" | "pass" | "degraded";
+        status: "failed" | "degraded" | "pass";
     };
     bad: {
         score: number;
-        status: "failed" | "pass" | "degraded";
+        status: "failed" | "degraded" | "pass";
         downgrade_reason: string;
     };
 };

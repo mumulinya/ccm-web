@@ -180,4 +180,21 @@ const updateField = (field, event) => emit('update-field', { field, value: event
   resize: vertical;
   outline: none;
 }
+
+@media (max-width: 640px) {
+  .shared-file-head {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .shared-file-head > div:last-child {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .file-editor-modal textarea {
+    min-height: 180px;
+    box-sizing: border-box;
+  }
+}
 </style>

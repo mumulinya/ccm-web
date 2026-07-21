@@ -6,7 +6,7 @@ export declare function buildUserWorkOrderPreview(task: any, summary?: any, plan
     summary: string;
     orders: any;
 };
-export declare function executionStoryStatus(conditionDone: boolean, conditionActive: boolean, phase: string): "failed" | "pending" | "done" | "active" | "warning";
+export declare function executionStoryStatus(conditionDone: boolean, conditionActive: boolean, phase: string): "done" | "pending" | "failed" | "active" | "warning";
 export declare function buildUserExecutionStory(task: any, summary?: any, executions?: any[], phase?: string, workOrderPreview?: any): {
     title: string;
     style: string;

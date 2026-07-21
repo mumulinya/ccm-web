@@ -978,7 +978,7 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
   const rawAgentType = String(options.agentType || options.agent_type || options.runtime || "unknown").trim().toLowerCase();
   const agentType = rawAgentType === "claude" ? "claudecode" : rawAgentType || "unknown";
   const apiRuntimes = new Set(["anthropic-api", "anthropic-sdk", "claude-api", "claude-sdk"]);
-  const cliRuntimes = new Set(["claudecode", "cursor", "codex", "gemini", "qoder", "test-agent-native"]);
+  const cliRuntimes = new Set(["claudecode", "cursor", "codex", "gemini", "opencode", "qoder", "test-agent-native"]);
   const transport = String(
     options.transport
     || options.executorTransport

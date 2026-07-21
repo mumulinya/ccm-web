@@ -1,0 +1,32 @@
+{
+  "pass": true,
+  "taskSessions": 10,
+  "projects": [
+    "cc-connect-test",
+    "self-test-project"
+  ],
+  "desktop": {
+    "projectIds": [
+      "cc-connect-test",
+      "self-test-project"
+    ],
+    "projectSessionCounts": [
+      {
+        "id": "cc-connect-test",
+        "count": 7
+      },
+      {
+        "id": "self-test-project",
+        "count": 3
+      }
+    ],
+    "documentOverflow": 0,
+    "sidebarOverflow": 0
+  },
+  "mobile": {
+    "documentOverflow": 0,
+    "sidebarOverflow": 0,
+    "taskGroupVisible": true,
+    "projectCount": 2
+  }
+}

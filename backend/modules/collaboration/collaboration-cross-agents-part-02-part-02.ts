@@ -7,6 +7,7 @@ import { buildDependencyOutputPacket } from "./collaboration-cross-agents-helper
 import { executeMentionJobTryB, handleExecuteMentionJobCatch } from "./collaboration-cross-agents-part-03";
 import { runGroupMemoryAutoCompactionNow } from "./group-memory-context-part-01";
 import { buildChildParentSessionContextPacket } from "./group-session-model-context";
+import { mergeThirdPartyMemoryUsageIntoReceipt } from "../../integrations/third-party-memory-snapshot";
 
 import type {
   CrossAgentEnv,
@@ -79,6 +80,7 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
   let groupMemoryBundle = L.groupMemoryBundle || null;
   let workerMemoryContext = L.workerMemoryContext || null;
   let workerMemoryPacket = L.workerMemoryPacket || "";
+  let thirdPartyMemorySnapshot = L.thirdPartyMemorySnapshot || null;
   const dependencyOutputPacket = L.dependencyOutputPacket || "";
   const continuationNotice = L.continuationNotice || "";
   const testAgentHandoffPacket = L.testAgentHandoffPacket || "";
@@ -1285,10 +1287,14 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
         }
       }
       const detectedSkillUse = attachInvokedSkillsToReceipt(targetReceipt, tOutput, toolContext.allowedTools, runtimeToolContext.audit);
-      targetReceipt = detectedSkillUse.receipt;
+      targetReceipt = mergeThirdPartyMemoryUsageIntoReceipt(
+        detectedSkillUse.receipt,
+        thirdPartyMemorySnapshot?.id || "",
+        thirdPartyMemorySnapshot?.checksum || "",
+      );
       targetInvokedSkills = detectedSkillUse.invoked;
       }
-      env._locals = { ...env._locals, outputs, targetName, tWorkDir, tAgentType, activeTaskSession, laneExecutionId, childTaskText, workerHandoff, developmentContract, tPrompt, advisoryOnly, toolContext, runtimeToolContext, activeGroupSessionId, activeInvocationEdge, groupMemoryBundle, workerMemoryContext, workerMemoryPacket, activeMemoryContextSnapshot, activeMemoryContextDelivery, memoryConsumptionChallenge, capacityRevalidationPreparation, capacityRevalidationCommitted, memoryPacket, tContext, providerSwitchSessionBinding, workerHandoffSummary, targetReceipt, tOutput, activeRuntime, targetFileChanges, targetWorkEvents, targetNativeSessionId, targetInvokedSkills, testAgentNativeReport, testAgentExecutionPlan, testAgentPlanDispatch, testAgentCliDispatch, responseMessageId, targetProviderToolAccessEvidence };
+      env._locals = { ...env._locals, outputs, targetName, tWorkDir, tAgentType, activeTaskSession, laneExecutionId, childTaskText, workerHandoff, developmentContract, tPrompt, advisoryOnly, toolContext, runtimeToolContext, activeGroupSessionId, activeInvocationEdge, groupMemoryBundle, workerMemoryContext, workerMemoryPacket, activeMemoryContextSnapshot, activeMemoryContextDelivery, memoryConsumptionChallenge, capacityRevalidationPreparation, capacityRevalidationCommitted, memoryPacket, tContext, providerSwitchSessionBinding, workerHandoffSummary, targetReceipt, tOutput, activeRuntime, targetFileChanges, targetWorkEvents, targetNativeSessionId, targetInvokedSkills, testAgentNativeReport, testAgentExecutionPlan, testAgentPlanDispatch, testAgentCliDispatch, responseMessageId, targetProviderToolAccessEvidence, thirdPartyMemorySnapshot };
       return executeMentionJobTryB(mention, env);
   } catch (error: any) {
     return handleExecuteMentionJobCatch(error, { outputs, targetName, groupId, planMessageId, taskId, streamRes, formatCollectedAgentOutput, addTaskLog, updateGroupMemory, appendGroupMessage, emitAssignmentStatus });

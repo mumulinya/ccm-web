@@ -1,7 +1,7 @@
 # 🚀 cc-web (Connect & Control Manager)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D18.0.0-brightgreen.svg" alt="Node version">
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D20.0.0-brightgreen.svg" alt="Node version">
   <img src="https://img.shields.io/badge/Vue.js-3.x-4FC08D.svg" alt="Vue version">
   <img src="https://img.shields.io/npm/v/@mumulinya167/cc-web.svg" alt="npm version">
   <img src="https://img.shields.io/badge/Protocol-MCP%20Ready-blueviolet" alt="MCP Ready">

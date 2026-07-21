@@ -1,0 +1,22 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-21T03:41:31.751Z",
+  "checks": [
+    {
+      "name": "legacy modal base constrains desktop width and forcibly clears mobile min-width",
+      "pass": true
+    },
+    {
+      "name": "complex project, pet, and music modals own their responsive inner-layout rules",
+      "pass": true
+    },
+    {
+      "name": "audited 21 modal-overlay components across the application",
+      "pass": true
+    },
+    {
+      "name": "project form remains self-contained and rejects invalid legacy platform values",
+      "pass": true
+    }
+  ]
+}

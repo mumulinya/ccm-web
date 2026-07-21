@@ -82,8 +82,8 @@ export declare function readGroupReplayRepairWorkItemsSummary(groupId: string, s
         replay_rendered_hash: any;
     }[];
 };
-export declare function replayRepairWorkItemStatusForMemory(item: any): "pending" | "blocked" | "in_progress" | "completed" | "cancelled";
-export declare function replayRepairCandidatePriorityRank(item: any): 0 | 1 | 2 | 9;
+export declare function replayRepairWorkItemStatusForMemory(item: any): "in_progress" | "pending" | "completed" | "cancelled" | "blocked";
+export declare function replayRepairCandidatePriorityRank(item: any): 1 | 2 | 0 | 9;
 export declare function readGroupReplayRepairDispatchCandidatesSummary(groupId: string, limit?: number, sessionId?: string): {
     schema: string;
     groupId: string;

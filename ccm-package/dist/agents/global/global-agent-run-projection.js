@@ -218,7 +218,7 @@ function buildToolPrompt() {
         .map(spec => `- ${spec.name}${spec.required?.length ? `（必填：${spec.required.join("、")}）` : ""}：${spec.description}；schema=${JSON.stringify(spec.inputSchema)}；risk=${spec.risk}`)
         .join("\n");
 }
-async function buildGlobalAgentModelMessages(run, runtime) {
+async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
     const context = runtime.getContext ? await runtime.getContext(run) : {};
     const boundaryValidation = runtime.verifyContextBoundary?.(context, run);
     if (boundaryValidation === false || (typeof boundaryValidation === "object" && boundaryValidation?.valid !== true)) {
@@ -266,9 +266,11 @@ ${buildToolPrompt()}
 只输出一个合法 JSON 对象，不要输出 Markdown：
 {"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"完整语义判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[]},"intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
 不调用工具时 tool 必须为 null。${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
-    const continuation = context?.session_continuity && typeof context.session_continuity === "object"
-        ? context.session_continuity
-        : null;
+    const continuation = options.sessionContinuationOverride !== undefined
+        ? options.sessionContinuationOverride
+        : context?.session_continuity && typeof context.session_continuity === "object"
+            ? context.session_continuity
+            : null;
     const continuationMessages = (Array.isArray(continuation?.messages) ? continuation.messages : [])
         .map((item) => ({ role: item?.role === "assistant" ? "assistant" : "user", content: String(item?.content || "") }))
         .filter((item) => item.content.trim());

@@ -1,7 +1,0 @@
-language = "zh"
-[[projects]]
-name = "backend-agent"
-[projects.agent]
-type = "codex"
-[projects.agent.options]
-work_dir = "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\backend-project"

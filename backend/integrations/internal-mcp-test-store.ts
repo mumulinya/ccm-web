@@ -8,6 +8,7 @@ import { invokeTestAgentHandoff } from "../test-agent/invocation";
 import { buildTestAgentWorkOrderFromHandoff, TestAgentHandoff } from "../test-agent/work-order-builder";
 import { InternalMcpTaskContext } from "./internal-mcp-runtime";
 import { appendInternalMcpTaskJournal, getBoundInternalMcpTask, internalMcpTaskPayload } from "./internal-mcp-task-store";
+import { resolveGroupTestTargets, resolveTargetStorageStatePath, ResolvedGroupTestTarget } from "../modules/collaboration/group-test-targets";
 
 const ROOT = path.join(os.homedir(), ".cc-connect", "internal-mcp", "test-acceptance");
 const DELIVERY_ROOT = path.join(os.homedir(), ".cc-connect", "internal-mcp", "delivery-workspaces");
@@ -127,6 +128,141 @@ function resolveDeliveryBindings(context: InternalMcpTaskContext, workspaceIds: 
   return { projects: records.map(row => row.project), deliveryBindings: records.map(row => row.delivery) };
 }
 
+function targetUrl(target: ResolvedGroupTestTarget) {
+  const base = String(target.baseUrl || "").replace(/\/+$/, "");
+  const route = String(target.auth.loginPath || "").trim();
+  if (!base || !route || /^https?:\/\//i.test(route)) return /^https?:\/\//i.test(route) ? route : base;
+  return `${base}/${route.replace(/^\/+/, "")}`;
+}
+
+function targetAgentSummary(target: ResolvedGroupTestTarget) {
+  return [
+    `Configured test target: ${target.name}`,
+    `Base project: ${target.project}`,
+    `Target kind: ${target.kind}`,
+    `Environment: ${target.environment || "default"}`,
+    `Base URL: ${target.baseUrl || "not configured"}`,
+    `Authentication mode: ${target.auth.mode}`,
+    target.auth.mode === "credentials"
+      ? `Authentication fields (values are runtime-only): ${target.auth.fields.map(field => `${field.label}:${field.envName}:${field.inputLabel || field.label}`).join(", ")}`
+      : "",
+    target.notes ? `Target notes: ${target.notes}` : "",
+    target.kind === "native_app" ? "Native application automation requires an explicitly configured native driver; do not claim browser evidence for it." : "",
+  ].filter(Boolean).join("\n");
+}
+
+function configuredBrowserChecks(target: ResolvedGroupTestTarget, workDir: string) {
+  if (!target.baseUrl || target.kind === "api" || target.kind === "native_app") return [];
+  const auth = target.auth;
+  if (auth.mode === "credentials") {
+    const actions: any[] = auth.fields.map(field => ({
+      type: "fill",
+      label: field.inputLabel || field.label,
+      valueEnv: field.envName,
+    }));
+    if (auth.submitLabel) actions.push({ type: "click", role: "button", name: auth.submitLabel, verifyEffect: true });
+    const assertions: any[] = [];
+    if (auth.successText) assertions.push({ type: "text", text: auth.successText });
+    if (auth.successUrlIncludes) assertions.push({ type: "urlIncludes", text: auth.successUrlIncludes });
+    if (!assertions.length && auth.loginPath) assertions.push({ type: "urlNotIncludes", text: auth.loginPath });
+    return [{
+      name: `${target.name} 登录验证`,
+      url: targetUrl(target),
+      actions,
+      assertions,
+      screenshot: false,
+      context: { testTargetId: target.id, authenticationConfiguredBy: "group-test-target" },
+    }];
+  }
+  if (auth.mode === "storage_state") {
+    resolveTargetStorageStatePath(workDir, auth.storageStatePath);
+    return [{
+      name: `${target.name} 已登录状态验证`,
+      url: target.baseUrl,
+      storageStatePath: auth.storageStatePath,
+      assertions: [{ type: "pageNotBlank" }],
+      screenshot: false,
+      context: { testTargetId: target.id, authenticationConfiguredBy: "group-test-target" },
+    }];
+  }
+  if (auth.mode === "existing_session") {
+    return [{
+      name: `${target.name} 已有浏览器会话验证`,
+      url: target.baseUrl,
+      authentication: { mode: "existing_session", provider: auth.existingSessionProvider, evidencePolicy: "minimal" },
+      assertions: [{ type: "pageNotBlank" }],
+      screenshot: false,
+      context: { testTargetId: target.id, authenticationConfiguredBy: "group-test-target" },
+    }];
+  }
+  return [];
+}
+
+function buildConfiguredTargetProjects(context: InternalMcpTaskContext, projectBindings: any[], input: any, completedTasks: string[]) {
+  const selectedIds = Array.isArray(input.test_target_ids) ? input.test_target_ids.map(String).filter(Boolean) : [];
+  const configured = context.groupId
+    ? resolveGroupTestTargets(context.groupId, projectBindings.map(project => project.name), selectedIds)
+    : [];
+  if (selectedIds.some(id => !configured.some(target => target.id === id))) {
+    throw new Error("所选测试目标未启用或不属于当前验收项目");
+  }
+  const byProject = new Map<string, ResolvedGroupTestTarget[]>();
+  for (const target of configured) {
+    const rows = byProject.get(target.project) || [];
+    rows.push(target);
+    byProject.set(target.project, rows);
+  }
+  const bindings: any[] = [];
+  const projects: any[] = [];
+  for (const project of projectBindings) {
+    const targets = byProject.get(project.name) || [];
+    const expanded = targets.length ? targets : [null];
+    expanded.forEach((target, targetIndex) => {
+      const name = target ? `${project.name} [${target.name}]` : project.name;
+      const configuredCommands = target?.verificationCommands || [];
+      const projectCommands = targetIndex === 0
+        ? (Array.isArray(input.verification_commands) && projectBindings.length === 1
+          ? internalMcpTaskPayload.cleanList(input.verification_commands, 30, 300)
+          : internalMcpTaskPayload.cleanList(project.verificationCommands || [], 30, 300))
+        : [];
+      projects.push({
+        name,
+        workDir: project.workDir,
+        targetUrl: internalMcpTaskPayload.cleanText(target?.baseUrl || input.target_url || project.targetUrl, 500),
+        devServerCommand: internalMcpTaskPayload.cleanText(target?.startupCommand || "", 500),
+        verificationCommands: [...new Set([...projectCommands, ...configuredCommands])],
+        browserChecks: target ? configuredBrowserChecks(target, project.workDir) : [],
+        changedFiles: internalMcpTaskPayload.cleanList(input.changed_files?.length ? input.changed_files : project.changedFiles || [], 200, 400),
+        completedTasks,
+        agentSummary: [
+          internalMcpTaskPayload.cleanText(input.summary || "群聊主 Agent 请求独立验收当前交付候选", 1000),
+          target ? targetAgentSummary(target) : "",
+        ].filter(Boolean).join("\n"),
+      });
+      if (target) bindings.push({
+        handoffProjectName: name,
+        baseProject: project.name,
+        targetId: target.id,
+        targetChecksum: target.checksum,
+      });
+    });
+  }
+  return { projects, bindings };
+}
+
+function runtimeTargetEnvironments(state: InternalMcpTestRun) {
+  const bindings = Array.isArray(state.handoff?.metadata?.testTargetBindings) ? state.handoff.metadata.testTargetBindings : [];
+  if (!bindings.length) return {};
+  const targetIds = bindings.map((binding: any) => String(binding.targetId || "")).filter(Boolean);
+  const resolved = resolveGroupTestTargets(state.group_id, [], targetIds);
+  const byId = new Map<string, ResolvedGroupTestTarget>(resolved.map(target => [target.id, target]));
+  return Object.fromEntries(bindings.map((binding: any) => {
+    const target = byId.get(String(binding.targetId || ""));
+    if (!target || target.checksum !== binding.targetChecksum) throw new Error(`测试目标配置已变化，请重新创建验收计划：${binding.targetId}`);
+    return [String(binding.handoffProjectName || ""), { ...target.env }];
+  }));
+}
+
 export function createInternalMcpTestRun(context: InternalMcpTaskContext, input: any = {}) {
   const task = getBoundInternalMcpTask(context);
   const requestedProjects = Array.isArray(input.projects) ? input.projects.map(String).filter(Boolean) : [];
@@ -135,6 +271,7 @@ export function createInternalMcpTestRun(context: InternalMcpTaskContext, input:
   const runId = `test_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const acceptanceCriteria = internalMcpTaskPayload.cleanList(input.acceptance_criteria?.length ? input.acceptance_criteria : task.acceptance_criteria || task.acceptanceCriteria, 80, 1000);
   const completedTasks = internalMcpTaskPayload.cleanList(input.completed_tasks || [], 80, 800);
+  const targetProjects = buildConfiguredTargetProjects(context, projectBindings, input, completedTasks);
   const handoff: TestAgentHandoff = {
     id: runId,
     taskId: context.taskId,
@@ -144,26 +281,17 @@ export function createInternalMcpTestRun(context: InternalMcpTaskContext, input:
     acceptanceCriteria,
     completedTasks,
     requiredChecks: internalMcpTaskPayload.cleanList(input.required_checks || [], 50, 100),
-    projects: projectBindings.map(project => ({
-      name: project.name,
-      workDir: project.workDir,
-      targetUrl: internalMcpTaskPayload.cleanText(input.target_url || project.targetUrl, 500),
-      verificationCommands: Array.isArray(input.verification_commands) && projectBindings.length === 1
-        ? internalMcpTaskPayload.cleanList(input.verification_commands, 30, 300)
-        : internalMcpTaskPayload.cleanList(project.verificationCommands || [], 30, 300),
-      changedFiles: internalMcpTaskPayload.cleanList(input.changed_files?.length ? input.changed_files : (project as any).changedFiles || [], 200, 400),
-      completedTasks,
-      agentSummary: internalMcpTaskPayload.cleanText(input.summary || "群聊主 Agent 请求独立验收当前交付候选", 1000),
-    })),
+    projects: targetProjects.projects,
     options: {
       verificationOnly: true,
       browserProvider: ["auto", "playwright", "mcp", "none"].includes(input.browser_provider) ? input.browser_provider : "auto",
       autoDiscoverVerificationCommands: input.auto_discover !== false,
       collectBrowserArtifacts: input.collect_browser_artifacts !== false,
       requireAdversarialProbe: input.require_adversarial_probe !== false,
+      agenticPlanning: true,
       ...(input.adversarial_probe_waiver ? { adversarialProbeWaiver: internalMcpTaskPayload.cleanText(input.adversarial_probe_waiver, 800) } : {}),
     },
-    metadata: { source: "ccm-internal-test-acceptance-mcp", taskAgentSessionId: context.taskAgentSessionId || "", requestedByProject: context.project, deliveryWorkspaces: resolvedBindings.deliveryBindings },
+    metadata: { source: "ccm-internal-test-acceptance-mcp", taskAgentSessionId: context.taskAgentSessionId || "", requestedByProject: context.project, deliveryWorkspaces: resolvedBindings.deliveryBindings, testTargetBindings: targetProjects.bindings },
     completedByProjectAgents: projectBindings.map(project => project.name),
   };
   const built = buildTestAgentWorkOrderFromHandoff(handoff);
@@ -198,7 +326,7 @@ export async function executeInternalMcpTestRunFile(file: string) {
   const running = { ...state, status: "running" as const, updated_at: new Date().toISOString(), pid: process.pid };
   atomicWrite(resolved, running);
   try {
-    const result = await invokeTestAgentHandoff(state.handoff);
+    const result = await invokeTestAgentHandoff(state.handoff, { runtimeProjectEnvironments: runtimeTargetEnvironments(state) });
     const completed: InternalMcpTestRun = { ...running, status: "completed", updated_at: new Date().toISOString(), invocation_result: result, error: "" };
     atomicWrite(resolved, completed);
     appendInternalMcpTaskJournal(state.context, "test", { run_id: state.run_id, status: "completed", outcome: result.outcome, recommendation: result.recommendation, can_accept: result.canAccept === true }, { type: "internal_mcp_test_run_completed", title: "TestAgent 独立验收完成", detail: result.canAccept ? "验收证据完整，可以进入主 Agent 最终判断" : result.error || result.report?.summary || "验收发现缺口，需要返工或人工判断", status: result.canAccept ? "passed" : "warning", phase: "test" });

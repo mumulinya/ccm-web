@@ -20,11 +20,13 @@ import { nowIso } from "./utils";
 import { normalizeTestAgentWorkOrder } from "./work-order";
 import { pruneTestAgentArtifacts } from "./artifact-retention";
 import { selectRoleSkills } from "../skills/role-skills";
+import { applyAgenticTestPlanning, planAgenticTestFollowup } from "./agentic-planner";
 
 export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgentRuntimeOptions = {}): Promise<TestAgentReport> {
   const startedAt = nowIso();
   const normalized = normalizeTestAgentWorkOrder(input, options);
-  const planned = planVerificationCommands(normalized.workOrder, normalized.issues);
+  const agentic = await applyAgenticTestPlanning(normalized.workOrder, options);
+  const planned = planVerificationCommands(agentic.workOrder, [...normalized.issues, ...agentic.issues]);
   const { workOrder, issues } = planned;
   const roleSkills = selectRoleSkills("test-agent", [
     workOrder.originalUserGoal,
@@ -76,6 +78,17 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
     } : {}),
     ...(browserResourceLifecycle ? { browserResourceLifecycle } : {}),
   };
+  const withRuntimeEnvironments = (source: typeof workOrder) => ({
+    ...source,
+    projects: source.projects.map(project => ({
+      ...project,
+      env: {
+        ...(project.env || {}),
+        ...(options.runtimeProjectEnvironments?.[project.name] || {}),
+      },
+    })),
+  });
+  const executionWorkOrder = withRuntimeEnvironments(workOrder);
   let commandResults = [] as Awaited<ReturnType<typeof runVerificationCommands>>;
   let devServers = [] as Awaited<ReturnType<typeof startDevServersForBrowserChecks>>;
   let httpResults = [] as Awaited<ReturnType<typeof runHttpVerification>>;
@@ -83,15 +96,19 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
   let browserProviderPreflight = [] as Awaited<ReturnType<typeof collectBrowserProviderPreflight>>;
 
   try {
-    browserProviderPreflight = await collectBrowserProviderPreflight(workOrder, runtimeOptions);
+    browserProviderPreflight = await collectBrowserProviderPreflight(executionWorkOrder, runtimeOptions);
     workOrder.metadata = {
       ...workOrder.metadata,
       browserProviderPreflight,
     };
-    commandResults = await runVerificationCommands(workOrder);
-    devServers = await startDevServersForBrowserChecks(workOrder);
-    httpResults = await runHttpVerification(workOrder);
-    browserResults = await runBrowserVerification(workOrder, runtimeOptions);
+    commandResults = await runVerificationCommands(executionWorkOrder);
+    devServers = await startDevServersForBrowserChecks(executionWorkOrder);
+    httpResults = await runHttpVerification(executionWorkOrder);
+    browserResults = await runBrowserVerification(executionWorkOrder, runtimeOptions);
+    const followup = await planAgenticTestFollowup({ workOrder, commandResults, httpResults, browserResults }, runtimeOptions);
+    workOrder.metadata = { ...workOrder.metadata, agenticFollowup: followup.metadata };
+    if (followup.issue) issues.push(followup.issue);
+    if (followup.workOrder) commandResults.push(...await runVerificationCommands(withRuntimeEnvironments(followup.workOrder)));
     workOrder.metadata = {
       ...workOrder.metadata,
       browserAuthenticationSummary: buildBrowserAuthenticationSummary(browserResults),

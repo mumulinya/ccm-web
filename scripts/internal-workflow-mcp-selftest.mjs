@@ -211,7 +211,7 @@ try {
   const names = new Set(catalog.items.map(item => item.name))
   for (const name of ['ccm__task_runtime', 'ccm__knowledge_context', 'ccm__test_acceptance', 'ccm__delivery_workspace', 'ccm__task_evidence']) assert.equal(names.has(name), true, `catalog missing ${name}`)
   assert.equal(catalog.summary.total, 7)
-  assert.equal(catalog.summary.tools, 34)
+  assert.equal(catalog.summary.tools, 39)
 
   const report = {
     pass: true,

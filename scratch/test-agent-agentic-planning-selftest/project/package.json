@@ -1,0 +1,8 @@
+{
+  "name": "agentic-test-fixture",
+  "private": true,
+  "scripts": {
+    "test:initial": "node -e \"console.error('focused failure for follow-up'); process.exit(1)\"",
+    "test:focused": "node -e \"console.log('focused verification passed')\""
+  }
+}

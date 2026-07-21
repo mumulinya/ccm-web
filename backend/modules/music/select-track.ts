@@ -132,19 +132,45 @@ function shouldUseAnthropicMusicApi(config: any) {
  * Pick the best track for a keyword from candidates.
  * Prefers model judgment; falls back to score matching when the model fails.
  */
-export async function selectMusicTrack(input: { keyword?: string; candidates?: any[] } = {}) {
+export async function selectMusicTrack(input: { keyword?: string; candidates?: any[]; selectionMode?: string; randomize?: boolean; originalRequest?: string; allowModel?: boolean; modelConfig?: any } = {}) {
   const keyword = String(input.keyword || "").trim();
-  const candidates = Array.isArray(input.candidates) ? input.candidates.slice(0, 8) : [];
+  const originalCandidates = Array.isArray(input.candidates) ? input.candidates.slice(0, 8) : [];
+  const selectionMode = String(input.selectionMode || "exact").trim().toLowerCase();
+  const strictMatch = selectionMode === "exact";
   if (!keyword) {
     return { success: false, index: -1, source: "reject", reason: "缺少点歌关键词", rejected: true };
   }
-  if (!candidates.length) {
+  if (!originalCandidates.length) {
     return { success: false, index: -1, source: "reject", reason: "没有可供选择的候选歌曲", rejected: true };
   }
 
+  let candidateEntries = originalCandidates.map((candidate, index) => ({ candidate, index }));
+  if (selectionMode === "artist_random") {
+    const normalizedArtist = normalizeTrackSearchText(keyword);
+    candidateEntries = candidateEntries
+      .filter(({ candidate }) => normalizeTrackSearchText([
+        candidate?.artist,
+        candidate?.author,
+        candidate?.singer,
+        candidate?.title,
+        candidate?.name,
+      ].filter(Boolean).join(" ")).includes(normalizedArtist));
+    if (!candidateEntries.length) {
+      return { success: false, index: -1, source: "reject", reason: `候选中没有歌手“${keyword}”的作品`, rejected: true };
+    }
+  }
+
+  const cfg = input.modelConfig || loadMusicAgentConfig();
+  const canCallModel = input.allowModel !== false && Boolean(cfg?.enabled && cfg?.apiKey && cfg?.model);
+  if (selectionMode === "artist_random" && input.randomize === true && canCallModel && candidateEntries.length > 1) {
+    for (let i = candidateEntries.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidateEntries[i], candidateEntries[j]] = [candidateEntries[j], candidateEntries[i]];
+    }
+  }
+  const candidates = candidateEntries.map((entry) => entry.candidate);
+  const toOriginalIndex = (index: number) => candidateEntries[index]?.index ?? index;
   const fallback = pickBestCandidateByScore(keyword, candidates);
-  const cfg = loadMusicAgentConfig();
-  const canCallModel = Boolean(cfg?.enabled && cfg?.apiKey && cfg?.model);
 
   if (canCallModel) {
     try {
@@ -153,14 +179,23 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
         const artist = String(item?.artist || item?.author || item?.singer || "未知歌手").slice(0, 80);
         return `${index}. 《${title}》 - ${artist}`;
       }).join("\n");
-      const system = `你是音乐点歌选曲器。根据用户要点的歌，从候选列表中选出最匹配的一首。
+      const system = strictMatch
+        ? `你是音乐点歌选曲器。根据用户要点的歌，从候选列表中选出最匹配的一首。
 只输出 JSON，不要 Markdown。
 规则：
 1. 歌名必须对得上用户意图；不能只因歌手相同就选。
 2. 不确定或没有足够匹配时返回 reject=true、index=-1。
 3. index 是候选列表中的整数下标（从 0 开始）。
+返回格式：{"index":0,"reject":false,"reason":"一句话依据"}`
+        : selectionMode === "artist_random"
+          ? `你是歌手作品选曲器。候选已经通过歌手字段筛选，全部属于用户指定的歌手。
+结合用户完整原话判断是否还有情绪、场景或偏好，并从候选作品中选择一首。没有额外偏好时也必须选择，不要虚构候选外歌曲。
+只输出 JSON，不要 Markdown。index 从 0 开始。
+返回格式：{"index":0,"reject":false,"reason":"一句话依据"}`
+          : `你是音乐推荐选曲器。根据用户的心情、场景或曲风，从搜索结果中选一首合适的歌。
+只输出 JSON，不要 Markdown。不要要求歌名精确匹配；候选整体合理时必须选择。index 从 0 开始。
 返回格式：{"index":0,"reject":false,"reason":"一句话依据"}`;
-      const user = `用户要点的歌：${keyword}\n\n候选列表：\n${listText}`;
+      const user = `用户原始请求：${String(input.originalRequest || keyword).slice(0, 500)}\n搜索主题：${keyword}\n\n候选列表：\n${listText}`;
       const requestConfig = { ...cfg, timeoutMs: Math.min(8_000, Math.max(5_000, Number(cfg.timeoutMs) || 8_000)) };
       const content = shouldUseAnthropicMusicApi(requestConfig)
         ? await callAnthropicCompatibleChat(requestConfig, {
@@ -183,6 +218,17 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
       const index = Number(parsed.index);
       const reason = String(parsed.reason || "").trim().slice(0, 300);
       if (rejected || !Number.isInteger(index) || index < 0 || index >= candidates.length) {
+        if (!strictMatch) {
+          const fallbackIndex = Math.floor(Math.random() * candidates.length);
+          return {
+            success: true,
+            index: toOriginalIndex(fallbackIndex),
+            source: "recommendation-fallback",
+            reason: reason || "模型未指定候选，从相关搜索结果中选择",
+            rejected: false,
+            candidate: candidates[fallbackIndex],
+          };
+        }
         return {
           success: false,
           index: -1,
@@ -191,13 +237,23 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
           rejected: true,
         };
       }
-      // 模型选曲也要过规则分：点了歌手时不能接受「歌名撞车、歌手不对」的结果
+      if (!strictMatch) {
+        return {
+          success: true,
+          index: toOriginalIndex(index),
+          source: selectionMode === "artist_random" ? "model-artist-selection" : "model-recommendation",
+          reason: reason || `模型推荐第 ${index + 1} 首`,
+          rejected: false,
+          candidate: candidates[index],
+        };
+      }
+      // 精确点歌仍要过规则分：点了歌手时不能接受「歌名撞车、歌手不对」的结果
       const modelScore = scoreMusicCandidate(keyword, candidates[index] || {});
       if (modelScore < MUSIC_MATCH_MIN_SCORE) {
         if (fallback.index >= 0) {
           return {
             success: true,
-            index: fallback.index,
+            index: toOriginalIndex(fallback.index),
             source: "fallback",
             reason: reason
               ? `${reason}；模型候选分不足(${modelScore})，改用规则选曲`
@@ -216,7 +272,7 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
       }
       return {
         success: true,
-        index,
+        index: toOriginalIndex(index),
         source: "model",
         reason: reason || `模型选中第 ${index + 1} 首`,
         rejected: false,
@@ -224,10 +280,14 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
       };
     } catch (error: any) {
       // Fall through to score-based selection.
+      if (!strictMatch) {
+        const index = Math.floor(Math.random() * candidates.length);
+        return { success: true, index: toOriginalIndex(index), source: "recommendation-fallback", reason: `模型不可用，从相关候选中选择：${error?.message || error}`, rejected: false, candidate: candidates[index] };
+      }
       if (fallback.index >= 0) {
         return {
           success: true,
-          index: fallback.index,
+          index: toOriginalIndex(fallback.index),
           source: "fallback",
           reason: `${fallback.reason}；模型不可用：${error?.message || error}`,
           rejected: false,
@@ -244,10 +304,14 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
     }
   }
 
+  if (!strictMatch) {
+    const index = Math.floor(Math.random() * candidates.length);
+    return { success: true, index: toOriginalIndex(index), source: "recommendation-fallback", reason: "未配置模型，从相关候选中选择", rejected: false, candidate: candidates[index] };
+  }
   if (fallback.index >= 0) {
     return {
       success: true,
-      index: fallback.index,
+      index: toOriginalIndex(fallback.index),
       source: "fallback",
       reason: fallback.reason,
       rejected: false,

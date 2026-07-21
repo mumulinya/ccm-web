@@ -102,7 +102,7 @@ export function inferPetActorKind(update: Partial<PetActivityUpdate>): PetActorK
   if (actor === "global-agent") return "global";
   if (/test[-_ ]?agent/.test(actor) || /test[-_ ]?agent/.test(source)) return "test-agent";
   if (/cron|scheduled|schedule/.test(source) || /cron|scheduled/.test(actor)) return "scheduled";
-  if (["codex", "cursor", "claudecode", "claude-code", "gemini", "qoder"].some(item => runtime.includes(item) || actor.includes(item))) return "third-party";
+  if (["codex", "cursor", "claudecode", "claude-code", "gemini", "opencode", "qoder"].some(item => runtime.includes(item) || actor.includes(item))) return "third-party";
   if (tab === "groups" && /coordinator|main-agent|主\s*agent/.test(actor)) return "group-main";
   return "project";
 }

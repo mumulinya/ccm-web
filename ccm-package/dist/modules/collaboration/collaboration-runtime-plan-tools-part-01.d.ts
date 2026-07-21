@@ -19,7 +19,7 @@ declare function buildMainAgentDecisionChain(input: {
     task_id: string;
     message_id: string;
     coordinator: string;
-    mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+    mode: "project_analysis" | "conversation" | "delegation" | "followup" | "project_task" | "governance";
     decision: {
         selected_actions: any;
         dispatch_policy: any;
@@ -1689,7 +1689,7 @@ export declare function appendMainAgentDecisionTrace(input: Parameters<typeof bu
     task_id: string;
     message_id: string;
     coordinator: string;
-    mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+    mode: "project_analysis" | "conversation" | "delegation" | "followup" | "project_task" | "governance";
     decision: {
         selected_actions: any;
         dispatch_policy: any;
@@ -3383,7 +3383,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "followup" | "project_task" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;
@@ -5053,7 +5053,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "followup" | "project_task" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;
@@ -6723,7 +6723,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "followup" | "project_task" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;
@@ -8393,7 +8393,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "project_analysis" | "conversation" | "delegation" | "followup" | "project_task" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;

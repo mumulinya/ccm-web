@@ -337,7 +337,7 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
                     : /(停止|关闭|停掉|结束)/.test(text) ? "stop"
                         : /(修改.*Agent|切换.*Agent|更换.*Agent|修改项目配置)/i.test(text) ? "update"
                             : "list";
-        const agentMatch = text.match(/(claudecode|claude|codex|cursor|gemini|qoder)/i);
+        const agentMatch = text.match(/(claudecode|claude|codex|cursor|gemini|opencode|qoder)/i);
         const nameMatch = text.match(/(?:创建项目|新建项目|创建一个项目|新建一个项目)\s*[「"']?([^，。,\.\s"'」]+)/);
         const workDirMatch = text.match(/(?:目录|路径|work_dir|工作目录)\s*[:：]?\s*([A-Za-z]:\\[^，。\n]+|\/[^，。\s]+)/i);
         const project = matchedProject || (operation === "create" ? (nameMatch?.[1] || "") : "");
@@ -411,12 +411,12 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
         if (keyword) {
             return {
                 reply: `我会交给音乐播放器搜索并播放「${keyword}」。`,
-                action: { type: "play_music", params: { keyword } }
+                action: { type: "play_music", params: { keyword, request_text: text } }
             };
         }
         return {
             reply: "我会交给音乐播放器随机播放一首音乐。",
-            action: { type: "play_music", params: { keyword: exports.RANDOM_MUSIC_KEYWORD, random: true } }
+            action: { type: "play_music", params: { keyword: exports.RANDOM_MUSIC_KEYWORD, request_text: text, random: true } }
         };
     }
     if (/定时任务|计划任务|定时执行|每(天|周|星期|小时|隔)/.test(text) && /(创建|新建|添加|定时|每)/.test(text)) {

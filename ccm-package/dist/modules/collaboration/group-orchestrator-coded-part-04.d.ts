@@ -252,8 +252,8 @@ export declare function classifyReplayRepairBriefConsumptionForCoordinator(brief
     postCompactReceiptMemoryUsageRepairProof?: undefined;
 };
 export declare function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, input?: any, options?: any): any;
-export declare function replayRepairStatusForCoordinator(item: any): "pending" | "blocked" | "in_progress" | "completed" | "cancelled";
-export declare function replayRepairPriorityRankForCoordinator(priority: any): 0 | 1 | 2 | 3;
+export declare function replayRepairStatusForCoordinator(item: any): "in_progress" | "pending" | "completed" | "cancelled" | "blocked";
+export declare function replayRepairPriorityRankForCoordinator(priority: any): 1 | 2 | 0 | 3;
 export declare function candidateNativeBindingForCoordinator(candidate?: any): string[];
 export declare function readyReplayRepairDispatchBriefsForCoordinator(groupId: string): any;
 export declare function replayRepairBriefMatchText(value: any): string;

@@ -377,12 +377,17 @@ export function recordMemoryContextConsumptionReceipt(context: InternalMcpTaskCo
     challenge_signature: String(challenge.challenge_signature || ""),
     group_id: String(context.groupId || ""),
     group_session_id: String(context.groupSessionId || ""),
+    project_session_id: String(context.projectSessionId || ""),
     task_id: String(context.taskId || ""),
     execution_id: String(challenge.execution_id || ""),
     project: String(context.project || ""),
     task_agent_session_id: String(context.taskAgentSessionId || challenge.task_agent_session_id || ""),
     agent_type: String(context.agentType || ""),
     native_session_id: String(context.nativeSessionId || ""),
+    memory_snapshot_id: String(context.memorySnapshotId || ""),
+    memory_snapshot_checksum: String(context.memorySnapshotChecksum || ""),
+    boundary_generation: Number(context.boundaryGeneration || 0),
+    native_generation: Number(context.nativeGeneration || 0),
     attempt: Number(challenge.attempt || 1),
     state: "loaded",
     source: "provider_model_mcp_call",
@@ -412,10 +417,13 @@ export function readMemoryContextConsumptionReceipt(challenge: any, expected: an
     for (const [field, aliases] of Object.entries({
       group_id: ["groupId", "group_id"],
       group_session_id: ["groupSessionId", "group_session_id"],
+      project_session_id: ["projectSessionId", "project_session_id"],
       task_id: ["taskId", "task_id"],
       execution_id: ["executionId", "execution_id"],
       project: ["project"],
       task_agent_session_id: ["taskAgentSessionId", "task_agent_session_id"],
+      memory_snapshot_id: ["memorySnapshotId", "memory_snapshot_id"],
+      memory_snapshot_checksum: ["memorySnapshotChecksum", "memory_snapshot_checksum"],
     })) {
       const expectedValue = (aliases as string[]).map(alias => expected?.[alias]).find(value => String(value || "").trim());
       if (expectedValue && String(receipt?.[field] || "") !== String(expectedValue)) issues.push(`receipt_${field}_mismatch`);

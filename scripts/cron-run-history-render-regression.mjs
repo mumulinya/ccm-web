@@ -52,10 +52,14 @@ async function assertNoOverflow(page, label) {
 
 async function openCron(page, mobile = false) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
-  const nav = mobile ? page.locator('.bottom-item').filter({ hasText: '定时' }) : page.locator('.nav-item').filter({ hasText: '定时任务' })
-  await nav.click()
+  if (mobile) {
+    await page.locator('.bottom-item').filter({ hasText: '更多' }).click()
+    await page.locator('.mobile-more-menu').getByRole('button', { name: '定时任务', exact: true }).click()
+  } else {
+    await page.locator('.nav-item').filter({ hasText: '定时任务' }).click()
+  }
   await page.locator('.cron-jobs').waitFor({ state: 'visible' })
-  await page.getByText('订单审核每日回归').waitFor({ state: 'visible' })
+  await page.locator('.cron-job-row').getByText('订单审核每日回归', { exact: true }).waitFor({ state: 'visible' })
 }
 
 let server
@@ -83,27 +87,30 @@ try {
   await search.fill('不存在的任务')
   await desktop.getByText('没有符合筛选条件的定时任务').waitFor()
   await search.fill('订单审核')
-  await desktop.getByText('订单审核每日回归').waitFor()
-  await desktop.locator('tbody .select-column input').check()
-  await desktop.locator('.bulk-actions button').filter({ hasText: '禁用' }).click()
-  await desktop.locator('tbody .toggle input').waitFor()
-  if (await desktop.locator('tbody .toggle input').isChecked()) throw new Error('bulk disable did not update the real API')
-  await desktop.locator('tbody .select-column input').check()
+  await desktop.locator('.cron-job-row').getByText('订单审核每日回归', { exact: true }).waitFor()
+  await desktop.locator('.cron-job-row .select-column input').check()
+  await desktop.locator('.bulk-actions button').filter({ hasText: '停用' }).click()
+  await desktop.locator('.cron-job-row .toggle input').waitFor()
+  if (await desktop.locator('.cron-job-row .toggle input').isChecked()) throw new Error('bulk disable did not update the real API')
+  await desktop.locator('.cron-job-row .select-column input').check()
   await desktop.locator('.bulk-actions button').filter({ hasText: '启用' }).click()
-  await desktop.waitForFunction(() => document.querySelector('tbody .toggle input')?.checked === true)
+  await desktop.waitForFunction(() => document.querySelector('.cron-job-row .toggle input')?.checked === true)
   await desktop.getByRole('button', { name: '运行记录' }).click()
   await desktop.getByRole('dialog', { name: '定时任务运行记录' }).waitFor()
   if (await desktop.locator('.run-technical').evaluate(element => element.open)) throw new Error('technical details must be collapsed')
   await desktop.screenshot({ path: path.join(outputDir, '02-run-controls-desktop.png') })
   await desktop.getByRole('button', { name: '关闭运行记录' }).click()
   await desktop.getByRole('button', { name: '新建定时任务' }).click()
-  await desktop.getByText('可靠运行').waitFor()
+  await desktop.getByText('调度可靠性').waitFor()
+  await desktop.waitForFunction(() => !document.querySelector('#toast-container .toast'), null, { timeout: 6000 })
   await desktop.screenshot({ path: path.join(outputDir, '03-reliability-form-desktop.png') })
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } })
   mobile.on('pageerror', error => errors.push(error.message))
   await openCron(mobile, true)
   await assertNoOverflow(mobile, 'mobile list')
+  const mobileOverview = await mobile.locator('.cron-overview').boundingBox()
+  if (!mobileOverview || mobileOverview.height < 60) throw new Error(`mobile scheduling overview is not visible: ${JSON.stringify(mobileOverview)}`)
   await mobile.screenshot({ path: path.join(outputDir, '04-list-mobile.png') })
   await mobile.getByRole('button', { name: '运行记录' }).click()
   await mobile.getByRole('dialog', { name: '定时任务运行记录' }).waitFor()

@@ -77,6 +77,15 @@ const NATIVE_CONTINUATION_PROFILES = {
         nativeFork: false,
         forkStrategy: "scratchpad_new_session",
     },
+    opencode: {
+        provider: "opencode",
+        aliases: ["opencode", "open-code"],
+        sessionResume: false,
+        resumeAckPolicy: "unsupported",
+        sessionIdOrigin: "none",
+        nativeFork: false,
+        forkStrategy: "scratchpad_new_session",
+    },
     qoder: {
         provider: "qoder",
         aliases: ["qoder", "qoder-cli"],

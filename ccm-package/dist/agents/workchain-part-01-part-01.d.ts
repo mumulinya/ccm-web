@@ -113,7 +113,7 @@ export declare function getPostReviewSpotCheckState(input: MainAgentWorkchainInp
 };
 export declare function collectAcceptanceEvidence(input: MainAgentWorkchainInput): string[];
 export declare function collectIndependentReviewEvidence(input: MainAgentWorkchainInput): string[];
-export declare function checkpointStatus(status: any): "failed" | "pending" | "done" | "active" | "warning";
+export declare function checkpointStatus(status: any): "done" | "pending" | "failed" | "active" | "warning";
 export declare function normalizeWorkchainTodoSteps(input: MainAgentWorkchainInput, stages: any[], terminal: boolean): {
     id: string;
     content: string;

@@ -70,12 +70,21 @@ if (process.argv.includes('--child')) {
     messages: [],
     compaction: {},
   })
+  writeJson('task-agent-sessions.json', {
+    schema: 'ccm-task-agent-sessions-v1',
+    sessions: [
+      { id: 'tas-project-a-one', project: 'project-a', agentType: 'codex', taskId: 'task-a', groupId: 'group-a', status: 'closed', turnCount: 2, lastUsedAt: '2026-07-18T12:00:00.000Z' },
+      { id: 'tas-project-a-two', project: 'project-a', agentType: 'cursor', taskId: 'task-b', groupId: 'group-a', status: 'open', turnCount: 1, lastUsedAt: '2026-07-18T13:00:00.000Z' },
+      { id: 'tas-project-b-one', project: 'project-b', agentType: 'claudecode', taskId: 'task-c', groupId: 'group-a', status: 'closed', turnCount: 4, lastUsedAt: '2026-07-18T11:00:00.000Z' },
+    ],
+  })
 
   const { buildMemoryCenterOverview } = await import('../ccm-package/dist/modules/knowledge/memory-control-center-handler.js')
   const { getMemoryCenterScope } = await import('../ccm-package/dist/modules/knowledge/memory-control-center-api.js')
   const overview = buildMemoryCenterOverview()
   const groupSessions = overview.groups.filter(item => item.groupId === 'group-a')
   const projectItems = overview.projects.filter(item => item.projectId === 'project-a')
+  const taskItems = overview.tasks
   const storedDetail = getMemoryCenterScope('group', 'group-a::gcs-one')
   const virtualDetail = getMemoryCenterScope('group', 'group-a::gcs-two')
   const storedTypes = new Set(storedDetail.itemGroups.map(group => group.type))
@@ -94,6 +103,9 @@ if (process.argv.includes('--child')) {
     projectLongTermSeparate: projectItems.some(item => item.memoryKind === 'long_term' && item.scope === 'project'),
     projectSessionSeparate: projectItems.some(item => item.memoryKind === 'session' && item.scope === 'project_session'),
     projectSessionIdentityExposed: projectItems.find(item => item.memoryKind === 'session')?.projectSessionId === 'session-one',
+    taskProjectIdentityExposed: taskItems.length === 3 && new Set(taskItems.map(item => item.projectId)).size === 2,
+    taskSessionMetadataExposed: taskItems.every(item => item.taskAgentSessionId && item.agentType && item.taskId && item.groupId),
+    taskSessionsSortedByRecentUse: taskItems.map(item => item.taskAgentSessionId).join(',') === 'tas-project-a-two,tas-project-a-one,tas-project-b-one',
   }
   assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify({ checks, overview }, null, 2))
   console.log(JSON.stringify({ pass: true, checks: Object.keys(checks).length, checksDetail: checks }))
@@ -104,8 +116,12 @@ const frontend = fs.readFileSync(new URL('../frontend/src/components/knowledge/M
 assert.match(frontend, /const globalTree = computed/)
 assert.match(frontend, /const groupTrees = computed/)
 assert.match(frontend, /const projectTrees = computed/)
+assert.match(frontend, /const taskProjectTrees = computed/)
 assert.match(frontend, /v-for="tree in groupTrees"/)
 assert.match(frontend, /v-for="tree in projectTrees"/)
+assert.match(frontend, /v-for="tree in taskProjectTrees"/)
+assert.match(frontend, /data-scope-kind="task-agent"/)
+assert.doesNotMatch(frontend, /v-for="item in taskScopes"/)
 assert.match(frontend, /tree\.sessions\.length/)
 assert.match(frontend, /class="scope-children"/)
 
@@ -120,7 +136,7 @@ try {
   assert.equal(child.status, 0, child.stderr || child.stdout)
   const result = JSON.parse(String(child.stdout || '').trim().split(/\r?\n/).at(-1))
   assert.equal(result.pass, true)
-  console.log(JSON.stringify({ pass: true, checks: result.checks + 7, hierarchy: 'scope -> sessions' }, null, 2))
+  console.log(JSON.stringify({ pass: true, checks: result.checks + 11, hierarchy: 'scope -> project -> sessions' }, null, 2))
 } finally {
   fs.rmSync(tempHome, { recursive: true, force: true })
 }

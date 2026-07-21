@@ -84,7 +84,7 @@ export declare function buildMainAgentProgressCheckpoints(input: MainAgentWorkch
     };
     items: any[];
 };
-export declare function stageStatus(input: MainAgentWorkchainInput, stage: string): "failed" | "pending" | "in_progress" | "completed" | "cancelled" | "needs_confirmation";
+export declare function stageStatus(input: MainAgentWorkchainInput, stage: string): "in_progress" | "pending" | "completed" | "cancelled" | "failed" | "needs_confirmation";
 export declare function terminalWorkchain(input: MainAgentWorkchainInput): boolean;
 export declare function collectWorkchainVisibleQualityText(value: any, depth?: number): string[];
 export declare function buildFinalSummaryQuality(input: MainAgentWorkchainInput, evidence: ReturnType<typeof collectCompletionEvidence>, terminal: boolean, headline: string, nextAction: string, options?: {

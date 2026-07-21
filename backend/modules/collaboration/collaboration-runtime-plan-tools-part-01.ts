@@ -962,7 +962,7 @@ export function getClaudeLocalGatewayReadiness(probeTarget: any = null) {
   const rawAgentType = String(probeTarget?.agent_type || probeTarget?.agentType || "").trim();
   if (!rawAgentType) return null;
   const agentType = normalizeAgentRuntimeId(rawAgentType);
-  if (agentType !== "claudecode" && agentType !== "claude") return null;
+  if (agentType !== "claudecode") return null;
   const env = readClaudeSettingsEnv();
   const local = parseLocalHttpUrl(env.ANTHROPIC_BASE_URL);
   if (!local) return null;

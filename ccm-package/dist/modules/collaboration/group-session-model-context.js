@@ -36,7 +36,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildChildParentSessionContextPacket = exports.buildChildParentSessionContextProjection = void 0;
 exports.buildExactGroupSessionModelContextProjection = buildExactGroupSessionModelContextProjection;
 exports.buildExactGroupSessionModelContextPacket = buildExactGroupSessionModelContextPacket;
-exports.prepareExactGroupSessionRenderedPayload = prepareExactGroupSessionRenderedPayload;
 const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("../../system/context-budget");
 const session_memory_window_1 = require("../../system/session-memory-window");
@@ -126,64 +125,6 @@ function buildExactGroupSessionModelContextPacket(groupId, options = {}) {
     if (!id || !groupSessionId.startsWith("gcs_"))
         throw new Error("exact_group_session_required_for_model_context");
     return buildExactGroupSessionModelContextProjection((0, storage_1.getGroupMessages)(id, groupSessionId), (0, group_memory_storage_1.loadGroupMemory)(id, groupSessionId), { groupId: id, groupSessionId });
-}
-function renderedPayloadText(value) {
-    if (typeof value === "string")
-        return value;
-    return String(value?.renderedPrompt || value?.rendered_prompt || value?.prompt || value?.payload || "");
-}
-async function prepareExactGroupSessionRenderedPayload(input) {
-    const groupId = String(input.groupId || input.group_id || "").trim();
-    const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
-    if (!groupId || !groupSessionId.startsWith("gcs_"))
-        throw new Error("exact_group_session_required_for_rendered_payload");
-    if (typeof input.renderPayload !== "function")
-        throw new Error("render_payload_required_for_group_context");
-    const capacity = input.modelCapacity || input.model_capacity || {};
-    const contextWindow = Math.max(32_000, Number(capacity.contextWindow || capacity.context_window || 200_000));
-    const reservedOutputTokens = Math.max(0, Number(capacity.reservedOutputTokens || capacity.reserved_output_tokens || 20_000));
-    const effectiveContextWindow = Math.max(18_000, Number(capacity.effectiveContextWindow || capacity.effective_context_window || contextWindow - reservedOutputTokens));
-    const bufferTokens = Math.max(0, Number(capacity.autoCompactBufferTokens || capacity.auto_compact_buffer_tokens || 13_000));
-    const threshold = Math.max(18_000, Math.min(effectiveContextWindow, Number(input.autoCompactThreshold || input.auto_compact_threshold || capacity.autoCompactThreshold || effectiveContextWindow - bufferTokens)));
-    const buildProjection = typeof input.buildProjection === "function" ? input.buildProjection : buildExactGroupSessionModelContextPacket;
-    const runCompaction = typeof input.runCompaction === "function"
-        ? input.runCompaction
-        : (scopeId, options) => {
-            const memoryContextApi = require("./group-memory-context");
-            return memoryContextApi.runGroupMemoryAutoCompactionNow(scopeId, options);
-        };
-    let projection = buildProjection(groupId, { groupSessionId });
-    let rendered = await input.renderPayload(projection);
-    let payload = renderedPayloadText(rendered);
-    let tokens = (0, context_budget_1.estimateTextTokens)(payload);
-    if (tokens < threshold)
-        return { compacted: false, projection, rendered, payload, tokens, threshold, capacity };
-    const fixedPayload = payload.includes(projection.rendered) ? payload.replace(projection.rendered, "") : payload;
-    const compactResult = await runCompaction(groupId, {
-        sessionId: groupSessionId,
-        reason: String(input.reason || "group_model_final_payload_capacity"),
-        config: {
-            ...(input.compactionConfig || input.compaction_config || {}),
-            memoryCompactionUseModel: true,
-            memoryCompactionMode: "model-required",
-            modelContextWindow: contextWindow,
-            modelMaxOutputTokens: reservedOutputTokens,
-            modelAutoCompactTokenLimit: threshold,
-            modelVisibleSystemContext: fixedPayload,
-        },
-    });
-    if (compactResult?.success !== true || compactResult?.compacted !== true) {
-        throw new Error(`GROUP_RENDERED_PAYLOAD_FORMAL_COMPACTION_FAILED:${compactResult?.error || compactResult?.reason || "formal_compaction_not_committed"}`);
-    }
-    projection = buildProjection(groupId, { groupSessionId });
-    if (projection.canonicalSummary !== true)
-        throw new Error("GROUP_RENDERED_PAYLOAD_FORMAL_COMPACTION_FAILED:canonical_summary_missing");
-    rendered = await input.renderPayload(projection);
-    payload = renderedPayloadText(rendered);
-    tokens = (0, context_budget_1.estimateTextTokens)(payload);
-    if (tokens >= threshold)
-        throw new Error(`GROUP_RENDERED_PAYLOAD_POST_COMPACT_BLOCKED:${tokens}/${threshold}`);
-    return { compacted: true, projection, rendered, payload, tokens, threshold, capacity, compactResult };
 }
 exports.buildChildParentSessionContextProjection = buildExactGroupSessionModelContextProjection;
 exports.buildChildParentSessionContextPacket = buildExactGroupSessionModelContextPacket;

@@ -1,4 +1,20 @@
 export declare const RANDOM_MUSIC_KEYWORD = "__random__";
+export type MusicPlaybackStrategy = "exact_song" | "artist_random" | "mood_recommendation" | "genre_recommendation" | "random";
+export type MusicPlaybackPlan = {
+    schema: "ccm-music-playback-plan-v1";
+    strategy: MusicPlaybackStrategy;
+    originalRequest: string;
+    searchQuery: string;
+    artist: string;
+    mood: string;
+    genre: string;
+    randomize: boolean;
+    strictMatch: boolean;
+    source: "model" | "fallback";
+    reason: string;
+};
+export declare function resolveMusicPlaybackRequestFallback(requestText: string, keyword?: string): MusicPlaybackPlan;
+export declare function resolveMusicPlaybackRequest(cfg: any, requestText: string, keyword?: string): Promise<MusicPlaybackPlan>;
 export declare function extractMusicIntent(msg: string): {
     type: string;
     keyword: string;
@@ -49,6 +65,12 @@ export declare function runMusicAgentIntentSelfTest(): {
         openAiBaseUrlUsesUnifiedEndpoint: boolean;
         anthropicBaseUrlUsesUnifiedEndpoint: boolean;
         remoteCommandQueue: boolean;
+        remoteCommandKeepsOriginalRequest: boolean;
+        exactSongStaysStrict: boolean;
+        sadMoodBeatsRandomKeyword: boolean;
+        happyMoodRecommendation: boolean;
+        artistOnlyRandomizes: boolean;
+        genreRecommendation: boolean;
         playMusicIsReadRisk: boolean;
     };
     samples: {

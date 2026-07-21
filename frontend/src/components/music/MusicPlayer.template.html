@@ -307,6 +307,14 @@
             <div class="agent-status-tags">
               <span class="status-tag standby">{{ agentLoading ? '思考中' : '待命' }}</span>
               <span class="status-tag ok">{{ agentConfigLoaded && agentConfig.hasKey ? '模型已连接' : '基础模式' }}</span>
+              <span v-if="musicMemoryLabel" class="status-tag standby" title="音乐助手单例上下文 Token / 自动压缩线">{{ musicMemoryLabel }}</span>
+              <ConversationFindBar
+                :messages="agentMessages"
+                :scroll-container="agentChatEl"
+                target-id-prefix="music-agent-msg-"
+                scope-key="music-agent"
+                :active="props.active && musicAssistantOpen"
+              />
               <button class="settings-btn-icon" @click="retryLastAgentMessage" :disabled="agentLoading || !lastUserMessage()" title="重试上一条">↻</button>
               <button class="settings-btn-icon" @click="clearChatHistory" title="清除历史">🧹</button>
               <button class="settings-btn-icon" @click="showSettings = true" title="助手设置">⚙️</button>
@@ -315,7 +323,7 @@
           </div>
 
           <div class="agent-chat-messages" id="agent-chat" ref="agentChatEl" @scroll="updateAgentChatScrollState">
-            <div v-for="msg in agentMessages" :key="getAgentMessageKey(msg)" class="aura-chat-row" :class="msg.role">
+            <div v-for="(msg, index) in agentMessages" :id="'music-agent-msg-' + index" :key="getAgentMessageKey(msg)" class="aura-chat-row" :class="msg.role">
               
               <!-- 消息气泡 -->
               <div class="chat-bubble-container">

@@ -11,6 +11,11 @@ export declare function pickBestCandidateByScore(keyword: string, candidates?: a
 export declare function selectMusicTrack(input?: {
     keyword?: string;
     candidates?: any[];
+    selectionMode?: string;
+    randomize?: boolean;
+    originalRequest?: string;
+    allowModel?: boolean;
+    modelConfig?: any;
 }): Promise<{
     success: boolean;
     index: number;

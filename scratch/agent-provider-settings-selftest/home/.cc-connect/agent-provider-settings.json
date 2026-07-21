@@ -1,0 +1,32 @@
+{
+  "version": 3,
+  "codex": {
+    "enabled": true,
+    "authMode": "cli_login",
+    "model": "gpt-5.3-codex"
+  },
+  "cursor": {
+    "enabled": true,
+    "authMode": "cli_login",
+    "model": "composer-test"
+  },
+  "gemini": {
+    "enabled": true,
+    "authMode": "cli_login",
+    "model": "gemini-test"
+  },
+  "opencode": {
+    "enabled": true,
+    "authMode": "cli_login",
+    "model": "provider/model-test"
+  },
+  "claudecode": {
+    "enabled": true,
+    "authMode": "api",
+    "apiUrl": "https://gateway.example.test",
+    "apiKey": "ccm-secret://development-agent-claudecode:apikey-51d7edf3ac1b",
+    "credentialType": "auth_token",
+    "model": "claude-test"
+  },
+  "updatedAt": "2026-07-21T04:11:28.841Z"
+}

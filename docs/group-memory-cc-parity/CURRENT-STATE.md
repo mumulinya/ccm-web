@@ -12,7 +12,7 @@ Date: 2026-07-18
 - 本地规则只估算 token 和校验保真，不能提交为 canonical summary。
 - 每次压缩都把上一轮摘要带入下一轮，形成 S1 -> S2 -> S3 lineage。
 - 原始 transcript 永不因压缩删除；compact head 只改变下一轮模型可见上下文。
-- 模型可见上下文固定为正式摘要、`10K-40K token` 动态近期原文、恢复上下文和 hooks 结果。
+- 正式压缩前使用精确会话全部原文；正式压缩后使用模型摘要、`10K-40K token` 动态近期原文、恢复上下文和 hooks 结果。
 - 压缩候选仍超过阈值时 fail closed，不推进边界，不调用 Provider。
 - 同一精确会话连续三次失败后熔断，兄弟会话不受影响。
 
@@ -37,10 +37,13 @@ Project session
   -> 第三方 Agent 原生 generation
   -> 服务端记录 Provider usage
   -> 成功 compact 后才轮换 generation
-  -> 摘要 + 动态近期原文注入新 generation
+  -> 未压缩：全部原文注入新 generation
+  -> 已压缩：摘要 + 动态近期原文注入新 generation
 ```
 
 Global Agent 只使用全局长期记忆和当前全局会话连续性，严格排除群聊 transcript、群聊记忆和项目记忆。
+
+音乐 Agent 不提供用户会话列表。它使用固定 `music-agent` 单例 transcript：未压缩时读取全部音乐对话，压缩后读取正式模型摘要和动态近期完整原文；明确的跨轮次音乐偏好由模型提取到独立长期音乐记忆。全局 Agent 点歌只复用统一播放器，不把全局会话注入音乐 Agent。
 
 ## 共享压缩核心
 
@@ -71,6 +74,9 @@ Provider usage 必须匹配 `scope/session/provider/model/generation/boundaryGen
 ### 群聊会话
 
 - 多群聊和多 `gcs_*` 的 transcript、Session Memory、compact head、工具闭包和恢复状态继续隔离。
+- 群聊主 Agent 未达到压缩线时使用当前精确会话全部原文，不再使用固定 20/12 条窗口或本地旧消息摘要。
+- 每次主 Agent Provider 调用前同步测量完整 system、Skill、共享文件、RAG、恢复指令、会话和当前请求；达到容量线后在同一轮正式压缩并重建。
+- 主 Agent Provider PTL 恢复不再调用 48K 字符首尾裁切，改走受精确会话熔断约束的正式模型压缩。
 - 无自定义 `/compact` 要求时优先使用已验证 Session Memory；自定义要求直接调用模型摘要。
 - 模型或 Session Memory 候选超阈值时不提交 compact head。
 - typed memory 蒸馏仍服务长期检索，但不参与生成 canonical session summary。
@@ -78,6 +84,10 @@ Provider usage 必须匹配 `scope/session/provider/model/generation/boundaryGen
 ### 项目会话
 
 - 一个项目可以有多个稳定 CCM 会话；一条会话可连续复用第三方 Agent 原生 session/generation。
+- 新原生 generation 启动且尚未正式压缩时，注入当前项目会话的全部历史原文；只有存在可信模型摘要后才切换为摘要加动态近期窗口。
+- 前端已预存的当前用户消息按角色和完整内容精确去重；直接 API 未预存当前请求时不会误删上一条 Agent 回复。
+- 支持 MCP 的 Codex、Claude Code 和 Cursor 使用签名 `project_session` 记忆快照：首次读取完整未压缩历史，后续同世代只读取消息和记忆增量。
+- MCP 未同步时继续使用完整 Prompt；MCP 已同步但必需记忆未读完时，修改任务失败且不提交长期记忆。
 - Provider usage 由服务端完成调用时记录，不依赖前端回传。
 - 摘要保留 lineage，S2/S3 不覆盖丢失 S1 中仍有效的信息。
 - 只有 compact 事务提交成功才轮换原生 generation。
@@ -92,6 +102,9 @@ Provider usage 必须匹配 `scope/session/provider/model/generation/boundaryGen
 - 不再生成相互冲突的本地 worker summary，也不做字符级 prompt projection。
 - Provider 原生 compact 无法证明真实执行时，当前 generation 失效并要求新 generation 回注正式上下文。
 - 模型压缩失败或压缩后最终 payload 仍超阈值时禁止 Provider 调用；原 transcript 与旧 compact head 保持不变。
+- 用户不能直接调用群聊成员或广播成员；所有群聊任务由群聊主 Agent 分派，并统一使用当前精确父会话上下文。
+- 项目子 Agent通过签名 `ccm__knowledge_context` MCP 读取父群聊连续性、相关群聊记忆和目标项目长期记忆；bootstrap Prompt 不再重复展开完整 memory envelope。
+- 子 Agent 的 MCP 候选先合并到结构化回执，只有群聊主 Agent验收通过后才能进入现有长期记忆 admission。
 
 ## Memory Center
 
@@ -124,12 +137,15 @@ Memory Center 分别列出：
 - worker fail-closed：[final-dispatch-reactive-compact.ts](../../backend/agents/final-dispatch-reactive-compact.ts)
 - Memory Center API：[memory-control-center-handler.ts](../../backend/modules/knowledge/memory-control-center-handler.ts)
 - Memory Center 前端：[MemoryCenterPanel.vue](../../frontend/src/components/knowledge/MemoryCenterPanel.vue)
+- 第三方 Agent 记忆快照：[third-party-memory-snapshot.ts](../../backend/integrations/third-party-memory-snapshot.ts)
+- 第三方 Agent 记忆 MCP：[knowledge-context-mcp.ts](../../backend/integrations/knowledge-context-mcp.ts)
 
 ## 验收证据
 
 - 共享全链路：`51/51`；
 - 全局模型压缩：`34/34`，包含 S1 -> S2 -> S3；
-- 项目会话与原生绑定：`66/66`，包含 S1 -> S2 -> S3；
+- 项目会话与原生绑定：`84/84`，包含压缩前完整原文、当前请求去重与 S1 -> S2 -> S3；
+- 第三方 Agent 记忆 MCP：`49/49`，包含三种运行时、全量/增量、重加载、隔离和受控写回；
 - 动态窗口：`23/23`；
 - 群聊 CC 核心：`18/18`；
 - 群聊 Session Memory 选择：`15/15`；
@@ -144,6 +160,12 @@ Memory Center 分别列出：
 专项记录见 [all-session-cc-compaction-alignment-2026-07-18](./all-session-cc-compaction-alignment-2026-07-18/README.md)。
 
 最后一批源码差异收口见 [cc-source-parity-closure-2026-07-18](./cc-source-parity-closure-2026-07-18/README.md)。
+
+2026-07-20 收口：群聊用户入口只保留主 Agent，项目成员仅能由主 Agent 内部分派；全局 Agent 每次 Provider 调用前按真实最终消息执行自动压缩预检，并在提交边界前完成候选上下文重建和后置门禁。专项记录见 [group-main-only-global-provider-cc-context-2026-07-20](./group-main-only-global-provider-cc-context-2026-07-20/README.md)。
+
+2026-07-20 项目会话补齐：新第三方 Agent generation 在正式压缩前回注全部项目会话原文，正式压缩后才使用摘要与动态近期原文；当前用户请求改为精确去重，不再盲删最后一条历史。专项记录见 [project-session-precompact-full-context-2026-07-20](./project-session-precompact-full-context-2026-07-20/README.md)。
+
+2026-07-20 第三方 Agent 记忆 MCP：现有知识 MCP 扩展为签名会话与长期记忆读取桥梁；独立项目和群聊子 Agent采用 MCP 优先、全量首读、同世代增量、压缩后重加载及候选验收写回。专项记录见 [third-party-agent-memory-mcp-hydration-2026-07-20](./third-party-agent-memory-mcp-hydration-2026-07-20/README.md)。
 
 ## 维护边界
 

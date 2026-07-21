@@ -35,6 +35,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentAgenticRuntime = createGlobalAgentAgenticRuntime;
 const crypto = __importStar(require("crypto"));
+const global_agent_run_projection_1 = require("../../agents/global/global-agent-run-projection");
+const session_compaction_core_1 = require("../../system/session-compaction-core");
+const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const source_ingestion_1 = require("../requirements/source-ingestion");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 function createGlobalAgentAgenticRuntime(deps) {
@@ -255,6 +258,71 @@ function createGlobalAgentAgenticRuntime(deps) {
         if (!validation.valid)
             throw new Error(`global agent context boundary failed: ${validation.issues.join(", ")}`);
         return context;
+    }
+    function buildGlobalProviderPayloadSnapshot(messages, sessionId) {
+        return (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+            scope: "global",
+            sessionId,
+            system: messages.filter(message => message.role === "system"),
+            recentMessages: messages.filter(message => message.role !== "system"),
+        });
+    }
+    function isGlobalPromptTooLongError(error) {
+        return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String(error?.message || error || ""));
+    }
+    async function prepareGlobalProviderMessages(messages, run, runtime, options = {}) {
+        const sessionId = String(run.session_id || "").trim();
+        if (!sessionId)
+            throw new Error("全局 Agent Provider 调用缺少精确会话 ID");
+        const config = loadOrchestratorConfig();
+        const modelCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
+        const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
+        const triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId);
+        if (!options.promptTooLong && triggerPayload.totalTokens < threshold)
+            return messages;
+        const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
+            reason: options.promptTooLong ? "provider_prompt_too_long" : "provider_payload_preflight",
+            promptTooLong: options.promptTooLong === true,
+            currentRequest: { role: "user", content: run.reasoning_loop?.effective_goal || run.user_message },
+            fixedContext: messages.filter(message => message.role === "system"),
+            modelVisiblePayload: triggerPayload,
+            postCompactPayloadBuilder: async ({ summary, preservedMessages, boundaryMarker, recoveryContext, hookResults }) => {
+                const continuation = {
+                    schema: "ccm-global-session-continuation-v2",
+                    sessionId,
+                    summary,
+                    messages: preservedMessages.map((message) => ({
+                        id: String(message.id || ""),
+                        role: message.role === "assistant" ? "assistant" : "user",
+                        content: String(message.content || ""),
+                        timestamp: String(message.timestamp || ""),
+                    })),
+                    boundary: boundaryMarker,
+                    recoveryContext,
+                    hookResults,
+                };
+                const rebuiltMessages = await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime, { sessionContinuationOverride: continuation });
+                return {
+                    messages: rebuiltMessages,
+                    modelVisiblePayload: buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId),
+                };
+            },
+        });
+        if (compaction?.reason === "circuit_breaker") {
+            throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
+        }
+        if (compaction?.compacted !== true) {
+            throw new Error(`全局 Agent 上下文已达到模型门禁，但无法形成可提交的正式压缩：${compaction?.reason || "unknown"}`);
+        }
+        const rebuiltMessages = Array.isArray(compaction.preparedModelMessages)
+            ? compaction.preparedModelMessages
+            : await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime);
+        const rebuiltPayload = buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId);
+        const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: rebuiltPayload, threshold });
+        if (postCompactGate.providerCallAllowed !== true || rebuiltPayload.totalTokens >= modelCapacity.contextWindow) {
+            throw new Error(`全局 Agent 正式压缩后的真实 Provider Payload 仍超限：${rebuiltPayload.totalTokens}/${threshold}`);
+        }
+        return rebuiltMessages;
     }
     function localActionToAgenticDecision(localIntent, run) {
         if (run.steps.length > 0) {
@@ -829,19 +897,29 @@ function createGlobalAgentAgenticRuntime(deps) {
     }
     function createAgenticRuntime(baseUrl, ctx, input = {}) {
         const config = loadOrchestratorConfig();
-        return {
+        const runtime = {
             callModel: async (messages, run) => {
                 attachGlobalRunRequirementSources(run, input.sourceIngestion);
                 if (!config.apiKey || !config.apiUrl || !config.model)
                     throw new Error("统一大模型尚未配置");
                 const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
-                return callGlobalModelWithRetry(config, messages, {
+                const invoke = (providerMessages) => callGlobalModelWithRetry(config, providerMessages, {
                     onUsage: (usage) => {
                         run.latest_context_usage = usage;
                         accumulateGlobalAgentRunUsage(run, usage);
                     },
                 });
+                try {
+                    return await invoke(messages);
+                }
+                catch (error) {
+                    if (!isGlobalPromptTooLongError(error))
+                        throw error;
+                    const recoveredMessages = await prepareGlobalProviderMessages(messages, run, runtime, { promptTooLong: true });
+                    return invoke(recoveredMessages);
+                }
             },
+            prepareModelMessages: (messages, run) => prepareGlobalProviderMessages(messages, run, runtime),
             getContext: (run) => buildAgenticContext(run.user_message, run.session_id),
             verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
             executeTool: (name, args, run) => {
@@ -857,6 +935,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             },
             onEvent: input.onEvent ? (event) => input.onEvent(event) : undefined,
         };
+        return runtime;
     }
     async function runAgenticGlobalRequest(baseUrl, ctx, input) {
         const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion });

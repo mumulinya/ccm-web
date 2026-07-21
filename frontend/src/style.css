@@ -2240,3 +2240,67 @@ html[data-theme-preset]:not([data-theme-preset="default"]) .pulse-glow {
 
 /* Music aura cards keep their own hover in MusicPlayer.css */
 
+/* Shared reliability baseline for legacy modal forms. Component styles can override it. */
+:where(.modal-overlay > .modal) {
+  width: min(560px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+:where(.modal .form-group) {
+  min-width: 0;
+  margin-bottom: 16px;
+}
+
+:where(.modal .form-group > label) {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+:where(.modal .form-group input:not([type="checkbox"]):not([type="radio"]),
+  .modal .form-group select,
+  .modal .form-group textarea) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border-color: var(--border-color);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+:where(.modal .form-actions) {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+@media (max-width: 768px) {
+  .modal-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .modal-overlay > .modal {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    max-height: 92vh !important;
+    margin: 0 !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    border-left: 0 !important;
+    border-radius: 8px 8px 0 0 !important;
+  }
+
+  :where(.modal .form-actions > button) {
+    min-width: 0;
+  }
+}

@@ -50,7 +50,7 @@ export declare function taskCardGapLabel(item: any): string;
 export declare function userAgentRole(project: string): "项目" | "测试" | "前端" | "后端";
 export declare function userAgentProgress(worker: any): string;
 export declare function sanitizeUserAgentProgressText(value: any, fallback?: string, max?: number): string;
-export declare function normalizeUserAgentProgressStatus(status: any, phase?: string): "failed" | "pending" | "blocked" | "completed" | "running";
+export declare function normalizeUserAgentProgressStatus(status: any, phase?: string): "pending" | "completed" | "failed" | "running" | "blocked";
 export declare function userAgentProgressStatusLabel(status: any): "失败" | "待补齐" | "执行中" | "等待中" | "已回传结果";
 export declare function userAgentProgressDefaultSummary(agent: string, status: string, currentFocus?: string, blockers?: string[]): string;
 export declare function userAgentProgressNextAction(status: string, currentFocus?: string): "等待我纳入验收和最终总结" | "我会按缺口精准返工" | "继续执行，完成后提交结果和验证" | "等待前置条件满足后派发" | "等待我分配下一步";

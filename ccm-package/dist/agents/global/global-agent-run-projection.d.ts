@@ -47,7 +47,7 @@ export declare function projectGlobalAgentReasoningForModel(reasoning: AgentReas
     deviations: {
         id: string;
         type: string;
-        severity: "error" | "info" | "warning";
+        severity: "info" | "error" | "warning";
         at: string;
     }[];
     recovery_checks: {
@@ -62,4 +62,6 @@ export declare function projectGlobalAgentReasoningForModel(reasoning: AgentReas
 export declare function parseGlobalAgentDecision(raw: string | GlobalAgentDecision): GlobalAgentDecision;
 export declare function normalizeDecision(value: any): GlobalAgentDecision;
 export declare function buildToolPrompt(): string;
-export declare function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime): Promise<any[]>;
+export declare function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime, options?: {
+    sessionContinuationOverride?: any;
+}): Promise<any[]>;

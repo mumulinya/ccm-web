@@ -40,7 +40,7 @@ export declare function collectGlobalTestAgentFailureSummaries(report?: any, ver
     hasNeedsUser: boolean;
 };
 export declare function globalRunVisibleReply(run: any, fallback?: string, max?: number): string;
-export declare function getGlobalPetToolState(toolName: string): "building" | "working" | "debugging" | "reviewing" | "carrying";
+export declare function getGlobalPetToolState(toolName: string): "reviewing" | "building" | "working" | "debugging" | "carrying";
 export declare function getGlobalToolDisplayName(toolName: string): string;
 export declare function buildGlobalAgentEventUi(event?: any): any;
 export declare function relayGlobalPetEvent(ctx: CollabCtx, event?: any, options?: {

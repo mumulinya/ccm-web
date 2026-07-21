@@ -231,7 +231,8 @@ export function stopUsabilityArchiveScheduler() {
 
 export function handleUsabilityApi(pathname: string, req: IncomingMessage, res: ServerResponse) {
   if (pathname === "/api/usability/workbench" && req.method === "GET") {
-    sendJson(res, buildUsabilityWorkbench());
+    // Archival governance runs on its scheduler, not on a user-facing read path.
+    sendJson(res, buildUsabilityWorkbench({ runArchive: false }));
     return true;
   }
   if (pathname === "/api/usability/workbench/stream" && req.method === "GET") {
@@ -260,7 +261,7 @@ export function handleUsabilityApi(pathname: string, req: IncomingMessage, res: 
       } catch (error: any) {
         sendWorkbenchEvent(res, { type: "warning", message: error?.message || String(error) });
       }
-    }, 2000);
+    }, 5000);
     req.on("close", () => clearInterval(interval));
     return true;
   }

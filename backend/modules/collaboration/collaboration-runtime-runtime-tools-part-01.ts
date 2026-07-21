@@ -531,6 +531,12 @@ export function prepareAgentRuntimeTools(
       projects: internalProjects,
       memoryReceiptChallenge: options.memoryReceiptChallenge || null,
       memoryReceiptFile: options.memoryReceiptFile || "",
+      memorySnapshotId: options.memorySnapshotId || "",
+      memorySnapshotChecksum: options.memorySnapshotChecksum || "",
+      boundaryGeneration: Number(options.boundaryGeneration || 0),
+      nativeGeneration: Number(options.nativeGeneration || 0),
+      requestText: options.requestText || "",
+      memoryReadBudgetTokens: Number(options.memoryReadBudgetTokens || 0),
     })
     : {};
   const audit = syncRuntimeTools(workDir, agentType, allowedTools, {

@@ -52,6 +52,7 @@ export const DEFAULT_OPTIONS: Required<TestAgentOptions> = {
   collectBrowserVideo: false,
   requireAdversarialProbe: true,
   adversarialProbeWaiver: "",
+  agenticPlanning: false,
 };
 
 export function text(value: any) {

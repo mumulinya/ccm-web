@@ -216,22 +216,16 @@ export function useProjectManager(props, emit) {
   const diffViewer = ref({ visible: false, file: null })
   const pageInfo = ref('')
 
-  const fallbackAgents = [
-    { type: 'claudecode', name: 'Claude Code' },
-    { type: 'cursor', name: 'Cursor' },
-    { type: 'gemini', name: 'Gemini CLI' },
-    { type: 'codex', name: 'Codex' },
-    { type: 'qoder', name: 'Qoder CLI' }
-  ]
-  const agentOptions = ref([...fallbackAgents])
+  const agentOptions = ref([])
 
   const loadAgentOptions = async () => {
     try {
       const data = await api('/api/agents')
       const agents = Array.isArray(data.agents) ? data.agents : []
-      agentOptions.value = agents.length ? agents : [...fallbackAgents]
+      agentOptions.value = agents
     } catch {
-      agentOptions.value = [...fallbackAgents]
+      agentOptions.value = []
+      toast.error('无法读取开发 Agent 注册表，请检查 CCM 服务')
     }
   }
 
@@ -279,12 +273,23 @@ export function useProjectManager(props, emit) {
     name: '',
     work_dir: '',
     agent: 'claudecode',
-    platform: 'feishu'
+    platform: 'feishu',
+    source_type: 'local',
+    repository_url: '',
+    repository_original_url: '',
+    repository_branch: '',
+    initialize_repository: false,
+    git_loading: false,
+    git_status: null
   })
 
   const updateProjectFormField = ({ field, value }) => {
     if (!field) return
     form.value[field] = value
+    if (field === 'repository_url' && showCreate.value && !String(form.value.name || '').trim()) {
+      const match = String(value || '').trim().match(/[/:]([^/:]+?)(?:\.git)?$/)
+      if (match?.[1]) form.value.name = match[1]
+    }
   }
 
   // 平台选项
@@ -415,7 +420,14 @@ export function useProjectManager(props, emit) {
 
   // 显示创建弹窗
   const openCreateModal = () => {
-    form.value = { name: '', work_dir: '', agent: 'claudecode', platform: 'feishu' }
+    const defaultAgent = agentOptions.value.find(agent => agent.enabled !== false && agent.ready)?.type
+      || agentOptions.value.find(agent => agent.enabled !== false)?.type
+      || agentOptions.value[0]?.type
+      || ''
+    form.value = {
+      name: '', work_dir: '', agent: defaultAgent, platform: 'feishu', source_type: 'local',
+      repository_url: '', repository_original_url: '', repository_branch: '', initialize_repository: false, git_loading: false, git_status: null
+    }
     showCreate.value = true
   }
 
@@ -423,6 +435,10 @@ export function useProjectManager(props, emit) {
   const submitCreate = async () => {
     if (!form.value.name || !form.value.work_dir) {
       toast.warning('请填写项目名称和目录')
+      return
+    }
+    if (form.value.source_type === 'github' && !String(form.value.repository_url || '').trim()) {
+      toast.warning('请填写 GitHub 仓库地址')
       return
     }
     const res = await projectsApi.create({ ...form.value, setup_token: feishuProjectSetupToken.value || undefined })
@@ -437,7 +453,24 @@ export function useProjectManager(props, emit) {
   }
 
   // 显示编辑弹窗
-  const openEditModal = (project) => {
+  const loadProjectGitStatus = async () => {
+    if (!editProject.value?.name) return
+    form.value.git_loading = true
+    try {
+      const result = await projectsApi.gitStatus(editProject.value.name)
+      const status = result.status || null
+      form.value.git_status = status
+      form.value.repository_url = status?.remote_url || ''
+      form.value.repository_original_url = status?.remote_url || ''
+    } catch (error) {
+      form.value.git_status = null
+      toast.error(error?.message || '读取项目 Git 状态失败')
+    } finally {
+      form.value.git_loading = false
+    }
+  }
+
+  const openEditModal = async (project) => {
     editProject.value = project
     const platformMap = { '飞书': 'feishu', '微信': 'weixin', 'Lark': 'lark', 'Telegram': 'telegram', 'Slack': 'slack', 'Discord': 'discord' }
     const rawPlatform = project.platform || 'feishu'
@@ -446,14 +479,26 @@ export function useProjectManager(props, emit) {
       name: project.name,
       work_dir: project.work_dir || '',
       agent: project.agent || 'claudecode',
-      platform: mappedPlatform
+      platform: mappedPlatform,
+      source_type: 'local',
+      repository_url: '',
+      repository_original_url: '',
+      repository_branch: '',
+      initialize_repository: false,
+      git_loading: true,
+      git_status: null
     }
     showEdit.value = true
+    await loadProjectGitStatus()
   }
 
   // 提交编辑
   const submitEdit = async () => {
-    const res = await projectsApi.update(form.value)
+    const repositoryChanged = String(form.value.repository_url || '').trim() !== String(form.value.repository_original_url || '').trim()
+    const res = await projectsApi.update({
+      ...form.value,
+      repository_url: repositoryChanged ? form.value.repository_url : ''
+    })
     if (res.success) {
       showEdit.value = false
       loadProjects()
@@ -1333,13 +1378,13 @@ export function useProjectManager(props, emit) {
     showTemplateSelector, allTemplates, templateSearchQuery, activeTemplateIndex, recommendedTemplate, activeTemplate,
     templateVariables, showVariableModal, openTemplateSelector, selectChatTemplate, applyTemplateVariables, detectRecommendation,
     applyRecommendation, handleTemplateKeydown, hideTemplateAssist, chatFiles, diffViewer, pageInfo,
-    fallbackAgents, agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
+    agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
     showCreate, showEdit, showSwitchAgent, showTools, showSharedFiles, showArchives,
     mobileSessionsOpen, projectActionBusy, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
     feishuQrLoading, feishuProjectSetupToken, browsePath, browseItems, browseTarget, drives,
     showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, activeSelectedTemplate,
     pendingTemplateToApply, selectProject, loadSessions, selectSession, startProject, stopProject,
-    deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit,
+    deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit, loadProjectGitStatus,
     openSwitchAgent, switchAgent, startProjectWithAgent, createSession, renameSession, deleteSession,
     saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
     thinkingMessages, pendingProjectParentRunId, streamController, activeProjectRunId, stoppingProjectTurn, makeProjectMessageId,

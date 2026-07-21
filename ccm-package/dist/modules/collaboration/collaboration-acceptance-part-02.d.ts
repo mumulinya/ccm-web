@@ -35,7 +35,7 @@ export declare function buildFailedIndependentReviewReworkFollowUps(input: {
     existingFollowUps?: any[];
     execution?: any;
 }): any[];
-export declare function testAgentDecisionReceiptStatus(report: TestAgentReport, verdict: TestAgentVerdict | null): "failed" | "blocked" | "done" | "partial";
+export declare function testAgentDecisionReceiptStatus(report: TestAgentReport, verdict: TestAgentVerdict | null): "done" | "failed" | "blocked" | "partial";
 export declare function buildNativeTestAgentReceipt(targetName: string, report: TestAgentReport, handoff?: any, workOrder?: any, invocationResult?: any): any;
 export declare function buildNativeTestAgentPlanBlockedReceipt(targetName: string, plan: any, dispatch?: any, handoff?: any): any;
 export declare function runtimeToolDispatchBlockedReceipt(projectName: string, runtimeToolContext?: any): {

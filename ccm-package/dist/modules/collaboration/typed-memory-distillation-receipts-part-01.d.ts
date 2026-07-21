@@ -209,6 +209,6 @@ export declare function buildGroupSessionModelExtractionTypedMemoryTopics(factsI
 };
 export declare function renderModelExtractionTypedMemoryBody(title: string, facts: any[], updatedAt: string): string;
 export declare function distillGroupSessionModelExtractionToTypedMemory(scopeId: string, input: any, options?: any): any;
-export declare function normalizeProviderReproofReceiptConsumptionStatus(value: any): "missing" | "blocked" | "invalid" | "verified" | "used" | "ignored" | "strong";
+export declare function normalizeProviderReproofReceiptConsumptionStatus(value: any): "missing" | "invalid" | "blocked" | "verified" | "used" | "ignored" | "strong";
 export declare function providerReproofReceiptConsumptionCategory(status: string): "caution" | "promoted";
 export declare function providerReproofReceiptConsumptionRecommendation(row?: any): "requires_followup_before_reuse" | "do_not_promote_unless_current_task_explicitly_matches" | "recall_but_verify_native_provider_proof_ledger" | "promote_recall_with_current_source_verification" | "promote_recall_with_current_repo_verification";

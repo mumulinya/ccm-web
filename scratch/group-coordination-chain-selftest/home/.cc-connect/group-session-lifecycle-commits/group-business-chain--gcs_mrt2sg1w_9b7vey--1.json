@@ -1,0 +1,13 @@
+{
+  "schema": "ccm-group-session-lifecycle-commit-v1",
+  "version": 1,
+  "group_id": "group-business-chain",
+  "group_session_id": "gcs_mrt2sg1w_9b7vey",
+  "generation": 1,
+  "status": "active",
+  "lifecycle_head_id": "gslh_7a267160e56a8c35d4a72fc4",
+  "head_checksum": "36176a13153f1c18dbbe219f35f026ecdb3b7a06f7519278155fab3c463fdbf1",
+  "journal_record_checksum": "49f91c5b7e23bde4199fc422e289b42fb55bd8a7eebd6007d169e32549bc7975",
+  "committed_at": "2026-07-20T10:22:26.678Z",
+  "commit_checksum": "87fd0bbe163b6d7949dbd8d4bb241d42af8fc434c00865b67fa7ca7175728976"
+}

@@ -50,11 +50,12 @@ const controlAgenticRun = async (msg, operation, approved = true, feedback = '',
         const keyword = String(effect.params?.keyword || '').trim()
         const mode = String(effect.params?.mode || '').trim()
         const commandId = String(effect.params?.command_id || '').trim()
+        const requestText = String(effect.params?.request_text || keyword).trim()
         if (keyword) {
           void (async () => {
             try {
               const { playMusicFromClientEffect } = await import('./useMusicRemotePlayback.js')
-              await playMusicFromClientEffect({ keyword, mode, commandId })
+              await playMusicFromClientEffect({ keyword, mode, commandId, requestText })
             } catch {}
           })()
         }
@@ -582,7 +583,7 @@ const executeAction = async (action, actionFiles = []) => {
       toast.info(isRandom ? '正在为您随机播放音乐...' : `正在为您后台检索并播放${requestLabel}...`)
       if (typeof window.__cc_global_play_music === 'function') {
         try {
-          const result = await window.__cc_global_play_music(keyword)
+          const result = await window.__cc_global_play_music(keyword, { requestText: String(action?.params?.request_text || keyword) })
           if (result?.skipped) {
             return
           } else if (result.success) {
@@ -602,7 +603,7 @@ const executeAction = async (action, actionFiles = []) => {
           const res = await fetch('/api/music/remote-command', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keyword, source: 'global-agent-web' })
+            body: JSON.stringify({ keyword, request_text: String(action?.params?.request_text || keyword), source: 'global-agent-web' })
           })
           const data = await res.json()
           if (!res.ok || data.success === false) throw new Error(data.error || '创建音乐播放指令失败')

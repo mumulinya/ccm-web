@@ -13,6 +13,17 @@ const syncMusicUi = () => {
   } catch {}
 }
 
+const waitForMusicEngine = async (timeoutMs = 10_000) => {
+  if (typeof window.__cc_global_play_music === 'function') return true
+  emit('switch-tab', 'music')
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (typeof window.__cc_global_play_music === 'function') return true
+    await new Promise(resolve => setTimeout(resolve, 80))
+  }
+  return false
+}
+
 onMounted(() => {
   stopPoller = startMusicRemoteCommandPoller({
     onPlayed: (result, command) => {
@@ -34,9 +45,14 @@ onMounted(() => {
     onError: (error) => {
       if (error) toast.error(`远程点歌失败：${error}`)
     },
+    onEngineRequired: () => {
+      emit('switch-tab', 'music')
+    },
   })
 
   window.__cc_music_remote_play = async (keyword, options = {}) => {
+    const ready = await waitForMusicEngine()
+    if (!ready) return { success: false, error: '音乐播放引擎加载超时，请重试' }
     const result = await playMusicViaGlobalHost(keyword, {
       mode: options.mode || getPreferredMusicMode(),
       ...options,
@@ -62,7 +78,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- Always-mounted host: no UI; MusicPlayer (also always mounted) owns the audio engine. -->
+  <!-- Always-mounted lightweight host; it wakes the lazy audio engine when a command arrives. -->
   <span class="music-remote-host" aria-hidden="true" />
 </template>
 

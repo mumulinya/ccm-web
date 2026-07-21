@@ -1,7 +1,7 @@
 <script setup>
 import { ArrowUpRight, Database, FileCheck2, FolderClock, HardDrive, MessageSquare, TimerReset } from '@lucide/vue'
 
-defineProps({
+const props = defineProps({
   cards: { type: Array, default: () => [] },
   totalBytes: { type: Number, default: 0 },
   selectedId: { type: String, default: '' },
@@ -39,6 +39,8 @@ const statusLabel = (value) => ({
   done: '已完成', failed: '失败', pending: '等待开始', running: '进行中', archived: '已归档',
   disabled: '已停用', enabled: '已启用', completed: '已完成', cancelled: '已取消',
 }[value] || value || '-')
+
+const storageShare = (bytes) => props.totalBytes > 0 ? Math.max(1, Math.min(100, Math.round(Number(bytes || 0) / props.totalBytes * 100))) : 0
 </script>
 
 <template>
@@ -56,22 +58,28 @@ const statusLabel = (value) => ({
       :key="card.id"
       class="cleanup-storage-tile"
       :class="{ active: selectedId === card.id }"
+      :style="{ '--storage-share': `${storageShare(card.bytes)}%` }"
       @click="$emit('select', card.id)"
     >
       <span class="cleanup-storage-icon"><component :is="icons[card.id] || HardDrive" :size="17" /></span>
       <span class="cleanup-storage-copy">
         <span class="cleanup-storage-label">{{ card.title }}</span>
         <strong>{{ Number(card.count || 0).toLocaleString() }}</strong>
-        <small>{{ card.detail }} · {{ formatBytes(card.bytes) }}</small>
+        <small>{{ card.detail }}</small>
+        <span class="cleanup-storage-foot"><span>{{ formatBytes(card.bytes) }}</span><span>{{ storageShare(card.bytes) }}%</span></span>
+        <span class="cleanup-storage-meter" aria-hidden="true"><i></i></span>
       </span>
     </button>
   </section>
 
   <section class="cleanup-data-section">
     <div class="cleanup-section-head">
-      <div>
+      <div class="cleanup-detail-title">
+        <span class="cleanup-storage-icon"><component :is="icons[selectedCard?.id] || HardDrive" :size="16" /></span>
+        <div>
         <h3>{{ selectedCard?.title || '数据明细' }}</h3>
         <p>最多显示最近 200 条，永久删除时仍会再次生成精确清单。</p>
+        </div>
       </div>
       <button v-if="navigationLabel" class="cleanup-button" @click="$emit('navigate')">
         {{ navigationLabel }} <ArrowUpRight :size="14" />

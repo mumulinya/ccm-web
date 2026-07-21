@@ -70,6 +70,25 @@ const projectScopes = computed(() => scopes.value.filter(item => item.scope === 
 const globalLongTermScopes = computed(() => scopes.value.filter(item => item.scope === 'global'))
 const globalSessionScopes = computed(() => scopes.value.filter(item => item.scope === 'global_session'))
 const taskScopes = computed(() => scopes.value.filter(item => item.scope === 'task_agent'))
+const taskProjectTrees = computed(() => {
+  const projects = new Map()
+  for (const item of taskScopes.value) {
+    const fallbackProject = String(item.label || '').split('/')[0]?.trim()
+    const id = item.projectId || item.project || fallbackProject || 'unassigned'
+    if (!projects.has(id)) projects.set(id, {
+      id,
+      label: item.projectLabel || (id === 'unassigned' ? '未关联项目' : id),
+      sessions: [],
+    })
+    projects.get(id).sessions.push(item)
+  }
+  return [...projects.values()]
+    .map(project => ({
+      ...project,
+      sessions: project.sessions.sort((left, right) => String(right.lastUsedAt || right.updatedAt || '').localeCompare(String(left.lastUsedAt || left.updatedAt || ''))),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+})
 const globalTree = computed(() => ({
   id: 'global-agent',
   label: '全局 Agent',
@@ -125,6 +144,25 @@ const sessionMemoryStatusLabel = value => ({
   invalid: '模型记忆校验失败',
   waiting: '未就绪',
 }[value] || '未就绪')
+const taskAgentRuntimeLabel = value => ({
+  claudecode: 'Claude Code',
+  claude: 'Claude Code',
+  codex: 'Codex',
+  cursor: 'Cursor',
+  gemini: 'Gemini CLI',
+  geminicli: 'Gemini CLI',
+  opencode: 'OpenCode',
+}[String(value || '').toLowerCase()] || '开发 Agent')
+const shortTaskAgentId = value => {
+  const id = String(value || '')
+  return id.length > 16 ? `${id.slice(0, 12)}…` : id
+}
+const taskAgentSessionLabel = item => `${taskAgentRuntimeLabel(item.agentType)} · ${shortTaskAgentId(item.taskAgentSessionId || item.id)}`
+const taskAgentSessionMeta = item => {
+  const turns = Number(item.turnCount || 0)
+  const state = item.status === 'open' ? '运行中' : item.status === 'closed' ? '已结束' : ''
+  return [state, turns ? `${turns} 轮` : ''].filter(Boolean).join(' · ')
+}
 
 async function requestJson(url, options) {
   const response = await fetch(url, options)
@@ -396,13 +434,13 @@ onMounted(() => loadOverview(false))
             </div>
           </details>
         </div>
-        <div v-if="taskScopes.length" class="scope-group">
-          <label>子 Agent</label>
-          <details class="scope-parent">
-            <summary><Bot :size="16" /><strong>任务 Agent</strong><small>{{ taskScopes.length }} 个会话</small></summary>
+        <div v-if="taskProjectTrees.length" class="scope-group task-agent-group" data-scope-kind="task-agent">
+          <label>子 Agent · {{ taskProjectTrees.length }} 个项目</label>
+          <details v-for="tree in taskProjectTrees" :key="tree.id" class="scope-parent task-project-parent" :data-project-id="tree.id">
+            <summary><FolderKanban :size="16" /><strong :title="tree.label">{{ tree.label }}</strong><small>{{ tree.sessions.length }} 个会话</small></summary>
             <div class="scope-children">
-              <button v-for="item in taskScopes" :key="item.id" :class="{ active: selectedId === item.id && selectedScope === item.scope }" @click="selectScope(item)">
-                <Bot :size="15" /><span><strong>{{ item.label }}</strong><small>{{ formatNumber(item.currentTokens) }} / {{ formatNumber(item.autoCompactThreshold) }} tokens</small></span>
+              <button v-for="item in tree.sessions" :key="item.id" :class="{ active: selectedId === item.id && selectedScope === item.scope }" :title="`${tree.label} / ${item.id}`" @click="selectScope(item)">
+                <Bot :size="15" /><span><strong>{{ taskAgentSessionLabel(item) }}</strong><small>{{ formatNumber(item.currentTokens) }} / {{ formatNumber(item.autoCompactThreshold) }} tokens<span v-if="taskAgentSessionMeta(item)"> · {{ taskAgentSessionMeta(item) }}</span></small></span>
                 <AlertTriangle v-if="item.circuitOpen" :size="15" class="warn" />
               </button>
             </div>
@@ -552,6 +590,10 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .scope-children { margin-left: 9px; border-left: 1px solid #d7dfdb; }
 .scope-children > button { width: calc(100% - 4px); min-height: 44px; margin-left: 4px; padding: 6px 7px 6px 10px; display: grid; grid-template-columns: 17px minmax(0, 1fr) auto; align-items: center; gap: 7px; border: 0; border-left: 3px solid transparent; background: transparent; color: #526159; text-align: left; cursor: pointer; }
 .scope-children > button.active { border-left-color: #0e6b4f; background: #e8f2ee; color: #124d3c; }
+.task-agent-group > label { display: flex; align-items: center; justify-content: space-between; }
+.task-project-parent > summary { border-left: 3px solid transparent; }
+.task-project-parent[open] > summary { border-left-color: #8aa99c; background: #f0f4f2; }
+.task-project-parent > summary strong { min-width: 0; }
 .memory-detail { min-width: 0; min-height: 0; padding: 22px clamp(18px, 3vw, 42px) 50px; overflow-y: auto; overscroll-behavior: contain; }
 .detail-content { max-width: 1100px; margin: 0 auto; }
 .summary-strip, .runtime-strip { margin: 18px 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid #dce3df; background: #fff; }

@@ -93,6 +93,7 @@ export const TestAgentOptionsContractSchema = z.object({
   require_adversarial_probe: z.boolean().optional(),
   adversarialProbeWaiver: optionalString,
   adversarial_probe_waiver: optionalString,
+  agenticPlanning: z.boolean().optional(),
 }).passthrough().superRefine((value, ctx) => {
   const required = value.requireAdversarialProbe ?? value.require_adversarial_probe;
   const waiver = String(value.adversarialProbeWaiver || value.adversarial_probe_waiver || "").trim();

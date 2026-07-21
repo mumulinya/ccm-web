@@ -202,7 +202,7 @@ export function useGroupChat(props, emit) {
   const slash = useSlashCommands({
     scope: 'group',
     input: newMessage,
-    context: () => ({ group: currentGroup.value?.name || '', groupId: currentGroup.value?.id || '', sessionId: currentGroupSessionId.value || '', target: targetAgent.value }),
+    context: () => ({ group: currentGroup.value?.name || '', groupId: currentGroup.value?.id || '', sessionId: currentGroupSessionId.value || '', target: 'coordinator' }),
     focus: () => nextTick(() => document.getElementById('groupChatInput')?.focus()),
     onNavigate: (tab) => slashNavigate(tab),
     onPrompt: async (prompt, command, result) => {
@@ -254,7 +254,6 @@ export function useGroupChat(props, emit) {
     onError: (message) => toast.error(message),
   })
   const messageFiles = ref([])
-  const targetAgent = computed(() => 'all')
   const messageMode = ref('conversation')
   const pendingGroupTaskInput = ref(null)
   const pendingGroupClarificationInput = ref(null)
@@ -474,6 +473,7 @@ export function useGroupChat(props, emit) {
   const showRename = ref(false)
   const showMembers = ref(false)
   const showTools = ref(false)
+  const showTestTargets = ref(false)
   const showSharedFiles = ref(false)
   const showLogs = ref(false)
   const groupTools = ref({ mcp: [], skill: [] })
@@ -519,7 +519,9 @@ export function useGroupChat(props, emit) {
     updateCreateGroupProjectSelection, submitCreateGroup, submitRename, deleteGroup,
     clearGroupMessages, saveCurrentGroupConversationKnowledge, logs, logFilter, logEventSource,
     logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream, stopLogStream, clearLogs,
-    loadAvailableGroupTools, loadGroupTools, toggleGroupTool, saveGroupTools, groupFiles,
+    loadAvailableGroupTools, loadGroupTools, toggleGroupTool, saveGroupTools, groupTestTargets,
+    groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving, loadGroupTestTargets,
+    saveGroupTestTarget, deleteGroupTestTarget, groupFiles,
     loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile, getAvailableProjects,
     addGroupMember, removeGroupMember
   } = useGroupChatAdmin({
@@ -533,6 +535,7 @@ export function useGroupChat(props, emit) {
     showRename,
     showMembers,
     showTools,
+    showTestTargets,
     showSharedFiles,
     showLogs,
     newGroupName,
@@ -573,7 +576,6 @@ export function useGroupChat(props, emit) {
     lastGroupMsgCount,
     newMessage,
     messageFiles,
-    targetAgent,
     messageMode,
     pendingGroupTaskInput,
     pendingGroupClarificationInput,
@@ -876,7 +878,7 @@ export function useGroupChat(props, emit) {
     focusGroupInput, showTemplateSelector, allTemplates, templateSearchQuery, activeTemplateIndex,
     recommendedTemplate, activeTemplate, templateVariables, showVariableModal, openTemplateSelector,
     selectChatTemplate, applyTemplateVariables, detectRecommendation, applyRecommendation,
-    handleTemplateKeydown, hideTemplateAssist, messageFiles, targetAgent, messageMode, pendingGroupTaskInput,
+    handleTemplateKeydown, hideTemplateAssist, messageFiles, messageMode, pendingGroupTaskInput,
     pendingGroupClarificationInput, isTaskSupplementMode, isClarificationResponseMode,
     isDirectedGroupInputMode, groupComposerPlaceholder, groupComposerSendLabel, cancelTaskSupplementInput,
     beginTaskSupplementInput, getGroupClarificationContext, getGroupClarificationSummary,
@@ -898,7 +900,7 @@ export function useGroupChat(props, emit) {
     testAgentReviewPhase, createTestAgentReviewFallbackMessage, applyTestAgentReviewReady,
     appendAgentWorkEvent, isAgentQaMessage, runAgentQaAction, appendAgentQaMessage,
     applyMainAgentProgressCheckpoint, groupMessageKeyMap, groupMessageKeySeq, getGroupMessageKey, showCreate,
-    showRename, showMembers, showTools, showSharedFiles, showLogs, groupTools, groupAllTools, groupToolAudit,
+    showRename, showMembers, showTools, showTestTargets, showSharedFiles, showLogs, groupTools, groupAllTools, groupToolAudit,
     groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, newGroupName, renameName,
     loadGroups, loadProjects, selectGroup, loadMessages,
     selectGroupSession, createGroupSession, renameGroupSession, archiveGroupSession, deleteGroupSession,
@@ -915,7 +917,8 @@ export function useGroupChat(props, emit) {
     submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, waitingCrossReply, pullNewMessages,
     logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
     stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool,
-    saveGroupTools, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
+    saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,
+    loadGroupTestTargets, saveGroupTestTarget, deleteGroupTestTarget, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
     getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
     startGroupPolling, stopGroupPolling, origSelectGroup, activeSelectedTemplate, pendingTemplateToApply,
   }

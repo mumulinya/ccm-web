@@ -9,7 +9,7 @@ export declare function runAgentCliProbe(payload: any, ctx: CollabCtx): Promise<
         group_id: any;
         group_name: any;
         project: any;
-        agent_type: import("../../agents/runtime").AgentRuntimeId;
+        agent_type: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
         work_dir: any;
     };
     execution_path: any;
@@ -39,8 +39,8 @@ export declare function runRuntimeFallbackProbe(payload: any, ctx: CollabCtx): P
     success: boolean;
     message: string;
     switched: boolean;
-    primary_runtime: import("../../agents/runtime").AgentRuntimeId;
-    final_runtime: import("../../agents/runtime").AgentRuntimeId;
+    primary_runtime: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
+    final_runtime: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
     attempts: any[];
     error?: undefined;
     runtime_tool_dispatch_gate?: undefined;
@@ -49,8 +49,8 @@ export declare function runRuntimeFallbackProbe(payload: any, ctx: CollabCtx): P
     success: boolean;
     message: string;
     switched: boolean;
-    primary_runtime: import("../../agents/runtime").AgentRuntimeId;
-    final_runtime: import("../../agents/runtime").AgentRuntimeId;
+    primary_runtime: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
+    final_runtime: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
     attempts: any[];
     decision: {
         permissionDrift: boolean;

@@ -86,7 +86,7 @@ export declare function createAgentRunnerSupport(deps: any): {
     normalizeAgentRunnerRuntimeToolSnapshot: (snapshot?: any, allowedTools?: any, mcpConfigPath?: string) => any;
     getProjectVerificationCommandsForRunner: (projectName: string) => string[];
     runIndependentProjectVerification: (projectName: string, workDir: string, timeoutMs: number, taskId: string, executionId: string, agentType: string) => Promise<string>;
-    buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string) => {
+    buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string, options?: any) => {
         prompt: any;
         allowedTools: any;
         audit: any;

@@ -44,7 +44,7 @@ export declare function recordTaskAgentMemoryContextDelivery(sessionId: string, 
         taskId: string;
         groupId: string;
         project: string;
-        runtime: import("../agents/runtime").AgentRuntimeId;
+        runtime: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
         nativeSessionId: string;
         executionId: string;
         traceId: string;

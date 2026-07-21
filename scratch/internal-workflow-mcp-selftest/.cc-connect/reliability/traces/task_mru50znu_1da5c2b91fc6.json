@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "trace_id": "task_mru50znu_1da5c2b91fc6",
+  "created_at": "2026-07-21T04:12:42.767Z",
+  "events": [
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru50znr_a279b7",
+      "at": "2026-07-21T04:12:42.767Z",
+      "type": "timeline.internal_mcp_todo_updated",
+      "status": "active",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "demo-project",
+      "runtime": "",
+      "message": "开始真实链路验证",
+      "data": {
+        "phase": "execution",
+        "internal_mcp_event_id": "imcp_mru50znr_a279b7",
+        "kind": "todo",
+        "role": "project-child-agent",
+        "project": "demo-project"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru50zob_f9974e",
+      "at": "2026-07-21T04:12:42.780Z",
+      "type": "timeline.internal_mcp_progress_reported",
+      "status": "active",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "demo-project",
+      "runtime": "",
+      "message": "任务上下文已读取，开始检索知识",
+      "data": {
+        "phase": "execution",
+        "internal_mcp_event_id": "imcp_mru50zob_f9974e",
+        "kind": "progress",
+        "role": "project-child-agent",
+        "project": "demo-project"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru50zom_fdd5a3",
+      "at": "2026-07-21T04:12:42.791Z",
+      "type": "timeline.internal_mcp_delivery_submitted",
+      "status": "active",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "demo-project",
+      "runtime": "",
+      "message": "内部 MCP 子 Agent 交付候选",
+      "data": {
+        "phase": "review",
+        "internal_mcp_event_id": "imcp_mru50zom_fdd5a3",
+        "kind": "delivery",
+        "role": "project-child-agent",
+        "project": "demo-project"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru50zos_08b442",
+      "at": "2026-07-21T04:12:42.797Z",
+      "type": "timeline.internal_mcp_user_decision_requested",
+      "status": "warning",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "demo-project",
+      "runtime": "",
+      "message": "是否保留演示证据？",
+      "data": {
+        "phase": "execution",
+        "internal_mcp_event_id": "imcp_mru50zos_08b442",
+        "kind": "decision",
+        "role": "project-child-agent",
+        "project": "demo-project"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru51497_f6aef2",
+      "at": "2026-07-21T04:12:48.720Z",
+      "type": "timeline.internal_mcp_delivery_worktree_created",
+      "status": "active",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "coordinator",
+      "runtime": "",
+      "message": "验证受控交付闭环",
+      "data": {
+        "phase": "dispatch",
+        "internal_mcp_event_id": "imcp_mru51497_f6aef2",
+        "kind": "workspace",
+        "role": "group-main-agent",
+        "project": "coordinator"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru5152h_3b0eb6",
+      "at": "2026-07-21T04:12:49.771Z",
+      "type": "timeline.internal_mcp_delivery_checks_completed",
+      "status": "passed",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "coordinator",
+      "runtime": "",
+      "message": "npm run check: passed",
+      "data": {
+        "phase": "test",
+        "internal_mcp_event_id": "imcp_mru5152h_3b0eb6",
+        "kind": "workspace",
+        "role": "group-main-agent",
+        "project": "coordinator"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru515mn_7c544a",
+      "at": "2026-07-21T04:12:50.496Z",
+      "type": "timeline.internal_mcp_delivery_branch_committed",
+      "status": "active",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "coordinator",
+      "runtime": "",
+      "message": "ccm/task-internal-mcp-e2e-coordinator-demo-project-d @ 56fe21f8068a，等待 TestAgent 与主 Agent 验收",
+      "data": {
+        "phase": "review",
+        "internal_mcp_event_id": "imcp_mru515mn_7c544a",
+        "kind": "delivery",
+        "role": "group-main-agent",
+        "project": "coordinator"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru515o6_18755c",
+      "at": "2026-07-21T04:12:50.560Z",
+      "type": "timeline.internal_mcp_test_plan_created",
+      "status": "active",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "coordinator",
+      "runtime": "",
+      "message": "将独立验证 demo-project",
+      "data": {
+        "phase": "test",
+        "internal_mcp_event_id": "imcp_mru515o6_18755c",
+        "kind": "test",
+        "role": "group-main-agent",
+        "project": "coordinator"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru515ow_1ed3b9",
+      "at": "2026-07-21T04:12:50.578Z",
+      "type": "timeline.internal_mcp_test_run_started",
+      "status": "active",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "coordinator",
+      "runtime": "",
+      "message": "验收运行 test_mru515nd_9105jv 已启动",
+      "data": {
+        "phase": "test",
+        "internal_mcp_event_id": "imcp_mru515ow_1ed3b9",
+        "kind": "test",
+        "role": "group-main-agent",
+        "project": "coordinator"
+      }
+    },
+    {
+      "id": "timeline:task-internal-mcp-e2e:timeline:imcp_mru517cl_c295b0",
+      "at": "2026-07-21T04:12:52.742Z",
+      "type": "timeline.internal_mcp_test_run_completed",
+      "status": "warning",
+      "task_id": "task-internal-mcp-e2e",
+      "group_id": "group-internal-mcp-e2e",
+      "agent": "coordinator",
+      "runtime": "",
+      "message": "TestAgent execution passed, but acceptance criteria have only report-status fallback evidence and are not independently verified.",
+      "data": {
+        "phase": "test",
+        "internal_mcp_event_id": "imcp_mru517cl_c295b0",
+        "kind": "test",
+        "role": "group-main-agent",
+        "project": "coordinator"
+      }
+    }
+  ],
+  "updated_at": "2026-07-21T04:12:52.742Z",
+  "task_id": "task-internal-mcp-e2e",
+  "group_id": "group-internal-mcp-e2e"
+}

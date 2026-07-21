@@ -1838,7 +1838,7 @@ export declare function loopStageStatus(stage: any, input: {
     blockedActions: string[];
     observations: any;
     verified?: boolean;
-}): "pending" | "in_progress" | "completed" | "skipped" | "needs_confirmation";
+}): "in_progress" | "pending" | "completed" | "skipped" | "needs_confirmation";
 export declare function planStepHasVerificationSignal(step: any): boolean;
 export declare function summaryHasExecutedVerification(summary?: any): boolean;
 export declare const GROUP_MAIN_AGENT_LOOP_STAGES: {

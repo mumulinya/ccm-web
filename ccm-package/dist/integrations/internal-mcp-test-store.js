@@ -50,6 +50,7 @@ const artifact_retention_1 = require("../test-agent/artifact-retention");
 const invocation_1 = require("../test-agent/invocation");
 const work_order_builder_1 = require("../test-agent/work-order-builder");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
+const group_test_targets_1 = require("../modules/collaboration/group-test-targets");
 const ROOT = path.join(os.homedir(), ".cc-connect", "internal-mcp", "test-acceptance");
 const DELIVERY_ROOT = path.join(os.homedir(), ".cc-connect", "internal-mcp", "delivery-workspaces");
 function safe(value) {
@@ -163,6 +164,145 @@ function resolveDeliveryBindings(context, workspaceIds, requestedProjects) {
         throw new Error("验收项目与交付工作区不一致");
     return { projects: records.map(row => row.project), deliveryBindings: records.map(row => row.delivery) };
 }
+function targetUrl(target) {
+    const base = String(target.baseUrl || "").replace(/\/+$/, "");
+    const route = String(target.auth.loginPath || "").trim();
+    if (!base || !route || /^https?:\/\//i.test(route))
+        return /^https?:\/\//i.test(route) ? route : base;
+    return `${base}/${route.replace(/^\/+/, "")}`;
+}
+function targetAgentSummary(target) {
+    return [
+        `Configured test target: ${target.name}`,
+        `Base project: ${target.project}`,
+        `Target kind: ${target.kind}`,
+        `Environment: ${target.environment || "default"}`,
+        `Base URL: ${target.baseUrl || "not configured"}`,
+        `Authentication mode: ${target.auth.mode}`,
+        target.auth.mode === "credentials"
+            ? `Authentication fields (values are runtime-only): ${target.auth.fields.map(field => `${field.label}:${field.envName}:${field.inputLabel || field.label}`).join(", ")}`
+            : "",
+        target.notes ? `Target notes: ${target.notes}` : "",
+        target.kind === "native_app" ? "Native application automation requires an explicitly configured native driver; do not claim browser evidence for it." : "",
+    ].filter(Boolean).join("\n");
+}
+function configuredBrowserChecks(target, workDir) {
+    if (!target.baseUrl || target.kind === "api" || target.kind === "native_app")
+        return [];
+    const auth = target.auth;
+    if (auth.mode === "credentials") {
+        const actions = auth.fields.map(field => ({
+            type: "fill",
+            label: field.inputLabel || field.label,
+            valueEnv: field.envName,
+        }));
+        if (auth.submitLabel)
+            actions.push({ type: "click", role: "button", name: auth.submitLabel, verifyEffect: true });
+        const assertions = [];
+        if (auth.successText)
+            assertions.push({ type: "text", text: auth.successText });
+        if (auth.successUrlIncludes)
+            assertions.push({ type: "urlIncludes", text: auth.successUrlIncludes });
+        if (!assertions.length && auth.loginPath)
+            assertions.push({ type: "urlNotIncludes", text: auth.loginPath });
+        return [{
+                name: `${target.name} 登录验证`,
+                url: targetUrl(target),
+                actions,
+                assertions,
+                screenshot: false,
+                context: { testTargetId: target.id, authenticationConfiguredBy: "group-test-target" },
+            }];
+    }
+    if (auth.mode === "storage_state") {
+        (0, group_test_targets_1.resolveTargetStorageStatePath)(workDir, auth.storageStatePath);
+        return [{
+                name: `${target.name} 已登录状态验证`,
+                url: target.baseUrl,
+                storageStatePath: auth.storageStatePath,
+                assertions: [{ type: "pageNotBlank" }],
+                screenshot: false,
+                context: { testTargetId: target.id, authenticationConfiguredBy: "group-test-target" },
+            }];
+    }
+    if (auth.mode === "existing_session") {
+        return [{
+                name: `${target.name} 已有浏览器会话验证`,
+                url: target.baseUrl,
+                authentication: { mode: "existing_session", provider: auth.existingSessionProvider, evidencePolicy: "minimal" },
+                assertions: [{ type: "pageNotBlank" }],
+                screenshot: false,
+                context: { testTargetId: target.id, authenticationConfiguredBy: "group-test-target" },
+            }];
+    }
+    return [];
+}
+function buildConfiguredTargetProjects(context, projectBindings, input, completedTasks) {
+    const selectedIds = Array.isArray(input.test_target_ids) ? input.test_target_ids.map(String).filter(Boolean) : [];
+    const configured = context.groupId
+        ? (0, group_test_targets_1.resolveGroupTestTargets)(context.groupId, projectBindings.map(project => project.name), selectedIds)
+        : [];
+    if (selectedIds.some(id => !configured.some(target => target.id === id))) {
+        throw new Error("所选测试目标未启用或不属于当前验收项目");
+    }
+    const byProject = new Map();
+    for (const target of configured) {
+        const rows = byProject.get(target.project) || [];
+        rows.push(target);
+        byProject.set(target.project, rows);
+    }
+    const bindings = [];
+    const projects = [];
+    for (const project of projectBindings) {
+        const targets = byProject.get(project.name) || [];
+        const expanded = targets.length ? targets : [null];
+        expanded.forEach((target, targetIndex) => {
+            const name = target ? `${project.name} [${target.name}]` : project.name;
+            const configuredCommands = target?.verificationCommands || [];
+            const projectCommands = targetIndex === 0
+                ? (Array.isArray(input.verification_commands) && projectBindings.length === 1
+                    ? internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.verification_commands, 30, 300)
+                    : internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(project.verificationCommands || [], 30, 300))
+                : [];
+            projects.push({
+                name,
+                workDir: project.workDir,
+                targetUrl: internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(target?.baseUrl || input.target_url || project.targetUrl, 500),
+                devServerCommand: internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(target?.startupCommand || "", 500),
+                verificationCommands: [...new Set([...projectCommands, ...configuredCommands])],
+                browserChecks: target ? configuredBrowserChecks(target, project.workDir) : [],
+                changedFiles: internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.changed_files?.length ? input.changed_files : project.changedFiles || [], 200, 400),
+                completedTasks,
+                agentSummary: [
+                    internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(input.summary || "群聊主 Agent 请求独立验收当前交付候选", 1000),
+                    target ? targetAgentSummary(target) : "",
+                ].filter(Boolean).join("\n"),
+            });
+            if (target)
+                bindings.push({
+                    handoffProjectName: name,
+                    baseProject: project.name,
+                    targetId: target.id,
+                    targetChecksum: target.checksum,
+                });
+        });
+    }
+    return { projects, bindings };
+}
+function runtimeTargetEnvironments(state) {
+    const bindings = Array.isArray(state.handoff?.metadata?.testTargetBindings) ? state.handoff.metadata.testTargetBindings : [];
+    if (!bindings.length)
+        return {};
+    const targetIds = bindings.map((binding) => String(binding.targetId || "")).filter(Boolean);
+    const resolved = (0, group_test_targets_1.resolveGroupTestTargets)(state.group_id, [], targetIds);
+    const byId = new Map(resolved.map(target => [target.id, target]));
+    return Object.fromEntries(bindings.map((binding) => {
+        const target = byId.get(String(binding.targetId || ""));
+        if (!target || target.checksum !== binding.targetChecksum)
+            throw new Error(`测试目标配置已变化，请重新创建验收计划：${binding.targetId}`);
+        return [String(binding.handoffProjectName || ""), { ...target.env }];
+    }));
+}
 function createInternalMcpTestRun(context, input = {}) {
     const task = (0, internal_mcp_task_store_1.getBoundInternalMcpTask)(context);
     const requestedProjects = Array.isArray(input.projects) ? input.projects.map(String).filter(Boolean) : [];
@@ -171,6 +311,7 @@ function createInternalMcpTestRun(context, input = {}) {
     const runId = `test_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const acceptanceCriteria = internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.acceptance_criteria?.length ? input.acceptance_criteria : task.acceptance_criteria || task.acceptanceCriteria, 80, 1000);
     const completedTasks = internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.completed_tasks || [], 80, 800);
+    const targetProjects = buildConfiguredTargetProjects(context, projectBindings, input, completedTasks);
     const handoff = {
         id: runId,
         taskId: context.taskId,
@@ -180,26 +321,17 @@ function createInternalMcpTestRun(context, input = {}) {
         acceptanceCriteria,
         completedTasks,
         requiredChecks: internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.required_checks || [], 50, 100),
-        projects: projectBindings.map(project => ({
-            name: project.name,
-            workDir: project.workDir,
-            targetUrl: internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(input.target_url || project.targetUrl, 500),
-            verificationCommands: Array.isArray(input.verification_commands) && projectBindings.length === 1
-                ? internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.verification_commands, 30, 300)
-                : internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(project.verificationCommands || [], 30, 300),
-            changedFiles: internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.changed_files?.length ? input.changed_files : project.changedFiles || [], 200, 400),
-            completedTasks,
-            agentSummary: internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(input.summary || "群聊主 Agent 请求独立验收当前交付候选", 1000),
-        })),
+        projects: targetProjects.projects,
         options: {
             verificationOnly: true,
             browserProvider: ["auto", "playwright", "mcp", "none"].includes(input.browser_provider) ? input.browser_provider : "auto",
             autoDiscoverVerificationCommands: input.auto_discover !== false,
             collectBrowserArtifacts: input.collect_browser_artifacts !== false,
             requireAdversarialProbe: input.require_adversarial_probe !== false,
+            agenticPlanning: true,
             ...(input.adversarial_probe_waiver ? { adversarialProbeWaiver: internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(input.adversarial_probe_waiver, 800) } : {}),
         },
-        metadata: { source: "ccm-internal-test-acceptance-mcp", taskAgentSessionId: context.taskAgentSessionId || "", requestedByProject: context.project, deliveryWorkspaces: resolvedBindings.deliveryBindings },
+        metadata: { source: "ccm-internal-test-acceptance-mcp", taskAgentSessionId: context.taskAgentSessionId || "", requestedByProject: context.project, deliveryWorkspaces: resolvedBindings.deliveryBindings, testTargetBindings: targetProjects.bindings },
         completedByProjectAgents: projectBindings.map(project => project.name),
     };
     const built = (0, work_order_builder_1.buildTestAgentWorkOrderFromHandoff)(handoff);
@@ -233,7 +365,7 @@ async function executeInternalMcpTestRunFile(file) {
     const running = { ...state, status: "running", updated_at: new Date().toISOString(), pid: process.pid };
     atomicWrite(resolved, running);
     try {
-        const result = await (0, invocation_1.invokeTestAgentHandoff)(state.handoff);
+        const result = await (0, invocation_1.invokeTestAgentHandoff)(state.handoff, { runtimeProjectEnvironments: runtimeTargetEnvironments(state) });
         const completed = { ...running, status: "completed", updated_at: new Date().toISOString(), invocation_result: result, error: "" };
         atomicWrite(resolved, completed);
         (0, internal_mcp_task_store_1.appendInternalMcpTaskJournal)(state.context, "test", { run_id: state.run_id, status: "completed", outcome: result.outcome, recommendation: result.recommendation, can_accept: result.canAccept === true }, { type: "internal_mcp_test_run_completed", title: "TestAgent 独立验收完成", detail: result.canAccept ? "验收证据完整，可以进入主 Agent 最终判断" : result.error || result.report?.summary || "验收发现缺口，需要返工或人工判断", status: result.canAccept ? "passed" : "warning", phase: "test" });

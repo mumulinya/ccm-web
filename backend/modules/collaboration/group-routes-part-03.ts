@@ -29,6 +29,7 @@ import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "
 import { acknowledgeInvalidPendingModelCapabilityRefreshOutcome, buildModelCapabilityRefreshPlan, readInvalidPendingModelCapabilityRefreshOutcomes, readModelCapabilityCache, readModelCapabilityDowngradeAlerts, readModelCapabilityRefreshOutcomeLedger, readModelCapabilityRefreshStatus, recordModelCapabilityEvidence, revokeModelCapabilityEvidence, runModelCapabilityCacheMaintenance, summarizeModelCapabilityCache } from "./model-capability-cache";
 import { readGroupSessionRetentionMaintenanceStatus, runGroupSessionRetentionMaintenance } from "./group-session-maintenance";
 import { runGroupMemoryAutoCompactionNow } from "./group-memory-context";
+import { deleteGroupTestTarget, listGroupTestTargets, publicGroupWithoutTestTargetSecrets, saveGroupTestTarget } from "./group-test-targets";
 
 import {
   BasicGroupRouteDeps,
@@ -49,7 +50,7 @@ export function handleBasicGroupRoutes(
   const pathname = parsed.pathname;
 
   if (pathname === "/api/groups" && req.method === "GET") {
-    sendJson(res, { groups: loadGroups() });
+    sendJson(res, { groups: loadGroups().map(publicGroupWithoutTestTargetSecrets) });
     return true;
   }
 
@@ -68,7 +69,7 @@ export function handleBasicGroupRoutes(
         });
         groups.push(group);
         saveGroups(groups);
-        sendJson(res, { success: true, group });
+        sendJson(res, { success: true, group: publicGroupWithoutTestTargetSecrets(group) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -98,7 +99,7 @@ export function handleBasicGroupRoutes(
         }
         normalizeGroupOrchestrator(group);
         saveGroups(groups);
-        sendJson(res, { success: true, group });
+        sendJson(res, { success: true, group: publicGroupWithoutTestTargetSecrets(group) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -140,7 +141,7 @@ export function handleBasicGroupRoutes(
         if (!group) return sendJson(res, { error: "群聊不存在" }, 404);
         group.name = name.trim();
         saveGroups(groups);
-        sendJson(res, { success: true, group });
+        sendJson(res, { success: true, group: publicGroupWithoutTestTargetSecrets(group) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -156,6 +157,49 @@ export function handleBasicGroupRoutes(
     if (!group) return sendJson(res, { error: "群聊不存在" }, 404);
     const toolAuth = buildToolAuthorizationPayload(group.tools || {});
     sendJson(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight });
+    return true;
+  }
+
+  if (pathname === "/api/groups/test-targets" && req.method === "GET") {
+    const groupId = String(parsed.query.id || "").trim();
+    if (!groupId) return sendJson(res, { error: "缺少群聊 ID" }, 400);
+    try {
+      sendJson(res, listGroupTestTargets(groupId));
+    } catch (e: any) {
+      sendJson(res, { error: e.message }, /不存在/.test(e.message) ? 404 : 400);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/groups/test-targets" && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", () => {
+      try {
+        const input = JSON.parse(body);
+        const groupId = String(input.group_id || "").trim();
+        if (!groupId) return sendJson(res, { error: "缺少群聊 ID" }, 400);
+        const target = saveGroupTestTarget(groupId, input.target || input);
+        sendJson(res, { success: true, target });
+      } catch (e: any) {
+        sendJson(res, { error: e.message }, /不存在/.test(e.message) ? 404 : 400);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/groups/test-targets/delete" && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", () => {
+      try {
+        const input = JSON.parse(body);
+        const result = deleteGroupTestTarget(String(input.group_id || "").trim(), String(input.target_id || "").trim());
+        sendJson(res, result);
+      } catch (e: any) {
+        sendJson(res, { error: e.message }, /不存在/.test(e.message) ? 404 : 400);
+      }
+    });
     return true;
   }
 

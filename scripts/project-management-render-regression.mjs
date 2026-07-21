@@ -25,13 +25,46 @@ const sseEvent = payload => `data: ${JSON.stringify(payload)}\n\n`
 const prepare = async page => {
   let sendRequestCount = 0
   page.on('pageerror', error => report.errors.push(`page: ${error.message}`))
-  page.on('console', message => { if (message.type() === 'error') report.errors.push(`console: ${message.text()}`) })
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    const location = message.location()?.url || ''
+    report.errors.push(`console: ${message.text()}${location ? ` (${location})` : ''}`)
+  })
   await page.route('**/api/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(projectsFixture) }))
-  await page.route('**/api/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: [{ type: 'codex', name: 'Codex' }] }) }))
+  await page.route('**/api/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: [
+    { type: 'codex', name: 'Codex CLI', enabled: true, ready: true },
+    { type: 'gemini', name: 'Gemini CLI', enabled: true, ready: false },
+    { type: 'opencode', name: 'OpenCode', enabled: true, ready: false },
+  ] }) }))
+  await page.route('**/api/projects/git-status?**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, status: {
+      git_available: true,
+      gh_available: false,
+      gh_authenticated: false,
+      is_repository: true,
+      remote_url: 'https://github.com/example/ccm-demo.git',
+      remote_web_url: 'https://github.com/example/ccm-demo',
+      branch: 'main',
+      upstream: 'origin/main',
+      ahead: 1,
+      behind: 0,
+      dirty: true,
+      changed_files: 2,
+      untracked_files: 1,
+      last_commit: { short_hash: 'abc1234', summary: 'feat: demo repository state' }
+    } }),
+  }))
   await page.route('**/api/projects/ccm-demo/sessions', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sessionsFixture) }))
   await page.route('**/api/projects/ccm-demo/sessions/s1', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detailFixture) }))
   await page.route('**/api/projects/archived', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, projects: [{ name: 'old-demo', archived_at: '2026-07-13T08:00:00.000Z' }] }) }))
   await page.route('**/api/projects/lifecycle-audit**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, records: [] }) }))
+  await page.route('**/api/memory-center/scope?**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, summary: { current_tokens: 1200, auto_compact_threshold: 167000, model_context_capacity: 200000 } }),
+  }))
   await page.route('**/api/sessions/message', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) }))
   await page.route('**/api/send-stream', async route => {
     sendRequestCount += 1
@@ -99,6 +132,45 @@ try {
   assert.match(await desktop.locator('.message.assistant .bubble').innerText(), /正常。\n关键服务/)
   report.checks.push({ name: 'desktop keeps readable session and conversation columns, hides internal session id and preserves line breaks', pass: true })
   await capture(desktop, 'desktop-project-workspace')
+
+  await desktop.getByTitle('更多项目操作').click()
+  await desktop.getByRole('button', { name: '编辑项目', exact: true }).click()
+  await desktop.locator('.project-form-modal').waitFor()
+  const editModalMetrics = await desktop.evaluate(() => {
+    const modal = document.querySelector('.project-form-modal')
+    const selects = Array.from(document.querySelectorAll('.project-field-grid select'))
+    return {
+      width: modal?.getBoundingClientRect().width || 0,
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      agent: selects[0]?.value || '',
+      platform: selects[1]?.value || '',
+    }
+  })
+  assert.ok(editModalMetrics.width >= 560 && editModalMetrics.width <= 620)
+  assert.equal(editModalMetrics.scrollWidth, editModalMetrics.clientWidth)
+  assert.equal(editModalMetrics.agent, 'codex')
+  assert.equal(editModalMetrics.platform, 'feishu')
+  assert.equal(await desktop.locator('.project-form-close').count(), 1)
+  assert.equal(await desktop.locator('.project-primary-button').isEnabled(), true)
+  assert.equal(await desktop.locator('.project-field-grid select').first().locator('option[value="gemini"]').count(), 1)
+  assert.equal(await desktop.locator('.project-field-grid select').first().locator('option[value="opencode"]').count(), 1)
+  assert.equal(await desktop.getByText('main · origin/main', { exact: true }).count(), 1)
+  assert.equal(await desktop.getByText('2 个文件未提交', { exact: true }).count(), 1)
+  assert.equal(await desktop.locator('.repository-url-field input').getAttribute('value'), 'https://github.com/example/ccm-demo.git')
+  report.checks.push({ name: 'edit project modal has stable desktop layout, valid fields and explicit actions', pass: true })
+  await capture(desktop, 'desktop-edit-project-modal')
+  await desktop.keyboard.press('Escape')
+  await desktop.locator('.project-form-modal').waitFor({ state: 'detached' })
+
+  await desktop.getByRole('button', { name: '新建项目', exact: true }).click()
+  await desktop.getByRole('button', { name: 'GitHub 仓库', exact: true }).click()
+  assert.equal(await desktop.getByPlaceholder('https://github.com/owner/repository').count(), 1)
+  assert.equal(await desktop.getByText('克隆目标目录', { exact: true }).count(), 1)
+  report.checks.push({ name: 'create project modal switches between local directory and GitHub clone sources', pass: true })
+  await desktop.keyboard.press('Escape')
+  await desktop.locator('.project-form-modal').waitFor({ state: 'detached' })
+
   await desktop.locator('#projectChatInput').fill('你是什么模型')
   await desktop.locator('.project-manager .send-button').click()
   await desktop.getByText('我是当前项目配置的 Codex Agent', { exact: false }).waitFor()
@@ -127,6 +199,22 @@ try {
   await prepare(mobile)
   await assertLayout(mobile, 'mobile project workspace')
   await capture(mobile, 'mobile-project-workspace')
+  await mobile.getByTitle('更多项目操作').click()
+  await mobile.getByRole('button', { name: '编辑项目', exact: true }).click()
+  await mobile.locator('.project-form-modal').waitFor()
+  const mobileEditMetrics = await mobile.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    modalWidth: document.querySelector('.project-form-modal')?.getBoundingClientRect().width || 0,
+    gridColumns: getComputedStyle(document.querySelector('.project-field-grid')).gridTemplateColumns,
+  }))
+  assert.equal(mobileEditMetrics.scrollWidth, mobileEditMetrics.clientWidth)
+  assert.ok(mobileEditMetrics.modalWidth <= mobileEditMetrics.clientWidth + 1)
+  assert.equal(mobileEditMetrics.gridColumns.split(' ').length, 1)
+  report.checks.push({ name: 'mobile edit project modal becomes a single-column bottom panel without overflow', pass: true })
+  await capture(mobile, 'mobile-edit-project-modal')
+  await mobile.keyboard.press('Escape')
+  await mobile.locator('.project-form-modal').waitFor({ state: 'detached' })
   const closedTransform = await mobile.locator('.session-sidebar').evaluate(element => getComputedStyle(element).transform)
   assert.notEqual(closedTransform, 'none')
   await mobile.getByTitle('打开会话列表').click()

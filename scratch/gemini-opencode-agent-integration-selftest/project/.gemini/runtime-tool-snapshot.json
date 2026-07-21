@@ -1,0 +1,59 @@
+{
+  "snapshotId": "0cea3643a219a5ff",
+  "runtime": "gemini",
+  "isolation": "allowlist",
+  "requested": {
+    "mcp": [
+      "memory-context"
+    ],
+    "skill": []
+  },
+  "synced": {
+    "mcp": [
+      "memory-context"
+    ],
+    "skill": []
+  },
+  "missing": {
+    "mcp": [],
+    "skill": []
+  },
+  "permission_rules": [
+    {
+      "kind": "mcp",
+      "scope": "server",
+      "raw": "memory-context",
+      "server": "memory-context",
+      "tool": "",
+      "rule": "mcp__ccm__memory-context__*"
+    }
+  ],
+  "authorization_readiness": null,
+  "dispatch_gate": {
+    "schema": "ccm-runtime-tool-dispatch-gate-v1",
+    "dispatchReady": true,
+    "status": "ready",
+    "reason": "runtime tool authorization is dispatch-ready",
+    "blockers": []
+  },
+  "catalogRevision": "de05d8800b88241fca6d",
+  "mcp_statuses": [
+    {
+      "name": "memory-context",
+      "serverName": "ccm__memory-context",
+      "state": "synced",
+      "delivery": "native",
+      "grants": [
+        "memory-context"
+      ],
+      "tools": []
+    }
+  ],
+  "skill_statuses": [],
+  "mcpConfigPath": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\gemini-opencode-agent-integration-selftest\\project\\.gemini\\settings.json",
+  "runtimeHomePath": "",
+  "isolatedHomePath": "",
+  "pluginDirPath": "",
+  "skillRoot": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\gemini-opencode-agent-integration-selftest\\project\\.gemini\\skills",
+  "generatedAt": "2026-07-21T04:15:37.827Z"
+}

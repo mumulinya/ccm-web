@@ -1,7 +1,6 @@
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { projectsApi, groupsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
-import CronRunHistoryDrawer from './CronRunHistoryDrawer.vue'
 
 export function useCronJobs(emit) {
 
@@ -32,6 +31,10 @@ const filteredJobs = computed(() => jobs.value.filter(job => {
   const matchesTarget = targetFilter.value === 'all' || job.target_type === targetFilter.value
   return matchesQuery && matchesStatus && matchesTarget
 }))
+const enabledJobCount = computed(() => jobs.value.filter(job => job.enabled !== false).length)
+const disabledJobCount = computed(() => jobs.value.filter(job => job.enabled === false).length)
+const issueJobCount = computed(() => jobs.value.filter(job => ['failed', 'invalid_schedule', 'retry_waiting'].includes(job.last_status)).length)
+const activeRunCount = computed(() => jobs.value.filter(job => isJobRunning(job.id) || ['running', 'triggering', 'running_task'].includes(job.last_status)).length)
 const allFilteredSelected = computed(() => filteredJobs.value.length > 0 && filteredJobs.value.every(job => selectedJobIds.value.has(job.id)))
 
 const newJob = ref({
@@ -256,6 +259,22 @@ const targetLabel = (job) => {
     return groups.value.find(g => g.id === job.group_id)?.name || job.group_id || '群聊'
   }
   return job.project || '项目'
+}
+
+const scheduleLabel = (job) => {
+  const value = String(job?.schedule || '').trim()
+  let match = value.match(/^\*\/(\d+) \* \* \* \*$/)
+  if (match) return `每 ${match[1]} 分钟`
+  if (value === '0 * * * *') return '每小时整点'
+  match = value.match(/^(\d+) (\d+) \* \* 1-5$/)
+  if (match) return `工作日 ${String(match[2]).padStart(2, '0')}:${String(match[1]).padStart(2, '0')}`
+  match = value.match(/^(\d+) (\d+) \* \* \*$/)
+  if (match) return `每天 ${String(match[2]).padStart(2, '0')}:${String(match[1]).padStart(2, '0')}`
+  match = value.match(/^(\d+) (\d+) \* \* ([0-6])$/)
+  if (match) return `每${weekOptions.find(item => item.value === match[3])?.label || '周'} ${String(match[2]).padStart(2, '0')}:${String(match[1]).padStart(2, '0')}`
+  match = value.match(/^(\d+) (\d+) (\d+) \* \*$/)
+  if (match) return `每月 ${match[3]} 日 ${String(match[2]).padStart(2, '0')}:${String(match[1]).padStart(2, '0')}`
+  return value || '未设置计划'
 }
 
 const statusLabel = (status) => ({
@@ -528,6 +547,10 @@ onBeforeUnmount(() => {
     refreshTimer,
     selectedRunJob,
     filteredJobs,
+    enabledJobCount,
+    disabledJobCount,
+    issueJobCount,
+    activeRunCount,
     allFilteredSelected,
     newJob,
     weekOptions,
@@ -547,6 +570,7 @@ onBeforeUnmount(() => {
     loadProjects,
     loadGroups,
     targetLabel,
+    scheduleLabel,
     statusLabel,
     formatTime,
     formatTimeInZone,

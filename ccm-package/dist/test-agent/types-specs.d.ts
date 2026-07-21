@@ -38,6 +38,7 @@ export interface TestAgentOptions {
     collectBrowserVideo?: boolean;
     requireAdversarialProbe?: boolean;
     adversarialProbeWaiver?: string;
+    agenticPlanning?: boolean;
 }
 export interface TestAgentBrowserToolExecutor {
     listTools?: (options?: {
@@ -65,10 +66,13 @@ export interface BrowserToolCallRecord {
     error?: string;
 }
 export interface TestAgentRuntimeOptions extends Partial<TestAgentOptions> {
+    runtimeProjectEnvironments?: Record<string, Record<string, string>>;
     browserToolExecutor?: TestAgentBrowserToolExecutor;
     browserToolCallScope?: <T>(execution: BrowserCheckExecutionIdentity, task: () => Promise<T>) => Promise<T>;
     browserToolCallIdsForExecution?: (execution: BrowserCheckExecutionIdentity) => string[];
     browserResourceLifecycle?: BrowserResourceLifecycleRecorder;
+    agenticPlanner?: (input: import("./agentic-planner").AgenticTestPlanningInput) => Promise<import("./agentic-planner").AgenticTestPlan>;
+    agenticFollowupPlanner?: (input: import("./agentic-planner").AgenticTestFollowupInput) => Promise<import("./agentic-planner").AgenticTestFollowupPlan>;
 }
 export interface TestAgentProjectTarget {
     name: string;

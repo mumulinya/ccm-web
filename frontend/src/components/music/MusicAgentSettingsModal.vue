@@ -62,6 +62,9 @@ const emit = defineEmits(['close', 'save', 'update-proxy'])
 
 .settings-modal {
   width: min(520px, 92vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid rgba(165, 139, 255, 0.22);
   border-radius: 18px;
@@ -96,6 +99,8 @@ const emit = defineEmits(['close', 'save', 'update-proxy'])
 }
 
 .settings-body {
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -187,5 +192,24 @@ const emit = defineEmits(['close', 'save', 'update-proxy'])
   border-color: rgba(165, 139, 255, 0.5);
   background: #d8ccff;
   color: #10091f;
+}
+
+@media (max-width: 600px) {
+  .settings-overlay {
+    align-items: flex-end;
+  }
+
+  .settings-modal {
+    width: 100%;
+    max-height: 92vh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 8px 8px 0 0;
+  }
+
+  .settings-footer .btn-aura {
+    flex: 1;
+  }
 }
 </style>

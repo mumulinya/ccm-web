@@ -14,6 +14,7 @@ export function useUsabilityWorkbenchLive() {
   let source = null
   let watchdog = null
   let recoveryTimer = null
+  let initialFallbackTimer = null
 
   const cachedAt = computed(() => lastSuccessfulAt.value ? new Date(lastSuccessfulAt.value) : null)
 
@@ -25,6 +26,10 @@ export function useUsabilityWorkbenchLive() {
 
   const applySnapshot = (snapshot, options = {}) => {
     if (!snapshot || typeof snapshot !== 'object') return false
+    if (initialFallbackTimer) {
+      window.clearTimeout(initialFallbackTimer)
+      initialFallbackTimer = null
+    }
     data.value = snapshot
     lastSuccessfulAt.value = Date.now()
     stale.value = false
@@ -78,9 +83,15 @@ export function useUsabilityWorkbenchLive() {
     if (source) source.close()
     if (typeof EventSource === 'undefined') {
       stale.value = !!data.value
+      load(true)
       return
     }
     source = new EventSource('/api/usability/workbench/stream')
+    if (initialFallbackTimer) window.clearTimeout(initialFallbackTimer)
+    initialFallbackTimer = window.setTimeout(() => {
+      initialFallbackTimer = null
+      if (loading.value || stale.value) load(true)
+    }, 1500)
     source.onopen = () => {
       realtimeConnected.value = true
       lastError.value = ''
@@ -112,8 +123,10 @@ export function useUsabilityWorkbenchLive() {
     source = null
     if (watchdog) window.clearInterval(watchdog)
     if (recoveryTimer) window.clearTimeout(recoveryTimer)
+    if (initialFallbackTimer) window.clearTimeout(initialFallbackTimer)
     watchdog = null
     recoveryTimer = null
+    initialFallbackTimer = null
   }
 
   return {

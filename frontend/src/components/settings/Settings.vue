@@ -6,6 +6,7 @@ import SettingsFeishuPanel from './SettingsFeishuPanel.vue'
 import SettingsModelPanel from './SettingsModelPanel.vue'
 import SettingsExperiencePanel from './SettingsExperiencePanel.vue'
 import SettingsSystemPanel from './SettingsSystemPanel.vue'
+import SettingsAgentProvidersPanel from './SettingsAgentProvidersPanel.vue'
 import './settings.css'
 
 const activeSection = ref('channels')
@@ -29,7 +30,7 @@ onMounted(loadSystemStatus)
         <span class="settings-title-icon"><Settings2 :size="20" /></span>
         <div>
           <h1>设置中心</h1>
-          <p>管理外部通道、统一模型和界面偏好。</p>
+          <p>管理外部通道、统一模型、开发 Agent 和界面偏好。</p>
         </div>
       </div>
       <span class="settings-service-state" :class="{ online: systemStatus?.service?.status === 'online' }">
@@ -46,6 +47,7 @@ onMounted(loadSystemStatus)
       <main class="settings-content">
         <SettingsFeishuPanel v-if="activeSection === 'channels'" />
         <SettingsModelPanel v-else-if="activeSection === 'models'" />
+        <SettingsAgentProvidersPanel v-else-if="activeSection === 'agent-providers'" />
         <SettingsExperiencePanel v-else-if="activeSection === 'experience'" />
         <SettingsSystemPanel
           v-else

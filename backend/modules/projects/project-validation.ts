@@ -1,11 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
+import { PROJECT_AGENT_TYPES as REGISTERED_PROJECT_AGENT_TYPES } from "../../agents/catalog";
 
 const INVALID_PROJECT_CHARS = /[\\/:*?"<>|\u0000-\u001f]/;
 const INVALID_WINDOWS_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
-export const PROJECT_AGENT_TYPES = ["claudecode", "cursor", "gemini", "codex", "qoder"] as const;
+export const PROJECT_AGENT_TYPES = REGISTERED_PROJECT_AGENT_TYPES;
 export const PROJECT_PLATFORMS = ["feishu", "lark", "weixin", "telegram", "slack", "discord"] as const;
 
 export function validateProjectName(value: unknown): string {

@@ -47,6 +47,8 @@ const provider_tool_access_evidence_1 = require("./agents/provider-tool-access-e
 const native_continuation_1 = require("./agents/native-continuation");
 const provider_memory_channel_1 = require("./agents/provider-memory-channel");
 const memory_context_consumption_receipt_1 = require("./integrations/memory-context-consumption-receipt");
+const agent_internal_mcp_1 = require("./integrations/agent-internal-mcp");
+const third_party_memory_snapshot_1 = require("./integrations/third-party-memory-snapshot");
 const memory_context_consumption_recovery_1 = require("./integrations/memory-context-consumption-recovery");
 const model_capability_cache_1 = require("./modules/collaboration/model-capability-cache");
 const agent_sessions_1 = require("./tasks/agent-sessions");
@@ -89,6 +91,7 @@ const reliability_drills_1 = require("./system/reliability-drills");
 const soak_test_1 = require("./system/soak-test");
 const process_lifecycle_1 = require("./system/process-lifecycle");
 const session_compaction_hooks_1 = require("./system/session-compaction-hooks");
+const context_budget_1 = require("./system/context-budget");
 const global_agent_1 = require("./modules/global/global-agent");
 const rag_1 = require("./modules/knowledge/rag");
 const slash_commands_1 = require("./modules/tools/slash-commands");
@@ -637,32 +640,124 @@ function handleRequest(req, res) {
                     error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
                 }, 503);
             }
-            const toolContext = buildProjectToolContext(project, workDir, agentType);
+            let toolContext = buildProjectToolContext(project, workDir, agentType);
             if (toolContext.dispatchGate?.dispatchReady === false)
                 return sendRuntimeToolDispatchBlocked(res, toolContext);
             if (resolvedRuntime.switched) {
                 toolContext.workEvent.text = `${project} 执行器自动切换：配置为 ${resolvedRuntime.preferred}，当前可用执行器为 ${agentType}；候选链 ${resolvedRuntime.chain.join(" → ")}`;
                 toolContext.workEvent.runtimeFallback = resolvedRuntime;
             }
+            const projectMemoryPacket = chatIntent.mode === "task"
+                ? (0, memory_1.buildProjectMemoryPacket)(project, { workDir, query: finalMessage })
+                : "";
+            let projectCompaction = null;
             if (exactProjectSessionId) {
                 try {
-                    const compaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
+                    projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
                         reason: "auto_model",
                         currentRequest: finalMessage,
-                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt },
+                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket },
                         tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
                         provider: agentType,
                     });
-                    if (compaction?.reason === "circuit_breaker") {
-                        return (0, utils_1.sendJson)(res, { error: "项目会话记忆压缩已熔断，本轮未启动第三方 Agent", consecutive_failures: compaction.consecutive_failures || 3 }, 503);
+                    if (projectCompaction?.reason === "circuit_breaker") {
+                        return (0, utils_1.sendJson)(res, { error: "项目会话记忆压缩已熔断，本轮未启动第三方 Agent", consecutive_failures: projectCompaction.consecutive_failures || 3 }, 503);
                     }
                 }
                 catch (error) {
                     return (0, utils_1.sendJson)(res, { error: `项目会话自动压缩失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
                 }
             }
+            let projectMemoryMcp = null;
+            if (exactProjectSessionId && chatIntent.mode === "task") {
+                try {
+                    const prepareProjectMemoryMcp = () => {
+                        const projection = (0, project_session_compaction_1.buildProjectSessionModelContextProjection)(project, exactProjectSessionId, { currentRequest: finalMessage });
+                        if (!projection)
+                            throw new Error("项目会话连续性不存在");
+                        const binding = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(project, exactProjectSessionId);
+                        const nativeGeneration = Number(binding.generation || binding.generation_count + 1 || 1);
+                        const snapshot = (0, third_party_memory_snapshot_1.createThirdPartyMemorySnapshot)({
+                            bindingKind: "project_session",
+                            role: "project-agent",
+                            project,
+                            projectSessionId: exactProjectSessionId,
+                            taskAgentSessionId: binding.task_agent_session_id || "",
+                            provider: agentType,
+                            nativeGeneration,
+                            boundaryGeneration: projection.boundaryGeneration,
+                            mode: projection.mode,
+                            summary: projection.summary,
+                            summarySource: projection.summarySource,
+                            messages: projection.visibleMessages,
+                            archiveMessages: projection.archiveMessages,
+                            memoryItems: [{ kind: "project_memory", source: project, required: true, content: projectMemoryPacket }],
+                            modelContextWindow: projectCompaction?.model_context_capacity?.contextWindow || projectCompaction?.resolved_model_capacity?.contextWindow || 0,
+                            autoCompactThreshold: projectCompaction?.auto_compact_threshold || 0,
+                            requestText: finalMessage,
+                        });
+                        const challenge = (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
+                            project,
+                            executionId: `${project}:${exactProjectSessionId}:generation:${nativeGeneration}`,
+                            taskAgentSessionId: binding.task_agent_session_id || "",
+                            attempt: nativeGeneration,
+                        });
+                        const internalMcpServers = (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
+                            project,
+                            projectSessionId: exactProjectSessionId,
+                            agentType,
+                            workDir,
+                            taskAgentSessionId: binding.task_agent_session_id || "",
+                            nativeSessionId: binding.native_session_id || "",
+                            memoryReceiptChallenge: challenge,
+                            memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(challenge.challenge_id),
+                            memorySnapshotId: snapshot.id,
+                            memorySnapshotChecksum: snapshot.checksum,
+                            boundaryGeneration: snapshot.boundaryGeneration,
+                            nativeGeneration: snapshot.nativeGeneration,
+                            requestText: finalMessage,
+                            memoryReadBudgetTokens: snapshot.autoCompactThreshold,
+                        });
+                        return { projection, binding, snapshot, challenge, internalMcpServers };
+                    };
+                    projectMemoryMcp = prepareProjectMemoryMcp();
+                    toolContext = buildProjectToolContext(project, workDir, agentType, { internalMcpServers: projectMemoryMcp.internalMcpServers });
+                    const knowledgeMcp = (toolContext.audit.internal_mcp || []).find((item) => item.name === "ccm__knowledge_context");
+                    projectMemoryMcp.ready = knowledgeMcp?.state === "synced";
+                    if (projectMemoryMcp.ready) {
+                        const threshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
+                        const hydratedPayloadTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0)
+                            + (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
+                            + (0, context_budget_1.estimateTextTokens)(finalMessage);
+                        if (threshold > 0 && hydratedPayloadTokens >= threshold && projectCompaction?.compacted !== true) {
+                            projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
+                                force: true,
+                                reason: "third_party_memory_mcp_required_hydration",
+                                currentRequest: finalMessage,
+                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket },
+                                tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
+                                provider: agentType,
+                            });
+                            projectMemoryMcp = prepareProjectMemoryMcp();
+                            toolContext = buildProjectToolContext(project, workDir, agentType, { internalMcpServers: projectMemoryMcp.internalMcpServers });
+                            projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
+                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(finalMessage);
+                            if (threshold > 0 && postTokens >= threshold)
+                                throw new Error(`项目记忆 MCP 必读上下文压缩后仍超过阈值：${postTokens}/${threshold}`);
+                        }
+                    }
+                }
+                catch (error) {
+                    return (0, utils_1.sendJson)(res, { error: `项目会话记忆 MCP 准备失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
+                }
+            }
+            if (toolContext.dispatchGate?.dispatchReady === false)
+                return sendRuntimeToolDispatchBlocked(res, toolContext);
             const fullMessage = `${toolContext.prompt}\n\n${finalMessage}`;
-            const projectSessionContext = exactProjectSessionId ? (0, project_session_compaction_1.buildProjectSessionPostCompactContext)(project, exactProjectSessionId, agentType) : "";
+            const memoryMcpEnabled = projectMemoryMcp?.ready === true;
+            const projectSessionContext = memoryMcpEnabled
+                ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
+                : exactProjectSessionId ? (0, project_session_compaction_1.buildProjectSessionPostCompactContext)(project, exactProjectSessionId, agentType, { currentRequest: finalMessage }) : "";
             const dispatchLease = exactProjectSessionId ? (0, project_session_agent_binding_1.acquireProjectSessionAgentDispatch)(project, exactProjectSessionId) : { acquired: true, scopeId: "" };
             const dispatchScope = dispatchLease.scopeId;
             if (!dispatchLease.acquired) {
@@ -688,6 +783,11 @@ function handleRequest(req, res) {
                     parentRunId,
                     projectSessionId: exactProjectSessionId,
                     projectSessionContext,
+                    memoryDeliveryMode: memoryMcpEnabled ? "mcp" : "prompt",
+                    memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
+                    memorySnapshotChecksum: projectMemoryMcp?.snapshot?.checksum || "",
+                    memoryContextConsumptionReceiptRequired: memoryMcpEnabled,
+                    memoryContextConsumptionChallenge: projectMemoryMcp?.challenge || null,
                     messageMode: chatIntent.mode,
                     workflowDecision: chatIntent.workflowDecision,
                 });

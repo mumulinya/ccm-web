@@ -30,9 +30,13 @@ import {
   verifyProviderMemoryChannelEvidence,
 } from "./agents/provider-memory-channel";
 import {
+  createMemoryContextConsumptionChallenge,
+  memoryContextConsumptionReceiptFile,
   readMemoryContextConsumptionReceipt,
   reconcileMemoryContextConsumptionReceipts,
 } from "./integrations/memory-context-consumption-receipt";
+import { buildProjectSessionBoundMemoryMcpServer } from "./integrations/agent-internal-mcp";
+import { buildThirdPartyMemoryBootstrap, createThirdPartyMemorySnapshot } from "./integrations/third-party-memory-snapshot";
 import {
   reconcileMemoryContextConsumptionRecoveries,
   recoverMemoryContextConsumptionReceipt,
@@ -60,7 +64,7 @@ import {
   cancelActiveAgentRun,
   requestGroupSessionAgentCancellation,
 } from "./agents/execution-kernel";
-import { buildProjectConversationBrief, buildProjectExecutionBrief } from "./projects/memory";
+import { buildProjectConversationBrief, buildProjectExecutionBrief, buildProjectMemoryPacket } from "./projects/memory";
 import {
   appendDirectAgentDispatchTranscript,
   completeDirectAgentDispatch,
@@ -154,6 +158,7 @@ import { startReliabilityDrillScheduler, stopReliabilityDrillScheduler } from ".
 import { resumeSoakTest, shutdownSoakMonitor } from "./system/soak-test";
 import { initializeProcessLifecycle, installProcessLifecycleFaultHandlers, markProcessShutdown, touchProcessLifecycle } from "./system/process-lifecycle";
 import { initializeBuiltInSessionCompactionHooks } from "./system/session-compaction-hooks";
+import { estimateTextTokens } from "./system/context-budget";
 import { bootstrapGlobalAgentMemoryForServer, handleGlobalAgentApi, resumeGlobalAgentLoopsForServer, startFeishuConversationTurnRecoveryForServer, startGlobalMissionSupervisionForServer, stopFeishuConversationTurnRecoveryForServer, stopGlobalMissionSupervisionForServer } from "./modules/global/global-agent";
 import { handleRagApi } from "./modules/knowledge/rag";
 import { handleSlashCommandsApi } from "./modules/tools/slash-commands";
@@ -181,9 +186,11 @@ import { getSessionDetail, getSessions } from "./modules/projects/sessions";
 import {
   acquireProjectSessionAgentDispatch,
   bindProjectSessionAgentExecution,
+  getProjectSessionAgentBinding,
   releaseProjectSessionAgentDispatch,
 } from "./modules/projects/project-session-agent-binding";
 import {
+  buildProjectSessionModelContextProjection,
   buildProjectSessionPostCompactContext,
   compactProjectSessionWithModel,
   recordProjectSessionProviderUsage,
@@ -724,30 +731,118 @@ function handleRequest(req: any, res: any) {
           error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
         }, 503);
       }
-      const toolContext = buildProjectToolContext(project, workDir, agentType);
+      let toolContext = buildProjectToolContext(project, workDir, agentType);
       if (toolContext.dispatchGate?.dispatchReady === false) return sendRuntimeToolDispatchBlocked(res, toolContext);
       if (resolvedRuntime.switched) {
         toolContext.workEvent.text = `${project} 执行器自动切换：配置为 ${resolvedRuntime.preferred}，当前可用执行器为 ${agentType}；候选链 ${resolvedRuntime.chain.join(" → ")}`;
         (toolContext.workEvent as any).runtimeFallback = resolvedRuntime;
       }
+      const projectMemoryPacket = chatIntent.mode === "task"
+        ? buildProjectMemoryPacket(project, { workDir, query: finalMessage })
+        : "";
+      let projectCompaction: any = null;
       if (exactProjectSessionId) {
         try {
-          const compaction = await compactProjectSessionWithModel(project, exactProjectSessionId, {
+          projectCompaction = await compactProjectSessionWithModel(project, exactProjectSessionId, {
             reason: "auto_model",
             currentRequest: finalMessage,
-            fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt },
+            fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket },
             tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
             provider: agentType,
           });
-          if (compaction?.reason === "circuit_breaker") {
-            return sendJson(res, { error: "项目会话记忆压缩已熔断，本轮未启动第三方 Agent", consecutive_failures: compaction.consecutive_failures || 3 }, 503);
+          if (projectCompaction?.reason === "circuit_breaker") {
+            return sendJson(res, { error: "项目会话记忆压缩已熔断，本轮未启动第三方 Agent", consecutive_failures: projectCompaction.consecutive_failures || 3 }, 503);
           }
         } catch (error: any) {
           return sendJson(res, { error: `项目会话自动压缩失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
         }
       }
+      let projectMemoryMcp: any = null;
+      if (exactProjectSessionId && chatIntent.mode === "task") {
+        try {
+          const prepareProjectMemoryMcp = () => {
+            const projection = buildProjectSessionModelContextProjection(project, exactProjectSessionId, { currentRequest: finalMessage });
+            if (!projection) throw new Error("项目会话连续性不存在");
+            const binding = getProjectSessionAgentBinding(project, exactProjectSessionId);
+            const nativeGeneration = Number(binding.generation || binding.generation_count + 1 || 1);
+            const snapshot = createThirdPartyMemorySnapshot({
+              bindingKind: "project_session",
+              role: "project-agent",
+              project,
+              projectSessionId: exactProjectSessionId,
+              taskAgentSessionId: binding.task_agent_session_id || "",
+              provider: agentType,
+              nativeGeneration,
+              boundaryGeneration: projection.boundaryGeneration,
+              mode: projection.mode,
+              summary: projection.summary,
+              summarySource: projection.summarySource,
+              messages: projection.visibleMessages,
+              archiveMessages: projection.archiveMessages,
+              memoryItems: [{ kind: "project_memory", source: project, required: true, content: projectMemoryPacket }],
+              modelContextWindow: projectCompaction?.model_context_capacity?.contextWindow || projectCompaction?.resolved_model_capacity?.contextWindow || 0,
+              autoCompactThreshold: projectCompaction?.auto_compact_threshold || 0,
+              requestText: finalMessage,
+            });
+            const challenge = createMemoryContextConsumptionChallenge({
+              project,
+              executionId: `${project}:${exactProjectSessionId}:generation:${nativeGeneration}`,
+              taskAgentSessionId: binding.task_agent_session_id || "",
+              attempt: nativeGeneration,
+            });
+            const internalMcpServers = buildProjectSessionBoundMemoryMcpServer({
+              project,
+              projectSessionId: exactProjectSessionId,
+              agentType,
+              workDir,
+              taskAgentSessionId: binding.task_agent_session_id || "",
+              nativeSessionId: binding.native_session_id || "",
+              memoryReceiptChallenge: challenge,
+              memoryReceiptFile: memoryContextConsumptionReceiptFile(challenge.challenge_id),
+              memorySnapshotId: snapshot.id,
+              memorySnapshotChecksum: snapshot.checksum,
+              boundaryGeneration: snapshot.boundaryGeneration,
+              nativeGeneration: snapshot.nativeGeneration,
+              requestText: finalMessage,
+              memoryReadBudgetTokens: snapshot.autoCompactThreshold,
+            });
+            return { projection, binding, snapshot, challenge, internalMcpServers };
+          };
+          projectMemoryMcp = prepareProjectMemoryMcp();
+          toolContext = buildProjectToolContext(project, workDir, agentType, { internalMcpServers: projectMemoryMcp.internalMcpServers });
+          const knowledgeMcp = (toolContext.audit.internal_mcp || []).find((item: any) => item.name === "ccm__knowledge_context");
+          projectMemoryMcp.ready = knowledgeMcp?.state === "synced";
+          if (projectMemoryMcp.ready) {
+            const threshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
+            const hydratedPayloadTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0)
+              + estimateTextTokens(toolContext.prompt)
+              + estimateTextTokens(finalMessage);
+            if (threshold > 0 && hydratedPayloadTokens >= threshold && projectCompaction?.compacted !== true) {
+              projectCompaction = await compactProjectSessionWithModel(project, exactProjectSessionId, {
+                force: true,
+                reason: "third_party_memory_mcp_required_hydration",
+                currentRequest: finalMessage,
+                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket },
+                tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
+                provider: agentType,
+              });
+              projectMemoryMcp = prepareProjectMemoryMcp();
+              toolContext = buildProjectToolContext(project, workDir, agentType, { internalMcpServers: projectMemoryMcp.internalMcpServers });
+              projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item: any) => item.name === "ccm__knowledge_context" && item.state === "synced");
+              const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + estimateTextTokens(toolContext.prompt) + estimateTextTokens(finalMessage);
+              if (threshold > 0 && postTokens >= threshold) throw new Error(`项目记忆 MCP 必读上下文压缩后仍超过阈值：${postTokens}/${threshold}`);
+            }
+          }
+        } catch (error: any) {
+          return sendJson(res, { error: `项目会话记忆 MCP 准备失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
+        }
+      }
+      if (toolContext.dispatchGate?.dispatchReady === false) return sendRuntimeToolDispatchBlocked(res, toolContext);
       const fullMessage = `${toolContext.prompt}\n\n${finalMessage}`;
-      const projectSessionContext = exactProjectSessionId ? buildProjectSessionPostCompactContext(project, exactProjectSessionId, agentType) : "";
+      const memoryMcpEnabled = projectMemoryMcp?.ready === true;
+      const projectSessionContext = memoryMcpEnabled
+        ? buildThirdPartyMemoryBootstrap(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
+        : exactProjectSessionId ? buildProjectSessionPostCompactContext(project, exactProjectSessionId, agentType, { currentRequest: finalMessage }) : "";
       const dispatchLease = exactProjectSessionId ? acquireProjectSessionAgentDispatch(project, exactProjectSessionId) : { acquired: true, scopeId: "" };
       const dispatchScope = dispatchLease.scopeId;
       if (!dispatchLease.acquired) {
@@ -771,6 +866,11 @@ function handleRequest(req: any, res: any) {
         parentRunId,
         projectSessionId: exactProjectSessionId,
         projectSessionContext,
+        memoryDeliveryMode: memoryMcpEnabled ? "mcp" : "prompt",
+        memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
+        memorySnapshotChecksum: projectMemoryMcp?.snapshot?.checksum || "",
+        memoryContextConsumptionReceiptRequired: memoryMcpEnabled,
+        memoryContextConsumptionChallenge: projectMemoryMcp?.challenge || null,
         messageMode: chatIntent.mode,
         workflowDecision: chatIntent.workflowDecision,
       }); } catch (error) {

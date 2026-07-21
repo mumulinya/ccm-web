@@ -36,6 +36,8 @@ export declare function buildProjectExecutionBrief(project: string, taskText: st
     resources?: any;
     query?: string;
     verificationHints?: any;
+    memoryDeliveryMode?: "prompt" | "mcp";
+    memorySnapshotId?: string;
 }): string;
 export declare function buildProjectConversationBrief(project: string, message: string, options?: {
     analysis?: boolean;

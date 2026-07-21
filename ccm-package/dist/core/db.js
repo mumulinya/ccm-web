@@ -76,6 +76,7 @@ exports.loadRagMetadata = loadRagMetadata;
 exports.saveRagMetadata = saveRagMetadata;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const catalog_1 = require("../agents/catalog");
 const os = __importStar(require("os"));
 const credential_store_1 = require("./credential-store");
 const tool_catalog_management_1 = require("../tools/tool-catalog-management");
@@ -154,11 +155,7 @@ function writeJsonAtomic(file, value) {
 }
 // === 代理类型定义 ===
 exports.AGENTS = [
-    { type: "claudecode", name: "Claude Code" },
-    { type: "cursor", name: "Cursor" },
-    { type: "gemini", name: "Gemini CLI" },
-    { type: "codex", name: "Codex" },
-    { type: "qoder", name: "Qoder CLI" },
+    ...catalog_1.DEVELOPMENT_AGENT_CATALOG.map(agent => ({ type: agent.id, name: agent.label })),
 ];
 // === 获取配置列表 ===
 function getConfigs() {

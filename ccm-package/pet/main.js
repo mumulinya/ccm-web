@@ -21,6 +21,7 @@ process.on('uncaughtException', (err) => { console.error('[pet] uncaughtExceptio
 process.on('unhandledRejection', (err) => { console.error('[pet] unhandledRejection:', err); });
 
 const PET_DIR = path.join(__dirname);
+const PET_ASSETS_DIR = path.resolve(__dirname, '..', 'public', 'pets');
 const API_BASE = `http://localhost:${CCM_PORT}`;
 const PETS_FILE = path.join(CCM_DIR, 'pets.json');
 const PID_FILE = path.join(CCM_DIR, 'pids', 'pet.pid');
@@ -430,7 +431,7 @@ ipcMain.handle('get-config', () => config);
 ipcMain.handle('get-asset-path', (_, filename) => {
   const safeName = String(filename || '').replace(/\\/g, '/');
   if (safeName.includes('..') || path.isAbsolute(safeName)) return null;
-  const filePath = path.join(__dirname, 'assets', safeName);
+  const filePath = path.join(PET_ASSETS_DIR, safeName);
   if (fs.existsSync(filePath)) return filePath;
 
   // 加上智能自适应：如果找不到，尝试将后缀替换后查找
@@ -438,14 +439,14 @@ ipcMain.handle('get-asset-path', (_, filename) => {
   if (ext) {
     const baseWithoutExt = safeName.slice(0, -ext.length);
     const altExt = ext.toLowerCase() === '.png' ? '.svg' : '.png';
-    const altFilePath = path.join(__dirname, 'assets', baseWithoutExt + altExt);
+    const altFilePath = path.join(PET_ASSETS_DIR, baseWithoutExt + altExt);
     if (fs.existsSync(altFilePath)) return altFilePath;
   }
 
   // 回退到基础 SVG
   const baseName = path.basename(safeName);
   const baseFile = baseName.split('-')[0] + '.svg';
-  const basePath = path.join(__dirname, 'assets', baseFile);
+  const basePath = path.join(PET_ASSETS_DIR, baseFile);
   if (fs.existsSync(basePath)) return basePath;
   return null;
 });

@@ -83,10 +83,25 @@ const emit = defineEmits([
 
 <style scoped>
 .pet-skin-create-modal {
-  width: 380px;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+@media (max-width: 480px) {
+  .pet-skin-create-modal {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 8px 8px 0 0;
+  }
+
+  .modal-footer-btns > button {
+    flex: 1;
+  }
 }
 .modal-header {
   display: flex;

@@ -1,12 +1,12 @@
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, ref } from 'vue'
 
-const CHAT_STORAGE_KEY = 'aura-music-chat-messages'
 const DEFAULT_GREETING = '你好！我是你的音乐助手\n告诉我你想听什么，我帮你找。\n\n支持：\n• B站音乐搜索与转码播放\n• 网易云音乐搜索与下载播放\n• 本地音乐库播放\n• 播放时歌词同步给音乐宠物'
 
 export function useMusicAgentChat(options = {}) {
   const agentMessages = ref([])
   const agentInput = ref('')
   const agentLoading = ref(false)
+  const musicMemoryContext = ref(null)
   const agentChatEl = ref(null)
   const isAgentChatPinnedToBottom = ref(true)
   const agentRequestStopped = ref(false)
@@ -133,29 +133,62 @@ export function useMusicAgentChat(options = {}) {
     agentChatResizeObserver = null
   }
 
-  const loadChatMessages = () => {
+  const serverMessage = (message) => ({
+    _localId: String(message?.id || createAgentMessageId()),
+    id: String(message?.id || ''),
+    role: message?.role === 'assistant' ? 'agent' : 'operator',
+    content: String(message?.content || ''),
+    time: (() => {
+      const date = new Date(message?.timestamp || '')
+      return Number.isNaN(date.getTime()) ? nowLabel() : date.toLocaleTimeString('zh-CN', { hour12: false })
+    })(),
+    ...(message?.action ? { action: message.action } : {}),
+    ...(Array.isArray(message?.results) ? { results: message.results } : {}),
+  })
+
+  const loadChatMessages = async () => {
     try {
-      const saved = localStorage.getItem(CHAT_STORAGE_KEY)
-      if (saved) {
-        const msgs = JSON.parse(saved)
-        if (Array.isArray(msgs) && msgs.length > 0) {
-          agentMessages.value = normalizeAgentMessages(msgs)
-          return
-        }
+      const response = await fetch('/api/music/memory')
+      const data = await response.json()
+      if (data?.success && data.memory) {
+        musicMemoryContext.value = data.memory.context || null
+        const messages = Array.isArray(data.memory.messages) ? data.memory.messages.map(serverMessage) : []
+        agentMessages.value = normalizeAgentMessages(messages.length ? messages : [greetingMessage(nowLabel())])
+        try { localStorage.removeItem('aura-music-chat-messages') } catch {}
+        return
       }
     } catch (e) {
       console.error('Failed to load chat messages:', e)
     }
-    agentMessages.value = normalizeAgentMessages([greetingMessage()])
+    agentMessages.value = normalizeAgentMessages([greetingMessage(nowLabel())])
   }
 
-  const saveChatMessages = () => {
-    try {
-      const limitMsgs = agentMessages.value.slice(-100)
-      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(limitMsgs))
-    } catch (e) {
-      console.error('Failed to save chat messages:', e)
-    }
+  const saveChatMessages = () => undefined
+
+  const persistAssistantMessage = async (content, input = {}) => {
+    const text = String(content || '').trim()
+    if (!text) return null
+    const response = await fetch('/api/music/memory/assistant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: text, action: input.action || null, results: input.results || [] }),
+    })
+    const data = await response.json()
+    if (!response.ok || data?.success === false) throw new Error(data?.error || '保存音乐助手记忆失败')
+    musicMemoryContext.value = data.memory?.context || musicMemoryContext.value
+    return data.message || null
+  }
+
+  const compactMusicMemory = async (instructions = '') => {
+    const response = await fetch('/api/music/memory/compact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instructions }),
+    })
+    const data = await response.json()
+    if (!response.ok || data?.success === false) throw new Error(data?.error || '音乐记忆压缩失败')
+    musicMemoryContext.value = data.memory?.context || musicMemoryContext.value
+    return data.result || null
   }
 
   const clearChatHistory = async () => {
@@ -163,8 +196,20 @@ export function useMusicAgentChat(options = {}) {
       ? await options.confirmClear()
       : true
     if (!confirmed) return false
-    agentMessages.value = normalizeAgentMessages([greetingMessage(nowLabel())])
-    saveChatMessages()
+    try {
+      const response = await fetch('/api/music/memory', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeLongTerm: false }),
+      })
+      const data = await response.json()
+      if (!response.ok || data?.success === false) throw new Error(data?.error || '清空音乐助手历史失败')
+      agentMessages.value = normalizeAgentMessages([greetingMessage(nowLabel())])
+      musicMemoryContext.value = null
+    } catch (error) {
+      console.error('Failed to clear music memory:', error)
+      return false
+    }
     scrollChat({ force: true })
     return true
   }
@@ -190,10 +235,6 @@ export function useMusicAgentChat(options = {}) {
 
   const lastUserMessage = () => [...agentMessages.value].reverse().find(item => ['operator', 'user'].includes(item?.role) && String(item?.content || '').trim()) || null
 
-  watch(agentMessages, () => {
-    saveChatMessages()
-  }, { deep: true })
-
   return {
     agentMessages,
     agentInput,
@@ -213,6 +254,9 @@ export function useMusicAgentChat(options = {}) {
     detachAgentChatResizeObserver,
     loadChatMessages,
     saveChatMessages,
+    persistAssistantMessage,
+    compactMusicMemory,
+    musicMemoryContext,
     clearChatHistory,
     agentRequestStopped,
     beginAgentRequest,

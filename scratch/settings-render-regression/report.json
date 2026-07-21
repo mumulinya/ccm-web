@@ -1,7 +1,7 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T04:30:48.194Z",
-  "baseUrl": "http://127.0.0.1:3082",
+  "generatedAt": "2026-07-21T03:06:50.769Z",
+  "baseUrl": "http://127.0.0.1:3080",
   "checks": [
     {
       "name": "desktop channels has no overflow and details default closed",

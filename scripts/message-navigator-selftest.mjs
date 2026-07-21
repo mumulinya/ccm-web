@@ -4,9 +4,9 @@ import fs from 'node:fs'
 
 const read = (path) => fs.readFileSync(new URL(path, import.meta.url), 'utf8')
 const navigator = read('../frontend/src/components/common/MessageNavigator.vue')
-const project = read('../frontend/src/components/projects/ProjectManager.vue')
-const group = read('../frontend/src/components/collaboration/GroupChat.vue')
-const globalAgent = read('../frontend/src/components/global/GlobalAgent.vue')
+const project = read('../frontend/src/components/projects/ProjectManager.template.html')
+const group = read('../frontend/src/components/collaboration/GroupChat.template.html')
+const globalAgent = read('../frontend/src/components/global/GlobalAgentMessageList.vue')
 
 const checks = {
   sharedComponentTracksVisibleMessage: /activeOriginalIndex/.test(navigator) && /addEventListener\('scroll'/.test(navigator),

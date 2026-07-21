@@ -285,7 +285,8 @@ function buildFinalWorkerDispatchPayloadGate(input = {}) {
     const autoCompactThreshold = Math.max(18_000, Math.min(effectiveContextWindow, Number(suppliedCapacity.autoCompactThreshold || effectiveContextWindow - autoCompactBufferTokens)));
     const estimatedPromptTokens = (0, context_budget_1.estimateTextTokens)(renderedPrompt);
     const providerEnvelopeTokens = Math.max(0, Number(input.providerEnvelopeTokens || input.provider_envelope_tokens || 0));
-    const estimatedTotalInputTokens = estimatedPromptTokens + providerEnvelopeTokens;
+    const requiredHydrationTokens = Math.max(0, Number(input.requiredHydrationTokens || input.required_hydration_tokens || 0));
+    const estimatedTotalInputTokens = estimatedPromptTokens + providerEnvelopeTokens + requiredHydrationTokens;
     const providerUsageBaseline = input.providerUsageBaseline || input.provider_usage_baseline || null;
     const providerUsageBaselineVerification = providerUsageBaseline
         ? verifyFinalDispatchProviderUsageBaseline(providerUsageBaseline, {
@@ -338,6 +339,7 @@ function buildFinalWorkerDispatchPayloadGate(input = {}) {
         auto_compact_threshold: autoCompactThreshold,
         estimated_prompt_tokens: estimatedPromptTokens,
         provider_envelope_tokens: providerEnvelopeTokens,
+        required_hydration_tokens: requiredHydrationTokens,
         estimated_total_input_tokens: estimatedTotalInputTokens,
         model_visible_input_tokens: modelVisibleInputTokens,
         token_basis: providerUsageBaselineVerification.valid ? "provider_observed_baseline_plus_current_estimate" : "estimated_final_prompt",

@@ -1,4 +1,4 @@
-export declare const PROJECT_AGENT_TYPES: readonly ["claudecode", "cursor", "gemini", "codex", "qoder"];
+export declare const PROJECT_AGENT_TYPES: ("claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder")[];
 export declare const PROJECT_PLATFORMS: readonly ["feishu", "lark", "weixin", "telegram", "slack", "discord"];
 export declare function validateProjectName(value: unknown): string;
 export declare function validateSessionId(value: unknown): string;

@@ -1,5 +1,5 @@
 export declare function createAgentRunnerRuntime(deps: any): {
-    buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string) => {
+    buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string, options?: any) => {
         prompt: any;
         allowedTools: any;
         audit: any;

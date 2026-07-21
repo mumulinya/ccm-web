@@ -1,7 +1,7 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T02:31:46.072Z",
-  "baseUrl": "http://127.0.0.1:3082",
+  "generatedAt": "2026-07-21T05:33:04.486Z",
+  "baseUrl": "http://127.0.0.1:3080",
   "checks": [
     {
       "name": "isolated permanent purge removes execution, TestAgent and replay evidence with audit receipt",

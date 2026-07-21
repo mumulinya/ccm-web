@@ -25,7 +25,8 @@ export declare function selectGroupTargets(group: any, targetProject: string | u
     isBroadcast: boolean;
     orchestrated: boolean;
     targetLabel: any;
-    members: any;
+    members: any[];
+    rejectedDirectTarget: string;
 };
 export declare function resolveMemberRuntime(projectName: string, group: any, configs: any[]): {
     project: string;

@@ -47,12 +47,13 @@ const group_memory_compaction_1 = require("./group-memory-compaction");
 const model_capability_cache_1 = require("./model-capability-cache");
 const group_session_maintenance_1 = require("./group-session-maintenance");
 const group_memory_context_1 = require("./group-memory-context");
+const group_test_targets_1 = require("./group-test-targets");
 const group_routes_part_01_1 = require("./group-routes-part-01");
 const group_routes_part_02_1 = require("./group-routes-part-02");
 function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
     if (pathname === "/api/groups" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { groups: (0, storage_1.loadGroups)() });
+        (0, utils_1.sendJson)(res, { groups: (0, storage_1.loadGroups)().map(group_test_targets_1.publicGroupWithoutTestTargetSecrets) });
         return true;
     }
     if (pathname === "/api/groups/create" && req.method === "POST") {
@@ -70,7 +71,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                 });
                 groups.push(group);
                 (0, storage_1.saveGroups)(groups);
-                (0, utils_1.sendJson)(res, { success: true, group });
+                (0, utils_1.sendJson)(res, { success: true, group: (0, group_test_targets_1.publicGroupWithoutTestTargetSecrets)(group) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -101,7 +102,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                 }
                 (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
                 (0, storage_1.saveGroups)(groups);
-                (0, utils_1.sendJson)(res, { success: true, group });
+                (0, utils_1.sendJson)(res, { success: true, group: (0, group_test_targets_1.publicGroupWithoutTestTargetSecrets)(group) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -147,7 +148,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
                 group.name = name.trim();
                 (0, storage_1.saveGroups)(groups);
-                (0, utils_1.sendJson)(res, { success: true, group });
+                (0, utils_1.sendJson)(res, { success: true, group: (0, group_test_targets_1.publicGroupWithoutTestTargetSecrets)(group) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -165,6 +166,51 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
             return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
         const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(group.tools || {});
         (0, utils_1.sendJson)(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight });
+        return true;
+    }
+    if (pathname === "/api/groups/test-targets" && req.method === "GET") {
+        const groupId = String(parsed.query.id || "").trim();
+        if (!groupId)
+            return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
+        try {
+            (0, utils_1.sendJson)(res, (0, group_test_targets_1.listGroupTestTargets)(groupId));
+        }
+        catch (e) {
+            (0, utils_1.sendJson)(res, { error: e.message }, /不存在/.test(e.message) ? 404 : 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/groups/test-targets" && req.method === "POST") {
+        let body = "";
+        req.on("data", chunk => body += chunk);
+        req.on("end", () => {
+            try {
+                const input = JSON.parse(body);
+                const groupId = String(input.group_id || "").trim();
+                if (!groupId)
+                    return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
+                const target = (0, group_test_targets_1.saveGroupTestTarget)(groupId, input.target || input);
+                (0, utils_1.sendJson)(res, { success: true, target });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, /不存在/.test(e.message) ? 404 : 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/groups/test-targets/delete" && req.method === "POST") {
+        let body = "";
+        req.on("data", chunk => body += chunk);
+        req.on("end", () => {
+            try {
+                const input = JSON.parse(body);
+                const result = (0, group_test_targets_1.deleteGroupTestTarget)(String(input.group_id || "").trim(), String(input.target_id || "").trim());
+                (0, utils_1.sendJson)(res, result);
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, /不存在/.test(e.message) ? 404 : 400);
+            }
+        });
         return true;
     }
     if (pathname === "/api/groups/tools" && req.method === "POST") {

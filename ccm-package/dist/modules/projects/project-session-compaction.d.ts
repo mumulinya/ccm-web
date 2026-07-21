@@ -60,4 +60,58 @@ export declare function compactProjectSessionWithModel(project: string, projectS
     provider?: string;
     model?: string;
 }): Promise<any>;
-export declare function buildProjectSessionPostCompactContext(project: string, projectSessionId: string, targetAgentType?: string): string;
+export declare function buildProjectSessionPostCompactContext(project: string, projectSessionId: string, targetAgentType?: string, options?: {
+    currentRequest?: any;
+}): string;
+export declare function buildProjectSessionModelContextProjection(project: string, projectSessionId: string, options?: {
+    currentRequest?: any;
+}): {
+    schema: string;
+    project: string;
+    projectSessionId: string;
+    mode: string;
+    canonicalSummary: boolean;
+    summary: any;
+    summarySource: string;
+    summaryChecksum: string;
+    boundaryGeneration: number;
+    lastCompactedIndex: number;
+    currentRequestDeduplicated: boolean;
+    historyMessageCount: any;
+    visibleMessages: {
+        id: any;
+        role: any;
+        content: string;
+    }[];
+    archiveMessages: {
+        id: any;
+        role: any;
+        content: string;
+    }[];
+    visibleMessageTokens: number;
+    recentWindow: {
+        schema: string;
+        strategy: string;
+        startIndex: number;
+        floorIndex: number;
+        preservedMessageCount: number;
+        preservedTextMessageCount: number;
+        preservedTokenCount: number;
+        minTokens: number;
+        minTextMessages: number;
+        maxTokens: number;
+        lastSummarizedMessageId: string;
+        lastSummarizedMessageIndex: number;
+        cursorValid: boolean;
+        tokenSelectedStartIndex: number;
+        expandedForConversationTurn: boolean;
+        maxExceededForAtomicBoundary: boolean;
+        minimumSatisfied: boolean;
+    } | {
+        startIndex: number;
+        preservedTokenCount: any;
+        preservedMessageCount: number;
+        preservedTextMessageCount: number;
+    };
+    transcriptChecksum: string;
+};

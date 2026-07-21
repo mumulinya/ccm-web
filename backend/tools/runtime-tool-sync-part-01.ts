@@ -9,6 +9,7 @@ import { normalizeAgentRuntimeId } from "../agents/runtime";
 import { CCM_DIR } from "../core/utils";
 import { loadOrchestratorConfig } from "../modules/collaboration/group-orchestrator";
 import { loadGroups } from "../modules/collaboration/storage";
+import { usesCodexCliLogin } from "../modules/system/agent-provider-settings";
 import { buildToolAuthorizationInventory, buildToolAuthorizationPayload } from "./tool-authorization";
 
 export const CCM_MCP_PREFIX = "ccm__";
@@ -245,7 +246,8 @@ function runtimeCliCandidates(runtime: string) {
   if (runtime === "cursor") return ["cursor-agent", "agent"];
   if (runtime === "codex") return ["codex"];
   if (runtime === "gemini") return ["gemini"];
-  if (runtime === "qoder") return ["qoder"];
+  if (runtime === "opencode") return ["opencode"];
+  if (runtime === "qoder") return ["qodercli"];
   return [runtime].filter(Boolean);
 }
 
@@ -1022,6 +1024,6 @@ export function loadCodexLocalAccessConfig(): CodexGatewayConfig | null {
 }
 
 export function loadCodexProviderConfig(): CodexGatewayConfig | null {
+  if (usesCodexCliLogin()) return null;
   return loadCodexGatewayConfig() || loadCodexLocalAccessConfig();
 }
-

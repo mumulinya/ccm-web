@@ -1,6 +1,6 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T05:30:06.641Z",
+  "generatedAt": "2026-07-21T04:30:57.430Z",
   "checks": [
     {
       "name": "desktop project workspace has no overflow and keeps technical details folded",
@@ -8,6 +8,14 @@
     },
     {
       "name": "desktop keeps readable session and conversation columns, hides internal session id and preserves line breaks",
+      "pass": true
+    },
+    {
+      "name": "edit project modal has stable desktop layout, valid fields and explicit actions",
+      "pass": true
+    },
+    {
+      "name": "create project modal switches between local directory and GitHub clone sources",
       "pass": true
     },
     {
@@ -23,16 +31,22 @@
       "pass": true
     },
     {
+      "name": "mobile edit project modal becomes a single-column bottom panel without overflow",
+      "pass": true
+    },
+    {
       "name": "mobile session list is a working drawer and conversation keeps full width",
       "pass": true
     }
   ],
   "screenshots": [
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-project-workspace.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-edit-project-modal.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-ordinary-conversation.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-explicit-task.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\desktop-archive-manager.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\mobile-project-workspace.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\mobile-edit-project-modal.png",
     "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\project-management-render-regression\\mobile-session-drawer.png"
   ],
   "errors": []

@@ -3,7 +3,7 @@ export declare function extractProviderToolAccessEvidence(agentType: string, raw
     checksum: string;
     schema: string;
     version: number;
-    provider: import("./runtime").AgentRuntimeId;
+    provider: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
     captureStatus: string;
     source: string;
     groupId: string;

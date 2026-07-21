@@ -101,6 +101,55 @@ try {
   }));
   const compactFile = path.join(compactDir, `${compactSessionId}.json`);
   fs.writeFileSync(compactFile, JSON.stringify({ id: compactSessionId, name: "压缩会话", history: compactMessages, updated_at: new Date().toISOString() }, null, 2));
+
+  const fullRawSessionId = "uncompressed-full-raw";
+  const fullRawMessages = Array.from({ length: 90 }, (_, index) => ({
+    id: `full_raw_${index}`,
+    role: index === 88 ? "assistant" : index === 89 ? "user" : index % 2 ? "assistant" : "user",
+    content: index === 0
+      ? `OLDEST_UNCOMPRESSED_PROJECT_CONTEXT ${"早期授权和实现决定".repeat(240)}`
+      : index === 88
+        ? `LATEST_ASSISTANT_BEFORE_CURRENT_REQUEST ${"最近执行结果".repeat(180)}`
+        : index === 89
+          ? "CURRENT_PROJECT_REQUEST_ALREADY_SAVED"
+          : `未压缩项目会话 ${index} ${"完整原文不能被动态窗口裁掉".repeat(35)}`,
+    timestamp: new Date(Date.now() + index * 1000).toISOString(),
+  }));
+  fs.writeFileSync(path.join(compactDir, `${fullRawSessionId}.json`), JSON.stringify({
+    id: fullRawSessionId,
+    history: fullRawMessages,
+  }, null, 2));
+  const fullRawContext = compactionModule.buildProjectSessionPostCompactContext(
+    compactProject,
+    fullRawSessionId,
+    "codex",
+    { currentRequest: "CURRENT_PROJECT_REQUEST_ALREADY_SAVED" },
+  );
+  assert.match(fullRawContext, /mode=precompact_full_raw/);
+  assert.match(fullRawContext, /OLDEST_UNCOMPRESSED_PROJECT_CONTEXT/);
+  assert.match(fullRawContext, /LATEST_ASSISTANT_BEFORE_CURRENT_REQUEST/);
+  assert.match(fullRawContext, /89\/90 条/);
+  assert.equal((fullRawContext.match(/CURRENT_PROJECT_REQUEST_ALREADY_SAVED/g) || []).length, 0);
+  assert.match(fullRawContext, /current_request_deduplicated=true/);
+
+  const directApiSessionId = "uncompressed-direct-api";
+  fs.writeFileSync(path.join(compactDir, `${directApiSessionId}.json`), JSON.stringify({
+    id: directApiSessionId,
+    history: [
+      { id: "direct_user", role: "user", content: "DIRECT_API_PRIOR_USER" },
+      { id: "direct_assistant", role: "assistant", content: "DIRECT_API_LAST_ASSISTANT_MUST_REMAIN" },
+    ],
+  }, null, 2));
+  const directApiContext = compactionModule.buildProjectSessionPostCompactContext(
+    compactProject,
+    directApiSessionId,
+    "codex",
+    { currentRequest: "DIRECT_API_NEW_UNSAVED_REQUEST" },
+  );
+  assert.match(directApiContext, /DIRECT_API_LAST_ASSISTANT_MUST_REMAIN/);
+  assert.match(directApiContext, /current_request_deduplicated=false/);
+  assert.doesNotMatch(directApiContext, /DIRECT_API_NEW_UNSAVED_REQUEST/);
+
   const compactBinding = bindingModule.bindProjectSessionAgentExecution({ project: compactProject, projectSessionId: compactSessionId, agentType: "codex" });
   sessionModule.recordTaskAgentSessionTurn(compactBinding.session.id, { nativeSessionId: "codex-compact-native", success: true });
   let compactPrompt = null;
@@ -134,7 +183,8 @@ try {
   assert.ok(compactDisk.compaction.v2.activeSummary);
   const restoreContext = compactionModule.buildProjectSessionPostCompactContext(compactProject, compactSessionId, "codex");
   assert.match(restoreContext, /important\.ts/);
-  assert.match(restoreContext, /模型压缩摘要/);
+  assert.match(restoreContext, /正式模型摘要/);
+  assert.match(restoreContext, /mode=canonical_summary_recent_raw/);
   assert.match(restoreContext, /DYNAMIC_RECENT_SENTINEL_END/);
   const nextGeneration = bindingModule.bindProjectSessionAgentExecution({ project: compactProject, projectSessionId: compactSessionId, agentType: "codex" });
   assert.equal(nextGeneration.binding.generation, 2);
@@ -261,11 +311,12 @@ try {
   assert.match(lifecycle, /rotateProjectSessionAgentBinding\(project,\s*sessionId/);
   assert.match(lifecycle, /purgeProjectSessionAgentBinding\(project,\s*sessionId\)/);
   assert.match(server, /compactProjectSessionWithModel\(project,\s*exactProjectSessionId/);
+  assert.match(server, /buildProjectSessionPostCompactContext\(project,\s*exactProjectSessionId,\s*agentType,\s*\{\s*currentRequest:\s*finalMessage/);
   assert.match(frontend, /compactSession:\s*async/);
 
   console.log(JSON.stringify({
     pass: true,
-    checks: 72,
+    checks: 84,
     stable_task_agent_session: true,
     native_resume_after_restart: true,
     sibling_session_isolated: true,
@@ -277,6 +328,8 @@ try {
     legacy_low_pressure_not_compacted: true,
     legacy_boundary_circuit_repaired: true,
     post_compact_context_reinjected: true,
+    precompact_full_raw_context_reinjected: true,
+    pending_request_exactly_deduplicated: true,
     project_session_memory_chain: "S1 -> S2 -> S3",
     real_provider_calls: 0,
   }, null, 2));

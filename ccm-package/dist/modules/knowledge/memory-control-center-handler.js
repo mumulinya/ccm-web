@@ -99,7 +99,25 @@ function globalSummaries() {
 }
 function taskAgentSummaries() {
     const store = (0, memory_control_center_api_1.readMemoryFile)(path.join(utils_1.CCM_DIR, "task-agent-sessions.json"));
-    return (store?.sessions || []).map((session) => (0, memory_control_center_api_1.memorySummary)("task_agent", String(session.id || ""), { ...session, compaction: session.compaction || { latestProviderUsage: session.providerContextUsageBaseline, consecutiveFailures: session.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures || 0 } }, `${session.project || "任务 Agent"} / ${session.id}`));
+    return (store?.sessions || []).map((session) => {
+        const sessionId = String(session.id || "");
+        const projectId = String(session.project || "").trim() || "unassigned";
+        const runtime = String(session.agentType || "").trim() || "agent";
+        const summary = (0, memory_control_center_api_1.memorySummary)("task_agent", sessionId, { ...session, compaction: session.compaction || { latestProviderUsage: session.providerContextUsageBaseline, consecutiveFailures: session.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures || 0 } }, `${projectId} / ${sessionId}`);
+        return {
+            ...summary,
+            projectId,
+            projectLabel: projectId === "unassigned" ? "未关联项目" : projectId,
+            taskAgentSessionId: sessionId,
+            taskId: String(session.taskId || ""),
+            groupId: String(session.groupId || ""),
+            agentType: runtime,
+            status: String(session.status || ""),
+            turnCount: Number(session.turnCount || 0),
+            lastUsedAt: String(session.lastUsedAt || session.updatedAt || session.createdAt || ""),
+            sessionLabel: `${runtime} · ${sessionId}`,
+        };
+    }).sort((left, right) => String(right.lastUsedAt || "").localeCompare(String(left.lastUsedAt || "")));
 }
 function buildMemoryCenterOverview() {
     const groups = (0, memory_control_center_api_1.listMemoryCenterGroupSessionScopes)();

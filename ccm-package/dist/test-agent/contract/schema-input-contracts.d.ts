@@ -29,6 +29,7 @@ export declare const TestAgentOptionsContractSchema: z.ZodEffects<z.ZodObject<{
     require_adversarial_probe: z.ZodOptional<z.ZodBoolean>;
     adversarialProbeWaiver: z.ZodOptional<z.ZodString>;
     adversarial_probe_waiver: z.ZodOptional<z.ZodString>;
+    agenticPlanning: z.ZodOptional<z.ZodBoolean>;
 }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
     artifactDir: z.ZodOptional<z.ZodString>;
     commandTimeoutMs: z.ZodOptional<z.ZodNumber>;
@@ -48,6 +49,7 @@ export declare const TestAgentOptionsContractSchema: z.ZodEffects<z.ZodObject<{
     require_adversarial_probe: z.ZodOptional<z.ZodBoolean>;
     adversarialProbeWaiver: z.ZodOptional<z.ZodString>;
     adversarial_probe_waiver: z.ZodOptional<z.ZodString>;
+    agenticPlanning: z.ZodOptional<z.ZodBoolean>;
 }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
     artifactDir: z.ZodOptional<z.ZodString>;
     commandTimeoutMs: z.ZodOptional<z.ZodNumber>;
@@ -67,6 +69,7 @@ export declare const TestAgentOptionsContractSchema: z.ZodEffects<z.ZodObject<{
     require_adversarial_probe: z.ZodOptional<z.ZodBoolean>;
     adversarialProbeWaiver: z.ZodOptional<z.ZodString>;
     adversarial_probe_waiver: z.ZodOptional<z.ZodString>;
+    agenticPlanning: z.ZodOptional<z.ZodBoolean>;
 }, z.ZodTypeAny, "passthrough">>, z.objectOutputType<{
     artifactDir: z.ZodOptional<z.ZodString>;
     commandTimeoutMs: z.ZodOptional<z.ZodNumber>;
@@ -86,6 +89,7 @@ export declare const TestAgentOptionsContractSchema: z.ZodEffects<z.ZodObject<{
     require_adversarial_probe: z.ZodOptional<z.ZodBoolean>;
     adversarialProbeWaiver: z.ZodOptional<z.ZodString>;
     adversarial_probe_waiver: z.ZodOptional<z.ZodString>;
+    agenticPlanning: z.ZodOptional<z.ZodBoolean>;
 }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
     artifactDir: z.ZodOptional<z.ZodString>;
     commandTimeoutMs: z.ZodOptional<z.ZodNumber>;
@@ -105,6 +109,7 @@ export declare const TestAgentOptionsContractSchema: z.ZodEffects<z.ZodObject<{
     require_adversarial_probe: z.ZodOptional<z.ZodBoolean>;
     adversarialProbeWaiver: z.ZodOptional<z.ZodString>;
     adversarial_probe_waiver: z.ZodOptional<z.ZodString>;
+    agenticPlanning: z.ZodOptional<z.ZodBoolean>;
 }, z.ZodTypeAny, "passthrough">>;
 export declare const TestAgentHttpAssertionContractSchema: z.ZodEffects<z.ZodObject<{
     type: z.ZodOptional<z.ZodString>;

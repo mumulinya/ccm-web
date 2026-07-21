@@ -38,7 +38,8 @@ const AGENTS = [
   { type: "cursor", name: "Cursor", modes: ["default", "force", "plan", "ask"], defaultMode: "default" },
   { type: "gemini", name: "Gemini CLI", modes: ["default", "auto_edit", "yolo", "plan"], defaultMode: "yolo" },
   { type: "codex", name: "Codex", modes: ["suggest", "auto-edit", "full-auto", "yolo"], defaultMode: "full-auto" },
-  { type: "qoder", name: "Qoder CLI", modes: ["default", "yolo"], defaultMode: "default" },
+  { type: "opencode", name: "OpenCode", modes: ["default", "auto", "plan"], defaultMode: "default" },
+  { type: "qoder", name: "Qoder CLI", modes: ["default", "yolo"], defaultMode: "default" },
 ];
 
 // 支持的平台列表

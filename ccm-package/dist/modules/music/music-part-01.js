@@ -49,6 +49,7 @@ const search_results_1 = require("./search-results");
 const download_jobs_1 = require("./download-jobs");
 const library_state_1 = require("./library-state");
 const select_track_1 = require("./select-track");
+const memory_1 = require("./memory");
 var agent_2 = require("./agent");
 Object.defineProperty(exports, "runMusicAgentIntentSelfTest", { enumerable: true, get: function () { return agent_2.runMusicAgentIntentSelfTest; } });
 var state_2 = require("./state");
@@ -248,6 +249,7 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
                     keyword: type === "stop" ? (keyword || "__stop__") : keyword,
                     mode: String(payload.mode || "").trim(),
                     source: payload.source || "global-agent",
+                    request_text: String(payload.request_text || payload.requestText || keyword).trim(),
                 });
                 (0, utils_1.sendJson)(res, { success: true, command });
             }
@@ -467,6 +469,9 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
                 const result = await (0, select_track_1.selectMusicTrack)({
                     keyword: payload.keyword || payload.query || "",
                     candidates: payload.candidates || payload.results || [],
+                    selectionMode: payload.selectionMode || payload.selection_mode || "exact",
+                    randomize: payload.randomize === true,
+                    originalRequest: payload.originalRequest || payload.request_text || "",
                 });
                 (0, utils_1.sendJson)(res, result, result.success === false && result.rejected ? 200 : 200);
             }
@@ -474,6 +479,17 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
                 (0, utils_1.sendJson)(res, { success: false, rejected: true, index: -1, source: "reject", reason: e?.message || "选曲失败" }, 400);
             }
         });
+        return true;
+    }
+    if (pathname === "/api/music/resolve-play-request" && req.method === "POST") {
+        readMusicJsonBody(req).then(async (payload) => {
+            const requestText = String(payload.requestText || payload.request_text || payload.keyword || "").trim();
+            const keyword = String(payload.keyword || "").trim();
+            if (!requestText && !keyword)
+                return (0, utils_1.sendJson)(res, { success: false, error: "缺少音乐播放请求" }, 400);
+            const plan = await (0, agent_1.resolveMusicPlaybackRequest)((0, state_1.loadMusicAgentConfig)(), requestText, keyword);
+            (0, utils_1.sendJson)(res, { success: true, plan });
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "播放意图识别失败" }, 400));
         return true;
     }
     if (pathname === "/api/music/config" && req.method === "GET") {
@@ -506,7 +522,7 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { message, mode: chatMode, history } = JSON.parse(body);
+                const { message, mode: chatMode } = JSON.parse(body);
                 const cfg = (0, state_1.loadMusicAgentConfig)();
                 if (!cfg.enabled) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "请先在系统设置启用统一大模型配置" });
@@ -517,6 +533,7 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
                 if (!cfg.model) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "请先到系统设置 → 统一大模型配置 中填写模型名称" });
                 }
+                const memoryContext = await (0, memory_1.prepareMusicAgentTurn)(message, chatMode);
                 const systemPrompt = `你是一个音乐助手 Agent。用户会告诉你想听什么音乐，你需要帮助他们搜索和推荐。
 
 你有三个工具可用：
@@ -554,15 +571,18 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
 1. 代码块标记必须用 \`\`\`tracks 开头，\`\`\` 结尾，各占独立一行。
 2. 数据必须是合法 JSON 数组，必须从工具返回的结果中提取字段（不要编造或修改 uri、bvid、filename、songId 等核心标识）。
 3. 如果用户只是闲聊、提问，不需要输出 tracks 代码块。
-4. 回复使用中文，简洁友好。`;
-                const messages = (0, agent_1.normalizeMusicAgentMessages)(history || [], message, 10);
+4. 回复使用中文，简洁友好。
+
+## 当前单例音乐记忆
+${memoryContext.continuityText}`;
+                const messages = (0, agent_1.normalizeMusicAgentMessages)(memoryContext.messages || [], "", Math.max(20, memoryContext.messages?.length || 0));
                 res.writeHead(200, {
                     "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                     "Access-Control-Allow-Origin": "*",
                 });
-                const agentAction = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, history || []);
+                const agentAction = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
                 (0, agent_1.writeSse)(res, {
                     type: "music_action",
                     action: agentAction,

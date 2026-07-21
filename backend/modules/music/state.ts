@@ -15,6 +15,7 @@ type MusicRemoteCommand = {
   id: string;
   type: string;
   keyword: string;
+  request_text?: string;
   mode?: string;
   source?: string;
   created_at: string;
@@ -51,6 +52,7 @@ function readQueue(): MusicRemoteCommand[] {
           id: String(legacy.id),
           type: String(legacy.type || "play"),
           keyword: String(legacy.keyword),
+          request_text: String(legacy.request_text || legacy.requestText || legacy.keyword || ""),
           mode: String(legacy.mode || ""),
           source: String(legacy.source || "legacy"),
           created_at: String(legacy.created_at || nowIso()),
@@ -119,6 +121,7 @@ export function enqueueMusicRemoteCommand(command: any) {
     id: `music_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`,
     type,
     keyword: String(command?.keyword || "").trim() || (type === "stop" ? STOP_MUSIC_KEYWORD : ""),
+    request_text: String(command?.request_text || command?.requestText || command?.keyword || "").trim() || undefined,
     mode: String(command?.mode || "").trim() || undefined,
     source: String(command?.source || "global-agent"),
     created_at: nowIso(),
@@ -198,49 +201,49 @@ export function listMusicRemoteCommands() {
 }
 
 export function runMusicRemoteCommandQueueSelfTest() {
-  // Use real queue then remove self-test rows so local CCM state stays clean.
-  for (const item of listMusicRemoteCommands().filter(row => String(row.source || "").includes("self-test"))) {
-    ackMusicRemoteCommand({ id: item.id, status: "success" });
+  const original = readQueue();
+  writeQueue([]);
+  try {
+    const a = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-a", request_text: "我心情不好，给我播放一首歌", source: "self-test" });
+    const claimed = claimMusicRemoteCommand();
+    const b = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-b", source: "self-test" });
+    const stillQueued = listMusicRemoteCommands().some(item => item.id === b.id && item.status === "pending");
+    const noRedeliver = claimMusicRemoteCommand() == null;
+    const takeWhileClaimed = takeMusicRemoteCommand(a.id) == null;
+    const ackOk = ackMusicRemoteCommand({ id: a.id, status: "success" });
+    const aGone = !listMusicRemoteCommands().some(item => item.id === a.id);
+    const takePending = takeMusicRemoteCommand(b.id);
+    const bTakenGone = takePending?.id === b.id && !listMusicRemoteCommands().some(item => item.id === b.id);
+    const c = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-c", source: "self-test" });
+    const claimedC = claimMusicRemoteCommand();
+    const failAck = ackMusicRemoteCommand({ id: c.id, status: "failed", error: "boom" });
+    const cRetryable = listMusicRemoteCommands().some(item => item.id === c.id && item.status === "pending");
+    return {
+      success: claimed?.id === a.id
+        && claimed?.request_text === "我心情不好，给我播放一首歌"
+        && noRedeliver
+        && takeWhileClaimed
+        && stillQueued
+        && ackOk.success === true
+        && aGone
+        && bTakenGone
+        && claimedC?.id === c.id
+        && failAck.success === true
+        && cRetryable,
+      checks: {
+        claimFirst: claimed?.id === a.id,
+        requestTextPreserved: claimed?.request_text === "我心情不好，给我播放一首歌",
+        claimNotRedelivered: noRedeliver,
+        takeDoesNotStealClaimed: takeWhileClaimed,
+        secondStillPending: stillQueued,
+        ackRemoves: aGone,
+        takePendingOnly: bTakenGone,
+        failRequeues: cRetryable,
+      },
+    };
+  } finally {
+    writeQueue(original);
   }
-  const a = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-a", source: "self-test" });
-  const b = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-b", source: "self-test" });
-  const claimed = claimMusicRemoteCommand();
-  const stillQueued = listMusicRemoteCommands().some(item => item.id === b.id && item.status === "pending");
-  const noRedeliver = claimMusicRemoteCommand() == null;
-  const takeWhileClaimed = takeMusicRemoteCommand(a.id) == null;
-  const ackOk = ackMusicRemoteCommand({ id: a.id, status: "success" });
-  const aGone = !listMusicRemoteCommands().some(item => item.id === a.id);
-  const takePending = takeMusicRemoteCommand(b.id);
-  const bTakenGone = takePending?.id === b.id && !listMusicRemoteCommands().some(item => item.id === b.id);
-  const c = enqueueMusicRemoteCommand({ type: "play", keyword: "self-test-c", source: "self-test" });
-  const claimedC = claimMusicRemoteCommand();
-  const failAck = ackMusicRemoteCommand({ id: c.id, status: "failed", error: "boom" });
-  const cRetryable = listMusicRemoteCommands().some(item => item.id === c.id && item.status === "pending");
-  ackMusicRemoteCommand({ id: c.id, status: "success" });
-  for (const item of listMusicRemoteCommands().filter(row => String(row.source || "").includes("self-test"))) {
-    ackMusicRemoteCommand({ id: item.id, status: "success" });
-  }
-  return {
-    success: claimed?.id === a.id
-      && noRedeliver
-      && takeWhileClaimed
-      && stillQueued
-      && ackOk.success === true
-      && aGone
-      && bTakenGone
-      && claimedC?.id === c.id
-      && failAck.success === true
-      && cRetryable,
-    checks: {
-      claimFirst: claimed?.id === a.id,
-      claimNotRedelivered: noRedeliver,
-      takeDoesNotStealClaimed: takeWhileClaimed,
-      secondStillPending: stillQueued,
-      ackRemoves: aGone,
-      takePendingOnly: bTakenGone,
-      failRequeues: cRetryable,
-    },
-  };
 }
 
 export function loadMusicAgentConfig() {

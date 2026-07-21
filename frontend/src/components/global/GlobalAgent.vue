@@ -4,6 +4,7 @@ import { BookOpen, Bot, Gauge, MoreHorizontal, RefreshCw } from '@lucide/vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import ConversationTurnControls from '../common/ConversationTurnControls.vue'
+import ConversationFindBar from '../common/ConversationFindBar.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import SlashCommandMenu from '../common/SlashCommandMenu.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
@@ -940,6 +941,13 @@ const handleGitCommitCardSubmit = async (msg) => {
           </p>
         </div>
         <div class="quality-header-actions">
+          <ConversationFindBar
+            :messages="messages"
+            :scroll-container="chatBody"
+            target-id-prefix="msg-"
+            :scope-key="currentSessionId"
+            :active="props.active && !!currentSessionId"
+          />
           <span :class="['quality-mode', qualitySnapshot?.policy?.shadowMode ? 'shadow' : 'live']">{{ qualitySnapshot?.policy?.shadowMode ? '影子模式' : '真实执行' }}</span>
           <button class="btn btn-outline" @click="saveCurrentGlobalSessionKnowledge"><BookOpen :size="14" />保存知识</button>
           <details class="global-header-menu">

@@ -7,9 +7,15 @@
       :memory-label="getMemoryCompressionLabel()"
       :memory-meta="getMemoryCompressionMeta()"
       :memory-title="getMemoryCompressionTitle()"
+      :messages="messages"
+      :scroll-container="groupMessagesEl"
+      :scope-key="`${currentGroup?.id || ''}::${currentGroupSessionId || ''}`"
+      :active="active && !!currentGroup"
+      :is-message-searchable="shouldShowGroupMessage"
       @select-group="selectGroup"
       @create-group="showCreate = true"
       @load-tools="loadGroupTools"
+      @load-test-targets="loadGroupTestTargets"
       @load-files="loadGroupFiles"
       @load-logs="loadLogs"
       @show-members="showMembers = true"
@@ -298,6 +304,18 @@
       @close="showTools = false"
       @toggle-tool="toggleGroupTool"
       @save="saveGroupTools"
+    />
+
+    <GroupTestTargetsModal
+      v-if="showTestTargets"
+      :group-name="currentGroup?.name"
+      :projects="groupTestTargetProjects"
+      :targets="groupTestTargets"
+      :loading="groupTestTargetsLoading"
+      :saving="groupTestTargetsSaving"
+      @close="showTestTargets = false"
+      @save="saveGroupTestTarget"
+      @delete="deleteGroupTestTarget"
     />
 
     <GroupSharedFilesModal

@@ -44,11 +44,14 @@ const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
+const runtime_1 = require("../../agents/runtime");
+const agent_provider_settings_1 = require("../system/agent-provider-settings");
 const sessions_1 = require("./sessions");
 const credential_store_1 = require("../../core/credential-store");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const project_lifecycle_1 = require("./project-lifecycle");
 const project_validation_1 = require("./project-validation");
+const project_git_1 = require("./project-git");
 function resolveCcConnectLauncher() {
     if (process.platform === "win32") {
         for (const entry of String(process.env.PATH || "").split(path.delimiter)) {
@@ -474,6 +477,20 @@ function requireActiveProjectName(value) {
         throw new Error("项目不存在或已经归档");
     return project;
 }
+function saveProjectRepositoryMetadata(project, status, source = "local") {
+    const configs = (0, db_1.loadProjectConfigs)();
+    if (!configs[project])
+        configs[project] = {};
+    configs[project].repository = status?.is_repository ? {
+        provider: status.remote_web_url ? "github" : "git",
+        source,
+        remote_url: String(status.remote_url || ""),
+        remote_web_url: String(status.remote_web_url || ""),
+        branch: String(status.branch || ""),
+        updated_at: new Date().toISOString(),
+    } : null;
+    (0, db_1.saveProjectConfigs)(configs);
+}
 function applyInferredVerificationCommands(options = {}) {
     const projectNames = Array.isArray(options.projects) && options.projects.length
         ? options.projects.map((item) => String(item || "").trim()).filter(Boolean)
@@ -539,7 +556,16 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
     }
     // 2. 获取可用 Agent 类型
     if (pathname === "/api/agents" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { agents: db_1.AGENTS });
+        const agents = (0, runtime_1.getPublicAgentRuntimes)().map(runtime => ({
+            type: runtime.id,
+            name: runtime.label,
+            command: runtime.commandLabel,
+            capabilities: runtime.capabilities,
+            nativeContinuation: runtime.nativeContinuation,
+            enabled: (0, agent_provider_settings_1.isDevelopmentAgentEnabled)(runtime.id),
+            ready: (0, runtime_1.isAgentRuntimeAvailable)(runtime.id),
+        }));
+        (0, utils_1.sendJson)(res, { agents });
         return true;
     }
     // 3. 启动项目
@@ -576,13 +602,15 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/projects/create" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        req.on("end", async () => {
             try {
-                const { name, work_dir, agent, platform, setup_token } = JSON.parse(body);
+                const { name, work_dir, agent, platform, setup_token, source_type, repository_url, repository_branch } = JSON.parse(body);
                 const safeName = (0, project_validation_1.validateProjectName)(name);
-                const safeWorkDir = (0, project_validation_1.validateWorkDirectory)(work_dir);
                 const safeAgent = (0, project_validation_1.validateAgentType)(agent);
                 const safePlatform = (0, project_validation_1.validateProjectPlatform)(platform);
+                const sourceType = String(source_type || "local").trim().toLowerCase();
+                if (!["local", "github"].includes(sourceType))
+                    throw new Error("不支持的项目来源类型");
                 const configPath = path.join(utils_1.CONFIGS_DIR, `config-${safeName}.toml`);
                 let existingAppId = "";
                 let existingAppSecret = "";
@@ -592,6 +620,17 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
                     const existingContent = fs.readFileSync(configPath, "utf-8");
                     existingAppId = existingContent.match(/app_id\s*=\s*"([^"]+)"/)?.[1] || "";
                     existingAppSecret = existingContent.match(/app_secret\s*=\s*"([^"]+)"/)?.[1] || "";
+                }
+                let repositoryStatus = null;
+                const safeWorkDir = sourceType === "github"
+                    ? String((await (0, project_git_1.cloneGitHubRepository)({ repositoryUrl: repository_url, destination: work_dir, branch: repository_branch })).work_dir)
+                    : (0, project_validation_1.validateWorkDirectory)(work_dir);
+                if (sourceType === "github")
+                    repositoryStatus = (0, project_git_1.inspectProjectGit)(safeWorkDir);
+                else {
+                    const inspected = (0, project_git_1.inspectProjectGit)(safeWorkDir);
+                    if (inspected.is_repository)
+                        repositoryStatus = inspected;
                 }
                 let platformOptionsToml = "";
                 const finalPlatform = safePlatform;
@@ -613,7 +652,13 @@ type = "${finalPlatform}"${platformOptionsToml}
 `;
                 fs.writeFileSync(configPath, template);
                 (0, credential_store_1.migrateTomlCredentials)(configPath);
-                (0, utils_1.sendJson)(res, { success: true, message: "项目配置已创建" });
+                if (repositoryStatus)
+                    saveProjectRepositoryMetadata(safeName, repositoryStatus, sourceType);
+                (0, utils_1.sendJson)(res, {
+                    success: true,
+                    message: sourceType === "github" ? "GitHub 仓库已克隆并创建项目" : "项目配置已创建",
+                    repository: repositoryStatus,
+                });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
@@ -627,7 +672,7 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { name, work_dir, agent, platform } = JSON.parse(body);
+                const { name, work_dir, agent, platform, repository_url, initialize_repository } = JSON.parse(body);
                 const safeName = (0, project_validation_1.validateProjectName)(name);
                 const safeWorkDir = (0, project_validation_1.validateWorkDirectory)(work_dir);
                 const safeAgent = (0, project_validation_1.validateAgentType)(agent);
@@ -636,6 +681,10 @@ type = "${finalPlatform}"${platformOptionsToml}
                 if (!fs.existsSync(configPath)) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目不存在" }, 404);
                 }
+                const shouldManageRepository = initialize_repository === true || String(repository_url || "").trim().length > 0;
+                const repositoryStatus = shouldManageRepository
+                    ? (0, project_git_1.configureProjectRepository)({ workDir: safeWorkDir, repositoryUrl: repository_url, initialize: initialize_repository === true })
+                    : (0, project_git_1.inspectProjectGit)(safeWorkDir);
                 const content = fs.readFileSync(configPath, "utf-8");
                 const appIdMatch = content.match(/app_id\s*=\s*"([^"]+)"/);
                 const appSecretMatch = content.match(/app_secret\s*=\s*"([^"]+)"/);
@@ -661,7 +710,9 @@ type = "${finalPlatform}"${platformOptionsToml}
 `;
                 fs.writeFileSync(configPath, template);
                 (0, credential_store_1.migrateTomlCredentials)(configPath);
-                (0, utils_1.sendJson)(res, { success: true, message: "项目配置已更新" });
+                if (repositoryStatus.is_repository)
+                    saveProjectRepositoryMetadata(safeName, repositoryStatus, "edit");
+                (0, utils_1.sendJson)(res, { success: true, message: "项目配置已更新", repository: repositoryStatus });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
@@ -693,6 +744,17 @@ type = "${finalPlatform}"${platformOptionsToml}
         const configs = (0, db_1.getConfigs)();
         const plaintextSecrets = configs.reduce((count, item) => count + (fs.readFileSync(item.path, "utf-8").match(/(?:app_secret|api_key|access_token|refresh_token|hook_token)\s*=\s*"(?!ccm-secret:\/\/)[^"]+"/gi) || []).length, 0);
         (0, utils_1.sendJson)(res, { success: true, ...(0, credential_store_1.credentialStoreStatus)(), config_files: configs.length, plaintext_config_secrets: plaintextSecrets });
+        return true;
+    }
+    if (pathname === "/api/projects/git-status" && req.method === "GET") {
+        try {
+            const project = requireActiveProjectName(parsed.query?.project);
+            const workDir = (0, project_validation_1.validateWorkDirectory)(getProjectWorkDir(project));
+            (0, utils_1.sendJson)(res, { success: true, project, status: (0, project_git_1.inspectProjectGit)(workDir) });
+        }
+        catch (e) {
+            (0, utils_1.sendJson)(res, { success: false, error: e.message || "读取 Git 状态失败" }, 400);
+        }
         return true;
     }
     if (pathname === "/api/projects/archived" && req.method === "GET") {

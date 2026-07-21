@@ -15,6 +15,7 @@ import {
   publicInternalMcpTestRun,
   readInternalMcpTestRun,
 } from "./internal-mcp-test-store";
+import { listGroupTestTargets } from "../modules/collaboration/group-test-targets";
 
 export const TEST_ACCEPTANCE_MCP_SERVER_NAME = "ccm__test_acceptance";
 
@@ -27,8 +28,9 @@ const tools: InternalMcpToolDefinition[] = [
     name: "create_test_work_order",
     description: "由全局或群聊主 Agent 为当前任务创建真实 TestAgent 工作单与验收计划。不会接受绑定任务以外的项目路径。",
     roles: ["group-main-agent"],
-    inputSchema: { type: "object", properties: { projects: { type: "array", items: { type: "string" } }, workspace_ids: { type: "array", items: { type: "string" } }, acceptance_criteria: { type: "array", items: { type: "string" } }, completed_tasks: { type: "array", items: { type: "string" } }, required_checks: { type: "array", items: { type: "string" } }, verification_commands: { type: "array", items: { type: "string" } }, changed_files: { type: "array", items: { type: "string" } }, target_url: { type: "string" }, browser_provider: { type: "string", enum: ["auto", "playwright", "mcp", "none"] }, collect_browser_artifacts: { type: "boolean" }, require_adversarial_probe: { type: "boolean" }, adversarial_probe_waiver: { type: "string" }, summary: { type: "string" }, start: { type: "boolean" } }, additionalProperties: false },
+    inputSchema: { type: "object", properties: { projects: { type: "array", items: { type: "string" } }, workspace_ids: { type: "array", items: { type: "string" } }, test_target_ids: { type: "array", items: { type: "string" } }, acceptance_criteria: { type: "array", items: { type: "string" } }, completed_tasks: { type: "array", items: { type: "string" } }, required_checks: { type: "array", items: { type: "string" } }, verification_commands: { type: "array", items: { type: "string" } }, changed_files: { type: "array", items: { type: "string" } }, target_url: { type: "string" }, browser_provider: { type: "string", enum: ["auto", "playwright", "mcp", "none"] }, collect_browser_artifacts: { type: "boolean" }, require_adversarial_probe: { type: "boolean" }, adversarial_probe_waiver: { type: "string" }, summary: { type: "string" }, start: { type: "boolean" } }, additionalProperties: false },
   },
+  { name: "list_test_targets", description: "列出当前签名群聊中可供 TestAgent 选择的项目测试目标，不返回登录凭据。", roles: ["group-main-agent"], inputSchema: { type: "object", properties: {}, additionalProperties: false } },
   {
     name: "start_test_run",
     description: "启动已创建的 TestAgent 工作单，后台执行命令、接口和浏览器验收并持久化证据。",
@@ -55,6 +57,7 @@ function startRun(context: InternalMcpTaskContext, runId = "") {
 }
 
 function callTool(context: InternalMcpTaskContext, name: string, args: any) {
+  if (name === "list_test_targets") return listGroupTestTargets(context.groupId);
   if (name === "create_test_work_order") {
     const state = createInternalMcpTestRun(context, args);
     return args?.start === true ? startRun(context, state.run_id) : { success: true, run: publicInternalMcpTestRun(state), next: "调用 start_test_run 开始真实验收" };

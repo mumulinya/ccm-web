@@ -9,11 +9,13 @@ import {
   Plus,
   RefreshCw,
   Settings2,
+  MonitorCheck,
   Trash2,
   Users,
   X,
   MessageSquare,
 } from '@lucide/vue'
+import ConversationFindBar from '../common/ConversationFindBar.vue'
 
 const props = defineProps({
   groups: { type: Array, default: () => [] },
@@ -22,13 +24,19 @@ const props = defineProps({
   memoryActive: { type: Boolean, default: false },
   memoryLabel: { type: String, default: '' },
   memoryMeta: { type: String, default: '' },
-  memoryTitle: { type: String, default: '' }
+  memoryTitle: { type: String, default: '' },
+  messages: { type: Array, default: () => [] },
+  scrollContainer: { type: Object, default: null },
+  scopeKey: { type: String, default: '' },
+  active: { type: Boolean, default: true },
+  isMessageSearchable: { type: Function, default: null },
 })
 
 const emit = defineEmits([
   'select-group',
   'create-group',
   'load-tools',
+  'load-test-targets',
   'load-files',
   'load-logs',
   'show-members',
@@ -87,7 +95,16 @@ function onSelectGroup(id) {
       </details>
     </div>
     <div v-if="currentGroup" class="header-actions">
+      <ConversationFindBar
+        :messages="messages"
+        :scroll-container="scrollContainer"
+        target-id-prefix="gc-msg-"
+        :scope-key="scopeKey"
+        :active="active"
+        :is-message-searchable="isMessageSearchable"
+      />
       <button class="btn btn-outline btn-sm" @click="emit('load-tools')"><Settings2 :size="14" />工具</button>
+      <button class="btn btn-outline btn-sm" @click="emit('load-test-targets')"><MonitorCheck :size="14" />测试目标</button>
       <button class="btn btn-outline btn-sm" @click="emit('load-files')"><FolderOpen :size="14" />共享文件</button>
       <button class="btn btn-outline btn-sm" @click="emit('show-members')"><Users :size="14" />成员</button>
       <button class="btn btn-outline btn-sm icon-only" title="刷新消息" aria-label="刷新消息" @click="emit('refresh')"><RefreshCw :size="14" /></button>

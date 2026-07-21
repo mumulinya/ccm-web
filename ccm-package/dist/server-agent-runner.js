@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAgentRunnerRuntime = createAgentRunnerRuntime;
 // Mechanically extracted from server.ts; preserves native and external runner behavior.
 const server_agent_runner_support_1 = require("./server-agent-runner-support");
+const third_party_memory_snapshot_1 = require("./integrations/third-party-memory-snapshot");
+const memory_1 = require("./projects/memory");
 function createAgentRunnerRuntime(deps) {
     const { normalizeToolSelection, hasToolSelection, buildAgentRunnerRuntimeToolPayload, normalizeVerificationCommands, extractVerificationCommandsFromMessage, buildAgentCliAllowedTools, isSpawnPermissionError, nativeContinuationDoneFields, callAgentViaExternalRunner, getProjectToolSelection, findRuntimeToolSnapshotPath, readJsonFileSafe, runtimeToolSnapshotFromAudit, normalizeAgentRunnerRuntimeToolSnapshot, getProjectVerificationCommandsForRunner, runIndependentProjectVerification, buildProjectToolContext, sendRuntimeToolDispatchBlocked, ensureAgentRunnerDirs, createAgentRunnerRequest, waitForAgentRunnerResult, recordNativeCapacityRefreshOutcome, callAgentViaExternalRunnerRaw, runManagedAgentContinuation, continueAgentToolCalls, } = (0, server_agent_runner_support_1.createAgentRunnerSupport)(deps);
     const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, broadcastPetSpeech, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordProjectSessionProviderUsage, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
@@ -223,7 +225,7 @@ function createAgentRunnerRuntime(deps) {
                         const recoveryCommand = buildAgentCommand(agentType, memoryReceiptRecoveryPromptFile, {
                             cliAllowedTools: Array.from(new Set([
                                 ...buildAgentCliAllowedTools(projectName, message),
-                                "mcp__ccm__knowledge_context__acknowledge_memory_context",
+                                ...third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES,
                             ])),
                             mcpConfigPath: workspaceTarget?.mcpConfigPath,
                             persistSession: true,
@@ -909,6 +911,8 @@ function createAgentRunnerRuntime(deps) {
                 workDir,
                 query: options.userMessage || message,
                 verificationHints: getProjectVerificationCommandsForRunner(projectName),
+                memoryDeliveryMode: options.memoryDeliveryMode === "mcp" ? "mcp" : "prompt",
+                memorySnapshotId: options.memorySnapshotId || "",
             })
             : buildProjectConversationBrief(projectName, options.userMessage || message, {
                 analysis: messageMode === "project_analysis",
@@ -917,7 +921,11 @@ function createAgentRunnerRuntime(deps) {
             ? `${baseExecutionBrief}\n\n${String(options.projectSessionContext)}`
             : baseExecutionBrief;
         fs.writeFileSync(tmpMsg, executionBrief, "utf-8");
-        const cmd = buildAgentCommand(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...taskAgentSessionOptions });
+        const cmd = buildAgentCommand(agentType, tmpMsg, {
+            mcpConfigPath: options.mcpConfigPath,
+            ...(options.memoryContextConsumptionReceiptRequired === true ? { cliAllowedTools: third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } : {}),
+            ...taskAgentSessionOptions,
+        });
         const send = (data) => writeSse(res, data);
         const workEvents = Array.isArray(options.initialWorkEvents) ? options.initialWorkEvents.slice(-20) : [];
         const pushProjectWorkEvent = (kind, text, extra = {}) => {
@@ -1071,7 +1079,29 @@ function createAgentRunnerRuntime(deps) {
                         },
                     });
                 }
-                const nativeFailure = detectAgentCommandFailure(agentType, fullOutput.trim(), code, stderrOutput);
+                let nativeFailure = detectAgentCommandFailure(agentType, fullOutput.trim(), code, stderrOutput);
+                let projectMemoryConsumptionReceipt = null;
+                if (!nativeFailure.failed && options.memoryContextConsumptionReceiptRequired === true) {
+                    const receiptValidation = readMemoryContextConsumptionReceipt(options.memoryContextConsumptionChallenge, {
+                        project: projectName,
+                        projectSessionId: projectRun.project_session_id || "",
+                        taskAgentSessionId: options.memoryContextConsumptionChallenge?.task_agent_session_id || "",
+                        memorySnapshotId: options.memorySnapshotId || "",
+                        memorySnapshotChecksum: options.memorySnapshotChecksum || "",
+                    });
+                    if (!receiptValidation.valid) {
+                        nativeFailure = {
+                            failed: true,
+                            message: `第三方 Agent 未完成必需记忆加载，本轮任务不提交：${receiptValidation.issues.join(",")}`,
+                        };
+                    }
+                    else {
+                        projectMemoryConsumptionReceipt = receiptValidation.receipt;
+                        projectRun.memory_context_consumption_receipt = receiptValidation.receipt;
+                        projectRun.memory_snapshot_id = options.memorySnapshotId || "";
+                        projectRun.memory_snapshot_checksum = options.memorySnapshotChecksum || "";
+                    }
+                }
                 let displayOutput = normalized.output || fullOutput.trim();
                 if (nativeFailure.failed) {
                     const failedSession = recordTaskAgentSessionTurn(taskAgentSession.id, { nativeSessionId: normalized.sessionId, success: false, error: nativeFailure.message }) || taskAgentSession;
@@ -1150,6 +1180,54 @@ function createAgentRunnerRuntime(deps) {
                 }
                 broadcastPetSpeech(projectName, { role: "assistant", text: "", mode: "append", final: true, source: "project" });
                 const fileChanges = getFileChanges(projectName, changeSnapshot);
+                if (showTaskExperience && options.memorySnapshotId) {
+                    const reports = (0, third_party_memory_snapshot_1.readThirdPartyMemoryUsageReports)(options.memorySnapshotId, options.memorySnapshotChecksum || "");
+                    const candidates = reports.flatMap((report) => report.acceptedCandidates || []);
+                    if (candidates.length) {
+                        const projectMemory = { constraints: [], decisions: [], facts: [], lessons: [], risks: [], openItems: [], contracts: [] };
+                        const targetKey = {
+                            constraint: "constraints",
+                            decision: "decisions",
+                            fact: "facts",
+                            lesson: "lessons",
+                            risk: "risks",
+                            open_item: "openItems",
+                            contract: "contracts",
+                        };
+                        for (const candidate of candidates) {
+                            const key = targetKey[String(candidate.kind || "")] || "facts";
+                            projectMemory[key].push({
+                                content: candidate.content,
+                                evidence: candidate.evidence,
+                                reason: `第三方 Agent 记忆候选；sourceMessages=${(candidate.sourceMessageIds || []).join(",")}`,
+                            });
+                        }
+                        try {
+                            const memory = (0, memory_1.updateProjectMemoryFromReceipt)({
+                                project: projectName,
+                                workDir,
+                                taskId: projectRun.id,
+                                agent: projectName,
+                                accepted: true,
+                                sourceKind: "accepted_project_session_memory_mcp_report",
+                                actualFiles: fileChanges?.files || fileChanges?.items || [],
+                                receipt: {
+                                    status: "done",
+                                    summary: String(outputWithTools || "项目 Agent 已完成任务").slice(0, 1000),
+                                    filesChanged: fileChanges?.files || fileChanges?.items || [],
+                                    memoryUsed: reports.flatMap((report) => report.usedIds || []),
+                                    memoryIgnored: reports.flatMap((report) => report.ignoredIds || []),
+                                    projectMemory,
+                                },
+                            });
+                            projectRun.memory_admission = memory.lastMemoryAdmission || null;
+                            projectRun.memory_usage_report_ids = reports.map((report) => report.id);
+                        }
+                        catch (error) {
+                            projectRun.memory_admission = { decision: "rejected", error: String(error?.message || error) };
+                        }
+                    }
+                }
                 projectRun.status = "done";
                 projectRun.fileChanges = fileChanges;
                 projectRun.workEvents = workEvents;
@@ -1163,7 +1241,7 @@ function createAgentRunnerRuntime(deps) {
                 setAgentActivity(projectName, "happy", "任务完成");
                 setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
                 pushProjectWorkEvent("done", "执行完成", { final: true, fileChanges });
-                send({ type: "done", fileChanges, workEvents, provider_usage: projectProviderUsage, usage_anchor_id: projectUsageAnchorId, run: publicProjectChatRun(projectRun), taskExperience: {
+                send({ type: "done", fileChanges, workEvents, provider_usage: projectProviderUsage, usage_anchor_id: projectUsageAnchorId, memory_context_consumption_receipt: projectMemoryConsumptionReceipt, run: publicProjectChatRun(projectRun), taskExperience: {
                         task_id: projectRun.id,
                         trace_id: projectRun.trace_id,
                         title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),

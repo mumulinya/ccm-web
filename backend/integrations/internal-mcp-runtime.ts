@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as readline from "readline";
 
-export type InternalMcpAgentRole = "global-agent" | "group-main-agent" | "project-child-agent" | "test-agent";
+export type InternalMcpAgentRole = "global-agent" | "group-main-agent" | "project-agent" | "project-child-agent" | "test-agent";
 
 export type InternalMcpProjectBinding = {
   name: string;
@@ -14,11 +14,13 @@ export type InternalMcpProjectBinding = {
 };
 
 export type InternalMcpTaskContext = {
-  schema: "ccm-internal-mcp-task-context-v1";
+  schema: "ccm-internal-mcp-task-context-v1" | "ccm-internal-mcp-context-v2";
+  bindingKind?: "task" | "project_session";
   taskId: string;
   groupId: string;
   groupSessionId?: string;
   project: string;
+  projectSessionId?: string;
   role: InternalMcpAgentRole;
   agentType?: string;
   taskAgentSessionId?: string;
@@ -28,6 +30,12 @@ export type InternalMcpTaskContext = {
   projects?: InternalMcpProjectBinding[];
   memoryReceiptChallenge?: any;
   memoryReceiptFile?: string;
+  memorySnapshotId?: string;
+  memorySnapshotChecksum?: string;
+  boundaryGeneration?: number;
+  nativeGeneration?: number;
+  requestText?: string;
+  memoryReadBudgetTokens?: number;
   issuedAt: string;
   expiresAt: string;
 };
@@ -82,18 +90,23 @@ export function verifyInternalMcpEvidenceSignature(value: any, supplied: any) {
 export function sealInternalMcpTaskContext(input: Omit<InternalMcpTaskContext, "schema" | "issuedAt" | "expiresAt"> & Partial<Pick<InternalMcpTaskContext, "issuedAt" | "expiresAt">>) {
   const issuedAt = input.issuedAt || new Date().toISOString();
   const expiresAt = input.expiresAt || new Date(Date.parse(issuedAt) + CONTEXT_TTL_MS).toISOString();
+  const bindingKind = input.bindingKind || (input.projectSessionId ? "project_session" : "task");
   const context: InternalMcpTaskContext = {
     ...input,
-    schema: "ccm-internal-mcp-task-context-v1",
+    schema: bindingKind === "project_session" ? "ccm-internal-mcp-context-v2" : "ccm-internal-mcp-task-context-v1",
+    bindingKind,
     taskId: String(input.taskId || "").trim(),
     groupId: String(input.groupId || "").trim(),
     project: String(input.project || "").trim(),
+    projectSessionId: String(input.projectSessionId || "").trim(),
     workDir: path.resolve(String(input.workDir || input.baseWorkDir || ".")),
     baseWorkDir: path.resolve(String(input.baseWorkDir || input.workDir || ".")),
     issuedAt,
     expiresAt,
   };
-  if (!context.taskId || !context.project || !context.role) throw new Error("内部 MCP 缺少任务、项目或角色绑定");
+  if (!context.project || !context.role) throw new Error("内部 MCP 缺少项目或角色绑定");
+  if (bindingKind === "task" && !context.taskId) throw new Error("内部 MCP 缺少任务绑定");
+  if (bindingKind === "project_session" && !context.projectSessionId) throw new Error("内部 MCP 缺少项目会话绑定");
   const payload = Buffer.from(JSON.stringify(context), "utf-8").toString("base64url");
   return `${payload}.${signature(payload)}`;
 }
@@ -106,8 +119,11 @@ export function openInternalMcpTaskContext(token = process.env.CCM_INTERNAL_MCP_
   const right = Buffer.from(expected);
   if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) throw new Error("内部 MCP 任务上下文签名无效");
   const context = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8")) as InternalMcpTaskContext;
-  if (context?.schema !== "ccm-internal-mcp-task-context-v1") throw new Error("内部 MCP 任务上下文版本无效");
-  if (!context.taskId || !context.project || !context.role) throw new Error("内部 MCP 任务上下文绑定不完整");
+  if (!["ccm-internal-mcp-task-context-v1", "ccm-internal-mcp-context-v2"].includes(String(context?.schema || ""))) throw new Error("内部 MCP 上下文版本无效");
+  context.bindingKind = context.bindingKind || (context.projectSessionId ? "project_session" : "task");
+  if (!context.project || !context.role) throw new Error("内部 MCP 上下文绑定不完整");
+  if (context.bindingKind === "task" && !context.taskId) throw new Error("内部 MCP 任务绑定不完整");
+  if (context.bindingKind === "project_session" && !context.projectSessionId) throw new Error("内部 MCP 项目会话绑定不完整");
   if (!Number.isFinite(Date.parse(context.expiresAt)) || Date.parse(context.expiresAt) <= Date.now()) throw new Error("内部 MCP 任务上下文已过期，请重新派发任务");
   return context;
 }
@@ -154,6 +170,7 @@ function appendAudit(server: string, context: InternalMcpTaskContext, tool: stri
     error: String(error || "").slice(0, 500),
     task_id: context.taskId,
     group_id: context.groupId,
+    project_session_id: context.projectSessionId || "",
     project: context.project,
     role: context.role,
     task_agent_session_id: context.taskAgentSessionId || "",

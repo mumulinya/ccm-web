@@ -1,5 +1,26 @@
 <script setup>
 import EmptyState from '../common/EmptyState.vue'
+import CronRunHistoryDrawer from './CronRunHistoryDrawer.vue'
+import {
+  Activity,
+  Archive,
+  CalendarClock,
+  CheckCircle2,
+  Clock3,
+  FolderKanban,
+  History,
+  MessagesSquare,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  TriangleAlert,
+  X
+} from '@lucide/vue'
 import { useCronJobs } from './useCronJobs.js'
 
 const emit = defineEmits(['navigate'])
@@ -24,6 +45,10 @@ const {
   refreshTimer,
   selectedRunJob,
   filteredJobs,
+  enabledJobCount,
+  disabledJobCount,
+  issueJobCount,
+  activeRunCount,
   allFilteredSelected,
   newJob,
   weekOptions,
@@ -43,6 +68,7 @@ const {
   loadProjects,
   loadGroups,
   targetLabel,
+  scheduleLabel,
   statusLabel,
   formatTime,
   formatTimeInZone,

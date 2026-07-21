@@ -51,13 +51,18 @@ const db_1 = require("../core/db");
 const runtime_1 = require("../agents/runtime");
 const utils_1 = require("../core/utils");
 const storage_1 = require("../modules/collaboration/storage");
+const agent_provider_settings_1 = require("../modules/system/agent-provider-settings");
 const tool_authorization_1 = require("./tool-authorization");
 const runtime_tool_sync_part_01_1 = require("./runtime-tool-sync-part-01");
 function getRuntimeExecutionEnv(agentType) {
+    const configured = (0, agent_provider_settings_1.getConfiguredDevelopmentAgentEnv)(agentType);
     if ((0, runtime_1.normalizeAgentRuntimeId)(agentType) !== "codex")
-        return {};
+        return configured;
     const provider = (0, runtime_tool_sync_part_01_1.loadCodexProviderConfig)();
-    return provider ? { [provider.envKey || "CCM_CODEX_API_KEY"]: provider.apiKey } : {};
+    return {
+        ...configured,
+        ...(provider ? { [provider.envKey || "CCM_CODEX_API_KEY"]: provider.apiKey } : {}),
+    };
 }
 function buildCodexConfigToml(mcpServers, gateway, skillPaths = []) {
     const lines = ["# Managed by CCM. This CODEX_HOME contains only tools authorized for this invocation.", ""];
@@ -85,6 +90,25 @@ function buildCodexConfigToml(mcpServers, gateway, skillPaths = []) {
         lines.push("[[skills.config]]", `path = ${(0, runtime_tool_sync_part_01_1.tomlString)(skillPath)}`, "enabled = true", "");
     }
     return lines.join("\n");
+}
+function toOpenCodeMcpServer(server) {
+    const url = String(server?.url || "").trim();
+    if (url)
+        return {
+            type: "remote",
+            url,
+            enabled: true,
+            ...(server?.headers && typeof server.headers === "object" ? { headers: server.headers } : {}),
+        };
+    const command = String(server?.command || "").trim();
+    if (!command)
+        throw new Error("OpenCode MCP 缺少 command");
+    return {
+        type: "local",
+        command: [command, ...(Array.isArray(server?.args) ? server.args.map(String) : [])],
+        enabled: true,
+        ...(server?.env && typeof server.env === "object" ? { environment: server.env } : {}),
+    };
 }
 function runRuntimeToolSyncIntegrationSelfTest() {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-runtime-sync-"));
@@ -437,7 +461,7 @@ function removeManagedCodexAuth(runtimeHome) {
 }
 function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog = {}, options = {}) {
     const runtime = (0, runtime_1.normalizeAgentRuntimeId)(agentType);
-    const nativeSupported = ["claudecode", "cursor", "gemini", "codex", "qoder"].includes(runtime);
+    const nativeSupported = ["claudecode", "cursor", "gemini", "codex", "opencode", "qoder"].includes(runtime);
     const requested = { mcp: (0, runtime_tool_sync_part_01_1.uniqueNames)(allowedTools?.mcp), skill: (0, runtime_tool_sync_part_01_1.uniqueNames)(allowedTools?.skill) };
     const requestedServers = (0, runtime_tool_sync_part_01_1.requestedMcpServers)(allowedTools?.mcp);
     const audit = {
@@ -648,6 +672,26 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
             audit.configFormat = "cursor-isolated-session-plugin";
             audit.isolation = "strict";
             (0, runtime_tool_sync_part_01_1.writeSessionPlugin)(pluginRoot, "cursor", authorizationId, mcpServers, selectedSkills, audit, skillPackagesDir);
+            (0, runtime_tool_sync_part_01_1.writeRuntimeSnapshot)(runtimeRoot, audit);
+        }
+        else if (runtime === "opencode") {
+            const runtimeRoot = path.join(runtimeStorageRoot, "opencode", authorizationId);
+            const configPath = path.join(runtimeRoot, "opencode.json");
+            const skillRoot = path.join(runtimeRoot, "skills");
+            const settings = (0, runtime_tool_sync_part_01_1.readJsonObject)(configPath);
+            const existingServers = settings.mcp && typeof settings.mcp === "object" && !Array.isArray(settings.mcp) ? settings.mcp : {};
+            settings.$schema = settings.$schema || "https://opencode.ai/config.json";
+            settings.mcp = {
+                ...Object.fromEntries(Object.entries(existingServers).filter(([name]) => !name.startsWith(runtime_tool_sync_part_01_1.CCM_MCP_PREFIX))),
+                ...Object.fromEntries(Object.entries(mcpServers).map(([name, server]) => [name, toOpenCodeMcpServer(server)])),
+            };
+            (0, runtime_tool_sync_part_01_1.writeJsonAtomic)(configPath, settings);
+            audit.mcpConfigPath = configPath;
+            audit.runtimeHomePath = runtimeRoot;
+            audit.skillRoot = skillRoot;
+            audit.configFormat = "opencode-isolated-config";
+            audit.isolation = "strict";
+            (0, runtime_tool_sync_part_01_1.syncManagedSkills)(skillRoot, selectedSkills, audit, skillPackagesDir);
             (0, runtime_tool_sync_part_01_1.writeRuntimeSnapshot)(runtimeRoot, audit);
         }
         else {

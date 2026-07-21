@@ -1,0 +1,39 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-21T04:11:29.166Z",
+  "checks": [
+    {
+      "name": "public settings default to CLI login and never expose Claude credentials",
+      "pass": true
+    },
+    {
+      "name": "Claude API secret is encrypted and redacted at rest and over public projection",
+      "pass": true
+    },
+    {
+      "name": "selected Claude credential type and model reach the sanitized Agent process environment",
+      "pass": true
+    },
+    {
+      "name": "saved model selection is passed explicitly to all five managed Agent launches",
+      "pass": true
+    },
+    {
+      "name": "model catalog keeps an automatic option and supports explicit custom model IDs",
+      "pass": true
+    },
+    {
+      "name": "all five managed project Agent runtimes resolve their explicit authentication source",
+      "pass": true
+    },
+    {
+      "name": "non-HTTP Claude provider endpoints are rejected",
+      "pass": true
+    },
+    {
+      "name": "settings UI, five-provider actions, and registry-driven project choices are wired to production paths",
+      "pass": true
+    }
+  ],
+  "paidProviderCalls": 0
+}

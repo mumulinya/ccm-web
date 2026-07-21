@@ -51,7 +51,7 @@ export declare function publicInternalMcpTestRun(state: InternalMcpTestRun | nul
     schema: "ccm-internal-mcp-test-run-v1";
     run_id: string;
     task_id: string;
-    status: "failed" | "completed" | "running" | "planned";
+    status: "completed" | "failed" | "running" | "planned";
     created_at: string;
     updated_at: string;
     plan_valid: boolean;

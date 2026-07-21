@@ -1,8 +1,9 @@
 "use strict";
-// Support helpers extracted from server-agent-runner.ts (behavior-freeze).
-// Contains tool/verification/external-runner plumbing used by the three orchestrators.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAgentRunnerSupport = createAgentRunnerSupport;
+// Support helpers extracted from server-agent-runner.ts (behavior-freeze).
+// Contains tool/verification/external-runner plumbing used by the three orchestrators.
+const third_party_memory_snapshot_1 = require("./integrations/third-party-memory-snapshot");
 function createAgentRunnerSupport(deps) {
     const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, broadcastPetSpeech, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
     function normalizeToolSelection(tools = {}) {
@@ -252,10 +253,13 @@ function createAgentRunnerSupport(deps) {
             results,
         }, null, 2) + "\n```";
     }
-    function buildProjectToolContext(projectName, workDir = "", agentType = "claudecode") {
+    function buildProjectToolContext(projectName, workDir = "", agentType = "claudecode", options = {}) {
         const toolAuth = buildToolAuthorizationPayload(getProjectToolSelection(projectName));
         const allowedTools = toolAuth.tools;
-        const audit = syncRuntimeTools(workDir, agentType, allowedTools, { authorizationReadiness: toolAuth.authorization_readiness });
+        const audit = syncRuntimeTools(workDir, agentType, allowedTools, {
+            authorizationReadiness: toolAuth.authorization_readiness,
+            internalMcpServers: options.internalMcpServers || {},
+        });
         audit.authorization_readiness = toolAuth.authorization_readiness;
         audit.dispatch_gate = buildRuntimeToolDispatchGate(audit);
         recordRuntimeToolSyncAudit(audit, projectName);
@@ -339,7 +343,7 @@ function createAgentRunnerSupport(deps) {
             cliAllowedTools: Array.from(new Set([
                 ...buildAgentCliAllowedTools(projectName, message),
                 ...(executionInfo?.memoryContextConsumptionReceiptRequired === true
-                    ? ["mcp__ccm__knowledge_context__acknowledge_memory_context"]
+                    ? third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES
                     : []),
             ])),
             message,

@@ -1,6 +1,5 @@
-import { type AgentRuntimeId } from "../../agents/runtime";
 export declare function isRuntimeCommandAvailable(agentType: string): boolean;
-export declare function buildRuntimeRecoveryCandidates(primary: string, configured?: any, availability?: (runtime: string) => boolean): AgentRuntimeId[];
+export declare function buildRuntimeRecoveryCandidates(primary: string, configured?: any, availability?: (runtime: string) => boolean): ("claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder")[];
 export declare function shouldSwitchRuntime(error: any): {
     permissionDrift: boolean;
     switchRuntime: boolean;

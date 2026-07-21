@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Archive, CircleCheck, HardDrive, History, RefreshCw, ShieldCheck, Trash2 } from '@lucide/vue'
+import { Archive, CircleCheck, Database, HardDrive, History, Info, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from '@lucide/vue'
 import { toast } from '../../../utils/toast'
 import CleanupStorageOverview from './CleanupStorageOverview.vue'
 import CleanupActionPanel from './CleanupActionPanel.vue'
@@ -22,10 +22,10 @@ const retentionDays = ref(30)
 const initializedPolicy = ref(false)
 
 const views = [
-  { id: 'overview', label: '存储概览', icon: HardDrive },
-  { id: 'safe', label: '安全整理', icon: Archive },
-  { id: 'danger', label: '永久删除', icon: Trash2 },
-  { id: 'history', label: '清理记录', icon: History },
+  { id: 'overview', label: '存储概览', description: '查看运行数据分布', icon: HardDrive },
+  { id: 'safe', label: '安全整理', description: '归档数据，可恢复', icon: Archive },
+  { id: 'danger', label: '永久删除', description: '不可恢复的清除', icon: Trash2, tone: 'danger' },
+  { id: 'history', label: '清理记录', description: '核对操作与结果', icon: History },
 ]
 
 const navigationMap = {
@@ -39,6 +39,14 @@ const currentRows = computed(() => summary.value?.rows?.[selectedCardId.value] |
 const currentCard = computed(() => summary.value?.cards?.find(card => card.id === selectedCardId.value) || null)
 const safeActions = computed(() => (summary.value?.actions || []).filter(action => action.risk === 'safe'))
 const dangerActions = computed(() => (summary.value?.actions || []).filter(action => action.risk === 'danger'))
+const totalRecords = computed(() => (summary.value?.cards || []).reduce((total, card) => total + Number(card.count || 0), 0))
+const formatBytes = (value) => {
+  const bytes = Number(value || 0)
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
 
 const loadSummary = async () => {
   loading.value = true
@@ -152,6 +160,7 @@ onMounted(loadSummary)
         </div>
       </div>
       <div class="cleanup-header-actions">
+        <span v-if="summary?.updated_at" class="cleanup-last-update">扫描于 {{ new Date(summary.updated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
         <span class="cleanup-service-state">
           <CircleCheck :size="15" /> 已启用安全预览
         </span>
@@ -161,20 +170,31 @@ onMounted(loadSummary)
       </div>
     </header>
 
-    <div v-if="error" class="cleanup-alert" role="alert">{{ error }}</div>
+    <div v-if="error" class="cleanup-alert cleanup-page-alert" role="alert">{{ error }}</div>
 
-    <nav class="cleanup-segmented" aria-label="清理中心视图">
-      <button
-        v-for="view in views"
-        :key="view.id"
-        :class="{ active: activeView === view.id }"
-        @click="activeView = view.id; closePreview()"
-      >
-        <component :is="view.icon" :size="15" />
-        {{ view.label }}
-      </button>
-    </nav>
+    <section v-if="summary" class="cleanup-summary-strip" aria-label="清理中心摘要">
+      <div><Database :size="16" /><span><strong>{{ totalRecords.toLocaleString() }}</strong><small>条运行数据</small></span></div>
+      <div><HardDrive :size="16" /><span><strong>{{ formatBytes(summary.storage?.total_bytes) }}</strong><small>已统计空间</small></span></div>
+      <div><Archive :size="16" /><span><strong>{{ safeActions.length }}</strong><small>项可恢复整理</small></span></div>
+      <div class="danger"><ShieldAlert :size="16" /><span><strong>{{ dangerActions.length }}</strong><small>项永久操作</small></span></div>
+    </section>
 
+    <div v-if="summary" class="cleanup-workspace">
+      <nav class="cleanup-segmented" aria-label="清理中心视图">
+        <div class="cleanup-nav-heading"><strong>数据治理</strong><small>选择要处理的范围</small></div>
+        <button
+          v-for="view in views"
+          :key="view.id"
+          :class="[{ active: activeView === view.id }, view.tone]"
+          @click="activeView = view.id; closePreview()"
+        >
+          <span><component :is="view.icon" :size="16" /></span>
+          <span><strong>{{ view.label }}</strong><small>{{ view.description }}</small></span>
+        </button>
+        <div class="cleanup-boundary-note"><Info :size="14" /><span>不会清理项目源码、知识库和用户上传资料。</span></div>
+      </nav>
+
+      <section class="cleanup-stage">
     <main v-if="summary" class="cleanup-content">
       <CleanupStorageOverview
         v-if="activeView === 'overview'"
@@ -189,31 +209,38 @@ onMounted(loadSummary)
       />
 
       <template v-else-if="activeView === 'safe' || activeView === 'danger'">
-        <CleanupActionPanel
-          :mode="activeView"
-          :actions="activeView === 'safe' ? safeActions : dangerActions"
-          :retention-days="retentionDays"
-          :retention-options="summary.policy?.retention_options || [7, 30, 90, 0]"
-          :loading="loading || running"
-          @update:retention-days="retentionDays = $event; closePreview()"
-          @preview="previewAction"
-        />
-        <CleanupPreviewPanel
-          v-if="preview"
-          :preview="preview"
-          :selected-ids="selectedIds"
-          :confirmation-text="confirmationText"
-          :running="running"
-          @toggle="toggleSelected"
-          @toggle-all="toggleAll"
-          @update:confirmation-text="confirmationText = $event"
-          @close="closePreview"
-          @execute="runAction"
-        />
+        <div class="cleanup-action-workspace" :class="{ 'has-preview': preview }">
+          <div class="cleanup-action-column">
+            <CleanupActionPanel
+              :mode="activeView"
+              :actions="activeView === 'safe' ? safeActions : dangerActions"
+              :retention-days="retentionDays"
+              :retention-options="summary.policy?.retention_options || [7, 30, 90, 0]"
+              :loading="loading || running"
+              @update:retention-days="retentionDays = $event; closePreview()"
+              @preview="previewAction"
+            />
+          </div>
+          <CleanupPreviewPanel
+            v-if="preview"
+            :preview="preview"
+            :selected-ids="selectedIds"
+            :confirmation-text="confirmationText"
+            :running="running"
+            @toggle="toggleSelected"
+            @toggle-all="toggleAll"
+            @update:confirmation-text="confirmationText = $event"
+            @close="closePreview"
+            @execute="runAction"
+          />
+        </div>
       </template>
 
       <CleanupHistory v-else :records="summary.history || []" />
     </main>
+
+      </section>
+    </div>
 
     <div v-else-if="loading" class="cleanup-loading">
       <RefreshCw :size="18" class="spinning" /> 正在扫描可整理数据

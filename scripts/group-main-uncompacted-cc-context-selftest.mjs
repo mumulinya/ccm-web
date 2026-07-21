@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const contextModule = await import(pathToFileURL(path.join(root, "ccm-package/dist/modules/collaboration/group-session-model-context.js")).href);
 const routingModule = await import(pathToFileURL(path.join(root, "ccm-package/dist/modules/collaboration/group-orchestrator-routing.js")).href);
-const { buildExactGroupSessionModelContextProjection, prepareExactGroupSessionRenderedPayload } = contextModule;
+const { buildExactGroupSessionModelContextProjection } = contextModule;
 const { prepareExactGroupMainAgentInput } = routingModule;
 
 let checks = 0;
@@ -102,24 +102,6 @@ check(!over.input.context.includes("large-message-0"), "raw messages before the 
 check(over.input.context.includes("large-message-25"), "dynamic recent complete raw messages must remain after compaction");
 check(over.measurement.tokens < over.threshold, "the rebuilt full model payload must pass the post-compact gate");
 
-projectionGeneration = 0;
-let renderedBuilds = 0;
-const directPayload = await prepareExactGroupSessionRenderedPayload({
-  groupId: group.id,
-  groupSessionId: sessionId,
-  modelCapacity: { contextWindow: 64_000, reservedOutputTokens: 20_000, autoCompactBufferTokens: 13_000 },
-  buildProjection: () => projectionGeneration++ === 0 ? largeProjection : compactedProjection,
-  runCompaction: async () => ({ success: true, compacted: true, boundary: { id: "direct-boundary" } }),
-  renderPayload: async projection => {
-    renderedBuilds += 1;
-    return `DIRECT_SYSTEM_AND_TOOLS\n${projection.rendered}\nCURRENT_USER_REQUEST`;
-  },
-});
-check(directPayload.compacted === true, "direct group member payloads must use the same formal compaction transaction");
-check(renderedBuilds === 2, "direct member memory and final prompt must rebuild after compact commit");
-check(directPayload.payload.includes("FORMAL_GROUP_MAIN_SUMMARY"), "direct members must receive the committed canonical group summary");
-check(directPayload.tokens < directPayload.threshold, "direct member post-compact payload must pass its own model capacity gate");
-
 await assert.rejects(
   () => prepareExactGroupMainAgentInput(baseInput, group, sessionId, config, {
     buildProjection: () => largeProjection,
@@ -134,8 +116,8 @@ const taskExecutorSource = fs.readFileSync(path.join(root, "backend/modules/coll
 const routingSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/group-orchestrator-routing.ts"), "utf8");
 check(!liveRoutesSource.includes("buildGroupContextPacket("), "live group model routes must not use fixed-count context packets");
 check(!taskExecutorSource.includes("buildGroupContextPacket("), "queued group tasks must not use fixed-count context packets");
-check((liveRoutesSource.match(/buildExactGroupSessionModelContextPacket\(/g) || []).length >= 2, "group-main live routes must use exact session continuity before central preflight");
-check((liveRoutesSource.match(/prepareExactGroupSessionRenderedPayload\(/g) || []).length >= 3, "all direct and broadcast member Provider paths must use full rendered-payload gates");
+check((liveRoutesSource.match(/buildExactGroupSessionModelContextPacket\(/g) || []).length >= 1, "group-main live route must use exact session continuity before central preflight");
+check(!/\/api\/groups\/broadcast|prepareExactGroupSessionRenderedPayload\(|target_project_actual/.test(liveRoutesSource), "removed direct and broadcast user routes must not retain Provider paths");
 check(routingSource.includes("prepareExactGroupMainAgentInput"), "the group-main Provider boundary must own exact payload preflight");
 check(!routingSource.includes("buildReactiveCompactionContext(enrichedInput.context"), "Provider PTL recovery must not use the legacy character projection");
 check(routingSource.includes("group_main_provider_prompt_too_long"), "Provider PTL must retry through formal model compaction");

@@ -4,6 +4,7 @@ type MusicRemoteCommand = {
     id: string;
     type: string;
     keyword: string;
+    request_text?: string;
     mode?: string;
     source?: string;
     created_at: string;
@@ -46,6 +47,7 @@ export declare function runMusicRemoteCommandQueueSelfTest(): {
     success: boolean;
     checks: {
         claimFirst: boolean;
+        requestTextPreserved: boolean;
         claimNotRedelivered: boolean;
         takeDoesNotStealClaimed: boolean;
         secondStillPending: boolean;

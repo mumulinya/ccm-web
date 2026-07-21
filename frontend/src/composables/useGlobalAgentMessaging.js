@@ -469,11 +469,12 @@ const sendMessage = async (options = {}) => {
               const keyword = String(effect.params?.keyword || '').trim()
               const mode = String(effect.params?.mode || '').trim()
               const commandId = String(effect.params?.command_id || '').trim()
+              const requestText = String(effect.params?.request_text || keyword).trim()
               if (keyword) {
                 void (async () => {
                   try {
                     const { playMusicFromClientEffect } = await import('./useMusicRemotePlayback.js')
-                    const result = await playMusicFromClientEffect({ keyword, mode, commandId })
+                    const result = await playMusicFromClientEffect({ keyword, mode, commandId, requestText })
                     if (result?.skipped) return
                     if (result?.success) {
                       toast.success(`已开始播放：${result.title || keyword}`)

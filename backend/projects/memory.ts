@@ -726,7 +726,14 @@ function buildProjectGitStatusSummary(workDir = "") {
   }
 }
 
-export function buildProjectExecutionBrief(project: string, taskText: string, options: { workDir?: string; resources?: any; query?: string; verificationHints?: any } = {}) {
+export function buildProjectExecutionBrief(project: string, taskText: string, options: {
+  workDir?: string;
+  resources?: any;
+  query?: string;
+  verificationHints?: any;
+  memoryDeliveryMode?: "prompt" | "mcp";
+  memorySnapshotId?: string;
+} = {}) {
   const query = String(options.query || taskText || "");
   const verificationHints = Array.isArray(options.verificationHints)
     ? options.verificationHints.filter(Boolean).join("；")
@@ -737,7 +744,9 @@ export function buildProjectExecutionBrief(project: string, taskText: string, op
     "",
     `本轮用户需求：${compact(taskText, 1800) || "未提供"}`,
     "",
-    buildProjectMemoryPacket(project, { workDir: options.workDir, resources: options.resources, query }),
+    options.memoryDeliveryMode === "mcp"
+      ? `项目长期记忆通过签名 ccm__knowledge_context MCP 读取；snapshot=${String(options.memorySnapshotId || "")}。不得把未读取的记忆声明为已使用。`
+      : buildProjectMemoryPacket(project, { workDir: options.workDir, resources: options.resources, query }),
     "",
     buildProjectGitStatusSummary(options.workDir || ""),
     verificationHints ? `- 项目验证提示：${compact(verificationHints, 1200)}` : "- 项目验证提示：未配置；如需验证，请先识别项目脚本后选择安全命令。",

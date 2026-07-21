@@ -4,7 +4,7 @@ import { toast, confirmDialog } from '../../utils/toast.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { normalizeGroupTools } from './groupChatHelpers.js'
 
-export function useGroupChatAdmin({ currentGroup, groups, projects, messages, groupMemory, currentGroupSessionId, showCreate, showRename, showMembers, showTools, showSharedFiles, showLogs, newGroupName, renameName, groupTools, groupAllTools, groupToolAudit, groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, loadGroups, selectGroup }) {
+export function useGroupChatAdmin({ currentGroup, groups, projects, messages, groupMemory, currentGroupSessionId, showCreate, showRename, showMembers, showTools, showTestTargets, showSharedFiles, showLogs, newGroupName, renameName, groupTools, groupAllTools, groupToolAudit, groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, loadGroups, selectGroup }) {
   const updateCreateGroupProjectSelection = ({ name, selected }) => {
     const project = projects.value.find(p => p.name === name)
     if (project) project.selected = selected
@@ -256,6 +256,58 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
     }
   }
 
+  const groupTestTargets = ref([])
+  const groupTestTargetProjects = ref([])
+  const groupTestTargetsLoading = ref(false)
+  const groupTestTargetsSaving = ref(false)
+
+  const loadGroupTestTargets = async () => {
+    if (!currentGroup.value) return
+    groupTestTargetsLoading.value = true
+    try {
+      const data = await groupsApi.testTargets(currentGroup.value.id)
+      if (data.error) throw new Error(data.error)
+      groupTestTargets.value = data.targets || []
+      groupTestTargetProjects.value = data.projects || []
+      showTestTargets.value = true
+    } catch (error) {
+      toast.error(error?.message || '测试目标读取失败')
+    } finally {
+      groupTestTargetsLoading.value = false
+    }
+  }
+
+  const saveGroupTestTarget = async (target) => {
+    if (!currentGroup.value || groupTestTargetsSaving.value) return
+    groupTestTargetsSaving.value = true
+    try {
+      const data = await groupsApi.saveTestTarget(currentGroup.value.id, target)
+      if (!data.success) throw new Error(data.error || '保存失败')
+      const index = groupTestTargets.value.findIndex(item => item.id === data.target.id)
+      if (index >= 0) groupTestTargets.value.splice(index, 1, data.target)
+      else groupTestTargets.value.push(data.target)
+      toast.success(`测试目标“${data.target.name}”已保存`)
+    } catch (error) {
+      toast.error(error?.message || '测试目标保存失败')
+    } finally {
+      groupTestTargetsSaving.value = false
+    }
+  }
+
+  const deleteGroupTestTarget = async (targetId) => {
+    const target = groupTestTargets.value.find(item => item.id === targetId)
+    const confirmed = await confirmDialog(`确定删除测试目标“${target?.name || targetId}”？`)
+    if (!confirmed || !currentGroup.value) return
+    try {
+      const data = await groupsApi.deleteTestTarget(currentGroup.value.id, targetId)
+      if (!data.success) throw new Error(data.error || '删除失败')
+      groupTestTargets.value = groupTestTargets.value.filter(item => item.id !== targetId)
+      toast.success('测试目标已删除')
+    } catch (error) {
+      toast.error(error?.message || '测试目标删除失败')
+    }
+  }
+
   // 群聊共享文件
   const groupFiles = ref([])
 
@@ -385,6 +437,13 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
     loadGroupTools,
     toggleGroupTool,
     saveGroupTools,
+    groupTestTargets,
+    groupTestTargetProjects,
+    groupTestTargetsLoading,
+    groupTestTargetsSaving,
+    loadGroupTestTargets,
+    saveGroupTestTarget,
+    deleteGroupTestTarget,
     groupFiles,
     loadGroupFiles,
     addGroupFile,

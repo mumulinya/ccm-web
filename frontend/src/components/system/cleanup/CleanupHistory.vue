@@ -31,6 +31,7 @@ const cleanupLabel = (key) => ({
         <p>每次执行都会保存处理范围、结果和释放空间，便于之后核对。</p>
       </div>
     </div>
+    <span class="cleanup-history-count">{{ records.length }} 条记录</span>
   </section>
 
   <section v-if="records.length" class="cleanup-history-list">

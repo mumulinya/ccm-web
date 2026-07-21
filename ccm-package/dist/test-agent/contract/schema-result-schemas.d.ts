@@ -4603,10 +4603,10 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         probeType: z.ZodOptional<z.ZodString>;
     }, "strict", z.ZodTypeAny, {
         project?: string;
-        url?: string;
         name?: string;
-        adversarial?: boolean;
+        url?: string;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4615,10 +4615,10 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         providerRoutingReason?: string;
     }, {
         project?: string;
-        url?: string;
         name?: string;
-        adversarial?: boolean;
+        url?: string;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4630,10 +4630,10 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
     schema?: "ccm-test-agent-browser-execution-plan-v1";
     items?: {
         project?: string;
-        url?: string;
         name?: string;
-        adversarial?: boolean;
+        url?: string;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4650,10 +4650,10 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
     schema?: "ccm-test-agent-browser-execution-plan-v1";
     items?: {
         project?: string;
-        url?: string;
         name?: string;
-        adversarial?: boolean;
+        url?: string;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4704,8 +4704,8 @@ export declare const browserCheckExecutionCoverageSchema: z.ZodObject<{
         status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
     }, "strict", z.ZodTypeAny, {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         checkId?: string;
         expectedRuns?: number;
         plannedProvider?: "mcp" | "none" | "playwright";
@@ -4715,8 +4715,8 @@ export declare const browserCheckExecutionCoverageSchema: z.ZodObject<{
         syntheticBlockedRuns?: number[];
     }, {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         checkId?: string;
         expectedRuns?: number;
         plannedProvider?: "mcp" | "none" | "playwright";
@@ -4729,8 +4729,8 @@ export declare const browserCheckExecutionCoverageSchema: z.ZodObject<{
     status?: "invalid" | "complete" | "incomplete";
     items?: {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         checkId?: string;
         expectedRuns?: number;
         plannedProvider?: "mcp" | "none" | "playwright";
@@ -4757,8 +4757,8 @@ export declare const browserCheckExecutionCoverageSchema: z.ZodObject<{
     status?: "invalid" | "complete" | "incomplete";
     items?: {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         checkId?: string;
         expectedRuns?: number;
         plannedProvider?: "mcp" | "none" | "playwright";
@@ -4805,22 +4805,22 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         status: z.ZodEnum<["complete", "invalid"]>;
         errors: z.ZodArray<z.ZodString, "many">;
     }, "strict", z.ZodTypeAny, {
-        startedAt?: string;
-        status?: "invalid" | "complete";
         id?: string;
+        status?: "invalid" | "complete";
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
-        errors?: string[];
         run?: number;
+        startedAt?: string;
+        errors?: string[];
         finishedAt?: string;
         durationMs?: number;
         checkId?: string;
     }, {
-        startedAt?: string;
-        status?: "invalid" | "complete";
         id?: string;
+        status?: "invalid" | "complete";
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
-        errors?: string[];
         run?: number;
+        startedAt?: string;
+        errors?: string[];
         finishedAt?: string;
         durationMs?: number;
         checkId?: string;
@@ -4828,12 +4828,12 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
 }, "strict", z.ZodTypeAny, {
     status?: "invalid" | "complete";
     items?: {
-        startedAt?: string;
-        status?: "invalid" | "complete";
         id?: string;
+        status?: "invalid" | "complete";
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
-        errors?: string[];
         run?: number;
+        startedAt?: string;
+        errors?: string[];
         finishedAt?: string;
         durationMs?: number;
         checkId?: string;
@@ -4851,12 +4851,12 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
 }, {
     status?: "invalid" | "complete";
     items?: {
-        startedAt?: string;
-        status?: "invalid" | "complete";
         id?: string;
+        status?: "invalid" | "complete";
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
-        errors?: string[];
         run?: number;
+        startedAt?: string;
+        errors?: string[];
         finishedAt?: string;
         durationMs?: number;
         checkId?: string;
@@ -4885,9 +4885,9 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     status: z.ZodEnum<["open", "released", "retained", "cleanup_failed"]>;
     error: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
-    error?: string;
-    status?: "released" | "open" | "retained" | "cleanup_failed";
     id?: string;
+    status?: "released" | "open" | "retained" | "cleanup_failed";
+    error?: string;
     provider?: "mcp" | "playwright";
     scope?: string;
     acquiredAt?: string;
@@ -4897,9 +4897,9 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     releaseAttemptedAt?: string;
     releasedAt?: string;
 }, {
-    error?: string;
-    status?: "released" | "open" | "retained" | "cleanup_failed";
     id?: string;
+    status?: "released" | "open" | "retained" | "cleanup_failed";
+    error?: string;
     provider?: "mcp" | "playwright";
     scope?: string;
     acquiredAt?: string;
@@ -4949,9 +4949,9 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         status: z.ZodEnum<["open", "released", "retained", "cleanup_failed"]>;
         error: z.ZodOptional<z.ZodString>;
     }, "strict", z.ZodTypeAny, {
-        error?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
         id?: string;
+        status?: "released" | "open" | "retained" | "cleanup_failed";
+        error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
         acquiredAt?: string;
@@ -4961,9 +4961,9 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         releaseAttemptedAt?: string;
         releasedAt?: string;
     }, {
-        error?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
         id?: string;
+        status?: "released" | "open" | "retained" | "cleanup_failed";
+        error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
         acquiredAt?: string;
@@ -4977,9 +4977,9 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
     status?: "invalid" | "complete" | "incomplete";
     eventCount?: number;
     events?: {
-        error?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
         id?: string;
+        status?: "released" | "open" | "retained" | "cleanup_failed";
+        error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
         acquiredAt?: string;
@@ -5009,9 +5009,9 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
     status?: "invalid" | "complete" | "incomplete";
     eventCount?: number;
     events?: {
-        error?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
         id?: string;
+        status?: "released" | "open" | "retained" | "cleanup_failed";
+        error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
         acquiredAt?: string;
@@ -5083,8 +5083,8 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
     }, "strict", z.ZodTypeAny, {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         run?: number;
         checkId?: string;
         resultStatus?: "failed" | "passed" | "blocked" | "started" | "skipped" | "already_running" | "timed_out";
@@ -5097,8 +5097,8 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         duplicateToolCallIds?: string[];
     }, {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         run?: number;
         checkId?: string;
         resultStatus?: "failed" | "passed" | "blocked" | "started" | "skipped" | "already_running" | "timed_out";
@@ -5114,8 +5114,8 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
     status?: "invalid" | "complete" | "incomplete";
     items?: {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         run?: number;
         checkId?: string;
         resultStatus?: "failed" | "passed" | "blocked" | "started" | "skipped" | "already_running" | "timed_out";
@@ -5150,8 +5150,8 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
     status?: "invalid" | "complete" | "incomplete";
     items?: {
         project?: string;
-        status?: "invalid" | "complete" | "incomplete";
         name?: string;
+        status?: "invalid" | "complete" | "incomplete";
         run?: number;
         checkId?: string;
         resultStatus?: "failed" | "passed" | "blocked" | "started" | "skipped" | "already_running" | "timed_out";

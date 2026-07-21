@@ -269,7 +269,7 @@ export declare function compactWorkerContextMetadataCategoriesForRetry(packet?: 
 };
 export declare function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: string, replayRepairDispatchBriefs: any[], options?: any): any;
 export declare function pressureProvenanceProviderDispatchPolicyForCoordinator(healthStatus: string): "hold_until_repair" | "allow_with_receipt_sampling" | "strict_review_before_dispatch" | "allow_with_monitoring" | "preferred";
-export declare function pressureProvenanceProviderHealthForCoordinator(policy?: any, row?: any): "critical" | "warning" | "healthy" | "monitor" | "watch";
+export declare function pressureProvenanceProviderHealthForCoordinator(policy?: any, row?: any): "critical" | "healthy" | "monitor" | "warning" | "watch";
 export declare function providerReliabilityConfiguredCandidatesForCoordinator(project: string, selectedAgentType: string, options?: any): any[];
 export declare function providerReliabilityHealthRankForCoordinator(healthStatus: any): number;
 export declare function providerReliabilityRiskRankForCoordinator(riskStatus: any): number;

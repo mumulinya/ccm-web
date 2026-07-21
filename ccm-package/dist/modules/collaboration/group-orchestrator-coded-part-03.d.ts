@@ -590,7 +590,7 @@ export declare function recordWorkerContextProviderDispatchOverrideCompletionFor
 export declare function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId: string): any;
 export declare function uniqueCoordinatorStrings(values?: any[]): string[];
 export declare const REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS_FOR_COORDINATOR: string[];
-export declare function replayRepairWorkItemStatusForCoordinator(value: any): "pending" | "blocked" | "in_progress" | "completed" | "cancelled";
+export declare function replayRepairWorkItemStatusForCoordinator(value: any): "in_progress" | "pending" | "completed" | "cancelled" | "blocked";
 export declare function replayRepairWorkItemOpenForCoordinator(status: any): boolean;
 export declare const API_MICROCOMPACT_NATIVE_PROOF_REPAIR_SOURCES_FOR_COORDINATOR: Set<string>;
 export declare function isApiMicrocompactNativeProofRepairSourceForCoordinator(source: any): boolean;

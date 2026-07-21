@@ -66,11 +66,12 @@ export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedF
         isBroadcast: boolean;
         orchestrated: boolean;
         targetLabel: any;
-        members: any;
+        members: any[];
+        rejectedDirectTarget: string;
     };
     isBroadcast: boolean;
     isOrchestrated: boolean;
-    targetMembers: any;
+    targetMembers: any[];
     messageMode: string;
     messageTraceId: string;
     forceProjectTask: boolean;

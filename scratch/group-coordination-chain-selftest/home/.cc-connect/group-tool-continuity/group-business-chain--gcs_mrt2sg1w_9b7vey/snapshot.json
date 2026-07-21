@@ -1,0 +1,88 @@
+{
+  "schema": "ccm-group-tool-continuity-snapshot-v1",
+  "version": 1,
+  "groupId": "group-business-chain--gcs_mrt2sg1w_9b7vey",
+  "generatedAt": "2026-07-20T10:22:26.816Z",
+  "reason": "save_group_memory",
+  "status": "empty",
+  "snapshotFile": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\home\\.cc-connect\\group-tool-continuity\\group-business-chain--gcs_mrt2sg1w_9b7vey\\snapshot.json",
+  "summaryFile": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\group-coordination-chain-selftest\\home\\.cc-connect\\group-tool-continuity\\group-business-chain--gcs_mrt2sg1w_9b7vey\\summary.md",
+  "strategy": "cc-tool-skill-continuity-context-v1",
+  "configuredTools": {
+    "mcp": [],
+    "skill": []
+  },
+  "allowedTools": {
+    "mcp": [],
+    "skill": []
+  },
+  "requested": {
+    "mcp": [],
+    "skill": []
+  },
+  "synced": {
+    "mcp": [],
+    "skill": []
+  },
+  "missing": {
+    "mcp": [],
+    "skill": []
+  },
+  "invokedSkills": [],
+  "mcpStatuses": [],
+  "skillStatuses": [],
+  "permissionRules": [],
+  "authorizationReadiness": [
+    {
+      "schema": "ccm-tool-authorization-readiness-v1",
+      "source": "current_authorization",
+      "dispatchReady": true,
+      "status": "ready",
+      "requested": {
+        "mcp": 0,
+        "skill": 0
+      },
+      "available": {
+        "mcp": 0,
+        "skill": 0
+      },
+      "missing": {
+        "missing_mcp_servers": 0,
+        "missing_mcp_tools": 0,
+        "missing_skills": 0
+      },
+      "invalid_mcp_grants": 0,
+      "unavailable": {
+        "mcp": [],
+        "skill": []
+      }
+    }
+  ],
+  "dispatchGates": [],
+  "configuredSources": [],
+  "sourceSummary": {
+    "groupFound": false,
+    "memberCount": 0,
+    "configuredSourceCount": 0,
+    "runtimeSnapshotCount": 0,
+    "runtimeAuditCount": 0,
+    "receiptCount": 0
+  },
+  "sourceMessageIds": [],
+  "sourceTaskIds": [],
+  "sourceProjects": [],
+  "snapshotIds": [],
+  "snapshotPaths": [],
+  "mcpConfigPaths": [],
+  "catalogRevisions": [],
+  "warnings": [],
+  "errors": [],
+  "lastRuntimeAt": "",
+  "hasRuntimeEvidence": false,
+  "shouldReuseAsContext": true,
+  "shouldBypassAuthorization": false,
+  "snapshotChecksum": "b28c94b2195c8ed259f0b415",
+  "markdownChecksum": "c0ceffb3e987541ec04c33c0",
+  "markdownChars": 559,
+  "markdownExcerpt": "# CCM Group Tool Continuity\n\n- groupId: group-business-chain--gcs_mrt2sg1w_9b7vey\n- generatedAt: 2026-07-20T10:22:26.816Z\n- strategy: cc-tool-skill-continuity-context-v1\n- status: empty\n- shouldReuseAsContext: true\n- shouldBypassAuthorization: false\n\n## Use Policy\n- Treat this as continuity context for the group chat and fresh third-party child Agent sessions.\n- This snapshot never grants tools and never bypasses CCM runtime authorization.\n- Real dispatch must still pass the current runtime tool gate, MCP config sync, and authorization readiness checks."
+}

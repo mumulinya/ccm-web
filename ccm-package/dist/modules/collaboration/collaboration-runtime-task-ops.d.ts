@@ -15,28 +15,12 @@ export declare function switchTaskExecutor(id: string, requestedRuntime: string,
     success: boolean;
     task: any;
     runtime: {
-        id: import("../../agents/runtime").AgentRuntimeId;
+        id: import("../../agents/catalog").AgentRuntimeId;
         aliases: string[];
         label: string;
         commandLabel: string;
-        capabilities: {
-            print: boolean;
-            streaming: boolean;
-            externalRunner: boolean;
-            worktreeIsolation: boolean;
-            sessionResume: boolean;
-            scratchpadContinuation: boolean;
-        };
-        nativeContinuation: {
-            schema: string;
-            version: number;
-            provider: any;
-            sessionResume: boolean;
-            resumeAckPolicy: string;
-            sessionIdOrigin: string;
-            nativeFork: boolean;
-            forkStrategy: string;
-        };
+        capabilities: import("../../agents/runtime").AgentRuntimeDescriptor["capabilities"];
+        nativeContinuation: any;
     };
     previous_runtime: string;
     project: string;

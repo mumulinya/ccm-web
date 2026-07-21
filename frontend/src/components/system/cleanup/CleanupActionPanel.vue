@@ -16,8 +16,8 @@ const retentionLabel = (days) => days === 0 ? '全部归档' : `${days} 天前`
 
 <template>
   <section class="cleanup-panel-heading">
-    <div class="cleanup-heading-with-icon">
-      <component :is="mode === 'safe' ? Archive : ShieldAlert" :size="19" />
+    <div class="cleanup-heading-with-icon" :class="mode">
+      <span><component :is="mode === 'safe' ? Archive : ShieldAlert" :size="19" /></span>
       <div>
         <h2>{{ mode === 'safe' ? '安全整理' : '永久删除' }}</h2>
         <p v-if="mode === 'safe'">归档不会破坏回放数据，适合先整理失败或过期记录。</p>
@@ -25,6 +25,12 @@ const retentionLabel = (days) => days === 0 ? '全部归档' : `${days} 天前`
       </div>
     </div>
   </section>
+
+  <div class="cleanup-mode-notice" :class="mode">
+    <component :is="mode === 'safe' ? Archive : ShieldAlert" :size="16" />
+    <span v-if="mode === 'safe'"><strong>默认建议</strong>先归档，再根据清理记录决定是否永久删除。</span>
+    <span v-else><strong>高风险区域</strong>生成清单不会删除数据，只有逐项选择并输入确认短语后才会执行。</span>
+  </div>
 
   <section class="cleanup-retention">
     <div>
@@ -47,11 +53,12 @@ const retentionLabel = (days) => days === 0 ? '全部归档' : `${days} 天前`
       <div class="cleanup-action-copy">
         <h3>{{ action.label }}</h3>
         <p>{{ action.description }}</p>
-        <small>按默认 30 天范围检测到 {{ Number(action.target_count || 0).toLocaleString() }} 项</small>
+        <small><strong>{{ Number(action.target_count || 0).toLocaleString() }}</strong> 项可能符合条件</small>
       </div>
       <button class="cleanup-button" :class="{ danger: mode === 'danger' }" :disabled="loading" @click="$emit('preview', action)">
         <Eye :size="15" /> 查看清单
       </button>
     </article>
+    <div v-if="!actions.length" class="cleanup-empty">当前没有可用的整理操作</div>
   </section>
 </template>

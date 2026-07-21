@@ -1,7 +1,7 @@
 {
   "pass": true,
   "internal_mcp_count": 7,
-  "tools_count": 33,
+  "tools_count": 39,
   "bundled_feishu_runtime_registered": true,
   "internal_mcp_hidden_from_external_catalog": true,
   "edit_and_delete_protected": true,

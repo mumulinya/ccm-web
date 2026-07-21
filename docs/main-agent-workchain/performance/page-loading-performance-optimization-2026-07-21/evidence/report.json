@@ -1,0 +1,25 @@
+{
+  "pass": true,
+  "initial": {
+    "requestCount": 14,
+    "musicAssets": 0,
+    "musicDataRequests": 0,
+    "workbenchReads": 0,
+    "workbenchStreams": 1,
+    "timing": {
+      "domContentLoadedMs": 1164,
+      "loadEventMs": 1695,
+      "transferBytes": 256387
+    }
+  },
+  "memoryPrefetched": true,
+  "musicLoadedOnDemand": true,
+  "musicEngineRetained": true,
+  "remoteCommandWakesLazyEngine": true,
+  "afterMusicTiming": {
+    "domContentLoadedMs": 1164,
+    "loadEventMs": 1695,
+    "transferBytes": 4387524
+  },
+  "pageErrors": []
+}

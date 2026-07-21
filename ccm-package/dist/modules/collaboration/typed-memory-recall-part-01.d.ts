@@ -154,7 +154,7 @@ export declare function buildWorkerContextPressureRecallUsageEntry(groupId: stri
     entry_id: string;
 };
 export declare function getGroupPressureRecallUsageRepairWorkItemsFile(groupId: string): any;
-export declare function normalizePressureRecallUsageRepairStatus(value: any): "pending" | "blocked" | "in_progress" | "completed" | "cancelled";
+export declare function normalizePressureRecallUsageRepairStatus(value: any): "in_progress" | "pending" | "completed" | "cancelled" | "blocked";
 export declare function pressureRecallUsageRepairOpen(status: any): boolean;
 export declare function normalizeWorkerContextPressureRecallUsageRepairHints(groupId: string, options?: any): {
     schema: string;

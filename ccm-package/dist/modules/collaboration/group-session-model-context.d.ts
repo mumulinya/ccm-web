@@ -82,24 +82,5 @@ export declare function buildExactGroupSessionModelContextPacket(groupId: string
     };
     rendered: string;
 };
-export declare function prepareExactGroupSessionRenderedPayload(input: any): Promise<{
-    compacted: boolean;
-    projection: any;
-    rendered: any;
-    payload: string;
-    tokens: number;
-    threshold: number;
-    capacity: any;
-    compactResult?: undefined;
-} | {
-    compacted: boolean;
-    projection: any;
-    rendered: any;
-    payload: string;
-    tokens: number;
-    threshold: number;
-    capacity: any;
-    compactResult: any;
-}>;
 export declare const buildChildParentSessionContextProjection: typeof buildExactGroupSessionModelContextProjection;
 export declare const buildChildParentSessionContextPacket: typeof buildExactGroupSessionModelContextPacket;

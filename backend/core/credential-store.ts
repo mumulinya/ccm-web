@@ -77,6 +77,17 @@ export function resolveCredential(value: any) {
   return Buffer.concat([decipher.update(Buffer.from(entry.data, "base64")), decipher.final()]).toString("utf-8");
 }
 
+export function deleteCredential(value: any) {
+  const raw = String(value || "");
+  if (!isCredentialReference(raw)) return false;
+  const id = raw.slice(REF_PREFIX.length);
+  const store = loadStore();
+  if (!store.entries[id]) return false;
+  delete store.entries[id];
+  saveStore(store);
+  return true;
+}
+
 export function protectObjectSecrets(value: any, scope = "config"): any {
   if (Array.isArray(value)) return value.map((item, index) => protectObjectSecrets(item, `${scope}.${index}`));
   if (!value || typeof value !== "object") return value;

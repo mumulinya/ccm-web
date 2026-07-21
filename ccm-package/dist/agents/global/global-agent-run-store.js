@@ -432,7 +432,7 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "git_review", description: "读取并审查指定项目的 Git 变更。", required: ["project"], risk: "read" },
     { name: "git_commit", description: "提交指定项目的代码变更。", required: ["project"], risk: "write" },
     { name: "create_template", description: "创建全局对话模板。", required: ["name", "content"], risk: "write" },
-    { name: "play_music", description: "搜索并播放音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。keyword 可为歌名/歌手，或 __random__ 表示随机播放。", required: ["keyword"], risk: "read" },
+    { name: "play_music", description: "理解用户的点歌、歌手、心情或场景请求并播放音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。keyword 可为歌名、歌手、风格、情绪搜索主题，或 __random__ 表示随机播放。", required: ["keyword"], risk: "read" },
     { name: "stop_music", description: "停止当前正在播放的音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。用于用户说关闭/停止/关掉音乐、停歌等。", required: [], risk: "read" },
     { name: "toggle_pet", description: "打开或关闭桌面宠物。", required: ["action"], risk: "write" },
     { name: "navigate", description: "通知 Web 客户端切换页面；不改变项目数据。", required: ["tab"], risk: "read" },

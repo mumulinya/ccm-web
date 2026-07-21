@@ -8,7 +8,7 @@ export const SESSION_MEMORY_UPDATE_GROWTH_TOKENS = 5_000;
 export const SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES = 3;
 export const SESSION_MEMORY_EXTRACTION_WAIT_MS = 15_000;
 
-export type SessionCompactionScope = "global" | "group" | "project" | "task_agent";
+export type SessionCompactionScope = "global" | "group" | "project" | "task_agent" | "music";
 export type SessionCompactionHookPhase = "pre_compact" | "session_start" | "post_compact";
 
 export type SessionProviderUsageBaseline = {

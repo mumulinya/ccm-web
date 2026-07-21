@@ -64,7 +64,7 @@ assert.equal(catalogResponse.body.read_only, true)
 const expectedInternalMcps = ['ccm__group_coordinator', 'mcp-feishu', 'ccm__task_runtime', 'ccm__knowledge_context', 'ccm__test_acceptance', 'ccm__delivery_workspace', 'ccm__task_evidence']
 for (const name of expectedInternalMcps) assert.equal(catalogResponse.body.items.some(item => item.name === name), true, `catalog missing ${name}`)
 assert.equal(catalogResponse.body.summary.total, 7)
-assert.equal(catalogResponse.body.summary.tools, 33)
+assert.equal(catalogResponse.body.summary.tools, 39)
 assert.equal(catalogResponse.body.items.every(item => item.protected === true && item.immutable === true), true)
 assert.equal(JSON.stringify(catalogResponse.body).includes('internal_mcp_test_secret'), false)
 

@@ -78,12 +78,30 @@ function globalSummaries() {
 
 function taskAgentSummaries() {
   const store = readMemoryFile(path.join(CCM_DIR, "task-agent-sessions.json"));
-  return (store?.sessions || []).map((session: any) => memorySummary(
-    "task_agent",
-    String(session.id || ""),
-    { ...session, compaction: session.compaction || { latestProviderUsage: session.providerContextUsageBaseline, consecutiveFailures: session.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures || 0 } },
-    `${session.project || "任务 Agent"} / ${session.id}`,
-  ));
+  return (store?.sessions || []).map((session: any) => {
+    const sessionId = String(session.id || "");
+    const projectId = String(session.project || "").trim() || "unassigned";
+    const runtime = String(session.agentType || "").trim() || "agent";
+    const summary = memorySummary(
+      "task_agent",
+      sessionId,
+      { ...session, compaction: session.compaction || { latestProviderUsage: session.providerContextUsageBaseline, consecutiveFailures: session.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures || 0 } },
+      `${projectId} / ${sessionId}`,
+    );
+    return {
+      ...summary,
+      projectId,
+      projectLabel: projectId === "unassigned" ? "未关联项目" : projectId,
+      taskAgentSessionId: sessionId,
+      taskId: String(session.taskId || ""),
+      groupId: String(session.groupId || ""),
+      agentType: runtime,
+      status: String(session.status || ""),
+      turnCount: Number(session.turnCount || 0),
+      lastUsedAt: String(session.lastUsedAt || session.updatedAt || session.createdAt || ""),
+      sessionLabel: `${runtime} · ${sessionId}`,
+    };
+  }).sort((left: any, right: any) => String(right.lastUsedAt || "").localeCompare(String(left.lastUsedAt || "")));
 }
 
 export function buildMemoryCenterOverview() {

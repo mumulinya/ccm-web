@@ -1111,6 +1111,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
 
 export async function compactGlobalAgentSessionWithModel(sessionId: string, options: {
   force?: boolean;
+  promptTooLong?: boolean;
   reason?: string;
   customInstructions?: string;
   modelCall?: (request: any) => Promise<any>;
@@ -1118,6 +1119,8 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
   fixedContext?: any;
   tools?: any;
   recoveryContext?: any;
+  modelVisiblePayload?: any;
+  postCompactPayloadBuilder?: (input: any) => Promise<any> | any;
 } = {}) {
   const exactSessionId = String(sessionId || "").trim();
   if (!exactSessionId) throw new Error("缺少全局 Agent 会话 ID");
@@ -1161,7 +1164,7 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
     const config = loadOrchestratorConfig();
     const modelCapacity = resolveGroupModelContextCapacity(config);
     const autoCompactTokenLimit = getGroupAutoCompactThreshold(config);
-    const triggerPayload = buildModelVisiblePayloadSnapshot({
+    const triggerPayload = options.modelVisiblePayload || buildModelVisiblePayloadSnapshot({
       scope: "global",
       sessionId: exactSessionId,
       system: globalFixedContext(memory, config, options),
@@ -1184,8 +1187,8 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       boundaryGeneration: state.boundaryGeneration,
       modelVisiblePayload: triggerPayload,
     });
-    const tokenCount = tokenMeasurement.activeTokens;
-    if (!options.force && tokenCount < autoCompactTokenLimit) {
+    const tokenCount = options.modelVisiblePayload ? triggerPayload.totalTokens : tokenMeasurement.activeTokens;
+    if (!options.force && !options.promptTooLong && tokenCount < autoCompactTokenLimit) {
       return {
         compacted: false,
         reason: "below_threshold",
@@ -1297,7 +1300,10 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       }
     }
     if (!validation.valid) throw lastError || new Error("全局 Agent 模型摘要不可用");
-    const candidate = modelResult?.summary || modelResult;
+    const candidate = normalizeGlobalModelSummary(
+      bindTrustedGlobalSourceBoundary(modelResult?.summary || modelResult, sourceMessageIds),
+      sourceMessageIds,
+    );
     const recoveryContext = options.recoveryContext || {
       filesAndResources: candidate.filesAndResources || [],
       references: candidate.references || [],
@@ -1321,7 +1327,17 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? sha(previousSummary, 40) : ""),
       preservedMessageIds: preservedMessages.map((message: any) => String(message.id || "")),
     });
-    const postCompactPayload = buildModelVisiblePayloadSnapshot({
+    const builtPostCompactPayload = options.postCompactPayloadBuilder
+      ? await options.postCompactPayloadBuilder({
+          summary: candidate,
+          preservedMessages,
+          currentRequest: dedupeGlobalPendingRequest(preservedMessages, currentRequest),
+          recoveryContext: { boundaryMarker, ...recoveryContext },
+          hookResults: sessionStartHookResults,
+          boundaryMarker,
+        })
+      : null;
+    const postCompactPayload = builtPostCompactPayload?.modelVisiblePayload || builtPostCompactPayload || buildModelVisiblePayloadSnapshot({
       scope: "global",
       sessionId: exactSessionId,
       system: globalFixedContext(memory, config, options),
@@ -1371,6 +1387,7 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       trigger: options.force ? "manual" : "auto",
       result: compacted,
     });
+    if (Array.isArray(builtPostCompactPayload?.messages)) (compacted as any).preparedModelMessages = builtPostCompactPayload.messages;
     return compacted;
   })().catch(error => {
     const memory = loadGlobalAgentMemory();

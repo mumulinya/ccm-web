@@ -77,6 +77,7 @@ const db_1 = require("../core/db");
 const runtime_1 = require("../agents/runtime");
 const utils_1 = require("../core/utils");
 const group_orchestrator_1 = require("../modules/collaboration/group-orchestrator");
+const agent_provider_settings_1 = require("../modules/system/agent-provider-settings");
 exports.CCM_MCP_PREFIX = "ccm__";
 exports.CCM_SKILL_MARKER = ".ccm-managed.json";
 const runtimeCliProbeCache = new Map();
@@ -172,8 +173,10 @@ function runtimeCliCandidates(runtime) {
         return ["codex"];
     if (runtime === "gemini")
         return ["gemini"];
+    if (runtime === "opencode")
+        return ["opencode"];
     if (runtime === "qoder")
-        return ["qoder"];
+        return ["qodercli"];
     return [runtime].filter(Boolean);
 }
 function commandAvailable(command) {
@@ -896,6 +899,8 @@ function loadCodexLocalAccessConfig() {
     }
 }
 function loadCodexProviderConfig() {
+    if ((0, agent_provider_settings_1.usesCodexCliLogin)())
+        return null;
     return loadCodexGatewayConfig() || loadCodexLocalAccessConfig();
 }
 //# sourceMappingURL=runtime-tool-sync-part-01.js.map

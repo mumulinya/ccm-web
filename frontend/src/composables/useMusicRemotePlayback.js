@@ -55,12 +55,12 @@ export async function ackMusicRemoteCommand(id, status, error = '') {
   } catch {}
 }
 
-async function requeueMusicRemotePlay(keyword, mode = '', source = 'client-effect-retry') {
+async function requeueMusicRemotePlay(keyword, mode = '', source = 'client-effect-retry', requestText = '') {
   try {
     await fetch('/api/music/remote-command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword, mode, source }),
+      body: JSON.stringify({ keyword, mode, source, request_text: requestText || keyword }),
     })
   } catch {}
 }
@@ -73,6 +73,7 @@ async function requeueMusicRemotePlay(keyword, mode = '', source = 'client-effec
 export async function playMusicFromClientEffect(params = {}) {
   const keyword = String(params.keyword || '').trim()
   const mode = String(params.mode || '').trim()
+  const requestText = String(params.requestText || params.request_text || keyword).trim()
   const commandId = String(params.commandId || params.command_id || '').trim()
   if (!keyword) return { success: false, error: '缺少要播放的歌曲关键词' }
 
@@ -86,23 +87,26 @@ export async function playMusicFromClientEffect(params = {}) {
     : window.__cc_global_play_music
 
   let ownedViaTake = false
+  let takenCommand = null
   if (commandId) {
     const taken = await takeMusicRemoteCommand(commandId)
     if (!taken) {
       return { success: false, skipped: true, reason: 'already_claimed' }
     }
     ownedViaTake = true
+    takenCommand = taken
   }
 
   try {
-    const result = await playFn(keyword, { mode, remote: true, commandId })
+    const resolvedRequestText = String(takenCommand?.request_text || requestText || keyword).trim()
+    const result = await playFn(keyword, { mode, remote: true, commandId, requestText: resolvedRequestText })
     // take() already removed the row; failed plays must re-queue for the poller.
     if (ownedViaTake && result && !result.success && !result.skipped) {
-      await requeueMusicRemotePlay(keyword, mode)
+      await requeueMusicRemotePlay(keyword, mode, 'client-effect-retry', resolvedRequestText)
     }
     return result
   } catch (error) {
-    if (ownedViaTake) await requeueMusicRemotePlay(keyword, mode)
+    if (ownedViaTake) await requeueMusicRemotePlay(keyword, mode, 'client-effect-retry', requestText)
     return { success: false, error: error?.message || String(error) }
   }
 }
@@ -159,18 +163,22 @@ export function startMusicRemoteCommandPoller(options = {}) {
   const onPlayed = typeof options.onPlayed === 'function' ? options.onPlayed : null
   const onStopped = typeof options.onStopped === 'function' ? options.onStopped : null
   const onError = typeof options.onError === 'function' ? options.onError : null
+  const onEngineRequired = typeof options.onEngineRequired === 'function' ? options.onEngineRequired : null
 
   const tick = async () => {
     if (busy) return
     const playReady = typeof window.__cc_global_play_music === 'function'
     const stopReady = typeof window.__cc_global_stop_music === 'function'
-    if (!playReady && !stopReady) return
     busy = true
     try {
       const res = await fetch('/api/music/remote-command')
       const data = await res.json()
       const command = data.command
       if (!command?.id) return
+      if (!playReady && !stopReady) {
+        onEngineRequired?.(command)
+        return
+      }
 
       if (command.type === 'stop') {
         if (!stopReady) return
@@ -192,6 +200,7 @@ export function startMusicRemoteCommandPoller(options = {}) {
         mode: command.mode || getPreferredMusicMode(),
         remote: true,
         commandId: command.id,
+        requestText: command.request_text || command.keyword,
       })
       if (result?.success) {
         await ackMusicRemoteCommand(command.id, 'success')

@@ -42,6 +42,8 @@ const knowledge_files_1 = require("../modules/knowledge/knowledge-files");
 const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
 const memory_context_consumption_receipt_1 = require("./memory-context-consumption-receipt");
+const memory_1 = require("../projects/memory");
+const third_party_memory_snapshot_1 = require("./third-party-memory-snapshot");
 exports.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME = "ccm__knowledge_context";
 function buildKnowledgeContextMcpServerConfig(context) {
     return (0, internal_mcp_runtime_1.buildInternalMcpServerConfig)(path.join(__dirname, "knowledge-context-mcp.js"), context);
@@ -74,13 +76,71 @@ const memoryReceiptTool = {
     inputSchema: {
         type: "object",
         required: ["challenge_id"],
-        properties: { challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" } },
+        properties: {
+            challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" },
+            snapshot_id: { type: "string" },
+            snapshot_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        },
         additionalProperties: false,
     },
-    roles: ["project-child-agent"],
+    roles: ["project-agent", "project-child-agent"],
 };
+const thirdPartyMemoryTools = [
+    {
+        name: "get_context_manifest",
+        description: "读取当前签名作用域的 CCM 会话与长期记忆快照清单。工具不接受 scope 参数。",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        roles: ["project-agent", "project-child-agent"],
+    },
+    {
+        name: "read_session_context",
+        description: "按完整对话轮次分页读取当前精确会话。continuity 为必需连续性，raw_archive 为压缩边界前可选原文。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                view: { type: "string", enum: ["continuity", "raw_archive"] },
+                cursor: { type: "number", minimum: 0 },
+                max_tokens: { type: "number", minimum: 1000, maximum: 20000 },
+            },
+            additionalProperties: false,
+        },
+        roles: ["project-agent", "project-child-agent"],
+    },
+    {
+        name: "search_memory",
+        description: "使用 CCM 现有召回逻辑检索当前群聊和项目允许范围内的长期记忆，返回稳定条目 ID。",
+        inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, limit: { type: "number", minimum: 1, maximum: 12 } }, additionalProperties: false },
+        roles: ["project-agent", "project-child-agent"],
+    },
+    {
+        name: "read_memory_items",
+        description: "读取当前快照或本轮检索返回的长期记忆条目，单次总量不得超过 20K token。",
+        inputSchema: { type: "object", required: ["ids"], properties: { ids: { type: "array", minItems: 1, maxItems: 24, items: { type: "string" } } }, additionalProperties: false },
+        roles: ["project-agent", "project-child-agent"],
+    },
+    {
+        name: "report_memory_usage",
+        description: "报告本轮实际使用、忽略、冲突、核验和候选记忆。候选只进入现有验收流程，不能直接写正式记忆。",
+        inputSchema: {
+            type: "object",
+            required: ["snapshot_id", "snapshot_checksum"],
+            properties: {
+                snapshot_id: { type: "string" },
+                snapshot_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                usedIds: { type: "array", items: { type: "string" }, maxItems: 80 },
+                ignoredIds: { type: "array", items: { type: "string" }, maxItems: 80 },
+                verifiedIds: { type: "array", items: { type: "string" }, maxItems: 80 },
+                conflicts: { type: "array", items: { type: "string" }, maxItems: 20 },
+                candidateUpdates: { type: "array", maxItems: 20, items: { type: "object" } },
+            },
+            additionalProperties: false,
+        },
+        roles: ["project-agent", "project-child-agent"],
+    },
+];
 function toolsForContext(context) {
-    return context.memoryReceiptChallenge?.challenge_id ? [...tools, memoryReceiptTool] : tools;
+    const memoryTools = context.memorySnapshotId ? thirdPartyMemoryTools : [];
+    return context.memoryReceiptChallenge?.challenge_id ? [...tools, ...memoryTools, memoryReceiptTool] : [...tools, ...memoryTools];
 }
 let indexReady = null;
 function ensureIndex() {
@@ -142,12 +202,52 @@ async function scopedSearch(context, query, limit, filename = "") {
 }
 async function callTool(context, name, args) {
     if (name === "acknowledge_memory_context") {
+        if (context.memorySnapshotId) {
+            if (String(args.snapshot_id || "") !== String(context.memorySnapshotId || "")
+                || String(args.snapshot_checksum || "") !== String(context.memorySnapshotChecksum || "")) {
+                throw new Error("记忆接收确认未绑定当前快照");
+            }
+            const hydration = (0, third_party_memory_snapshot_1.inspectThirdPartyMemoryHydration)(context);
+            if (!hydration.ready)
+                throw new Error(`必需记忆尚未读取完成：segments=${hydration.missingSegmentIds.join(",") || "none"}; memory=${hydration.missingMemoryItemIds.join(",") || "none"}`);
+            const receipt = (0, memory_context_consumption_receipt_1.recordMemoryContextConsumptionReceipt)(context, args);
+            (0, third_party_memory_snapshot_1.acknowledgeThirdPartyMemoryHydration)(context);
+            return { success: true, state: "loaded", snapshot_id: context.memorySnapshotId, receipt };
+        }
         return { success: true, state: "loaded", receipt: (0, memory_context_consumption_receipt_1.recordMemoryContextConsumptionReceipt)(context, args) };
     }
+    if (name === "get_context_manifest") {
+        return { success: true, manifest: (0, third_party_memory_snapshot_1.getThirdPartyMemoryManifest)(context) };
+    }
+    if (name === "read_session_context") {
+        return (0, third_party_memory_snapshot_1.readThirdPartySessionContext)(context, args);
+    }
+    if (name === "read_memory_items") {
+        return (0, third_party_memory_snapshot_1.readThirdPartyMemoryItems)(context, args?.ids || []);
+    }
+    if (name === "search_memory") {
+        const query = internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(args?.query, 2000);
+        if (!query)
+            throw new Error("记忆检索问题不能为空");
+        const limit = Math.max(1, Math.min(12, Number(args?.limit || 6)));
+        const packets = [];
+        if (context.groupId && context.groupSessionId) {
+            const { buildAgentMemoryPacket } = require("../modules/collaboration/group-agent-memory-packet");
+            packets.push({ kind: "group_memory", source: `${context.groupId}:${context.groupSessionId}`, required: false, content: buildAgentMemoryPacket(context.groupId, context.project, query, { groupSessionId: context.groupSessionId }) });
+        }
+        packets.push({ kind: "project_memory", source: context.project, required: false, content: (0, memory_1.buildProjectMemoryPacket)(context.project, { workDir: context.workDir, query }) });
+        const results = (0, third_party_memory_snapshot_1.storeThirdPartyMemorySearchItems)(context, packets.slice(0, limit));
+        return { success: true, query, results };
+    }
+    if (name === "report_memory_usage") {
+        return { success: true, report: (0, third_party_memory_snapshot_1.reportThirdPartyMemoryUsage)(context, args) };
+    }
     if (name === "get_project_context") {
-        const task = (0, internal_mcp_task_store_1.getBoundInternalMcpTask)(context);
+        const task = context.bindingKind === "project_session" ? null : (0, internal_mcp_task_store_1.getBoundInternalMcpTask)(context);
         const focus = internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(args?.focus, 1200);
-        const query = [task.business_goal || task.description || task.title, task.acceptance_criteria, focus].flat().filter(Boolean).join("\n");
+        const query = task
+            ? [task.business_goal || task.description || task.title, task.acceptance_criteria, focus].flat().filter(Boolean).join("\n")
+            : [context.requestText, focus].filter(Boolean).join("\n");
         const results = await scopedSearch(context, query, Math.max(1, Math.min(12, Number(args?.limit || 6))));
         return { success: true, query, results, citations: results.map(item => item.citation), scope: { project: context.project, group_id: context.groupId, includes_global: true } };
     }

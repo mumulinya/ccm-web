@@ -71,7 +71,9 @@ const result = cleanup.runCleanupAction('purge_archived_tasks', {
 assert.equal(result.success, true)
 assert.equal(result.receipt.processed_count, 1)
 assert.equal(result.receipt.status, 'success')
-assert.equal(JSON.parse(fs.readFileSync(path.join(ccmDir, 'tasks.json'), 'utf8')).length, 0)
+const remainingTaskFile = path.join(ccmDir, 'tasks.json')
+const remainingTasks = fs.existsSync(remainingTaskFile) ? JSON.parse(fs.readFileSync(remainingTaskFile, 'utf8')) : []
+assert.equal(remainingTasks.length, 0)
 for (const target of [executionFile, checkpointFile, outputFile, artifactDir, testRunFile, replayFile]) {
   assert.equal(fs.existsSync(target), false, `${target} should be removed`)
 }

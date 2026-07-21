@@ -43,7 +43,7 @@ const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const pet_activity_coordinator_1 = require("./pet-activity-coordinator");
 const PET_WEB_ASSETS_DIR = path.join(utils_1.PUBLIC_DIR, "pets");
-const PET_DESKTOP_ASSETS_DIR = path.resolve(__dirname, "..", "..", "..", "pet", "assets");
+const PET_DESKTOP_ASSETS_DIR = PET_WEB_ASSETS_DIR;
 const MAX_PET_ASSET_BYTES = 2 * 1024 * 1024;
 function syncGeneratedPetDisplayNames(customTypes) {
     const list = Array.isArray(customTypes) ? customTypes : [];
@@ -55,10 +55,10 @@ function syncGeneratedPetDisplayNames(customTypes) {
         if (!(skin?.generated || Number(skin?.spriteVersionNumber) === 2))
             continue;
         const relativeDir = path.join("generated", id);
-        const targets = [
-            path.join(PET_WEB_ASSETS_DIR, relativeDir, "pet.json"),
-            path.join(PET_DESKTOP_ASSETS_DIR, relativeDir, "pet.json"),
-        ];
+        const targets = [path.join(PET_WEB_ASSETS_DIR, relativeDir, "pet.json")];
+        if (path.resolve(PET_DESKTOP_ASSETS_DIR) !== path.resolve(PET_WEB_ASSETS_DIR)) {
+            targets.push(path.join(PET_DESKTOP_ASSETS_DIR, relativeDir, "pet.json"));
+        }
         const frontendRoot = path.resolve(utils_1.PUBLIC_DIR, "..", "..", "frontend");
         if (fs.existsSync(frontendRoot)) {
             targets.push(path.join(frontendRoot, "public", "pets", relativeDir, "pet.json"));
@@ -185,8 +185,10 @@ function writePetAsset(assetPath, sourcePath) {
     const devWebAssetsDir = path.resolve(utils_1.PUBLIC_DIR, "..", "..", "frontend", "public", "pets");
     const targets = [
         { root: PET_WEB_ASSETS_DIR, file: path.join(PET_WEB_ASSETS_DIR, safePath) },
-        { root: PET_DESKTOP_ASSETS_DIR, file: path.join(PET_DESKTOP_ASSETS_DIR, safePath) },
     ];
+    if (path.resolve(PET_DESKTOP_ASSETS_DIR) !== path.resolve(PET_WEB_ASSETS_DIR)) {
+        targets.push({ root: PET_DESKTOP_ASSETS_DIR, file: path.join(PET_DESKTOP_ASSETS_DIR, safePath) });
+    }
     if (fs.existsSync(devWebAssetsDir)) {
         targets.push({ root: devWebAssetsDir, file: path.join(devWebAssetsDir, safePath) });
     }

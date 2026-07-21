@@ -10700,7 +10700,7 @@ export declare function buildUserContinuationStatus(task: any, phase?: string): 
 export declare function shouldResumeAfterGoalRevisionInterruption(task: any, executionFollowupRevision?: number): boolean;
 export declare function buildGoalRevisionInterruptedStatus(pending?: any[]): string;
 export declare function shouldShowUserTaskCard(task: any, summary?: any, executions?: any[]): any;
-export declare function timelineStatusForUser(item: any): "failed" | "pending" | "done" | "active" | "warning";
+export declare function timelineStatusForUser(item: any): "done" | "pending" | "failed" | "active" | "warning";
 export declare function timelineLabelForUser(item: any): string;
 export declare function buildUserWorkflowTimeline(task: any, summary: any, phase: string): any;
 export declare function buildUserAgentQuestionRows(summary: any): any;

@@ -43,10 +43,11 @@ exports.validateWorkDirectory = validateWorkDirectory;
 exports.resolveContainedPath = resolveContainedPath;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const catalog_1 = require("../../agents/catalog");
 const INVALID_PROJECT_CHARS = /[\\/:*?"<>|\u0000-\u001f]/;
 const INVALID_WINDOWS_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-exports.PROJECT_AGENT_TYPES = ["claudecode", "cursor", "gemini", "codex", "qoder"];
+exports.PROJECT_AGENT_TYPES = catalog_1.PROJECT_AGENT_TYPES;
 exports.PROJECT_PLATFORMS = ["feishu", "lark", "weixin", "telegram", "slack", "discord"];
 function validateProjectName(value) {
     const name = String(value ?? "");

@@ -1,0 +1,28 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-20T17:00:45.513Z",
+  "checks": {
+    "plannerReadCurrentChangedSource": true,
+    "plannerReceivedPackageScripts": true,
+    "initialModelPlannedCommandExecuted": true,
+    "failureTriggeredFocusedFollowup": true,
+    "previousFailedCommandNotRepeated": true,
+    "unsafeMutationCommandRejectedBeforeExecution": true,
+    "planningEvidencePersisted": true,
+    "followupEvidencePersisted": true,
+    "noPaidProviderCalls": true
+  },
+  "commandResults": [
+    {
+      "command": "npm run test:initial",
+      "status": "failed",
+      "exitCode": 1
+    },
+    {
+      "command": "npm run test:focused",
+      "status": "passed",
+      "exitCode": 0
+    }
+  ],
+  "paidProviderCalls": 0
+}

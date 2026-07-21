@@ -1,0 +1,36 @@
+{
+  "pass": true,
+  "request_id": "gcr_mrt2sg7r_79e39e9c09",
+  "parent_task_id": "mrt2sg2wmkq1",
+  "work_item_task_id": "mrt2shhju1my",
+  "lifecycle": [
+    "submitted_via_mcp",
+    "claimed_by_group_main_agent",
+    "formal_work_item_created",
+    "parallel_work_item_queued",
+    "parallel_session_started",
+    "evidence_review",
+    "worktree_merge_started",
+    "resolved",
+    "source_agent_resumed"
+  ],
+  "dispatch_order": [
+    "backend-agent",
+    "backend-agent",
+    "frontend-agent",
+    "frontend-agent"
+  ],
+  "backend_file_changed": true,
+  "source_session_resumed": true,
+  "isolated_worktree_merged": true,
+  "existing_session_not_interrupted": true,
+  "parallel_events": [
+    "existing-started",
+    "coordination-started",
+    "existing-finished"
+  ],
+  "restart_dependency_state_preserved": true,
+  "post_merge_restart_resumed_without_worktree": true,
+  "merge_conflict_preserved_after_restart": true,
+  "persisted_for_replay": true
+}

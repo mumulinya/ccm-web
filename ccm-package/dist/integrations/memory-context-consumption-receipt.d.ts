@@ -110,12 +110,17 @@ export declare function recordMemoryContextConsumptionReceipt(context: InternalM
     challenge_signature: string;
     group_id: string;
     group_session_id: string;
+    project_session_id: string;
     task_id: string;
     execution_id: string;
     project: string;
     task_agent_session_id: string;
     agent_type: string;
     native_session_id: string;
+    memory_snapshot_id: string;
+    memory_snapshot_checksum: string;
+    boundary_generation: number;
+    native_generation: number;
     attempt: number;
     state: string;
     source: string;

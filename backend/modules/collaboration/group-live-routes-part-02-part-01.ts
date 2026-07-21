@@ -206,7 +206,12 @@ export async function handleGroupLiveRoutesSendPreface(
           ? buildGroupClarificationContinuationMessage(clarificationContext, incomingMessageForAgent)
           : incomingMessageForAgent;
 
-        const routing = selectGroupTargets(group, clarificationContext?.target_project || clarificationContext?.targetProject || target_project);
+        const requestedTarget = String(clarificationContext?.target_project || clarificationContext?.targetProject || target_project || "").trim();
+        const routing = selectGroupTargets(group, requestedTarget);
+        if (routing.rejectedDirectTarget) {
+          sendJson(res, { error: "群聊不再支持用户直接调用项目成员，请把消息交给群聊主 Agent 统一分派", code: "GROUP_DIRECT_MEMBER_REMOVED" }, 410);
+          return { done: true as const };
+        }
         const isBroadcast = routing.isBroadcast;
         const isOrchestrated = routing.orchestrated;
         const targetMembers = routing.members;

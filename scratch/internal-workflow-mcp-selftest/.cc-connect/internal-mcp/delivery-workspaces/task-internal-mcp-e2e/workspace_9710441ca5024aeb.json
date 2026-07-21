@@ -8,12 +8,10 @@
   "worktree_path": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\internal-workflow-mcp-selftest\\demo-project\\.cc-connect\\worktrees\\task-internal-mcp-e2e-coordinator-demo-project-d",
   "branch": "ccm/task-internal-mcp-e2e-coordinator-demo-project-d",
   "base_branch": "master",
-  "base_head": "c54f1ea8b97e44956b06e1580fc58d33716266f9",
-  "created_at": "2026-07-16T04:25:20.794Z",
-  "updated_at": "2026-07-16T04:25:28.564Z",
-  "status": "cleaned",
-  "head": "a234122a5b126ab354c3b1ed1bd6fe611395c1b7",
-  "commit": "04213cb13f604930398c2cd100ea1f1f0cd63d6c",
-  "merged_at": "2026-07-16T04:25:28.242Z",
-  "test_run_id": "test_mrn0a2bh_858nzr"
+  "base_head": "f5b46ba5dcc8f91d1aab09e61bdb2bdbdf8cee91",
+  "created_at": "2026-07-21T04:12:48.692Z",
+  "updated_at": "2026-07-21T04:12:50.488Z",
+  "status": "committed",
+  "head": "56fe21f8068a6cd0a1bec815cfaa07c8c360adf3",
+  "commit": "56fe21f8068a6cd0a1bec815cfaa07c8c360adf3"
 }

@@ -1,0 +1,26 @@
+{
+  "last_run_at": "2026-07-20T15:41:13.947Z",
+  "last_completed_at": "2026-07-20T15:41:16.973Z",
+  "last_result": {
+    "pass": true,
+    "trace_id": "e2e_mrte6kws_4535ffc6749a",
+    "task_id": "e2e-task-1784562073947-f20676",
+    "merge_commit": "7e95385d7215405aaf28e1796dfd4b84aa8a1906",
+    "checks": {
+      "intakeAcceptedOnce": true,
+      "duplicateMessageSuppressedWhileRunning": true,
+      "duplicateMessageReplaysOriginalTask": true,
+      "taskLeaseAcquired": true,
+      "conflictPredictedAndSerialized": true,
+      "agentsShareProtectedWorktree": true,
+      "downstreamWorkerSeesUpstreamChange": true,
+      "realVerificationPassed": true,
+      "mergeExecutedOnce": true,
+      "runtimeCrashTriggersFallback": true,
+      "missingNativeSessionHasSafeRecovery": true,
+      "staleLeaseRecoveryWorks": true,
+      "traceExplainsWholeDelivery": true
+    }
+  },
+  "consecutive_failures": 0
+}

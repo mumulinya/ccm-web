@@ -1,4 +1,5 @@
-export type AgentRuntimeId = "claudecode" | "claude" | "cursor" | "gemini" | "codex" | "qoder";
+import type { AgentRuntimeId as RegisteredAgentRuntimeId } from "./catalog";
+export type AgentRuntimeId = RegisteredAgentRuntimeId;
 export interface AgentCommandOptions {
     cliAllowedTools?: string[];
     mcpConfigPath?: string;
@@ -38,40 +39,24 @@ export interface AgentRuntimeVersionSnapshot {
 }
 export declare function captureAgentRuntimeVersionSnapshot(agentType: string): AgentRuntimeVersionSnapshot;
 export declare const AGENT_RUNTIMES: AgentRuntimeDescriptor[];
-export declare function normalizeAgentRuntimeId(agentType?: string): AgentRuntimeId;
+export declare function normalizeAgentRuntimeId(agentType?: string): RegisteredAgentRuntimeId;
 export declare function getAgentRuntime(agentType?: string): AgentRuntimeDescriptor;
 export declare function buildAgentCommand(agentType: string, msgFile: string, options?: AgentCommandOptions): string;
 export declare function getAgentCommandLabel(agentType: string): string;
-export declare function getPublicAgentRuntimes(): {
-    id: AgentRuntimeId;
+export declare function getPublicAgentRuntimes(): Array<{
+    id: RegisteredAgentRuntimeId;
     aliases: string[];
     label: string;
     commandLabel: string;
-    capabilities: {
-        print: boolean;
-        streaming: boolean;
-        externalRunner: boolean;
-        worktreeIsolation: boolean;
-        sessionResume: boolean;
-        scratchpadContinuation: boolean;
-    };
-    nativeContinuation: {
-        schema: string;
-        version: number;
-        provider: any;
-        sessionResume: boolean;
-        resumeAckPolicy: string;
-        sessionIdOrigin: string;
-        nativeFork: boolean;
-        forkStrategy: string;
-    };
-}[];
+    capabilities: AgentRuntimeDescriptor["capabilities"];
+    nativeContinuation: any;
+}>;
 export declare function isAgentRuntimeAvailable(agentType: string): boolean;
-export declare function getAgentRuntimeFallbackChain(preferred?: string): AgentRuntimeId[];
+export declare function getAgentRuntimeFallbackChain(preferred?: string): ("claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder")[];
 export declare function resolveAvailableAgentRuntime(preferred?: string): {
-    selected: AgentRuntimeId;
-    preferred: AgentRuntimeId;
-    chain: AgentRuntimeId[];
+    selected: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
+    preferred: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
+    chain: ("claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder")[];
     switched: boolean;
 };
 export declare function extractAgentCommandUsage(rawOutput: string, agentType?: string): {
@@ -85,12 +70,12 @@ export declare function extractAgentCommandUsage(rawOutput: string, agentType?: 
     totalTokens: number;
     totalCostUsd: number;
     reported: boolean;
-    provider: AgentRuntimeId;
+    provider: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
 };
 export declare function extractProviderOutputContractEvidence(agentType: string, rawOutput: string, options?: any): {
     schema: string;
     version: number;
-    provider: AgentRuntimeId;
+    provider: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
     parserVersion: number;
     providerContractId: string;
     contractDefinition: {
@@ -141,12 +126,12 @@ export declare function normalizeAgentCommandOutput(agentType: string, rawOutput
         totalTokens: number;
         totalCostUsd: number;
         reported: boolean;
-        provider: AgentRuntimeId;
+        provider: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
     };
     providerOutputContractEvidence: {
         schema: string;
         version: number;
-        provider: AgentRuntimeId;
+        provider: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
         parserVersion: number;
         providerContractId: string;
         contractDefinition: {

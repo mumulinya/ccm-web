@@ -1,0 +1,55 @@
+{
+  "pass": true,
+  "generatedAt": "2026-07-21T05:30:57.148Z",
+  "baseUrl": "http://127.0.0.1:3080",
+  "checks": [
+    {
+      "name": "desktop uses governance navigation and capacity distribution meters",
+      "pass": true
+    },
+    {
+      "name": "desktop overview has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "dangerous action requires exact preview selection and confirmation phrase",
+      "pass": true
+    },
+    {
+      "name": "desktop danger preview has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "desktop history has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "mobile keeps summary and all governance views reachable",
+      "pass": true
+    },
+    {
+      "name": "mobile overview has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "mobile danger preview has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "live cleanup data has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "production cleanup summary loads through the real API",
+      "pass": true
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\main-agent-workchain\\operations-and-integrations\\cleanup\\cleanup-center-workspace-redesign-2026-07-21\\evidence\\desktop-overview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\main-agent-workchain\\operations-and-integrations\\cleanup\\cleanup-center-workspace-redesign-2026-07-21\\evidence\\desktop-danger-preview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\main-agent-workchain\\operations-and-integrations\\cleanup\\cleanup-center-workspace-redesign-2026-07-21\\evidence\\desktop-history.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\main-agent-workchain\\operations-and-integrations\\cleanup\\cleanup-center-workspace-redesign-2026-07-21\\evidence\\mobile-overview.png",
+    "C:\\Users\\admin\\.cc-connect\\ccm\\docs\\main-agent-workchain\\operations-and-integrations\\cleanup\\cleanup-center-workspace-redesign-2026-07-21\\evidence\\mobile-danger-preview.png"
+  ]
+}

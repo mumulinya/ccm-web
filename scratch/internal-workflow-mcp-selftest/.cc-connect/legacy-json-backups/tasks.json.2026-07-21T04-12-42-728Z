@@ -1,0 +1,18 @@
+[
+  {
+    "id": "task-internal-mcp-e2e",
+    "group_id": "group-internal-mcp-e2e",
+    "group_session_id": "session-internal-mcp-e2e",
+    "title": "内部 MCP 真实链路验证",
+    "business_goal": "验证任务、知识、TestAgent、交付工作区与证据 MCP 能被第三方 Agent 调用",
+    "acceptance_criteria": [
+      "npm run check 成功",
+      "任务时间线保存内部 MCP 事件"
+    ],
+    "target_project": "demo-project",
+    "status": "in_progress",
+    "workflow_timeline": [],
+    "created_at": "2026-07-21T04:12:41.333Z",
+    "updated_at": "2026-07-21T04:12:41.335Z"
+  }
+]

@@ -1,11 +1,13 @@
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useMusicPlayer } from './useMusicPlayer.js'
 import { useMusicVisualExperience } from '../../composables/useMusicVisualExperience.js'
+import ConversationFindBar from '../common/ConversationFindBar.vue'
 import { ChevronDown, ChevronUp, Download, Heart, ListMusic, Maximize2, MessageCircle, Minimize2, MoreHorizontal, PanelRightClose, Pause, Pencil, Play, Plus, Repeat1, Repeat2, Search, Shuffle, SkipBack, SkipForward, Trash2, Upload, Volume2, VolumeX, X } from '@lucide/vue'
 
 const props = defineProps({
-  agentLabel: { type: String, default: '乖乖' }
+  agentLabel: { type: String, default: '乖乖' },
+  active: { type: Boolean, default: true },
 })
 
 const {
@@ -107,6 +109,7 @@ const {
   mode,
   moveTrackInActivePlaylist,
   musicAgentLabel,
+  musicMemoryContext,
   newPlaylistName,
   nextRecommendTrack,
   nextTrack,
@@ -190,6 +193,13 @@ const {
 const musicAssistantOpen = ref(false)
 const immersiveMode = ref(false)
 const mobilePlayerExpanded = ref(false)
+const musicMemoryLabel = computed(() => {
+  const current = Math.max(0, Number(musicMemoryContext.value?.currentTokens || 0))
+  const threshold = Math.max(0, Number(musicMemoryContext.value?.autoCompactThreshold || 0))
+  if (!threshold) return ''
+  const compact = (value) => value >= 1000 ? `${Math.round(value / 100) / 10}K` : String(value)
+  return `${compact(current)} / ${compact(threshold)}`
+})
 const { coverUrl, trackBackdropStyle, trackVisualKey, visualCssVars } = useMusicVisualExperience({ currentTrack, sessionAnimeCover })
 
 const toggleMusicAssistant = async (force) => {

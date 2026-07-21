@@ -56,6 +56,8 @@ const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const native_continuation_1 = require("./native-continuation");
+const agent_provider_settings_1 = require("../modules/system/agent-provider-settings");
+const catalog_1 = require("./catalog");
 const AGENT_RUNTIME_VERSION_CACHE = new Map();
 function stableRuntimeChecksum(value) {
     const canonical = (input) => Array.isArray(input)
@@ -79,10 +81,12 @@ function getRuntimeVersionCommand(agentType) {
         const explicit = String(process.env.CCM_CURSOR_AGENT_COMMAND || "").trim();
         if (explicit)
             return explicit;
-        return commandExists("cursor-agent") ? "cursor-agent" : "agent";
+        return (0, agent_provider_settings_1.resolveCursorAgentCommand)();
     }
     if (provider === "gemini")
         return "gemini";
+    if (provider === "opencode")
+        return "opencode";
     if (provider === "qoder")
         return "qodercli";
     return provider;
@@ -226,6 +230,14 @@ function formatWindowsEnvPrefix(values) {
         .map(([key, value]) => `set "${key}=${String(value).replace(/"/g, "")}"`);
     return assignments.length ? `${assignments.join(" && ")} && ` : "";
 }
+function formatRuntimeEnvPrefix(values) {
+    if (process.platform === "win32")
+        return formatWindowsEnvPrefix(values);
+    const assignments = Object.entries(values)
+        .filter(([, value]) => String(value || "").trim())
+        .map(([key, value]) => `${key}='${String(value).replace(/'/g, `'\\''`)}'`);
+    return assignments.length ? `${assignments.join(" ")} ` : "";
+}
 function buildIsolatedHomeEnv(homePath, runtime) {
     const normalized = path.resolve(homePath);
     const root = path.parse(normalized).root.replace(/[\\/]$/, "");
@@ -257,12 +269,14 @@ function buildCodexExecCommand(msgFile, options = {}) {
     const sandboxMode = getCodexSandboxMode();
     const developerInstructionsFile = String(options.developerInstructionsFile || "").trim();
     const helper = path.join(__dirname, "codex-prompt-runner.js");
+    const selectedModel = (0, agent_provider_settings_1.getConfiguredDevelopmentAgentModel)("codex");
+    const modelArgs = selectedModel ? ["--model", selectedModel] : [];
     if (options.persistSession && options.resumeSession && sessionId) {
-        const args = ["exec", "resume", "-c", `sandbox_mode=${JSON.stringify(sandboxMode)}`, "--skip-git-repo-check", "--json", sessionId, "-"];
+        const args = ["exec", "resume", ...modelArgs, "-c", `sandbox_mode=${JSON.stringify(sandboxMode)}`, "--skip-git-repo-check", "--json", sessionId, "-"];
         return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(developerInstructionsFile)} ${quoteCmdArg(encodeCliArgs(args))}`;
     }
     const persistence = options.persistSession ? " --json" : " --ephemeral";
-    const args = ["exec", ...flags.split(" "), persistence.trim(), "--skip-git-repo-check", "-"].filter(Boolean);
+    const args = ["exec", ...modelArgs, ...flags.split(" "), persistence.trim(), "--skip-git-repo-check", "-"].filter(Boolean);
     return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(developerInstructionsFile)} ${quoteCmdArg(encodeCliArgs(args))}`;
 }
 function getCodexSandboxMode() {
@@ -281,13 +295,13 @@ function buildCursorAgentCommand(msgFile, options = {}) {
     const metadata = readRuntimeLaunchMetadata(options);
     const sessionId = String(options.sessionId || "").trim();
     const explicit = String(process.env.CCM_CURSOR_AGENT_COMMAND || "").trim();
-    const available = (command) => process.platform === "win32"
-        ? (0, child_process_1.spawnSync)("where.exe", [command], { windowsHide: true, stdio: "ignore" }).status === 0
-        : (0, child_process_1.spawnSync)("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" }).status === 0;
-    const command = explicit || (available("cursor-agent") ? "cursor-agent" : available("agent") ? "agent" : "cursor-agent");
+    const command = explicit || (0, agent_provider_settings_1.resolveCursorAgentCommand)();
     const isolatedHome = String(metadata.isolatedHomePath || "").trim();
     const homePrefix = isolatedHome ? formatWindowsEnvPrefix(buildIsolatedHomeEnv(isolatedHome, "cursor")) : "";
     const args = ["-p", "--force", "--trust"];
+    const selectedModel = (0, agent_provider_settings_1.getConfiguredDevelopmentAgentModel)("cursor");
+    if (selectedModel)
+        args.push("--model", selectedModel);
     if (metadata.pluginDirPath) {
         args.push("--approve-mcps", "--plugin-dir", String(metadata.pluginDirPath));
     }
@@ -297,6 +311,35 @@ function buildCursorAgentCommand(msgFile, options = {}) {
         args.push("--resume", sessionId);
     const helper = path.join(__dirname, "cli-prompt-runner.js");
     return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(command)} ${encodeCliArgs(args)}`;
+}
+function buildGeminiAgentCommand(msgFile, options = {}) {
+    const args = ["--approval-mode", "yolo", "--skip-trust", "--output-format", "json"];
+    const selectedModel = (0, agent_provider_settings_1.getConfiguredDevelopmentAgentModel)("gemini");
+    if (selectedModel)
+        args.push("--model", selectedModel);
+    const tools = Array.isArray(options.cliAllowedTools)
+        ? Array.from(new Set(options.cliAllowedTools.map(item => String(item || "").trim()).filter(Boolean)))
+        : [];
+    if (tools.length)
+        args.push("--allowed-tools", tools.join(","));
+    args.push("--prompt");
+    const helper = path.join(__dirname, "cli-prompt-runner.js");
+    return `node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg("gemini")} ${encodeCliArgs(args)}`;
+}
+function buildOpenCodeAgentCommand(msgFile, options = {}) {
+    const metadata = readRuntimeLaunchMetadata(options);
+    const configPath = String(options.mcpConfigPath || "").trim();
+    const runtimeRoot = String(metadata.runtimeHomePath || (configPath ? path.dirname(configPath) : "")).trim();
+    const envPrefix = formatRuntimeEnvPrefix({
+        OPENCODE_CONFIG: configPath,
+        OPENCODE_CONFIG_DIR: runtimeRoot,
+    });
+    const args = ["run", "--format", "json", "--auto"];
+    const selectedModel = (0, agent_provider_settings_1.getConfiguredDevelopmentAgentModel)("opencode");
+    if (selectedModel)
+        args.push("--model", selectedModel);
+    const helper = path.join(__dirname, "cli-prompt-runner.js");
+    return `${envPrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg("opencode")} ${encodeCliArgs(args)}`;
 }
 exports.AGENT_RUNTIMES = [
     {
@@ -318,7 +361,9 @@ exports.AGENT_RUNTIMES = [
                 ? (options.resumeSession ? ` --resume ${quoteCmdArg(sessionId)}` : ` --session-id ${quoteCmdArg(sessionId)}`)
                 : "";
             const metadata = readRuntimeLaunchMetadata(options);
-            return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${formatAppendSystemPromptFileArg(options)}${sessionArg} -p`;
+            const selectedModel = (0, agent_provider_settings_1.getConfiguredDevelopmentAgentModel)("claudecode");
+            const modelArg = selectedModel ? ` --model ${quoteCmdArg(selectedModel)}` : "";
+            return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}${modelArg}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${formatAppendSystemPromptFileArg(options)}${sessionArg} -p`;
         },
     },
     {
@@ -338,9 +383,9 @@ exports.AGENT_RUNTIMES = [
     },
     {
         id: "gemini",
-        aliases: ["gemini"],
+        aliases: ["gemini", "geminicli", "gemini-cli"],
         label: "Gemini CLI",
-        commandLabel: "gemini -p",
+        commandLabel: "gemini --output-format json --prompt",
         capabilities: {
             print: true,
             streaming: false,
@@ -349,7 +394,7 @@ exports.AGENT_RUNTIMES = [
             sessionResume: false,
             scratchpadContinuation: true,
         },
-        buildCommand: msgFile => pipeFileToCommand(msgFile, "gemini -p"),
+        buildCommand: (msgFile, options) => buildGeminiAgentCommand(msgFile, options),
     },
     {
         id: "codex",
@@ -365,6 +410,21 @@ exports.AGENT_RUNTIMES = [
             scratchpadContinuation: true,
         },
         buildCommand: (msgFile, options) => buildCodexExecCommand(msgFile, options),
+    },
+    {
+        id: "opencode",
+        aliases: ["opencode", "open-code"],
+        label: "OpenCode",
+        commandLabel: "opencode run --format json --auto",
+        capabilities: {
+            print: true,
+            streaming: false,
+            externalRunner: true,
+            worktreeIsolation: true,
+            sessionResume: false,
+            scratchpadContinuation: true,
+        },
+        buildCommand: (msgFile, options) => buildOpenCodeAgentCommand(msgFile, options),
     },
     {
         id: "qoder",
@@ -383,9 +443,7 @@ exports.AGENT_RUNTIMES = [
     },
 ];
 function normalizeAgentRuntimeId(agentType = "") {
-    const key = String(agentType || "").trim().toLowerCase();
-    const runtime = exports.AGENT_RUNTIMES.find(item => item.aliases.includes(key) || item.id === key);
-    return runtime?.id || "claudecode";
+    return (0, catalog_1.findDevelopmentAgent)(agentType)?.id || "claudecode";
 }
 function getAgentRuntime(agentType = "") {
     const id = normalizeAgentRuntimeId(agentType);
@@ -398,14 +456,19 @@ function getAgentCommandLabel(agentType) {
     return getAgentRuntime(agentType).commandLabel;
 }
 function getPublicAgentRuntimes() {
-    return exports.AGENT_RUNTIMES.map(runtime => ({
-        id: runtime.id,
-        aliases: runtime.aliases,
-        label: runtime.label,
-        commandLabel: runtime.commandLabel,
-        capabilities: runtime.capabilities,
-        nativeContinuation: (0, native_continuation_1.getNativeContinuationCapabilityProfile)(runtime.id),
-    }));
+    return catalog_1.DEVELOPMENT_AGENT_CATALOG.map(definition => {
+        const runtime = exports.AGENT_RUNTIMES.find(item => item.id === definition.id);
+        if (!runtime)
+            return null;
+        return {
+            id: definition.id,
+            aliases: [...definition.aliases],
+            label: definition.label,
+            commandLabel: runtime.commandLabel,
+            capabilities: runtime.capabilities,
+            nativeContinuation: (0, native_continuation_1.getNativeContinuationCapabilityProfile)(runtime.id),
+        };
+    }).filter(Boolean);
 }
 function commandExists(command) {
     try {
@@ -420,21 +483,15 @@ function commandExists(command) {
 }
 function isAgentRuntimeAvailable(agentType) {
     const runtime = normalizeAgentRuntimeId(agentType);
-    if (runtime === "claudecode")
-        return commandExists("claude");
-    if (runtime === "cursor")
-        return commandExists("cursor-agent") || commandExists("agent");
-    if (runtime === "codex")
-        return commandExists("codex");
-    if (runtime === "gemini")
-        return commandExists("gemini");
+    if (["claudecode", "cursor", "codex", "gemini", "opencode"].includes(runtime))
+        return (0, agent_provider_settings_1.isDevelopmentAgentReady)(runtime);
     if (runtime === "qoder")
         return commandExists("qodercli");
     return false;
 }
 function getAgentRuntimeFallbackChain(preferred = "claudecode") {
     const preferredRuntime = normalizeAgentRuntimeId(preferred || "claudecode");
-    const priority = ["claudecode", "cursor", "codex"];
+    const priority = ["claudecode", "codex", "cursor", "gemini", "opencode"];
     const ordered = [preferredRuntime, ...priority.filter(item => item !== preferredRuntime)];
     return ordered.filter((item, index, arr) => arr.indexOf(item) === index);
 }
@@ -622,7 +679,55 @@ function normalizeAgentCommandOutput(agentType, rawOutput, options = {}) {
     const raw = String(rawOutput || "").trim();
     const usage = extractAgentCommandUsage(raw, runtime);
     const providerOutputContractEvidence = extractProviderOutputContractEvidence(runtime, raw, options);
-    if (!raw || !["codex", "cursor"].includes(runtime))
+    if (!raw)
+        return { output: raw, sessionId: "", rawSessionId: "", usage, providerOutputContractEvidence };
+    if (["gemini", "opencode"].includes(runtime)) {
+        const messages = [];
+        const append = (value) => {
+            const text = String(value || "").trim();
+            if (text && messages[messages.length - 1] !== text)
+                messages.push(text);
+        };
+        const inspect = (event) => {
+            if (!event || typeof event !== "object")
+                return;
+            if (typeof event.response === "string")
+                append(event.response);
+            if (typeof event.result === "string")
+                append(event.result);
+            if (event.type === "text")
+                append(event.text || event.part?.text);
+            if (["assistant", "assistant_message", "message"].includes(String(event.type || ""))
+                && ["", "assistant"].includes(String(event.role || event.message?.role || ""))) {
+                append(event.text || event.content || event.message?.content);
+            }
+            if (event.part?.type === "text")
+                append(event.part.text);
+        };
+        for (const line of raw.split(/\r?\n/)) {
+            const text = line.trim();
+            if (!text.startsWith("{"))
+                continue;
+            try {
+                inspect(JSON.parse(text));
+            }
+            catch { }
+        }
+        if (!messages.length && raw.startsWith("{") && raw.endsWith("}")) {
+            try {
+                inspect(JSON.parse(raw));
+            }
+            catch { }
+        }
+        return {
+            output: messages.length ? messages.join("\n\n") : raw,
+            sessionId: "",
+            rawSessionId: "",
+            usage,
+            providerOutputContractEvidence,
+        };
+    }
+    if (!["codex", "cursor"].includes(runtime))
         return { output: raw, sessionId: "", rawSessionId: "", usage, providerOutputContractEvidence };
     if (runtime === "cursor") {
         let sessionId = "";

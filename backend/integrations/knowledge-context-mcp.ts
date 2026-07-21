@@ -14,6 +14,16 @@ import {
 } from "./internal-mcp-runtime";
 import { getBoundInternalMcpTask, internalMcpTaskPayload } from "./internal-mcp-task-store";
 import { recordMemoryContextConsumptionReceipt } from "./memory-context-consumption-receipt";
+import { buildProjectMemoryPacket } from "../projects/memory";
+import {
+  acknowledgeThirdPartyMemoryHydration,
+  getThirdPartyMemoryManifest,
+  inspectThirdPartyMemoryHydration,
+  readThirdPartyMemoryItems,
+  readThirdPartySessionContext,
+  reportThirdPartyMemoryUsage,
+  storeThirdPartyMemorySearchItems,
+} from "./third-party-memory-snapshot";
 
 export const KNOWLEDGE_CONTEXT_MCP_SERVER_NAME = "ccm__knowledge_context";
 
@@ -50,14 +60,73 @@ const memoryReceiptTool: InternalMcpToolDefinition = {
   inputSchema: {
     type: "object",
     required: ["challenge_id"],
-    properties: { challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" } },
+    properties: {
+      challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" },
+      snapshot_id: { type: "string" },
+      snapshot_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    },
     additionalProperties: false,
   },
-  roles: ["project-child-agent"],
+  roles: ["project-agent", "project-child-agent"],
 };
 
+const thirdPartyMemoryTools: InternalMcpToolDefinition[] = [
+  {
+    name: "get_context_manifest",
+    description: "读取当前签名作用域的 CCM 会话与长期记忆快照清单。工具不接受 scope 参数。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    roles: ["project-agent", "project-child-agent"],
+  },
+  {
+    name: "read_session_context",
+    description: "按完整对话轮次分页读取当前精确会话。continuity 为必需连续性，raw_archive 为压缩边界前可选原文。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        view: { type: "string", enum: ["continuity", "raw_archive"] },
+        cursor: { type: "number", minimum: 0 },
+        max_tokens: { type: "number", minimum: 1000, maximum: 20000 },
+      },
+      additionalProperties: false,
+    },
+    roles: ["project-agent", "project-child-agent"],
+  },
+  {
+    name: "search_memory",
+    description: "使用 CCM 现有召回逻辑检索当前群聊和项目允许范围内的长期记忆，返回稳定条目 ID。",
+    inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, limit: { type: "number", minimum: 1, maximum: 12 } }, additionalProperties: false },
+    roles: ["project-agent", "project-child-agent"],
+  },
+  {
+    name: "read_memory_items",
+    description: "读取当前快照或本轮检索返回的长期记忆条目，单次总量不得超过 20K token。",
+    inputSchema: { type: "object", required: ["ids"], properties: { ids: { type: "array", minItems: 1, maxItems: 24, items: { type: "string" } } }, additionalProperties: false },
+    roles: ["project-agent", "project-child-agent"],
+  },
+  {
+    name: "report_memory_usage",
+    description: "报告本轮实际使用、忽略、冲突、核验和候选记忆。候选只进入现有验收流程，不能直接写正式记忆。",
+    inputSchema: {
+      type: "object",
+      required: ["snapshot_id", "snapshot_checksum"],
+      properties: {
+        snapshot_id: { type: "string" },
+        snapshot_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        usedIds: { type: "array", items: { type: "string" }, maxItems: 80 },
+        ignoredIds: { type: "array", items: { type: "string" }, maxItems: 80 },
+        verifiedIds: { type: "array", items: { type: "string" }, maxItems: 80 },
+        conflicts: { type: "array", items: { type: "string" }, maxItems: 20 },
+        candidateUpdates: { type: "array", maxItems: 20, items: { type: "object" } },
+      },
+      additionalProperties: false,
+    },
+    roles: ["project-agent", "project-child-agent"],
+  },
+];
+
 function toolsForContext(context: InternalMcpTaskContext) {
-  return context.memoryReceiptChallenge?.challenge_id ? [...tools, memoryReceiptTool] : tools;
+  const memoryTools = context.memorySnapshotId ? thirdPartyMemoryTools : [];
+  return context.memoryReceiptChallenge?.challenge_id ? [...tools, ...memoryTools, memoryReceiptTool] : [...tools, ...memoryTools];
 }
 
 let indexReady: Promise<any> | null = null;
@@ -113,12 +182,50 @@ async function scopedSearch(context: InternalMcpTaskContext, query: string, limi
 
 async function callTool(context: InternalMcpTaskContext, name: string, args: any) {
   if (name === "acknowledge_memory_context") {
+    if (context.memorySnapshotId) {
+      if (String(args.snapshot_id || "") !== String(context.memorySnapshotId || "")
+        || String(args.snapshot_checksum || "") !== String(context.memorySnapshotChecksum || "")) {
+        throw new Error("记忆接收确认未绑定当前快照");
+      }
+      const hydration = inspectThirdPartyMemoryHydration(context);
+      if (!hydration.ready) throw new Error(`必需记忆尚未读取完成：segments=${hydration.missingSegmentIds.join(",") || "none"}; memory=${hydration.missingMemoryItemIds.join(",") || "none"}`);
+      const receipt = recordMemoryContextConsumptionReceipt(context, args);
+      acknowledgeThirdPartyMemoryHydration(context);
+      return { success: true, state: "loaded", snapshot_id: context.memorySnapshotId, receipt };
+    }
     return { success: true, state: "loaded", receipt: recordMemoryContextConsumptionReceipt(context, args) };
   }
+  if (name === "get_context_manifest") {
+    return { success: true, manifest: getThirdPartyMemoryManifest(context) };
+  }
+  if (name === "read_session_context") {
+    return readThirdPartySessionContext(context, args);
+  }
+  if (name === "read_memory_items") {
+    return readThirdPartyMemoryItems(context, args?.ids || []);
+  }
+  if (name === "search_memory") {
+    const query = internalMcpTaskPayload.cleanText(args?.query, 2000);
+    if (!query) throw new Error("记忆检索问题不能为空");
+    const limit = Math.max(1, Math.min(12, Number(args?.limit || 6)));
+    const packets: any[] = [];
+    if (context.groupId && context.groupSessionId) {
+      const { buildAgentMemoryPacket } = require("../modules/collaboration/group-agent-memory-packet");
+      packets.push({ kind: "group_memory", source: `${context.groupId}:${context.groupSessionId}`, required: false, content: buildAgentMemoryPacket(context.groupId, context.project, query, { groupSessionId: context.groupSessionId }) });
+    }
+    packets.push({ kind: "project_memory", source: context.project, required: false, content: buildProjectMemoryPacket(context.project, { workDir: context.workDir, query }) });
+    const results = storeThirdPartyMemorySearchItems(context, packets.slice(0, limit));
+    return { success: true, query, results };
+  }
+  if (name === "report_memory_usage") {
+    return { success: true, report: reportThirdPartyMemoryUsage(context, args) };
+  }
   if (name === "get_project_context") {
-    const task = getBoundInternalMcpTask(context);
+    const task = context.bindingKind === "project_session" ? null : getBoundInternalMcpTask(context);
     const focus = internalMcpTaskPayload.cleanText(args?.focus, 1200);
-    const query = [task.business_goal || task.description || task.title, task.acceptance_criteria, focus].flat().filter(Boolean).join("\n");
+    const query = task
+      ? [task.business_goal || task.description || task.title, task.acceptance_criteria, focus].flat().filter(Boolean).join("\n")
+      : [context.requestText, focus].filter(Boolean).join("\n");
     const results = await scopedSearch(context, query, Math.max(1, Math.min(12, Number(args?.limit || 6))));
     return { success: true, query, results, citations: results.map(item => item.citation), scope: { project: context.project, group_id: context.groupId, includes_global: true } };
   }

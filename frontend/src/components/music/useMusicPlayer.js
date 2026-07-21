@@ -288,6 +288,9 @@ export function useMusicPlayer(options = {}) {
     detachAgentChatResizeObserver,
     loadChatMessages,
     clearChatHistory,
+    persistAssistantMessage,
+    compactMusicMemory,
+    musicMemoryContext,
     beginAgentRequest,
     finishAgentRequest,
     stopAgentRequest,
@@ -779,12 +782,38 @@ export function useMusicPlayer(options = {}) {
         mode.value = playModeHint
       }
 
+      const requestText = String(options.requestText || options.request_text || kw).trim()
+      let playbackPlan = {
+        strategy: isRandomMusicKeyword(kw) ? 'random' : 'exact_song',
+        searchQuery: kw,
+        artist: '',
+        randomize: isRandomMusicKeyword(kw),
+        strictMatch: !isRandomMusicKeyword(kw),
+        source: 'frontend-fallback',
+        reason: '',
+      }
+      try {
+        const planRes = await fetch('/api/music/resolve-play-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestText, keyword: kw, mode: playModeHint }),
+        })
+        if (!isLatest()) return superseded()
+        const planData = await planRes.json()
+        if (!isLatest()) return superseded()
+        if (planData?.success && planData?.plan?.strategy) playbackPlan = planData.plan
+      } catch (error) {
+        console.warn('[GlobalPlay] 播放意图识别失败，使用精确/随机兜底:', error)
+      }
+      const effectiveQuery = String(playbackPlan.searchQuery || kw).trim()
+      console.log('[GlobalPlay] 结构化播放计划:', playbackPlan)
+
       if (!tracks.value.length) {
         await loadTracks()
         if (!isLatest()) return superseded()
       }
 
-      const selectTrackFromCandidates = async (query, candidates) => {
+      const selectTrackFromCandidates = async (query, candidates, plan = playbackPlan) => {
         if (!isLatest()) return superseded()
         const list = Array.isArray(candidates) ? candidates.slice(0, 8) : []
         if (!list.length) return { success: false, rejected: true, error: '没有可供选择的候选歌曲' }
@@ -794,6 +823,9 @@ export function useMusicPlayer(options = {}) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               keyword: query,
+              originalRequest: requestText,
+              selectionMode: plan.strictMatch ? 'exact' : (plan.strategy === 'artist_random' ? 'artist_random' : 'recommendation'),
+              randomize: plan.randomize === true,
               candidates: list.map((item) => ({
                 title: item.title || item.name || '',
                 artist: item.artist || item.author || item.singer || '',
@@ -818,7 +850,7 @@ export function useMusicPlayer(options = {}) {
           }
         } catch (err) {
           if (!isLatest()) return superseded()
-          const best = pickBestSearchResult(query, list)
+          const best = plan.strictMatch ? pickBestSearchResult(query, list) : pickRandomTrack(list)
           if (!best) return { success: false, rejected: true, error: err?.message || '选曲失败' }
           return { success: true, item: best, source: 'fallback', reason: '本地规则打分兜底' }
         }
@@ -837,7 +869,7 @@ export function useMusicPlayer(options = {}) {
         return { success: true, source: sourceLabel, title: formatTrackLabel(track) }
       }
 
-      const playCloudByMode = async (query) => {
+      const playCloudByMode = async (query, plan = playbackPlan) => {
         if (!isLatest()) return superseded()
         const q = String(query || '').trim()
         if (!q) return { success: false, error: '缺少搜索关键词' }
@@ -851,7 +883,7 @@ export function useMusicPlayer(options = {}) {
           const data = await res.json()
           if (!isLatest()) return superseded()
           if (data.success && data.results?.length) {
-            const picked = await selectTrackFromCandidates(q, data.results)
+            const picked = await selectTrackFromCandidates(q, data.results, plan)
             if (!isLatest()) return superseded()
             if (!picked.success) return { success: false, error: picked.error || '网易云未找到足够匹配的歌曲' }
             const played = await convertNeteaseAndPlay(picked.item, { ...options, remote: true, playbackIntent })
@@ -867,7 +899,7 @@ export function useMusicPlayer(options = {}) {
         const biliData = await biliRes.json()
         if (!isLatest()) return superseded()
         if (biliData.success && biliData.results?.length) {
-          const picked = await selectTrackFromCandidates(q, biliData.results)
+          const picked = await selectTrackFromCandidates(q, biliData.results, plan)
           if (!isLatest()) return superseded()
           if (!picked.success) return { success: false, error: picked.error || 'B站未找到足够匹配的歌曲' }
           const played = await convertAndPlay(picked.item, { ...options, remote: true, playbackIntent })
@@ -879,8 +911,8 @@ export function useMusicPlayer(options = {}) {
       }
 
       // 播放指定歌单：整单入队
-      const savedPlaylist = matchSavedPlaylistByKeyword(kw)
-      if (savedPlaylist && !isRandomMusicKeyword(kw)) {
+      const savedPlaylist = playbackPlan.strictMatch ? matchSavedPlaylistByKeyword(effectiveQuery) : null
+      if (savedPlaylist && playbackPlan.strategy !== 'random') {
         const played = await playPlaylistById(savedPlaylist.id, { ...options, remote: true, playbackIntent })
         if (!isLatest()) return superseded()
         if (played.success) {
@@ -889,7 +921,7 @@ export function useMusicPlayer(options = {}) {
         }
       }
 
-      if (isRandomMusicKeyword(kw)) {
+      if (playbackPlan.strategy === 'random') {
         // 有本地曲：全库入队后在队列内随机，绝不先走云端热门
         if (tracks.value.length) {
           const pool = await ensurePlaybackQueueFromLibrary({ forceFullLibrary: true })
@@ -912,7 +944,7 @@ export function useMusicPlayer(options = {}) {
         }
         const cloudQuery = nextCloudRandomQuery(playModeHint)
         try {
-          const cloud = await playCloudByMode(cloudQuery)
+          const cloud = await playCloudByMode(cloudQuery, { ...playbackPlan, strategy: 'mood_recommendation', strictMatch: false, randomize: true })
           if (!isLatest()) return superseded()
           if (cloud.success) return { ...cloud, source: `${cloud.source || playModeHint}-random` }
           return cloud
@@ -922,29 +954,30 @@ export function useMusicPlayer(options = {}) {
         }
       }
 
-      // 1. Local candidates → model/rule pick when multiple; single strong hit can play directly.
-      const localRows = listLocalTrackCandidates(kw, tracks.value, { minScore: 40, limit: 8 })
+      // 1. Local candidates: exact requests stay strict; artist/mood/genre use recommendation semantics.
+      const localMinScore = playbackPlan.strictMatch ? 40 : (playbackPlan.strategy === 'artist_random' ? 40 : 1)
+      const localRows = listLocalTrackCandidates(effectiveQuery, tracks.value, { minScore: localMinScore, limit: 8 })
       const strongLocal = localRows.filter(row => row.score >= MUSIC_MATCH_MIN_SCORE)
-      if (strongLocal.length === 1) {
+      if (playbackPlan.strictMatch && strongLocal.length === 1) {
         console.log('[GlobalPlay] 本地唯一高分匹配:', formatTrackLabel(strongLocal[0].track))
         return await playSelectedLocal(strongLocal[0].track, 'local')
       }
       if (localRows.length > 0) {
-        const picked = await selectTrackFromCandidates(kw, localRows.map(row => row.track))
+        const picked = await selectTrackFromCandidates(effectiveQuery, localRows.map(row => row.track), playbackPlan)
         if (!isLatest()) return superseded()
         if (picked.success && picked.item) {
           console.log('[GlobalPlay] 本地候选已点名:', formatTrackLabel(picked.item), picked.source)
           return await playSelectedLocal(picked.item, `local-${picked.source || 'pick'}`)
         }
         // Keep going to cloud if local pick rejected.
-      } else {
-        const matchedLocal = findLocalTrackByKeyword(kw)
+      } else if (playbackPlan.strictMatch) {
+        const matchedLocal = findLocalTrackByKeyword(effectiveQuery)
         if (matchedLocal) return await playSelectedLocal(matchedLocal, 'local')
       }
 
       // 2. Mode-aware cloud search + model pick.
       try {
-        const played = await playCloudByMode(kw)
+        const played = await playCloudByMode(effectiveQuery, playbackPlan)
         if (!isLatest()) return superseded()
         return played
       } catch (err) {
@@ -1012,13 +1045,13 @@ export function useMusicPlayer(options = {}) {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
   }
 
-  const autoplayFromAgentAction = async (action) => {
+  const autoplayFromAgentAction = async (action, requestText = '') => {
     if (!action || action.type !== 'play_music') return null
     const source = String(action.source || '').trim().toLowerCase()
     if (source && !['agent', 'fallback', 'simple-fallback'].includes(source)) return null
     const keyword = String(action.keyword || '').trim()
     if (!keyword || typeof window.__cc_global_play_music !== 'function') return null
-    const result = await window.__cc_global_play_music(keyword)
+    const result = await window.__cc_global_play_music(keyword, { requestText: requestText || action.requestText || keyword, mode: action.mode || mode.value })
     if (result?.skipped) return result
     if (result?.success) {
       toast.success(`Agent 已播放：${result.title}`)
@@ -1032,6 +1065,27 @@ export function useMusicPlayer(options = {}) {
     const msg = agentInput.value.trim()
     if (!msg || agentLoading.value) return
     agentInput.value = ''
+
+    if (/^\/compact(?:\s|$)/i.test(msg)) {
+      agentLoading.value = true
+      try {
+        const result = await compactMusicMemory(msg.replace(/^\/compact\s*/i, ''))
+        pushAgentMessage({
+          role: 'system',
+          content: result?.compacted
+            ? `记忆压缩完成：${result.beforeTokens || 0} → ${result.afterTokens || 0} tokens`
+            : `当前不需要压缩（${result?.reason || 'nothing_to_compact'}）`,
+          time: formatTimeHHMMSS()
+        })
+      } catch (error) {
+        pushAgentMessage({ role: 'system', content: `记忆压缩失败：${error?.message || error}`, time: formatTimeHHMMSS() })
+      } finally {
+        agentLoading.value = false
+        await nextTick()
+        scrollChat({ force: true })
+      }
+      return
+    }
     
     const time = formatTimeHHMMSS()
     pushAgentMessage({ role: 'operator', content: msg, time })
@@ -1115,7 +1169,12 @@ export function useMusicPlayer(options = {}) {
       if (petStreamStarted && !petStreamHadError) {
         notifyMusicPetSpeech('', { role: 'assistant', mode: 'append', final: true, source: 'music-chat' })
       }
-      const playResult = await autoplayFromAgentAction(musicAction)
+      if (String(agentMsg.content || '').trim()) {
+        await persistAssistantMessage(agentMsg.content, { action: musicAction, results: agentMsg.results || [] }).catch((error) => {
+          console.error('Failed to persist music assistant response:', error)
+        })
+      }
+      const playResult = await autoplayFromAgentAction(musicAction, msg)
       if (playResult) {
         pushAgentMessage({
           role: 'system',
@@ -1158,8 +1217,16 @@ export function useMusicPlayer(options = {}) {
         })
         scrollChat()
         notifyMusicPetSpeech(replyText, { role: 'assistant', mode: 'replace', final: true, source: 'music-chat' })
+        await persistAssistantMessage(replyText, {
+          action: data.action || null,
+          results: [
+            ...(data.localResults || []).map(t => ({ type: 'local', track: t })),
+            ...(data.biliResults || []).map(r => ({ type: 'bilibili', ...r })),
+            ...(data.neteaseResults || []).map(r => ({ type: 'netease', ...r }))
+          ].slice(0, 8)
+        }).catch((error) => console.error('Failed to persist music assistant response:', error))
         if (data.action?.type === 'play_music') {
-          const result = await autoplayFromAgentAction(data.action)
+          const result = await autoplayFromAgentAction(data.action, msg)
           if (result && !result.skipped) {
             pushAgentMessage({
               role: 'system',
@@ -1374,6 +1441,7 @@ export function useMusicPlayer(options = {}) {
     canvasRef,
     captureAgentChatScroll,
     clearChatHistory,
+    compactMusicMemory,
     clearFinishedDownloadJobs,
     closePlaylistDialog,
     companionTimeStr,
@@ -1439,6 +1507,7 @@ export function useMusicPlayer(options = {}) {
     lyrics,
     lyricsOffset,
     mode,
+    musicMemoryContext,
     moveTrackInActivePlaylist,
     musicAgentLabel,
     newPlaylistName,

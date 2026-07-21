@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "boot_id": "DESKTOP-MN23N8A:15308:bde84376",
+  "pid": 15308,
+  "hostname": "DESKTOP-MN23N8A",
+  "status": "running",
+  "started_at": "2026-07-20T15:46:26.360Z",
+  "last_seen_at": "2026-07-20T15:51:26.439Z",
+  "restart": {
+    "category": "unexpected_crash",
+    "expected": false,
+    "reason": "上一进程没有留下正常退出记录",
+    "task_id": "",
+    "trace_id": ""
+  },
+  "previous_boot_id": "DESKTOP-MN23N8A:31264:f5d9b982",
+  "previous_pid": 31264,
+  "active_execution": {
+    "task_id": "",
+    "trace_id": "",
+    "task_ids": [],
+    "trace_ids": [],
+    "captured_at": "2026-07-20T15:51:26.440Z"
+  }
+}

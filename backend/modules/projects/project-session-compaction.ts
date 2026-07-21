@@ -774,13 +774,61 @@ export async function compactProjectSessionWithModel(project: string, projectSes
   return operation;
 }
 
-export function buildProjectSessionPostCompactContext(project: string, projectSessionId: string, targetAgentType = "") {
-  const file = sessionFile(project, projectSessionId);
-  if (!fs.existsSync(file)) return "";
-  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+function projectSessionMessageContent(value: any) {
+  const content = value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "content")
+    ? value.content
+    : value;
+  if (typeof content === "string") return content;
+  try { return JSON.stringify(content); } catch { return String(content || ""); }
+}
+
+function excludePendingProjectRequest(history: any[], currentRequest: any) {
+  if (currentRequest == null || currentRequest === "") return { history, deduplicated: false };
+  const last = history.at(-1);
+  const matchesSavedRequest = String(last?.role || "") === "user"
+    && projectSessionMessageContent(last) === projectSessionMessageContent(currentRequest);
+  return matchesSavedRequest
+    ? { history: history.slice(0, -1), deduplicated: true }
+    : { history, deduplicated: false };
+}
+
+export function buildProjectSessionPostCompactContext(
+  project: string,
+  projectSessionId: string,
+  targetAgentType = "",
+  options: { currentRequest?: any } = {},
+) {
   const binding = getProjectSessionAgentBinding(project, projectSessionId);
   const targetProvider = targetAgentType ? normalizeAgentRuntimeId(targetAgentType) : "";
-  if (binding.status === "open" && binding.turn_count > 0 && (!targetProvider || binding.provider === targetProvider)) return "";
+  if (binding.status === "open"
+    && binding.turn_count > 0
+    && (!targetProvider || binding.provider === targetProvider)) return "";
+  const projection = buildProjectSessionModelContextProjection(project, projectSessionId, options);
+  if (!projection) return "";
+  if (!projection.summary && !projection.visibleMessages.length) return "";
+  return [
+    "【当前项目逻辑会话连续性上下文】",
+    "这是 CCM 为新第三方 Agent 会话世代恢复的历史上下文。执行前仍须核验当前文件和真实状态。",
+    `- mode=${projection.mode}`,
+    "- raw_transcript_preserved=true；不使用本地摘要、固定消息条数或字符截断。",
+    `- current_request_deduplicated=${projection.currentRequestDeduplicated}`,
+    projection.canonicalSummary
+      ? `正式模型摘要：${JSON.stringify(projection.summary)}`
+      : "正式模型摘要：无；尚未发生正式模型压缩，以下为当前会话全部历史原文。",
+    projection.visibleMessages.length
+      ? `${projection.canonicalSummary ? "压缩后近期完整原文" : "压缩前完整会话原文"}（${projection.visibleMessages.length}/${projection.historyMessageCount} 条，${projection.visibleMessageTokens} tokens）：${JSON.stringify(projection.visibleMessages)}`
+      : `${projection.canonicalSummary ? "压缩后近期完整原文" : "压缩前完整会话原文"}：无`,
+  ].join("\n");
+}
+
+export function buildProjectSessionModelContextProjection(
+  project: string,
+  projectSessionId: string,
+  options: { currentRequest?: any } = {},
+) {
+  const file = sessionFile(project, projectSessionId);
+  if (!fs.existsSync(file)) return null;
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
   const state = projectCompactionState(data, project, projectSessionId);
   const summary = state.activeSummary || null;
   const compatibilitySummary = data.compaction?.active_summary || null;
@@ -788,19 +836,51 @@ export function buildProjectSessionPostCompactContext(project: string, projectSe
     throw new Error("项目会话压缩摘要校验失败，V2 与兼容字段不一致");
   }
   if (summary && String(data.compaction?.active_summary_checksum || "") !== summaryChecksum(summary)) throw new Error("项目会话压缩摘要校验失败，拒绝注入");
-  const history = Array.isArray(data.history) ? data.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
+  const history = Array.isArray(data.history)
+    ? data.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || "")))
+    : [];
+  const pending = excludePendingProjectRequest(history, options.currentRequest);
+  const historyBeforeCurrentTurn = pending.history;
+  const canonicalSummary = !!summary;
   const recentFloor = Math.max(0, state.lastCompactedIndex + 1);
-  const historyBeforeCurrentTurn = history.slice(0, -1);
-  const recentWindow = calculateSessionMemoryKeepWindow(historyBeforeCurrentTurn, {
+  const recentWindow = canonicalSummary ? calculateSessionMemoryKeepWindow(historyBeforeCurrentTurn, {
     floorIndex: recentFloor,
     lastSummarizedMessageId: String(state.sessionMemoryState?.lastExtractedMessageId || ""),
-  });
-  const recent = historyBeforeCurrentTurn.slice(recentWindow.startIndex).map((message: any) => ({ id: message.id, role: message.role, content: String(message.content || "") }));
-  if (!summary && !recent.length) return "";
-  return [
-    "【当前项目逻辑会话连续性上下文】",
-    "这是 CCM 为新第三方 Agent 会话世代恢复的历史上下文。执行前仍须核验当前文件和真实状态。",
-    summary ? `模型压缩摘要：${JSON.stringify(summary)}` : "模型压缩摘要：无",
-    recent.length ? `最近消息（${recentWindow.preservedTokenCount} tokens）：${JSON.stringify(recent)}` : "最近消息：无",
-  ].join("\n");
+  }) : {
+    startIndex: 0,
+    preservedTokenCount: historyBeforeCurrentTurn.reduce((sum: number, message: any) => sum + estimateTextTokens(projectSessionMessageContent(message)), 0),
+    preservedMessageCount: historyBeforeCurrentTurn.length,
+    preservedTextMessageCount: historyBeforeCurrentTurn.filter((message: any) => projectSessionMessageContent(message).trim()).length,
+  };
+  const visibleMessages = canonicalSummary
+    ? historyBeforeCurrentTurn.slice(recentWindow.startIndex)
+    : historyBeforeCurrentTurn;
+  const visible = visibleMessages.map((message: any) => ({
+    id: message.id,
+    role: message.role,
+    content: projectSessionMessageContent(message),
+  }));
+  const mode = canonicalSummary ? "canonical_summary_recent_raw" : "precompact_full_raw";
+  const archiveMessages = canonicalSummary
+    ? historyBeforeCurrentTurn.slice(0, recentWindow.startIndex).map((message: any) => ({ id: message.id, role: message.role, content: projectSessionMessageContent(message) }))
+    : [];
+  return {
+    schema: "ccm-project-session-model-context-v1",
+    project,
+    projectSessionId,
+    mode,
+    canonicalSummary,
+    summary,
+    summarySource: canonicalSummary ? String(data.compaction?.summary_source || data.compaction?.summarySource || "") : "",
+    summaryChecksum: canonicalSummary ? summaryChecksum(summary) : "",
+    boundaryGeneration: Number(state.boundaryGeneration || 0),
+    lastCompactedIndex: Number(state.lastCompactedIndex || -1),
+    currentRequestDeduplicated: pending.deduplicated,
+    historyMessageCount: history.length,
+    visibleMessages: visible,
+    archiveMessages,
+    visibleMessageTokens: Number(recentWindow.preservedTokenCount || 0),
+    recentWindow,
+    transcriptChecksum: sessionCompactionChecksum(historyBeforeCurrentTurn.map((message: any) => [message.id, message.role, projectSessionMessageContent(message)])),
+  };
 }

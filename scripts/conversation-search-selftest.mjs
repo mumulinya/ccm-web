@@ -29,6 +29,8 @@ const checks = {
   safeRendering: !page.includes('v-html') && !result.includes('v-html') && !highlighter.includes('v-html') && highlighter.includes('{{ segment.text }}'),
   completeFiltersAndPagination: ['source', 'role', 'agent', 'timeRange', 'matchMode', 'response.page_count'].every(value => page.includes(value)),
   recentAndFavoritesPersist: page.includes('ccm-conversation-search-recent-v2') && page.includes('ccm-conversation-search-favorites-v2'),
+  sourceToolbarIsIntegrated: page.includes('class="source-toolbar"') && page.includes('class="source-filter-group"') && page.includes('sourceCounts'),
+  sourceSwitchLeavesFavorites: page.includes("viewMode.value = 'results'") && page.includes('const selectSource'),
   contextTaskAttachmentResult: result.includes('查看前后文') && result.includes('item.taskId') && result.includes('item.attachments'),
   unifiedRouteRegistered: server.includes('handleConversationSearchApi') && !legacySessions.includes('pathname === "/api/search"'),
   appRoutesAllConversationTypes: app.includes("item.conversationType === 'global'") && app.includes("item.conversationType === 'group'") && app.includes("item.conversationType === 'task'"),

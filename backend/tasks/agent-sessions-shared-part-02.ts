@@ -325,6 +325,17 @@ export function hasMeaningfulMemoryContext(value: any) {
 
 
 export function extractGroupSessionMemoryBinding(memoryContext: any = {}) {
+  if (memoryContext?.schema === "ccm-third-party-memory-mcp-reference-v1") {
+    const supplied = memoryContext.group_session_memory_binding || null;
+    if (!supplied) return null;
+    const payload = { ...supplied };
+    const checksum = String(payload.checksum || "");
+    delete payload.checksum;
+    if (!checksum || hashValue(payload) !== checksum) {
+      return { ...supplied, deliveryReady: false, compactHeadFenceValid: false, checksumValid: false, issues: ["mcp_reference_group_binding_checksum_invalid"] };
+    }
+    return { ...supplied, checksumValid: true };
+  }
   const groupMemory = memoryContext?.schema === "ccm-group-memory-context-v1"
     ? memoryContext
     : memoryContext?.group_memory?.schema === "ccm-group-memory-context-v1"

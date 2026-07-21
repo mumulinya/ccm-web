@@ -221,6 +221,12 @@ function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allo
             projects: internalProjects,
             memoryReceiptChallenge: options.memoryReceiptChallenge || null,
             memoryReceiptFile: options.memoryReceiptFile || "",
+            memorySnapshotId: options.memorySnapshotId || "",
+            memorySnapshotChecksum: options.memorySnapshotChecksum || "",
+            boundaryGeneration: Number(options.boundaryGeneration || 0),
+            nativeGeneration: Number(options.nativeGeneration || 0),
+            requestText: options.requestText || "",
+            memoryReadBudgetTokens: Number(options.memoryReadBudgetTokens || 0),
         })
         : {};
     const audit = (0, runtime_tool_sync_1.syncRuntimeTools)(workDir, agentType, allowedTools, {

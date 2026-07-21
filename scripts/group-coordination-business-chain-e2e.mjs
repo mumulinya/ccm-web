@@ -54,6 +54,8 @@ const require = createRequire(import.meta.url)
 const collaboration = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'collaboration.js'))
 const integration = require(path.join(root, 'ccm-package', 'dist', 'integrations', 'group-coordination-mcp.js'))
 const store = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-coordination-store.js'))
+const { loadTasks } = require(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))
+const { closeSqliteTaskStore } = require(path.join(root, 'ccm-package', 'dist', 'core', 'task-store.js'))
 const { McpClient } = require(path.join(root, 'ccm-package', 'dist', 'tools', 'mcp-client.js'))
 
 const group = {
@@ -213,7 +215,7 @@ const rows = store.listGroupCoordinationRequests({ groupId: group.id, taskId: pa
 assert.equal(rows.length, 1)
 assert.equal(rows[0].status, 'resumed')
 assert.ok(rows[0].work_item_task_id)
-const tasks = JSON.parse(fs.readFileSync(path.join(ccmHome, 'tasks.json'), 'utf8'))
+const tasks = loadTasks()
 const dependency = tasks.find(task => task.id === rows[0].work_item_task_id)
 const refreshedParent = tasks.find(task => task.id === parent.id)
 assert.equal(dependency.workflow_type, 'agent_coordination_dependency')
@@ -325,11 +327,11 @@ const restartProbe = spawnSync(process.execPath, ['-e', `
 process.env.HOME = ${JSON.stringify(home)};
 process.env.USERPROFILE = ${JSON.stringify(home)};
 process.env.CCM_GROUP_COORDINATION_FILE = ${JSON.stringify(process.env.CCM_GROUP_COORDINATION_FILE)};
-const fs = require('fs');
 const store = require(${JSON.stringify(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-coordination-store.js'))});
 const collaboration = require(${JSON.stringify(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'collaboration.js'))});
+const { loadTasks } = require(${JSON.stringify(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))});
 const request = store.listGroupCoordinationRequests({ groupId: ${JSON.stringify(group.id)} }).find(item => item.id === ${JSON.stringify(restartRequest.id)});
-const tasks = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(ccmHome, 'tasks.json'))}, 'utf8'));
+const tasks = loadTasks();
 const task = tasks.find(item => item.id === request?.work_item_task_id);
 if (!request || request.status !== 'work_item_created' || !task || task.status !== 'pending' || task.queue_scope !== 'isolated_parallel' || task.workflow_meta?.coordination_request_id !== request.id || typeof collaboration.recoverGroupCoordinationDependencies !== 'function') process.exit(12);
 process.stdout.write(JSON.stringify({ request_id: request.id, task_id: task.id, queue_scope: task.queue_scope }));
@@ -356,8 +358,9 @@ const report = {
   persisted_for_replay: true,
 }
 fs.writeFileSync(path.join(scratch, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
+closeSqliteTaskStore()
 for (const target of [home, frontendDir, backendDir]) {
   fs.rmSync(target, { recursive:true, force:true })
 }
-cleanupPassedArtifacts = true
+cleanupPassedArtifacts = false
 console.log(JSON.stringify(report, null, 2))

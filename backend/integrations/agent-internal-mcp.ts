@@ -20,6 +20,12 @@ export type TaskBoundInternalMcpInput = {
   projects?: InternalMcpProjectBinding[];
   memoryReceiptChallenge?: any;
   memoryReceiptFile?: string;
+  memorySnapshotId?: string;
+  memorySnapshotChecksum?: string;
+  boundaryGeneration?: number;
+  nativeGeneration?: number;
+  requestText?: string;
+  memoryReadBudgetTokens?: number;
 };
 
 export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInput) {
@@ -38,6 +44,12 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
     projects: input.projects || [],
     memoryReceiptChallenge: input.memoryReceiptChallenge || null,
     memoryReceiptFile: input.memoryReceiptFile || "",
+    memorySnapshotId: input.memorySnapshotId || "",
+    memorySnapshotChecksum: input.memorySnapshotChecksum || "",
+    boundaryGeneration: Number(input.boundaryGeneration || 0),
+    nativeGeneration: Number(input.nativeGeneration || 0),
+    requestText: input.requestText || "",
+    memoryReadBudgetTokens: Number(input.memoryReadBudgetTokens || 0),
   };
   const servers: Record<string, any> = {
     [TASK_RUNTIME_MCP_SERVER_NAME]: buildTaskRuntimeMcpServerConfig(context),
@@ -63,4 +75,51 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
     });
   }
   return servers;
+}
+
+export type ProjectSessionBoundMemoryMcpInput = {
+  project: string;
+  projectSessionId: string;
+  agentType?: string;
+  workDir: string;
+  taskAgentSessionId?: string;
+  nativeSessionId?: string;
+  memoryReceiptChallenge: any;
+  memoryReceiptFile: string;
+  memorySnapshotId: string;
+  memorySnapshotChecksum: string;
+  boundaryGeneration?: number;
+  nativeGeneration?: number;
+  requestText?: string;
+  memoryReadBudgetTokens?: number;
+};
+
+export function buildProjectSessionBoundMemoryMcpServer(input: ProjectSessionBoundMemoryMcpInput) {
+  if (!input.project || !input.projectSessionId || !input.workDir || !input.memorySnapshotId) return {};
+  const context: Omit<InternalMcpTaskContext, "schema" | "issuedAt" | "expiresAt"> = {
+    bindingKind: "project_session",
+    taskId: "",
+    groupId: "",
+    groupSessionId: "",
+    project: input.project,
+    projectSessionId: input.projectSessionId,
+    role: "project-agent",
+    agentType: input.agentType || "",
+    taskAgentSessionId: input.taskAgentSessionId || "",
+    nativeSessionId: input.nativeSessionId || "",
+    workDir: input.workDir,
+    baseWorkDir: input.workDir,
+    projects: [],
+    memoryReceiptChallenge: input.memoryReceiptChallenge,
+    memoryReceiptFile: input.memoryReceiptFile,
+    memorySnapshotId: input.memorySnapshotId,
+    memorySnapshotChecksum: input.memorySnapshotChecksum,
+    boundaryGeneration: Number(input.boundaryGeneration || 0),
+    nativeGeneration: Number(input.nativeGeneration || 0),
+    requestText: input.requestText || "",
+    memoryReadBudgetTokens: Number(input.memoryReadBudgetTokens || 0),
+  };
+  return {
+    [KNOWLEDGE_CONTEXT_MCP_SERVER_NAME]: buildKnowledgeContextMcpServerConfig(context),
+  };
 }

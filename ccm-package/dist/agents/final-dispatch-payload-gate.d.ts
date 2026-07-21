@@ -12,7 +12,7 @@ export declare function buildFinalDispatchProviderUsageBaseline(input?: any): {
     group_session_id: string;
     task_id: string;
     task_agent_session_id: string;
-    provider: import("./runtime").AgentRuntimeId;
+    provider: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
     model: string;
     provider_contract_id: string;
     provider_runtime_version: string;
@@ -66,6 +66,7 @@ export declare function buildFinalWorkerDispatchPayloadGate(input?: any): {
     auto_compact_threshold: number;
     estimated_prompt_tokens: number;
     provider_envelope_tokens: number;
+    required_hydration_tokens: number;
     estimated_total_input_tokens: number;
     model_visible_input_tokens: number;
     token_basis: string;

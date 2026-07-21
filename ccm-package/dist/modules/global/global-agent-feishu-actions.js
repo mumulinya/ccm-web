@@ -18,8 +18,10 @@ function createGlobalAgentFeishuActions(deps) {
         }
         const mode = String(input.mode || "").trim();
         const source = String(input.source || "global-agent").trim() || "global-agent";
+        const requestText = String(input.originalText || input.keyword || raw).trim();
         const result = await postLocalApi(baseUrl, "/api/music/remote-command", {
             keyword: normalizedKeyword,
+            request_text: requestText,
             mode,
             source,
         });
@@ -38,6 +40,7 @@ function createGlobalAgentFeishuActions(deps) {
                 type: "play_music",
                 params: {
                     keyword: normalizedKeyword,
+                    request_text: requestText,
                     mode,
                     command_id: command?.id || "",
                 },

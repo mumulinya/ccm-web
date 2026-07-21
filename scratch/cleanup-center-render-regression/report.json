@@ -1,8 +1,12 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-14T02:31:55.566Z",
-  "baseUrl": "http://127.0.0.1:3082",
+  "generatedAt": "2026-07-21T05:27:15.161Z",
+  "baseUrl": "http://127.0.0.1:3080",
   "checks": [
+    {
+      "name": "desktop uses governance navigation and capacity distribution meters",
+      "pass": true
+    },
     {
       "name": "desktop overview has no overflow, raw JSON or open technical details",
       "pass": true
@@ -17,6 +21,10 @@
     },
     {
       "name": "desktop history has no overflow, raw JSON or open technical details",
+      "pass": true
+    },
+    {
+      "name": "mobile keeps summary and all governance views reachable",
       "pass": true
     },
     {

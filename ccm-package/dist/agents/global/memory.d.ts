@@ -124,6 +124,7 @@ export declare function extractGlobalMemoryCandidates(messages: any[], sessionId
 };
 export declare function compactGlobalAgentSessionWithModel(sessionId: string, options?: {
     force?: boolean;
+    promptTooLong?: boolean;
     reason?: string;
     customInstructions?: string;
     modelCall?: (request: any) => Promise<any>;
@@ -131,6 +132,8 @@ export declare function compactGlobalAgentSessionWithModel(sessionId: string, op
     fixedContext?: any;
     tools?: any;
     recoveryContext?: any;
+    modelVisiblePayload?: any;
+    postCompactPayloadBuilder?: (input: any) => Promise<any> | any;
 }): any;
 export declare function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, options?: {
     modelCall?: (request: any) => Promise<any>;

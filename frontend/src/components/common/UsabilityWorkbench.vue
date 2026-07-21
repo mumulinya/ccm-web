@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import AttachmentChips from './AttachmentChips.vue'
 import EmptyState from './EmptyState.vue'
@@ -43,6 +43,9 @@ const targetOptions = computed(() => [
   ...resources.value.groups.map(item => ({ value: `group:${item.id}`, label: `协作群 · ${item.name}` })),
   ...resources.value.projects.map(item => ({ value: `project:${item.name}`, label: `项目 · ${item.name}` })),
 ])
+watch(targetOptions, options => {
+  if (!target.value && options.length) target.value = options[0].value
+}, { immediate: true })
 const quickActions = [
   { label: '全局助手', detail: '直接讨论与分派', tab: 'global-agent', icon: Bot },
   { label: '任务中心', detail: '查看执行与阻塞', tab: 'tasks', icon: ListTodo },
@@ -263,7 +266,6 @@ const cacheLabel = computed(() => cachedAt.value
 
 onMounted(() => {
   hydrateCache()
-  refreshWorkbench()
   connect()
   elapsedTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
 })

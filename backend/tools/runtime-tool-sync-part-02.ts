@@ -9,6 +9,7 @@ import { normalizeAgentRuntimeId } from "../agents/runtime";
 import { CCM_DIR } from "../core/utils";
 import { loadOrchestratorConfig } from "../modules/collaboration/group-orchestrator";
 import { loadGroups } from "../modules/collaboration/storage";
+import { getConfiguredDevelopmentAgentEnv } from "../modules/system/agent-provider-settings";
 import { buildToolAuthorizationInventory, buildToolAuthorizationPayload } from "./tool-authorization";
 import {
   type RuntimeToolSyncAudit,
@@ -60,9 +61,13 @@ import {
   loadCodexLocalAccessConfig,
 } from "./runtime-tool-sync-part-01";
 export function getRuntimeExecutionEnv(agentType: string): Record<string, string> {
-  if (normalizeAgentRuntimeId(agentType) !== "codex") return {};
+  const configured = getConfiguredDevelopmentAgentEnv(agentType);
+  if (normalizeAgentRuntimeId(agentType) !== "codex") return configured;
   const provider = loadCodexProviderConfig();
-  return provider ? { [provider.envKey || "CCM_CODEX_API_KEY"]: provider.apiKey } : {};
+  return {
+    ...configured,
+    ...(provider ? { [provider.envKey || "CCM_CODEX_API_KEY"]: provider.apiKey } : {}),
+  };
 }
 
 function buildCodexConfigToml(
@@ -110,6 +115,24 @@ function buildCodexConfigToml(
     );
   }
   return lines.join("\n");
+}
+
+function toOpenCodeMcpServer(server: any) {
+  const url = String(server?.url || "").trim();
+  if (url) return {
+    type: "remote",
+    url,
+    enabled: true,
+    ...(server?.headers && typeof server.headers === "object" ? { headers: server.headers } : {}),
+  };
+  const command = String(server?.command || "").trim();
+  if (!command) throw new Error("OpenCode MCP 缺少 command");
+  return {
+    type: "local",
+    command: [command, ...(Array.isArray(server?.args) ? server.args.map(String) : [])],
+    enabled: true,
+    ...(server?.env && typeof server.env === "object" ? { environment: server.env } : {}),
+  };
 }
 
 function runRuntimeToolSyncIntegrationSelfTest() {
@@ -481,7 +504,7 @@ export function syncRuntimeToolsWithCatalog(
   options: RuntimeToolSyncOptions = {},
 ): RuntimeToolSyncAudit {
   const runtime = normalizeAgentRuntimeId(agentType);
-  const nativeSupported = ["claudecode", "cursor", "gemini", "codex", "qoder"].includes(runtime);
+  const nativeSupported = ["claudecode", "cursor", "gemini", "codex", "opencode", "qoder"].includes(runtime);
   const requested = { mcp: uniqueNames(allowedTools?.mcp), skill: uniqueNames(allowedTools?.skill) };
   const requestedServers = requestedMcpServers(allowedTools?.mcp);
   const audit: RuntimeToolSyncAudit = {
@@ -697,6 +720,25 @@ export function syncRuntimeToolsWithCatalog(
       audit.configFormat = "cursor-isolated-session-plugin";
       audit.isolation = "strict";
       writeSessionPlugin(pluginRoot, "cursor", authorizationId, mcpServers, selectedSkills, audit, skillPackagesDir);
+      writeRuntimeSnapshot(runtimeRoot, audit);
+    } else if (runtime === "opencode") {
+      const runtimeRoot = path.join(runtimeStorageRoot, "opencode", authorizationId);
+      const configPath = path.join(runtimeRoot, "opencode.json");
+      const skillRoot = path.join(runtimeRoot, "skills");
+      const settings = readJsonObject(configPath);
+      const existingServers = settings.mcp && typeof settings.mcp === "object" && !Array.isArray(settings.mcp) ? settings.mcp : {};
+      settings.$schema = settings.$schema || "https://opencode.ai/config.json";
+      settings.mcp = {
+        ...Object.fromEntries(Object.entries(existingServers).filter(([name]) => !name.startsWith(CCM_MCP_PREFIX))),
+        ...Object.fromEntries(Object.entries(mcpServers).map(([name, server]) => [name, toOpenCodeMcpServer(server)])),
+      };
+      writeJsonAtomic(configPath, settings);
+      audit.mcpConfigPath = configPath;
+      audit.runtimeHomePath = runtimeRoot;
+      audit.skillRoot = skillRoot;
+      audit.configFormat = "opencode-isolated-config";
+      audit.isolation = "strict";
+      syncManagedSkills(skillRoot, selectedSkills, audit, skillPackagesDir);
       writeRuntimeSnapshot(runtimeRoot, audit);
     } else {
       const runtimeSpec = runtime === "gemini"
@@ -1141,4 +1183,3 @@ export function recordRuntimeToolSyncAudit(audit: RuntimeToolSyncAudit, projectN
     // Runtime execution should not fail solely because audit persistence is unavailable.
   }
 }
-

@@ -1,0 +1,11 @@
+{
+  "schema": "ccm-group-session-retention-maintenance-status-v1",
+  "enabled": false,
+  "running": false,
+  "lastRunAt": "",
+  "nextRunAt": "",
+  "groups": [],
+  "skipped": true,
+  "reason": "auto_prune_disabled",
+  "checkedAt": "2026-07-20T15:46:26.559Z"
+}

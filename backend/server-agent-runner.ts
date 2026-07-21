@@ -1,6 +1,8 @@
 
 // Mechanically extracted from server.ts; preserves native and external runner behavior.
 import { createAgentRunnerSupport } from "./server-agent-runner-support";
+import { readThirdPartyMemoryUsageReports, THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } from "./integrations/third-party-memory-snapshot";
+import { updateProjectMemoryFromReceipt } from "./projects/memory";
 
 export function createAgentRunnerRuntime(deps: any) {
   const {
@@ -304,7 +306,7 @@ export function createAgentRunnerRuntime(deps: any) {
             const recoveryCommand = buildAgentCommand(agentType, memoryReceiptRecoveryPromptFile, {
               cliAllowedTools: Array.from(new Set([
                 ...buildAgentCliAllowedTools(projectName, message),
-                "mcp__ccm__knowledge_context__acknowledge_memory_context",
+                ...THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES,
               ])),
               mcpConfigPath: workspaceTarget?.mcpConfigPath,
               persistSession: true,
@@ -971,6 +973,8 @@ export function createAgentRunnerRuntime(deps: any) {
           workDir,
           query: options.userMessage || message,
           verificationHints: getProjectVerificationCommandsForRunner(projectName),
+          memoryDeliveryMode: options.memoryDeliveryMode === "mcp" ? "mcp" : "prompt",
+          memorySnapshotId: options.memorySnapshotId || "",
         })
         : buildProjectConversationBrief(projectName, options.userMessage || message, {
           analysis: messageMode === "project_analysis",
@@ -980,7 +984,11 @@ export function createAgentRunnerRuntime(deps: any) {
       : baseExecutionBrief;
     fs.writeFileSync(tmpMsg, executionBrief, "utf-8");
   
-    const cmd = buildAgentCommand(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...taskAgentSessionOptions });
+    const cmd = buildAgentCommand(agentType, tmpMsg, {
+      mcpConfigPath: options.mcpConfigPath,
+      ...(options.memoryContextConsumptionReceiptRequired === true ? { cliAllowedTools: THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } : {}),
+      ...taskAgentSessionOptions,
+    });
   
     const send = (data: any) => writeSse(res, data);
     const workEvents: any[] = Array.isArray(options.initialWorkEvents) ? options.initialWorkEvents.slice(-20) : [];
@@ -1132,7 +1140,28 @@ export function createAgentRunnerRuntime(deps: any) {
             },
           });
         }
-        const nativeFailure = detectAgentCommandFailure(agentType, fullOutput.trim(), code, stderrOutput);
+        let nativeFailure = detectAgentCommandFailure(agentType, fullOutput.trim(), code, stderrOutput);
+        let projectMemoryConsumptionReceipt: any = null;
+        if (!nativeFailure.failed && options.memoryContextConsumptionReceiptRequired === true) {
+          const receiptValidation = readMemoryContextConsumptionReceipt(options.memoryContextConsumptionChallenge, {
+            project: projectName,
+            projectSessionId: projectRun.project_session_id || "",
+            taskAgentSessionId: options.memoryContextConsumptionChallenge?.task_agent_session_id || "",
+            memorySnapshotId: options.memorySnapshotId || "",
+            memorySnapshotChecksum: options.memorySnapshotChecksum || "",
+          });
+          if (!receiptValidation.valid) {
+            nativeFailure = {
+              failed: true,
+              message: `第三方 Agent 未完成必需记忆加载，本轮任务不提交：${receiptValidation.issues.join(",")}`,
+            };
+          } else {
+            projectMemoryConsumptionReceipt = receiptValidation.receipt;
+            projectRun.memory_context_consumption_receipt = receiptValidation.receipt;
+            projectRun.memory_snapshot_id = options.memorySnapshotId || "";
+            projectRun.memory_snapshot_checksum = options.memorySnapshotChecksum || "";
+          }
+        }
         let displayOutput = normalized.output || fullOutput.trim();
         if (nativeFailure.failed) {
           const failedSession = recordTaskAgentSessionTurn(taskAgentSession.id, { nativeSessionId: normalized.sessionId, success: false, error: nativeFailure.message }) || taskAgentSession;
@@ -1215,6 +1244,53 @@ export function createAgentRunnerRuntime(deps: any) {
         }
         broadcastPetSpeech(projectName, { role: "assistant", text: "", mode: "append", final: true, source: "project" });
         const fileChanges = getFileChanges(projectName, changeSnapshot);
+        if (showTaskExperience && options.memorySnapshotId) {
+          const reports = readThirdPartyMemoryUsageReports(options.memorySnapshotId, options.memorySnapshotChecksum || "");
+          const candidates = reports.flatMap((report: any) => report.acceptedCandidates || []);
+          if (candidates.length) {
+            const projectMemory: any = { constraints: [], decisions: [], facts: [], lessons: [], risks: [], openItems: [], contracts: [] };
+            const targetKey: Record<string, string> = {
+              constraint: "constraints",
+              decision: "decisions",
+              fact: "facts",
+              lesson: "lessons",
+              risk: "risks",
+              open_item: "openItems",
+              contract: "contracts",
+            };
+            for (const candidate of candidates) {
+              const key = targetKey[String(candidate.kind || "")] || "facts";
+              projectMemory[key].push({
+                content: candidate.content,
+                evidence: candidate.evidence,
+                reason: `第三方 Agent 记忆候选；sourceMessages=${(candidate.sourceMessageIds || []).join(",")}`,
+              });
+            }
+            try {
+              const memory = updateProjectMemoryFromReceipt({
+                project: projectName,
+                workDir,
+                taskId: projectRun.id,
+                agent: projectName,
+                accepted: true,
+                sourceKind: "accepted_project_session_memory_mcp_report",
+                actualFiles: fileChanges?.files || fileChanges?.items || [],
+                receipt: {
+                  status: "done",
+                  summary: String(outputWithTools || "项目 Agent 已完成任务").slice(0, 1000),
+                  filesChanged: fileChanges?.files || fileChanges?.items || [],
+                  memoryUsed: reports.flatMap((report: any) => report.usedIds || []),
+                  memoryIgnored: reports.flatMap((report: any) => report.ignoredIds || []),
+                  projectMemory,
+                },
+              });
+              projectRun.memory_admission = memory.lastMemoryAdmission || null;
+              projectRun.memory_usage_report_ids = reports.map((report: any) => report.id);
+            } catch (error: any) {
+              projectRun.memory_admission = { decision: "rejected", error: String(error?.message || error) };
+            }
+          }
+        }
         projectRun.status = "done";
         projectRun.fileChanges = fileChanges;
         projectRun.workEvents = workEvents;
@@ -1228,7 +1304,7 @@ export function createAgentRunnerRuntime(deps: any) {
         setAgentActivity(projectName, "happy", "任务完成");
         setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
         pushProjectWorkEvent("done", "执行完成", { final: true, fileChanges });
-        send({ type: "done", fileChanges, workEvents, provider_usage: projectProviderUsage, usage_anchor_id: projectUsageAnchorId, run: publicProjectChatRun(projectRun), taskExperience: {
+        send({ type: "done", fileChanges, workEvents, provider_usage: projectProviderUsage, usage_anchor_id: projectUsageAnchorId, memory_context_consumption_receipt: projectMemoryConsumptionReceipt, run: publicProjectChatRun(projectRun), taskExperience: {
           task_id: projectRun.id,
           trace_id: projectRun.trace_id,
           title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),

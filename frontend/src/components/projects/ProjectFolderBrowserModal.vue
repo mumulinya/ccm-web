@@ -267,4 +267,30 @@ const emit = defineEmits(['close', 'load', 'go-up', 'refresh', 'select'])
   box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
   font-weight: 600;
 }
+
+@media (max-width: 640px) {
+  .folder-header,
+  .folder-body {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .folder-list {
+    min-height: 220px;
+  }
+
+  .folder-actions {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .folder-actions > span {
+    display: none;
+  }
+
+  .folder-actions .btn {
+    min-width: 0;
+    width: 100%;
+  }
+}
 </style>

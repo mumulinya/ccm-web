@@ -506,7 +506,7 @@ function getClaudeLocalGatewayReadiness(probeTarget = null) {
     if (!rawAgentType)
         return null;
     const agentType = (0, runtime_1.normalizeAgentRuntimeId)(rawAgentType);
-    if (agentType !== "claudecode" && agentType !== "claude")
+    if (agentType !== "claudecode")
         return null;
     const env = readClaudeSettingsEnv();
     const local = parseLocalHttpUrl(env.ANTHROPIC_BASE_URL);

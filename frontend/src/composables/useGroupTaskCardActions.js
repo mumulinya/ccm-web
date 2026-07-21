@@ -99,7 +99,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
       } else if (action.kind === 'retry') {
         await postTaskCardAction('/api/tasks/retry', { id, reason: '用户从群聊任务卡重新派发', auto_execute: true })
       } else if (action.kind === 'switch_executor') {
-        const runtime = window.prompt('切换执行器（claudecode / codex / cursor）：', 'codex')
+        const runtime = window.prompt('切换执行器（claudecode / codex / cursor / gemini / opencode）：', 'codex')
         if (!runtime) return
         await postTaskCardAction('/api/tasks/switch-executor', { id, runtime: runtime.trim(), reason: '用户从群聊任务卡切换执行器', auto_execute: true })
       } else if (action.kind === 'queue') {

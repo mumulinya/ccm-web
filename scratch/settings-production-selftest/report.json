@@ -1,6 +1,6 @@
 {
   "pass": true,
-  "generatedAt": "2026-07-18T15:22:32.437Z",
+  "generatedAt": "2026-07-21T03:06:49.674Z",
   "baseUrl": "http://127.0.0.1:3080",
   "checks": [
     {
@@ -25,10 +25,6 @@
     },
     {
       "name": "legacy unified model key migrated to encrypted credential reference",
-      "pass": true
-    },
-    {
-      "name": "real unified model connection serves all three agent consumers",
       "pass": true
     }
   ]

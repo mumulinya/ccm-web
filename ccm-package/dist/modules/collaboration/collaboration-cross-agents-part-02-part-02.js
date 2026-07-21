@@ -39,6 +39,7 @@ const crypto = __importStar(require("crypto"));
 const collaboration_cross_agents_part_03_1 = require("./collaboration-cross-agents-part-03");
 const group_memory_context_part_01_1 = require("./group-memory-context-part-01");
 const group_session_model_context_1 = require("./group-session-model-context");
+const third_party_memory_snapshot_1 = require("../../integrations/third-party-memory-snapshot");
 const collaboration_cross_agents_part_02_part_02_native_test_1 = require("./collaboration-cross-agents-part-02-part-02-native-test");
 async function executeMentionJobTryA(mention, env) {
     const { deps, groupId, group, sourceProject, output, configs, ctx, streamRes, depth, seenMentions, executionOrder, planMessageId, taskId, sourceTask, completedOutputsByAgent, processCrossAgents } = env;
@@ -67,6 +68,7 @@ async function executeMentionJobTryA(mention, env) {
     let groupMemoryBundle = L.groupMemoryBundle || null;
     let workerMemoryContext = L.workerMemoryContext || null;
     let workerMemoryPacket = L.workerMemoryPacket || "";
+    let thirdPartyMemorySnapshot = L.thirdPartyMemorySnapshot || null;
     const dependencyOutputPacket = L.dependencyOutputPacket || "";
     const continuationNotice = L.continuationNotice || "";
     const testAgentHandoffPacket = L.testAgentHandoffPacket || "";
@@ -1296,10 +1298,10 @@ async function executeMentionJobTryA(mention, env) {
                 }
             }
             const detectedSkillUse = attachInvokedSkillsToReceipt(targetReceipt, tOutput, toolContext.allowedTools, runtimeToolContext.audit);
-            targetReceipt = detectedSkillUse.receipt;
+            targetReceipt = (0, third_party_memory_snapshot_1.mergeThirdPartyMemoryUsageIntoReceipt)(detectedSkillUse.receipt, thirdPartyMemorySnapshot?.id || "", thirdPartyMemorySnapshot?.checksum || "");
             targetInvokedSkills = detectedSkillUse.invoked;
         }
-        env._locals = { ...env._locals, outputs, targetName, tWorkDir, tAgentType, activeTaskSession, laneExecutionId, childTaskText, workerHandoff, developmentContract, tPrompt, advisoryOnly, toolContext, runtimeToolContext, activeGroupSessionId, activeInvocationEdge, groupMemoryBundle, workerMemoryContext, workerMemoryPacket, activeMemoryContextSnapshot, activeMemoryContextDelivery, memoryConsumptionChallenge, capacityRevalidationPreparation, capacityRevalidationCommitted, memoryPacket, tContext, providerSwitchSessionBinding, workerHandoffSummary, targetReceipt, tOutput, activeRuntime, targetFileChanges, targetWorkEvents, targetNativeSessionId, targetInvokedSkills, testAgentNativeReport, testAgentExecutionPlan, testAgentPlanDispatch, testAgentCliDispatch, responseMessageId, targetProviderToolAccessEvidence };
+        env._locals = { ...env._locals, outputs, targetName, tWorkDir, tAgentType, activeTaskSession, laneExecutionId, childTaskText, workerHandoff, developmentContract, tPrompt, advisoryOnly, toolContext, runtimeToolContext, activeGroupSessionId, activeInvocationEdge, groupMemoryBundle, workerMemoryContext, workerMemoryPacket, activeMemoryContextSnapshot, activeMemoryContextDelivery, memoryConsumptionChallenge, capacityRevalidationPreparation, capacityRevalidationCommitted, memoryPacket, tContext, providerSwitchSessionBinding, workerHandoffSummary, targetReceipt, tOutput, activeRuntime, targetFileChanges, targetWorkEvents, targetNativeSessionId, targetInvokedSkills, testAgentNativeReport, testAgentExecutionPlan, testAgentPlanDispatch, testAgentCliDispatch, responseMessageId, targetProviderToolAccessEvidence, thirdPartyMemorySnapshot };
         return (0, collaboration_cross_agents_part_03_1.executeMentionJobTryB)(mention, env);
     }
     catch (error) {

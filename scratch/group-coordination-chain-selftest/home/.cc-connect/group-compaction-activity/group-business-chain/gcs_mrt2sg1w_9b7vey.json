@@ -1,0 +1,36 @@
+{
+  "schema": "ccm-group-compaction-activity-ledger-v1",
+  "version": 1,
+  "group_id": "group-business-chain",
+  "group_session_id": "gcs_mrt2sg1w_9b7vey",
+  "scope_id": "group-business-chain::gcs_mrt2sg1w_9b7vey",
+  "revision": 2,
+  "current": null,
+  "recent": [
+    {
+      "operation_id": "acba_1fe4deeb2f935155a07177fa",
+      "status": "skipped",
+      "stage": "skipped",
+      "reason": "message_append",
+      "owner_pid": 16024,
+      "owner_hostname": "DESKTOP-MN23N8A",
+      "lifecycle_generation": 1,
+      "lifecycle_head_id": "gslh_7a267160e56a8c35d4a72fc4",
+      "lifecycle_head_checksum": "36176a13153f1c18dbbe219f35f026ecdb3b7a06f7519278155fab3c463fdbf1",
+      "started_at": "2026-07-20T10:22:26.706Z",
+      "heartbeat_at": "2026-07-20T10:22:26.826Z",
+      "lease_expires_at": "2026-07-20T10:22:26.826Z",
+      "heartbeat_sequence": 0,
+      "model_wait_heartbeat_count": 0,
+      "body_free": true,
+      "terminal_reason": "compact_not_required",
+      "boundary_id": "",
+      "compact_transaction_receipt_checksum": "",
+      "commit_fence_status": "sealed",
+      "commit_sealed_at": "2026-07-20T10:22:26.826Z",
+      "completed_at": "2026-07-20T10:22:26.826Z"
+    }
+  ],
+  "updated_at": "2026-07-20T10:22:26.826Z",
+  "ledger_checksum": "b50fadcb407eedb942e36ca59c91fb3c68466e3652b772e736a0e95cc5d52bd6"
+}

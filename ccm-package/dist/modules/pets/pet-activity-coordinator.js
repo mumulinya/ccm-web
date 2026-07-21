@@ -55,7 +55,7 @@ function inferPetActorKind(update) {
         return "test-agent";
     if (/cron|scheduled|schedule/.test(source) || /cron|scheduled/.test(actor))
         return "scheduled";
-    if (["codex", "cursor", "claudecode", "claude-code", "gemini", "qoder"].some(item => runtime.includes(item) || actor.includes(item)))
+    if (["codex", "cursor", "claudecode", "claude-code", "gemini", "opencode", "qoder"].some(item => runtime.includes(item) || actor.includes(item)))
         return "third-party";
     if (tab === "groups" && /coordinator|main-agent|主\s*agent/.test(actor))
         return "group-main";

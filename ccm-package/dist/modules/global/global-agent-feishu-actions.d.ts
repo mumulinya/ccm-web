@@ -22,6 +22,7 @@ export declare function createGlobalAgentFeishuActions(deps: any): {
             type: string;
             params: {
                 keyword: any;
+                request_text: string;
                 mode: string;
                 command_id: any;
             };

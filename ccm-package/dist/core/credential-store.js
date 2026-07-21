@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.isCredentialReference = isCredentialReference;
 exports.protectCredential = protectCredential;
 exports.resolveCredential = resolveCredential;
+exports.deleteCredential = deleteCredential;
 exports.protectObjectSecrets = protectObjectSecrets;
 exports.resolveObjectSecrets = resolveObjectSecrets;
 exports.migrateTomlCredentials = migrateTomlCredentials;
@@ -127,6 +128,18 @@ function resolveCredential(value) {
     const decipher = crypto.createDecipheriv("aes-256-gcm", masterKey(), Buffer.from(entry.iv, "base64"));
     decipher.setAuthTag(Buffer.from(entry.tag, "base64"));
     return Buffer.concat([decipher.update(Buffer.from(entry.data, "base64")), decipher.final()]).toString("utf-8");
+}
+function deleteCredential(value) {
+    const raw = String(value || "");
+    if (!isCredentialReference(raw))
+        return false;
+    const id = raw.slice(REF_PREFIX.length);
+    const store = loadStore();
+    if (!store.entries[id])
+        return false;
+    delete store.entries[id];
+    saveStore(store);
+    return true;
 }
 function protectObjectSecrets(value, scope = "config") {
     if (Array.isArray(value))

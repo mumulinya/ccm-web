@@ -1,14 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ccm-web-vue</title>
-    <script type="module" crossorigin src="/assets/index-BSJCwPHD.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-ChCa7PXI.css">
+    <title>CCM Agent Workspace</title>
+    <style>
+      html, body, #app { width: 100%; height: 100%; margin: 0; }
+      body { background: #f5f7f6; color: #17201d; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .ccm-boot { position: fixed; inset: 0; display: grid; place-items: center; background: #f5f7f6; }
+      .ccm-boot__content { width: min(300px, calc(100% - 40px)); display: grid; justify-items: center; gap: 10px; text-align: center; }
+      .ccm-boot__mark { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid #ccd6d1; background: #fff; color: #0e6b4f; font-size: 18px; font-weight: 800; }
+      .ccm-boot strong { font-size: 14px; }
+      .ccm-boot span { color: #6d7973; font-size: 11px; }
+      .ccm-boot__track { width: 148px; height: 3px; margin-top: 3px; overflow: hidden; background: #dce3df; }
+      .ccm-boot__track::after { content: ""; display: block; width: 44%; height: 100%; background: #0e6b4f; animation: ccm-boot-progress 1.1s ease-in-out infinite; }
+      @keyframes ccm-boot-progress { from { transform: translateX(-115%); } to { transform: translateX(330%); } }
+      @media (prefers-reduced-motion: reduce) { .ccm-boot__track::after { animation-duration: 2.4s; } }
+    </style>
+    <script type="module" crossorigin src="/assets/index-0JDQ5waf.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DV9UGqsR.css">
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="ccm-boot" role="status" aria-live="polite" aria-label="CCM 正在启动">
+        <div class="ccm-boot__content">
+          <div class="ccm-boot__mark" aria-hidden="true">CCM</div>
+          <strong>正在打开工作台</strong>
+          <span>正在准备界面和本地数据</span>
+          <i class="ccm-boot__track" aria-hidden="true"></i>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

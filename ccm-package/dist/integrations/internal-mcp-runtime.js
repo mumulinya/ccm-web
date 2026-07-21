@@ -87,19 +87,26 @@ function verifyInternalMcpEvidenceSignature(value, supplied) {
 function sealInternalMcpTaskContext(input) {
     const issuedAt = input.issuedAt || new Date().toISOString();
     const expiresAt = input.expiresAt || new Date(Date.parse(issuedAt) + CONTEXT_TTL_MS).toISOString();
+    const bindingKind = input.bindingKind || (input.projectSessionId ? "project_session" : "task");
     const context = {
         ...input,
-        schema: "ccm-internal-mcp-task-context-v1",
+        schema: bindingKind === "project_session" ? "ccm-internal-mcp-context-v2" : "ccm-internal-mcp-task-context-v1",
+        bindingKind,
         taskId: String(input.taskId || "").trim(),
         groupId: String(input.groupId || "").trim(),
         project: String(input.project || "").trim(),
+        projectSessionId: String(input.projectSessionId || "").trim(),
         workDir: path.resolve(String(input.workDir || input.baseWorkDir || ".")),
         baseWorkDir: path.resolve(String(input.baseWorkDir || input.workDir || ".")),
         issuedAt,
         expiresAt,
     };
-    if (!context.taskId || !context.project || !context.role)
-        throw new Error("内部 MCP 缺少任务、项目或角色绑定");
+    if (!context.project || !context.role)
+        throw new Error("内部 MCP 缺少项目或角色绑定");
+    if (bindingKind === "task" && !context.taskId)
+        throw new Error("内部 MCP 缺少任务绑定");
+    if (bindingKind === "project_session" && !context.projectSessionId)
+        throw new Error("内部 MCP 缺少项目会话绑定");
     const payload = Buffer.from(JSON.stringify(context), "utf-8").toString("base64url");
     return `${payload}.${signature(payload)}`;
 }
@@ -113,10 +120,15 @@ function openInternalMcpTaskContext(token = process.env.CCM_INTERNAL_MCP_CONTEXT
     if (left.length !== right.length || !crypto.timingSafeEqual(left, right))
         throw new Error("内部 MCP 任务上下文签名无效");
     const context = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
-    if (context?.schema !== "ccm-internal-mcp-task-context-v1")
-        throw new Error("内部 MCP 任务上下文版本无效");
-    if (!context.taskId || !context.project || !context.role)
-        throw new Error("内部 MCP 任务上下文绑定不完整");
+    if (!["ccm-internal-mcp-task-context-v1", "ccm-internal-mcp-context-v2"].includes(String(context?.schema || "")))
+        throw new Error("内部 MCP 上下文版本无效");
+    context.bindingKind = context.bindingKind || (context.projectSessionId ? "project_session" : "task");
+    if (!context.project || !context.role)
+        throw new Error("内部 MCP 上下文绑定不完整");
+    if (context.bindingKind === "task" && !context.taskId)
+        throw new Error("内部 MCP 任务绑定不完整");
+    if (context.bindingKind === "project_session" && !context.projectSessionId)
+        throw new Error("内部 MCP 项目会话绑定不完整");
     if (!Number.isFinite(Date.parse(context.expiresAt)) || Date.parse(context.expiresAt) <= Date.now())
         throw new Error("内部 MCP 任务上下文已过期，请重新派发任务");
     return context;
@@ -164,6 +176,7 @@ function appendAudit(server, context, tool, args, status, error = "") {
         error: String(error || "").slice(0, 500),
         task_id: context.taskId,
         group_id: context.groupId,
+        project_session_id: context.projectSessionId || "",
         project: context.project,
         role: context.role,
         task_agent_session_id: context.taskAgentSessionId || "",

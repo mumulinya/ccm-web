@@ -23,11 +23,11 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
     userMessage?: string;
     coordinatorOutput?: string;
 }): any;
-export declare function testAgentStatusToReceiptStatus(status: any): "failed" | "blocked" | "done" | "partial";
+export declare function testAgentStatusToReceiptStatus(status: any): "done" | "failed" | "blocked" | "partial";
 export declare function readTestAgentVerdictArtifact(report: TestAgentReport): TestAgentVerdict | null;
 export declare function resolveTestAgentDecisionVerdict(report: TestAgentReport, artifactVerdict?: TestAgentVerdict | null): TestAgentVerdict;
 export declare function testAgentDecisionReceiptStatus(report: TestAgentReport, verdict: TestAgentVerdict | null): any;
-export declare function testAgentDecisionReviewVerdict(report: TestAgentReport, verdict: TestAgentVerdict | null): "failed" | "passed" | "blocked" | "unknown" | "partial" | "needs_recheck" | "needs_environment";
+export declare function testAgentDecisionReviewVerdict(report: TestAgentReport, verdict: TestAgentVerdict | null): "failed" | "passed" | "unknown" | "blocked" | "partial" | "needs_recheck" | "needs_environment";
 export declare function testAgentDecisionLabel(report: TestAgentReport, verdict: TestAgentVerdict | null): "待确认" | "需要返工" | "可以接受" | "需要人工确认" | "需要重新复验" | "需要补齐环境条件" | "未给出";
 export declare function collectTestAgentVerdictGapLines(verdict: TestAgentVerdict | null): string[];
 export declare function collectTestAgentVerdictNextActions(verdict: TestAgentVerdict | null): string[];
@@ -143,7 +143,7 @@ export declare function compactTestAgentVerdict(verdict: TestAgentVerdict | null
         manifestPath?: string;
     };
 };
-export declare function testAgentStatusLabel(status: any): "已跳过" | "未知" | "未通过" | "待确认" | "未覆盖" | "通过" | "部分通过" | "已阻塞" | "已覆盖" | "超时" | "已启动" | "已在运行";
+export declare function testAgentStatusLabel(status: any): "已跳过" | "未知" | "通过" | "未通过" | "待确认" | "未覆盖" | "部分通过" | "已阻塞" | "已覆盖" | "超时" | "已启动" | "已在运行";
 export declare function testAgentRecommendationLabel(recommendation: any): "待确认" | "需要返工" | "可以接受" | "需要人工确认" | "未给出";
 export declare function testAgentEvidenceTypeLabel(type: any): string;
 export declare function testAgentVisibleReviewSummary(report?: any, verdict?: any): "独立复核通过，我可以继续做最终验收。" | "独立复核要求返工，需要把缺口交回原实现成员。" | "独立复核还没有闭环，我会先补齐证据并重新复验。" | "独立复核受环境或登录条件阻塞，我会先补齐条件。" | "独立复核需要人工确认，我会先暂停最终验收。" | "独立复核通过，我会继续核对整体交付。" | "独立复核发现未通过项，需要安排原实现成员返工。" | "独立复核只通过了一部分，还需要补齐剩余证据。" | "独立复核被阻塞，需要先处理环境、命令或交接信息问题。" | "独立复核已返回结果，我会继续判断下一步。";

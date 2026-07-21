@@ -19,10 +19,12 @@ const utils_1 = require("./utils");
 const work_order_1 = require("./work-order");
 const artifact_retention_1 = require("./artifact-retention");
 const role_skills_1 = require("../skills/role-skills");
+const agentic_planner_1 = require("./agentic-planner");
 async function runTestAgent(input, options = {}) {
     const startedAt = (0, utils_1.nowIso)();
     const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)(input, options);
-    const planned = (0, command_planner_1.planVerificationCommands)(normalized.workOrder, normalized.issues);
+    const agentic = await (0, agentic_planner_1.applyAgenticTestPlanning)(normalized.workOrder, options);
+    const planned = (0, command_planner_1.planVerificationCommands)(agentic.workOrder, [...normalized.issues, ...agentic.issues]);
     const { workOrder, issues } = planned;
     const roleSkills = (0, role_skills_1.selectRoleSkills)("test-agent", [
         workOrder.originalUserGoal,
@@ -65,21 +67,38 @@ async function runTestAgent(input, options = {}) {
         } : {}),
         ...(browserResourceLifecycle ? { browserResourceLifecycle } : {}),
     };
+    const withRuntimeEnvironments = (source) => ({
+        ...source,
+        projects: source.projects.map(project => ({
+            ...project,
+            env: {
+                ...(project.env || {}),
+                ...(options.runtimeProjectEnvironments?.[project.name] || {}),
+            },
+        })),
+    });
+    const executionWorkOrder = withRuntimeEnvironments(workOrder);
     let commandResults = [];
     let devServers = [];
     let httpResults = [];
     let browserResults = [];
     let browserProviderPreflight = [];
     try {
-        browserProviderPreflight = await (0, registry_1.collectBrowserProviderPreflight)(workOrder, runtimeOptions);
+        browserProviderPreflight = await (0, registry_1.collectBrowserProviderPreflight)(executionWorkOrder, runtimeOptions);
         workOrder.metadata = {
             ...workOrder.metadata,
             browserProviderPreflight,
         };
-        commandResults = await (0, command_runner_1.runVerificationCommands)(workOrder);
-        devServers = await (0, dev_server_1.startDevServersForBrowserChecks)(workOrder);
-        httpResults = await (0, http_verifier_1.runHttpVerification)(workOrder);
-        browserResults = await (0, browser_verifier_1.runBrowserVerification)(workOrder, runtimeOptions);
+        commandResults = await (0, command_runner_1.runVerificationCommands)(executionWorkOrder);
+        devServers = await (0, dev_server_1.startDevServersForBrowserChecks)(executionWorkOrder);
+        httpResults = await (0, http_verifier_1.runHttpVerification)(executionWorkOrder);
+        browserResults = await (0, browser_verifier_1.runBrowserVerification)(executionWorkOrder, runtimeOptions);
+        const followup = await (0, agentic_planner_1.planAgenticTestFollowup)({ workOrder, commandResults, httpResults, browserResults }, runtimeOptions);
+        workOrder.metadata = { ...workOrder.metadata, agenticFollowup: followup.metadata };
+        if (followup.issue)
+            issues.push(followup.issue);
+        if (followup.workOrder)
+            commandResults.push(...await (0, command_runner_1.runVerificationCommands)(withRuntimeEnvironments(followup.workOrder)));
         workOrder.metadata = {
             ...workOrder.metadata,
             browserAuthenticationSummary: (0, authentication_summary_1.buildBrowserAuthenticationSummary)(browserResults),

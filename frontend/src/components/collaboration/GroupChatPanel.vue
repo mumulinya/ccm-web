@@ -20,6 +20,7 @@ import GroupChatHeader from './GroupChatHeader.vue'
 import GroupChatSessionSidebar from './GroupChatSessionSidebar.vue'
 import GroupLogsModal from './GroupLogsModal.vue'
 import GroupToolsModal from './GroupToolsModal.vue'
+import GroupTestTargetsModal from './GroupTestTargetsModal.vue'
 import GroupSharedFilesModal from './GroupSharedFilesModal.vue'
 import GroupMembersModal from './GroupMembersModal.vue'
 import GroupCreateModal from './GroupCreateModal.vue'
@@ -69,7 +70,7 @@ const {
   createTestAgentReviewFallbackMessage, applyTestAgentReviewReady, appendAgentWorkEvent,
   isAgentQaMessage, runAgentQaAction, appendAgentQaMessage,
   applyMainAgentProgressCheckpoint, groupMessageKeyMap, groupMessageKeySeq, getGroupMessageKey, showCreate,
-  showRename, showMembers, showTools, showSharedFiles, showLogs, groupTools, groupAllTools, groupToolAudit,
+  showRename, showMembers, showTools, showTestTargets, showSharedFiles, showLogs, groupTools, groupAllTools, groupToolAudit,
   groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, newGroupName, renameName,
   loadGroups, loadProjects, selectGroup, loadMessages,
   selectGroupSession, createGroupSession, renameGroupSession, archiveGroupSession, deleteGroupSession,
@@ -86,7 +87,8 @@ const {
   submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, waitingCrossReply, pullNewMessages,
   logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
   stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool,
-  saveGroupTools, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
+  saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,
+  loadGroupTestTargets, saveGroupTestTarget, deleteGroupTestTarget, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
   getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
   startGroupPolling, stopGroupPolling, origSelectGroup, activeSelectedTemplate, pendingTemplateToApply,
 } = useGroupChat(props, emit)

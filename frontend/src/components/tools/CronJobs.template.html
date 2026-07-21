@@ -1,30 +1,58 @@
   <div class="cron-jobs">
-    <div class="toolbar">
-      <div class="stats">
-        <div class="stat"><span class="stat-label">总计</span><span class="stat-value">{{ jobs.length }}</span></div>
-        <div class="stat"><span class="stat-label ok">启用</span><span class="stat-value ok">{{ jobs.filter(j => j.enabled).length }}</span></div>
-        <div class="stat"><span class="stat-label muted">禁用</span><span class="stat-value muted">{{ jobs.filter(j => !j.enabled).length }}</span></div>
-        <div class="scheduler-pill" :class="{ online: scheduler.running }">{{ scheduler.running ? '调度器运行中' : '调度器未启动' }}</div>
+    <header class="cron-workspace-header">
+      <div class="cron-title-block">
+        <span class="cron-eyebrow"><CalendarClock :size="14" />自动调度</span>
+        <h2>{{ showArchived ? '归档定时任务' : '定时任务' }}</h2>
+        <p>{{ showArchived ? '查看、恢复或永久清除已归档任务。' : '集中管理 Agent 的周期执行计划、可靠性策略与运行结果。' }}</p>
       </div>
-      <div class="actions">
-        <button class="btn btn-outline" @click="showArchived = !showArchived; loadJobs()">{{ showArchived ? '返回运行中' : `归档 (${archivedCount})` }}</button>
-        <button v-if="!showArchived" class="btn btn-primary" @click="openCreateJob">新建定时任务</button>
+      <div class="cron-header-actions">
+        <button class="icon-command" title="刷新任务" aria-label="刷新任务" @click="refreshJobsAndDiagnostics"><RefreshCw :size="17" /></button>
+        <button class="btn btn-outline" @click="showArchived = !showArchived; loadJobs()">
+          <RotateCcw v-if="showArchived" :size="15" />
+          <Archive v-else :size="15" />
+          {{ showArchived ? '返回活动任务' : `归档 ${archivedCount}` }}
+        </button>
+        <button v-if="!showArchived" class="btn btn-primary" @click="openCreateJob"><Plus :size="16" />新建定时任务</button>
       </div>
-    </div>
+    </header>
 
-    <div class="cron-filter-bar">
-      <input v-model="searchQuery" type="search" placeholder="搜索名称、目标或提示词" aria-label="搜索定时任务">
-      <select v-model="statusFilter" aria-label="状态筛选">
-        <option value="all">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option>
-        <option value="running_task">执行中</option><option value="retry_waiting">等待重试</option><option value="failed">失败</option><option value="done">已完成</option>
-      </select>
-      <select v-model="targetFilter" aria-label="目标筛选"><option value="all">全部目标</option><option value="project">项目 Agent</option><option value="group">群聊协作</option></select>
-      <div v-if="selectedJobIds.size" class="bulk-actions">
-        <span>已选 {{ selectedJobIds.size }}</span>
-        <button :disabled="bulkLoading" @click="runBulkAction('enable')">启用</button>
-        <button :disabled="bulkLoading" @click="runBulkAction('disable')">禁用</button>
-        <button :disabled="bulkLoading" @click="runBulkAction(showArchived ? 'restore' : 'archive')">{{ showArchived ? '恢复' : '归档' }}</button>
+    <section class="cron-overview" aria-label="调度概览">
+      <div class="scheduler-state" :class="{ online: scheduler.running }">
+        <span class="scheduler-indicator"><Activity :size="18" /></span>
+        <div>
+          <strong>{{ scheduler.running ? '调度服务正常' : '调度服务未启动' }}</strong>
+          <small>{{ scheduler.running ? '任务状态每 30 秒自动同步' : '任务不会按计划自动触发' }}</small>
+        </div>
       </div>
+      <dl class="cron-metrics">
+        <div><dt>全部任务</dt><dd>{{ jobs.length }}</dd></div>
+        <div class="metric-enabled"><dt>已启用</dt><dd>{{ enabledJobCount }}</dd></div>
+        <div><dt>已停用</dt><dd>{{ disabledJobCount }}</dd></div>
+        <div :class="{ 'metric-issue': issueJobCount }"><dt>需要关注</dt><dd>{{ issueJobCount }}</dd></div>
+        <div class="metric-running"><dt>正在执行</dt><dd>{{ activeRunCount }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="cron-filter-bar" aria-label="定时任务筛选">
+      <label class="cron-search-field">
+        <Search :size="16" />
+        <input v-model="searchQuery" type="search" placeholder="搜索任务名称、目标或执行内容" aria-label="搜索定时任务">
+      </label>
+      <div class="cron-filter-controls">
+        <SlidersHorizontal :size="15" aria-hidden="true" />
+        <select v-model="statusFilter" aria-label="状态筛选">
+          <option value="all">全部状态</option><option value="enabled">已启用</option><option value="disabled">已停用</option>
+          <option value="running_task">执行中</option><option value="retry_waiting">等待重试</option><option value="failed">失败</option><option value="done">已完成</option>
+        </select>
+        <select v-model="targetFilter" aria-label="目标筛选"><option value="all">全部目标</option><option value="project">项目 Agent</option><option value="group">群聊协作</option></select>
+      </div>
+    </section>
+
+    <div v-if="selectedJobIds.size" class="bulk-actions" role="toolbar" aria-label="批量操作">
+      <span><CheckCircle2 :size="15" />已选择 {{ selectedJobIds.size }} 项</span>
+      <button :disabled="bulkLoading" @click="runBulkAction('enable')">启用</button>
+      <button :disabled="bulkLoading" @click="runBulkAction('disable')">停用</button>
+      <button :disabled="bulkLoading" @click="runBulkAction(showArchived ? 'restore' : 'archive')">{{ showArchived ? '恢复' : '归档' }}</button>
     </div>
 
     <div v-if="hasEnabledDailyDevJobs() && isExecutionBlocked()" class="cron-execution-warning">
@@ -34,87 +62,94 @@
       <code>claude -p</code>
     </div>
 
-    <div class="content">
+    <main class="content">
       <EmptyState
         v-if="jobs.length === 0"
         large
-        icon="⏰"
-        title="暂无定时任务"
-        hint="创建一个定时任务，让 Agent 按计划自动执行"
-      />
+        icon=""
+        :title="showArchived ? '没有归档任务' : '还没有定时任务'"
+        :hint="showArchived ? '归档的任务会保留在这里。' : '创建任务后，Agent 会按计划自动执行。'"
+      >
+        <button v-if="!showArchived" class="btn btn-primary" @click="openCreateJob"><Plus :size="16" />新建定时任务</button>
+      </EmptyState>
 
       <EmptyState
         v-else-if="filteredJobs.length === 0"
-        icon="🔎"
+        icon=""
         title="没有符合筛选条件的定时任务"
         hint="试试调整搜索词或状态筛选"
       />
-      <div v-else class="table-wrapper">
-        <table class="table">
-          <thead>
-            <tr>
-              <th class="select-column"><input type="checkbox" :checked="allFilteredSelected" aria-label="选择当前结果" @change="toggleAllFiltered"></th>
-              <th>名称</th>
-              <th>目标</th>
-              <th>调度</th>
-              <th>提示词</th>
-              <th>状态</th>
-              <th>运行记录</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="job in filteredJobs" :key="job.id">
-              <td class="select-column"><input type="checkbox" :checked="selectedJobIds.has(job.id)" :aria-label="`选择 ${job.name}`" @change="toggleJobSelection(job.id)"></td>
-              <td data-label="名称">
-                <strong>{{ job.name }}</strong>
-                <div class="job-subtitle">已触发 {{ job.run_count || 0 }} 次</div>
-                <div v-if="job.workflow_type === 'daily_dev'" class="job-subtitle dev-flow">业务开发 · {{ job.requires_code_changes === false ? '允许无代码变更' : '必须有代码变更' }}</div>
-                <div v-if="job.workflow_type === 'daily_dev'" class="job-subtitle">{{ job.continue_gaps === false ? '不自动续跑缺口' : `自动续跑缺口，每次最多 ${job.gap_continue_limit || 3} 个` }}</div>
-                <div v-if="job.workflow_type === 'daily_dev'" class="job-subtitle">每次最多认领 {{ job.backlog_batch_limit || 1 }} 条需求</div>
-                <div v-if="job.workflow_type === 'daily_dev'" class="job-subtitle">{{ job.import_shared_docs === false ? '仅认领已有需求池' : '自动导入共享文档' }}</div>
-                <div v-if="job.workflow_type === 'daily_dev' && isExecutionBlocked()" class="job-runtime-warning">执行通道阻塞，触发后任务会等待复检通过</div>
-                <div class="job-subtitle">{{ job.timezone }} · 失败最多重试 {{ job.retry_limit || 0 }} 次</div>
-                <div v-if="job.notification_enabled" class="job-subtitle">飞书通知 · {{ (job.notify_on || []).map(statusLabel).join('、') }}</div>
-              </td>
-              <td data-label="目标"><span class="tag" :class="{ group: job.target_type === 'group' }">{{ targetLabel(job) }}</span></td>
-              <td data-label="调度">
-                <code>{{ job.schedule }}</code>
-                <div v-if="job.schedule_error" class="error-text">{{ job.schedule_error }}</div>
-              </td>
-              <td class="prompt-cell" data-label="提示词" :title="job.prompt">{{ job.prompt }}</td>
-              <td data-label="状态">
-                <label class="toggle">
-                  <input type="checkbox" :checked="job.enabled" @change="toggleJob(job.id, $event.target.checked)">
-                  <span>{{ job.enabled ? '启用' : '禁用' }}</span>
-                </label>
-                <span class="status" :class="`status-${job.last_status || 'never'}`">{{ statusLabel(job.last_status) }}</span>
-              </td>
-              <td class="run-cell" data-label="运行记录">
-                <div>上次 {{ formatTimeInZone(job.last_run, job.timezone) }}</div>
-                <div>下次 {{ formatTimeInZone(job.next_run, job.timezone) }}</div>
-                <div v-if="cronRunMetaItems(job).length" class="cron-meta-row">
-                  <span v-for="item in cronRunMetaItems(job)" :key="item">{{ item }}</span>
+      <section v-else class="cron-list" aria-label="定时任务列表">
+        <div class="cron-list-heading">
+          <label><input type="checkbox" :checked="allFilteredSelected" aria-label="选择当前结果" @change="toggleAllFiltered"><span>选择当前结果</span></label>
+          <span>显示 {{ filteredJobs.length }} 项</span>
+        </div>
+        <article v-for="job in filteredJobs" :key="job.id" class="cron-job-row" :class="{ disabled: !job.enabled, running: isJobRunning(job.id) }">
+          <label class="select-column"><input type="checkbox" :checked="selectedJobIds.has(job.id)" :aria-label="`选择 ${job.name}`" @change="toggleJobSelection(job.id)"></label>
+
+          <div class="cron-job-main">
+            <div class="cron-job-heading">
+              <div class="cron-job-icon" :class="{ group: job.target_type === 'group' }">
+                <MessagesSquare v-if="job.target_type === 'group'" :size="17" />
+                <FolderKanban v-else :size="17" />
+              </div>
+              <div>
+                <div class="cron-job-title-line">
+                  <strong>{{ job.name }}</strong>
+                  <span class="target-tag" :class="{ group: job.target_type === 'group' }">{{ targetLabel(job) }}</span>
+                  <span v-if="job.workflow_type === 'daily_dev'" class="workflow-tag">业务开发</span>
                 </div>
-                <div class="result-text" :title="job.last_result">{{ job.last_result || '暂无结果' }}</div>
-              </td>
-              <td data-label="操作">
-                <div class="actions">
-                  <button class="btn btn-outline btn-sm" @click="openRunHistory(job)">运行记录</button>
-                  <button v-if="!showArchived" class="btn btn-secondary btn-sm" :disabled="isJobRunning(job.id)" @click="runJob(job.id)">
-                    {{ isJobRunning(job.id) ? '运行中' : '立即运行' }}
-                  </button>
-                  <button v-if="!showArchived" class="btn btn-outline btn-sm" @click="editJob(job)">编辑</button>
-                  <button v-if="!showArchived" class="btn btn-danger btn-sm" @click="deleteJob(job.id)">删除</button>
-                  <button v-if="showArchived" class="btn btn-primary btn-sm" @click="restoreJob(job.id)">恢复</button>
-                  <button v-if="showArchived" class="btn btn-danger btn-sm" @click="purgeJob(job.id)">永久清除</button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+                <p class="prompt-cell" :title="job.prompt">{{ job.prompt }}</p>
+              </div>
+            </div>
+            <div class="cron-job-policy">
+              <span>{{ job.timezone || 'Asia/Shanghai' }}</span>
+              <span>失败重试 {{ job.retry_limit || 0 }} 次</span>
+              <span v-if="job.workflow_type === 'daily_dev'">最多认领 {{ job.backlog_batch_limit || 1 }} 条需求</span>
+              <span v-if="job.workflow_type === 'daily_dev' && job.continue_gaps !== false">自动续跑缺口</span>
+              <span v-if="job.notification_enabled">已开启通知</span>
+            </div>
+            <p v-if="job.workflow_type === 'daily_dev' && isExecutionBlocked()" class="job-runtime-warning"><TriangleAlert :size="14" />执行通道阻塞，触发后会等待复检通过</p>
+          </div>
+
+          <div class="cron-schedule-block">
+            <span class="column-label">执行计划</span>
+            <strong><Clock3 :size="15" />{{ scheduleLabel(job) }}</strong>
+            <code>{{ job.schedule }}</code>
+            <p v-if="job.schedule_error" class="error-text">{{ job.schedule_error }}</p>
+          </div>
+
+          <div class="cron-run-block">
+            <span class="column-label">运行情况</span>
+            <div class="run-status-line">
+              <span class="status" :class="`status-${job.last_status || 'never'}`">{{ statusLabel(job.last_status) }}</span>
+              <span>已触发 {{ job.run_count || 0 }} 次</span>
+            </div>
+            <p><span>上次</span>{{ formatTimeInZone(job.last_run, job.timezone) }}</p>
+            <p><span>下次</span>{{ formatTimeInZone(job.next_run, job.timezone) }}</p>
+            <div v-if="cronRunMetaItems(job).length" class="cron-meta-row"><span v-for="item in cronRunMetaItems(job)" :key="item">{{ item }}</span></div>
+            <small class="result-text" :title="job.last_result">{{ job.last_result || '暂无运行结果' }}</small>
+          </div>
+
+          <div class="cron-job-controls">
+            <label v-if="!showArchived" class="toggle" :title="job.enabled ? '停用任务' : '启用任务'">
+              <input type="checkbox" :checked="job.enabled" @change="toggleJob(job.id, $event.target.checked)">
+              <span aria-hidden="true"></span><small>{{ job.enabled ? '已启用' : '已停用' }}</small>
+            </label>
+            <div class="primary-row-actions">
+              <button class="btn btn-outline btn-sm" @click="openRunHistory(job)"><History :size="14" />运行记录</button>
+              <button v-if="!showArchived" class="btn btn-secondary btn-sm" :disabled="isJobRunning(job.id)" @click="runJob(job.id)"><Play :size="14" />{{ isJobRunning(job.id) ? '运行中' : '立即运行' }}</button>
+              <button v-if="showArchived" class="btn btn-primary btn-sm" @click="restoreJob(job.id)"><RotateCcw :size="14" />恢复</button>
+            </div>
+            <div class="secondary-row-actions">
+              <button v-if="!showArchived" class="text-command" @click="editJob(job)"><Pencil :size="14" />编辑</button>
+              <button v-if="!showArchived" class="text-command danger" @click="deleteJob(job.id)"><Trash2 :size="14" />归档</button>
+              <button v-if="showArchived" class="text-command danger" @click="purgeJob(job.id)"><Trash2 :size="14" />永久清除</button>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
 
     <CronRunHistoryDrawer
       :visible="!!selectedRunJob"
@@ -125,9 +160,14 @@
     />
 
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
-      <div class="modal">
-        <button class="modal-close" @click="showCreate = false">&times;</button>
-        <h3>{{ editingId ? '编辑定时任务' : '新建定时任务' }}</h3>
+      <div class="modal" role="dialog" aria-modal="true" :aria-label="editingId ? '编辑定时任务' : '新建定时任务'">
+        <header class="modal-header">
+          <span class="modal-title-icon"><CalendarClock :size="19" /></span>
+          <div><h3>{{ editingId ? '编辑定时任务' : '新建定时任务' }}</h3><p>{{ editingId ? '调整执行目标、计划和可靠性策略。' : '配置一个可追踪、可重试的 Agent 自动任务。' }}</p></div>
+          <button class="modal-close" aria-label="关闭" @click="showCreate = false"><X :size="18" /></button>
+        </header>
+        <div class="modal-body">
+        <div class="form-section-title first">基础信息</div>
         <div class="form-group">
           <label>任务名称</label>
           <input v-model="newJob.name" placeholder="如 每日代码检查">
@@ -159,7 +199,7 @@
             <option value="low">低</option>
           </select>
         </div>
-        <div class="form-section-title">可靠运行</div>
+        <div class="form-section-title">调度可靠性</div>
         <div class="schedule-grid">
           <div class="form-group">
             <label>执行时区</label>
@@ -189,6 +229,7 @@
           </div>
           <div class="field-hint">使用设置页面已配置的飞书通知机器人，每个定时任务可独立选择通知时机。</div>
         </div>
+        <div v-if="newJob.targetType === 'group'" class="form-section-title">群聊工作流</div>
         <div v-if="newJob.targetType === 'group'" class="form-group">
           <label>工作流类型</label>
           <select v-model="newJob.workflowType">
@@ -226,6 +267,7 @@
           <input type="number" v-model.number="newJob.backlogBatchLimit" min="1" max="20">
           <div class="field-hint">定时触发时最多从需求池认领多少条 ready 需求；每条会创建独立日常开发任务。</div>
         </div>
+        <div class="form-section-title">执行计划</div>
         <div class="form-group">
           <label>执行频率</label>
           <select v-model="newJob.scheduleMode">
@@ -276,9 +318,10 @@
           <div class="hint">格式：分 时 日 月 周，例如 */30 * * * *</div>
         </div>
         <div class="schedule-preview">
-          <span>生成表达式</span>
+          <span><CheckCircle2 :size="14" />计划表达式</span>
           <code>{{ schedulePreview || '请选择执行频率' }}</code>
         </div>
+        <div class="form-section-title">执行内容</div>
         <div class="form-group">
           <div class="label-row">
             <label>执行提示词</label>
@@ -286,9 +329,10 @@
           </div>
           <textarea v-model="newJob.prompt" rows="4" placeholder="告诉 Agent 到点后要做什么"></textarea>
         </div>
+        </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showCreate = false">取消</button>
-          <button class="btn btn-primary" @click="submitCreate">{{ editingId ? '保存修改' : '创建' }}</button>
+          <button class="btn btn-primary" @click="submitCreate"><CheckCircle2 :size="15" />{{ editingId ? '保存修改' : '创建任务' }}</button>
         </div>
       </div>
     </div>

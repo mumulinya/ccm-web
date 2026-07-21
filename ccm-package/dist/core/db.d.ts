@@ -2,8 +2,8 @@ export declare const MCP_DIR: string;
 export declare const SKILLS_DIR: string;
 export declare const SKILL_PACKAGES_DIR: string;
 export declare const AGENTS: {
-    type: string;
-    name: string;
+    type: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
+    name: "Claude Code" | "Codex CLI" | "Cursor Agent" | "Gemini CLI" | "OpenCode" | "Qoder CLI";
 }[];
 export declare function getConfigs(): any[];
 export declare function getConfigInfo(configPath: string): any[];
