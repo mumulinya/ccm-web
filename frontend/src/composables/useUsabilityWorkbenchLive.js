@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { subscribeRuntimeEvents } from '../utils/runtimeEventBus.js'
 
 const CACHE_KEY = 'ccm:usability-workbench:snapshot:v2'
 const STALE_AFTER_MS = 25_000
@@ -11,10 +12,11 @@ export function useUsabilityWorkbenchLive() {
   const stale = ref(false)
   const lastError = ref('')
   const lastSuccessfulAt = ref(0)
-  let source = null
+  let unsubscribeEvents = null
   let watchdog = null
   let recoveryTimer = null
-  let initialFallbackTimer = null
+  let fallbackTimer = null
+  let refreshDebounce = null
 
   const cachedAt = computed(() => lastSuccessfulAt.value ? new Date(lastSuccessfulAt.value) : null)
 
@@ -26,10 +28,6 @@ export function useUsabilityWorkbenchLive() {
 
   const applySnapshot = (snapshot, options = {}) => {
     if (!snapshot || typeof snapshot !== 'object') return false
-    if (initialFallbackTimer) {
-      window.clearTimeout(initialFallbackTimer)
-      initialFallbackTimer = null
-    }
     data.value = snapshot
     lastSuccessfulAt.value = Date.now()
     stale.value = false
@@ -80,38 +78,31 @@ export function useUsabilityWorkbenchLive() {
   }
 
   const connect = () => {
-    if (source) source.close()
-    if (typeof EventSource === 'undefined') {
-      stale.value = !!data.value
-      load(true)
-      return
-    }
-    source = new EventSource('/api/usability/workbench/stream')
-    if (initialFallbackTimer) window.clearTimeout(initialFallbackTimer)
-    initialFallbackTimer = window.setTimeout(() => {
-      initialFallbackTimer = null
-      if (loading.value || stale.value) load(true)
-    }, 1500)
-    source.onopen = () => {
-      realtimeConnected.value = true
-      lastError.value = ''
-    }
-    source.onmessage = event => {
-      try {
-        const payload = JSON.parse(event.data)
+    unsubscribeEvents?.()
+    unsubscribeEvents = subscribeRuntimeEvents(['task', 'permission', 'agent', 'feishu', 'project', 'group', 'cron', 'system'], payload => {
+      if (payload.type === 'connected' || payload.type === 'ready') {
         realtimeConnected.value = true
-        lastSuccessfulAt.value = Date.now()
-        if (payload.type === 'snapshot' || payload.type === 'update') applySnapshot(payload.data)
-        else if (payload.type === 'heartbeat') stale.value = false
-        else if (payload.type === 'warning') lastError.value = payload.message || '实时数据更新异常'
-      } catch {}
-    }
-    source.onerror = () => {
-      realtimeConnected.value = false
-      stale.value = !!data.value
-      lastError.value = '实时连接中断，正在尝试恢复'
-      scheduleRecovery()
-    }
+        lastError.value = ''
+        return
+      }
+      if (payload.type === 'heartbeat') {
+        realtimeConnected.value = true
+        stale.value = false
+        return
+      }
+      if (payload.type === 'disconnected') {
+        realtimeConnected.value = false
+        stale.value = !!data.value
+        lastError.value = '实时连接中断，正在尝试恢复'
+        scheduleRecovery()
+        return
+      }
+      if (refreshDebounce) window.clearTimeout(refreshDebounce)
+      refreshDebounce = window.setTimeout(() => load(true), 180)
+    })
+    void load(true)
+    if (fallbackTimer) window.clearInterval(fallbackTimer)
+    fallbackTimer = window.setInterval(() => load(true), 60_000)
     if (watchdog) window.clearInterval(watchdog)
     watchdog = window.setInterval(() => {
       if (lastSuccessfulAt.value && Date.now() - lastSuccessfulAt.value > STALE_AFTER_MS) stale.value = true
@@ -119,14 +110,16 @@ export function useUsabilityWorkbenchLive() {
   }
 
   const disconnect = () => {
-    source?.close()
-    source = null
+    unsubscribeEvents?.()
+    unsubscribeEvents = null
     if (watchdog) window.clearInterval(watchdog)
     if (recoveryTimer) window.clearTimeout(recoveryTimer)
-    if (initialFallbackTimer) window.clearTimeout(initialFallbackTimer)
+    if (fallbackTimer) window.clearInterval(fallbackTimer)
+    if (refreshDebounce) window.clearTimeout(refreshDebounce)
     watchdog = null
     recoveryTimer = null
-    initialFallbackTimer = null
+    fallbackTimer = null
+    refreshDebounce = null
   }
 
   return {

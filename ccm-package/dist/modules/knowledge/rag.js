@@ -299,6 +299,8 @@ function handleRagApi(pathname, req, res, parsed) {
             retrieval: {
                 semanticEnabled: embedding.enabled && embedding.hasKey && !!embedding.model,
                 mode: embedding.enabled && embedding.hasKey ? `hybrid:${embedding.model}` : "hybrid:hashing",
+                localFallbackEnabled: true,
+                localFallbackDescription: "未配置 Embedding 或远程调用失败时，自动使用本地关键词、中文切词与 hashing 向量混合检索",
             },
         });
     }

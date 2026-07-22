@@ -79,6 +79,8 @@ const pets_1 = require("./modules/pets/pets");
 const pet_activity_coordinator_1 = require("./modules/pets/pet-activity-coordinator");
 const music_1 = require("./modules/music/music");
 const collaboration_1 = require("./modules/collaboration/collaboration");
+const task_permission_routes_1 = require("./modules/collaboration/task-permission-routes");
+const task_permission_broker_1 = require("./modules/collaboration/task-permission-broker");
 const storage_1 = require("./modules/collaboration/storage");
 const group_session_lifecycle_head_1 = require("./modules/collaboration/group-session-lifecycle-head");
 const feishu_channel_1 = require("./modules/collaboration/feishu-channel");
@@ -90,14 +92,17 @@ const task_agent_continuation_soak_1 = require("./tasks/task-agent-continuation-
 const reliability_drills_1 = require("./system/reliability-drills");
 const soak_test_1 = require("./system/soak-test");
 const process_lifecycle_1 = require("./system/process-lifecycle");
+const runtime_events_1 = require("./system/runtime-events");
 const session_compaction_hooks_1 = require("./system/session-compaction-hooks");
 const context_budget_1 = require("./system/context-budget");
 const global_agent_1 = require("./modules/global/global-agent");
 const rag_1 = require("./modules/knowledge/rag");
+const knowledge_access_1 = require("./modules/knowledge/knowledge-access");
 const slash_commands_1 = require("./modules/tools/slash-commands");
 const credential_store_1 = require("./core/credential-store");
 const usability_1 = require("./modules/system/usability");
 const settings_1 = require("./modules/system/settings");
+const local_auth_1 = require("./modules/system/local-auth");
 const role_skills_1 = require("./skills/role-skills");
 const chat_runs_1 = require("./projects/chat-runs");
 const cleanup_center_1 = require("./system/cleanup-center");
@@ -110,6 +115,15 @@ const server_static_1 = require("./server-static");
 const server_bootstrap_1 = require("./server-bootstrap");
 // === 运行时内存状态与心跳推送 ===
 let PORT = 3080;
+let LISTEN_HOST = "127.0.0.1";
+const CCM_RUNTIME_VERSION = (() => {
+    try {
+        return String(require("../package.json")?.version || "dev");
+    }
+    catch {
+        return "dev";
+    }
+})();
 const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, MUSIC_PET_AGENT_NAME, bindProjectRunAgentSession, broadcastPetConfigChanged, broadcastPetNavigation, broadcastPetSpeech, getAgentRunActivityDuration, getAgentState, getMusicPetAgent, getPetAgents, getPetNavigationTarget, getProjectPetActionStrategy, petStatusClients, petWorkspaceClients, setAgentActivity, setMusicPetState, writeSse } = (0, server_pet_activity_1.createPetActivityRuntime)({
     getPort: () => PORT,
     CCM_DIR: utils_1.CCM_DIR,
@@ -228,8 +242,17 @@ function createCollabCtx() {
 function handleRequest(req, res) {
     const parsed = url.parse(req.url, true);
     const pathname = parsed.pathname || "/";
-    // CORS 头支持
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    // Browser requests stay same-origin. Local Node/Agent clients do not need CORS headers.
+    const requestOrigin = String(req.headers.origin || "").trim();
+    if (requestOrigin) {
+        try {
+            if (new URL(requestOrigin).host === String(req.headers.host || "")) {
+                res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+                res.setHeader("Vary", "Origin");
+            }
+        }
+        catch { }
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
     if (req.method === "OPTIONS") {
@@ -237,6 +260,14 @@ function handleRequest(req, res) {
         res.end();
         return;
     }
+    if ((0, local_auth_1.handleLocalAuthApi)(pathname, req, res))
+        return;
+    if (pathname.startsWith("/api/") && !(0, local_auth_1.browserApiAccessAllowed)(req)) {
+        (0, utils_1.sendJson)(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
+        return;
+    }
+    if ((0, runtime_events_1.handleRuntimeEventsApi)(pathname, req, res, parsed))
+        return;
     if (pathname === "/api/agent-runs" && req.method === "GET") {
         (0, utils_1.sendJson)(res, {
             success: true,
@@ -630,6 +661,13 @@ function handleRequest(req, res) {
             const configuredAgentType = info[0]?.agent || "claudecode";
             const resolvedRuntime = (0, runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
             const agentType = resolvedRuntime.selected;
+            let projectKnowledge = { context: "", citations: [], embeddingMode: "hashing", fallback: true };
+            try {
+                projectKnowledge = await (0, knowledge_access_1.searchAgentKnowledge)(finalMessage, { role: "project-agent", project }, { limit: 6, maxContextChars: 18000 });
+            }
+            catch (error) {
+                console.warn(`[项目知识检索] ${project} 已使用无知识上下文继续：${error?.message || error}`);
+            }
             let chatIntent;
             try {
                 chatIntent = await (0, project_chat_intent_1.classifyProjectChatIntentWithModel)(message, files, { forceTask: !!parentRunId, project });
@@ -656,7 +694,7 @@ function handleRequest(req, res) {
                     projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
                         reason: "auto_model",
                         currentRequest: finalMessage,
-                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket },
+                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context },
                         tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
                         provider: agentType,
                     });
@@ -728,20 +766,21 @@ function handleRequest(req, res) {
                         const threshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
                         const hydratedPayloadTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0)
                             + (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
+                            + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
                             + (0, context_budget_1.estimateTextTokens)(finalMessage);
                         if (threshold > 0 && hydratedPayloadTokens >= threshold && projectCompaction?.compacted !== true) {
                             projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
                                 force: true,
                                 reason: "third_party_memory_mcp_required_hydration",
                                 currentRequest: finalMessage,
-                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket },
+                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context },
                                 tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
                                 provider: agentType,
                             });
                             projectMemoryMcp = prepareProjectMemoryMcp();
                             toolContext = buildProjectToolContext(project, workDir, agentType, { internalMcpServers: projectMemoryMcp.internalMcpServers });
                             projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
-                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(finalMessage);
+                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context) + (0, context_budget_1.estimateTextTokens)(finalMessage);
                             if (threshold > 0 && postTokens >= threshold)
                                 throw new Error(`项目记忆 MCP 必读上下文压缩后仍超过阈值：${postTokens}/${threshold}`);
                         }
@@ -753,7 +792,7 @@ function handleRequest(req, res) {
             }
             if (toolContext.dispatchGate?.dispatchReady === false)
                 return sendRuntimeToolDispatchBlocked(res, toolContext);
-            const fullMessage = `${toolContext.prompt}\n\n${finalMessage}`;
+            const fullMessage = [toolContext.prompt, projectKnowledge.context, finalMessage].filter(Boolean).join("\n\n");
             const memoryMcpEnabled = projectMemoryMcp?.ready === true;
             const projectSessionContext = memoryMcpEnabled
                 ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
@@ -850,7 +889,14 @@ function handleRequest(req, res) {
             const toolContext = buildProjectToolContext(project, workDir, agentType);
             if (toolContext.dispatchGate?.dispatchReady === false)
                 return sendRuntimeToolDispatchBlocked(res, toolContext);
-            const promptWithTools = `${toolContext.prompt}\n\n${fullMessage}`;
+            let projectKnowledge = { context: "" };
+            try {
+                projectKnowledge = await (0, knowledge_access_1.searchAgentKnowledge)(fullMessage, { role: "project-agent", project }, { limit: 6, maxContextChars: 18000 });
+            }
+            catch (error) {
+                console.warn(`[项目知识检索] ${project} 已使用无知识上下文继续：${error?.message || error}`);
+            }
+            const promptWithTools = [toolContext.prompt, projectKnowledge.context, fullMessage].filter(Boolean).join("\n\n");
             try {
                 const output = await callAgent(project, promptWithTools, workDir, agentType, 120000, {
                     tab: "projects",
@@ -918,6 +964,8 @@ function handleRequest(req, res) {
         return;
     if ((0, music_1.handleMusicApi)(pathname, req, res, parsed, musicCtx))
         return;
+    if ((0, task_permission_routes_1.handleTaskPermissionRoutes)(pathname, req, res, parsed, collabCtx))
+        return;
     if ((0, collaboration_1.handleCollaborationApi)(pathname, req, res, parsed, collabCtx))
         return;
     if ((0, global_agent_1.handleGlobalAgentApi)(pathname, req, res, parsed, collabCtx))
@@ -973,9 +1021,34 @@ function bootstrapServerRuntime(startupCollabCtx, port) {
         toolManager: tool_manager_1.toolManager
     });
 }
-function startServer(port) {
+function normalizeListenHost(value) {
+    let host = String(value || "127.0.0.1").trim().replace(/^\[|\]$/g, "");
+    if (host === "*")
+        host = "0.0.0.0";
+    if (!host || host.length > 253 || !/^[a-zA-Z0-9._:-]+$/.test(host))
+        throw new Error(`监听地址无效：${value}`);
+    return host;
+}
+function formatHostUrl(host, port) {
+    return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+function networkAccessUrls(host, port) {
+    if (!["0.0.0.0", "::"].includes(host)) {
+        return ["127.0.0.1", "localhost", "::1"].includes(host) ? [] : [formatHostUrl(host, port)];
+    }
+    const addresses = new Set();
+    for (const rows of Object.values(os.networkInterfaces())) {
+        for (const row of rows || []) {
+            if (!row.internal && row.family === "IPv4")
+                addresses.add(formatHostUrl(row.address, port));
+        }
+    }
+    return [...addresses];
+}
+function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
     PORT = port;
-    const instanceLock = (0, server_instance_lock_1.acquireCcmServerInstanceLock)(port);
+    LISTEN_HOST = normalizeListenHost(host);
+    const instanceLock = (0, server_instance_lock_1.acquireCcmServerInstanceLock)(port, LISTEN_HOST);
     const startupCollabCtx = createCollabCtx();
     const server = http.createServer(handleRequest);
     server.on("error", () => (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock));
@@ -991,21 +1064,29 @@ function startServer(port) {
         (0, group_session_maintenance_1.stopGroupSessionRetentionMaintenanceScheduler)();
         (0, model_capability_cache_1.stopModelCapabilityRefreshScheduler)();
         (0, runtime_tool_real_cli_matrix_1.stopRuntimeToolRealCliMatrixScheduler)();
+        (0, task_permission_broker_1.stopTaskPermissionNotificationScheduler)();
         (0, soak_test_1.shutdownSoakMonitor)();
         (0, task_store_1.closeSqliteTaskStore)();
         (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
     });
-    server.listen(port, () => {
+    server.listen(port, LISTEN_HOST, () => {
         // Port ownership and the data-directory lock are the fail-closed singleton
         // gates. No mutable startup work may run before both have succeeded.
         bootstrapServerRuntime(startupCollabCtx, port);
+        (0, task_permission_broker_1.startTaskPermissionNotificationScheduler)(startupCollabCtx);
         (0, model_capability_cache_1.startModelCapabilityRefreshScheduler)();
         (0, runtime_tool_real_cli_matrix_1.startRuntimeToolRealCliMatrixScheduler)();
-        console.log(`\n╔══════════════════════════════════════╗`);
-        console.log(`║     ccm Web 控制台                    ║`);
-        console.log(`╚══════════════════════════════════════╝\n`);
-        console.log(`  地址: http://localhost:${port}`);
-        console.log(`  按 Ctrl+C 停止\n`);
+        console.log("");
+        console.log(`CCM Workspace  v${CCM_RUNTIME_VERSION}`);
+        console.log("------------------------------------------------------");
+        console.log(`Local URL   http://localhost:${port}`);
+        console.log(`Listen      ${LISTEN_HOST}:${port}`);
+        for (const accessUrl of networkAccessUrls(LISTEN_HOST, port))
+            console.log(`Network URL ${accessUrl}`);
+        console.log(`Data        ${utils_1.CCM_DIR}`);
+        console.log(`Runtime     ${networkAccessUrls(LISTEN_HOST, port).length ? "remote access enabled; login required" : "local authenticated workspace"}`);
+        console.log("Stop        Ctrl+C");
+        console.log("");
         void (0, global_agent_1.resumeGlobalAgentLoopsForServer)(startupCollabCtx, port)
             .then(result => {
             if (result.total > 0)
@@ -1030,8 +1111,9 @@ function startServer(port) {
 }
 if (require.main === module) {
     PORT = parseInt(process.argv[2]) || 3080;
+    LISTEN_HOST = normalizeListenHost(process.argv[3] || process.env.CCM_HOST || "127.0.0.1");
     (0, process_lifecycle_1.installProcessLifecycleFaultHandlers)();
-    const server = startServer(PORT);
+    const server = startServer(PORT, LISTEN_HOST);
     let lifecycleHeartbeat = null;
     server.prependOnceListener("listening", () => {
         (0, process_lifecycle_1.initializeProcessLifecycle)();

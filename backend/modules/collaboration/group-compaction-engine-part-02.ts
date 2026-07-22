@@ -15,6 +15,7 @@ import {
   buildModelVisiblePayloadSnapshot,
   buildSessionPostCompactGate,
   measureSessionContextTokens,
+  modelVisiblePayloadAccounting,
   runSessionCompactionHooks,
 } from "../../system/session-compaction-core";
 import { calculateSessionMemoryKeepWindow } from "../../system/session-memory-window";
@@ -221,6 +222,12 @@ export async function compactGroupConversationMemory(input: {
     currentRequest: input.config?.currentRequest || input.config?.current_request || null,
     recoveryContext: input.config?.recoveryContext || input.config?.recovery_context || null,
     hookResults: [],
+    contextComponents: input.config?.contextComponents || input.config?.context_components || {
+      rules: input.config?.modelVisibleRules || input.config?.model_visible_rules || null,
+      skills: input.config?.modelVisibleSkills || input.config?.model_visible_skills || null,
+      mcpTools: input.config?.modelVisibleMcpTools || input.config?.model_visible_mcp_tools || null,
+      subagentDefinitions: input.config?.modelVisibleSubagentDefinitions || input.config?.model_visible_subagent_definitions || null,
+    },
   });
   const contextTokenMeasurement = measureSessionContextTokens({
     scope: "group",
@@ -257,6 +264,10 @@ export async function compactGroupConversationMemory(input: {
       contextPressureWarning: preCompactWarning,
       compactWarning: preCompactWarning,
       lastPressureSampleAt: now,
+      tokenMeasurement: contextTokenMeasurement,
+      token_measurement: contextTokenMeasurement,
+      modelVisiblePayload: modelVisiblePayloadAccounting(triggerPayload),
+      model_visible_payload: modelVisiblePayloadAccounting(triggerPayload),
     },
     messageCompression: {
       ...(memory?.messageCompression || {}),
@@ -670,6 +681,12 @@ export async function compactGroupConversationMemory(input: {
       toolContinuity: memory.toolContinuity,
     },
     hookResults: sharedSessionStartHookResults,
+    contextComponents: input.config?.contextComponents || input.config?.context_components || {
+      rules: input.config?.modelVisibleRules || input.config?.model_visible_rules || null,
+      skills: input.config?.modelVisibleSkills || input.config?.model_visible_skills || null,
+      mcpTools: input.config?.modelVisibleMcpTools || input.config?.model_visible_mcp_tools || null,
+      subagentDefinitions: input.config?.modelVisibleSubagentDefinitions || input.config?.model_visible_subagent_definitions || null,
+    },
   });
   const sharedPostCompactGate = buildSessionPostCompactGate({
     modelVisiblePayload: finalModelVisiblePayload,

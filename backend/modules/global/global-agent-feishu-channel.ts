@@ -10,7 +10,20 @@ import { decideWorkflowWithModel } from "../../agents/workflow-decision";
 
 // Feishu event decoding, message lifecycle, turn control, and restart recovery.
 export function createGlobalAgentFeishuChannel(deps: any) {
-  const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, loadGroups, notifyFeishuTaskStage, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps
+  const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, listTaskPermissionRequests, loadGroups, notifyFeishuTaskStage, postLocalApi, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps
+
+  async function sendFeishuConversationReply(input: { conversationId: string; title: string; markdown: string; traceId?: string; stage?: string; dedupeSuffix?: string }) {
+    const bound = await notifyFeishuTaskStage({
+      stage: input.stage || "global_agent_reply",
+      title: input.title,
+      markdown: input.markdown,
+      sessionId: input.conversationId,
+      dedupeKey: `global-reply:${input.traceId || input.conversationId}:${input.dedupeSuffix || crypto.createHash("sha256").update(input.markdown).digest("hex").slice(0, 16)}`,
+    });
+    if (bound?.success || bound?.queued) return { ...bound, channel: "bound_conversation" };
+    const fallback = await sendFeishuReportMessage({ title: input.title, markdown: input.markdown });
+    return { ...fallback, channel: "configured_fallback", reason: bound?.reason || "bound_delivery_unavailable" };
+  }
 
   function decryptFeishuEvent(encrypted: string, encryptKey: string): any {
     const key = crypto.createHash("sha256").update(encryptKey).digest();
@@ -133,11 +146,11 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     return "";
   }
 
-  async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, text: string, payload: any, options: { sendReport?: boolean; traceId?: string } = {}) {
+  async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, text: string, payload: any, options: { sendReport?: boolean; traceId?: string; inboundRecorded?: boolean; destination?: any; conversationId?: string } = {}) {
     const sendReport = options.sendReport !== false;
     const traceId = ensureTraceId(options.traceId, "feishu");
-    const conversationId = resolveFeishuGlobalAgentSessionId(payload);
-    const destination = recordFeishuInbound({ payload, sessionId: conversationId, messageId: getFeishuMessageId(payload) });
+    const conversationId = options.conversationId || resolveFeishuGlobalAgentSessionId(payload);
+    const destination = options.destination || (options.inboundRecorded ? null : recordFeishuInbound({ payload, sessionId: conversationId, messageId: getFeishuMessageId(payload) }));
     bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot" });
     const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
     const sourceIngestion = await ingestFeishuRequirementAttachment(payload, text);
@@ -151,9 +164,35 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     appendTraceEvent(traceId, { id: `feishu:${getFeishuMessageId(payload) || crypto.randomBytes(4).toString("hex")}:received`, type: "feishu.message_received", status: "info", message: text.slice(0, 500), data: { conversation_id: conversationId, message_id: getFeishuMessageId(payload) } });
     try {
       if (/^(帮助|help|\/help)$/i.test(text)) {
-        const markdown = "可以直接发送业务需求，也可以说：\n- 查看任务状态\n- 检查系统状态\n- 给某个协作群或项目执行成员下发指令\n- 每天 9 点执行某项任务\n- 暂停、恢复或重试指定任务\n\n删除等高风险操作必须回到 CCM 界面确认。";
-        if (sendReport) await sendFeishuReportMessage({ title: "全局 Agent 使用帮助", markdown });
+        const markdown = "可以直接发送业务需求，也可以说：\n- 查看任务状态\n- 检查系统状态\n- 给某个协作群或项目执行成员下发指令\n- 每天 9 点执行某项任务\n- 暂停、恢复或重试指定任务\n\n项目 Agent 请求额外权限时，可按通知回复“批准权限 申请ID”或“拒绝权限 申请ID”。";
+        if (sendReport) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 使用帮助", markdown, traceId, dedupeSuffix: "help" });
         appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+        return markdown;
+      }
+      const permissionMatch = text.match(/^(批准权限|同意权限|拒绝权限|取消权限)\s+(perm_[a-f0-9]{24})[。！!\s]*$/i);
+      if (permissionMatch) {
+        const requestId = String(permissionMatch[2] || "");
+        const request = listTaskPermissionRequests({ originType: "global", originSessionId: conversationId, state: "awaiting_user" })
+          .find((item: any) => item.id === requestId);
+        if (!request) {
+          const markdown = "这项权限申请不属于当前飞书全局会话，或者已经处理、失效。";
+          appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+          if (sendReport) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 权限审批", markdown, traceId, dedupeSuffix: `permission-mismatch:${requestId}` });
+          return markdown;
+        }
+        const decision = /^(批准|同意)/.test(permissionMatch[1]) ? "approve" : "reject";
+        await postLocalApi(baseUrl, "/api/tasks/permission-requests/decide", {
+          request_id: requestId,
+          decision,
+          reason: `用户在来源飞书会话明确${decision === "approve" ? "批准" : "拒绝"}`,
+          maxUses: 1,
+          expiresInMinutes: 15,
+        });
+        const markdown = decision === "approve"
+          ? `已批准 ${request.project} 的 ${request.operation} 权限一次，有效期 15 分钟；原任务会自动继续。`
+          : `已拒绝 ${request.project} 的 ${request.operation} 权限申请。`;
+        appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+        if (sendReport) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 权限审批", markdown, traceId, dedupeSuffix: `permission:${requestId}:${decision}` });
         return markdown;
       }
       const confirmationMatch = text.match(/^(确认(?:执行)?|同意|取消)(?:\s+([a-z0-9_-]+))?[。！!\s]*$/i);
@@ -164,7 +203,7 @@ export function createGlobalAgentFeishuChannel(deps: any) {
         if (!waiting || waiting.status !== "waiting_confirmation") {
           const markdown = "当前没有等待你确认的全局 Agent 操作。";
           appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-          if (sendReport) await sendFeishuReportMessage({ title: "全局 Agent", markdown });
+          if (sendReport) await sendFeishuConversationReply({ conversationId, title: "全局 Agent", markdown, traceId, dedupeSuffix: "no-confirmation" });
           return markdown;
         }
         run = await resumeGlobalAgentRun(waiting.id, createAgenticRuntime(baseUrl, ctx), {
@@ -207,13 +246,13 @@ export function createGlobalAgentFeishuChannel(deps: any) {
       const markdown = `${globalRunVisibleReply(run, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK)}${confirmationHint}`;
       appendGlobalActionAudit({ ...auditBase, action: { type: "agentic_loop", params: { run_id: run.id } }, status: run.status, result: { summary: markdown, trace_id: run.trace_id, steps: run.steps.length } });
       appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-      if (sendReport) await sendFeishuReportMessage({ title: run.status === "waiting_confirmation" ? "全局 Agent 等待确认" : "全局 Agent 执行结果", markdown });
+      if (sendReport) await sendFeishuConversationReply({ conversationId, title: run.status === "waiting_confirmation" ? "全局 Agent 等待确认" : "全局 Agent 执行结果", markdown, traceId, dedupeSuffix: `run:${run.id}:${run.status}` });
       return markdown;
     } catch (error: any) {
       const markdown = `指令：${text}\n\n错误：${error?.message || String(error)}`;
       appendGlobalActionAudit({ ...auditBase, action: { type: "feishu_command", params: { message: text } }, status: "failed", result: { error: error?.message || String(error) } });
       appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-      if (sendReport) await sendFeishuReportMessage({ title: "全局 Agent 执行失败", markdown });
+      if (sendReport) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 执行失败", markdown, traceId, dedupeSuffix: "failure" });
       return markdown;
     }
   }
@@ -282,6 +321,8 @@ export function createGlobalAgentFeishuChannel(deps: any) {
   async function processFeishuControlledMessage(baseUrl: string, ctx: CollabCtx, text: string, payload: any, options: any = {}) {
     const conversationId = resolveFeishuGlobalAgentSessionId(payload);
     const messageId = getFeishuMessageId(payload);
+    const destination = recordFeishuInbound({ payload, sessionId: conversationId, messageId });
+    bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot" });
     const command = parseFeishuConversationTurnCommand(text);
     const activeRun = listGlobalAgentRuns({ sessionId: conversationId, limit: 20 })
       .find((run: any) => ["running", "supervising", "paused"].includes(String(run?.status || ""))) || null;
@@ -289,12 +330,14 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     if (command.kind === "stop") {
       if (activeRun?.id) cancelGlobalAgentRun(activeRun.id);
       void drainFeishuConversationTurns(baseUrl, ctx, conversationId, payload);
-      return {
+      const result = {
         reply: activeRun?.id
           ? "已停止当前工作。已经排队的后续消息会继续保留，你也可以发送新的要求。"
           : "当前没有正在执行的工作。已经排队的消息仍会保留。",
         stopped_run_id: activeRun?.id || "",
       };
+      if (options.sendReport !== false) await sendFeishuConversationReply({ conversationId, title: "全局 Agent", markdown: result.reply, traceId: options.traceId, dedupeSuffix: `stop:${messageId || activeRun?.id || "none"}` });
+      return { ...result, report_sent: options.sendReport !== false };
     }
   
     if (activeRun && command.kind === "steer") {
@@ -319,7 +362,9 @@ export function createGlobalAgentFeishuChannel(deps: any) {
           requestId: queued.turn.request_id,
         });
         conversationTurnControl.settle({ id: queued.turn.id, status: "applied", active_run_id: activeRun.id });
-        return { reply: "已把这条要求纳入当前工作，我会在安全节点重新核对计划并继续。", turn: queued.turn, run_id: activeRun.id };
+        const result = { reply: "已把这条要求纳入当前工作，我会在安全节点重新核对计划并继续。", turn: queued.turn, run_id: activeRun.id };
+        if (options.sendReport !== false) await sendFeishuConversationReply({ conversationId, title: "全局 Agent", markdown: result.reply, traceId: options.traceId, dedupeSuffix: `steer:${queued.turn.id}` });
+        return { ...result, report_sent: options.sendReport !== false };
       } catch (error: any) {
         conversationTurnControl.settle({ id: queued.turn.id, status: "failed", error: error?.message || String(error) });
         throw error;
@@ -338,15 +383,17 @@ export function createGlobalAgentFeishuChannel(deps: any) {
       });
       const position = conversationTurnControl.list({ scope: "feishu", conversation_id: conversationId, statuses: "queued,sending" })
         .turns.find((turn: any) => turn.id === queued.turn.id)?.position || 1;
-      return {
+      const result = {
         reply: `当前工作仍在进行，这条消息已排在第 ${position} 位，完成后会自动处理。发送“停止”可以结束当前工作。`,
         queued: true,
         position,
         turn: queued.turn,
       };
+      if (options.sendReport !== false) await sendFeishuConversationReply({ conversationId, title: "全局 Agent", markdown: result.reply, traceId: options.traceId, dedupeSuffix: `queue:${queued.turn.id}` });
+      return { ...result, report_sent: options.sendReport !== false };
     }
   
-    const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, command.message, payload, options);
+    const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, command.message, payload, { ...options, inboundRecorded: true, destination, conversationId });
     void drainFeishuConversationTurns(baseUrl, ctx, conversationId, payload);
     return { reply };
   }

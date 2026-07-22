@@ -8,6 +8,7 @@ const knowledge_context_mcp_1 = require("./knowledge-context-mcp");
 const task_evidence_mcp_1 = require("./task-evidence-mcp");
 const task_runtime_mcp_1 = require("./task-runtime-mcp");
 const test_acceptance_mcp_1 = require("./test-acceptance-mcp");
+const permission_broker_mcp_1 = require("./permission-broker-mcp");
 function buildTaskBoundInternalMcpServers(input) {
     if (!input.taskId || !input.project || !input.workDir)
         return {};
@@ -36,6 +37,7 @@ function buildTaskBoundInternalMcpServers(input) {
         [task_runtime_mcp_1.TASK_RUNTIME_MCP_SERVER_NAME]: (0, task_runtime_mcp_1.buildTaskRuntimeMcpServerConfig)(context),
         [knowledge_context_mcp_1.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME]: (0, knowledge_context_mcp_1.buildKnowledgeContextMcpServerConfig)(context),
         [task_evidence_mcp_1.TASK_EVIDENCE_MCP_SERVER_NAME]: (0, task_evidence_mcp_1.buildTaskEvidenceMcpServerConfig)(context),
+        [permission_broker_mcp_1.PERMISSION_BROKER_MCP_SERVER_NAME]: (0, permission_broker_mcp_1.buildPermissionBrokerMcpServerConfig)(context),
     };
     if (input.role !== "global-agent") {
         servers[test_acceptance_mcp_1.TEST_ACCEPTANCE_MCP_SERVER_NAME] = (0, test_acceptance_mcp_1.buildTestAcceptanceMcpServerConfig)(context);
@@ -85,6 +87,7 @@ function buildProjectSessionBoundMemoryMcpServer(input) {
     };
     return {
         [knowledge_context_mcp_1.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME]: (0, knowledge_context_mcp_1.buildKnowledgeContextMcpServerConfig)(context),
+        [permission_broker_mcp_1.PERMISSION_BROKER_MCP_SERVER_NAME]: (0, permission_broker_mcp_1.buildPermissionBrokerMcpServerConfig)(context),
     };
 }
 //# sourceMappingURL=agent-internal-mcp.js.map

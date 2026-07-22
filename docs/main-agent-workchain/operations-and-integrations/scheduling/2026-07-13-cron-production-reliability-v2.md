@@ -83,8 +83,8 @@
 - [桌面任务列表](evidence/cron-reliability-v2/01-list-desktop.png)
 - [桌面运行控制](evidence/cron-reliability-v2/02-run-controls-desktop.png)
 - [桌面可靠性配置](evidence/cron-reliability-v2/03-reliability-form-desktop.png)
-- [手机任务列表](evidence/cron-reliability-v2/04-list-mobile.png)
-- [手机运行控制](evidence/cron-reliability-v2/05-run-controls-mobile.png)
+- [手机任务列表](evidence/cron-reliability-v2/07-list-mobile.png)
+- [手机运行控制](evidence/cron-reliability-v2/08-run-controls-mobile.png)
 
 ## 数据边界
 

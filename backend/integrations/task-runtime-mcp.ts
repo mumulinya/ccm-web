@@ -69,7 +69,7 @@ const tools: InternalMcpToolDefinition[] = [
   },
 ];
 
-function callTool(context: InternalMcpTaskContext, name: string, args: any) {
+async function callTool(context: InternalMcpTaskContext, name: string, args: any) {
   if (name === "get_task_context") return { success: true, ...publicInternalMcpTaskContext(context) };
   if (name === "update_todo") {
     const items = (Array.isArray(args?.items) ? args.items : []).slice(0, 30).map((item: any, index: number) => ({

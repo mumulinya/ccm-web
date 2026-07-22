@@ -23540,13 +23540,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }>, "many">;
         warnings: z.ZodArray<z.ZodObject<{
@@ -23559,13 +23559,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
@@ -23574,14 +23574,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     }, {
@@ -23590,14 +23590,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     }>;
@@ -23613,13 +23613,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }>, "many">;
         warnings: z.ZodArray<z.ZodObject<{
@@ -23632,13 +23632,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
@@ -23647,14 +23647,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     }, {
@@ -23663,14 +23663,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     }>>;
@@ -47305,8 +47305,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
     status?: "completed" | "rejected" | "runtime_error";
-    error?: string;
     source?: "unknown" | "work_order" | "handoff";
+    error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
     outcome?: "failed" | "passed" | "blocked" | "partial";
@@ -47852,8 +47852,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            failed?: number;
             status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            failed?: number;
             passed?: number;
             blocked?: number;
             required?: boolean;
@@ -47892,8 +47892,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             verified?: number;
             total?: number;
             fallback?: number;
-            direct?: number;
             token?: number;
+            direct?: number;
             canAccept?: boolean;
             notVerified?: number;
             matchedEvidence?: number;
@@ -48050,8 +48050,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchStrengthCounts?: {
                 none?: number;
                 fallback?: number;
-                direct?: number;
                 token?: number;
+                direct?: number;
             } & {
                 [k: string]: unknown;
             };
@@ -48158,14 +48158,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };
@@ -48175,14 +48175,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };
@@ -48210,8 +48210,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     };
 }, {
     status?: "completed" | "rejected" | "runtime_error";
-    error?: string;
     source?: "unknown" | "work_order" | "handoff";
+    error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
     outcome?: "failed" | "passed" | "blocked" | "partial";
@@ -48757,8 +48757,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            failed?: number;
             status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            failed?: number;
             passed?: number;
             blocked?: number;
             required?: boolean;
@@ -48797,8 +48797,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             verified?: number;
             total?: number;
             fallback?: number;
-            direct?: number;
             token?: number;
+            direct?: number;
             canAccept?: boolean;
             notVerified?: number;
             matchedEvidence?: number;
@@ -48955,8 +48955,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchStrengthCounts?: {
                 none?: number;
                 fallback?: number;
-                direct?: number;
                 token?: number;
+                direct?: number;
             } & {
                 [k: string]: unknown;
             };
@@ -49063,14 +49063,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };
@@ -49080,14 +49080,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };
@@ -49115,8 +49115,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     };
 }>, {
     status?: "completed" | "rejected" | "runtime_error";
-    error?: string;
     source?: "unknown" | "work_order" | "handoff";
+    error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
     outcome?: "failed" | "passed" | "blocked" | "partial";
@@ -49662,8 +49662,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            failed?: number;
             status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            failed?: number;
             passed?: number;
             blocked?: number;
             required?: boolean;
@@ -49702,8 +49702,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             verified?: number;
             total?: number;
             fallback?: number;
-            direct?: number;
             token?: number;
+            direct?: number;
             canAccept?: boolean;
             notVerified?: number;
             matchedEvidence?: number;
@@ -49860,8 +49860,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchStrengthCounts?: {
                 none?: number;
                 fallback?: number;
-                direct?: number;
                 token?: number;
+                direct?: number;
             } & {
                 [k: string]: unknown;
             };
@@ -49968,14 +49968,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };
@@ -49985,14 +49985,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };
@@ -50020,8 +50020,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     };
 }, {
     status?: "completed" | "rejected" | "runtime_error";
-    error?: string;
     source?: "unknown" | "work_order" | "handoff";
+    error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
     outcome?: "failed" | "passed" | "blocked" | "partial";
@@ -50567,8 +50567,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            failed?: number;
             status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            failed?: number;
             passed?: number;
             blocked?: number;
             required?: boolean;
@@ -50607,8 +50607,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             verified?: number;
             total?: number;
             fallback?: number;
-            direct?: number;
             token?: number;
+            direct?: number;
             canAccept?: boolean;
             notVerified?: number;
             matchedEvidence?: number;
@@ -50765,8 +50765,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchStrengthCounts?: {
                 none?: number;
                 fallback?: number;
-                direct?: number;
                 token?: number;
+                direct?: number;
             } & {
                 [k: string]: unknown;
             };
@@ -50873,14 +50873,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };
@@ -50890,14 +50890,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "error" | "warning";
+            severity?: "warning" | "error";
             code?: string;
         }[];
     };

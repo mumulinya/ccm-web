@@ -1,197 +1,161 @@
-# 🚀 cc-web (Connect & Control Manager)
+# CCM Workspace
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D20.0.0-brightgreen.svg" alt="Node version">
-  <img src="https://img.shields.io/badge/Vue.js-3.x-4FC08D.svg" alt="Vue version">
-  <img src="https://img.shields.io/npm/v/@mumulinya167/cc-web.svg" alt="npm version">
-  <img src="https://img.shields.io/badge/Protocol-MCP%20Ready-blueviolet" alt="MCP Ready">
-  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
-</p>
+<img src="./public/ccm-app-icon.png" alt="CCM" width="84" height="84" />
 
-<p align="center">
-  <b>极客风的本地大模型多 Agent 协作工作区与可视化调度台</b><br>
-  让复杂的 AI Agent 任务派发、执行、门禁验收与灾难恢复变得触手可及。
-</p>
+CCM 是一个运行在本机的多 Agent 协作工作区，统一管理全局助手、群聊主 Agent、项目 Agent、第三方开发 Agent、会话记忆、任务验收、Git 工作流和持久终端。
 
----
+## 安装
 
-## 🌟 核心理念与亮点
-
-**cc-web** 不仅仅是一个套壳的前端面板，它是一整套**企业级单机 AI 协作基础设施**。它打破了传统“单体 LLM 对话框”的限制，通过引入流水线式的多 Agent 协同机制，结合本地真实的执行环境，让 AI 真正成为您的**全自动外包开发团队**。
-
-### 🎨 极致的极客风 UI 设计 (Glassmorphism & Cyberpunk)
-摒弃传统的后台管理系统样式，我们采用了次世代的设计语言：
-- **全息玻璃态界面 (Glassmorphism)**：底层模糊、自适应光效卡片，所有界面如悬浮玻璃般通透。
-- **动态微交互与暗黑模式**：午夜蓝深色主题 (Dark Mode)，流光按钮，数据加载微动效，专为长时间沉浸式开发的极客打造。
-- **Web 原生操作体验**：内置美观的系统级文件管理器、XTerm 虚拟终端、代码高亮审查面板，全程无需离开浏览器。
-
----
-
-## 🤖 多 Agent 分级协作体系
-
-我们定义了极其严密的职责边界，确保 AI 团队不会“乱套”：
-
-1. 🌐 **全局主入口 (Global Agent)**：
-   用户意图的第一接触点，负责管理群聊、配置工具、调度路由。它像产品经理一样，将非结构化的需求梳理后分配给对应的部门群聊。
-2. 👨‍💼 **群聊协调者 (Group Coordinator)**：
-   它在特定群聊内工作，负责拆解大型史诗级需求 (Epic)。它会将任务拆分成具体工单，派发给不同的底层子 Agent，并负责最后的代码门禁验收与复盘报告。
-3. 👷‍♂️ **执行子 Agent (Worker Sub-Agent)**：
-   干脏活累活的“打工人”。它们被绑定在本地真实的项目目录中，基于 `Claude CLI` 等沙盒执行器运行，直接修改代码并提供结构化的回执。
-4. ⚙️ **规则兜底引擎 (Coded Orchestrator)**：
-   非 LLM 的本地确定性规则调度器。处理任务去重、依赖等待阻塞、执行失败后的自动续跑等硬核调度。
-
----
-
-## 🚀 史诗级功能特性
-
-### 1. ⚙️ 自动开发与看门狗 (AutoDevOps & Watchdog)
-真正实现“无人值守”的自动接单与容灾：
-- **定时抓单 (Autopilot)**：通过 Cron 定时任务，自动扫描未认领的需求单并启动开发流水线。
-- **看门狗与死锁恢复**：内置状态机监控。当检测到子 Agent 执行卡死、网络异常断开时，自动发起接管、重启执行通道并进行断点续跑。
-- **真实试运行与闭环演练 (Smoke Test)**：提交生产环境前，一键自动跑通“派发->执行->回执->验收”的全闭环链路，保障高可用性。
-
-### 2. 📊 系统自检与就绪大盘 (System Diagnostics Dashboard)
-运维级的数据大盘，随时掌握 AI 团队的健康状态：
-- **探针矩阵 (Probe Matrix)**：实时探测所有子 Agent 与本地宿主机的连通性、CLI 启动耗时。
-- **折叠式高级诊断分析**：一键聚合 Node 子进程报错、Runner 运行日志、验证推断等海量调试信息。
-
-### 3. 🧠 记忆控制中心 (Memory Center)
-告别 AI 永远记不住上下文的痛点：
-- 全局集中管理个人偏好设置、项目架构约束文档、以及各个第三方 API Key。
-- **记忆穿透机制**：Agent 会在生成 Prompt 时自动挂载相关记忆库，实现全团队信息同步。
-
-### 4. 💻 任务流水线与原生代码审查 (Task Pipeline & Code Review)
-- **结构化执行报告**：任务详情页支持一键查看 Agent 交付总结、实际修改文件列表以及失败的验证命令。
-- **内建 Git Diff 视图**：在「代码变更」面板，像用 VSCode 一样查看代码增删（红绿高亮）。并支持一键将变更 Commit 到本地仓库！
-
-### 5. 🔌 MCP 生态深度集成 (Model Context Protocol)
-AI 的感官与手脚无限延伸：
-- `filesystem-mcp`：受控且安全的本地文件读写权限。
-- `fetch-web-mcp`：赋予 Agent 联网检索、抓取文档的能力。
-- `mcp-feishu`：扫码秒级绑定飞书，让 AI 直接读取办公文档或向人类同事发送汇报消息！
-
----
-
-## 🏗️ 核心架构与工作流
-
-### 系统架构图
-
-```mermaid
-graph TD
-    %% 终端用户层
-    Browser[极客控制台 Browser UI] -- WebSocket / HTTP --> Server(CCM 后端调度网关)
-    
-    %% 调度网关层
-    subgraph "CCM Core Orchestrator"
-      Server --> Router[意图与任务路由]
-      Server --> Watchdog[监控与看门狗灾难恢复]
-      Server --> Memory[记忆与配置中心]
-    end
-
-    %% Agent 协作层
-    subgraph "Multi-Agent Ecosystem"
-      Router --> GlobalAgent[全局管理 Agent]
-      Router --> GroupAgent[群聊协调 Agent]
-      GroupAgent -- 派发任务单 --> SubAgent1[子 Agent A - 前端]
-      GroupAgent -- 派发任务单 --> SubAgent2[子 Agent B - 后端]
-    end
-
-    %% 执行与协议层
-    subgraph "Execution & Protocol Sandbox"
-      SubAgent1 -.-> CLI[Claude CLI / 本地执行器]
-      SubAgent2 -.-> CLI
-      CLI --> LocalFiles[(本地代码库 Workspace)]
-      CLI -- MCP Protocol --> MCPGateway{MCP 工具网关}
-      MCPGateway --> FS[File System MCP]
-      MCPGateway --> Web[Fetch Web MCP]
-      MCPGateway --> Feishu[飞书办公 MCP]
-    end
-```
-
-### Agent 自动开发工作流
-
-```mermaid
-sequenceDiagram
-    participant User as 用户 (前端)
-    participant Group as 群聊协调 Agent
-    participant Worker as 子 Agent
-    participant Env as 本地文件与执行环境
-
-    User->>Group: 下发自然语言需求
-    Group->>Group: 分析需求，拆解出具体工程 Task
-    Group->>Worker: 派发 Task (含验收标准)
-    Worker->>Env: 读取代码、执行修改 (MCP)
-    Env-->>Worker: 运行报错，反馈给 AI
-    Worker->>Env: 自动 debug 并修复
-    Worker-->>Group: 提交结构化回执与修改文件列表
-    Group->>Env: 执行验证命令 (如 npm run test)
-    Env-->>Group: 测试通过
-    Group->>Group: 撰写最终复盘报告 (Review)
-    Group-->>User: 交付任务流成功通知！
-```
-
----
-
-## 📦 如何安装与启动
-
-对于绝大多数使用者，我们推荐直接通过 NPM 进行全局安装，即插即用！
-
-### 环境准备
-- Node.js >= 20.0.0
-- 推荐使用现代浏览器（Chrome / Edge）以获取最佳玻璃态渲染体验。
-
-### 快速上手 (推荐)
+要求 Node.js 20 或更高版本。
 
 ```bash
-# 1. 全局安装 cc-web
-npm install -g @mumulinya167/cc-web
+npm install -g @mumulinya167/cc-web@latest
+ccm start --open
+```
 
-# 2. 一键启动 Web 控制台
+默认地址：<http://localhost:3080>。默认只监听 `127.0.0.1`，不会意外暴露到局域网或公网。
+
+首次安装时，登录页会提供初始账户或注册入口。账户、项目、会话和运行数据保存在用户目录下的 `.cc-connect`，不会写入 npm 安装目录。
+
+## 常用命令
+
+```text
+ccm start                         前台启动 CCM
+ccm start --background --open     后台启动并打开浏览器
+ccm stop                          停止 CCM 服务
+ccm restart --background          重启后台服务
+ccm status                        查看服务与项目状态
+ccm status --json                 输出结构化状态
+ccm doctor                        检查 Node、运行资源、PTY 与 Agent CLI
+ccm open                          打开当前工作区
+ccm logs --follow                 跟踪后台启动日志
+ccm update --check                检查 npm 新版本
+ccm update                        全局安装 latest
+ccm version                       查看当前版本
+```
+
+项目兼容命令：
+
+```text
+ccm project list
+ccm project start <项目名> [agent]
+ccm project stop <项目名|all>
+ccm project init
+ccm agents
+ccm pet [stop]
+```
+
+旧命令 `ccm start/stop <项目名>`、`ccm start/stop all`、`ccm --list` 和 `ccm --init` 继续可用。
+
+## 主要能力
+
+### Agent 协作
+
+- 全局助手只使用全局上下文，并负责跨群聊、跨项目管理和任务路由。
+- 群聊主 Agent 按精确群聊会话工作，拆分任务并验收项目子 Agent 结果。
+- 独立项目 Agent 按精确项目会话运行，第三方 Agent 可通过受控 MCP 读取权威上下文。
+- 支持 Claude Code、Codex、Cursor、Gemini CLI、OpenCode 和 Qoder CLI 配置。
+
+### 会话与记忆
+
+- 全局、群聊和项目均使用独立会话。
+- 正式模型摘要与动态近期原文组成压缩后的连续上下文。
+- 多轮压缩保留上一代摘要链，原始 transcript 不会因压缩删除。
+- 记忆控制中心展示模型可见上下文、Token 分项、压缩门禁和会话状态。
+
+### 开发工作流
+
+- 项目管理支持本地目录、创建文件夹、GitHub 远端与开发 Agent 配置。
+- 代码协作页面支持 Diff、暂存、提交、fetch、fast-forward pull 和 push。
+- TestAgent 使用 Playwright MCP 执行浏览器检查，并把验证证据交回主 Agent。
+- 任务回放、定时任务、自动开发和清理中心使用同一套任务与验收记录。
+
+### 终端工作台
+
+- 基于 `node-pty` 与 xterm 的持久 Shell，会话在页面刷新后可重新连接。
+- `node-pty` 是可选原生能力；当前平台无法安装或加载时，CCM 核心服务仍可启动，终端页面自动切换为逐条命令兼容模式。
+- 支持 ANSI、交互式 CLI、Shell 切换、项目脚本、Git 分支、PID 与监听端口。
+- 危险命令在后端 Enter 边界要求一次性确认。
+- 终端输出可以预填到全局、项目或群聊 Agent，但不会自动发送。
+
+## 运行方式
+
+前台运行适合直接观察服务日志：
+
+```bash
 ccm start
 ```
 
-启动后在浏览器打开：`http://localhost:3080`。
-
----
-
-## 💻 开发者指南 (参与贡献源码)
-
-我们非常欢迎开发者一起共建这套强大的 Agent 基础设施！
+后台运行适合日常使用：
 
 ```bash
-# 1. 下载源码
-git clone https://github.com/mumulinya167/cc-web.git
-cd cc-web
-
-# 2. 安装全部依赖
-npm install
-npm --prefix frontend install
-
-# 3. 本地全量构建与静态类型检查
-npm run check
-npm run build
-
-# 4. 启动开发模式 (热更新)
-# 前端服务会自动在 3081 端口启动，并无缝代理至 3080 的后端 API
-npm run dev:frontend
+ccm start --background --open
+ccm status
+ccm logs --follow
+ccm stop
 ```
 
-> ⚠️ **关于分层架构的特别说明**: 
-> 本项目严格采用了「开发态」与「运行态」分离的架构。源码位于 `backend/`、`frontend/` 及 `integrations/` 中；执行 `npm run build` 后，最终的运行时工件将被注入并打包在 `ccm-package/` 目录中。
-> **请开发者绝对不要手动修改 `ccm-package/` 内的任何自动生成文件。**
+指定端口：
 
----
+```bash
+ccm start --port 31900
+ccm open --port 31900
+```
 
-## 📈 规划与 Roadmap (敬请期待)
-- [x] 多 Agent 协作与状态流转可视化
-- [x] 基于 MCP 协议的全栈工具链接入
-- [x] AutoDevOps 自动化接单与死锁恢复看门狗
-- [x] Glassmorphism 暗黑极客风 UI 重构
-- [ ] 大模型 Token 消耗与计费成本实时大盘 (Coming Soon!)
-- [ ] 更多云端 IDE 协议接入
+### 服务器远程访问
 
----
+同一局域网或云服务器需要显式监听所有网卡：
 
-## 📄 许可证
+```bash
+ccm start --background --host 0.0.0.0 --port 3080
+ccm status
+```
 
-本项目基于 [MIT License](LICENSE) 开源。欢迎点亮 ⭐️ Star，提交 Issue 与 PR，一起打造属于开发者的最强 AI 协作终端！
+其他设备应访问 `http://<服务器 IP>:3080`，不能使用 `localhost`。同时需要在系统防火墙和云安全组中放行 TCP `3080`。远程 API 必须通过 CCM 登录会话，只有服务器本机的 Agent 调用保留免登录能力。
+
+公网部署建议让 CCM 继续监听 `127.0.0.1`，再通过 Nginx、Caddy 或 Cloudflare Tunnel 提供 HTTPS。直接使用 HTTP 会让登录凭据在网络中以明文传输；首次登录后也应立即修改初始管理员密码。
+
+同一数据目录只允许一个 CCM 实例。测试多个实例时应为每个实例配置独立的 `CCM_TASK_STORE_DIR`。
+
+## 本地数据
+
+默认目录：
+
+```text
+~/.cc-connect/
+  configs/    项目与 Agent 配置
+  logs/       后台服务和项目日志
+  pids/       项目进程记录
+  run/        CCM 服务实例锁
+  sessions/   会话数据
+```
+
+凭据和账户数据不会打进 npm 包。删除或迁移 `.cc-connect` 前应先停止 CCM 并自行备份。
+
+## 开发构建
+
+```bash
+npm install
+npm --prefix frontend install
+npm run build
+npm run docs:check
+```
+
+发布前可运行：
+
+```bash
+npm run release:preflight
+npm run test:release
+```
+
+`release:preflight` 只读取五种开发 Agent 的安装、登录、版本和模型配置，不调用付费模型。需要执行每种 Provider 一次真实只读验收并核对最近飞书往返与权限审批时，显式运行 `npm run release:acceptance:live`；该命令可能产生最多五次模型调用。
+
+源码位于 `backend/`、`frontend/` 和 `integrations/`；`ccm-package/dist` 与 `ccm-package/public` 是生产构建产物。
+
+## 外部条件
+
+第三方 Agent 登录、付费模型、飞书租户、Git 远端和外部音乐服务需要用户自己的账号、网络与凭据。CCM 不会替用户创建这些外部授权。
+
+## License
+
+MIT

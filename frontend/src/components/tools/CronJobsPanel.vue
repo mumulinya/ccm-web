@@ -1,5 +1,6 @@
 <script setup>
 import EmptyState from '../common/EmptyState.vue'
+import TaskAttachmentPicker from '../common/TaskAttachmentPicker.vue'
 import CronRunHistoryDrawer from './CronRunHistoryDrawer.vue'
 import {
   Activity,
@@ -59,6 +60,9 @@ const {
   buildSchedule,
   schedulePreview,
   applyDailyDevPrompt,
+  addCronFiles,
+  handleCronPaste,
+  removeExistingCronAttachment,
   readResponse,
   loadJobs,
   scheduleFormFromCron,

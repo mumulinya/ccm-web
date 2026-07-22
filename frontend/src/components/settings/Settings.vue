@@ -7,6 +7,7 @@ import SettingsModelPanel from './SettingsModelPanel.vue'
 import SettingsExperiencePanel from './SettingsExperiencePanel.vue'
 import SettingsSystemPanel from './SettingsSystemPanel.vue'
 import SettingsAgentProvidersPanel from './SettingsAgentProvidersPanel.vue'
+import SettingsSecurityPanel from './SettingsSecurityPanel.vue'
 import './settings.css'
 
 const activeSection = ref('channels')
@@ -49,6 +50,7 @@ onMounted(loadSystemStatus)
         <SettingsModelPanel v-else-if="activeSection === 'models'" />
         <SettingsAgentProvidersPanel v-else-if="activeSection === 'agent-providers'" />
         <SettingsExperiencePanel v-else-if="activeSection === 'experience'" />
+        <SettingsSecurityPanel v-else-if="activeSection === 'security'" />
         <SettingsSystemPanel
           v-else
           :initial-status="systemStatus"

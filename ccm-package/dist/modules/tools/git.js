@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectGitRemoteState = inspectGitRemoteState;
 exports.normalizeRepoPath = normalizeRepoPath;
 exports.resolveSafeProjectFile = resolveSafeProjectFile;
 exports.parseGitStatus = parseGitStatus;
@@ -48,13 +49,110 @@ const db_1 = require("../../core/db");
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const LARGE_FILE_BYTES = 1024 * 1024;
 function runGit(workDir, args, options = {}) {
+    const optionEnv = options?.env && typeof options.env === "object" ? options.env : {};
     return (0, child_process_1.execFileSync)("git", args, {
         cwd: workDir,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
         maxBuffer: 12 * 1024 * 1024,
+        timeout: 60_000,
         ...options,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...optionEnv },
     });
+}
+function tryGit(workDir, args) {
+    try {
+        return { ok: true, output: String(runGit(workDir, args) || "").trim() };
+    }
+    catch (error) {
+        return { ok: false, output: "", error: safeGitError(error) };
+    }
+}
+function safeGitError(error) {
+    return String(error?.stderr || error?.stdout || error?.message || error || "Git 操作失败")
+        .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1")
+        .replace(/[\0\r]+/g, " ")
+        .trim()
+        .slice(0, 2_000);
+}
+function sanitizeRemoteUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw)
+        return "";
+    try {
+        const parsed = new URL(raw);
+        parsed.username = "";
+        parsed.password = "";
+        return parsed.toString();
+    }
+    catch {
+        return raw.replace(/^(https?:\/\/)[^/@\s]+@/i, "$1");
+    }
+}
+function inspectGitRemoteState(workDir, changedFiles = -1) {
+    const branchResult = tryGit(workDir, ["branch", "--show-current"]);
+    const branch = branchResult.ok ? branchResult.output : "";
+    const remoteResult = tryGit(workDir, ["remote", "get-url", "origin"]);
+    const remoteUrl = remoteResult.ok ? sanitizeRemoteUrl(remoteResult.output) : "";
+    const upstreamResult = tryGit(workDir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+    const upstream = upstreamResult.ok ? upstreamResult.output : "";
+    let ahead = 0;
+    let behind = 0;
+    if (upstream) {
+        const counts = tryGit(workDir, ["rev-list", "--left-right", "--count", `HEAD...${upstream}`]);
+        const match = counts.output.match(/^(\d+)\s+(\d+)$/);
+        if (counts.ok && match) {
+            ahead = Number(match[1]);
+            behind = Number(match[2]);
+        }
+    }
+    const changed = changedFiles >= 0
+        ? changedFiles
+        : String(tryGit(workDir, ["status", "--porcelain=v1", "--untracked-files=normal"]).output || "").split(/\r?\n/).filter(Boolean).length;
+    const detached = !branch;
+    return {
+        remoteUrl,
+        remoteName: remoteUrl ? "origin" : "",
+        branch: branch || "detached HEAD",
+        detached,
+        upstream,
+        ahead,
+        behind,
+        dirty: changed > 0,
+        changedFiles: changed,
+        canFetch: !!remoteUrl,
+        canPull: !!remoteUrl && !detached && changed === 0,
+        canPush: !!remoteUrl && !detached,
+    };
+}
+function performGitRemoteOperation(workDir, operation) {
+    const before = inspectGitRemoteState(workDir);
+    if (!before.remoteUrl)
+        throw new Error("当前项目没有配置 origin 远端仓库");
+    if (operation !== "fetch" && before.detached)
+        throw new Error("当前处于 detached HEAD，不能更新或推送分支");
+    if (operation === "pull" && before.dirty)
+        throw new Error(`工作区有 ${before.changedFiles} 个未提交文件，请先提交或处理后再更新本地代码`);
+    let args;
+    if (operation === "fetch")
+        args = ["fetch", "--prune", "origin"];
+    else if (operation === "pull")
+        args = before.upstream
+            ? ["pull", "--ff-only"]
+            : ["pull", "--ff-only", "origin", before.branch];
+    else if (operation === "push")
+        args = before.upstream
+            ? ["push"]
+            : ["push", "--set-upstream", "origin", before.branch];
+    else
+        throw new Error("不支持的 Git 远端操作");
+    const output = String(runGit(workDir, args, { timeout: 90_000 }) || "").trim();
+    return {
+        operation,
+        output: output.slice(-4_000),
+        repository: inspectGitRemoteState(workDir),
+    };
 }
 function readJson(file, fallback) {
     try {
@@ -420,11 +518,39 @@ function handleGitApi(pathname, req, res, parsed) {
             const branch = runGit(workDir, ["branch", "--show-current"]).trim() || "detached HEAD";
             const summary = buildGitStatusSummary(enriched);
             const context = buildChangeContext(project, workDir, enriched.map(file => file.path));
-            (0, utils_1.sendJson)(res, { success: true, branch, files: enriched, total: enriched.length, summary, context });
+            const repository = inspectGitRemoteState(workDir, enriched.length);
+            (0, utils_1.sendJson)(res, { success: true, branch, files: enriched, total: enriched.length, summary, context, repository });
         }
         catch (error) {
             (0, utils_1.sendJson)(res, { success: false, error: "无法读取 Git 工作区: " + (error.stderr || error.message) });
         }
+        return true;
+    }
+    if (pathname === "/api/git/remote-operation" && req.method === "POST") {
+        readBody(req, res, body => {
+            const project = String(body.project || "").trim();
+            const operation = String(body.operation || "").trim().toLowerCase();
+            const resolved = projectWorkDir(project);
+            if (!project || !["fetch", "pull", "push"].includes(operation)) {
+                return (0, utils_1.sendJson)(res, { success: false, error: "缺少项目或 Git 操作无效" }, 400);
+            }
+            if ("error" in resolved)
+                return (0, utils_1.sendJson)(res, { success: false, error: resolved.error }, resolved.status);
+            if (operation !== "fetch" && body.confirmed !== true) {
+                return (0, utils_1.sendJson)(res, { success: false, error: "该操作需要用户明确确认", confirmationRequired: true }, 409);
+            }
+            try {
+                runGit(resolved.workDir, ["rev-parse", "--is-inside-work-tree"]);
+                const result = performGitRemoteOperation(resolved.workDir, operation);
+                const message = operation === "fetch"
+                    ? "远端引用已拉取"
+                    : operation === "pull" ? "本地分支已更新" : "本地提交已推送";
+                (0, utils_1.sendJson)(res, { success: true, message, ...result });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: safeGitError(error), operation }, 409);
+            }
+        });
         return true;
     }
     if (pathname === "/api/git/diff" && req.method === "GET") {

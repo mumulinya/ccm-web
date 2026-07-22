@@ -181,6 +181,7 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
         currentRequest,
         recoveryContext: input.recoveryContext || input.recovery_context || null,
         hookResults: input.hookResults || input.hook_results || [],
+        contextComponents: input.contextComponents || input.context_components || undefined,
     });
     const usage = (0, session_compaction_core_1.normalizeSessionProviderUsage)({
         ...(input || {}),
@@ -189,17 +190,43 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
         boundaryGeneration: state.boundaryGeneration,
         payloadChecksum: input.payloadChecksum || input.payload_checksum || payload.payloadChecksum,
         fixedContextChecksum: input.fixedContextChecksum || input.fixed_context_checksum || payload.fixedContextChecksum,
-        estimatedFixedTokens: input.estimatedFixedTokens || input.estimated_fixed_tokens
-            || payload.tokenBreakdown.system + payload.tokenBreakdown.tools + payload.tokenBreakdown.recoveryContext + payload.tokenBreakdown.hookResults,
+        estimatedFixedTokens: input.estimatedFixedTokens || input.estimated_fixed_tokens || (0, session_compaction_core_1.modelVisibleFixedTokens)(payload),
         estimatedPayloadTokens: input.estimatedPayloadTokens || input.estimated_payload_tokens || payload.totalTokens,
     });
-    if (!usage)
-        return null;
+    const measurementUsage = usage || state.latestProviderUsage;
+    const tokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
+        scope: "project",
+        sessionId: `${safeProject}:${safeSessionId}`,
+        messages: visibleMessages,
+        activeSummary: state.activeSummary,
+        latestProviderUsage: measurementUsage,
+        provider: String(measurementUsage?.provider || ""),
+        model: String(measurementUsage?.model || ""),
+        generation: Number(measurementUsage?.generation || 0),
+        boundaryGeneration: state.boundaryGeneration,
+        modelVisiblePayload: payload,
+    });
+    const accounting = (0, session_compaction_core_1.modelVisiblePayloadAccounting)(payload);
+    const nextState = {
+        ...state,
+        latestProviderUsage: measurementUsage || null,
+        tokenMeasurement,
+        modelVisiblePayload: accounting,
+        modelVisiblePayloadChecksum: payload.payloadChecksum,
+        fixedContextChecksum: payload.fixedContextChecksum,
+        pendingRequestChecksum: payload.pendingRequestChecksum,
+        recoveryContextTokens: payload.tokenBreakdown.recoveryContext,
+        hookResultTokens: payload.tokenBreakdown.hookResults,
+    };
     data.compaction = {
         ...(data.compaction || {}),
-        latest_provider_usage: usage,
-        latestProviderUsage: usage,
-        v2: { ...state, latestProviderUsage: usage },
+        latest_provider_usage: measurementUsage || null,
+        latestProviderUsage: measurementUsage || null,
+        token_measurement: tokenMeasurement,
+        tokenMeasurement,
+        model_visible_payload: accounting,
+        modelVisiblePayload: accounting,
+        v2: nextState,
     };
     data.updated_at = new Date().toISOString();
     persistSession(safeProject, safeSessionId, data);
@@ -451,6 +478,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             currentRequest,
             recoveryContext: options.recoveryContext || null,
             hookResults: [],
+            contextComponents: options.contextComponents || options.context_components || undefined,
         });
         const tokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
             scope: "project",
@@ -639,6 +667,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             currentRequest,
             recoveryContext: { boundaryMarker, ...recoveryContext },
             hookResults: sessionStartHookResults,
+            contextComponents: options.contextComponents || options.context_components || undefined,
         });
         const afterTokens = postCompactPayload.totalTokens;
         const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: postCompactPayload, threshold });

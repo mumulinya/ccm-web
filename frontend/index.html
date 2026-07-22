@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/ccm-app-icon.png" />
+    <meta name="theme-color" content="#081416" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CCM Agent Workspace</title>
     <style>
@@ -10,7 +12,7 @@
       body { background: #f5f7f6; color: #17201d; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
       .ccm-boot { position: fixed; inset: 0; display: grid; place-items: center; background: #f5f7f6; }
       .ccm-boot__content { width: min(300px, calc(100% - 40px)); display: grid; justify-items: center; gap: 10px; text-align: center; }
-      .ccm-boot__mark { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid #ccd6d1; background: #fff; color: #0e6b4f; font-size: 18px; font-weight: 800; }
+      .ccm-boot__mark { width: 44px; height: 44px; display: block; }
       .ccm-boot strong { font-size: 14px; }
       .ccm-boot span { color: #6d7973; font-size: 11px; }
       .ccm-boot__track { width: 148px; height: 3px; margin-top: 3px; overflow: hidden; background: #dce3df; }
@@ -23,7 +25,7 @@
     <div id="app">
       <div class="ccm-boot" role="status" aria-live="polite" aria-label="CCM 正在启动">
         <div class="ccm-boot__content">
-          <div class="ccm-boot__mark" aria-hidden="true">CCM</div>
+          <img class="ccm-boot__mark" src="/favicon.svg" alt="" aria-hidden="true" />
           <strong>正在打开工作台</strong>
           <span>正在准备界面和本地数据</span>
           <i class="ccm-boot__track" aria-hidden="true"></i>

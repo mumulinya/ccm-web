@@ -296,6 +296,7 @@ class ToolManager {
                         description: t.description || "",
                         serverName: config.name,
                         inputSchema: t.inputSchema,
+                        annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
                     });
                 }
                 this.serverStatuses.set(config.name, {
@@ -464,6 +465,23 @@ class ToolManager {
             missing_skills: skillRows.filter(row => row.state === "missing"),
         };
     }
+    getScopedToolCatalog(scope) {
+        const tools = (scope ? this.tools.filter(tool => isMcpToolAllowed(scope, tool)) : this.tools).map(tool => ({
+            name: tool.name,
+            canonicalName: `mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`,
+            description: tool.description || "",
+            server: tool.serverName,
+            inputSchema: tool.inputSchema || null,
+            annotations: tool.annotations || {},
+        }));
+        const skills = (scope ? this.skills.filter(skill => isSkillAllowed(scope, skill.name)) : this.skills).map(skill => ({
+            name: skill.name,
+            description: skill.description || "",
+            contentHash: skill.contentHash || contentHash(skill),
+            toolName: "invoke_skill",
+        }));
+        return { tools, skills };
+    }
     discoverSkills(scope) {
         const skills = scope
             ? this.skills.filter(skill => isSkillAllowed(scope, skill.name))
@@ -626,6 +644,7 @@ class ToolManager {
                 description: t.description || "",
                 serverName,
                 inputSchema: t.inputSchema,
+                annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
             })),
         ];
         this.serverStatuses.set(serverName, {
@@ -714,6 +733,7 @@ class ToolManager {
                 description: t.description,
                 server: t.serverName,
                 schema: t.inputSchema,
+                annotations: t.annotations || {},
             })),
             skills: this.skills,
             skillTools: this.discoverSkills(),

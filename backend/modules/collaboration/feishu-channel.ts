@@ -4,6 +4,7 @@ import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { loadAutoDevNotifyConfig, loadFeishuConfig } from "../../core/db";
 import { sendFeishuMessageToTarget } from "./feishu";
+import { publishRuntimeEvent } from "../../system/runtime-events";
 
 const STATE_FILE = path.join(CCM_DIR, "feishu-channel-state.json");
 const SESSION_DIR = path.join(CCM_DIR, "sessions");
@@ -278,6 +279,14 @@ async function attemptDelivery(deliveryId: string) {
       last_error: result.success ? "" : current.error,
     };
     saveState(state);
+    publishRuntimeEvent("feishu", "feishu.delivery_changed", {
+      deliveryId: current.id,
+      taskId: current.task_id,
+      runId: current.run_id,
+      status: current.status,
+      reason: current.error,
+      source: "feishu-outbox",
+    });
     return current;
   } finally {
     releaseLease();
@@ -394,6 +403,12 @@ export function recordFeishuInbound(input: { payload?: any; sessionId?: string; 
   };
   saveState(state);
   if (destination) bindFeishuTaskContext({ sessionId: input.sessionId, destination, source: "feishu-control-bot" });
+  publishRuntimeEvent("feishu", "feishu.inbound", {
+    sessionId: input.sessionId,
+    id: input.messageId,
+    status: destination ? "bound" : "unbound",
+    source: "feishu-control-bot",
+  });
   return destination;
 }
 

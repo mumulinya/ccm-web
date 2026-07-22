@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { ChildProcess, spawn, spawnSync } from "child_process";
 import { CCM_DIR } from "../core/utils";
+import { publishRuntimeEvent } from "../system/runtime-events";
 
 export type ExecutionState =
   | "queued"
@@ -439,6 +440,13 @@ function registerActiveAgentRun(taskId: string, executionId: string, child: Chil
     child,
   };
   activeAgentRuns.set(runId, run);
+  publishRuntimeEvent("agent", "agent.started", {
+    runId,
+    taskId: run.taskId,
+    project: run.project,
+    status: run.status,
+    source: run.source,
+  });
   return runId;
 }
 
@@ -448,6 +456,13 @@ function finishActiveAgentRun(runId: string, status = "finished") {
   run.status = status;
   run.updatedAt = now();
   activeAgentRuns.delete(runId);
+  publishRuntimeEvent("agent", "agent.finished", {
+    runId,
+    taskId: run.taskId,
+    project: run.project,
+    status,
+    source: run.source,
+  });
 }
 
 export function listActiveAgentRuns(filters: any = {}) {
@@ -492,6 +507,14 @@ export function cancelActiveAgentRun(input: any = {}) {
   const cancellation = cancelTask && (taskId || matched[0]?.taskId)
     ? requestTaskCancellation(taskId || matched[0]?.taskId, reason, String(input.actor || "local-user"))
     : null;
+  for (const run of matched) publishRuntimeEvent("agent", "agent.cancel_requested", {
+    runId: run.id,
+    taskId: run.taskId,
+    project: run.project,
+    status: run.status,
+    reason,
+    source: run.source,
+  });
   return { success: true, matched: matched.length, killed, cancellation, targeted: !cancelTask, runs: matched.map(publicActiveAgentRun) };
 }
 

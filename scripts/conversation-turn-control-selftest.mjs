@@ -23,8 +23,16 @@ const source = {
   composer: fs.readFileSync(path.join(root, 'frontend/src/components/common/ChatComposer.vue'), 'utf8'),
   controls: fs.readFileSync(path.join(root, 'frontend/src/components/common/ConversationTurnControls.vue'), 'utf8'),
   global: fs.readFileSync(path.join(root, 'frontend/src/components/global/GlobalAgent.vue'), 'utf8'),
-  group: fs.readFileSync(path.join(root, 'frontend/src/components/collaboration/GroupChat.vue'), 'utf8'),
-  project: fs.readFileSync(path.join(root, 'frontend/src/components/projects/ProjectManager.vue'), 'utf8'),
+  group: [
+    'frontend/src/components/collaboration/GroupChatPanel.vue',
+    'frontend/src/components/collaboration/GroupChat.template.html',
+    'frontend/src/components/collaboration/useGroupChatStream.js',
+  ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n'),
+  project: [
+    'frontend/src/components/projects/ProjectManagerPanel.vue',
+    'frontend/src/components/projects/ProjectManager.template.html',
+    'frontend/src/components/projects/useProjectManager.js',
+  ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n'),
   acp: fs.readFileSync(path.join(root, 'backend/integrations/control-bot-acp.ts'), 'utf8'),
 }
 assert.match(source.composer, /allowInputWhileBusy/, '共享输入框必须支持工作中继续编辑')

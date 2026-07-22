@@ -61,10 +61,10 @@ const request = (pathname, method = 'GET', payload = null) => new Promise((resol
 const catalogResponse = await request('/api/tools/internal-mcp')
 assert.equal(catalogResponse.status, 200)
 assert.equal(catalogResponse.body.read_only, true)
-const expectedInternalMcps = ['ccm__group_coordinator', 'mcp-feishu', 'ccm__task_runtime', 'ccm__knowledge_context', 'ccm__test_acceptance', 'ccm__delivery_workspace', 'ccm__task_evidence']
+const expectedInternalMcps = ['ccm__group_coordinator', 'mcp-feishu', 'ccm__task_runtime', 'ccm__knowledge_context', 'ccm__test_acceptance', 'ccm__delivery_workspace', 'ccm__task_evidence', 'ccm__permission_broker']
 for (const name of expectedInternalMcps) assert.equal(catalogResponse.body.items.some(item => item.name === name), true, `catalog missing ${name}`)
-assert.equal(catalogResponse.body.summary.total, 7)
-assert.equal(catalogResponse.body.summary.tools, 39)
+assert.equal(catalogResponse.body.summary.total, 8)
+assert.equal(catalogResponse.body.summary.tools, 42)
 assert.equal(catalogResponse.body.items.every(item => item.protected === true && item.immutable === true), true)
 assert.equal(JSON.stringify(catalogResponse.body).includes('internal_mcp_test_secret'), false)
 
@@ -108,6 +108,8 @@ const requiredPackedFiles = [
   'dist/integrations/delivery-workspace-mcp.js',
   'mcp-task-evidence/internal-mcp.json',
   'dist/integrations/task-evidence-mcp.js',
+  'mcp-permission-broker/internal-mcp.json',
+  'dist/integrations/permission-broker-mcp.js',
 ]
 for (const required of requiredPackedFiles) {
   assert.equal(packedFiles.has(required), true, `npm package missing ${required}`)

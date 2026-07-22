@@ -39,6 +39,7 @@ exports.buildUsabilityWorkbench = buildUsabilityWorkbench;
 exports.startUsabilityArchiveScheduler = startUsabilityArchiveScheduler;
 exports.stopUsabilityArchiveScheduler = stopUsabilityArchiveScheduler;
 exports.handleUsabilityApi = handleUsabilityApi;
+const runtime_events_1 = require("../../system/runtime-events");
 const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
 const collaboration_1 = require("../collaboration/collaboration");
@@ -292,11 +293,10 @@ function handleUsabilityApi(pathname, req, res) {
         });
         let snapshot = buildUsabilityWorkbench({ runArchive: false });
         let signature = workbenchSignature(snapshot);
-        let ticks = 0;
+        let refreshTimer = null;
         sendWorkbenchEvent(res, { type: "snapshot", data: snapshot });
-        const interval = setInterval(() => {
+        const refresh = () => {
             try {
-                ticks++;
                 const next = buildUsabilityWorkbench({ runArchive: false });
                 const nextSignature = workbenchSignature(next);
                 if (nextSignature !== signature) {
@@ -304,15 +304,24 @@ function handleUsabilityApi(pathname, req, res) {
                     signature = nextSignature;
                     sendWorkbenchEvent(res, { type: "update", data: snapshot });
                 }
-                else if (ticks % 5 === 0) {
-                    sendWorkbenchEvent(res, { type: "heartbeat", generated_at: new Date().toISOString() });
-                }
             }
             catch (error) {
                 sendWorkbenchEvent(res, { type: "warning", message: error?.message || String(error) });
             }
-        }, 5000);
-        req.on("close", () => clearInterval(interval));
+        };
+        const unsubscribe = (0, runtime_events_1.subscribeRuntimeEventListener)(["task", "permission", "agent", "feishu", "project", "group", "cron"], () => {
+            if (refreshTimer)
+                clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(refresh, 180);
+        });
+        const heartbeat = setInterval(() => sendWorkbenchEvent(res, { type: "heartbeat", generated_at: new Date().toISOString() }), 15_000);
+        heartbeat.unref?.();
+        req.on("close", () => {
+            unsubscribe();
+            if (refreshTimer)
+                clearTimeout(refreshTimer);
+            clearInterval(heartbeat);
+        });
         return true;
     }
     if (pathname === "/api/usability/archive-history" && req.method === "POST") {

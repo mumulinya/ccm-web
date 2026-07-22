@@ -68,6 +68,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../core/utils");
+const runtime_events_1 = require("../system/runtime-events");
 const KERNEL_DIR = path.join(utils_1.CCM_DIR, "execution-kernel");
 const EXECUTIONS_DIR = path.join(KERNEL_DIR, "executions");
 const CHECKPOINTS_DIR = path.join(KERNEL_DIR, "checkpoints");
@@ -409,6 +410,13 @@ function registerActiveAgentRun(taskId, executionId, child, meta = {}) {
         child,
     };
     activeAgentRuns.set(runId, run);
+    (0, runtime_events_1.publishRuntimeEvent)("agent", "agent.started", {
+        runId,
+        taskId: run.taskId,
+        project: run.project,
+        status: run.status,
+        source: run.source,
+    });
     return runId;
 }
 function finishActiveAgentRun(runId, status = "finished") {
@@ -418,6 +426,13 @@ function finishActiveAgentRun(runId, status = "finished") {
     run.status = status;
     run.updatedAt = now();
     activeAgentRuns.delete(runId);
+    (0, runtime_events_1.publishRuntimeEvent)("agent", "agent.finished", {
+        runId,
+        taskId: run.taskId,
+        project: run.project,
+        status,
+        source: run.source,
+    });
 }
 function listActiveAgentRuns(filters = {}) {
     const taskId = String(filters.taskId || filters.task_id || "").trim();
@@ -467,6 +482,15 @@ function cancelActiveAgentRun(input = {}) {
     const cancellation = cancelTask && (taskId || matched[0]?.taskId)
         ? requestTaskCancellation(taskId || matched[0]?.taskId, reason, String(input.actor || "local-user"))
         : null;
+    for (const run of matched)
+        (0, runtime_events_1.publishRuntimeEvent)("agent", "agent.cancel_requested", {
+            runId: run.id,
+            taskId: run.taskId,
+            project: run.project,
+            status: run.status,
+            reason,
+            source: run.source,
+        });
     return { success: true, matched: matched.length, killed, cancellation, targeted: !cancelTask, runs: matched.map(publicActiveAgentRun) };
 }
 function trackManagedChildProcess(taskId, executionId, child, meta = {}) {

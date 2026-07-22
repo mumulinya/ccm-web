@@ -1,14 +1,17 @@
 <script setup>
 import EmptyState from '../common/EmptyState.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
+import TaskAttachmentPicker from '../common/TaskAttachmentPicker.vue'
+import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import { useTaskManager } from './useTaskManager.js'
 import { Inbox, ListTodo, Plus, RefreshCw, Route, Sparkles } from '@lucide/vue'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
-const emit = defineEmits(['navigated'])
+const emit = defineEmits(['navigated', 'resume-project-permission'])
 
 const {
   AgentPipeline, TaskListItem, TaskBacklogModal, DailyDevTaskModal, TaskDispatchHeader, tasks,
+  pendingPermissionRequests, standalonePermissionRequests, permissionDecisionBusyId,
   groups, projects, stats, orchestratorDiagnostics, taskExecutions, executionActionBusy,
   showArchivedTasks, archivedTaskCount, selectedTaskIds, editingTaskId, activeTaskView, taskSearch,
   taskStatusFilter, showCreate, showDailyDevCreate, showQueue, showLogs, showReport,
@@ -22,6 +25,7 @@ const {
   backlogBulkDispatchResult, backlogImportLoading, backlogImportResult, backlogStatusLabel, formatBacklogTime, backlogState,
   backlogCount, backlogQualityText, backlogLatestHistory, backlogCanDispatch, backlogCanRestoreReady, loadDailyDevBacklogs,
   openBacklog, updateBacklogStatus, dispatchBacklog, dispatchReadyBacklogs, importSharedDocsToBacklog, newTask,
+  addTaskFiles, handleTaskPaste, removeExistingTaskAttachment,
   defaultDailyDevTask, dailyDevTask, updateDailyDevTaskField, loadTasks, toggleTaskSelection, loadGroups,
   loadProjects, loadOrchestratorDiagnostics, refreshTaskWork, formatDuration, visibleReportText, visibleReportObject,
   visibleReportList, continuationStrategyLabel, updateStats, deliveryEvidenceItems, isExecutionBlockedTask, executionBlockedMessage,
@@ -37,7 +41,7 @@ const {
   visibleTaskTitle, visibleTaskStatusDetail, visibleRequiredVerification, visibleDeliveryBlockers, visibleUserDeliveryReport, loadTaskTrace,
   viewReport, cancelTask, rollbackExecution, mergeExecution, cleanupExecution, openContinueTask,
   continueFromReport, submitContinuationPayload, submitTaskContinuation, autoContinueFromReport, resendTask, priorityLabel,
-  visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks
+  visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission
 } = useTaskManager(props, emit)
 </script>
 

@@ -59,6 +59,7 @@ type IndexCache = {
 export type KnowledgeSearchOptions = {
   limit?: number;
   filename?: string;
+  filenames?: string[];
   tags?: string[];
   domain?: string;
   scopeType?: string;
@@ -494,6 +495,12 @@ export function rebuildKnowledgeIndex(reason = "manual") {
   return activeRebuild;
 }
 
+export function waitForKnowledgeIndex(reason = "agent-retrieval") {
+  if (activeRebuild) return activeRebuild;
+  if (indexStatus.state === "ready") return Promise.resolve(getKnowledgeIndexStatus());
+  return rebuildKnowledgeIndex(reason);
+}
+
 export function getKnowledgeIndexStatus(): KnowledgeIndexStatus {
   return JSON.parse(JSON.stringify(indexStatus));
 }
@@ -534,6 +541,7 @@ function keywordSearch(query: string, options: KnowledgeSearchOptions = {}) {
   const metadata = loadKnowledgeMetadata();
   const eligible = documentChunks.filter(chunk => {
     if (options.filename && chunk.filename !== options.filename) return false;
+    if (Array.isArray(options.filenames) && !options.filenames.includes(chunk.filename)) return false;
     if (options.domain && chunk.domain !== options.domain) return false;
     if (!matchesScope(chunk, options)) return false;
     if (options.tags?.length) {

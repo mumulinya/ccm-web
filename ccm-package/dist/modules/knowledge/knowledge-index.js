@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.tokenizeKnowledgeText = tokenizeKnowledgeText;
 exports.formatAwareChunkText = formatAwareChunkText;
 exports.rebuildKnowledgeIndex = rebuildKnowledgeIndex;
+exports.waitForKnowledgeIndex = waitForKnowledgeIndex;
 exports.getKnowledgeIndexStatus = getKnowledgeIndexStatus;
 exports.getKnowledgeDocumentChunks = getKnowledgeDocumentChunks;
 exports.getParsedKnowledgeDocument = getParsedKnowledgeDocument;
@@ -483,6 +484,13 @@ function rebuildKnowledgeIndex(reason = "manual") {
     })();
     return activeRebuild;
 }
+function waitForKnowledgeIndex(reason = "agent-retrieval") {
+    if (activeRebuild)
+        return activeRebuild;
+    if (indexStatus.state === "ready")
+        return Promise.resolve(getKnowledgeIndexStatus());
+    return rebuildKnowledgeIndex(reason);
+}
 function getKnowledgeIndexStatus() {
     return JSON.parse(JSON.stringify(indexStatus));
 }
@@ -523,6 +531,8 @@ function keywordSearch(query, options = {}) {
     const metadata = (0, knowledge_files_1.loadKnowledgeMetadata)();
     const eligible = documentChunks.filter(chunk => {
         if (options.filename && chunk.filename !== options.filename)
+            return false;
+        if (Array.isArray(options.filenames) && !options.filenames.includes(chunk.filename))
             return false;
         if (options.domain && chunk.domain !== options.domain)
             return false;

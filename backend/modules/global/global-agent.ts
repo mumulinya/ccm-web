@@ -53,6 +53,7 @@ import {
   recordFeishuInbound,
   resolveFeishuDestination,
 } from "../collaboration/feishu-channel";
+import { listTaskPermissionRequests } from "../collaboration/task-permission-broker";
 import {
   acquireIdempotency,
   appendTraceEvent,
@@ -751,6 +752,8 @@ const globalAgentFeishuChannel = createGlobalAgentFeishuChannel({
   listGlobalAgentRuns,
   loadGroups,
   notifyFeishuTaskStage,
+  listTaskPermissionRequests,
+  postLocalApi,
   recordFeishuInbound,
   resolveFeishuGlobalAgentSessionId,
   resumeGlobalAgentRun,

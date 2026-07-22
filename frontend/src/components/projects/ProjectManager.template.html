@@ -100,6 +100,12 @@
           target-id-prefix="msg-"
           @navigate="scrollToMessage"
         />
+        <PermissionApprovalCards
+          :requests="projectPermissionRequests"
+          :busy-id="projectPermissionBusyId"
+          @approve="approveProjectPermission"
+          @reject="rejectProjectPermission"
+        />
         <ConversationTurnControls
           :busy="isStreaming"
           v-model:mode="projectTurnControl.mode.value"
@@ -216,9 +222,13 @@
       :path="browsePath"
       :items="browseItems"
       :drives="drives"
+      :home="browseHome"
+      :loading="browseLoading"
+      :error="browseError"
       @load="loadFolderContents"
       @go-up="browseGoUp"
       @refresh="loadFolderContents(browsePath)"
+      @create="createBrowseFolder"
       @select="selectFolder"
       @close="showFolderBrowser = false"
     />

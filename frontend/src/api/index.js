@@ -84,8 +84,12 @@ export const conversationTurnsApi = {
 // 任务相关 API
 export const tasksApi = {
   list: () => api('/api/tasks'),
-  create: (data) => api('/api/tasks/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  update: (data) => api('/api/tasks/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  create: (data) => api('/api/tasks/create', data instanceof FormData
+    ? { method: 'POST', body: data }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  update: (data) => api('/api/tasks/update', data instanceof FormData
+    ? { method: 'POST', body: data }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   retry: (data) => api('/api/tasks/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   cancel: (data) => api('/api/tasks/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   executions: (taskId) => api(`/api/tasks/executions?task_id=${encodeURIComponent(taskId)}`),
@@ -183,6 +187,14 @@ export const sharedApi = {
 export const terminalApi = {
   exec: (data) => api('/api/terminal/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   info: () => api('/api/terminal/info'),
+  shells: () => api('/api/terminal/shells'),
+  sessions: () => api('/api/terminal/sessions'),
+  createSession: (data) => api('/api/terminal/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  deleteSession: (id) => api(`/api/terminal/session?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  input: (id, data) => fetch('/api/terminal/session/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, data }) }),
+  confirmInput: (id, challenge) => api('/api/terminal/session/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, challenge }) }),
+  resize: (id, cols, rows) => api('/api/terminal/session/resize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, cols, rows }) }),
+  projectActions: (cwd) => api(`/api/terminal/project-actions?cwd=${encodeURIComponent(cwd || '')}`),
   workspace: () => api('/api/terminal/workspace'),
   saveWorkspace: (workspace) => api('/api/terminal/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace }) }),
   stop: (runId) => api('/api/terminal/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId }) }),

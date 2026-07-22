@@ -437,6 +437,11 @@ export function buildTaskFromCronJob(job: any, trigger: "manual" | "schedule" | 
     workflow_type: workflowType,
     imported_shared_docs: null,
     claimed_backlogs: [],
+    attachment_snapshot: {
+      count: Array.isArray(job.source_attachments) ? job.source_attachments.length : 0,
+      ids: (Array.isArray(job.source_attachments) ? job.source_attachments : []).map((item: any) => item.id).filter(Boolean),
+      captured_at: new Date().toISOString(),
+    },
   };
   const buildBacklogTask = (backlog: any, batchIndex = 0, batchTotal = 1) => {
     const description = [
@@ -474,6 +479,10 @@ export function buildTaskFromCronJob(job: any, trigger: "manual" | "schedule" | 
       business_goal: backlog.business_goal || backlog.title || String(job.prompt || job.name || "").slice(0, 500),
       acceptance_criteria: backlog.acceptance || "定时业务开发任务必须有子 Agent 回执、主 Agent 复盘、实际文件变更证据、已执行验证记录和交付摘要。",
       source_documents: buildCronSourceDocuments(backlog.documents),
+      source_attachments: Array.isArray(job.source_attachments) ? job.source_attachments.map((item: any) => ({ ...item })) : [],
+      source_attachment_contexts: Array.isArray(job.source_attachment_contexts) ? job.source_attachment_contexts.map((item: any) => ({ ...item })) : [],
+      source_attachment_context: String(job.source_attachment_context || ""),
+      source_attachment_warnings: Array.isArray(job.source_attachment_warnings) ? [...job.source_attachment_warnings] : [],
       workflow_meta: {
         intake: {
           backlog_file: backlog.backlog_file,
@@ -558,6 +567,10 @@ export function buildTaskFromCronJob(job: any, trigger: "manual" | "schedule" | 
     business_goal: workflowType === "daily_dev" ? String(job.prompt || job.name || "").slice(0, 500) : "",
     acceptance_criteria: workflowType === "daily_dev" ? "定时业务开发任务必须有子 Agent 回执、主 Agent 复盘、实际文件变更证据、已执行验证记录和交付摘要。" : "",
     source_documents: workflowType === "daily_dev" ? buildCronSourceDocuments("来自定时任务提示词、群聊共享文件或 backlog 文档。") : "",
+    source_attachments: Array.isArray(job.source_attachments) ? job.source_attachments.map((item: any) => ({ ...item })) : [],
+    source_attachment_contexts: Array.isArray(job.source_attachment_contexts) ? job.source_attachment_contexts.map((item: any) => ({ ...item })) : [],
+    source_attachment_context: String(job.source_attachment_context || ""),
+    source_attachment_warnings: Array.isArray(job.source_attachment_warnings) ? [...job.source_attachment_warnings] : [],
     cron_job_id: job.id,
     cron_trigger: trigger,
   };

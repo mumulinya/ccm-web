@@ -273,7 +273,7 @@ function buildCodexExecCommand(msgFile: string, options: AgentCommandOptions = {
 function getCodexSandboxMode() {
   const requested = String(process.env.CCM_CODEX_SANDBOX || process.env.CCM_CODEX_SANDBOX_MODE || "").trim();
   if (["read-only", "workspace-write", "danger-full-access"].includes(requested)) return requested;
-  return process.platform === "win32" ? "danger-full-access" : "workspace-write";
+  return "workspace-write";
 }
 
 function formatCodexExecSafetyFlags() {

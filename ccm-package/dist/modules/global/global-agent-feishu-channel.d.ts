@@ -7,6 +7,9 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
     processFeishuGlobalAgentMessage: (baseUrl: string, ctx: CollabCtx, text: string, payload: any, options?: {
         sendReport?: boolean;
         traceId?: string;
+        inboundRecorded?: boolean;
+        destination?: any;
+        conversationId?: string;
     }) => Promise<string>;
     parseFeishuConversationTurnCommand: (value: any) => {
         kind: "normal" | "steer" | "queue" | "stop";
@@ -17,33 +20,22 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
     };
     stopFeishuConversationTurnRecoveryForServer: () => void;
     processFeishuControlledMessage: (baseUrl: string, ctx: CollabCtx, text: string, payload: any, options?: any) => Promise<{
+        report_sent: boolean;
         reply: string;
         stopped_run_id: any;
-        turn?: undefined;
-        run_id?: undefined;
-        queued?: undefined;
-        position?: undefined;
     } | {
+        report_sent: boolean;
         reply: string;
         turn: any;
         run_id: any;
-        stopped_run_id?: undefined;
-        queued?: undefined;
-        position?: undefined;
     } | {
+        report_sent: boolean;
         reply: string;
         queued: boolean;
         position: any;
         turn: any;
-        stopped_run_id?: undefined;
-        run_id?: undefined;
     } | {
         reply: string;
-        stopped_run_id?: undefined;
-        turn?: undefined;
-        run_id?: undefined;
-        queued?: undefined;
-        position?: undefined;
     }>;
     runFeishuConversationTurnCommandSelfTest: () => {
         pass: boolean;

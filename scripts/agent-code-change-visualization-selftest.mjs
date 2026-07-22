@@ -15,8 +15,16 @@ const require = createRequire(import.meta.url)
 const read = (path) => readFileSync(join(root, path), 'utf-8')
 
 const component = read('frontend/src/components/agents/AgentCodeChangeDrawer.vue')
-const project = read('frontend/src/components/projects/ProjectManager.vue')
-const group = read('frontend/src/components/collaboration/GroupChat.vue')
+const project = [
+  read('frontend/src/components/projects/ProjectManagerPanel.vue'),
+  read('frontend/src/components/projects/ProjectManager.template.html'),
+  read('frontend/src/components/projects/useProjectManager.js'),
+].join('\n')
+const group = [
+  read('frontend/src/components/collaboration/GroupChatPanel.vue'),
+  read('frontend/src/components/collaboration/GroupChat.template.html'),
+  read('frontend/src/components/collaboration/useGroupChat.js'),
+].join('\n')
 const groupTaskActions = read('frontend/src/composables/useGroupTaskCardActions.js')
 const global = read('frontend/src/components/global/GlobalAgent.vue')
 const gitModule = read('backend/modules/tools/git.ts')
@@ -48,7 +56,7 @@ const checks = {
   projectChatUsesDrawer: project.includes("import AgentCodeChangeDrawer") && project.includes('<AgentCodeChangeDrawer') && project.includes('openCodeChangeDrawer(msg.fileChanges'),
   groupChatUsesDrawer: group.includes("import AgentCodeChangeDrawer") && group.includes('<AgentCodeChangeDrawer') && groupTaskActions.includes("action.kind === 'view_changes'"),
   groupViewChangesPrefersCode: groupTaskActions.includes('openCodeChangeDrawer?.(msg.fileChanges') && groupTaskActions.includes('return openPipelineViewer?.(msg)'),
-  globalChatUsesDrawer: global.includes("import AgentCodeChangeDrawer") && global.includes('<AgentCodeChangeDrawer') && global.includes('openGlobalCodeChangeDrawer'),
+  globalChatUsesDrawer: global.includes("import AgentCodeChangeDrawer") && global.includes('<AgentCodeChangeDrawer') && global.includes('openCodeChangeDrawer'),
   backendFilePreviewEndpointExists: gitModule.includes('pathname === "/api/git/file"') && gitModule.includes('非法文件路径') && gitModule.includes('readWorkingFileText'),
   workspaceHasUserSummary: workspace.includes('<CodeChangeSummary') && summaryComponent.includes('任务来源') && summaryComponent.includes('查看任务回放'),
   workspaceGroupsFileState: workspace.includes('<CodeChangeFileList') && fileListComponent.includes('同时存在暂存与工作区改动') && fileListComponent.includes('未跟踪'),

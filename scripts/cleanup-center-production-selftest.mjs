@@ -6,12 +6,13 @@ import { spawnSync } from 'node:child_process'
 
 const root = path.resolve(import.meta.dirname, '..')
 const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
+const authCookie = String(process.env.CCM_AUTH_COOKIE || '').trim()
 const outputDir = path.join(root, 'scratch', 'cleanup-center-production-selftest')
 fs.mkdirSync(outputDir, { recursive: true })
 const checks = []
 
 const request = async (pathname, options = {}) => {
-  const response = await fetch(`${baseUrl}${pathname}`, options)
+  const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers: { ...(options.headers || {}), ...(authCookie ? { Cookie: authCookie } : {}) } })
   return { response, data: await response.json().catch(() => ({})) }
 }
 
@@ -19,7 +20,12 @@ try {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-cleanup-selftest-'))
   const isolated = spawnSync(process.execPath, [path.join(root, 'scripts', 'cleanup-center-isolated-selftest-child.cjs')], {
     cwd: root,
-    env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome },
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      USERPROFILE: tempHome,
+      CCM_TASK_STORE_DIR: path.join(tempHome, '.cc-connect'),
+    },
     encoding: 'utf8',
     timeout: 90_000,
   })

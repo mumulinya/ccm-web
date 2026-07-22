@@ -81,10 +81,10 @@ function removeStaleLock(file) {
         return false;
     }
 }
-function acquireCcmServerInstanceLock(port) {
+function acquireCcmServerInstanceLock(port, listenHost = "127.0.0.1") {
     const file = getLockFile();
     if (process.env.CCM_ALLOW_SHARED_DATA_DIR === "1") {
-        return { bypassed: true, file, token: "", pid: process.pid, port };
+        return { bypassed: true, file, token: "", pid: process.pid, port, listenHost };
     }
     fs.mkdirSync(path.dirname(file), { recursive: true });
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -94,6 +94,7 @@ function acquireCcmServerInstanceLock(port) {
             token,
             pid: process.pid,
             port,
+            listen_host: listenHost,
             hostname: os.hostname(),
             acquired_at: new Date().toISOString(),
             data_directory: path.dirname(path.dirname(file)),
@@ -107,7 +108,7 @@ function acquireCcmServerInstanceLock(port) {
             finally {
                 fs.closeSync(fd);
             }
-            return { file, token, pid: process.pid, port };
+            return { file, token, pid: process.pid, port, listenHost };
         }
         catch (error) {
             if (error?.code !== "EEXIST")

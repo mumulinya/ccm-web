@@ -72,6 +72,7 @@ const db_1 = require("../../core/db");
 const collaboration_1 = require("../collaboration/collaboration");
 const display_1 = require("../collaboration/display");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
+const task_permission_broker_1 = require("../collaboration/task-permission-broker");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const worker_handoff_1 = require("../../agents/worker-handoff");
 const memory_1 = require("../collaboration/memory");
@@ -655,6 +656,8 @@ const globalAgentFeishuChannel = (0, global_agent_feishu_channel_1.createGlobalA
     listGlobalAgentRuns: loop_1.listGlobalAgentRuns,
     loadGroups: collaboration_1.loadGroups,
     notifyFeishuTaskStage: feishu_channel_1.notifyFeishuTaskStage,
+    listTaskPermissionRequests: task_permission_broker_1.listTaskPermissionRequests,
+    postLocalApi,
     recordFeishuInbound: feishu_channel_1.recordFeishuInbound,
     resolveFeishuGlobalAgentSessionId,
     resumeGlobalAgentRun: loop_1.resumeGlobalAgentRun,

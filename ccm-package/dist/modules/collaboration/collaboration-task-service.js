@@ -116,6 +116,13 @@ function createTask(task) {
         source_attachments: Array.isArray(task.source_attachments || task.sourceAttachments)
             ? (task.source_attachments || task.sourceAttachments)
             : [],
+        source_attachment_contexts: Array.isArray(task.source_attachment_contexts || task.sourceAttachmentContexts)
+            ? (task.source_attachment_contexts || task.sourceAttachmentContexts)
+            : [],
+        source_attachment_context: task.source_attachment_context || task.sourceAttachmentContext || "",
+        source_attachment_warnings: Array.isArray(task.source_attachment_warnings || task.sourceAttachmentWarnings)
+            ? (task.source_attachment_warnings || task.sourceAttachmentWarnings)
+            : [],
         requirement_extraction: task.requirement_extraction || task.requirementExtraction || null,
         requirement_decomposition: task.requirement_decomposition || task.requirementDecomposition || null,
         decomposition_plan: task.decomposition_plan || task.decompositionPlan || null,

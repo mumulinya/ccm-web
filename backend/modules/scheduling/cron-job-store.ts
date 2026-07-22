@@ -246,6 +246,10 @@ export function normalizeCronJob(job: any) {
     misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
     notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
     notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
+    source_attachments: Array.isArray(job.source_attachments || job.sourceAttachments) ? (job.source_attachments || job.sourceAttachments) : [],
+    source_attachment_contexts: Array.isArray(job.source_attachment_contexts || job.sourceAttachmentContexts) ? (job.source_attachment_contexts || job.sourceAttachmentContexts) : [],
+    source_attachment_context: String(job.source_attachment_context || job.sourceAttachmentContext || ""),
+    source_attachment_warnings: Array.isArray(job.source_attachment_warnings || job.sourceAttachmentWarnings) ? (job.source_attachment_warnings || job.sourceAttachmentWarnings) : [],
     next_run: scheduleError || job.enabled === false ? null : (job.next_run || computeNextRun(job.schedule, new Date(), timezone)),
     schedule_error: scheduleError || null,
   };
@@ -405,6 +409,10 @@ export function createCronJob(job: any) {
     misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
     notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
     notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
+    source_attachments: Array.isArray(job.source_attachments || job.sourceAttachments) ? (job.source_attachments || job.sourceAttachments) : [],
+    source_attachment_contexts: Array.isArray(job.source_attachment_contexts || job.sourceAttachmentContexts) ? (job.source_attachment_contexts || job.sourceAttachmentContexts) : [],
+    source_attachment_context: String(job.source_attachment_context || job.sourceAttachmentContext || ""),
+    source_attachment_warnings: Array.isArray(job.source_attachment_warnings || job.sourceAttachmentWarnings) ? (job.source_attachment_warnings || job.sourceAttachmentWarnings) : [],
     backlog_batch_limit: Math.max(1, Math.min(20, Number(job.backlog_batch_limit || job.backlogBatchLimit || 1))),
     import_shared_docs: targetType === "group"
       && (job.workflow_type === "daily_dev" || job.workflowType === "daily_dev" || job.daily_dev || job.dailyDev)

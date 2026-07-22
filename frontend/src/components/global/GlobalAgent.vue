@@ -8,6 +8,7 @@ import ConversationFindBar from '../common/ConversationFindBar.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import SlashCommandMenu from '../common/SlashCommandMenu.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
+import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
@@ -24,6 +25,7 @@ import { useConversationTurnControl } from '../../composables/useConversationTur
 import { useSlashCommands } from '../../composables/useSlashCommands.js'
 import { createSlashCommandClientActions } from '../../composables/useSlashCommandClientActions.js'
 import { notifySessionContextUsage, useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
+import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 import { getDeliveryReport } from '../../utils/agentDisplay.js'
 import {
   classifyGlobalAgentRunPresentation,
@@ -222,7 +224,15 @@ const syncPendingGlobalClarificationInput = () => {
 const searchHighlightMsgIndex = ref(-1)
 const handleSearchNavigation = async () => {
   const target = props.navigateTo
-  if (!target || target.tab !== 'global-agent' || !target.sessionId) return
+  if (!target || target.tab !== 'global-agent') return
+  if (target.draftMessage) {
+    chatInput.value = String(target.draftMessage)
+    await nextTick()
+    chatInputElement.value?.focus()
+    emit('navigated')
+    return
+  }
+  if (!target.sessionId) return
   for (let attempt = 0; attempt < 20 && !sessions.value.some(session => session.id === target.sessionId); attempt += 1) {
     await syncHistoryFromServer()
     if (!sessions.value.some(session => session.id === target.sessionId)) await new Promise(resolve => window.setTimeout(resolve, 100))
@@ -658,6 +668,19 @@ const {
   enabled: computed(() => props.active !== false && !!globalContextScopeId.value),
   refreshKey: computed(() => `${messages.value.length}:${globalTurnBusy.value}`),
   activeRequest: globalTurnBusy,
+})
+
+const {
+  requests: globalPermissionRequests,
+  busyId: globalPermissionBusyId,
+  approve: approveGlobalPermission,
+  reject: rejectGlobalPermission,
+} = usePermissionApprovals({
+  scope: computed(() => ({
+    originType: 'global',
+    originSessionId: currentSessionId.value || '',
+  })),
+  active: computed(() => props.active !== false && !!currentSessionId.value),
 })
 
 const processBridgeRequest = async (request) => {
@@ -1129,6 +1152,12 @@ const handleGitCommitCardSubmit = async (msg) => {
       />
 
       <div class="chat-footer">
+        <PermissionApprovalCards
+          :requests="globalPermissionRequests"
+          :busy-id="globalPermissionBusyId"
+          @approve="approveGlobalPermission"
+          @reject="rejectGlobalPermission"
+        />
         <!-- 附件上传预览区 -->
         <div v-if="selectedFiles.length > 0" class="upload-preview-area">
           <div 

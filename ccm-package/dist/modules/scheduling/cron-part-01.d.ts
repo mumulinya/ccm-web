@@ -30,6 +30,10 @@ export declare function buildTaskFromCronJob(job: any, trigger: "manual" | "sche
         business_goal: any;
         acceptance_criteria: any;
         source_documents: string;
+        source_attachments: any;
+        source_attachment_contexts: any;
+        source_attachment_context: string;
+        source_attachment_warnings: any[];
         workflow_meta: {
             intake: {
                 backlog_file: any;
@@ -62,6 +66,10 @@ export declare function buildTaskFromCronJob(job: any, trigger: "manual" | "sche
         business_goal: string;
         acceptance_criteria: string;
         source_documents: string;
+        source_attachments: any;
+        source_attachment_contexts: any;
+        source_attachment_context: string;
+        source_attachment_warnings: any[];
         cron_job_id: any;
         cron_trigger: "resume" | "manual" | "retry" | "recovery" | "schedule";
     }[];

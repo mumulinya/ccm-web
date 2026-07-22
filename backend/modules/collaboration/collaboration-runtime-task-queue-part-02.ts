@@ -521,13 +521,22 @@ export function getTaskById(taskId: string) {
 }
 
 export function buildChildAgentTaskText(childTaskText: string, task: any = null) {
-  if (!task || task.workflow_type !== "daily_dev") return childTaskText;
+  if (!task) return childTaskText;
+  const attachmentContext = compactMemoryText(task.source_attachment_context || task.sourceAttachmentContext || "", 50_000);
+  if (task.workflow_type !== "daily_dev") {
+    return [
+      childTaskText,
+      attachmentContext,
+      attachmentContext ? "附件是任务事实来源；必须读取可用正文或本地文件后再修改代码，解析失败时要明确报告，不能根据文件名猜测。" : "",
+    ].filter(Boolean).join("\n\n");
+  }
   return [
     "原始业务开发任务上下文：",
     `- 任务：${task.title || "未命名任务"}`,
     task.business_goal || task.businessGoal ? `- 业务目标：${compactMemoryText(task.business_goal || task.businessGoal, 700)}` : "",
     task.acceptance_criteria || task.acceptanceCriteria ? `- 全局验收标准：${compactMemoryText(task.acceptance_criteria || task.acceptanceCriteria, 700)}` : "",
     task.source_documents || task.sourceDocuments ? `- 关联文档摘要：${compactMemoryText(task.source_documents || task.sourceDocuments, 900)}` : "",
+    attachmentContext,
     "",
     "主 Agent 指派给你的子任务：",
     childTaskText || "请根据原始业务开发任务上下文完成你负责的实现与验证。",

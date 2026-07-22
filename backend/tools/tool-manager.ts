@@ -17,6 +17,13 @@ interface ToolDef {
   description: string;
   serverName: string;
   inputSchema?: any;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+    [key: string]: any;
+  };
 }
 
 interface SkillDef {
@@ -323,6 +330,7 @@ export class ToolManager {
             description: t.description || "",
             serverName: config.name,
             inputSchema: t.inputSchema,
+            annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
           });
         }
         this.serverStatuses.set(config.name, {
@@ -496,6 +504,24 @@ export class ToolManager {
     };
   }
 
+  getScopedToolCatalog(scope?: ToolScope) {
+    const tools = (scope ? this.tools.filter(tool => isMcpToolAllowed(scope, tool)) : this.tools).map(tool => ({
+      name: tool.name,
+      canonicalName: `mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`,
+      description: tool.description || "",
+      server: tool.serverName,
+      inputSchema: tool.inputSchema || null,
+      annotations: tool.annotations || {},
+    }));
+    const skills = (scope ? this.skills.filter(skill => isSkillAllowed(scope, skill.name)) : this.skills).map(skill => ({
+      name: skill.name,
+      description: skill.description || "",
+      contentHash: skill.contentHash || contentHash(skill),
+      toolName: "invoke_skill",
+    }));
+    return { tools, skills };
+  }
+
   discoverSkills(scope?: ToolScope) {
     const skills = scope
       ? this.skills.filter(skill => isSkillAllowed(scope, skill.name))
@@ -656,6 +682,7 @@ export class ToolManager {
         description: t.description || "",
         serverName,
         inputSchema: t.inputSchema,
+        annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
       })),
     ];
     this.serverStatuses.set(serverName, {
@@ -747,6 +774,7 @@ export class ToolManager {
         description: t.description,
         server: t.serverName,
         schema: t.inputSchema,
+        annotations: t.annotations || {},
       })),
       skills: this.skills,
       skillTools: this.discoverSkills(),

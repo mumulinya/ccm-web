@@ -3,6 +3,20 @@ type FileStats = {
     deletions: number;
     binary: boolean;
 };
+export declare function inspectGitRemoteState(workDir: string, changedFiles?: number): {
+    remoteUrl: string;
+    remoteName: string;
+    branch: string;
+    detached: boolean;
+    upstream: string;
+    ahead: number;
+    behind: number;
+    dirty: boolean;
+    changedFiles: number;
+    canFetch: boolean;
+    canPull: boolean;
+    canPush: boolean;
+};
 export declare function normalizeRepoPath(filePath: any): string;
 export declare function resolveSafeProjectFile(workDir: string, filePath: any): {
     normalized: string;

@@ -59,6 +59,7 @@ try {
 
   const listed = await request('/api/projects')
   assert.equal(listed.data.projects.some(item => item.name === project), true)
+  assert.equal((await request('/api/tasks?include_archived=true')).data.tasks.some(item => item.id === 'task-preserved'), true)
   checks.push({ name: 'active project is listed from isolated runtime', pass: true })
 
   const duplicate = await post('/api/projects/create', { name: project, work_dir: workDir, agent: 'codex', platform: 'feishu' })
@@ -102,7 +103,7 @@ try {
   assert.equal(fs.existsSync(path.join(ccmDir, 'web-sessions', project)), false)
   assert.equal(fs.existsSync(path.join(ccmDir, 'sessions', `${project}_a1b2c3d4.json`)), false)
   assert.equal(fs.existsSync(workDir), true)
-  assert.equal(fs.existsSync(path.join(ccmDir, 'tasks.json')), true)
+  assert.equal((await request('/api/tasks?include_archived=true')).data.tasks.some(item => item.id === 'task-preserved'), true)
   assert.equal(fs.existsSync(path.join(ccmDir, 'test-agent-artifacts', 'evidence-1', 'result.json')), true)
   assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(path.join(ccmDir, 'project-configs.json'), 'utf8')), project), false)
   checks.push({ name: 'permanent purge requires preview, deletes exact project data and preserves source, tasks and TestAgent evidence', pass: true })

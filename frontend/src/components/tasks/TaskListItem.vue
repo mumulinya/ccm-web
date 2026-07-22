@@ -83,7 +83,9 @@ const emit = defineEmits([
   'logs',
   'resend',
   'edit',
-  'delete'
+  'delete',
+  'permission-approve',
+  'permission-reject'
 ])
 </script>
 
@@ -127,6 +129,17 @@ const emit = defineEmits([
           </details>
         </div>
         <div v-if="task.status_detail" class="task-status-detail">{{ task.status_detail }}</div>
+        <div v-for="request in (task.permission_requests || []).filter(item => item.state === 'awaiting_user')" :key="request.id" class="permission-request">
+          <div class="permission-copy">
+            <strong>需要你的权限确认</strong>
+            <span>{{ request.project }} 请求 {{ request.operation }} · {{ request.reason }}</span>
+            <small>{{ (request.riskReasons || []).join('；') }}</small>
+          </div>
+          <div class="permission-actions">
+            <button class="btn btn-outline btn-sm" type="button" @click="emit('permission-reject', request)">拒绝</button>
+            <button class="btn btn-primary btn-sm" type="button" @click="emit('permission-approve', request)">批准一次</button>
+          </div>
+        </div>
         <details v-if="task.execution_kernel" class="task-technical-details kernel-details">
           <summary>执行技术状态</summary>
           <div class="kernel-summary-row">
@@ -137,6 +150,7 @@ const emit = defineEmits([
         <div v-if="task.final_report || task.result" class="task-result">{{ (task.final_report || task.result)?.substring(0, 180) }}</div>
         <div class="task-meta">
           <span class="meta-item">{{ task.assign_type === 'group' ? '💬' : '🤖' }} {{ task.assign_type === 'group' ? groupName : task.target_project }}</span>
+          <span v-if="task.source_attachments?.length" class="meta-item">附件 {{ task.source_attachments.length }} 个</span>
           <span class="meta-item">🕐 {{ new Date(task.created_at).toLocaleString('zh-CN') }}</span>
         </div>
       </div>
@@ -196,6 +210,14 @@ const emit = defineEmits([
   flex: 1;
   min-width: 0;
 }
+
+.permission-request { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(217, 119, 6, .35); border-radius: 7px; background: rgba(245, 158, 11, .08); }
+.permission-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.permission-copy strong { color: #b45309; font-size: 12px; }
+.permission-copy span { color: var(--text-primary); font-size: 11.5px; overflow-wrap: anywhere; }
+.permission-copy small { color: var(--text-secondary); font-size: 10.5px; }
+.permission-actions { display: flex; gap: 6px; flex-shrink: 0; }
+@media (max-width: 640px) { .permission-request { align-items: stretch; flex-direction: column; } .permission-actions button { flex: 1; } }
 
 .task-title-row {
   display: flex;

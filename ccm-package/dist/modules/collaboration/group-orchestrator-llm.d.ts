@@ -1,6 +1,26 @@
 import { type LlmTokenUsage } from "./group-orchestrator-llm-client";
+import { type ToolScope } from "../../tools/tool-manager";
 import { type WorkflowDecision } from "../../agents/workflow-decision";
 export declare function mergeLlmTokenUsage(...values: any[]): LlmTokenUsage | null;
+export type GroupMainToolRequest = {
+    name: string;
+    arguments: any;
+    reason: string;
+};
+export declare function isGroupMainReadOnlyMcpTool(tool: any): boolean;
+export declare function buildGroupMainAgentToolContext(input: {
+    group: any;
+    message: string;
+    source?: string;
+    groupSessionId?: string;
+    group_session_id?: string;
+}): any;
+export declare function normalizeGroupMainToolRequests(value: any): GroupMainToolRequest[];
+export declare function executeGroupMainAgentToolRequests(input: {
+    requests: GroupMainToolRequest[];
+    toolContext: any;
+    executeToolCall?: (name: string, args: any, scope?: ToolScope) => Promise<string>;
+}): Promise<any[]>;
 export declare function attachLlmTokenUsage(error: any, usage: LlmTokenUsage | null): any;
 export declare function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[], options?: any): Promise<{
     agent: any;
@@ -51,10 +71,30 @@ export declare function buildLlmCoordinatorMessages(input: {
     ragContext?: string;
     extraInstructions?: string;
     source?: string;
+    groupSessionId?: string;
+    group_session_id?: string;
+    mainAgentToolResults?: any[];
+    main_agent_tool_results?: any[];
 }): {
     role: string;
     content: string;
 }[];
+export declare function buildLlmCoordinatorContextComponents(input: {
+    group: any;
+    message: string;
+    extraInstructions?: string;
+    source?: string;
+    groupSessionId?: string;
+    group_session_id?: string;
+    mainAgentToolResults?: any[];
+    main_agent_tool_results?: any[];
+}): {
+    rules: string;
+    skills: string;
+    mcpTools: any;
+    mcpResults: any[];
+    subagentDefinitions: any;
+};
 export declare function normalizeDocumentFindings(parsed: any): any;
 export declare function enrichTaskWithDocumentFindings(task: string, findings: string[]): string;
 export declare function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair?: boolean): any;
@@ -131,8 +171,22 @@ export declare function runLlmGroupOrchestrator(input: {
     provider_switch_requests?: any;
     groupSessionId?: string;
     group_session_id?: string;
+    mainAgentToolResults?: any[];
+    main_agent_tool_results?: any[];
 }): Promise<{
     usage: LlmTokenUsage;
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -159,6 +213,18 @@ export declare function runLlmGroupOrchestrator(input: {
     coordinationStrategy?: undefined;
 } | {
     usage: LlmTokenUsage;
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];

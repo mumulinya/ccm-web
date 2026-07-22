@@ -61,7 +61,7 @@ export declare function buildCompleteTaskReplay(taskId: string): {
     };
     phases: {
         id: TaskReplayStage;
-        status: "info" | "failed" | "passed" | "running" | "blocked" | "warning";
+        status: "warning" | "info" | "failed" | "passed" | "running" | "blocked";
         event_count: number;
         started_at: string;
         finished_at: string;

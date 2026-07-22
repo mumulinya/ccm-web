@@ -3,9 +3,9 @@ import {
   getKnowledgeDocumentChunks,
   getParsedKnowledgeDocument,
   rebuildKnowledgeIndex,
-  searchKnowledgeBase,
 } from "../modules/knowledge/knowledge-index";
 import { loadKnowledgeMetadata, KnowledgeDocumentMetadata } from "../modules/knowledge/knowledge-files";
+import { isKnowledgeDocumentAllowed, searchAgentKnowledge } from "../modules/knowledge/knowledge-access";
 import {
   buildInternalMcpServerConfig,
   InternalMcpTaskContext,
@@ -136,48 +136,12 @@ function ensureIndex() {
 }
 
 function scopeAllowed(metadata: KnowledgeDocumentMetadata | undefined, context: InternalMcpTaskContext) {
-  const scope = metadata?.scope || { type: "global", id: "" };
-  if (metadata?.visibility === "restricted") {
-    if (scope.type === "project") return scope.id === context.project;
-    if (scope.type === "group") return !!context.groupId && scope.id === context.groupId;
-    if (scope.type === "agent") return scope.id === context.project || scope.id === context.taskAgentSessionId;
-    return false;
-  }
-  if (scope.type === "global") return true;
-  if (scope.type === "project") return scope.id === context.project || context.role === "group-main-agent" && (context.projects || []).some(project => project.name === scope.id);
-  if (scope.type === "group") return !!context.groupId && scope.id === context.groupId;
-  if (scope.type === "agent") return scope.id === context.project || scope.id === context.taskAgentSessionId;
-  return false;
+  return isKnowledgeDocumentAllowed(metadata, context);
 }
 
 async function scopedSearch(context: InternalMcpTaskContext, query: string, limit: number, filename = "") {
-  await ensureIndex();
-  const metadata = loadKnowledgeMetadata();
-  const searches = [
-    searchKnowledgeBase(query, { limit: Math.min(20, limit * 2), filename: filename || undefined, scopeType: "project", scopeId: context.project, includeGlobal: true }),
-    ...(context.groupId ? [searchKnowledgeBase(query, { limit: Math.min(20, limit * 2), filename: filename || undefined, scopeType: "group", scopeId: context.groupId, includeGlobal: false })] : []),
-  ];
-  if (context.role === "group-main-agent") {
-    for (const project of context.projects || []) {
-      if (project.name && project.name !== context.project) searches.push(searchKnowledgeBase(query, { limit: Math.min(20, limit * 2), filename: filename || undefined, scopeType: "project", scopeId: project.name, includeGlobal: false }));
-    }
-  }
-  const rows = (await Promise.all(searches)).flatMap(result => result.results.map(item => ({ ...item, embeddingMode: result.embeddingMode, embeddingError: result.embeddingError })));
-  const seen = new Set<string>();
-  return rows.filter(item => {
-    const id = String(item.chunk.id || "");
-    if (!id || seen.has(id) || !scopeAllowed(metadata[item.chunk.filename], context)) return false;
-    seen.add(id);
-    return true;
-  }).sort((a, b) => b.score - a.score).slice(0, limit).map(item => ({
-    citation: item.chunk.id,
-    filename: item.chunk.filename,
-    heading: item.chunk.heading || "",
-    text: internalMcpTaskPayload.cleanText(item.chunk.text, 5000),
-    score: Number(item.score.toFixed(4)),
-    scope: metadata[item.chunk.filename]?.scope || { type: "global", id: "" },
-    source: metadata[item.chunk.filename]?.source || { type: "manual" },
-  }));
+  const search = await searchAgentKnowledge(query, context, { limit, filename: filename || undefined, maxChunkChars: 5000 });
+  return search.results;
 }
 
 async function callTool(context: InternalMcpTaskContext, name: string, args: any) {

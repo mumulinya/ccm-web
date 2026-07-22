@@ -1,5 +1,5 @@
 // Behavior-freeze split from cron.ts (part 2/2).
-import { sendJson } from "../../core/utils";
+import { collectRequestBuffer, getMultipartBoundary, parseMultipart, sendJson } from "../../core/utils";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -77,6 +77,7 @@ import {
   runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryQuarantineRetention,
   runPostCompactCompletionMemoryPreservationClosureConflictResolutionMaintenanceNotificationDeliveryRetention,
 } from "../collaboration/group-memory-index";
+import { buildTaskAttachmentMutation, parseRetainedAttachmentIds, removeUploadedFiles } from "../../system/task-attachments";
 
 import {
   runningCronJobs,
@@ -635,28 +636,86 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
   }
 
   if (pathname === "/api/cron/create" && req.method === "POST") {
-    readJsonBody(req, (payload) => {
+    const handleCreate = async (payload: any, files: any[] = []) => {
       try {
-        const job = createCronJob(payload);
+        let jobPayload = payload || {};
+        if (files.length) {
+          const attachments = await buildTaskAttachmentMutation({ files, retainedIds: [], userText: `${jobPayload.name || ""}\n${jobPayload.prompt || ""}` });
+          jobPayload = {
+            ...jobPayload,
+            source_attachments: attachments.attachments,
+            source_attachment_contexts: attachments.contexts,
+            source_attachment_context: attachments.context,
+            source_attachment_warnings: attachments.warnings,
+          };
+        }
+        const job = createCronJob(jobPayload);
         sendJson(res, { success: true, job: normalizeCronJob(job) });
       } catch (e: any) {
+        removeUploadedFiles(files);
         sendJson(res, { error: e.message }, 400);
       }
-    }, (e) => sendJson(res, { error: e.message }, 400));
+    };
+    const contentType = String(req.headers["content-type"] || "");
+    if (contentType.includes("multipart/form-data")) {
+      collectRequestBuffer(req).then((buffer) => {
+        const boundary = getMultipartBoundary(contentType);
+        if (!boundary) throw new Error("无效的定时任务附件请求");
+        const { fields, files } = parseMultipart(buffer, boundary);
+        const payload = (fields as any).payload ? JSON.parse((fields as any).payload) : fields;
+        return handleCreate(payload, files || []);
+      }).catch((e: any) => sendJson(res, { error: e.message }, 400));
+      return true;
+    }
+    readJsonBody(req, (payload) => void handleCreate(payload), (e) => sendJson(res, { error: e.message }, 400));
     return true;
   }
 
   if (pathname === "/api/cron/update" && req.method === "POST") {
-    readJsonBody(req, (payload) => {
+    const handleUpdate = async (payload: any, files: any[] = [], multipart = false) => {
       try {
-        const { id, ...updates } = payload;
+        const { id, retained_attachment_ids, retainedAttachmentIds, ...incomingUpdates } = payload || {};
+        let updates = incomingUpdates;
+        const current = loadCronJobs().find((item: any) => item.id === id);
+        if (!current) return sendJson(res, { error: "定时任务不存在" }, 404);
+        if (multipart) {
+          const attachments = await buildTaskAttachmentMutation({
+            files,
+            currentAttachments: current.source_attachments,
+            currentContexts: current.source_attachment_contexts,
+            retainedIds: retained_attachment_ids === undefined && retainedAttachmentIds === undefined
+              ? undefined
+              : parseRetainedAttachmentIds(retained_attachment_ids ?? retainedAttachmentIds),
+            userText: `${updates.name || current.name || ""}\n${updates.prompt || current.prompt || ""}`,
+          });
+          updates = {
+            ...updates,
+            source_attachments: attachments.attachments,
+            source_attachment_contexts: attachments.contexts,
+            source_attachment_context: attachments.context,
+            source_attachment_warnings: attachments.warnings,
+          };
+        }
         const job = updateCronJob(id, updates);
         if (!job) return sendJson(res, { error: "定时任务不存在" }, 404);
         sendJson(res, { success: true, job: normalizeCronJob(job) });
       } catch (e: any) {
+        removeUploadedFiles(files);
         sendJson(res, { error: e.message }, 400);
       }
-    }, (e) => sendJson(res, { error: e.message }, 400));
+    };
+    const contentType = String(req.headers["content-type"] || "");
+    if (contentType.includes("multipart/form-data")) {
+      collectRequestBuffer(req).then((buffer) => {
+        const boundary = getMultipartBoundary(contentType);
+        if (!boundary) throw new Error("无效的定时任务附件请求");
+        const { fields, files } = parseMultipart(buffer, boundary);
+        const payload = (fields as any).payload ? JSON.parse((fields as any).payload) : fields;
+        return handleUpdate(payload, files || [], true);
+      }).catch((e: any) => sendJson(res, { error: e.message }, 400));
+      return true;
+    }
+    readJsonBody(req, (payload) => void handleUpdate(payload), (e) => sendJson(res, { error: e.message }, 400));
     return true;
   }
 

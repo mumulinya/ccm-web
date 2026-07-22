@@ -412,7 +412,7 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "list_groups", description: "列出群聊、成员项目及协调配置。", risk: "read" },
     { name: "list_tasks", description: "查询开发任务；可按 id 或 status 过滤。", risk: "read" },
     { name: "list_cron", description: "查询定时任务。", risk: "read" },
-    { name: "query_knowledge", description: "查询本地知识库，只用于获取回答或规划依据。", required: ["query"], risk: "read" },
+    { name: "query_knowledge", description: "查询当前全局作用域知识库。优先使用已配置的语义 Embedding，未配置或失败时自动使用本地混合检索；只用于获取回答或规划依据。", required: ["query"], risk: "read" },
     { name: "query_global_memory", description: "查询全局 Agent 的长期记忆、历史任务结论和来源引用。", required: ["query"], risk: "read" },
     { name: "manage_global_memory", description: "查询状态、压缩、重建、启用或禁用全局 Agent 长期记忆；变更操作必须提供 reason。", required: ["operation"], risk: args => String(args?.operation || "").toLowerCase() === "status" ? "read" : ["disable", "rebuild"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
     { name: "inspect_mission", description: "查询全局开发任务及子任务交付状态。", required: ["id"], risk: "read" },

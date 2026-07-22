@@ -172,6 +172,13 @@
           <span style="margin-left:auto;font-size:10px;color:var(--text-muted);cursor:pointer" @click="waitingCrossReply = false">忽略</span>
         </div>
 
+        <PermissionApprovalCards
+          :requests="groupPermissionRequests"
+          :busy-id="groupPermissionBusyId"
+          @approve="approveGroupPermission"
+          @reject="rejectGroupPermission"
+        />
+
         <!-- 输入栏 -->
         <div v-if="currentGroup" class="composer-region">
           <div class="composer-inner">

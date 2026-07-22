@@ -64,6 +64,10 @@ export declare function createCronJob(job: any): {
     misfire_grace_minutes: number;
     notification_enabled: boolean;
     notify_on: unknown[];
+    source_attachments: any;
+    source_attachment_contexts: any;
+    source_attachment_context: string;
+    source_attachment_warnings: any;
     backlog_batch_limit: number;
     import_shared_docs: any;
     continue_gaps: any;

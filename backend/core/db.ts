@@ -6,6 +6,7 @@ import { isCredentialReference, protectCredential, protectObjectSecrets, resolve
 import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
 import { assertCcmInternalSkillMutable, isCcmInternalSkillName } from "../skills/internal-skill-catalog";
 import { buildBundledFeishuMcpTool } from "../tools/internal-mcp-registry";
+import { publishRuntimeEvent } from "../system/runtime-events";
 import {
   getTaskByIdFromSqlite,
   listTasksByParentIdFromSqlite,
@@ -518,7 +519,9 @@ export function loadTasks(): any[] {
 }
 
 export function saveTasks(tasks: any[]) {
-  return saveTasksToSqlite(tasks);
+  const result = saveTasksToSqlite(tasks);
+  publishRuntimeEvent("task", "tasks.changed", { count: Array.isArray(tasks) ? tasks.length : 0 });
+  return result;
 }
 
 export function getTaskById(id: string) {
@@ -526,7 +529,9 @@ export function getTaskById(id: string) {
 }
 
 export function updateTaskById(id: string, patchOrMutator: any) {
-  return updateTaskByIdInSqlite(id, patchOrMutator);
+  const result = updateTaskByIdInSqlite(id, patchOrMutator);
+  publishRuntimeEvent("task", "task.changed", { taskId: id });
+  return result;
 }
 
 export function listTasksByParentId(parentId: string) {

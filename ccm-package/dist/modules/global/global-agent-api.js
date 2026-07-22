@@ -225,7 +225,7 @@ function createGlobalAgentApi(deps) {
                         .then(result => {
                         if (operationKey)
                             completeIdempotency("feishu-event", operationKey, result);
-                        if (result.queued || result.stopped_run_id || result.turn?.mode === "steer") {
+                        if (!result.report_sent && (result.queued || result.stopped_run_id || result.turn?.mode === "steer")) {
                             return sendFeishuReportMessage({ title: "全局 Agent", markdown: result.reply });
                         }
                     })

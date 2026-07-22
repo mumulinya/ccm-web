@@ -47,7 +47,7 @@ export declare function projectGlobalAgentReasoningForModel(reasoning: AgentReas
     deviations: {
         id: string;
         type: string;
-        severity: "info" | "error" | "warning";
+        severity: "warning" | "error" | "info";
         at: string;
     }[];
     recovery_checks: {

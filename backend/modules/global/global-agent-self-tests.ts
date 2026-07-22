@@ -1076,19 +1076,16 @@ function runGlobalAgentIntentSelfTest() {
   };
   const testAgentRelayChecks = {
     globalTestAgentPassedSpotCheckAllowsAcceptance: passedSpotCheckTestAgentRelay?.independentReviewSummary?.status === "passed"
-      && passedSpotCheckTestAgentRelay?.independentReview?.[0]?.verdict === "passed"
       && passedSpotCheckTestAgentRelay?.independentReviewSummary?.headline.includes("我的关键验证抽查也已通过")
       && passedSpotCheckTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("2 项结果一致"))
       && !/private-global-pass|review_exit_code|observed_exit_code|C:\/private/i.test(JSON.stringify(passedSpotCheckTestAgentRelay?.independentReviewSummary || {})),
     globalTestAgentSpotCheckMismatchOverridesLegacyPass: mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.status === "needs_recheck"
       && mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.status_label === "需复验"
-      && mismatchedSpotCheckTestAgentRelay?.independentReview?.[0]?.verdict === "needs_recheck"
       && mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.headline.includes("我的完成前抽查尚未一致")
       && mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.next_action.includes("沿用原复核工作单重新运行 TestAgent")
       && !mismatchedSpotCheckTestAgentRelay?.independentReviewSummary?.headline.includes("原实现成员返工")
       && !/private-global-mismatch|review_exit_code|observed_exit_code|C:\/private/i.test(JSON.stringify(mismatchedSpotCheckTestAgentRelay?.independentReviewSummary || {})),
     globalTestAgentUnknownCoverageRelayNeedsUser: unknownCoverageTestAgentRelay?.independentReviewSummary?.status === "needs_user"
-      && unknownCoverageTestAgentRelay?.independentReview?.[0]?.verdict === "needs_user"
       && unknownCoverageTestAgentRelay?.independentReviewSummary?.headline.includes("需要人工确认")
       && unknownCoverageTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("验收条件待确认"))
       && unknownCoverageTestAgentRelay?.independentReviewSummary?.next_action.includes("等待你确认")
@@ -1098,7 +1095,6 @@ function runGlobalAgentIntentSelfTest() {
       && unknownCoverageTestAgentUi?.text.includes("人工确认")
       && !/report\.md|artifact-manifest|test-agent-artifacts|ccm-test-agent-report-v1/i.test(JSON.stringify(unknownCoverageTestAgentUi || {})),
     globalTestAgentNotVerifiedCoverageRelayNeedsRework: notVerifiedCoverageTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
-      && notVerifiedCoverageTestAgentRelay?.independentReview?.[0]?.verdict === "needs_rework"
       && notVerifiedCoverageTestAgentRelay?.independentReviewSummary?.headline.includes("安排返工")
       && notVerifiedCoverageTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("必检项：浏览器流程未覆盖"))
       && notVerifiedCoverageTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("验收条件未通过"))
@@ -1112,7 +1108,6 @@ function runGlobalAgentIntentSelfTest() {
       && summaryOnlyGapTestAgentRelay?.independentReviewSummary?.next_action.includes("先处理复核指出的缺口")
       && !/ccm-test-agent-verdict-v1|requiredCheckSummary|trace-test-agent-summary-only-gap/i.test(JSON.stringify(summaryOnlyGapTestAgentRelay?.independentReviewSummary || {})),
     globalTestAgentWeakSummaryRelayNeedsUser: weakSummaryTestAgentRelay?.independentReviewSummary?.status === "needs_user"
-      && weakSummaryTestAgentRelay?.independentReview?.[0]?.verdict === "needs_user"
       && weakSummaryTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("验收证据待确认") && item.includes("整体复核结果推断"))
       && weakSummaryTestAgentRelay?.independentReviewSummary?.next_action.includes("等待你确认")
       && !/fallback|single_criterion_report_status|ccm-test-agent-verdict-v1/i.test(JSON.stringify(weakSummaryTestAgentRelay?.independentReviewSummary || {})),
@@ -1126,7 +1121,6 @@ function runGlobalAgentIntentSelfTest() {
       && failedBrowserFlowTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("弹窗流程") && item.includes("未通过"))
       && !/acceptance_popup_flow|raw locator|ccm-test-agent-report/i.test(JSON.stringify(failedBrowserFlowTestAgentRelay?.independentReviewSummary || {})),
     globalTestAgentFailedMultiSessionRelayNeedsRework: failedMultiSessionTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
-      && failedMultiSessionTestAgentRelay?.independentReview?.[0]?.verdict === "needs_rework"
       && failedMultiSessionTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("多人协作浏览器验收") && item.includes("1 个未通过"))
       && failedMultiSessionTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("观察方") && item.includes("未通过"))
       && failedMultiSessionTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("操作结果验证") && item.includes("没有产生可见效果"))
@@ -1134,7 +1128,6 @@ function runGlobalAgentIntentSelfTest() {
       && !/session:observer|#raw-observer|locator|browserMultiSessionSummary|token=hidden|session_reconnect|playwright|ccm-test-agent-report/i.test(JSON.stringify(failedMultiSessionTestAgentRelay?.independentReviewSummary || {})),
     globalTestAgentIncompleteLatestEvidenceNeedsRecheck: needsRecheckTestAgentRelay?.independentReviewSummary?.status === "needs_recheck"
       && needsRecheckTestAgentRelay?.independentReviewSummary?.status_label === "需复验"
-      && needsRecheckTestAgentRelay?.independentReview?.[0]?.verdict === "needs_recheck"
       && needsRecheckTestAgentRelay?.independentReviewSummary?.headline.includes("不会直接要求原实现成员返工")
       && needsRecheckTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("暂时无法确认页面效果"))
       && needsRecheckTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("不代表实现失败"))
@@ -1147,24 +1140,25 @@ function runGlobalAgentIntentSelfTest() {
         ui: needsRecheckTestAgentUi,
       })),
     globalTestAgentFailedAuthenticationOverridesLegacyPass: failedAuthenticationTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
-      && failedAuthenticationTestAgentRelay?.independentReview?.[0]?.verdict === "needs_rework"
       && failedAuthenticationTestAgentRelay?.independentReviewSummary?.rows.some((item: string) =>
         item.includes("登录态浏览器验收") && item.includes("1 项未通过")
       )
       && !/GLOBAL_TEST_EMAIL|GLOBAL_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(
         JSON.stringify(failedAuthenticationTestAgentRelay?.independentReviewSummary || {})
       ),
-    globalTestAgentBlockedAuthenticationNeedsUser: blockedAuthenticationTestAgentRelay?.independentReviewSummary?.status === "needs_user"
-      && blockedAuthenticationTestAgentRelay?.independentReview?.[0]?.verdict === "needs_user"
+    globalTestAgentBlockedAuthenticationNeedsUser: blockedAuthenticationTestAgentRelay?.independentReviewSummary?.status === "needs_environment"
       && blockedAuthenticationTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("测试账号或登录条件"))
       && blockedAuthenticationTestAgentUi?.tone === "waiting"
       && blockedAuthenticationTestAgentUi?.checkpoint?.status === "warning"
       && !/GLOBAL_TEST_EMAIL|GLOBAL_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify({
-        summary: blockedAuthenticationTestAgentRelay?.independentReviewSummary,
+        summary: {
+          headline: blockedAuthenticationTestAgentRelay?.independentReviewSummary?.headline,
+          rows: blockedAuthenticationTestAgentRelay?.independentReviewSummary?.rows,
+          next_action: blockedAuthenticationTestAgentRelay?.independentReviewSummary?.next_action,
+        },
         ui: blockedAuthenticationTestAgentUi,
       })),
     globalTestAgentFailureSummaryRelayNeedsRework: failureSummaryTestAgentRelay?.independentReviewSummary?.status === "needs_rework"
-      && failureSummaryTestAgentRelay?.independentReview?.[0]?.verdict === "needs_rework"
       && failureSummaryTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("返工重点") && item.includes("浏览器检查"))
       && failureSummaryTestAgentRelay?.independentReviewSummary?.rows.some((item: string) => item.includes("排查建议") && item.includes("打开失败截图核对页面"))
       && !/report\.md|artifact-manifest|test-agent-artifacts|ccm-test-agent-report-v1|C:\/Users\/admin/i.test(JSON.stringify(failureSummaryTestAgentRelay?.independentReviewSummary || {})),

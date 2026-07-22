@@ -39,8 +39,17 @@ export type ProjectSessionBoundMemoryMcpInput = {
 };
 export declare function buildProjectSessionBoundMemoryMcpServer(input: ProjectSessionBoundMemoryMcpInput): {
     ccm__knowledge_context?: undefined;
+    ccm__permission_broker?: undefined;
 } | {
     ccm__knowledge_context: {
+        command: string;
+        args: string[];
+        env: {
+            CCM_INTERNAL_MCP_CONTEXT: string;
+            CCM_INTERNAL_MCP_SECRET_FILE: string;
+        };
+    };
+    ccm__permission_broker: {
         command: string;
         args: string[];
         env: {

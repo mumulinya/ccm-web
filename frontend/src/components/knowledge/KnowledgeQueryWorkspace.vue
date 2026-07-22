@@ -137,8 +137,8 @@ const openSource = source => emit('open-source', { filename: source.filename, ch
       <summary>技术详情</summary>
       <dl>
         <div><dt>检索模式</dt><dd>{{ retrieval.mode }}</dd></div>
-        <div><dt>向量来源</dt><dd>{{ retrieval.embedding }}</dd></div>
-        <div><dt>回退检索</dt><dd>{{ retrieval.fallback ? '是' : '否' }}</dd></div>
+        <div><dt>检索引擎</dt><dd>{{ retrieval.embedding === 'hashing' ? '本地混合检索' : retrieval.embedding?.includes('fallback') ? '远程失败，已切换本地' : retrieval.embedding }}</dd></div>
+        <div><dt>本地检索</dt><dd>{{ retrieval.fallback ? '正在使用' : '作为基础排序' }}</dd></div>
         <div><dt>排序策略</dt><dd>{{ retrieval.rerank }}</dd></div>
         <div><dt>耗时</dt><dd>{{ elapsedMs }} ms</dd></div>
         <div><dt>引用数量</dt><dd>{{ retrieval.citations?.length || 0 }}</dd></div>

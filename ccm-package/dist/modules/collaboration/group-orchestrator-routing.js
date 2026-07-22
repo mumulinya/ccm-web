@@ -78,6 +78,7 @@ const group_reactive_compact_retry_ownership_1 = require("./group-reactive-compa
 const group_orchestrator_config_1 = require("./group-orchestrator-config");
 const group_orchestrator_prompts_1 = require("./group-orchestrator-prompts");
 const group_orchestrator_coded_1 = require("./group-orchestrator-coded");
+const knowledge_access_1 = require("../knowledge/knowledge-access");
 const group_orchestrator_llm_1 = require("./group-orchestrator-llm");
 exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-work-items");
 exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-plans");
@@ -506,7 +507,9 @@ function measureGroupMainAgentPayload(input) {
     const snapshot = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
         scope: "group",
         sessionId: `${String(input?.group?.id || "")}:${String(input?.groupSessionId || input?.group_session_id || "")}`,
-        recentMessages: messages,
+        system: messages.filter((message) => message.role === "system"),
+        contextComponents: (0, group_orchestrator_llm_1.buildLlmCoordinatorContextComponents)(input),
+        recentMessages: messages.filter((message) => message.role !== "system"),
     });
     return { messages, snapshot, tokens: snapshot.totalTokens };
 }
@@ -559,8 +562,29 @@ async function prepareExactGroupMainAgentInput(input, group, groupSessionId, con
     return { input: preparedInput, compacted: true, projection, measurement, capacity, threshold, compactResult };
 }
 async function runGroupOrchestratorCore(input) {
-    const initialInput = (0, group_orchestrator_coded_1.withGroupRagContext)(input);
-    const group = normalizeGroupOrchestrator(initialInput.group);
+    const group = normalizeGroupOrchestrator(input.group);
+    let initialInput = { ...input, group };
+    if (input.ragContext === undefined && String(input.message || "").trim()) {
+        try {
+            const members = getRoutableMembers(group).map((member) => ({ name: member.project }));
+            const knowledge = await (0, knowledge_access_1.searchAgentKnowledge)((0, group_orchestrator_coded_1.buildGroupRagQuery)(group, input), {
+                role: "group-main-agent",
+                project: getCoordinatorProject(group),
+                groupId: String(group.id || ""),
+                projects: members,
+            }, { limit: 6, maxContextChars: 18000 });
+            initialInput = {
+                ...initialInput,
+                ragContext: knowledge.context,
+                ragCitations: knowledge.citations,
+                ragScoped: knowledge.results.some(item => item.scope?.type !== "global"),
+            };
+        }
+        catch (error) {
+            console.warn(`[群聊知识检索] 已使用无知识上下文继续：${error?.message || error}`);
+            initialInput = { ...initialInput, ragContext: "", ragCitations: [], ragScoped: false };
+        }
+    }
     const groupSessionId = String(initialInput.groupSessionId || initialInput.group_session_id || "").trim();
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const configIssue = getLlmConfigIssue(config);

@@ -91,7 +91,7 @@ assert.throws(() => importMenuConfiguration(JSON.stringify({ schema: 'wrong' }),
 const root = process.cwd()
 const app = fs.readFileSync(path.join(root, 'frontend/src/App.vue'), 'utf8')
 const manager = fs.readFileSync(path.join(root, 'frontend/src/components/workspace/MenuManager.vue'), 'utf8')
-assert.ok(app.includes("switchTab('menumanager')"), 'sidebar edit button should navigate to the single center')
+assert.ok(app.includes("id: 'menumanager'") && app.includes('<MenuManager'), 'the single menu center should remain registered as a real page')
 assert.ok(!app.includes('showMenuManager'), 'legacy duplicate menu modal must be removed')
 assert.ok(!app.includes('<iframe :src="tab.url"'), 'custom links must not run in an unsandboxed iframe')
 assert.ok(app.includes("window.open(tabInfo.url, '_blank', 'noopener,noreferrer')"))

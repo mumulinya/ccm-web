@@ -36,6 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SESSION_MEMORY_EXTRACTION_WAIT_MS = exports.SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES = exports.SESSION_MEMORY_UPDATE_GROWTH_TOKENS = exports.SESSION_MEMORY_INITIAL_TOKENS = exports.SESSION_COMPACTION_MAX_CONSECUTIVE_FAILURES = exports.SESSION_COMPACTION_STATE_SCHEMA = void 0;
 exports.sessionCompactionChecksum = sessionCompactionChecksum;
 exports.buildModelVisiblePayloadSnapshot = buildModelVisiblePayloadSnapshot;
+exports.modelVisibleFixedTokens = modelVisibleFixedTokens;
+exports.modelVisiblePayloadAccounting = modelVisiblePayloadAccounting;
 exports.evaluateSessionMemoryCadence = evaluateSessionMemoryCadence;
 exports.validateSessionMemoryState = validateSessionMemoryState;
 exports.waitForSessionMemoryExtraction = waitForSessionMemoryExtraction;
@@ -62,6 +64,16 @@ exports.SESSION_MEMORY_INITIAL_TOKENS = 10_000;
 exports.SESSION_MEMORY_UPDATE_GROWTH_TOKENS = 5_000;
 exports.SESSION_MEMORY_TOOL_CALLS_BETWEEN_UPDATES = 3;
 exports.SESSION_MEMORY_EXTRACTION_WAIT_MS = 15_000;
+const MODEL_VISIBLE_FIXED_TOKEN_KEYS = [
+    "system",
+    "tools",
+    "rules",
+    "skills",
+    "mcpTools",
+    "subagentDefinitions",
+    "recoveryContext",
+    "hookResults",
+];
 const lifecycleHooks = {
     pre_compact: new Set(),
     session_start: new Set(),
@@ -91,17 +103,100 @@ function sessionCompactionChecksum(value) {
 function valueTokens(value) {
     if (value == null || value === "")
         return 0;
+    if (Array.isArray(value) && value.length === 0)
+        return 0;
+    if (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0)
+        return 0;
     return (0, context_budget_1.estimateTextTokens)(typeof value === "string" ? value : JSON.stringify(value));
+}
+function contextComponentKey(key) {
+    const value = String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (/skill/.test(value))
+        return "skills";
+    if (/mcp|dynamictool/.test(value))
+        return "mcpTools";
+    if (/subagent|agentdefinition|agentcatalog|projectdirectory|groupmember|members/.test(value))
+        return "subagentDefinitions";
+    if (/rule|policy|instruction|constraint|permission|authorization|boundary/.test(value))
+        return "rules";
+    return "";
+}
+function structuredContextHints(value) {
+    const result = {};
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return result;
+    for (const [key, entry] of Object.entries(value)) {
+        const component = contextComponentKey(key);
+        if (!component)
+            continue;
+        result[component] = (result[component] || 0) + valueTokens({ [key]: entry });
+    }
+    return result;
+}
+function toolContextHints(value) {
+    const items = Array.isArray(value) ? value : value && typeof value === "object" ? Object.values(value) : [];
+    let mcpTools = 0;
+    let subagentDefinitions = 0;
+    for (const item of items) {
+        const identity = JSON.stringify({ name: item?.name || item?.function?.name || item?.id || "", type: item?.type || "", source: item?.source || "" });
+        const tokens = valueTokens(item);
+        if (/mcp__|\bmcp\b|dynamic[_-]?tool/i.test(identity))
+            mcpTools += tokens;
+        else if (/subagent|task[_-]?agent|worker[_-]?agent/i.test(identity))
+            subagentDefinitions += tokens;
+    }
+    return { mcpTools, subagentDefinitions };
+}
+function partitionTokens(totalInput, requestedInput) {
+    const total = Math.max(0, Math.floor(totalInput));
+    const requested = Object.fromEntries(Object.entries(requestedInput).map(([key, value]) => [key, Math.max(0, Math.floor(Number(value || 0)))]));
+    const requestedTotal = Object.values(requested).reduce((sum, value) => sum + value, 0);
+    if (!requestedTotal)
+        return { allocated: requested, remaining: total };
+    if (requestedTotal <= total)
+        return { allocated: requested, remaining: total - requestedTotal };
+    const allocated = {};
+    let used = 0;
+    const entries = Object.entries(requested);
+    entries.forEach(([key, value], index) => {
+        const next = index === entries.length - 1 ? total - used : Math.floor((value / requestedTotal) * total);
+        allocated[key] = Math.max(0, next);
+        used += allocated[key];
+    });
+    return { allocated, remaining: 0 };
 }
 function buildModelVisiblePayloadSnapshot(input) {
     const recentMessages = Array.isArray(input.recentMessages) ? input.recentMessages : [];
     const hookResults = Array.isArray(input.hookResults) ? input.hookResults : [];
     const fixedContext = { system: input.system ?? null, tools: input.tools ?? null, recoveryContext: input.recoveryContext ?? null, hookResults };
+    const rawSystemTokens = valueTokens(input.system);
+    const rawToolTokens = valueTokens(input.tools);
+    const structuredHints = structuredContextHints(input.system);
+    const toolHints = toolContextHints(input.tools);
+    const explicit = input.contextComponents || {};
+    const toolMcpTokens = explicit.mcpTools === undefined ? toolHints.mcpTools : valueTokens(explicit.mcpTools);
+    const toolSubagentTokens = toolHints.subagentDefinitions;
+    const toolPartition = partitionTokens(rawToolTokens, { mcpTools: toolMcpTokens, subagentDefinitions: toolSubagentTokens });
+    const rawRecentMessageTokens = recentMessages.reduce((sum, message) => sum + valueTokens(messageContent(message)), 0);
+    const recentPartition = partitionTokens(rawRecentMessageTokens, {
+        mcpResults: explicit.mcpResults === undefined ? 0 : valueTokens(explicit.mcpResults),
+    });
+    const systemPartition = partitionTokens(rawSystemTokens, {
+        rules: explicit.rules === undefined ? structuredHints.rules || 0 : valueTokens(explicit.rules),
+        skills: explicit.skills === undefined ? structuredHints.skills || 0 : valueTokens(explicit.skills),
+        mcpTools: rawToolTokens > 0 ? 0 : explicit.mcpTools === undefined ? structuredHints.mcpTools || 0 : valueTokens(explicit.mcpTools),
+        subagentDefinitions: explicit.subagentDefinitions === undefined ? structuredHints.subagentDefinitions || 0 : valueTokens(explicit.subagentDefinitions),
+    });
     const tokenBreakdown = {
-        system: valueTokens(input.system),
-        tools: valueTokens(input.tools),
+        system: systemPartition.remaining,
+        tools: toolPartition.remaining,
+        rules: Number(systemPartition.allocated.rules || 0),
+        skills: Number(systemPartition.allocated.skills || 0),
+        mcpTools: Number(systemPartition.allocated.mcpTools || 0) + Number(toolPartition.allocated.mcpTools || 0),
+        mcpResults: Number(recentPartition.allocated.mcpResults || 0),
+        subagentDefinitions: Number(systemPartition.allocated.subagentDefinitions || 0) + Number(toolPartition.allocated.subagentDefinitions || 0),
         summary: valueTokens(input.activeSummary),
-        recentMessages: recentMessages.reduce((sum, message) => sum + valueTokens(messageContent(message)), 0),
+        recentMessages: recentPartition.remaining,
         currentRequest: valueTokens(input.currentRequest),
         recoveryContext: valueTokens(input.recoveryContext),
         hookResults: valueTokens(hookResults),
@@ -125,6 +220,25 @@ function buildModelVisiblePayloadSnapshot(input) {
         payloadChecksum: checksum(payload),
         fixedContextChecksum: checksum(fixedContext),
         pendingRequestChecksum: input.currentRequest == null ? "" : checksum(input.currentRequest),
+    };
+}
+function modelVisibleFixedTokens(snapshot) {
+    const breakdown = snapshot?.tokenBreakdown || {};
+    return MODEL_VISIBLE_FIXED_TOKEN_KEYS.reduce((sum, key) => sum + Math.max(0, Math.floor(Number(breakdown[key] || 0))), 0);
+}
+function modelVisiblePayloadAccounting(snapshot) {
+    if (!snapshot)
+        return null;
+    return {
+        schema: "ccm-model-visible-payload-accounting-v1",
+        scope: snapshot.scope,
+        sessionId: snapshot.sessionId,
+        tokenBreakdown: { ...snapshot.tokenBreakdown },
+        totalTokens: snapshot.totalTokens,
+        payloadChecksum: snapshot.payloadChecksum,
+        fixedContextChecksum: snapshot.fixedContextChecksum,
+        pendingRequestChecksum: snapshot.pendingRequestChecksum,
+        contentStored: false,
     };
 }
 function messageToolCallCount(message) {
@@ -312,7 +426,7 @@ function measureSessionContextTokens(input) {
     const baselineValid = identityValid && (anchorIndex >= 0 || snapshotBaselineValid);
     const estimatedSummaryTokens = payload ? payload.tokenBreakdown.summary : input.activeSummary == null ? 0 : (0, context_budget_1.estimateTextTokens)(JSON.stringify(input.activeSummary));
     const estimatedFixedTokens = payload
-        ? payload.tokenBreakdown.system + payload.tokenBreakdown.tools + payload.tokenBreakdown.recoveryContext + payload.tokenBreakdown.hookResults
+        ? modelVisibleFixedTokens(payload)
         : input.fixedContext == null ? 0 : (0, context_budget_1.estimateTextTokens)(typeof input.fixedContext === "string" ? input.fixedContext : JSON.stringify(input.fixedContext));
     const estimatedMessageTokens = payload ? payload.tokenBreakdown.recentMessages : messages.reduce((sum, message) => sum + (0, context_budget_1.estimateTextTokens)(messageContent(message)), 0);
     const currentEstimatedPayloadTokens = payload?.totalTokens ?? estimatedSummaryTokens + estimatedFixedTokens + estimatedMessageTokens;

@@ -1,4 +1,4 @@
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { tasksApi, groupsApi, projectsApi } from '../../api/index.js'
 import AgentPipeline from '../agents/AgentPipeline.vue'
 import TaskListItem from './TaskListItem.vue'
@@ -9,9 +9,12 @@ import { toast, confirmDialog } from '../../utils/toast.js'
 import { useTaskBacklog } from '../../composables/useTaskBacklog.js'
 import { useTaskExecutionDashboard } from '../../composables/useTaskExecutionDashboard.js'
 import { sanitizeUserFacingAgentText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
+import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 
 export function useTaskManager(props, emit) {
   const tasks = ref([])
+  const permissionRequests = ref([])
+  const permissionDecisionBusyId = ref('')
   const groups = ref([])
   const projects = ref([])
   const stats = ref({ total: 0, pending: 0, inProgress: 0, done: 0, failed: 0 })
@@ -25,6 +28,9 @@ export function useTaskManager(props, emit) {
   const activeTaskView = ref('overview')
   const taskSearch = ref('')
   const taskStatusFilter = ref('all')
+  let unsubscribeRuntimeEvents = null
+  let runtimeRefreshTimer = null
+  let fallbackRefreshTimer = null
 
   // 弹窗状态
   const showCreate = ref(false)
@@ -114,8 +120,33 @@ export function useTaskManager(props, emit) {
     groupId: '',
     projectId: '',
     priority: 'normal',
-    autoExecute: true
+    autoExecute: true,
+    files: [],
+    existingAttachments: []
   })
+
+  const addTaskFiles = (incoming) => {
+    const rows = Array.from(incoming || []).filter(file => file?.name)
+    const keys = new Set(newTask.value.files.map(file => `${file.name}:${file.size}:${file.lastModified || 0}`))
+    for (const file of rows) {
+      if (newTask.value.files.length + newTask.value.existingAttachments.length >= 10) break
+      const key = `${file.name}:${file.size}:${file.lastModified || 0}`
+      if (file.size > 25 * 1024 * 1024 || keys.has(key)) continue
+      keys.add(key)
+      newTask.value.files.push(file)
+    }
+  }
+
+  const handleTaskPaste = (event) => {
+    const files = Array.from(event.clipboardData?.files || [])
+    if (!files.length) return
+    event.preventDefault()
+    addTaskFiles(files)
+  }
+
+  const removeExistingTaskAttachment = (id) => {
+    newTask.value.existingAttachments = newTask.value.existingAttachments.filter(item => item.id !== id)
+  }
 
   const defaultDailyDevTask = () => ({
     title: '',
@@ -128,7 +159,8 @@ export function useTaskManager(props, emit) {
     priority: 'normal',
     requiresCodeChanges: true,
     persistDocuments: true,
-    autoExecute: true
+    autoExecute: true,
+    files: []
   })
   const dailyDevTask = ref(defaultDailyDevTask())
 
@@ -139,13 +171,56 @@ export function useTaskManager(props, emit) {
 
   // 加载数据
   const loadTasks = async () => {
-    const response = await fetch(showArchivedTasks.value ? '/api/tasks?archived=true' : '/api/tasks')
+    const [response, permissionResponse] = await Promise.all([
+      fetch(showArchivedTasks.value ? '/api/tasks?archived=true' : '/api/tasks'),
+      fetch('/api/tasks/permission-requests')
+    ])
     const data = await response.json()
-    tasks.value = (data.tasks || []).slice().reverse()
+    const permissionData = await permissionResponse.json().catch(() => ({ requests: [] }))
+    permissionRequests.value = Array.isArray(permissionData.requests) ? permissionData.requests : []
+    const permissionsByTask = new Map()
+    for (const request of permissionData.requests || []) {
+      const rows = permissionsByTask.get(request.taskId) || []
+      rows.push(request)
+      permissionsByTask.set(request.taskId, rows)
+    }
+    tasks.value = (data.tasks || []).slice().reverse().map(task => ({ ...task, permission_requests: permissionsByTask.get(task.id) || [] }))
     archivedTaskCount.value = Number(data.archived_count || 0)
     selectedTaskIds.value = selectedTaskIds.value.filter(id => tasks.value.some(task => task.id === id))
     updateStats()
   }
+
+  const decideTaskPermission = async (request, decision) => {
+    const label = decision === 'approve' ? '批准' : '拒绝'
+    if (!request?.id || permissionDecisionBusyId.value) return
+    permissionDecisionBusyId.value = request.id
+    try {
+      const response = await fetch('/api/tasks/permission-requests/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: request.id, decision, reason: `用户在任务派发中心明确${label}`, maxUses: 1, expiresInMinutes: 15 })
+      })
+      const data = await response.json()
+      if (!response.ok || data.success === false) throw new Error(data.error || `${label}失败`)
+      toast.success(`已${label} ${request.project || 'Agent'} 的限时权限`)
+      if (decision === 'approve' && request.originType === 'project' && request.originProject && request.originSessionId) {
+        emit('resume-project-permission', {
+          tab: 'projects',
+          project: request.originProject,
+          sessionId: request.originSessionId,
+          autoMessage: `权限申请 ${request.id} 已获用户批准。请继续当前未完成任务；仅通过 ccm__permission_broker 使用这项精确、限时、单次授权。`,
+        })
+      }
+      await loadTasks()
+    } catch (error) {
+      toast.error(error.message || `${label}失败`)
+    } finally {
+      permissionDecisionBusyId.value = ''
+    }
+  }
+
+  const pendingPermissionRequests = computed(() => permissionRequests.value.filter(item => item.state === 'awaiting_user'))
+  const standalonePermissionRequests = computed(() => pendingPermissionRequests.value.filter(request => !tasks.value.some(task => task.id === request.taskId)))
 
   const toggleTaskSelection = (id, checked) => {
     if (checked) {
@@ -438,7 +513,7 @@ export function useTaskManager(props, emit) {
     const checks = [
       { key: 'goal', ok: len(dailyDevTask.value.businessGoal) >= 8, label: '业务目标' },
       { key: 'scope', ok: len(dailyDevTask.value.scope) >= 8, label: '开发范围' },
-      { key: 'documents', ok: len(dailyDevTask.value.documents) >= 12, label: '业务/接口文档' },
+      { key: 'documents', ok: len(dailyDevTask.value.documents) >= 12 || dailyDevTask.value.files.length > 0, label: '业务/接口文档或附件' },
       { key: 'acceptance', ok: len(dailyDevTask.value.acceptance) >= 8, label: '验收标准' }
     ]
     const pass = checks[0].ok && checks[3].ok && (checks[1].ok || checks[2].ok)
@@ -465,9 +540,12 @@ export function useTaskManager(props, emit) {
       assign_type: newTask.value.assignType,
       auto_execute: newTask.value.autoExecute
     }
-    const res = editingTaskId.value
-      ? await tasksApi.update({ id: editingTaskId.value, ...payload })
-      : await tasksApi.create(payload)
+    const requestPayload = editingTaskId.value ? { id: editingTaskId.value, ...payload } : payload
+    requestPayload.retained_attachment_ids = newTask.value.existingAttachments.map(item => item.id)
+    const form = new FormData()
+    form.append('payload', JSON.stringify(requestPayload))
+    newTask.value.files.forEach(file => form.append('files', file, file.name))
+    const res = editingTaskId.value ? await tasksApi.update(form) : await tasksApi.create(form)
 
     if (res.success) {
       showCreate.value = false
@@ -478,10 +556,16 @@ export function useTaskManager(props, emit) {
         groupId: groups.value[0]?.id || '',
         projectId: projects.value[0]?.name || '',
         priority: 'normal',
-        autoExecute: true
+        autoExecute: true,
+        files: [],
+        existingAttachments: []
       }
       refreshTaskWork()
-      toast.success(editingTaskId.value ? '任务修改成功' : res.queued ? '任务已创建并加入执行队列' : '任务创建成功')
+      if (res.task?.source_attachment_warnings?.length) {
+        toast.warning(`任务已保存，但有 ${res.task.source_attachment_warnings.length} 个附件未完整解析；执行 Agent 会按原文件路径继续核验`)
+      } else {
+        toast.success(editingTaskId.value ? '任务修改成功' : res.queued ? '任务已创建并加入执行队列' : '任务创建成功')
+      }
       editingTaskId.value = ''
     } else {
       toast.error('创建失败: ' + (res.error || '未知错误'))
@@ -514,11 +598,10 @@ export function useTaskManager(props, emit) {
     if (!dailyDevTask.value.groupId) { toast.warning('请选择开发群聊'); return }
 
     try {
-      const res = await fetch('/api/tasks/create-daily-dev', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildDailyDevCreatePayload(forceQualityGate))
-      })
+      const form = new FormData()
+      form.append('payload', JSON.stringify(buildDailyDevCreatePayload(forceQualityGate)))
+      dailyDevTask.value.files.forEach(file => form.append('files', file, file.name))
+      const res = await fetch('/api/tasks/create-daily-dev', { method: 'POST', body: form })
       const data = await res.json()
       if (!data.success) {
         if (data.needs_confirmation && !forceQualityGate) {
@@ -532,7 +615,8 @@ export function useTaskManager(props, emit) {
       dailyDevTask.value = defaultDailyDevTask()
       refreshTaskWork()
       const backlogText = data.backlog_file ? `，已写入需求池 ${data.backlog_file}` : ''
-      if (data.queued) toast.success(`业务开发任务已交给主 Agent${backlogText}`)
+      if (data.task?.source_attachment_warnings?.length) toast.warning(`业务开发任务已保存，但有 ${data.task.source_attachment_warnings.length} 个附件未完整解析；主 Agent 会按原文件路径继续核验${backlogText}`)
+      else if (data.queued) toast.success(`业务开发任务已交给主 Agent${backlogText}`)
       else toast.warning((data.queue_result?.message || '业务开发任务已创建，但尚未入队') + backlogText)
     } catch (e) {
       toast.error('创建业务开发任务失败')
@@ -562,7 +646,7 @@ export function useTaskManager(props, emit) {
 
   const openCreateTask = () => {
     editingTaskId.value = ''
-    newTask.value = { title: '', description: '', assignType: 'group', groupId: groups.value[0]?.id || '', projectId: projects.value[0]?.name || '', priority: 'normal', autoExecute: true }
+    newTask.value = { title: '', description: '', assignType: 'group', groupId: groups.value[0]?.id || '', projectId: projects.value[0]?.name || '', priority: 'normal', autoExecute: true, files: [], existingAttachments: [] }
     showCreate.value = true
   }
 
@@ -572,6 +656,7 @@ export function useTaskManager(props, emit) {
       title: task.title || '', description: task.description || '', assignType: task.assign_type || 'group',
       groupId: task.group_id || groups.value[0]?.id || '', projectId: task.target_project || projects.value[0]?.name || '',
       priority: task.priority || 'normal', autoExecute: task.auto_execute !== false,
+      files: [], existingAttachments: Array.isArray(task.source_attachments) ? [...task.source_attachments] : [],
     }
     showCreate.value = true
   }
@@ -1032,10 +1117,28 @@ export function useTaskManager(props, emit) {
     loadProjects()
     loadOrchestratorDiagnostics()
     loadExecutionDashboard()
+    unsubscribeRuntimeEvents = subscribeRuntimeEvents(['task', 'permission', 'agent', 'feishu'], event => {
+      if (!['task', 'permission', 'agent', 'feishu'].includes(event.topic)) return
+      if (runtimeRefreshTimer) window.clearTimeout(runtimeRefreshTimer)
+      runtimeRefreshTimer = window.setTimeout(() => {
+        if (event.topic === 'permission') void loadTasks()
+        else if (event.topic === 'agent') void Promise.all([loadActiveAgentRuns(), loadExecutionDashboard()])
+        else void Promise.all([loadTasks(), loadExecutionDashboard()])
+      }, 180)
+    })
+    fallbackRefreshTimer = window.setInterval(() => void loadTasks(), 60_000)
+  })
+
+  onUnmounted(() => {
+    unsubscribeRuntimeEvents?.()
+    unsubscribeRuntimeEvents = null
+    if (runtimeRefreshTimer) window.clearTimeout(runtimeRefreshTimer)
+    if (fallbackRefreshTimer) window.clearInterval(fallbackRefreshTimer)
   })
 
   return {
     AgentPipeline, TaskListItem, TaskBacklogModal, DailyDevTaskModal, TaskDispatchHeader, tasks,
+    permissionRequests, pendingPermissionRequests, standalonePermissionRequests, permissionDecisionBusyId,
     groups, projects, stats, orchestratorDiagnostics, taskExecutions, executionActionBusy,
     showArchivedTasks, archivedTaskCount, selectedTaskIds, editingTaskId, activeTaskView, taskSearch,
     taskStatusFilter, showCreate, showDailyDevCreate, showQueue, showLogs, showReport,
@@ -1049,6 +1152,7 @@ export function useTaskManager(props, emit) {
     backlogBulkDispatchResult, backlogImportLoading, backlogImportResult, backlogStatusLabel, formatBacklogTime, backlogState,
     backlogCount, backlogQualityText, backlogLatestHistory, backlogCanDispatch, backlogCanRestoreReady, loadDailyDevBacklogs,
     openBacklog, updateBacklogStatus, dispatchBacklog, dispatchReadyBacklogs, importSharedDocsToBacklog, newTask,
+    addTaskFiles, handleTaskPaste, removeExistingTaskAttachment,
     defaultDailyDevTask, dailyDevTask, updateDailyDevTaskField, loadTasks, toggleTaskSelection, loadGroups,
     loadProjects, loadOrchestratorDiagnostics, refreshTaskWork, formatDuration, visibleReportText, visibleReportObject,
     visibleReportList, continuationStrategyLabel, updateStats, deliveryEvidenceItems, isExecutionBlockedTask, executionBlockedMessage,
@@ -1064,6 +1168,6 @@ export function useTaskManager(props, emit) {
     visibleTaskTitle, visibleTaskStatusDetail, visibleRequiredVerification, visibleDeliveryBlockers, visibleUserDeliveryReport, loadTaskTrace,
     viewReport, cancelTask, rollbackExecution, mergeExecution, cleanupExecution, openContinueTask,
     continueFromReport, submitContinuationPayload, submitTaskContinuation, autoContinueFromReport, resendTask, priorityLabel,
-    visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks
+    visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission
   }
 }

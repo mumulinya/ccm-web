@@ -465,7 +465,7 @@ const DEFAULT_TABS = [
   { id: 'global-agent', icon: '🤖', label: '全局助手' },
   { id: 'tools', icon: '🔧', label: '工具配置' },
   { id: 'pets', icon: '🐾', label: '宠物空间' },
-  { id: 'changes', icon: '📝', label: '代码变更' },
+  { id: 'changes', icon: '📝', label: '代码协作' },
   { id: 'tasks', icon: '📋', label: '任务派发' },
   { id: 'trace-replay', icon: '🔁', label: '任务回放' },
   { id: 'autodev', icon: '🧭', label: '自动开发' },
@@ -473,7 +473,7 @@ const DEFAULT_TABS = [
   { id: 'memory-center', icon: '🧠', label: '记忆控制中心' },
   { id: 'cleanup-center', icon: '🧹', label: '清理中心' },
   { id: 'cron', icon: '⏰', label: '定时任务' },
-  { id: 'terminal', icon: '💻', label: '内置终端' },
+  { id: 'terminal', icon: '💻', label: '终端工作台' },
   { id: 'metrics', icon: '📈', label: '性能监控' },
   { id: 'search', icon: '🔍', label: '对话搜索' },
   { id: 'music', icon: '🎵', label: '音乐播放' },
@@ -572,6 +572,29 @@ const handleWorkbenchNavigate = (target = {}) => {
   switchTab(target.tab || 'dashboard')
 }
 
+const handleTerminalAnalysis = (payload = {}) => {
+  const draftMessage = String(payload.draft || '').trim()
+  if (!draftMessage) return
+  if (payload.target === 'project' && payload.project) {
+    navigateTo.value = { tab: 'projects', project: payload.project, draftMessage }
+    switchTab('projects')
+    return
+  }
+  if (payload.target === 'group' && payload.groupId) {
+    navigateTo.value = { tab: 'groups', groupId: payload.groupId, draftMessage }
+    switchTab('groups')
+    return
+  }
+  navigateTo.value = { tab: 'global-agent', draftMessage }
+  switchTab('global-agent')
+}
+
+const resumeProjectPermission = (target = {}) => {
+  if (!target.project || !target.sessionId || !target.autoMessage) return
+  navigateTo.value = { ...target, tab: 'projects' }
+  switchTab('projects')
+}
+
 const switchTab = (tabId) => {
   tabId = RETIRED_TAB_REDIRECTS[tabId] || tabId
   const tabInfo = tabs.value.find(t => t.id === tabId)
@@ -609,10 +632,10 @@ const closeTab = (tabId, event) => {
     <nav class="nav-sidebar">
       <div class="nav-logo">
         <button class="brand-home" title="返回我的工作台" @click="switchTab('dashboard')">
-          <span class="brand-mark"><Sparkles :size="18" /></span>
+          <span class="brand-mark"><img src="/favicon.svg" alt="" /></span>
           <span class="brand-copy"><strong>CCM</strong><small>Agent Workspace</small></span>
         </button>
-        <span class="brand-version">v1.0.10</span>
+        <span class="brand-version">v1.0.16</span>
       </div>
       <div class="nav-menu">
         <template v-if="pinnedTabs.length">
@@ -706,14 +729,14 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig @navigate="applyPetNavigationTarget" /></div>
         <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :active="currentTab === 'pets'" :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
-        <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" @resume-project-permission="resumeProjectPermission" /></div>
         <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
         <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
         <div v-if="isTabOpen('memory-center')" v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>
         <div v-if="isTabOpen('cleanup-center')" v-show="currentTab === 'cleanup-center'" class="tab-pane"><CleanupCenter @navigate="switchTab" /></div>
         <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs @navigate="handleWorkbenchNavigate" /></div>
-        <div v-if="isTabOpen('terminal')" v-show="currentTab === 'terminal'" class="tab-pane"><Terminal /></div>
+        <div v-if="isTabOpen('terminal')" v-show="currentTab === 'terminal'" class="tab-pane"><Terminal @analyze-output="handleTerminalAnalysis" /></div>
         <div v-if="isTabOpen('dashboard')" v-show="currentTab === 'dashboard'" class="tab-pane scrollable-pane"><UsabilityWorkbench @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics :active="currentTab === 'metrics'" @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
@@ -821,13 +844,12 @@ const closeTab = (tabId, event) => {
   flex: 0 0 auto;
   width: 34px;
   height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent-blue) 28%, var(--border-color));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent-blue) 9%, var(--surface));
-  color: var(--accent-blue);
+  display: block;
+  overflow: hidden;
+  border-radius: 9px;
 }
+
+.brand-mark img { width: 100%; height: 100%; display: block; }
 
 .brand-copy {
   min-width: 0;

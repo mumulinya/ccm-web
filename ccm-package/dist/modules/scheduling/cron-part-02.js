@@ -16,6 +16,7 @@ const cron_job_store_1 = require("./cron-job-store");
 const cron_dev_reports_1 = require("./cron-dev-reports");
 const work_journal_1 = require("./work-journal");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
+const task_attachments_1 = require("../../system/task-attachments");
 const cron_part_01_1 = require("./cron-part-01");
 let schedulerTimer = null;
 function syncCronTaskStatus(task, status, result = "") {
@@ -583,30 +584,91 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
         return true;
     }
     if (pathname === "/api/cron/create" && req.method === "POST") {
-        readJsonBody(req, (payload) => {
+        const handleCreate = async (payload, files = []) => {
             try {
-                const job = (0, cron_job_store_1.createCronJob)(payload);
+                let jobPayload = payload || {};
+                if (files.length) {
+                    const attachments = await (0, task_attachments_1.buildTaskAttachmentMutation)({ files, retainedIds: [], userText: `${jobPayload.name || ""}\n${jobPayload.prompt || ""}` });
+                    jobPayload = {
+                        ...jobPayload,
+                        source_attachments: attachments.attachments,
+                        source_attachment_contexts: attachments.contexts,
+                        source_attachment_context: attachments.context,
+                        source_attachment_warnings: attachments.warnings,
+                    };
+                }
+                const job = (0, cron_job_store_1.createCronJob)(jobPayload);
                 (0, utils_1.sendJson)(res, { success: true, job: (0, cron_job_store_1.normalizeCronJob)(job) });
             }
             catch (e) {
+                (0, task_attachments_1.removeUploadedFiles)(files);
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
             }
-        }, (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+        };
+        const contentType = String(req.headers["content-type"] || "");
+        if (contentType.includes("multipart/form-data")) {
+            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
+                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
+                if (!boundary)
+                    throw new Error("无效的定时任务附件请求");
+                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+                const payload = fields.payload ? JSON.parse(fields.payload) : fields;
+                return handleCreate(payload, files || []);
+            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+            return true;
+        }
+        readJsonBody(req, (payload) => void handleCreate(payload), (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
         return true;
     }
     if (pathname === "/api/cron/update" && req.method === "POST") {
-        readJsonBody(req, (payload) => {
+        const handleUpdate = async (payload, files = [], multipart = false) => {
             try {
-                const { id, ...updates } = payload;
+                const { id, retained_attachment_ids, retainedAttachmentIds, ...incomingUpdates } = payload || {};
+                let updates = incomingUpdates;
+                const current = (0, db_1.loadCronJobs)().find((item) => item.id === id);
+                if (!current)
+                    return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
+                if (multipart) {
+                    const attachments = await (0, task_attachments_1.buildTaskAttachmentMutation)({
+                        files,
+                        currentAttachments: current.source_attachments,
+                        currentContexts: current.source_attachment_contexts,
+                        retainedIds: retained_attachment_ids === undefined && retainedAttachmentIds === undefined
+                            ? undefined
+                            : (0, task_attachments_1.parseRetainedAttachmentIds)(retained_attachment_ids ?? retainedAttachmentIds),
+                        userText: `${updates.name || current.name || ""}\n${updates.prompt || current.prompt || ""}`,
+                    });
+                    updates = {
+                        ...updates,
+                        source_attachments: attachments.attachments,
+                        source_attachment_contexts: attachments.contexts,
+                        source_attachment_context: attachments.context,
+                        source_attachment_warnings: attachments.warnings,
+                    };
+                }
                 const job = (0, cron_job_store_1.updateCronJob)(id, updates);
                 if (!job)
                     return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
                 (0, utils_1.sendJson)(res, { success: true, job: (0, cron_job_store_1.normalizeCronJob)(job) });
             }
             catch (e) {
+                (0, task_attachments_1.removeUploadedFiles)(files);
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
             }
-        }, (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+        };
+        const contentType = String(req.headers["content-type"] || "");
+        if (contentType.includes("multipart/form-data")) {
+            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
+                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
+                if (!boundary)
+                    throw new Error("无效的定时任务附件请求");
+                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+                const payload = fields.payload ? JSON.parse(fields.payload) : fields;
+                return handleUpdate(payload, files || [], true);
+            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+            return true;
+        }
+        readJsonBody(req, (payload) => void handleUpdate(payload), (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
         return true;
     }
     if (pathname === "/api/cron/delete" && req.method === "POST") {

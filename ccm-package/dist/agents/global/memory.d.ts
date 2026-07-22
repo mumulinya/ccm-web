@@ -133,6 +133,7 @@ export declare function compactGlobalAgentSessionWithModel(sessionId: string, op
     tools?: any;
     recoveryContext?: any;
     modelVisiblePayload?: any;
+    contextComponents?: any;
     postCompactPayloadBuilder?: (input: any) => Promise<any> | any;
 }): any;
 export declare function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, options?: {

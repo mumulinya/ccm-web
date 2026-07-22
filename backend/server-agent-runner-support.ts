@@ -348,7 +348,24 @@ export function createAgentRunnerSupport(deps: any) {
     audit.authorization_readiness = toolAuth.authorization_readiness;
     audit.dispatch_gate = buildRuntimeToolDispatchGate(audit);
     recordRuntimeToolSyncAudit(audit, projectName);
-    const prompt = toolManager.buildToolPrompt(allowedTools) + buildRuntimeToolSyncPrompt(audit);
+    const hasKnowledgeMcp = (audit.internal_mcp || []).some((item: any) => item.name === "ccm__knowledge_context" && item.state === "synced");
+    const hasPermissionBrokerMcp = (audit.internal_mcp || []).some((item: any) => item.name === "ccm__permission_broker" && item.state === "synced");
+    const knowledgePrompt = hasKnowledgeMcp ? [
+      "",
+      "[CCM 知识库使用规则]",
+      "- 当前任务提供签名作用域知识工具。任务涉及业务规范、历史文档、接口约定或用户明确要求查资料时，先调用 ccm__knowledge_context.search_knowledge。",
+      "- 需要完整原文时再调用 read_knowledge_document；不得通过文件名读取作用域之外的文档。",
+      "- 使用知识结论时在交付中保留 [source:引用标识]；未命中时明确说明，不得编造资料内容。",
+    ].join("\n") : "";
+    const permissionPrompt = hasPermissionBrokerMcp ? [
+      "",
+      "[CCM 分级权限规则]",
+      "- 项目工作区内的读取、编辑、构建、测试和普通依赖安装按任务包默认权限执行。",
+      "- 超出默认范围前调用 ccm__permission_broker.request_execution_permission；绑定命令的授权必须通过 execute_approved_command 执行，非命令授权才调用 consume_execution_permission。",
+      "- awaiting_user、rejected、expired 或 consumed 均表示不得执行；应报告阻塞并等待主 Agent 或用户。",
+      "- 发布、生产部署、强推、密钥读取、系统提权、项目外路径和破坏性数据库操作不能由子 Agent 自行决定，也不能绕开 CCM 工具直接执行。",
+    ].join("\n") : "";
+    const prompt = toolManager.buildToolPrompt(allowedTools) + buildRuntimeToolSyncPrompt(audit) + knowledgePrompt + permissionPrompt;
     const mcpStatuses = Array.isArray(audit.mcp_statuses) ? audit.mcp_statuses : [];
     const nativeMcpCount = mcpStatuses.length ? mcpStatuses.filter((item: any) => item.state === "synced").length : audit.synced.mcp.length;
     const proxyMcpCount = mcpStatuses.filter((item: any) => item.state === "proxy_only").length;

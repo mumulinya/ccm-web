@@ -4,6 +4,13 @@ interface McpTool {
   name: string;
   description?: string;
   inputSchema?: any;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+    [key: string]: any;
+  };
 }
 
 interface McpToolResult {

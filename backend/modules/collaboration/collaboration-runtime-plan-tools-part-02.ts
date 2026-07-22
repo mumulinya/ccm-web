@@ -738,7 +738,10 @@ export function buildTaskSourceDocumentsContext(task: any) {
     "[任务级业务/接口文档]",
     task?.business_goal || task?.businessGoal ? `业务目标：${compactMemoryText(task.business_goal || task.businessGoal, 600)}` : "",
     task?.acceptance_criteria || task?.acceptanceCriteria ? `验收标准：${compactMemoryText(task.acceptance_criteria || task.acceptanceCriteria, 800)}` : "",
-    task?.source_documents || task?.sourceDocuments ? `关联文档：${compactMemoryText(task.source_documents || task.sourceDocuments, 1800)}` : "",
+    task?.source_documents || task?.sourceDocuments ? `关联文档：${compactMemoryText(task.source_documents || task.sourceDocuments, 12_000)}` : "",
+    task?.source_attachment_context || task?.sourceAttachmentContext
+      ? compactMemoryText(task.source_attachment_context || task.sourceAttachmentContext, 50_000)
+      : "",
   ].filter(Boolean);
   return lines.length > 1 ? lines.join("\n") : "";
 }

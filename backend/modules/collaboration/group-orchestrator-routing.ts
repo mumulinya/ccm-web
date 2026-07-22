@@ -75,13 +75,15 @@ import {
   compactText,
 } from "./group-orchestrator-prompts";
 import {
+  buildGroupRagQuery,
   hashCoordinator,
   isBroadDevelopmentRequest,
   runCodedGroupOrchestrator,
-  withGroupRagContext,
 } from "./group-orchestrator-coded";
+import { searchAgentKnowledge } from "../knowledge/knowledge-access";
 import {
   attachLlmTokenUsage,
+  buildLlmCoordinatorContextComponents,
   buildLlmCoordinatorMessages,
   mergeLlmTokenUsage,
   runLlmGroupOrchestrator,
@@ -744,7 +746,9 @@ export function measureGroupMainAgentPayload(input: any) {
   const snapshot = buildModelVisiblePayloadSnapshot({
     scope: "group",
     sessionId: `${String(input?.group?.id || "")}:${String(input?.groupSessionId || input?.group_session_id || "")}`,
-    recentMessages: messages,
+    system: messages.filter((message: any) => message.role === "system"),
+    contextComponents: buildLlmCoordinatorContextComponents(input),
+    recentMessages: messages.filter((message: any) => message.role !== "system"),
   });
   return { messages, snapshot, tokens: snapshot.totalTokens };
 }
@@ -799,8 +803,28 @@ export async function prepareExactGroupMainAgentInput(input: any, group: any, gr
 }
 
 export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
-  const initialInput = withGroupRagContext(input);
-  const group = normalizeGroupOrchestrator(initialInput.group);
+  const group = normalizeGroupOrchestrator(input.group);
+  let initialInput: GroupOrchestratorInput = { ...input, group };
+  if (input.ragContext === undefined && String(input.message || "").trim()) {
+    try {
+      const members = getRoutableMembers(group).map((member: any) => ({ name: member.project }));
+      const knowledge = await searchAgentKnowledge(buildGroupRagQuery(group, input), {
+        role: "group-main-agent",
+        project: getCoordinatorProject(group),
+        groupId: String(group.id || ""),
+        projects: members,
+      }, { limit: 6, maxContextChars: 18000 });
+      initialInput = {
+        ...initialInput,
+        ragContext: knowledge.context,
+        ragCitations: knowledge.citations,
+        ragScoped: knowledge.results.some(item => item.scope?.type !== "global"),
+      };
+    } catch (error: any) {
+      console.warn(`[群聊知识检索] 已使用无知识上下文继续：${error?.message || error}`);
+      initialInput = { ...initialInput, ragContext: "", ragCitations: [], ragScoped: false };
+    }
+  }
   const groupSessionId = String(initialInput.groupSessionId || initialInput.group_session_id || "").trim();
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);

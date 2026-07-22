@@ -48,8 +48,11 @@ import {
 } from "./group-memory-index";
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 import { estimateTextTokens } from "../../system/context-budget";
-import { buildModelVisiblePayloadSnapshot } from "../../system/session-compaction-core";
+import { buildModelVisiblePayloadSnapshot, modelVisibleFixedTokens } from "../../system/session-compaction-core";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
+import { toolManager, type ToolScope } from "../../tools/tool-manager";
+import { normalizeToolAuthorization } from "../../tools/tool-authorization";
+import { getGroupAutoCompactThreshold } from "./group-compaction-strategy";
 import {
   WORKFLOW_DECISION_GUIDANCE,
   normalizeWorkflowDecision,
@@ -113,6 +116,141 @@ export function mergeLlmTokenUsage(...values: any[]): LlmTokenUsage | null {
   const cacheCreationInputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.cacheCreationInputTokens || value.cache_creation_input_tokens || 0) || 0)), 0);
   const cacheReadInputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.cacheReadInputTokens || value.cache_read_input_tokens || 0) || 0)), 0);
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, reported: true, directInputTokens, cacheCreationInputTokens, cacheReadInputTokens };
+}
+
+export type GroupMainToolRequest = {
+  name: string;
+  arguments: any;
+  reason: string;
+};
+
+function uniqueText(values: any[]) {
+  return Array.from(new Set(values.map(value => String(value || "").trim()).filter(Boolean)));
+}
+
+export function isGroupMainReadOnlyMcpTool(tool: any) {
+  const annotations = tool?.annotations && typeof tool.annotations === "object" ? tool.annotations : {};
+  if (annotations.destructiveHint === true || annotations.readOnlyHint === false) return false;
+  const name = String(tool?.name || "").trim();
+  if (!name) return false;
+  if (/(?:create|add|update|edit|set|write|delete|remove|clear|send|post|publish|upload|move|copy|rename|execute|run|start|stop|restart|deploy|install|uninstall|merge|commit|push|apply|approve|reject|cancel|archive|restore|trigger|invoke|dispatch|assign|grant|revoke|login|logout|authenticate|pay|refund)/i.test(name)) return false;
+  if (annotations.readOnlyHint === true) return true;
+  return /^(?:get|list|read|search|query|find|fetch|lookup|inspect|check|status|describe|resolve|preview|view|show|count|validate|verify|compare|diff|history|manifest)/i.test(name);
+}
+
+export function buildGroupMainAgentToolContext(input: {
+  group: any;
+  message: string;
+  source?: string;
+  groupSessionId?: string;
+  group_session_id?: string;
+}): any {
+  const group = normalizeGroupOrchestrator(input.group);
+  const selectedRoleSkills = buildRoleSkillPrompt("group-main-agent", input.message, {
+    source: input.source || "",
+    phase: "planning",
+  });
+  const configured = normalizeToolAuthorization(group?.tools || {});
+  const scope: ToolScope = {
+    mcp: configured.mcp,
+    skill: uniqueText([...configured.skill, ...selectedRoleSkills.names]),
+    auditContext: {
+      runtime: "group-main-agent",
+      project: getCoordinatorMember(group)?.project || "",
+      groupId: String(group?.id || ""),
+      source: String(input.source || "group-main-planning"),
+    },
+  };
+  const scoped = toolManager.getScopedToolCatalog(scope);
+  const readOnlyTools = scoped.tools.filter(isGroupMainReadOnlyMcpTool);
+  const rejectedTools = scoped.tools.filter(tool => !isGroupMainReadOnlyMcpTool(tool));
+  const toolAudit = toolManager.buildScopeAudit(scope);
+  const mcpPrompt = readOnlyTools.length > 0
+    ? [
+        "群聊已授权给主 Agent 的只读 MCP 工具（仅可按 canonicalName 请求）：",
+        ...readOnlyTools.map(tool => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+      ].join("\n")
+    : "";
+  const skillPrompt = scoped.skills.length > 0
+    ? [
+        "群聊已授权给主 Agent 的 Skill：",
+        ...scoped.skills.map(skill => `- ${skill.name}: ${skill.description || "未提供描述"}; hash=${skill.contentHash || ""}`),
+      ].join("\n")
+    : "";
+  const unavailable = [
+    ...(Array.isArray(toolAudit?.missing_mcp_servers) ? toolAudit.missing_mcp_servers : []),
+    ...(Array.isArray(toolAudit?.missing_mcp_tools) ? toolAudit.missing_mcp_tools : []),
+    ...(Array.isArray(toolAudit?.missing_skills) ? toolAudit.missing_skills : []),
+  ];
+  const policyPrompt = (mcpPrompt || skillPrompt || rejectedTools.length || unavailable.length)
+    ? [
+        mcpPrompt,
+        skillPrompt,
+        rejectedTools.length ? `以下已配置 MCP 因可能产生写入或副作用，不向主 Agent 开放：${rejectedTools.map(tool => tool.canonicalName).join(", ")}` : "",
+        unavailable.length ? "部分已配置工具当前不可用；不要假装已经调用。" : "",
+        "如确实需要工具数据，在 JSON 的 toolRequests 中请求。MCP 仅限上面的只读 canonicalName；Skill 只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果会由 CCM 执行后重新交给你规划。不要把工具请求同时当作已完成事实。",
+      ].filter(Boolean).join("\n\n")
+    : "";
+  return {
+    scope,
+    configured,
+    selectedRoleSkills,
+    catalog: { mcp: readOnlyTools, skills: scoped.skills, rejectedMcp: rejectedTools },
+    toolAudit,
+    mcpPrompt,
+    skillPrompt,
+    policyPrompt,
+  };
+}
+
+export function normalizeGroupMainToolRequests(value: any): GroupMainToolRequest[] {
+  const rows = Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const result: GroupMainToolRequest[] = [];
+  for (const row of rows) {
+    const name = String(row?.name || "").trim();
+    if (!name) continue;
+    const args = row?.arguments && typeof row.arguments === "object" ? row.arguments : {};
+    const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ name, args })).digest("hex");
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    result.push({ name, arguments: args, reason: compactText(row?.reason || "", 240) });
+    if (result.length >= 2) break;
+  }
+  return result;
+}
+
+export async function executeGroupMainAgentToolRequests(input: {
+  requests: GroupMainToolRequest[];
+  toolContext: any;
+  executeToolCall?: (name: string, args: any, scope?: ToolScope) => Promise<string>;
+}) {
+  const allowedMcp = new Set(input.toolContext.catalog.mcp.map(tool => tool.canonicalName));
+  const allowedSkills = new Set(input.toolContext.catalog.skills.map(skill => skill.name));
+  const execute = input.executeToolCall || ((name: string, args: any, scope?: ToolScope) => toolManager.executeToolCall(name, args, scope));
+  const results: any[] = [];
+  for (const request of input.requests.slice(0, 2)) {
+    const skillName = request.name === "invoke_skill" ? String(request.arguments?.name || "").trim() : "";
+    const authorized = skillName ? allowedSkills.has(skillName) : allowedMcp.has(request.name);
+    if (!authorized) {
+      results.push({ name: request.name, ok: false, error: "GROUP_MAIN_TOOL_NOT_AUTHORIZED", reason: request.reason });
+      continue;
+    }
+    const output = String(await execute(request.name, request.arguments, input.toolContext.scope));
+    const outputTokens = estimateTextTokens(output);
+    if (outputTokens > 8_000) {
+      results.push({ name: request.name, ok: false, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET", outputTokens, reason: request.reason });
+      continue;
+    }
+    results.push({
+      name: request.name,
+      ok: !/^\[(?:错误|工具错误)\]/.test(output),
+      output,
+      outputTokens,
+      reason: request.reason,
+    });
+  }
+  return results;
 }
 
 
@@ -485,6 +623,10 @@ export function buildLlmCoordinatorMessages(input: {
   ragContext?: string;
   extraInstructions?: string;
   source?: string;
+  groupSessionId?: string;
+  group_session_id?: string;
+  mainAgentToolResults?: any[];
+  main_agent_tool_results?: any[];
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   // 优化3：共享文件上下文注入
@@ -493,6 +635,14 @@ export function buildLlmCoordinatorMessages(input: {
   const extraInstructionsPart = input.extraInstructions ? `\n\n${input.extraInstructions}` : "";
   const roleSkills = buildRoleSkillPrompt("group-main-agent", input.message, { source: input.source || "", phase: "planning" });
   const roleSkillsPart = roleSkills.prompt ? `\n\n${roleSkills.prompt}` : "";
+  const mainAgentTools = buildGroupMainAgentToolContext(input);
+  const mainAgentToolsPart = mainAgentTools.policyPrompt ? `\n\n${mainAgentTools.policyPrompt}` : "";
+  const toolResults = Array.isArray(input.mainAgentToolResults)
+    ? input.mainAgentToolResults
+    : Array.isArray(input.main_agent_tool_results) ? input.main_agent_tool_results : [];
+  const toolResultsPart = toolResults.length
+    ? `\n\nCCM 已执行的群聊主 Agent 工具结果（只能据此得出结果中可验证的事实；不要重复相同请求）：\n${JSON.stringify(toolResults)}`
+    : "";
   const system = `你是 CCM 群聊的主 Agent（工作协调者）。
 
 ${WORKFLOW_DECISION_GUIDANCE}
@@ -535,10 +685,15 @@ CCM 主 Agent 动作边界（必须按动作风险做决定）：
 - 文档中的关键契约、业务规则、来源和验收项必须进入 documentFindings 及相关工作单；缺失内容不得编造。
 - 子 Agent 默认不直接读取群聊知识库，执行所需摘要和来源必须由主 Agent 写入自包含工作单。
 
+权限审批边界：
+- targets[].permissionPlan 必须写明该 Worker 完成任务预计需要的额外权限；项目内读取、编辑、构建、测试和普通依赖安装不需要列入。
+- 群聊主 Agent只能审批目标项目内、可恢复、完成当前任务确有必要的权限。
+- 发布、生产部署、强推、密钥、系统提权、项目外路径、破坏性数据库操作和无法判断的事项必须列入 userApprovalRequired，不能提前授权。
+
 你必须只返回 JSON 对象，不要 Markdown，不要解释。
 
 允许分派的项目 Agent 只有：
-${buildAllowedProjectBrief(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}${roleSkillsPart}
+${buildAllowedProjectBrief(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}${roleSkillsPart}${mainAgentToolsPart}
 
 JSON 格式：
 {
@@ -582,6 +737,13 @@ JSON 格式：
     "dependencyRationale": ["每条跨项目依赖为什么存在"],
     "replanTriggers": ["出现什么事实变化或失败时必须重规划"]
   },
+  "toolRequests": [
+    {
+      "name": "只读 MCP 的 canonicalName，或 invoke_skill",
+      "arguments": { "工具参数": "值；Skill 使用 name 和 input" },
+      "reason": "为什么当前规划必须读取这项信息"
+    }
+  ],
   "shouldDelegate": true,
   "executionOrder": "parallel | sequential | backend_first",
   "targets": [
@@ -589,7 +751,8 @@ JSON 格式：
       "project": "必须是允许分派的项目 Agent 名称",
       "task": "给这个项目 Agent 的可执行工作单，包含背景、引用的文档/附件、负责的接口/字段/业务规则、边界、交付物、需要检查/修改的范围、风险和验证要求",
       "reason": "为什么分给它",
-      "dependsOn": "如果依赖其他 Agent 先完成，填其项目名；否则空字符串"
+      "dependsOn": "如果依赖其他 Agent 先完成，填其项目名；否则空字符串",
+      "permissionPlan": { "requestedOperations": ["预计需要主 Agent 审批的额外操作"], "userApprovalRequired": ["必须由用户审批的操作"] }
     }
   ],
   "friendlyResponse": "给用户看的友好自然语言回复，说明你的判断和安排，不要包含内部分析结构",
@@ -602,7 +765,7 @@ JSON 格式：
 ${input.context || "无"}
 
 用户最新消息：
-${input.message}
+${input.message}${toolResultsPart}
 
 请输出 JSON。`;
 
@@ -610,6 +773,30 @@ ${input.message}
     { role: "system", content: system },
     { role: "user", content: user },
   ];
+}
+
+export function buildLlmCoordinatorContextComponents(input: {
+  group: any;
+  message: string;
+  extraInstructions?: string;
+  source?: string;
+  groupSessionId?: string;
+  group_session_id?: string;
+  mainAgentToolResults?: any[];
+  main_agent_tool_results?: any[];
+}) {
+  const group = normalizeGroupOrchestrator(input.group);
+  const roleSkills = buildRoleSkillPrompt("group-main-agent", input.message, { source: input.source || "", phase: "planning" });
+  const mainAgentTools = buildGroupMainAgentToolContext(input);
+  return {
+    rules: [WORKFLOW_DECISION_GUIDANCE, input.extraInstructions || ""].filter(Boolean).join("\n\n"),
+    skills: [roleSkills.prompt || "", mainAgentTools.skillPrompt].filter(Boolean).join("\n\n"),
+    mcpTools: mainAgentTools.mcpPrompt,
+    mcpResults: Array.isArray(input.mainAgentToolResults)
+      ? input.mainAgentToolResults
+      : Array.isArray(input.main_agent_tool_results) ? input.main_agent_tool_results : [],
+    subagentDefinitions: buildAllowedProjectBrief(group),
+  };
 }
 
 
@@ -658,17 +845,31 @@ export function sanitizeLlmTargets(group: any, parsed: any, message: string, fal
     const project = String(target?.project || "").trim();
     if (!allowed.has(project) || seen.has(project)) continue;
     const enrichedTask = enrichTaskWithDocumentFindings(String(target?.task || "").trim() || message, documentFindings);
-    const task = buildSelfContainedWorkerTask(project, enrichedTask, taskAnalysis, {
+    const permissionPlan = {
+      requestedOperations: Array.isArray(target?.permissionPlan?.requestedOperations) ? target.permissionPlan.requestedOperations.map((item: any) => String(item).slice(0, 300)).slice(0, 12) : [],
+      userApprovalRequired: Array.isArray(target?.permissionPlan?.userApprovalRequired) ? target.permissionPlan.userApprovalRequired.map((item: any) => String(item).slice(0, 300)).slice(0, 12) : [],
+    };
+    const baseTask = buildSelfContainedWorkerTask(project, enrichedTask, taskAnalysis, {
       group,
       reason: target?.reason || "LLM 主 Agent 根据需求理解和项目职责派发",
       dependsOn: target?.dependsOn || "",
       coordinationStrategy: taskAnalysis.coordinationStrategy,
     });
+    const task = [
+      baseTask,
+      permissionPlan.requestedOperations.length || permissionPlan.userApprovalRequired.length ? [
+        "权限计划（不能替代实际租约）：",
+        ...permissionPlan.requestedOperations.map((item: string) => `- 主 Agent 可审批候选：${item}`),
+        ...permissionPlan.userApprovalRequired.map((item: string) => `- 必须等待用户审批：${item}`),
+        "实际执行前仍必须调用 ccm__permission_broker 权限工具。",
+      ].join("\n") : "",
+    ].filter(Boolean).join("\n\n");
     targets.push({
       member: allowed.get(project),
       task,
       reason: String(target?.reason || "").trim(),
       dependsOn: String(target?.dependsOn || "").trim(),
+      permissionPlan,
     });
     seen.add(project);
   }
@@ -819,52 +1020,55 @@ export async function runLlmGroupOrchestrator(input: {
   provider_switch_requests?: any;
   groupSessionId?: string;
   group_session_id?: string;
+  mainAgentToolResults?: any[];
+  main_agent_tool_results?: any[];
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const config = loadOrchestratorConfig();
   const fallbackAnalysis = buildDocumentAwareAnalysis(group, input);
-
-  const messages = buildLlmCoordinatorMessages(input);
-  const estimatedContextTokens = messages.reduce((sum: number, message: any) => {
-    return sum + estimateTextTokens(String(message?.content || ""));
-  }, 0);
   const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
-  const providerPayload = buildModelVisiblePayloadSnapshot({
-    scope: "group",
-    sessionId: `${group.id}:${groupSessionId}`,
-    recentMessages: messages,
-  });
   const anthropic = shouldUseAnthropic(config);
   let tokenUsage: LlmTokenUsage | null = null;
-  const captureTokenUsage = (usage: LlmTokenUsage) => {
-    tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
-    if (groupSessionId.startsWith("gcs_")) {
-      try {
-        recordGroupPromptCacheUsage({
-          groupId: group.id,
-          groupSessionId,
-          source: "group_main_planning",
-          provider: anthropic ? "anthropic" : "openai",
-          model: config.model,
-          usage,
-          estimatedContextTokens,
-          estimatedPayloadTokens: providerPayload.totalTokens,
-          estimatedFixedTokens: providerPayload.tokenBreakdown.system + providerPayload.tokenBreakdown.tools,
-          payloadChecksum: providerPayload.payloadChecksum,
-          fixedContextChecksum: providerPayload.fixedContextChecksum,
-        });
-      } catch {}
-    }
-  };
-  let parsed: any;
-  try {
-    parsed = anthropic
+  const callPlanningModel = async (roundInput: any, round: number) => {
+    const messages = buildLlmCoordinatorMessages(roundInput);
+    const estimatedContextTokens = messages.reduce((sum: number, message: any) => {
+      return sum + estimateTextTokens(String(message?.content || ""));
+    }, 0);
+    const providerPayload = buildModelVisiblePayloadSnapshot({
+      scope: "group",
+      sessionId: `${group.id}:${groupSessionId}`,
+      system: messages.filter((message: any) => message.role === "system"),
+      contextComponents: buildLlmCoordinatorContextComponents(roundInput),
+      recentMessages: messages.filter((message: any) => message.role !== "system"),
+    });
+    const captureTokenUsage = (usage: LlmTokenUsage) => {
+      tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
+      if (groupSessionId.startsWith("gcs_")) {
+        try {
+          recordGroupPromptCacheUsage({
+            groupId: group.id,
+            groupSessionId,
+            source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning",
+            provider: anthropic ? "anthropic" : "openai",
+            model: config.model,
+            usage,
+            estimatedContextTokens,
+            estimatedPayloadTokens: providerPayload.totalTokens,
+            estimatedFixedTokens: modelVisibleFixedTokens(providerPayload),
+            payloadChecksum: providerPayload.payloadChecksum,
+            fixedContextChecksum: providerPayload.fixedContextChecksum,
+            modelVisiblePayload: providerPayload,
+          });
+        } catch {}
+      }
+    };
+    const parsed = anthropic
       ? await callAnthropicCompatibleJson(config, {
           messages,
           maxTokens: 1500,
           defaultTimeoutMs: 45000,
           httpErrorPrefix: "主 Agent API 调用失败",
-          promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_planning" },
+          promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
           onUsage: captureTokenUsage,
         })
       : await callOpenAiCompatibleJson(config, {
@@ -873,6 +1077,43 @@ export async function runLlmGroupOrchestrator(input: {
           httpErrorPrefix: "主 Agent API 调用失败",
           onUsage: captureTokenUsage,
         });
+    return { parsed, messages, providerPayload };
+  };
+  let parsed: any;
+  let planningInput: any = { ...input, group };
+  const toolResults: any[] = [];
+  const executed = new Set<string>();
+  try {
+    for (let round = 0; round <= 2; round += 1) {
+      const response = await callPlanningModel(planningInput, round);
+      parsed = response.parsed;
+      const requests = normalizeGroupMainToolRequests(parsed?.toolRequests || parsed?.tool_requests);
+      if (requests.length === 0) break;
+      if (round >= 2) throw new Error("GROUP_MAIN_TOOL_LOOP_MAX_ROUNDS");
+      const freshRequests = requests.filter(request => {
+        const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex");
+        if (executed.has(fingerprint)) return false;
+        executed.add(fingerprint);
+        return true;
+      });
+      if (freshRequests.length === 0) throw new Error("GROUP_MAIN_TOOL_LOOP_DUPLICATE_REQUEST");
+      const toolContext = buildGroupMainAgentToolContext(planningInput);
+      const roundResults = await executeGroupMainAgentToolRequests({ requests: freshRequests, toolContext });
+      toolResults.push(...roundResults);
+      planningInput = { ...planningInput, mainAgentToolResults: toolResults };
+      const hydratedMessages = buildLlmCoordinatorMessages(planningInput);
+      const hydratedPayload = buildModelVisiblePayloadSnapshot({
+        scope: "group",
+        sessionId: `${group.id}:${groupSessionId}`,
+        system: hydratedMessages.filter((message: any) => message.role === "system"),
+        contextComponents: buildLlmCoordinatorContextComponents(planningInput),
+        recentMessages: hydratedMessages.filter((message: any) => message.role !== "system"),
+      });
+      const threshold = getGroupAutoCompactThreshold(config);
+      if (hydratedPayload.totalTokens >= threshold) {
+        throw new Error(`GROUP_MAIN_TOOL_RESULT_PAYLOAD_BLOCKED:${hydratedPayload.totalTokens}/${threshold}`);
+      }
+    }
   } catch (error: any) {
     throw attachLlmTokenUsage(error, tokenUsage);
   }
@@ -881,5 +1122,12 @@ export async function runLlmGroupOrchestrator(input: {
   return {
     ...buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, input),
     usage: tokenUsage,
+    mainAgentToolUsage: {
+      schema: "ccm-group-main-tool-usage-v1",
+      groupId: String(group.id || ""),
+      groupSessionId,
+      calls: toolResults.length,
+      results: toolResults.map(row => ({ name: row.name, ok: row.ok, outputTokens: row.outputTokens || 0, error: row.error || "" })),
+    },
   };
 }

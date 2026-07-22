@@ -805,9 +805,13 @@ function buildCoordinationSelfTestChecks(ctx = {}) {
         blockedAuthenticationNeedsUserWithoutLeakingCredentials: blockedAuthenticationReceipt.status === "blocked"
             && blockedAuthenticationReceipt.testAgentReport?.verdict?.canAccept === false
             && blockedAuthenticationReceipt.testAgentReport?.verdict?.needsHuman === true
-            && blockedAuthenticationReviewSummary.status === "needs_user"
+            && blockedAuthenticationReviewSummary.status === "needs_environment"
             && blockedAuthenticationReviewSummary.rows.some((item) => item.includes("测试账号或登录条件"))
-            && !/PRIVATE_TEST_LOGIN|PRIVATE_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify(blockedAuthenticationReviewSummary)),
+            && !/PRIVATE_TEST_LOGIN|PRIVATE_TEST_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify({
+                headline: blockedAuthenticationReviewSummary.headline,
+                rows: blockedAuthenticationReviewSummary.rows,
+                next_action: blockedAuthenticationReviewSummary.next_action,
+            })),
         nativeTestAgentReceiptIncludesMultiSessionBrowserSummary: nativeTestAgentReceipt.verification.some((item) => item.includes("多人协作浏览器验收") && item.includes("2 个通过"))
             && nativeTestAgentReceipt.testAgentReport?.verdict?.browserMultiSessionSummary?.total === 2
             && nativeTestAgentReceipt.testAgentReport?.browserMultiSessionSummary?.parallelGroupCount === 2

@@ -431,7 +431,7 @@ export function buildGlobalAgentEventUi(event: any = {}) {
       .join(" ");
     return withCheckpoint({
       phase: "reviewing",
-      tone: summary.status === "passed" ? "ok" : ["needs_rework", "needs_recheck", "needs_user"].includes(summary.status) ? "waiting" : "running",
+      tone: summary.status === "passed" ? "ok" : ["needs_rework", "needs_recheck", "needs_environment", "needs_user"].includes(summary.status) ? "waiting" : "running",
       title: summary.title || "独立复核",
       text: text([summary.headline || event.detail, reviewRows].filter(Boolean).join(" "), 360, "TestAgent 已提交独立复核结论，我会纳入最终验收。"),
     });

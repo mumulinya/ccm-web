@@ -1,7 +1,0 @@
-{
-  "name": "ccm-runtime-3a86c7104c4df4b6",
-  "version": "1.0.0",
-  "description": "CCM invocation-scoped MCP and Skill authorization snapshot",
-  "skills": "./skills/",
-  "mcpServers": "./.mcp.json"
-}

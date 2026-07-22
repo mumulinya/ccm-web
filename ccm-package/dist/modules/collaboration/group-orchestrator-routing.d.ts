@@ -234,6 +234,18 @@ export declare function prepareExactGroupMainAgentInput(input: any, group: any, 
 }>;
 export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput): Promise<{
     usage: LlmTokenUsage;
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -260,6 +272,18 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     coordinationStrategy?: undefined;
 } | {
     usage: LlmTokenUsage;
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -410,6 +434,18 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         recoveredChars: number;
         ownership: any;
     };
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -441,6 +477,18 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         originalChars: number;
         recoveredChars: number;
         ownership: any;
+    };
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
     };
     agent: any;
     delegated: any[];
@@ -604,6 +652,18 @@ export declare function summarizeGroupOrchestratorProviderError(error: any): str
 export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<{
     selectedRoleSkills: string[];
     usage: LlmTokenUsage;
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -631,6 +691,18 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
 } | {
     selectedRoleSkills: string[];
     usage: LlmTokenUsage;
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -785,6 +857,18 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
         recoveredChars: number;
         ownership: any;
     };
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -817,6 +901,18 @@ export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Pro
         originalChars: number;
         recoveredChars: number;
         ownership: any;
+    };
+    mainAgentToolUsage: {
+        schema: string;
+        groupId: string;
+        groupSessionId: string;
+        calls: number;
+        results: {
+            name: any;
+            ok: any;
+            outputTokens: any;
+            error: any;
+        }[];
     };
     agent: any;
     delegated: any[];

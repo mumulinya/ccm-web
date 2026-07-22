@@ -40,10 +40,10 @@ function buildWorkchainQualityFollowup(quality: any) {
     ? independentReviewDetail && !/复杂变更独立复核仍需补齐/.test(independentReviewDetail)
       ? independentReviewNeedsRecheck
         ? "先补齐可观察结果、会话恢复或目标关联的边界检查，再重新运行 TestAgent；不要直接要求原实现成员返工。"
-        : independentReviewNeedsConfirmation
-          ? `${independentReviewDetail}。确认或补齐证据后重新运行 TestAgent/独立复核，再给出最终交付总结。`
-          : independentReviewNeedsEnvironment
+        : independentReviewNeedsEnvironment
             ? "先补齐环境、登录或运行条件，再继续 TestAgent 复核和最终总结。"
+          : independentReviewNeedsConfirmation
+            ? `${independentReviewDetail}。确认或补齐证据后重新运行 TestAgent/独立复核，再给出最终交付总结。`
             : "先让原实现成员修复复核失败点，修复后重新运行 TestAgent/独立复核，再给出最终交付总结。"
       : "先让原实现成员修复复核未通过的问题，修复后重新运行 TestAgent/独立复核，再给出最终交付总结。"
     : `先补齐${missing[0]}，再给出最终交付总结。`;
@@ -1079,11 +1079,11 @@ export function runMainAgentWorkchainSelfTest() {
         next: failedBrowserAuthenticationSummary.completion_summary.next_action,
       })),
     testAgentBlockedAuthenticationNeedsConfirmation: blockedBrowserAuthenticationSummary.completion_summary.final_summary_quality?.passed === false
-      && blockedBrowserAuthenticationSummary.user_visible_text.includes("还需要确认")
+      && blockedBrowserAuthenticationSummary.user_visible_text.includes("需要补齐执行条件")
       && blockedBrowserAuthenticationSummary.completion_summary.independent_review?.some((item: string) =>
         item.includes("测试账号或登录条件")
       )
-      && blockedBrowserAuthenticationSummary.completion_summary.next_action?.includes("确认")
+      && blockedBrowserAuthenticationSummary.completion_summary.next_action?.includes("补齐环境、登录或运行条件")
       && blockedBrowserAuthenticationSummary.todo_plan?.quality_followup_required === true
       && !/^已完成/.test(blockedBrowserAuthenticationSummary.user_visible_text || "")
       && !/PRIVATE_LOGIN_EMAIL|PRIVATE_LOGIN_PASSWORD|credentialEnvNames|storageState|cookie|token|sha/i.test(JSON.stringify({
@@ -1202,4 +1202,3 @@ export function runMainAgentWorkchainSelfTest() {
   };
   return { pass: Object.values(checks).every(Boolean), checks, simple, group, failedTestAgentSummary, summaryOnlyTestAgentGap, weakTestAgentAcceptanceSummary, passedPostReviewSpotCheck, failedPostReviewSpotCheck, reply, shapedReply, ordinaryReply, runningTodo, missingVerificationTodo, incompleteQuality, incompleteQualityReply, protocolLeak, protocolLeakReply, legacySummaryReply, rawLeakQuality };
 }
-

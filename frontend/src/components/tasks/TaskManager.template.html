@@ -8,6 +8,14 @@
       @open-backlog="openBacklog"
     />
 
+    <PermissionApprovalCards
+      v-if="activeTaskView !== 'all'"
+      :requests="pendingPermissionRequests"
+      :busy-id="permissionDecisionBusyId"
+      @approve="(request) => decideTaskPermission(request, 'approve')"
+      @reject="(request) => decideTaskPermission(request, 'reject')"
+    />
+
     <section v-if="activeTaskView === 'overview'" class="execution-dashboard">
       <div class="dashboard-head">
         <div>
@@ -249,6 +257,12 @@
           <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('purge')">永久清除</button>
         </div>
       </div>
+      <PermissionApprovalCards
+        :requests="standalonePermissionRequests"
+        :busy-id="permissionDecisionBusyId"
+        @approve="(request) => decideTaskPermission(request, 'approve')"
+        @reject="(request) => decideTaskPermission(request, 'reject')"
+      />
       <EmptyState
         v-if="visibleTasks.length === 0"
         large
@@ -290,6 +304,8 @@
           @resend="resendTask"
           @edit="editTask"
           @delete="deleteTask"
+          @permission-approve="(request) => decideTaskPermission(request, 'approve')"
+          @permission-reject="(request) => decideTaskPermission(request, 'reject')"
         />
       </div>
     </div>
@@ -307,7 +323,7 @@
     />
 
     <!-- 新建任务弹窗 -->
-    <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
+    <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false" @paste.capture="handleTaskPaste">
       <div class="modal" style="min-width:500px">
         <button class="modal-close" @click="showCreate = false">&times;</button>
         <h3>{{ editingTaskId ? '编辑任务' : '📋 新建任务' }}</h3>
@@ -318,6 +334,14 @@
         <div class="form-group">
           <label>详细描述</label>
           <textarea v-model="newTask.description" rows="3" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="可选，详细描述任务需求"></textarea>
+        </div>
+        <div class="form-group">
+          <TaskAttachmentPicker
+            :files="newTask.files"
+            :existing="newTask.existingAttachments"
+            @update:files="newTask.files = $event"
+            @remove-existing="removeExistingTaskAttachment"
+          />
         </div>
         <div class="form-group">
           <label>分配方式</label>

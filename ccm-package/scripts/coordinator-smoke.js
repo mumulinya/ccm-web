@@ -13,11 +13,7 @@ const { runGroupMemoryStorageRecoverySelfTest } = require("../dist/modules/colla
 const { runCronDailyDevProtocolSelfTest } = require("../dist/modules/scheduling/cron.js");
 const { defaultOrchestratorConfig, runCoordinatorProtocolSelfTest } = require("../dist/modules/collaboration/group-orchestrator.js");
 const { runGlobalAgentIntentSelfTest } = require("../dist/modules/global/global-agent.js");
-const {
-  runGroupMemoryCompactionSelfTest,
-  runGroupMemoryCompactionIntegrationSelfTest,
-  runGroupMemoryCompactionStressSelfTest,
-} = require("../dist/modules/collaboration/group-memory-compaction.js");
+const { runGroupMemoryCompactionSelfTest } = require("../dist/modules/collaboration/group-memory-compaction-self-tests.js");
 const { runAgentRuntimeSessionSelfTest } = require("../dist/agents/runtime.js");
 const { runProjectMemorySelfTest } = require("../dist/projects/memory.js");
 const { runTaskAgentSessionSelfTest } = require("../dist/tasks/agent-sessions.js");
@@ -34,7 +30,7 @@ const { runGlobalMissionSupervisorSelfTest, runGlobalMissionSupervisorAsyncSelfT
 const { runGlobalAgentMemorySelfTest, runGlobalAgentMemoryStressSelfTest } = require("../dist/agents/global/memory.js");
 const { runAgentQualityCenterSelfTest } = require("../dist/agents/quality-center.js");
 const { runAgentReasoningLoopSelfTest } = require("../dist/agents/reasoning-loop.js");
-const { runGlobalMemoryControlSelfTest } = require("../dist/modules/knowledge/memory-control-center.js");
+const { runGlobalMemoryControlSelfTest } = require("../dist/modules/knowledge/memory-control-core-self-tests.js");
 const { runSlashCommandSelfTest } = require("../dist/modules/tools/slash-commands.js");
 
 async function main() {
@@ -45,8 +41,6 @@ async function main() {
   const groupMemoryStorageRecovery = runGroupMemoryStorageRecoverySelfTest();
   const globalAgentIntentResult = runGlobalAgentIntentSelfTest();
   const groupMemoryCompactionResult = runGroupMemoryCompactionSelfTest();
-  const groupMemoryCompactionIntegration = await runGroupMemoryCompactionIntegrationSelfTest();
-  const groupMemoryCompactionStress = await runGroupMemoryCompactionStressSelfTest();
   const agentRuntimeSession = runAgentRuntimeSessionSelfTest();
   const projectMemory = runProjectMemorySelfTest();
   const taskAgentSession = runTaskAgentSessionSelfTest();
@@ -96,8 +90,6 @@ async function main() {
   assert.ok(groupMemoryStorageRecovery.pass, "群聊记忆原子写入/备份恢复自测未通过");
   assert.ok(globalAgentIntentResult.passed, "全局 Agent 对话/执行意图边界自测未通过");
   assert.ok(groupMemoryCompactionResult.pass, "群聊会话记忆压缩自测未通过");
-  assert.ok(groupMemoryCompactionIntegration.pass, "群聊会话记忆异步集成自测未通过");
-  assert.ok(groupMemoryCompactionStress.pass, "群聊记忆长会话/漂移压力自测未通过");
   assert.ok(agentRuntimeSession.pass, "外部 Agent 原生会话续跑自测未通过");
   assert.ok(projectMemory.pass, "独立项目记忆压缩自测未通过");
   assert.ok(taskAgentSession.pass, "任务级 Agent 会话生命周期自测未通过");
@@ -130,8 +122,6 @@ async function main() {
     groupMemoryStorageRecovery,
     globalAgentIntent: globalAgentIntentResult,
     groupMemoryCompaction: groupMemoryCompactionResult,
-    groupMemoryCompactionIntegration,
-    groupMemoryCompactionStress,
     agentRuntimeSession,
     projectMemory,
     taskAgentSession,

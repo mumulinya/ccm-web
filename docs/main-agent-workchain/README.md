@@ -2,6 +2,8 @@
 
 这个目录统一管理全局 Agent、群聊主 Agent 以及它们与项目 Agent、TestAgent、任务系统和外部通道之间的完整工作链记录。
 
+> 当前已确认的业务结构以 [确认项目结构](../confirmed-project-architecture/README.md) 和 [当前状态](../CURRENT.md) 为准。本目录主要保存各阶段实现、迁移和验收证据；日期较早的方案不自动代表当前行为。
+
 ## 长期目标
 
 1. 理解用户需求和影响范围。
@@ -22,6 +24,8 @@
 
 所有历史记录可在 [CATALOG.md](./CATALOG.md) 按业务目录查找。
 
+当前测试入口与旧命令兼容方式见 [测试指南](../TESTING.md)。
+
 ## 归档规则
 
 - 新文档直接放入最具体的叶子目录，不再平铺到本目录根级。
@@ -29,4 +33,3 @@
 - 文件名继续使用 `YYYY-MM-DD-功能名-vN.md`。
 - 用户可见内容只记录友好说明；Trace、run id、session id、执行器和内部协议归入技术详情。
 - 新增或移动文档后运行 `node scripts/generate-main-agent-doc-catalog.mjs` 刷新总目录。
-

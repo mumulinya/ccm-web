@@ -36,7 +36,8 @@ const checks = {
   webHasEveryWorkState: requiredStates.every(state => v2.includes(`${state}:`)),
   electronHasEveryWorkState: requiredStates.every(state => electronRenderer.includes(`${state}:`)),
   electronReceivesV2Metadata: /skin: getPetTypeMetadata\(petType\)/.test(electronMain),
-  webAndElectronUseV2Grid: v2.includes("backgroundSize: '800% 1100%'") && electronRenderer.includes('background-size:800% 1100%'),
+  webAndElectronUseV2Grid: v2.includes('backgroundSize:') && v2.includes('800%') && v2.includes('props.rows')
+    && electronRenderer.includes('background-size:800%') && electronRenderer.includes('spriteRows * 100'),
 }
 
 const report = {

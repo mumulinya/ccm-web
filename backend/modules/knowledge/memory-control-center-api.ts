@@ -52,6 +52,32 @@ import { estimateGroupMessageTokens } from "../collaboration/group-compaction-pr
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { readGroupCompactionActivity } from "../collaboration/group-compaction-activity";
+import { readGroupMainContextUsageBaseline } from "../collaboration/group-prompt-cache-break-detection";
+
+function latestGroupContextAccounting(scopeId: string, memory: any) {
+  try {
+    const exact = parseGroupMemoryScopeId(scopeId, memory);
+    const baseline = readGroupMainContextUsageBaseline(exact.groupId, exact.sessionId);
+    const event = baseline?.valid === true ? baseline.event : null;
+    if (!event?.token_breakdown || typeof event.token_breakdown !== "object") return null;
+    return {
+      event,
+      payload: {
+        schema: "ccm-model-visible-payload-accounting-v1",
+        scope: "group",
+        sessionId: `${exact.groupId}:${exact.sessionId}`,
+        tokenBreakdown: event.token_breakdown,
+        totalTokens: Number(event.accounting_total_tokens || event.estimated_payload_tokens || 0),
+        payloadChecksum: String(event.payload_checksum || ""),
+        fixedContextChecksum: String(event.fixed_context_checksum || ""),
+        contentStored: false,
+      },
+      updatedAt: String(event.recorded_at || ""),
+    };
+  } catch {
+    return null;
+  }
+}
 
 function currentCompactionActivity(scope: MemoryScope, scopeId: string, memory: any) {
   try {
@@ -241,7 +267,12 @@ export function resolveMemoryCenterTokenState(scope: MemoryScope, scopeId: strin
   const modelVisiblePayload = memory?.compaction?.model_visible_payload || compaction.modelVisiblePayload || compaction.model_visible_payload || compaction.postCompactGate?.model_visible_payload || compaction.post_compact_gate?.model_visible_payload || null;
   let currentTokens = Number(compaction.tokenMeasurement?.activeTokens ?? compaction.token_measurement?.activeTokens ?? modelVisiblePayload?.totalTokens ?? compaction.postCompactTokenCount ?? memory?.providerContextUsageBaseline?.observed_context_tokens ?? 0);
   let currentMessageCount = 0;
-  let tokenSource = currentTokens > 0 ? "post_compact_record" : "empty";
+  const measurementMethod = String(compaction.tokenMeasurement?.method || compaction.token_measurement?.method || "");
+  let tokenSource = currentTokens <= 0 ? "empty"
+    : measurementMethod === "latest_provider_usage_plus_new_message_estimate" ? "provider_usage_plus_estimate"
+    : ["model_visible_payload_estimate", "full_prompt_estimate"].includes(measurementMethod) ? "model_visible_payload"
+    : measurementMethod === "final_provider_payload_gate" ? "provider_usage"
+    : "post_compact_record";
   let tokenUpdatedAt = warning.createdAt || decision.createdAt || compaction.lastPressureSampleAt || compaction.lastCompactedAt || "";
   if (scope === "project") {
     const activeDurable = (Array.isArray(memory?.durableMemories) ? memory.durableMemories : [])
@@ -262,6 +293,10 @@ export function resolveMemoryCenterTokenState(scope: MemoryScope, scopeId: strin
     tokenUpdatedAt = memory?.updatedAt || tokenUpdatedAt;
   } else if (scope === "group") {
     const parts = parseGroupMemoryScopeId(scopeId, memory);
+    const liveAccounting = latestGroupContextAccounting(scopeId, memory);
+    const pressureUpdatedAt = String(warning.createdAt || decision.createdAt || compaction.lastPressureSampleAt || "");
+    const liveAccountingIsNewest = !!liveAccounting
+      && (!pressureUpdatedAt || Date.parse(liveAccounting.updatedAt) >= Date.parse(pressureUpdatedAt));
     const recordedTokens = Number(
       warning.tokenUsage
         ?? decision.activeTokensBeforeCompact
@@ -269,7 +304,12 @@ export function resolveMemoryCenterTokenState(scope: MemoryScope, scopeId: strin
         ?? compaction.postCompactTokenCount
         ?? 0
     );
-    if (Number.isFinite(recordedTokens) && recordedTokens >= 0 && (warning.schema || decision.schema || compaction.apiMicroCompactEditPlan?.schema)) {
+    if (liveAccountingIsNewest && Number(liveAccounting?.event?.provider_observed_context_tokens || 0) > 0) {
+      currentTokens = Number(liveAccounting.event.provider_observed_context_tokens || 0);
+      currentMessageCount = Number(compaction.totalMessagesSeen || 0);
+      tokenSource = "provider_usage";
+      tokenUpdatedAt = liveAccounting.updatedAt;
+    } else if (Number.isFinite(recordedTokens) && recordedTokens >= 0 && (warning.schema || decision.schema || compaction.apiMicroCompactEditPlan?.schema)) {
       currentTokens = recordedTokens;
       currentMessageCount = Number(warning.activeMessageCount || decision.activeMessageCount || compaction.totalMessagesSeen || 0);
       tokenSource = warning.schema ? "context_pressure_sample" : decision.schema ? "compact_strategy_sample" : "api_microcompact_sample";
@@ -385,6 +425,12 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
     && sessionMemory?.markdownExists === true
     && sessionMemory?.markdownChecksumMatches === true;
   const tokenState = resolveMemoryCenterTokenState(scope, scopeId, memory);
+  const storedModelVisiblePayload = compaction.modelVisiblePayload || compaction.model_visible_payload || compactionContainer.model_visible_payload || memory?.modelVisiblePayload || null;
+  const groupAccounting = scope === "group" ? latestGroupContextAccounting(scopeId, memory) : null;
+  const modelVisiblePayload = groupAccounting
+    && (!tokenState.tokenUpdatedAt || Date.parse(groupAccounting.updatedAt) >= Date.parse(String(tokenState.tokenUpdatedAt)))
+    ? groupAccounting.payload
+    : storedModelVisiblePayload;
   const compactionActivity = currentCompactionActivity(scope, scopeId, memory);
   return {
     scope, id: scopeId, label, health: alerts.some(item => item.severity === "critical") ? "critical" : alerts.length ? "warning" : "healthy",
@@ -426,7 +472,7 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
     circuitOpen: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? memory?.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures ?? 0) >= 3,
     postCompactGate: compaction.postCompactGate || compaction.post_compact_gate || compactionContainer.post_compact_gate || null,
     tokenMeasurement: compaction.tokenMeasurement || compaction.token_measurement || compactionContainer.token_measurement || null,
-    modelVisiblePayload: compaction.modelVisiblePayload || compaction.model_visible_payload || compactionContainer.model_visible_payload || memory?.modelVisiblePayload || null,
+    modelVisiblePayload,
     resolvedModelCapacity: compaction.resolvedModelCapacity || compaction.resolved_model_capacity || compactionContainer.resolved_model_capacity || memory?.model?.modelContextCapacity || null,
     pendingRequestTokens: Number(compaction.pendingRequestTokens ?? compaction.pending_request_tokens ?? compactionContainer.pending_request_tokens ?? 0),
     recoveryContextTokens: Number(compaction.recoveryContextTokens ?? compaction.recovery_context_tokens ?? compactionContainer.recovery_context_tokens ?? 0),

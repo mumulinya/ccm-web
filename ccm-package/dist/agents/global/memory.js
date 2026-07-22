@@ -694,6 +694,7 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
         currentRequest,
         recoveryContext: input.recoveryContext || input.recovery_context || null,
         hookResults: input.hookResults || input.hook_results || [],
+        contextComponents: input.contextComponents || input.context_components || undefined,
     });
     const usage = (0, session_compaction_core_1.normalizeSessionProviderUsage)({
         ...(input || {}),
@@ -702,13 +703,33 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
         boundaryGeneration: state.boundaryGeneration,
         payloadChecksum: input.payloadChecksum || input.payload_checksum || payload.payloadChecksum,
         fixedContextChecksum: input.fixedContextChecksum || input.fixed_context_checksum || payload.fixedContextChecksum,
-        estimatedFixedTokens: input.estimatedFixedTokens || input.estimated_fixed_tokens
-            || payload.tokenBreakdown.system + payload.tokenBreakdown.tools + payload.tokenBreakdown.recoveryContext + payload.tokenBreakdown.hookResults,
+        estimatedFixedTokens: input.estimatedFixedTokens || input.estimated_fixed_tokens || (0, session_compaction_core_1.modelVisibleFixedTokens)(payload),
         estimatedPayloadTokens: input.estimatedPayloadTokens || input.estimated_payload_tokens || payload.totalTokens,
     });
-    if (!usage)
-        return null;
-    const nextState = { ...state, latestProviderUsage: usage };
+    const measurementUsage = usage || state.latestProviderUsage;
+    const tokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
+        scope: "global",
+        sessionId: exactSessionId,
+        messages: visibleMessages,
+        activeSummary: state.activeSummary,
+        latestProviderUsage: measurementUsage,
+        provider: String(measurementUsage?.provider || ""),
+        model: String(measurementUsage?.model || ""),
+        generation: Number(measurementUsage?.generation || 0),
+        boundaryGeneration: state.boundaryGeneration,
+        modelVisiblePayload: payload,
+    });
+    const nextState = {
+        ...state,
+        latestProviderUsage: measurementUsage || null,
+        tokenMeasurement,
+        modelVisiblePayload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(payload),
+        modelVisiblePayloadChecksum: payload.payloadChecksum,
+        fixedContextChecksum: payload.fixedContextChecksum,
+        pendingRequestChecksum: payload.pendingRequestChecksum,
+        recoveryContextTokens: payload.tokenBreakdown.recoveryContext,
+        hookResultTokens: payload.tokenBreakdown.hookResults,
+    };
     replaceGlobalSession(memory, exactSessionId, { ...session, sessionId: exactSessionId, compaction: nextState });
     saveMemory(memory);
     return usage;
@@ -958,6 +979,7 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
         currentRequest: options.currentRequest || null,
         recoveryContext: options.recoveryContext || null,
         hookResults: [],
+        contextComponents: options.contextComponents,
     });
     const tokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
         scope: "global",
@@ -1006,6 +1028,7 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
             currentRequest: options.currentRequest || null,
             recoveryContext: options.recoveryContext || null,
             hookResults: options.modelMetadata?.hookResults?.sessionStart || [],
+            contextComponents: options.contextComponents,
         });
         const postCompactTokenCount = postCompactPayload.totalTokens;
         const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: postCompactPayload, threshold });
@@ -1208,6 +1231,7 @@ async function compactGlobalAgentSessionWithModel(sessionId, options = {}) {
             currentRequest,
             recoveryContext: options.recoveryContext || null,
             hookResults: [],
+            contextComponents: options.contextComponents,
         });
         const tokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
             scope: "global",
@@ -1383,6 +1407,7 @@ async function compactGlobalAgentSessionWithModel(sessionId, options = {}) {
             currentRequest: dedupeGlobalPendingRequest(preservedMessages, currentRequest),
             recoveryContext: { boundaryMarker, ...recoveryContext },
             hookResults: sessionStartHookResults,
+            contextComponents: options.contextComponents,
         });
         const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: postCompactPayload, threshold: autoCompactTokenLimit });
         if (postCompactGate.providerCallAllowed !== true) {
@@ -1876,7 +1901,7 @@ function runGlobalAgentMemorySelfTest() {
     const id = `memory-selftest-${process.pid}-${Date.now().toString(36)}`;
     const messages = [];
     for (let index = 0; index < 90; index += 1) {
-        messages.push({ role: "user", timestamp: new Date(Date.now() + index * 1000).toISOString(), content: index === 2 ? "以后全局 Agent 没有明确授权时不要直接操作项目，必须先确认" : index === 4 ? "我的 Claude Code 源码在 D:\\claude-code，以后分析压缩机制先看这里" : index === 6 ? "api_key=super-secret-value-123456" : `第 ${index} 轮普通对话，讨论全局任务连续性和记忆压缩边界` });
+        messages.push({ role: "user", timestamp: new Date(Date.now() + index * 1000).toISOString(), content: index === 2 ? "以后全局 Agent 没有明确授权时不要直接操作项目，必须先确认" : index === 4 ? "我的 Claude Code 源码在 D:\\claude-code，以后分析压缩机制先看这里" : index === 6 ? "api_key=super-secret-value-123456" : `第 ${index} 轮普通对话，讨论全局任务连续性和记忆压缩边界。${"需要持续保留项目约束、验证证据、文件引用、失败原因和下一步。".repeat(60)}` });
         messages.push({ role: "assistant", timestamp: new Date(Date.now() + index * 1000 + 10).toISOString(), content: index === 8 ? "下一步仍需完成全局记忆控制中心的跨会话验收" : index === 12 ? `大型工具输出 ${"x".repeat(12_000)} 结束` : `已记录第 ${index} 轮上下文` });
     }
     const result = ingestGlobalAgentConversation({ sessionId: id, source: "self-test", messages, compact: false });
@@ -1981,7 +2006,7 @@ function runGlobalAgentMemoryStressSelfTest() {
             for (let index = 0; index < 36; index += 1) {
                 const content = round === 0 && index === 0
                     ? "以后所有全局开发任务必须等测试和合并门禁都通过后才能报告完成"
-                    : `压力轮次 ${round} 消息 ${index}，跟踪跨项目目标、失败恢复、验证证据和下一步`;
+                    : `压力轮次 ${round} 消息 ${index}，跟踪跨项目目标、失败恢复、验证证据和下一步。${"持续保留项目约束、验收证据、失败原因、文件引用和后续动作。".repeat(60)}`;
                 batch.push({ role: index % 2 ? "assistant" : "user", content, timestamp: new Date(Date.now() + round * 100_000 + index * 1000).toISOString() });
             }
             totalMessages += batch.length;

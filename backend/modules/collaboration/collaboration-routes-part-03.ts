@@ -25,6 +25,7 @@ import {
 import { decomposeRequirementToTaskPlan, ingestRequirementSources, requirementToIntakeDraft } from "../requirements/source-ingestion";
 import { runRequirementEpicSelfTest } from "../requirements/requirement-epic-self-tests";
 import { startGlobalMissionSupervisor } from "../../agents/global/mission-supervisor";
+import { buildTaskAttachmentMutation, parseRetainedAttachmentIds, removeUploadedFiles } from "../../system/task-attachments";
 
 import {
   loadCronJobs,
@@ -543,13 +544,31 @@ export function handleCollaborationApiTaskLifecycleRoutes(
   parsed: any,
   ctx: CollabCtx,
 ): boolean {  if (pathname === "/api/tasks/update" && req.method === "POST") {
-    let body = "";
-    req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    const handleUpdate = async (payload: any, files: any[] = [], multipart = false) => {
       try {
-        const { id, ...updates } = JSON.parse(body);
+        const { id, retained_attachment_ids, retainedAttachmentIds, ...incomingUpdates } = payload || {};
+        let updates = incomingUpdates;
         const current = loadTasks().find(t => t.id === id);
         if (!current) return sendJson(res, { error: "任务不存在" }, 404);
+        if (multipart) {
+          const attachments = await buildTaskAttachmentMutation({
+            files,
+            currentAttachments: current.source_attachments,
+            currentContexts: current.source_attachment_contexts,
+            retainedIds: retained_attachment_ids === undefined && retainedAttachmentIds === undefined
+              ? undefined
+              : parseRetainedAttachmentIds(retained_attachment_ids ?? retainedAttachmentIds),
+            userText: [updates.title || current.title, updates.description || current.description].filter(Boolean).join("\n"),
+          });
+          updates = {
+            ...updates,
+            source_attachments: attachments.attachments,
+            source_attachment_contexts: attachments.contexts,
+            source_attachment_context: attachments.context,
+            source_attachment_warnings: attachments.warnings,
+            source_ingestion: attachments.technical || current.source_ingestion || null,
+          };
+        }
         const validationError = validateTaskManualStatusUpdate(current, updates);
         if (validationError) return sendJson(res, { error: validationError }, 409);
         const task = updateTask(id, updates);
@@ -557,8 +576,26 @@ export function handleCollaborationApiTaskLifecycleRoutes(
         updateGroupTaskInlineStatus(task, task.status, task.status_detail || "任务状态已更新");
         sendJson(res, { success: true, task });
       } catch (e: any) {
+        removeUploadedFiles(files);
         sendJson(res, { error: e.message }, 400);
       }
+    };
+    const contentType = String(req.headers["content-type"] || "");
+    if (contentType.includes("multipart/form-data")) {
+      collectRequestBuffer(req).then((buffer) => {
+        const boundary = getMultipartBoundary(contentType);
+        if (!boundary) throw new Error("无效的任务附件请求");
+        const { fields, files } = parseMultipart(buffer, boundary);
+        const payload = (fields as any).payload ? JSON.parse((fields as any).payload) : fields;
+        return handleUpdate(payload, files || [], true);
+      }).catch((e: any) => sendJson(res, { error: e.message }, 400));
+      return true;
+    }
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try { void handleUpdate(body ? JSON.parse(body) : {}); }
+      catch (e: any) { sendJson(res, { error: e.message }, 400); }
     });
     return true;
   }

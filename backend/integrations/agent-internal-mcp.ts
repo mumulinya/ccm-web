@@ -5,6 +5,7 @@ import { InternalMcpAgentRole, InternalMcpProjectBinding, InternalMcpTaskContext
 import { buildTaskEvidenceMcpServerConfig, TASK_EVIDENCE_MCP_SERVER_NAME } from "./task-evidence-mcp";
 import { buildTaskRuntimeMcpServerConfig, TASK_RUNTIME_MCP_SERVER_NAME } from "./task-runtime-mcp";
 import { buildTestAcceptanceMcpServerConfig, TEST_ACCEPTANCE_MCP_SERVER_NAME } from "./test-acceptance-mcp";
+import { buildPermissionBrokerMcpServerConfig, PERMISSION_BROKER_MCP_SERVER_NAME } from "./permission-broker-mcp";
 
 export type TaskBoundInternalMcpInput = {
   taskId: string;
@@ -55,6 +56,7 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
     [TASK_RUNTIME_MCP_SERVER_NAME]: buildTaskRuntimeMcpServerConfig(context),
     [KNOWLEDGE_CONTEXT_MCP_SERVER_NAME]: buildKnowledgeContextMcpServerConfig(context),
     [TASK_EVIDENCE_MCP_SERVER_NAME]: buildTaskEvidenceMcpServerConfig(context),
+    [PERMISSION_BROKER_MCP_SERVER_NAME]: buildPermissionBrokerMcpServerConfig(context),
   };
   if (input.role !== "global-agent") {
     servers[TEST_ACCEPTANCE_MCP_SERVER_NAME] = buildTestAcceptanceMcpServerConfig(context);
@@ -121,5 +123,6 @@ export function buildProjectSessionBoundMemoryMcpServer(input: ProjectSessionBou
   };
   return {
     [KNOWLEDGE_CONTEXT_MCP_SERVER_NAME]: buildKnowledgeContextMcpServerConfig(context),
+    [PERMISSION_BROKER_MCP_SERVER_NAME]: buildPermissionBrokerMcpServerConfig(context),
   };
 }

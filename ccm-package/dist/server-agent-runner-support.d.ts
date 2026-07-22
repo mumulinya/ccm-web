@@ -87,7 +87,7 @@ export declare function createAgentRunnerSupport(deps: any): {
     getProjectVerificationCommandsForRunner: (projectName: string) => string[];
     runIndependentProjectVerification: (projectName: string, workDir: string, timeoutMs: number, taskId: string, executionId: string, agentType: string) => Promise<string>;
     buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string, options?: any) => {
-        prompt: any;
+        prompt: string;
         allowedTools: any;
         audit: any;
         workEvent: {

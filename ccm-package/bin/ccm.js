@@ -1,759 +1,503 @@
 #!/usr/bin/env node
-// cc-web - cc-connect Web 管理界面
-// 用法: cc-web              启动 Web 控制台
-//       cc-web start        启动 Web 服务器
-//       cc-web start all    启动所有项目
-//       cc-web stop all     停止所有项目
-//       cc-web status       查看运行状态
 
-const { execSync, spawn } = require("child_process");
+const { execFileSync, spawn, spawnSync } = require("child_process");
 const fs = require("fs");
-const path = require("path");
-const readline = require("readline");
+const net = require("net");
 const os = require("os");
+const path = require("path");
 
-const CCM_DIR = path.join(os.homedir(), ".cc-connect");
+const PACKAGE_ROOT = path.resolve(__dirname, "..");
+const PACKAGE_FILE = path.join(PACKAGE_ROOT, "package.json");
+const SERVER_FILE = path.join(PACKAGE_ROOT, "dist", "server.js");
+const PUBLIC_INDEX = path.join(PACKAGE_ROOT, "public", "index.html");
+const LEGACY_CLI = path.join(__dirname, "legacy-project-cli.js");
+const PACKAGE_INFO = JSON.parse(fs.readFileSync(PACKAGE_FILE, "utf-8"));
+const PACKAGE_NAME = PACKAGE_INFO.name;
+const VERSION = PACKAGE_INFO.version;
+const CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".cc-connect"));
+const RUN_DIR = path.join(CCM_DIR, "run");
+const LOG_DIR = path.join(CCM_DIR, "logs");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
-const LOG_DIR = path.join(CCM_DIR, "logs");
-const TEMP_DIR = path.join(CCM_DIR, "temp");
-const PROJECTS_FILE = path.join(CCM_DIR, "projects.txt");
+const SERVER_LOCK_FILE = path.resolve(process.env.CCM_SERVER_LOCK_FILE || path.join(RUN_DIR, "ccm-server-instance.lock"));
+const SERVER_LOG_FILE = path.join(LOG_DIR, "ccm-server.log");
+const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+const color = (code, value) => useColor ? `\u001b[${code}m${value}\u001b[0m` : String(value);
+const style = {
+  title: value => color("1;36", value),
+  strong: value => color("1", value),
+  muted: value => color("90", value),
+  success: value => color("32", value),
+  warning: value => color("33", value),
+  danger: value => color("31", value),
+  link: value => color("4;36", value),
+};
 
-function resolveCcConnectLauncher() {
-  if (process.platform === "win32") {
-    for (const entry of String(process.env.PATH || "").split(path.delimiter)) {
-      const base = entry.replace(/^"|"$/g, "").trim();
-      if (!base) continue;
-      const executable = path.join(base, "node_modules", "cc-connect", "bin", "cc-connect.exe");
-      if (fs.existsSync(executable)) return { command: executable, shell: false };
-    }
-    return { command: "cc-connect", shell: true };
-  }
-  return { command: "cc-connect", shell: false };
+function ensureRuntimeDirs() {
+  for (const dir of [CCM_DIR, RUN_DIR, LOG_DIR, CONFIGS_DIR, PID_DIR]) fs.mkdirSync(dir, { recursive: true });
 }
 
-// 支持的 Agent 列表
-const AGENTS = [
-  { type: "claudecode", name: "Claude Code", modes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"], defaultMode: "default" },
-  { type: "cursor", name: "Cursor", modes: ["default", "force", "plan", "ask"], defaultMode: "default" },
-  { type: "gemini", name: "Gemini CLI", modes: ["default", "auto_edit", "yolo", "plan"], defaultMode: "yolo" },
-  { type: "codex", name: "Codex", modes: ["suggest", "auto-edit", "full-auto", "yolo"], defaultMode: "full-auto" },
-  { type: "opencode", name: "OpenCode", modes: ["default", "auto", "plan"], defaultMode: "default" },
-  { type: "qoder", name: "Qoder CLI", modes: ["default", "yolo"], defaultMode: "default" },
-];
-
-// 支持的平台列表
-const PLATFORMS = [
-  { type: "feishu", name: "飞书", hasQrSetup: true, fields: ["app_id", "app_secret"] },
-  { type: "lark", name: "Lark (国际版飞书)", hasQrSetup: true, fields: ["app_id", "app_secret"] },
-  { type: "weixin", name: "微信", hasQrSetup: false, fields: ["token", "base_url", "account_id"] },
-  { type: "telegram", name: "Telegram", hasQrSetup: false, fields: ["token"] },
-  { type: "slack", name: "Slack", hasQrSetup: false, fields: ["bot_token", "app_token"] },
-  { type: "discord", name: "Discord", hasQrSetup: false, fields: ["token"] },
-  { type: "dingtalk", name: "钉钉", hasQrSetup: false, fields: ["token"] },
-];
-
-function ensureDirs() {
-  [CCM_DIR, CONFIGS_DIR, PID_DIR, LOG_DIR, TEMP_DIR].forEach((dir) => {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  });
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function getConfigs() {
-  if (!fs.existsSync(CONFIGS_DIR)) return [];
-  return fs
-    .readdirSync(CONFIGS_DIR)
-    .filter((f) => f.endsWith(".toml"))
-    .sort()
-    .map((f, i) => ({
-      index: i + 1,
-      file: f,
-      name: f.replace("config-", "").replace(".toml", ""),
-      path: path.join(CONFIGS_DIR, f),
-    }));
+function readJson(file, fallback = null) {
+  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return fallback; }
 }
 
-function getConfigInfo(configPath) {
-  const content = fs.readFileSync(configPath, "utf-8");
-  const projects = [];
-  const lines = content.split("\n");
-  let currentProject = null;
-  let inPlatformsBlock = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed === "[[projects]]") {
-      if (currentProject && currentProject.name) projects.push(currentProject);
-      currentProject = {};
-      inPlatformsBlock = false;
-    }
-    if (currentProject && trimmed.startsWith("name = "))
-      currentProject.name = trimmed.split("=")[1].trim().replace(/"/g, "");
-    if (currentProject && trimmed.startsWith("work_dir = "))
-      currentProject.workDir = trimmed.split("=")[1].trim().replace(/"/g, "");
-    if (trimmed === "[[projects.platforms]]") {
-      inPlatformsBlock = true;
-    } else if (trimmed.startsWith("[") && !trimmed.startsWith("[projects.platforms")) {
-      inPlatformsBlock = false;
-    }
-    if (currentProject && inPlatformsBlock && trimmed.startsWith("type = ")) {
-      const pt = trimmed.split("=")[1].trim().replace(/"/g, "");
-      const map = { weixin: "微信", feishu: "飞书", telegram: "Telegram", slack: "Slack", discord: "Discord" };
-      currentProject.platform = map[pt] || pt;
-      inPlatformsBlock = false;
-    }
-    if (currentProject && (trimmed === "[[commands]]" || trimmed === "[[aliases]]")) {
-      if (currentProject.name) projects.push(currentProject);
-      currentProject = null;
-    }
-  }
-  if (currentProject && currentProject.name) projects.push(currentProject);
-  return projects;
-}
-
-// 获取当前配置中的 agent type
-function getCurrentAgent(configPath) {
-  const content = fs.readFileSync(configPath, "utf-8");
-  const match = content.match(/\[projects\.agent\][\s\S]*?type\s*=\s*"([^"]+)"/);
-  return match ? match[1] : "claudecode";
-}
-
-// 生成临时配置，替换 agent type
-function generateTempConfig(configPath, newAgentType) {
-  let content = fs.readFileSync(configPath, "utf-8");
-
-  // 找到 agent 定义，替换 type
-  content = content.replace(
-    /(\[projects\.agent\]\s*\n\s*type\s*=\s*)"[^"]+"/g,
-    `$1"${newAgentType}"`
-  );
-
-  // 移除 [projects.agent.options] 下的 mode 行（不同 agent 的 mode 值不同）
-  // 保留其他 options
-  const agentInfo = AGENTS.find(a => a.type === newAgentType);
-  if (agentInfo) {
-    content = content.replace(
-      /(\[projects\.agent\.options\][\s\S]*?mode\s*=\s*)"[^"]+"/g,
-      `$1"${agentInfo.defaultMode}"`
-    );
-  }
-
-  // 写入临时文件
-  const baseName = path.basename(configPath, ".toml");
-  const tempPath = path.join(TEMP_DIR, `${baseName}-${newAgentType}.toml`);
-  fs.writeFileSync(tempPath, content);
-  return tempPath;
-}
-
-function getRunningStatus() {
-  const status = {};
-  if (!fs.existsSync(PID_DIR)) return status;
-  for (const f of fs.readdirSync(PID_DIR)) {
-    if (!f.endsWith(".pid")) continue;
-    const name = f.replace(".pid", "");
-    const pidFile = path.join(PID_DIR, f);
-    const pid = fs.readFileSync(pidFile, "utf-8").trim();
-    try {
-      process.kill(parseInt(pid), 0);
-      status[name] = { running: true, pid };
-    } catch {
-      try { fs.unlinkSync(pidFile); } catch {}
-    }
-  }
-  return status;
-}
-
-function isRunning(name) {
-  const pidFile = path.join(PID_DIR, `${name}.pid`);
-  if (!fs.existsSync(pidFile)) return false;
-  const pid = fs.readFileSync(pidFile, "utf-8").trim();
-  try {
-    process.kill(parseInt(pid), 0);
-    return true;
-  } catch {
-    try { fs.unlinkSync(pidFile); } catch {}
-    return false;
-  }
-}
-
-function startProject(config, agentType) {
-  const displayName = agentType ? `${config.name} (${agentType})` : config.name;
-
-  if (isRunning(config.name)) {
-    console.log(`  ⚠ ${config.name} 已在运行中，先停止再切换 Agent`);
-    return;
-  }
-
-  let configPath = config.path;
-
-  // 如果指定了不同的 agent，生成临时配置
-  if (agentType) {
-    const currentAgent = getCurrentAgent(config.path);
-    if (currentAgent !== agentType) {
-      configPath = generateTempConfig(config.path, agentType);
-      console.log(`  → 切换 Agent: ${currentAgent} → ${agentType}`);
-    }
-  }
-
-  const logFile = path.join(LOG_DIR, `${config.name}.log`);
-  const logStream = fs.openSync(logFile, "w");
-
-  const launcher = resolveCcConnectLauncher();
-  const child = spawn(launcher.command, ["--config", configPath, "--force"], {
-    stdio: ["ignore", logStream, logStream],
-    shell: launcher.shell,
-    detached: true,
-    windowsHide: true,
-  });
-
-  child.unref();
-  fs.writeFileSync(path.join(PID_DIR, `${config.name}.pid`), String(child.pid));
-
-  setTimeout(() => {
-    if (isRunning(config.name)) {
-      const projects = getConfigInfo(configPath);
-      const platform = projects.map((p) => p.platform).join(", ");
-      const agent = agentType || getCurrentAgent(config.path);
-      console.log(`  ✓ ${config.name} 已启动 (PID: ${child.pid}, Agent: ${agent}, 平台: ${platform})`);
-    } else {
-      console.log(`  ✗ ${displayName} 启动失败，查看日志: ${logFile}`);
-    }
-  }, 2000);
-}
-
-function stopProject(name) {
-  const pidFile = path.join(PID_DIR, `${name}.pid`);
-  if (!fs.existsSync(pidFile)) {
-    console.log(`  ⚠ ${name} 未在运行`);
-    return;
-  }
-  const pid = fs.readFileSync(pidFile, "utf-8").trim();
-  try {
-    if (process.platform === "win32") {
-      execSync(`taskkill /T /F /PID ${pid}`, { stdio: "ignore" });
-    } else {
-      process.kill(parseInt(pid), "SIGTERM");
-    }
-    console.log(`  ✓ ${name} 已停止`);
-  } catch {
-    console.log(`  ⚠ ${name} 进程已不存在`);
-  }
-  try { fs.unlinkSync(pidFile); } catch {}
-}
-
-function showStatus() {
-  const configs = getConfigs();
-  const running = getRunningStatus();
-
-  console.log("\n项目状态:\n");
-  for (const config of configs) {
-    const projects = getConfigInfo(config.path);
-    const platform = projects.map((p) => p.platform).join(", ");
-    const dir = [...new Set(projects.map((p) => p.workDir))].join(", ");
-    const agent = getCurrentAgent(config.path);
-    const isUp = running[config.name];
-    const icon = isUp ? "🟢" : "⚪";
-    const pidInfo = isUp ? ` (PID: ${isUp.pid})` : "";
-    console.log(`  ${icon} [${config.index}] ${config.name.padEnd(20)} Agent: ${agent.padEnd(12)} ${platform.padEnd(6)}${pidInfo}`);
-    console.log(`     ${dir}`);
-  }
-  const runningCount = Object.keys(running).length;
-  console.log(`\n运行中: ${runningCount}/${configs.length}`);
-}
-
-// Agent 选择菜单
-function selectAgent(config, callback) {
-  const currentAgent = getCurrentAgent(config.path);
-
-  console.log(`\n选择 Agent (当前: ${currentAgent}):\n`);
-  AGENTS.forEach((agent, i) => {
-    const isCurrent = agent.type === currentAgent;
-    const mark = isCurrent ? " ← 当前" : "";
-    console.log(`  [${i + 1}] ${agent.name.padEnd(15)} (${agent.type})${mark}`);
-  });
-  console.log(`  [0] 使用当前 Agent\n`);
-
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  rl.question("选择 Agent 编号: ", (answer) => {
-    const idx = parseInt(answer);
-    rl.close();
-
-    if (idx === 0 || isNaN(idx)) {
-      callback(null); // 使用当前
-    } else if (idx >= 1 && idx <= AGENTS.length) {
-      callback(AGENTS[idx - 1].type);
-    } else {
-      console.log("无效选择，使用当前 Agent");
-      callback(null);
-    }
-  });
-}
-
-function generateConfig(name, workDir, selectedAgent, selectedPlatform, platformOptions) {
-  // 构建平台选项
-  const optionsLines = Object.entries(platformOptions)
-    .map(([k, v]) => `${k} = "${v}"`)
-    .join("\n");
-
-  // 飞书/Lark 特有选项
-  const extraOptions = (selectedPlatform.type === "feishu" || selectedPlatform.type === "lark")
-    ? "\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = \"card\""
-    : "";
-
-  return `# cc-connect - ${name}
-language = "zh"
-
-[[projects]]
-name = "${name}"
-work_dir = "${workDir.replace(/\\/g, "\\\\")}"
-admin_from = "*"
-
-[projects.agent]
-type = "${selectedAgent.type}"
-mode = "${selectedAgent.defaultMode}"
-
-[projects.agent.options]
-work_dir = "${workDir.replace(/\\/g, "\\\\")}"
-
-[[projects.platforms]]
-type = "${selectedPlatform.type}"
-
-[projects.platforms.options]
-${optionsLines}${extraOptions}
-
-# 自定义命令
-[[commands]]
-name = "history"
-description = "查看会话历史记录"
-exec = "cc-connect sessions show {{1}} -n {{2:20}}"
-
-[[commands]]
-name = "sessions"
-description = "列出所有会话"
-exec = "cc-connect sessions list"
-
-[[commands]]
-name = "projects"
-description = "查看所有可操作的代码项目目录"
-exec = "cmd /c type ${CCM_DIR.replace(/\\/g, "\\\\")}\\\\projects.txt"
-
-[[aliases]]
-name = "历史"
-command = "/history"
-
-[[aliases]]
-name = "会话"
-command = "/sessions"
-
-[[aliases]]
-name = "项目"
-command = "/projects"
-`;
-}
-
-function finalizeConfig(name, workDir) {
-  let projectsContent = "";
-  if (fs.existsSync(PROJECTS_FILE)) {
-    projectsContent = fs.readFileSync(PROJECTS_FILE, "utf-8");
-  }
-  const lineNum = projectsContent.split("\n").filter((l) => l.trim()).length + 1;
-  projectsContent += `\n${lineNum}. ${name} → ${workDir}`;
-  fs.writeFileSync(PROJECTS_FILE, projectsContent.trim() + "\n");
-}
-
-function setupFeishuQrCode(name, configPath) {
-  console.log("\n正在启动飞书扫码配置...\n");
-  try {
-    execSync(`cc-connect feishu setup --project "${name}" --config "${configPath}"`, {
-      stdio: "inherit",
-      timeout: 600000,
-    });
-    console.log("\n✓ 飞书机器人配置完成");
-    return true;
-  } catch (err) {
-    console.log("\n✗ 扫码配置失败或已取消");
-    return false;
-  }
-}
-
-function promptPlatformConfig(rl, selectedPlatform, callback) {
-  // 飞书/Lark 支持扫码
-  if (selectedPlatform.hasQrSetup) {
-    console.log(`\n${selectedPlatform.name}机器人配置方式:\n`);
-    console.log("  [1] 扫码创建新机器人（推荐）");
-    console.log("  [2] 绑定已有机器人（手动输入凭证）");
-
-    rl.question("\n选择 (默认 1): ", (choice) => {
-      if (choice === "2") {
-        promptPlatformFields(rl, selectedPlatform, callback);
-      } else {
-        callback({ qrSetup: true });
-      }
-    });
-  } else {
-    // 其他平台直接输入凭证
-    console.log(`\n请输入 ${selectedPlatform.name} 凭证:\n`);
-    promptPlatformFields(rl, selectedPlatform, callback);
-  }
-}
-
-function promptPlatformFields(rl, selectedPlatform, callback) {
-  const fields = selectedPlatform.fields;
-  const options = {};
-  let i = 0;
-
-  const fieldLabels = {
-    app_id: "App ID",
-    app_secret: "App Secret",
-    token: "Bot Token",
-    base_url: "Base URL",
-    account_id: "Account ID",
-    bot_token: "Bot Token",
-    app_token: "App Token",
+function readServerState() {
+  const owner = readJson(SERVER_LOCK_FILE, null);
+  const pid = Number(owner?.pid || 0);
+  const active = !!owner && (!owner.hostname || owner.hostname === os.hostname()) && processAlive(pid);
+  return {
+    active,
+    pid: active ? pid : 0,
+    port: Number(owner?.port || 3080),
+    host: String(owner?.listen_host || "127.0.0.1"),
+    acquiredAt: owner?.acquired_at || "",
+    lockFile: SERVER_LOCK_FILE,
+    stale: !!owner && !active,
   };
+}
 
-  function askNext() {
-    if (i >= fields.length) {
-      callback(options);
-      return;
+function validPort(value, fallback = 3080) {
+  const parsed = Number(value || fallback);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) throw new Error(`端口无效：${value}`);
+  return parsed;
+}
+
+function validHost(value, fallback = "127.0.0.1") {
+  let host = String(value || fallback).trim().replace(/^\[|\]$/g, "");
+  if (host === "*") host = "0.0.0.0";
+  if (!host || host.length > 253 || !/^[a-zA-Z0-9._:-]+$/.test(host)) throw new Error(`监听地址无效：${value}`);
+  return host;
+}
+
+function formatHostUrl(host, port) {
+  return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
+function serviceUrls(host, port) {
+  const localUrl = `http://localhost:${port}`;
+  let remoteUrls = [];
+  if (["0.0.0.0", "::"].includes(host)) {
+    const addresses = new Set();
+    for (const rows of Object.values(os.networkInterfaces())) {
+      for (const row of rows || []) if (!row.internal && row.family === "IPv4") addresses.add(formatHostUrl(row.address, port));
     }
-    const field = fields[i];
-    const label = fieldLabels[field] || field;
-    rl.question(`${label}: `, (value) => {
-      options[field] = value;
-      i++;
-      askNext();
-    });
+    remoteUrls = [...addresses];
+  } else if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
+    remoteUrls = [formatHostUrl(host, port)];
   }
-  askNext();
+  return { localUrl, remoteUrls, url: remoteUrls[0] || localUrl };
 }
 
-function initProject() {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-
-  console.log("\n╔══════════════════════════════════════╗");
-  console.log("║     新建项目配置                      ║");
-  console.log("╚══════════════════════════════════════╝\n");
-
-  // 选择 Agent
-  console.log("① 选择 Agent:\n");
-  AGENTS.forEach((agent, i) => {
-    const mark = agent.type === "claudecode" ? " ← 默认" : "";
-    console.log(`  [${i + 1}] ${agent.name.padEnd(15)} (${agent.type})${mark}`);
-  });
-
-  rl.question("\nAgent 编号 (默认 1): ", (agentAnswer) => {
-    const agentIdx = parseInt(agentAnswer) || 1;
-    const selectedAgent = AGENTS[agentIdx - 1] || AGENTS[0];
-
-    // 选择平台
-    console.log("\n② 选择平台:\n");
-    PLATFORMS.forEach((platform, i) => {
-      const mark = platform.type === "feishu" ? " ← 默认" : "";
-      const qrTag = platform.hasQrSetup ? " [支持扫码]" : "";
-      console.log(`  [${i + 1}] ${platform.name.padEnd(18)} (${platform.type})${qrTag}${mark}`);
-    });
-
-    rl.question("\n平台编号 (默认 1): ", (platformAnswer) => {
-      const platformIdx = parseInt(platformAnswer) || 1;
-      const selectedPlatform = PLATFORMS[platformIdx - 1] || PLATFORMS[0];
-
-      rl.question("\n③ 项目名称 (英文，如 my-app): ", (name) => {
-        rl.question("④ 代码目录路径 (如 D:\\projects\\my-app): ", (workDir) => {
-
-          promptPlatformConfig(rl, selectedPlatform, (platformOptions) => {
-            if (platformOptions.qrSetup) {
-              // 扫码方式
-              rl.close();
-              const placeholderOptions = {};
-              selectedPlatform.fields.forEach(f => placeholderOptions[f] = `PLACEHOLDER_${f.toUpperCase()}`);
-              const template = generateConfig(name, workDir, selectedAgent, selectedPlatform, placeholderOptions);
-              const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
-              fs.writeFileSync(configPath, template);
-
-              const success = setupFeishuQrCode(name, configPath);
-              if (success) {
-                finalizeConfig(name, workDir);
-                console.log(`\n✓ 项目配置完成`);
-                console.log(`  Agent: ${selectedAgent.name}`);
-                console.log(`  平台: ${selectedPlatform.name}`);
-                console.log(`  启动: ccm start ${name}`);
-              } else {
-                try { fs.unlinkSync(configPath); } catch {}
-                console.log("\n配置已取消");
-              }
-            } else {
-              // 手动输入凭证
-              const template = generateConfig(name, workDir, selectedAgent, selectedPlatform, platformOptions);
-              const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
-              fs.writeFileSync(configPath, template);
-              finalizeConfig(name, workDir);
-
-              console.log(`\n✓ 配置已创建: ${configPath}`);
-              console.log(`  Agent: ${selectedAgent.name}`);
-              console.log(`  平台: ${selectedPlatform.name}`);
-              console.log(`  启动: ccm start ${name}`);
-              rl.close();
-            }
-          });
-        });
-      });
-    });
-  });
+function optionValue(args, name, fallback = "") {
+  const index = args.indexOf(name);
+  return index >= 0 && args[index + 1] && !args[index + 1].startsWith("-") ? args[index + 1] : fallback;
 }
 
-function interactive() {
-  const configs = getConfigs();
-  const running = getRunningStatus();
-
-  if (configs.length === 0) {
-    console.log("\n还没有项目配置，运行 ccm --init 创建第一个项目\n");
-    return;
-  }
-
-  console.log("\n╔══════════════════════════════════════╗");
-  console.log("║     cc-connect 项目管理器            ║");
-  console.log("╚══════════════════════════════════════╝\n");
-
-  for (const config of configs) {
-    const projects = getConfigInfo(config.path);
-    const platform = projects.map((p) => p.platform).join(", ");
-    const agent = getCurrentAgent(config.path);
-    const isUp = running[config.name];
-    const icon = isUp ? "🟢" : "⚪";
-    console.log(`  ${icon} [${config.index}] ${config.name.padEnd(20)} ${agent.padEnd(12)} ${platform}`);
-  }
-
-  console.log(`\n  操作:`);
-  console.log(`    输入编号 → 启动该项目（可选 Agent）`);
-  console.log(`    stop 编号 → 停止该项目`);
-  console.log(`    all → 启动所有项目`);
-  console.log(`    stop all → 停止所有项目`);
-  console.log(`    status → 查看状态`);
-  console.log(`    agents → 查看支持的 Agent 列表`);
-  console.log(`    init → 新建项目`);
-  console.log(`    0 → 退出\n`);
-
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-
-  function prompt() {
-    rl.question("ccm> ", (answer) => {
-      const input = answer.trim().toLowerCase();
-
-      if (input === "0" || input === "exit" || input === "quit") {
-        rl.close();
-        return;
-      }
-
-      if (input === "status") {
-        showStatus();
-        prompt();
-        return;
-      }
-
-      if (input === "agents") {
-        console.log("\n支持的 Agent:\n");
-        AGENTS.forEach((a, i) => {
-          console.log(`  [${i + 1}] ${a.name.padEnd(15)} ${a.type.padEnd(14)} 模式: ${a.modes.join(", ")}`);
-        });
-        console.log();
-        prompt();
-        return;
-      }
-
-      if (input === "init") {
-        rl.close();
-        initProject();
-        return;
-      }
-
-      if (input === "all") {
-        console.log("\n启动所有项目...\n");
-        for (const config of configs) startProject(config);
-        setTimeout(prompt, 2500);
-        return;
-      }
-
-      if (input === "stop all") {
-        console.log("\n停止所有项目...\n");
-        for (const config of configs) stopProject(config.name);
-        prompt();
-        return;
-      }
-
-      if (input.startsWith("stop ")) {
-        const target = input.replace("stop ", "").trim();
-        const idx = parseInt(target);
-        const config = configs.find((c) => c.index === idx);
-        if (config) {
-          stopProject(config.name);
-        } else {
-          console.log("无效编号");
-        }
-        prompt();
-        return;
-      }
-
-      // 启动项目
-      const idx = parseInt(input);
-      if (!isNaN(idx) && idx > 0) {
-        const config = configs.find((c) => c.index === idx);
-        if (config) {
-          // 弹出 Agent 选择
-          rl.close();
-          selectAgent(config, (agentType) => {
-            console.log();
-            startProject(config, agentType);
-            // 重新创建 rl 继续交互
-            setTimeout(() => interactive(), 2500);
-          });
-        } else {
-          console.log("无效编号");
-          prompt();
-        }
-        return;
-      }
-
-      console.log("无效输入");
-      prompt();
-    });
-  }
-
-  prompt();
+function hasFlag(args, ...names) {
+  return names.some(name => args.includes(name));
 }
 
-// 主入口
-ensureDirs();
-const args = process.argv.slice(2);
+function divider() {
+  console.log(style.muted("-".repeat(62)));
+}
 
-if (args.includes("--list") || args.includes("-l")) {
-  const configs = getConfigs();
-  const running = getRunningStatus();
-  console.log("\n可用配置:\n");
-  for (const config of configs) {
-    const projects = getConfigInfo(config.path);
-    const platform = projects.map((p) => p.platform).join(", ");
-    const dir = [...new Set(projects.map((p) => p.workDir))].join(", ");
-    const agent = getCurrentAgent(config.path);
-    const icon = running[config.name] ? "🟢" : "⚪";
-    console.log(`  ${icon} ${config.name}`);
-    console.log(`     Agent: ${agent}`);
-    console.log(`     平台: ${platform}`);
-    console.log(`     目录: ${dir}\n`);
-  }
-} else if (args.includes("--init")) {
-  initProject();
-} else if (args[0] === "status") {
-  showStatus();
-} else if (args[0] === "agents") {
-  console.log("\n支持的 Agent:\n");
-  AGENTS.forEach((a, i) => {
-    console.log(`  [${i + 1}] ${a.name.padEnd(15)} ${a.type.padEnd(14)} 模式: ${a.modes.join(", ")}`);
-  });
+function printHeader(subtitle = "Local AI Agent Workspace") {
   console.log();
-} else if (args[0] === "pet") {
-  const petDir = path.join(__dirname, "..", "pet");
-  const petPidFile = path.join(CCM_DIR, "pids", "pet.pid");
-  const ccmPort = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
-  if (args[1] === "stop") {
-    if (!fs.existsSync(petPidFile)) { console.log("桌面宠物未在运行"); process.exit(0); }
-    const pid = fs.readFileSync(petPidFile, "utf-8").trim();
-    try {
-      if (process.platform === "win32") execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
-      else process.kill(parseInt(pid), "SIGTERM");
-    } catch {}
-    try { fs.unlinkSync(petPidFile); } catch {}
-    console.log("桌面宠物已关闭");
+  console.log(`${style.title("CCM Workspace")}  ${style.muted(`v${VERSION}`)}`);
+  console.log(style.muted(subtitle));
+  divider();
+}
+
+function printHelp() {
+  printHeader("Command line control center");
+  console.log(`${style.strong("Usage")}  ccm <command> [options]\n`);
+  console.log(style.strong("Workspace service"));
+  console.log("  start [--port 3080] [--host 127.0.0.1] [...] Start CCM");
+  console.log("  stop [web]                                  Stop CCM");
+  console.log("  restart [--background] [--open]              Restart CCM");
+  console.log("  status [--json]                              Service and project status");
+  console.log("  open [--port 3080]                           Open the workspace");
+  console.log("  logs [--lines 120] [--follow]                Read background logs");
+  console.log("  doctor [--json]                              Check local readiness\n");
+  console.log(style.strong("Projects and extensions"));
+  console.log("  project list                                 List projects");
+  console.log("  project start <name> [agent]                 Start one project");
+  console.log("  project stop <name|all>                      Stop project processes");
+  console.log("  project init                                 Create a legacy config");
+  console.log("  agents                                      List supported Agents");
+  console.log("  pet [stop]                                  Control desktop pet\n");
+  console.log(style.strong("Package"));
+  console.log("  update --check                              Check npm latest");
+  console.log("  update                                      Install npm latest globally");
+  console.log("  version                                     Print version");
+  console.log("  help                                        Show this help\n");
+  console.log(style.muted("Compatibility: start/stop <project>, start/stop all, --list and --init remain available."));
+}
+
+function canConnect(port, timeoutMs = 600) {
+  return new Promise(resolve => {
+    const socket = net.createConnection({ host: "127.0.0.1", port });
+    const done = result => { socket.destroy(); resolve(result); };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
+}
+
+async function waitForPort(port, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await canConnect(port)) return true;
+    await new Promise(resolve => setTimeout(resolve, 350));
+  }
+  return false;
+}
+
+function openBrowser(url) {
+  let command;
+  let args;
+  if (process.platform === "win32") {
+    command = "cmd.exe";
+    args = ["/d", "/s", "/c", "start", "", url];
+  } else if (process.platform === "darwin") {
+    command = "open";
+    args = [url];
   } else {
-    if (fs.existsSync(petPidFile)) {
-      const pid = fs.readFileSync(petPidFile, "utf-8").trim();
-      try { process.kill(parseInt(pid), 0); console.log("桌面宠物已在运行"); process.exit(0); } catch {}
-    }
-    if (!fs.existsSync(path.join(petDir, "main.js"))) {
-      console.log("宠物应用未安装，请先运行: cd pet && npm install");
-      process.exit(1);
-    }
-    const petExe = path.join(petDir, "node_modules", "electron", "dist", "electron.exe");
-    const mainExe = path.join(__dirname, "..", "node_modules", "electron", "dist", "electron.exe");
-    const petBin = path.join(petDir, "node_modules", ".bin", "electron");
-    const mainBin = path.join(__dirname, "..", "node_modules", ".bin", "electron");
-    const electronBin = fs.existsSync(petExe) ? petExe : fs.existsSync(mainExe) ? mainExe : fs.existsSync(petBin) ? petBin : fs.existsSync(mainBin) ? mainBin : null;
-    const cmd = electronBin || "npx";
-    const args2 = electronBin ? [petDir] : ["electron", petDir];
-    const child = spawn(cmd, args2, {
+    command = "xdg-open";
+    args = [url];
+  }
+  const child = spawn(command, args, { detached: true, windowsHide: true, stdio: "ignore" });
+  child.unref();
+}
+
+async function startWorkspace(args = []) {
+  ensureRuntimeDirs();
+  const requestedPort = validPort(optionValue(args, "--port", 3080));
+  const requestedHost = validHost(optionValue(args, "--host", process.env.CCM_HOST || "127.0.0.1"));
+  const existing = readServerState();
+  if (existing.active) {
+    const urls = serviceUrls(existing.host, existing.port);
+    printHeader("Workspace service");
+    console.log(`${style.success("RUNNING")}  PID ${existing.pid}`);
+    console.log(`${style.muted("Listen")}   ${existing.host}:${existing.port}`);
+    console.log(`${style.muted("URL")}      ${style.link(urls.url)}`);
+    if (hasFlag(args, "--open")) openBrowser(urls.localUrl);
+    return 0;
+  }
+  if (!fs.existsSync(SERVER_FILE) || !fs.existsSync(PUBLIC_INDEX)) {
+    console.error(style.danger("CCM 运行文件不完整，请重新安装或执行 npm run build。"));
+    return 1;
+  }
+  const urls = serviceUrls(requestedHost, requestedPort);
+  const background = hasFlag(args, "--background", "-d");
+  if (background) {
+    const logFd = fs.openSync(SERVER_LOG_FILE, "a");
+    fs.writeSync(logFd, `\n[${new Date().toISOString()}] ccm start --background\n`);
+    const child = spawn(process.execPath, [SERVER_FILE, String(requestedPort)], {
+      cwd: PACKAGE_ROOT,
       detached: true,
-      stdio: "ignore",
-      shell: !electronBin,
       windowsHide: true,
-      env: { ...process.env, CCM_PORT: String(ccmPort) }
+      stdio: ["ignore", logFd, logFd],
+      env: { ...process.env, CCM_HOST: requestedHost },
     });
     child.unref();
-    if (!fs.existsSync(path.dirname(petPidFile))) fs.mkdirSync(path.dirname(petPidFile), { recursive: true });
-    fs.writeFileSync(petPidFile, String(child.pid));
-    console.log("桌面宠物已启动！");
+    fs.closeSync(logFd);
+    const ready = await waitForPort(requestedPort);
+    printHeader("Workspace service");
+    if (!ready) {
+      console.error(`${style.danger("FAILED")}   服务没有在 20 秒内就绪`);
+      console.error(`${style.muted("Log")}      ${SERVER_LOG_FILE}`);
+      return 1;
+    }
+    const state = readServerState();
+    console.log(`${style.success("STARTED")}  PID ${state.pid || child.pid}`);
+    console.log(`${style.muted("Listen")}   ${requestedHost}:${requestedPort}`);
+    console.log(`${style.muted("URL")}      ${style.link(urls.url)}`);
+    for (const remoteUrl of urls.remoteUrls.slice(1)) console.log(`${style.muted("Network")}  ${style.link(remoteUrl)}`);
+    console.log(`${style.muted("Log")}      ${SERVER_LOG_FILE}`);
+    console.log(`${style.muted("Stop")}     ccm stop`);
+    if (hasFlag(args, "--open")) openBrowser(urls.localUrl);
+    return 0;
   }
-} else if (args[0] === "web") {
-  const port = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
-  const { startServer } = require("../dist/server.js");
-  startServer(port);
-} else if (args[0] === "start" && !args[1]) {
-  // ccm start → 启动 Web 控制台（前端 + 后端，前端由 server.js 从 public/ 目录直接 serve）
-  const port = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
 
-  console.log("\n╔══════════════════════════════════════╗");
-  console.log("║     cc-web 控制台                     ║");
-  console.log("╚══════════════════════════════════════╝\n");
-  console.log(`访问: http://localhost:${port}\n`);
-
-  const { startServer } = require("../dist/server.js");
-  startServer(port);
-} else if (args[0] === "start" && args[1]) {
-  const configs = getConfigs();
-  if (args[1] === "all") {
-    console.log("\n启动所有项目...\n");
-    for (const config of configs) startProject(config, args[2]);
-  } else {
-    const idx = parseInt(args[1]);
-    const config = configs.find((c) => c.index === idx || c.name === args[1]);
-    if (config) startProject(config, args[2]);
-    else console.log("项目不存在");
-  }
-} else if (args[0] === "stop" && args[1]) {
-  const configs = getConfigs();
-  if (args[1] === "all") {
-    console.log("\n停止所有项目...\n");
-    for (const config of configs) stopProject(config.name);
-    try {
-      if (process.platform === "win32") {
-        execSync("taskkill /F /IM cc-connect.exe", { stdio: "ignore" });
-      }
-    } catch {}
-  } else {
-    const idx = parseInt(args[1]);
-    const config = configs.find((c) => c.index === idx || c.name === args[1]);
-    if (config) stopProject(config.name);
-    else console.log("项目不存在");
-  }
-} else if (args.length > 0 && !args[0].startsWith("-")) {
-  const configs = getConfigs();
-  const config = configs.find((c) => c.name === args[0]);
-  if (config) startProject(config, args[1]);
-  else console.log(`项目 "${args[0]}" 不存在，用 cc-web --list 查看`);
-} else {
-  console.log("\n╔══════════════════════════════════════╗");
-  console.log("║     cc-web - cc-connect 管理工具      ║");
-  console.log("╚══════════════════════════════════════╝\n");
-  console.log("用法:");
-  console.log("  ccm start              启动 Web 控制台（前端 + 后端）");
-  console.log("  ccm start <项目名>      启动指定项目");
-  console.log("  ccm start all           启动所有项目");
-  console.log("  ccm stop  <项目名>      停止指定项目");
-  console.log("  ccm stop  all           停止所有项目");
-  console.log("  ccm web                 仅启动后端 API 服务");
-  console.log("  ccm pet                 启动桌面宠物");
-  console.log("  ccm pet stop            关闭桌面宠物");
-  console.log("  ccm status              查看运行状态");
-  console.log("  ccm --list              列出所有配置");
-  console.log("  ccm --init              初始化新项目");
-  console.log("  ccm agents              查看支持的 Agent\n");
+  if (hasFlag(args, "--open")) void waitForPort(requestedPort).then(ready => { if (ready) openBrowser(urls.localUrl); });
+  const child = spawn(process.execPath, [SERVER_FILE, String(requestedPort), requestedHost], {
+    cwd: PACKAGE_ROOT,
+    windowsHide: false,
+    stdio: "inherit",
+    env: { ...process.env, CCM_HOST: requestedHost },
+  });
+  return await new Promise(resolve => {
+    child.once("error", error => {
+      console.error(style.danger(`启动失败：${error.message}`));
+      resolve(1);
+    });
+    child.once("exit", code => resolve(Number(code || 0)));
+  });
 }
+
+async function stopWorkspace({ quiet = false } = {}) {
+  const state = readServerState();
+  if (!state.active) {
+    if (state.stale) { try { fs.unlinkSync(SERVER_LOCK_FILE); } catch {} }
+    if (!quiet) {
+      printHeader("Workspace service");
+      console.log(style.muted("STOPPED  当前没有运行中的 CCM 服务"));
+    }
+    return 0;
+  }
+  try { process.kill(state.pid, "SIGTERM"); } catch {}
+  const deadline = Date.now() + 6_000;
+  while (processAlive(state.pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
+  if (processAlive(state.pid)) {
+    try {
+      if (process.platform === "win32") execFileSync("taskkill.exe", ["/PID", String(state.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      else process.kill(state.pid, "SIGKILL");
+    } catch {}
+  }
+  if (!processAlive(state.pid)) { try { fs.unlinkSync(SERVER_LOCK_FILE); } catch {} }
+  if (!quiet) {
+    printHeader("Workspace service");
+    console.log(`${style.success("STOPPED")}  PID ${state.pid}`);
+  }
+  return processAlive(state.pid) ? 1 : 0;
+}
+
+function configuredProjects() {
+  if (!fs.existsSync(CONFIGS_DIR)) return [];
+  return fs.readdirSync(CONFIGS_DIR).filter(file => file.endsWith(".toml")).sort().map(file => {
+    const name = file.replace(/^config-/, "").replace(/\.toml$/, "");
+    const pidFile = path.join(PID_DIR, `${name}.pid`);
+    const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf-8").trim() : 0);
+    return { name, running: processAlive(pid), pid: processAlive(pid) ? pid : 0, config: path.join(CONFIGS_DIR, file) };
+  });
+}
+
+function statusPayload() {
+  const service = readServerState();
+  const urls = serviceUrls(service.host, service.port);
+  const projects = configuredProjects();
+  return {
+    package: { name: PACKAGE_NAME, version: VERSION },
+    service: { ...service, ...urls },
+    projects,
+    summary: { projects: projects.length, runningProjects: projects.filter(project => project.running).length },
+    dataDirectory: CCM_DIR,
+  };
+}
+
+function showStatus(args = []) {
+  const payload = statusPayload();
+  if (hasFlag(args, "--json")) {
+    console.log(JSON.stringify(payload, null, 2));
+    return 0;
+  }
+  printHeader("Runtime status");
+  console.log(`${style.strong("Workspace")}  ${payload.service.active ? style.success("RUNNING") : style.muted("STOPPED")}${payload.service.active ? `  PID ${payload.service.pid}` : ""}`);
+  console.log(`${style.muted("Listen")}     ${payload.service.host}:${payload.service.port}`);
+  console.log(`${style.muted("URL")}        ${style.link(payload.service.url)}`);
+  console.log(`${style.muted("Projects")}   ${payload.summary.runningProjects}/${payload.summary.projects} running`);
+  console.log(`${style.muted("Data")}       ${payload.dataDirectory}`);
+  if (payload.projects.length) {
+    console.log();
+    for (const project of payload.projects) console.log(`  ${project.running ? style.success("RUN") : style.muted("OFF")}  ${project.name}${project.pid ? style.muted(`  PID ${project.pid}`) : ""}`);
+  }
+  return 0;
+}
+
+function executableAvailable(name) {
+  try {
+    const command = process.platform === "win32" ? "where.exe" : "which";
+    execFileSync(command, [name], { windowsHide: true, stdio: "ignore", timeout: 3_000 });
+    return true;
+  } catch { return false; }
+}
+
+function persistentPtyProbe() {
+  if (process.env.CCM_DISABLE_NODE_PTY === "1") return { ok: false, reason: "disabled_for_compatibility" };
+  try {
+    const loaded = require("node-pty");
+    return { ok: typeof loaded?.spawn === "function", reason: typeof loaded?.spawn === "function" ? "" : "invalid_module" };
+  } catch {
+    return { ok: false, reason: "node_pty_unavailable" };
+  }
+}
+
+function doctorPayload() {
+  ensureRuntimeDirs();
+  const major = Number(process.versions.node.split(".")[0]);
+  const pty = persistentPtyProbe();
+  const checks = [
+    { id: "node", label: `Node.js ${process.version}`, ok: major >= 20, required: true },
+    { id: "server", label: "Backend runtime", ok: fs.existsSync(SERVER_FILE), required: true },
+    { id: "frontend", label: "Frontend assets", ok: fs.existsSync(PUBLIC_INDEX), required: true },
+    { id: "pty", label: pty.ok ? "Persistent PTY" : "Persistent PTY (command fallback active)", ok: pty.ok, required: false, degraded: !pty.ok, reason: pty.reason },
+    { id: "data", label: "Data directory writable", ok: (() => { try { fs.accessSync(CCM_DIR, fs.constants.W_OK); return true; } catch { return false; } })(), required: true },
+    { id: "cc-connect", label: "cc-connect CLI", ok: executableAvailable("cc-connect"), required: false },
+    ...["claude", "codex", "cursor", "gemini", "opencode"].map(name => ({ id: name, label: `${name} CLI`, ok: executableAvailable(name), required: false })),
+  ];
+  return { success: checks.filter(check => check.required).every(check => check.ok), checks, service: readServerState(), dataDirectory: CCM_DIR };
+}
+
+function showDoctor(args = []) {
+  const payload = doctorPayload();
+  if (hasFlag(args, "--json")) {
+    console.log(JSON.stringify(payload, null, 2));
+    return payload.success ? 0 : 1;
+  }
+  printHeader("Environment diagnostics");
+  for (const check of payload.checks) {
+    const mark = check.ok ? style.success("PASS") : check.required ? style.danger("FAIL") : style.warning("MISS");
+    console.log(`  ${mark.padEnd(useColor ? 14 : 6)} ${check.label}${!check.required ? style.muted("  optional") : ""}`);
+  }
+  console.log();
+  console.log(payload.success ? style.success("Required runtime checks passed.") : style.danger("Required runtime checks failed."));
+  return payload.success ? 0 : 1;
+}
+
+function showLogs(args = []) {
+  const lines = Math.max(10, Math.min(2_000, Number(optionValue(args, "--lines", 120)) || 120));
+  if (!fs.existsSync(SERVER_LOG_FILE)) {
+    console.log(style.muted(`暂无后台日志：${SERVER_LOG_FILE}`));
+    return 0;
+  }
+  const printTail = () => {
+    const rows = fs.readFileSync(SERVER_LOG_FILE, "utf-8").split(/\r?\n/);
+    console.log(rows.slice(-lines).join("\n"));
+  };
+  printTail();
+  if (hasFlag(args, "--follow", "-f")) {
+    let size = fs.statSync(SERVER_LOG_FILE).size;
+    fs.watchFile(SERVER_LOG_FILE, { interval: 500 }, current => {
+      if (current.size < size) size = 0;
+      if (current.size === size) return;
+      const fd = fs.openSync(SERVER_LOG_FILE, "r");
+      const buffer = Buffer.alloc(current.size - size);
+      fs.readSync(fd, buffer, 0, buffer.length, size);
+      fs.closeSync(fd);
+      size = current.size;
+      process.stdout.write(buffer.toString("utf-8"));
+    });
+  }
+  return 0;
+}
+
+function delegateLegacy(args) {
+  const result = spawnSync(process.execPath, [LEGACY_CLI, ...args], { stdio: "inherit", windowsHide: false, env: process.env });
+  return Number(result.status || 0);
+}
+
+function projectCommand(args) {
+  const [action = "list", ...rest] = args;
+  if (["list", "ls"].includes(action)) return delegateLegacy(["--list"]);
+  if (action === "start") return delegateLegacy(["start", ...rest]);
+  if (action === "stop") return delegateLegacy(["stop", ...rest]);
+  if (action === "init") return delegateLegacy(["--init"]);
+  if (action === "agents") return delegateLegacy(["agents"]);
+  if (action === "interactive") return delegateLegacy(["interactive"]);
+  console.error(style.danger(`未知 project 命令：${action}`));
+  return 1;
+}
+
+function npmInvocation() {
+  const cli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  if (fs.existsSync(cli)) return { command: process.execPath, prefix: [cli] };
+  return { command: "npm", prefix: [] };
+}
+
+function latestVersion() {
+  const npm = npmInvocation();
+  try { return String(execFileSync(npm.command, [...npm.prefix, "view", PACKAGE_NAME, "version", "--json"], { encoding: "utf-8", windowsHide: true, timeout: 90_000 }).trim()).replace(/^"|"$/g, ""); }
+  catch (error) {
+    if (process.env.CCM_CLI_DEBUG === "1") console.error(error?.message || error);
+    return "";
+  }
+}
+
+function compareVersions(left, right) {
+  const a = String(left || "0").split(/[.-]/).slice(0, 3).map(value => Number(value) || 0);
+  const b = String(right || "0").split(/[.-]/).slice(0, 3).map(value => Number(value) || 0);
+  for (let index = 0; index < 3; index += 1) {
+    if ((a[index] || 0) > (b[index] || 0)) return 1;
+    if ((a[index] || 0) < (b[index] || 0)) return -1;
+  }
+  return 0;
+}
+
+function updatePackage(args = []) {
+  const latest = latestVersion();
+  printHeader("Package update");
+  if (!latest) {
+    console.error(style.danger("无法读取 npm registry 版本。"));
+    return 1;
+  }
+  console.log(`${style.muted("Current")}  ${VERSION}`);
+  console.log(`${style.muted("Latest")}   ${latest}`);
+  const comparison = compareVersions(latest, VERSION);
+  if (comparison <= 0) {
+    console.log(comparison === 0 ? style.success("Already up to date.") : style.muted("Current build is newer than the npm registry."));
+    return 0;
+  }
+  if (hasFlag(args, "--check")) {
+    console.log(style.warning(`Run "ccm update" to install ${latest}.`));
+    return 0;
+  }
+  const npm = npmInvocation();
+  const result = spawnSync(npm.command, [...npm.prefix, "install", "-g", `${PACKAGE_NAME}@latest`], { stdio: "inherit", windowsHide: false });
+  return Number(result.status || 0);
+}
+
+async function main() {
+  ensureRuntimeDirs();
+  const args = process.argv.slice(2);
+  const command = String(args[0] || "help").toLowerCase();
+  const rest = args.slice(1);
+
+  if (["help", "--help", "-h"].includes(command)) return printHelp() || 0;
+  if (["version", "--version", "-v"].includes(command)) { console.log(`${PACKAGE_NAME} ${VERSION}`); return 0; }
+  if (command === "status") return showStatus(rest);
+  if (command === "doctor") return showDoctor(rest);
+  if (command === "open") {
+    const state = readServerState();
+    const port = validPort(optionValue(rest, "--port", state.port || 3080));
+    openBrowser(`http://localhost:${port}`);
+    console.log(`Opening ${style.link(`http://localhost:${port}`)}`);
+    return 0;
+  }
+  if (command === "logs") return showLogs(rest);
+  if (command === "update") return updatePackage(rest);
+  if (command === "project") return projectCommand(rest);
+  if (command === "projects") return projectCommand(["interactive", ...rest]);
+  if (["agents", "pet"].includes(command)) return delegateLegacy([command, ...rest]);
+  if (["--list", "-l"].includes(command)) return delegateLegacy(["--list", ...rest]);
+  if (command === "--init") return delegateLegacy(["--init", ...rest]);
+
+  if (["start", "serve", "web"].includes(command)) {
+    const projectTarget = command === "start" && rest[0] && !rest[0].startsWith("-") && rest[0] !== "web";
+    if (projectTarget) return delegateLegacy(["start", ...rest]);
+    return startWorkspace(command === "start" ? rest : command === "web" ? rest : rest);
+  }
+  if (command === "stop") {
+    const target = rest[0];
+    if (target && !target.startsWith("-") && !["web", "server"].includes(target)) return delegateLegacy(["stop", ...rest]);
+    return stopWorkspace();
+  }
+  if (command === "restart") {
+    const stopped = await stopWorkspace({ quiet: true });
+    if (stopped !== 0) return stopped;
+    return startWorkspace(rest);
+  }
+
+  return delegateLegacy(args);
+}
+
+main().then(code => { process.exitCode = Number(code || 0); }).catch(error => {
+  console.error(style.danger(error?.message || String(error)));
+  process.exitCode = 1;
+});

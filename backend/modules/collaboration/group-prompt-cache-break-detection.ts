@@ -486,6 +486,7 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
     const estimatedContext = finite(input.estimatedContextTokens ?? input.estimated_context_tokens);
     const estimatedPayload = finite(input.estimatedPayloadTokens ?? input.estimated_payload_tokens ?? estimatedContext);
     const estimatedFixed = finite(input.estimatedFixedTokens ?? input.estimated_fixed_tokens);
+    const modelVisiblePayload = input.modelVisiblePayload || input.model_visible_payload || null;
     const observedContext = directInput + cacheCreation + cacheRead + output;
     const previous = current.previous_cache_read_tokens === null || current.previous_cache_read_tokens === undefined
       ? null
@@ -560,6 +561,10 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
       estimated_fixed_tokens: estimatedFixed,
       payload_checksum: String(input.payloadChecksum || input.payload_checksum || ""),
       fixed_context_checksum: String(input.fixedContextChecksum || input.fixed_context_checksum || ""),
+      token_breakdown: modelVisiblePayload?.tokenBreakdown && typeof modelVisiblePayload.tokenBreakdown === "object"
+        ? Object.fromEntries(Object.entries(modelVisiblePayload.tokenBreakdown).map(([key, value]) => [key, finite(value)]))
+        : null,
+      accounting_total_tokens: finite(modelVisiblePayload?.totalTokens || estimatedPayload),
       provider_observed_context_tokens: observedContext,
       positive_estimation_drift_tokens: Math.max(0, observedContext - estimatedContext),
       token_drop: tokenDrop,

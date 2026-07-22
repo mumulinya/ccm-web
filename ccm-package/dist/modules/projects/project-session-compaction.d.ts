@@ -57,6 +57,8 @@ export declare function compactProjectSessionWithModel(project: string, projectS
     fixedContext?: any;
     tools?: any;
     recoveryContext?: any;
+    contextComponents?: any;
+    context_components?: any;
     provider?: string;
     model?: string;
 }): Promise<any>;

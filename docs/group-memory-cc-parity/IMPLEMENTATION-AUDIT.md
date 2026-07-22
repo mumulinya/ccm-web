@@ -94,6 +94,8 @@ Date: 2026-07-18
 
 该链路已通过群聊协调业务端到端回归：协作依赖在隔离 worktree 中执行，主 Agent 验收后合并并恢复源 Agent；并行既有任务不被打断，重启后的依赖关系仍可恢复。测试也已改用当前 SQLite 任务存储 API，不再依赖迁移后会被归档的旧 `tasks.json`。
 
+2026-07-22 新增本地登录与注册入口：首次启动自动创建管理员账户，注册默认关闭，浏览器业务 API 需要同源有效会话，普通用户和管理员权限分离，密码与会话令牌均不以明文保存。完整流程由 `npm run test:local-auth` 在临时用户目录中验证，未触碰现有用户数据。详细边界见 [本地登录与注册](../main-agent-workchain/security/local-login-registration-2026-07-22/README.md)。
+
 Memory Center 的最终投影不再是扁平 scope 清单：现在以全局 Agent、群聊和项目为父节点，再展示各自的精确会话。群聊会话以真实 manifest 为准，不再因尚未生成压缩文件而漏掉。详见 [记忆中心项目与群聊会话层级](./memory-center-scope-session-hierarchy-2026-07-18/README.md)。
 
 后续核对发现记忆中心曾把 intent gateway 判断、普通回复流水和本地 deterministic fallback 冒充会话记忆。这些字段已从会话页与模型上下文移除，只保留审计/故障恢复价值。详见 [会话记忆真实投影与流水状态清理](./canonical-session-memory-presentation-2026-07-18/README.md)。

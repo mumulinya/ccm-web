@@ -38,6 +38,7 @@ exports.handleCollaborationApiIntakeRoutesPartB = handleCollaborationApiIntakeRo
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const mission_supervisor_1 = require("../../agents/global/mission-supervisor");
+const task_attachments_1 = require("../../system/task-attachments");
 const db_1 = require("../../core/db");
 const task_delivery_report_1 = require("./task-delivery-report");
 const logs_1 = require("./logs");
@@ -47,17 +48,58 @@ const reliability_ledger_1 = require("../../system/reliability-ledger");
 const collaboration_1 = require("./collaboration");
 function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/tasks/create" && req.method === "POST") {
+        const handleCreate = async (payload, files = []) => {
+            let persistedTask = null;
+            try {
+                let taskPayload = payload || {};
+                if (files.length) {
+                    const attachments = await (0, task_attachments_1.buildTaskAttachmentMutation)({
+                        files,
+                        retainedIds: [],
+                        userText: [taskPayload.title, taskPayload.description].filter(Boolean).join("\n"),
+                    });
+                    taskPayload = {
+                        ...taskPayload,
+                        source_attachments: attachments.attachments,
+                        source_attachment_contexts: attachments.contexts,
+                        source_attachment_context: attachments.context,
+                        source_attachment_warnings: attachments.warnings,
+                        source_ingestion: attachments.technical,
+                    };
+                }
+                const task = (0, collaboration_1.createTask)(taskPayload);
+                persistedTask = task;
+                if (task?.deduplicated === true)
+                    (0, task_attachments_1.removeUploadedFiles)(files);
+                let queueResult = null;
+                if (taskPayload.auto_execute || taskPayload.autoExecute) {
+                    queueResult = (0, collaboration_1.enqueueTask)(task.id, ctx);
+                }
+                (0, utils_1.sendJson)(res, { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: (0, collaboration_1.getQueueStatus)() });
+            }
+            catch (e) {
+                if (!persistedTask)
+                    (0, task_attachments_1.removeUploadedFiles)(files);
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        };
+        const contentType = String(req.headers["content-type"] || "");
+        if (contentType.includes("multipart/form-data")) {
+            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
+                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
+                if (!boundary)
+                    throw new Error("无效的任务附件请求");
+                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+                const payload = fields.payload ? JSON.parse(fields.payload) : fields;
+                return handleCreate(payload, files || []);
+            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+            return true;
+        }
         let body = "";
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const payload = JSON.parse(body);
-                const task = (0, collaboration_1.createTask)(payload);
-                let queueResult = null;
-                if (payload.auto_execute || payload.autoExecute) {
-                    queueResult = (0, collaboration_1.enqueueTask)(task.id, ctx);
-                }
-                (0, utils_1.sendJson)(res, { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: (0, collaboration_1.getQueueStatus)() });
+                void handleCreate(body ? JSON.parse(body) : {});
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -66,12 +108,10 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
         return true;
     }
     if (pathname === "/api/tasks/create-daily-dev" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        const handleDailyDevCreate = async (payload, files = []) => {
             let operationKey = "";
+            let keepUploadedFiles = false;
             try {
-                const payload = body ? JSON.parse(body) : {};
                 operationKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
                 const traceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "daily-dev");
                 const groupId = payload.group_id || payload.groupId;
@@ -85,7 +125,11 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                 const goal = (0, collaboration_1.compactFormText)(payload.business_goal || payload.businessGoal || payload.goal || payload.description, "");
                 if (!goal)
                     return (0, utils_1.sendJson)(res, { error: "请输入业务目标" }, 400);
-                const quality = (0, daily_dev_backlog_1.evaluateDailyDevIntakeQuality)(payload, goal);
+                const qualityPayload = files.length ? {
+                    ...payload,
+                    documents: [payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "", "已提交业务需求附件，创建时由主 Agent 读取解析。"].filter(Boolean).join("\n\n"),
+                } : payload;
+                const quality = (0, daily_dev_backlog_1.evaluateDailyDevIntakeQuality)(qualityPayload, goal);
                 const forceQualityGate = !!(payload.force_quality_gate || payload.forceQualityGate || payload.force);
                 if (!quality.pass && !forceQualityGate) {
                     return (0, utils_1.sendJson)(res, {
@@ -101,8 +145,19 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                     (0, utils_1.sendJson)(res, { success: true, duplicate: true, task: existingTask, trace_id: operation.traceId });
                     return;
                 }
+                const attachmentBundle = files.length
+                    ? await (0, task_attachments_1.buildTaskAttachmentMutation)({
+                        files,
+                        retainedIds: [],
+                        userText: [payload.title, goal, payload.scope, payload.documents, payload.acceptance, payload.constraints].filter(Boolean).join("\n"),
+                    })
+                    : { attachments: [], contexts: [], context: "", warnings: [], technical: null };
                 const title = (0, collaboration_1.compactFormText)(payload.title, goal.slice(0, 60));
-                const backlogFile = (0, daily_dev_backlog_1.persistDailyDevBacklogFile)(groups, group, payload, title, goal);
+                const backlogPayload = {
+                    ...payload,
+                    documents: [payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "", attachmentBundle.context].filter(Boolean).join("\n\n"),
+                };
+                const backlogFile = (0, daily_dev_backlog_1.persistDailyDevBacklogFile)(groups, group, backlogPayload, title, goal);
                 const sourceDocuments = [
                     payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "",
                     backlogFile ? `群聊需求池文件：${backlogFile.name}` : "",
@@ -122,18 +177,28 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                     business_goal: goal,
                     acceptance_criteria: payload.acceptance || payload.acceptance_criteria || payload.acceptanceCriteria || "",
                     source_documents: sourceDocuments,
+                    source_attachments: attachmentBundle.attachments,
+                    source_attachment_contexts: attachmentBundle.contexts,
+                    source_attachment_context: attachmentBundle.context,
+                    source_attachment_warnings: attachmentBundle.warnings,
+                    source_ingestion: attachmentBundle.technical,
                     workflow_meta: {
                         ...(payload.workflow_meta || payload.workflowMeta || {}),
                         intake_quality: quality,
-                        intake: backlogFile ? {
-                            backlog_file: backlogFile.name,
-                            persisted_at: new Date().toISOString(),
+                        intake: {
+                            ...(backlogFile ? {
+                                backlog_file: backlogFile.name,
+                                persisted_at: new Date().toISOString(),
+                            } : {}),
                             source: "create-daily-dev",
-                        } : null,
+                            attachment_count: attachmentBundle.attachments.length,
+                            attachment_warning_count: attachmentBundle.warnings.length,
+                        },
                     },
                     trace_id: traceId,
                     idempotency_key: operationKey || null,
                 });
+                keepUploadedFiles = true;
                 if (backlogFile) {
                     (0, daily_dev_backlog_1.markDailyDevBacklogStatus)(groupId, backlogFile.name, "dispatched", {
                         task_id: task.id,
@@ -161,6 +226,32 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                     }
                     catch { }
                 }
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+            finally {
+                if (!keepUploadedFiles)
+                    (0, task_attachments_1.removeUploadedFiles)(files);
+            }
+        };
+        const contentType = String(req.headers["content-type"] || "");
+        if (contentType.includes("multipart/form-data")) {
+            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
+                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
+                if (!boundary)
+                    throw new Error("无效的业务开发任务附件请求");
+                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+                const payload = fields.payload ? JSON.parse(fields.payload) : fields;
+                return handleDailyDevCreate(payload, files || []);
+            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+            return true;
+        }
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                void handleDailyDevCreate(body ? JSON.parse(body) : {});
+            }
+            catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
             }
         });

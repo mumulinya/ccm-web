@@ -1,4 +1,5 @@
 import { IncomingMessage, ServerResponse } from "http";
+import { subscribeRuntimeEventListener } from "../../system/runtime-events";
 import { loadCronJobs, loadTasks, saveTasks, getConfigs, getConfigInfo, isRunning } from "../../core/db";
 import { CCM_DIR, sendJson } from "../../core/utils";
 import { loadGroups } from "../collaboration/collaboration";
@@ -244,25 +245,32 @@ export function handleUsabilityApi(pathname: string, req: IncomingMessage, res: 
     });
     let snapshot = buildUsabilityWorkbench({ runArchive: false });
     let signature = workbenchSignature(snapshot);
-    let ticks = 0;
+    let refreshTimer: NodeJS.Timeout | null = null;
     sendWorkbenchEvent(res, { type: "snapshot", data: snapshot });
-    const interval = setInterval(() => {
+    const refresh = () => {
       try {
-        ticks++;
         const next = buildUsabilityWorkbench({ runArchive: false });
         const nextSignature = workbenchSignature(next);
         if (nextSignature !== signature) {
           snapshot = next;
           signature = nextSignature;
           sendWorkbenchEvent(res, { type: "update", data: snapshot });
-        } else if (ticks % 5 === 0) {
-          sendWorkbenchEvent(res, { type: "heartbeat", generated_at: new Date().toISOString() });
         }
       } catch (error: any) {
         sendWorkbenchEvent(res, { type: "warning", message: error?.message || String(error) });
       }
-    }, 5000);
-    req.on("close", () => clearInterval(interval));
+    };
+    const unsubscribe = subscribeRuntimeEventListener(["task", "permission", "agent", "feishu", "project", "group", "cron"], () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refresh, 180);
+    });
+    const heartbeat = setInterval(() => sendWorkbenchEvent(res, { type: "heartbeat", generated_at: new Date().toISOString() }), 15_000);
+    heartbeat.unref?.();
+    req.on("close", () => {
+      unsubscribe();
+      if (refreshTimer) clearTimeout(refreshTimer);
+      clearInterval(heartbeat);
+    });
     return true;
   }
   if (pathname === "/api/usability/archive-history" && req.method === "POST") {

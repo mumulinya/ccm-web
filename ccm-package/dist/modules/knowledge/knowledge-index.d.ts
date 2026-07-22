@@ -17,6 +17,7 @@ export type KnowledgeChunk = {
 export type KnowledgeSearchOptions = {
     limit?: number;
     filename?: string;
+    filenames?: string[];
     tags?: string[];
     domain?: string;
     scopeType?: string;
@@ -51,6 +52,7 @@ export declare function formatAwareChunkText(content: string, extension?: string
     charEnd: number;
 }[];
 export declare function rebuildKnowledgeIndex(reason?: string): Promise<KnowledgeIndexStatus>;
+export declare function waitForKnowledgeIndex(reason?: string): Promise<KnowledgeIndexStatus>;
 export declare function getKnowledgeIndexStatus(): KnowledgeIndexStatus;
 export declare function getKnowledgeDocumentChunks(filename: string): {
     id: string;

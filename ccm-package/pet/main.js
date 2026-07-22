@@ -318,6 +318,7 @@ function createPetWindow(agent, petType, label = petLabels.get(agent) || agent) 
     hasShadow: false,
     focusable: false,
     title: '',
+    icon: path.resolve(__dirname, '..', 'public', 'ccm-app-icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

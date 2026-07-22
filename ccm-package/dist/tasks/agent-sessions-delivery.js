@@ -591,6 +591,32 @@ function recordTaskAgentMemoryContextDelivery(sessionId, input = {}) {
             boundaryGeneration: Number(parentContinuity?.boundary_generation || previousCompaction.boundaryGeneration || 0),
             anchorMessageId: String(input.executionId || input.runnerRequestId || receiptId),
         } : null);
+        const taskAgentTokenBreakdown = finalDispatchPayloadGateVerification.valid ? {
+            system: 0,
+            tools: 0,
+            rules: 0,
+            skills: 0,
+            mcpTools: 0,
+            subagentDefinitions: 0,
+            summary: 0,
+            recentMessages: 0,
+            currentRequest: 0,
+            recoveryContext: 0,
+            hookResults: 0,
+            workerBootstrap: Number(finalDispatchPayloadGate?.estimated_prompt_tokens || 0),
+            hydratedContext: Number(finalDispatchPayloadGate?.required_hydration_tokens || 0),
+            providerEnvelope: Number(finalDispatchPayloadGate?.provider_envelope_tokens || 0),
+        } : null;
+        const taskAgentModelVisiblePayload = taskAgentTokenBreakdown ? {
+            schema: "ccm-model-visible-payload-accounting-v1",
+            scope: "task_agent",
+            sessionId: id,
+            tokenBreakdown: taskAgentTokenBreakdown,
+            totalTokens: Object.values(taskAgentTokenBreakdown).reduce((sum, value) => sum + Number(value || 0), 0),
+            payloadChecksum: String(finalDispatchPayloadGate?.prompt_checksum || ""),
+            fixedContextChecksum: String(finalDispatchPayloadGate?.memory_binding_checksum || ""),
+            contentStored: false,
+        } : previousCompaction.modelVisiblePayload || null;
         const taskCompaction = {
             ...previousCompaction,
             activeSummary: parentContinuity?.summary || previousCompaction.activeSummary || null,
@@ -606,7 +632,9 @@ function recordTaskAgentMemoryContextDelivery(sessionId, input = {}) {
                 baselineValid: !!normalizedUsage,
                 provider: input.runtime || current.agentType || "",
                 model: providerModel,
+                modelVisiblePayload: taskAgentModelVisiblePayload,
             },
+            modelVisiblePayload: taskAgentModelVisiblePayload,
             sessionMemoryState: parentContinuity?.session_memory || previousCompaction.sessionMemoryState || null,
             postCompactGate: finalDispatchPayloadGateVerification.valid ? finalDispatchPayloadGate : previousCompaction.postCompactGate,
             consecutiveFailures: Number(current.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures || previousCompaction.consecutiveFailures || 0),

@@ -52,6 +52,20 @@ const checks = {
   providerCompletionRefreshesImmediately: /provider_usage_updated/.test(projectManager)
     && /provider_usage_updated/.test(globalMessaging)
     && /provider_usage_updated/.test(groupStream),
+  detailedContextCategoriesVisible: [
+    'System prompt',
+    'Tool definitions',
+    'Rules',
+    'Skills',
+    'MCP & dynamic tools',
+    'Subagent definitions',
+    'Summarized conversation',
+    'Conversation',
+  ].every(label => component.includes(label)),
+  componentRatiosVisible: /usedPercent/.test(component) && /row\.usedPercent/.test(component),
+  segmentedCapacityMeterVisible: /context-meter-segment/.test(component) && /row\.capacityPercent/.test(component),
+  providerRemainderIsTransparent: /Provider observed remainder/.test(component),
+  explicitZeroBucketsDoNotFallback: /hasPayloadBreakdown \? breakdown\.system \|\| 0/.test(component),
 }
 
 assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify(checks, null, 2))

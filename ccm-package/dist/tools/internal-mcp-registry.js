@@ -240,14 +240,16 @@ function runInternalMcpRegistrySelfTest(packageRoot = findCcmPackageRoot()) {
         ["ccm__task_evidence", 4],
     ]);
     const workflowItems = [...workflowMcps].map(([name, tools]) => ({ item: configured.items.find((row) => row.name === name), name, tools }));
+    const permissionBroker = configured.items.find((item) => item.name === "ccm__permission_broker");
     const hiddenSecrets = !JSON.stringify(configured).includes("secret") && !JSON.stringify(configured).includes("cli_test");
     const checks = {
-        bundledCatalogDiscovered: configured.items.length === 7 && configured.summary.tools === 39,
+        bundledCatalogDiscovered: configured.items.length === 8 && configured.summary.tools === 42,
         coordinatorProtectedAndReady: coordinator?.protected === true && coordinator?.state === "ready" && coordinator?.tools?.length === 4,
         feishuBundledAndReady: feishu?.bundled === true && feishu?.state === "ready" && feishu?.tools?.length === 4,
         workflowMcpsProtectedAndReady: workflowItems.every(({ item, tools }) => item?.bundled === true && item?.protected === true && item?.immutable === true && item?.state === "ready" && item?.lifecycle === "task_scoped" && item?.tools?.length === tools),
+        permissionBrokerProtectedAndReady: permissionBroker?.bundled === true && permissionBroker?.protected === true && permissionBroker?.immutable === true && permissionBroker?.state === "ready" && permissionBroker?.lifecycle === "session_scoped" && permissionBroker?.tools?.length === 3,
         feishuNeedsSettingsWithoutCredentials: unconfigured.items.find((item) => item.name === exports.FEISHU_INTERNAL_MCP)?.state === "needs_configuration",
-        internalNamesReserved: [exports.GROUP_COORDINATOR_INTERNAL_MCP, exports.FEISHU_INTERNAL_MCP, ...workflowMcps.keys()].every(isInternalMcpName),
+        internalNamesReserved: [exports.GROUP_COORDINATOR_INTERNAL_MCP, exports.FEISHU_INTERNAL_MCP, ...workflowMcps.keys(), "ccm__permission_broker"].every(isInternalMcpName),
         secretsNeverExposed: hiddenSecrets,
     };
     return { pass: Object.values(checks).every(Boolean), checks, catalog: configured };

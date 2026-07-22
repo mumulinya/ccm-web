@@ -10,8 +10,12 @@ const channelSource = read('backend/modules/collaboration/feishu-channel.ts')
 const routesSource = read('backend/modules/collaboration/feishu-routes.ts')
 const feishuSource = read('backend/modules/collaboration/feishu.ts')
 const globalAgentSource = read('backend/modules/global/global-agent.ts')
+const globalAgentRuntimeSource = read('backend/modules/global/global-agent-agentic-runtime.ts')
+const globalAgentRelaySource = read('backend/modules/global/global-agent-test-agent-relay.ts')
 const collaborationSource = read('backend/modules/collaboration/collaboration.ts')
+const collaborationQueueSource = read('backend/modules/collaboration/collaboration-runtime-task-queue-part-02.ts')
 const cronSource = read('backend/modules/scheduling/cron.ts')
+const cronRuntimeSource = read('backend/modules/scheduling/cron-part-02.ts')
 const reportsSource = read('backend/modules/scheduling/cron-dev-reports.ts')
 const acpSource = read('backend/integrations/control-bot-acp.ts')
 
@@ -30,21 +34,21 @@ const checks = {
     channelSource.includes('feishu-channel-state.json')
     && channelSource.includes('dedupe_key')
     && channelSource.includes('attempts >= 5')
-    && cronSource.includes('tickFeishuNotificationOutbox(now)'),
+    && (cronSource.includes('tickFeishuNotificationOutbox(now)') || cronRuntimeSource.includes('tickFeishuNotificationOutbox(now)')),
   complete_stage_projection:
     channelSource.includes('stage: "dispatch"')
     && channelSource.includes('stage: "test"')
     && channelSource.includes('stage: "execution"')
     && channelSource.includes('stage: "completion"')
     && globalAgentSource.includes('notifyFeishuTaskStage')
-    && globalAgentSource.includes('mission:${record.mission_id}:completed')
-    && globalAgentSource.includes('mission:${record.mission_id}:actions:'),
+    && (globalAgentSource.includes('mission:${record.mission_id}:completed') || globalAgentRuntimeSource.includes('mission:${record.mission_id}:completed'))
+    && (globalAgentSource.includes('mission:${record.mission_id}:actions:') || globalAgentRuntimeSource.includes('mission:${record.mission_id}:actions:')),
   test_agent_stays_group_owned:
-    globalAgentSource.includes('relayGlobalTestAgentEventFromGroup')
-    && globalAgentSource.includes('test_agent_review_ready'),
+    (globalAgentSource.includes('relayGlobalTestAgentEventFromGroup') || globalAgentRelaySource.includes('relayGlobalTestAgentEventFromGroup'))
+    && (globalAgentSource.includes('test_agent_review_ready') || globalAgentRelaySource.includes('test_agent_review_ready')),
   duplicate_webhook_is_suppressed:
-    collaborationSource.includes('hasFeishuTaskBinding({ taskId: task?.id')
-    && collaborationSource.includes('legacy fallback'),
+    (collaborationSource.includes('hasFeishuTaskBinding({ taskId: task?.id') || collaborationQueueSource.includes('hasFeishuTaskBinding({ taskId: task?.id'))
+    && (collaborationSource.includes('legacy fallback') || collaborationQueueSource.includes('legacy fallback')),
   config_credentials_are_masked:
     routesSource.includes('webhook_url: config.webhook_url ? "******" : ""')
     && routesSource.includes('updates.webhook_url !== "******"')

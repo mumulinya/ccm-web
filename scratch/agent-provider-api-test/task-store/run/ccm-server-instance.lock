@@ -1,9 +1,0 @@
-{
-  "schema": "ccm-server-instance-lock-v1",
-  "token": "8ff357ae859e19bb1b3f53b2af5115fa",
-  "pid": 15308,
-  "port": 3099,
-  "hostname": "DESKTOP-MN23N8A",
-  "acquired_at": "2026-07-20T15:46:26.348Z",
-  "data_directory": "C:\\Users\\admin\\.cc-connect\\ccm\\scratch\\agent-provider-api-test\\task-store"
-}

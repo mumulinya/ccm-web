@@ -82,6 +82,7 @@ const credential_store_1 = require("./credential-store");
 const tool_catalog_management_1 = require("../tools/tool-catalog-management");
 const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 const internal_mcp_registry_1 = require("../tools/internal-mcp-registry");
+const runtime_events_1 = require("../system/runtime-events");
 const task_store_1 = require("./task-store");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -605,13 +606,17 @@ function loadTasks() {
     return (0, task_store_1.loadTasksFromSqlite)();
 }
 function saveTasks(tasks) {
-    return (0, task_store_1.saveTasksToSqlite)(tasks);
+    const result = (0, task_store_1.saveTasksToSqlite)(tasks);
+    (0, runtime_events_1.publishRuntimeEvent)("task", "tasks.changed", { count: Array.isArray(tasks) ? tasks.length : 0 });
+    return result;
 }
 function getTaskById(id) {
     return (0, task_store_1.getTaskByIdFromSqlite)(id);
 }
 function updateTaskById(id, patchOrMutator) {
-    return (0, task_store_1.updateTaskByIdInSqlite)(id, patchOrMutator);
+    const result = (0, task_store_1.updateTaskByIdInSqlite)(id, patchOrMutator);
+    (0, runtime_events_1.publishRuntimeEvent)("task", "task.changed", { taskId: id });
+    return result;
 }
 function listTasksByParentId(parentId) {
     return (0, task_store_1.listTasksByParentIdFromSqlite)(parentId);

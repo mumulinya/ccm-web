@@ -1,7 +1,7 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "1.0.10",
-  "description": "cc-web - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
+  "version": "1.0.16",
+  "description": "CCM 本地多 Agent 协作工作区，支持会话记忆、项目执行、代码协作、TestAgent 与持久终端",
   "main": "dist/server.js",
   "bin": {
     "cc-web": "bin/ccm.js",
@@ -29,6 +29,7 @@
     "start": "node dist/server.js",
     "agent-runner": "node dist/agent-runner.js --watch",
     "agent-runner:ps": "powershell -ExecutionPolicy Bypass -File bin/agent-runner.ps1 -Watch",
+    "postinstall": "node bin/postinstall.js",
     "prepack": "npm --prefix .. run build"
   },
   "keywords": [
@@ -48,6 +49,11 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
     "electron": "^35.7.5",
+    "pdf-parse": "^1.1.1",
+    "playwright": "^1.61.1",
     "zod": "^3.25.76"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.2.0-beta.14"
   }
 }

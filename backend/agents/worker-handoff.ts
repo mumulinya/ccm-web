@@ -111,6 +111,10 @@ function renderMemoryConsumptionChallenge(challenge: any) {
   return [
     "[CCM 模型侧记忆加载回执]",
     "- 开始执行任务前，必须调用内部 MCP server `ccm__knowledge_context` 的 `acknowledge_memory_context` 工具。",
+    "- 若工作单涉及业务规范、历史文档、接口约定或明确要求查资料，使用同一 MCP 的 `search_knowledge` 检索；需要完整原文时调用 `read_knowledge_document`。",
+    "- 引用知识库结论时保留 `[source:引用标识]`，不得把未读取或未命中的内容写成事实。",
+    "- 项目内默认开发权限之外的操作，必须通过 `ccm__permission_broker.request_execution_permission` 申请；绑定命令的授权使用 `execute_approved_command`，非命令授权才调用 `consume_execution_permission`。",
+    "- 权限状态不是 approved 时立即停止相关操作。发布、生产部署、强推、密钥、系统提权、项目外路径和破坏性数据库操作必须等待用户审批。",
     `- 工具参数：challenge_id=${challenge.challenge_id}`,
     "- 该调用只确认你已加载本轮受信记忆，不表示你同意或采用其中每一条；后续仍需在结构化回执中分别声明 used/ignored/verified。",
     "- 不得只在最终文本中复述 challenge；缺少真实 MCP tool receipt 时本轮交付不会提交。",

@@ -1,8 +1,9 @@
 <script setup>
 import { computed, inject, onMounted, ref } from 'vue'
 import {
-  ArrowDown, ArrowUp, Clipboard, Columns2, Download, FileDiff, GitCommitHorizontal,
-  History, List, RefreshCw, RotateCcw, Search, ShieldAlert,
+  ArrowDown, ArrowUp, Clipboard, CloudDownload, CloudUpload, Columns2, Download, FileDiff,
+  GitBranch, GitCommitHorizontal, GitPullRequestArrow, History, List, RefreshCw, RotateCcw,
+  Search, ShieldAlert,
 } from '@lucide/vue'
 import { projectsApi } from '../../api/index.js'
 import { confirmDialog, toast } from '../../utils/toast.js'
@@ -18,12 +19,14 @@ const selectedProject = ref('')
 const branch = ref('')
 const files = ref([])
 const summary = ref({})
+const repository = ref({})
 const changeContext = ref({ tasks: [], latestTestAgent: null, attribution: 'none' })
 const selectedFile = ref('')
 const selectedFiles = ref(new Set())
 const showStaged = ref(false)
 const statusLoading = ref(false)
 const statusError = ref('')
+const remoteBusy = ref('')
 
 const diffRaw = ref('')
 const diffHunks = ref([])
@@ -113,6 +116,7 @@ const loadGitStatus = async ({ preserveSelection = false } = {}) => {
     files.value = data.files || []
     branch.value = data.branch || ''
     summary.value = data.summary || {}
+    repository.value = data.repository || {}
     changeContext.value = data.context || { tasks: [], latestTestAgent: null, attribution: 'none' }
     selectedFiles.value = new Set([...selectedFiles.value].filter(file => files.value.some(item => item.path === file)))
     const nextFile = files.value.some(file => file.path === previousFile) ? previousFile : files.value[0]?.path || ''
@@ -122,6 +126,7 @@ const loadGitStatus = async ({ preserveSelection = false } = {}) => {
   } catch (error) {
     files.value = []
     summary.value = {}
+    repository.value = {}
     changeContext.value = { tasks: [], latestTestAgent: null, attribution: 'none' }
     branch.value = ''
     selectedFile.value = ''
@@ -137,6 +142,40 @@ const changeProject = () => {
   selectedFiles.value = new Set()
   showStaged.value = false
   loadGitStatus()
+}
+
+const remoteOperationTitle = operation => {
+  if (!repository.value?.remoteUrl) return '当前项目没有配置 origin 远端仓库'
+  if (operation === 'pull' && repository.value?.dirty) return '请先提交或处理工作区改动，再更新本地分支'
+  if (repository.value?.detached && operation !== 'fetch') return 'detached HEAD 不能更新或推送分支'
+  if (operation === 'fetch') return '拉取 origin 的远端分支和引用，不修改本地文件'
+  if (operation === 'pull') return '使用 fast-forward only 更新当前本地分支'
+  return repository.value?.upstream ? '推送当前分支的本地提交' : '首次推送并设置当前分支的 upstream'
+}
+
+const runRemoteOperation = async operation => {
+  if (!selectedProject.value || remoteBusy.value) return
+  if (operation !== 'fetch') {
+    const description = operation === 'pull'
+      ? `将从 ${repository.value.upstream || `origin/${repository.value.branch || '当前分支'}`} 更新本地代码，仅允许快进合并。`
+      : `将 ${repository.value.branch || '当前分支'} 的本地提交推送到 ${repository.value.upstream || 'origin'}。`
+    const approved = await confirmDialog(`${description}是否继续？`)
+    if (!approved) return
+  }
+  remoteBusy.value = operation
+  try {
+    const data = await fetchJson('/api/git/remote-operation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: selectedProject.value, operation, confirmed: true }),
+    })
+    toast.success(data.message || 'Git 远端操作完成')
+    await loadGitStatus({ preserveSelection: true })
+  } catch (error) {
+    toast.error(error.message || 'Git 远端操作失败')
+  } finally {
+    remoteBusy.value = ''
+  }
 }
 
 const toggleSelectedFile = filePath => {
@@ -286,6 +325,33 @@ onMounted(loadProjects)
       </div>
     </header>
 
+    <section v-if="selectedProject" class="repository-toolbar" aria-label="Git 远端同步">
+      <div class="repository-identity">
+        <span class="repository-icon"><GitBranch :size="16" /></span>
+        <div>
+          <strong>{{ repository.branch || branch || '未知分支' }}</strong>
+          <small v-if="repository.remoteUrl">{{ repository.upstream || '尚未设置 upstream' }} · origin</small>
+          <small v-else>当前项目没有配置 origin 远端仓库</small>
+        </div>
+      </div>
+      <div class="repository-state" aria-label="分支同步状态">
+        <span :class="{ active: repository.behind }">远端领先 <strong>{{ repository.behind || 0 }}</strong></span>
+        <span :class="{ active: repository.ahead }">本地领先 <strong>{{ repository.ahead || 0 }}</strong></span>
+        <span :class="{ warning: repository.dirty }">{{ repository.dirty ? `${repository.changedFiles || 0} 个未提交文件` : '工作区干净' }}</span>
+      </div>
+      <div class="repository-actions">
+        <button :title="remoteOperationTitle('fetch')" :disabled="remoteBusy || !repository.canFetch" @click="runRemoteOperation('fetch')">
+          <CloudDownload :size="15" :class="{ spinning: remoteBusy === 'fetch' }" /><span>拉取远端</span>
+        </button>
+        <button :title="remoteOperationTitle('pull')" :disabled="remoteBusy || !repository.canPull" @click="runRemoteOperation('pull')">
+          <GitPullRequestArrow :size="15" :class="{ spinning: remoteBusy === 'pull' }" /><span>更新本地</span>
+        </button>
+        <button class="push-button" :title="remoteOperationTitle('push')" :disabled="remoteBusy || !repository.canPush" @click="runRemoteOperation('push')">
+          <CloudUpload :size="15" :class="{ spinning: remoteBusy === 'push' }" /><span>推送提交</span>
+        </button>
+      </div>
+    </section>
+
     <CodeChangeSummary :summary="summary" :context="changeContext" :branch="branch" :loading="statusLoading" @open-replay="openReplay" />
     <div v-if="statusError" class="status-error"><ShieldAlert :size="16" />{{ statusError }}</div>
 
@@ -320,8 +386,12 @@ onMounted(loadProjects)
 .page-toolbar { min-height:52px; padding:8px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--border-color,rgba(15,23,42,.09)); background:var(--bg-primary,#fff); }.toolbar-primary,.toolbar-actions,.diff-tools { display:flex; align-items:center; gap:7px; }.project-select { display:flex;align-items:center;gap:7px }.project-select span { font-size:11px;color:var(--text-muted) }.project-select select { min-width:160px;height:32px;padding:0 9px;border:1px solid var(--border-color,rgba(15,23,42,.12));border-radius:6px;background:var(--bg-primary,#fff);color:var(--text-primary);font-size:12px;outline:0 }.project-select select:focus { border-color:#3b82f6 }
 .page-toolbar button,.diff-toolbar button { min-height:30px;padding:0 9px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border-color,rgba(15,23,42,.1));border-radius:6px;background:transparent;color:var(--text-secondary);font-size:11px;cursor:pointer;white-space:nowrap }.page-toolbar button:hover,.diff-toolbar button:hover { background:rgba(37,99,235,.06);color:#2563eb }.page-toolbar button:disabled { opacity:.42;cursor:not-allowed }.page-toolbar .commit-button { border-color:#2563eb;background:#2563eb;color:#fff }.commit-button strong { min-width:17px;padding:1px 4px;border-radius:4px;background:rgba(255,255,255,.2);font-size:10px }
 .area-switch { display:flex;padding:2px;border:1px solid var(--border-color,rgba(15,23,42,.1));border-radius:6px }.area-switch button { min-height:26px;border:0;border-radius:4px }.area-switch button.active { background:rgba(37,99,235,.1);color:#1d4ed8 }
+.repository-toolbar { min-height:58px;padding:9px 16px;display:grid;grid-template-columns:minmax(220px,1fr) auto auto;align-items:center;gap:18px;border-bottom:1px solid var(--border-color,rgba(15,23,42,.09));background:color-mix(in srgb,var(--bg-secondary,#f8fafc) 62%,transparent) }
+.repository-identity { min-width:0;display:flex;align-items:center;gap:9px }.repository-icon { width:32px;height:32px;flex:0 0 auto;display:grid;place-items:center;border:1px solid color-mix(in srgb,#2563eb 22%,transparent);border-radius:6px;background:color-mix(in srgb,#2563eb 8%,transparent);color:#2563eb }.repository-identity>div { min-width:0 }.repository-identity strong,.repository-identity small { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }.repository-identity strong { color:var(--text-primary);font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace }.repository-identity small { margin-top:3px;color:var(--text-muted);font-size:10px }
+.repository-state { display:flex;align-items:center;gap:7px }.repository-state>span { min-height:25px;display:inline-flex;align-items:center;gap:4px;padding:0 8px;border:1px solid var(--border-color,rgba(15,23,42,.09));border-radius:5px;color:var(--text-muted);font-size:10px;white-space:nowrap }.repository-state strong { color:var(--text-secondary);font-size:11px }.repository-state .active { border-color:color-mix(in srgb,#2563eb 22%,transparent);background:color-mix(in srgb,#2563eb 6%,transparent);color:#2563eb }.repository-state .warning { border-color:color-mix(in srgb,#d97706 28%,transparent);background:color-mix(in srgb,#f59e0b 7%,transparent);color:#b45309 }
+.repository-actions { display:flex;align-items:center;gap:6px }.repository-actions button { min-height:32px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border-color,rgba(15,23,42,.11));border-radius:6px;background:var(--surface,var(--bg-primary,#fff));color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap }.repository-actions button:hover:not(:disabled) { border-color:color-mix(in srgb,#2563eb 30%,transparent);background:color-mix(in srgb,#2563eb 6%,transparent);color:#2563eb }.repository-actions .push-button { border-color:color-mix(in srgb,#2563eb 28%,transparent);color:#2563eb }.repository-actions button:disabled { opacity:.42;cursor:not-allowed }
 .changes-layout { flex:1;min-height:0;display:flex;overflow:hidden }.diff-pane { flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden }.diff-toolbar { min-height:46px;padding:7px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--border-color,rgba(15,23,42,.09));background:color-mix(in srgb,var(--bg-primary,#fff) 97%,#f1f5f9) }.file-title { min-width:0;display:flex;align-items:center;gap:7px }.file-title strong { max-width:min(420px,35vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600 }.line-stats { display:flex;gap:5px;font:10px ui-monospace,monospace }.line-stats b { color:#047857 }.line-stats i { color:#b91c1c;font-style:normal }.diff-search { width:150px;height:29px;padding:0 7px;display:flex;align-items:center;gap:5px;border:1px solid var(--border-color,rgba(15,23,42,.1));border-radius:6px;color:var(--text-muted) }.diff-search input { min-width:0;width:100%;border:0;outline:0;background:transparent;color:var(--text-primary);font-size:11px }.diff-toolbar button { width:30px;padding:0 }.diff-toolbar button.active { border-color:rgba(37,99,235,.35);background:rgba(37,99,235,.1);color:#2563eb }.diff-toolbar .danger-action { color:#b91c1c }.status-error { padding:9px 16px;display:flex;align-items:center;gap:7px;background:#fef2f2;color:#b91c1c;font-size:12px }
 .spinning { animation:spin .8s linear infinite }@keyframes spin{to{transform:rotate(360deg)}}
-@media(max-width:1050px){.diff-search{display:none}.file-title strong{max-width:220px}.change-summary+:deep(*){min-width:0}}
-@media(max-width:768px){.page-toolbar{align-items:stretch;flex-direction:column;padding:8px 10px}.toolbar-primary,.toolbar-actions{width:100%}.project-select{flex:1}.project-select>span{display:none}.project-select select{width:100%;min-width:0}.toolbar-actions{justify-content:flex-end}.changes-layout{overflow:auto;flex-direction:column}.diff-pane{min-height:520px;overflow:visible}.diff-toolbar{position:sticky;top:0;z-index:5;align-items:flex-start;flex-direction:column}.diff-tools{width:100%;overflow-x:auto;padding-bottom:2px}.file-title strong{max-width:calc(100vw - 130px)}.diff-toolbar button[title="左右对比"]{display:none}.page-toolbar button span{display:none}.page-toolbar .commit-button span{display:inline}.code-changes-workbench{overflow:auto}.changes-layout{flex:none}.toolbar-primary>.page-toolbar button{width:32px}}
+@media(max-width:1180px){.repository-toolbar{grid-template-columns:minmax(180px,1fr) auto}.repository-state{display:none}.diff-search{display:none}.file-title strong{max-width:220px}.change-summary+:deep(*){min-width:0}}
+@media(max-width:768px){.page-toolbar{align-items:stretch;flex-direction:column;padding:8px 10px}.toolbar-primary,.toolbar-actions{width:100%}.project-select{flex:1}.project-select>span{display:none}.project-select select{width:100%;min-width:0}.toolbar-actions{justify-content:flex-end}.repository-toolbar{grid-template-columns:minmax(0,1fr);gap:8px;padding:9px 10px}.repository-actions{min-width:0;width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.repository-actions button{min-width:0;width:100%;padding:0 5px;white-space:nowrap}.repository-actions button span{font-size:10px}.changes-layout{overflow:auto;flex-direction:column}.diff-pane{min-height:520px;overflow:visible}.diff-toolbar{position:sticky;top:0;z-index:5;align-items:flex-start;flex-direction:column}.diff-tools{width:100%;overflow-x:auto;padding-bottom:2px}.file-title strong{max-width:calc(100vw - 130px)}.diff-toolbar button[title="左右对比"]{display:none}.page-toolbar button span{display:none}.page-toolbar .commit-button span{display:inline}.code-changes-workbench{overflow:auto}.changes-layout{flex:none}.toolbar-primary>.page-toolbar button{width:32px}}
 </style>

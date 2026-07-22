@@ -39,6 +39,7 @@ const global_agent_run_projection_1 = require("../../agents/global/global-agent-
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const source_ingestion_1 = require("../requirements/source-ingestion");
+const knowledge_access_1 = require("../knowledge/knowledge-access");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 function createGlobalAgentAgenticRuntime(deps) {
     const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
@@ -78,6 +79,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         "cron_jobs",
         "tools",
         "global_memory",
+        "global_knowledge",
         "session_continuity",
         "memory_context_boundary",
         "context_source_manifest",
@@ -126,7 +128,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 issues.push("global_context_group_task_payload_present");
         }
         const manifestEntries = Array.isArray(context?.context_source_manifest?.entries) ? context.context_source_manifest.entries : [];
-        const expectedSources = ["global_agent_memory", "global_agent_session", "routing_directory", "global_task_state", "runtime_capability_directory"];
+        const expectedSources = ["global_agent_memory", "global_agent_session", "global_knowledge", "routing_directory", "global_task_state", "runtime_capability_directory"];
         if (expectedSources.some(source => !manifestEntries.some((entry) => entry.source === source && entry.allowed === true)))
             issues.push("global_context_source_manifest_incomplete");
         if (manifestEntries.some((entry) => !expectedSources.includes(String(entry?.source || ""))))
@@ -226,6 +228,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 limit: 7,
                 recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
             }) : "",
+            global_knowledge: options.knowledgeContext || options.knowledge_context || "",
             session_continuity: sessionId && options.includeSessionContinuity !== false && options.include_session_continuity !== false
                 ? buildGlobalAgentSessionContinuation(sessionId)
                 : null,
@@ -243,6 +246,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 entries: [
                     { source: "global_agent_memory", allowed: true },
                     { source: "global_agent_session", allowed: true },
+                    { source: "global_knowledge", allowed: true },
                     { source: "routing_directory", allowed: true },
                     { source: "global_task_state", allowed: true },
                     { source: "runtime_capability_directory", allowed: true },
@@ -264,6 +268,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             scope: "global",
             sessionId,
             system: messages.filter(message => message.role === "system"),
+            tools: GLOBAL_AGENT_TOOL_SPECS,
             recentMessages: messages.filter(message => message.role !== "system"),
         });
     }
@@ -527,7 +532,14 @@ function createGlobalAgentAgenticRuntime(deps) {
                 observation = { success: true, jobs: buildAgenticContext().cron_jobs };
             }
             else if (name === "query_knowledge") {
-                observation = { success: true, query: args.query, content: queryKnowledgeBase(String(args.query || "")) || "未检索到相关知识" };
+                const knowledge = await (0, knowledge_access_1.searchAgentKnowledge)(String(args.query || ""), { role: "global-agent" }, { limit: 6 });
+                observation = {
+                    success: true,
+                    query: args.query,
+                    content: knowledge.context || "未检索到相关知识",
+                    citations: knowledge.citations,
+                    retrieval: { embedding: knowledge.embeddingMode, fallback: knowledge.fallback, error: knowledge.embeddingError },
+                };
             }
             else if (name === "query_global_memory") {
                 observation = { success: true, query: args.query, ...recallGlobalAgentMemory(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
@@ -920,7 +932,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 }
             },
             prepareModelMessages: (messages, run) => prepareGlobalProviderMessages(messages, run, runtime),
-            getContext: (run) => buildAgenticContext(run.user_message, run.session_id),
+            getContext: (run) => buildAgenticContext(run.user_message, run.session_id, { knowledgeContext: input.knowledgeContext || "" }),
             verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
             executeTool: (name, args, run) => {
                 attachGlobalRunRequirementSources(run, input.sourceIngestion);
@@ -938,14 +950,22 @@ function createGlobalAgentAgenticRuntime(deps) {
         return runtime;
     }
     async function runAgenticGlobalRequest(baseUrl, ctx, input) {
-        const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion });
         const sessionId = input.sessionId || "default";
+        let globalKnowledgeContext = "";
+        try {
+            globalKnowledgeContext = (await (0, knowledge_access_1.searchAgentKnowledge)(input.message, { role: "global-agent" }, { limit: 5, maxContextChars: 14000 })).context;
+        }
+        catch (error) {
+            console.warn(`[全局知识检索] 已使用无知识上下文继续：${error?.message || error}`);
+        }
+        const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
         if (!/feishu/i.test(input.source || "")) {
             ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
         }
         const compactionFixedContext = buildAgenticContext(input.message, sessionId, {
             includeSessionContinuity: false,
             recordMemoryMetric: false,
+            knowledgeContext: globalKnowledgeContext,
         });
         const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
             reason: "auto_model",

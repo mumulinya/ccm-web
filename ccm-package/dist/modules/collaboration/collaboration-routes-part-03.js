@@ -4,20 +4,39 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleCollaborationApiTaskLifecycleRoutes = handleCollaborationApiTaskLifecycleRoutes;
 const utils_1 = require("../../core/utils");
+const task_attachments_1 = require("../../system/task-attachments");
 const db_1 = require("../../core/db");
 const logs_1 = require("./logs");
 const work_items_1 = require("../../agents/work-items");
 const collaboration_1 = require("./collaboration");
 function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/tasks/update" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        const handleUpdate = async (payload, files = [], multipart = false) => {
             try {
-                const { id, ...updates } = JSON.parse(body);
+                const { id, retained_attachment_ids, retainedAttachmentIds, ...incomingUpdates } = payload || {};
+                let updates = incomingUpdates;
                 const current = (0, db_1.loadTasks)().find(t => t.id === id);
                 if (!current)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (multipart) {
+                    const attachments = await (0, task_attachments_1.buildTaskAttachmentMutation)({
+                        files,
+                        currentAttachments: current.source_attachments,
+                        currentContexts: current.source_attachment_contexts,
+                        retainedIds: retained_attachment_ids === undefined && retainedAttachmentIds === undefined
+                            ? undefined
+                            : (0, task_attachments_1.parseRetainedAttachmentIds)(retained_attachment_ids ?? retainedAttachmentIds),
+                        userText: [updates.title || current.title, updates.description || current.description].filter(Boolean).join("\n"),
+                    });
+                    updates = {
+                        ...updates,
+                        source_attachments: attachments.attachments,
+                        source_attachment_contexts: attachments.contexts,
+                        source_attachment_context: attachments.context,
+                        source_attachment_warnings: attachments.warnings,
+                        source_ingestion: attachments.technical || current.source_ingestion || null,
+                    };
+                }
                 const validationError = (0, collaboration_1.validateTaskManualStatusUpdate)(current, updates);
                 if (validationError)
                     return (0, utils_1.sendJson)(res, { error: validationError }, 409);
@@ -26,6 +45,29 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
                 (0, collaboration_1.updateGroupTaskInlineStatus)(task, task.status, task.status_detail || "任务状态已更新");
                 (0, utils_1.sendJson)(res, { success: true, task });
+            }
+            catch (e) {
+                (0, task_attachments_1.removeUploadedFiles)(files);
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        };
+        const contentType = String(req.headers["content-type"] || "");
+        if (contentType.includes("multipart/form-data")) {
+            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
+                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
+                if (!boundary)
+                    throw new Error("无效的任务附件请求");
+                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+                const payload = fields.payload ? JSON.parse(fields.payload) : fields;
+                return handleUpdate(payload, files || [], true);
+            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+            return true;
+        }
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                void handleUpdate(body ? JSON.parse(body) : {});
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

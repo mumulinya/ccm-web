@@ -112,6 +112,28 @@ export declare class ToolManager {
             toolName: string;
         }[];
     };
+    getScopedToolCatalog(scope?: ToolScope): {
+        tools: {
+            name: string;
+            canonicalName: string;
+            description: string;
+            server: string;
+            inputSchema: any;
+            annotations: {
+                [key: string]: any;
+                readOnlyHint?: boolean;
+                destructiveHint?: boolean;
+                idempotentHint?: boolean;
+                openWorldHint?: boolean;
+            };
+        }[];
+        skills: {
+            name: string;
+            description: string;
+            contentHash: string;
+            toolName: string;
+        }[];
+    };
     discoverSkills(scope?: ToolScope): {
         name: string;
         description: string;
@@ -158,6 +180,13 @@ export declare class ToolManager {
             description: string;
             server: string;
             schema: any;
+            annotations: {
+                [key: string]: any;
+                readOnlyHint?: boolean;
+                destructiveHint?: boolean;
+                idempotentHint?: boolean;
+                openWorldHint?: boolean;
+            };
         }[];
         skills: SkillDef[];
         skillTools: {

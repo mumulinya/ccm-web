@@ -30,6 +30,14 @@ const prepare = async page => {
     const location = message.location()?.url || ''
     report.errors.push(`console: ${message.text()}${location ? ` (${location})` : ''}`)
   })
+  await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
+  await page.route('**/api/auth/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, authenticated: true, user: { username: 'selftest' } }) }))
+  await page.route('**/api/pets/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, agents: [] }) }))
+  await page.route('**/api/status/stream**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
+  await page.route('**/api/usability/workbench/stream**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
+  await page.route('**/api/usability/workbench', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, snapshot: {} }) }))
+  await page.route('**/api/music/remote-command', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, commands: [] }) }))
+  await page.route('**/api/conversation-turns**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, turns: [] }) }))
   await page.route('**/api/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(projectsFixture) }))
   await page.route('**/api/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: [
     { type: 'codex', name: 'Codex CLI', enabled: true, ready: true },
@@ -60,6 +68,13 @@ const prepare = async page => {
   await page.route('**/api/projects/ccm-demo/sessions/s1', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detailFixture) }))
   await page.route('**/api/projects/archived', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, projects: [{ name: 'old-demo', archived_at: '2026-07-13T08:00:00.000Z' }] }) }))
   await page.route('**/api/projects/lifecycle-audit**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, records: [] }) }))
+  await page.route('**/api/filesystem/drives', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, home: 'C:\\Users\\demo', drives: [{ name: 'C', path: 'C:\\' }, { name: 'D', path: 'D:\\' }] }) }))
+  await page.route('**/api/filesystem/browse**', route => {
+    const requested = new URL(route.request().url()).searchParams.get('dir') || 'C:\\Users\\demo'
+    const isNewFolder = requested.endsWith('client-workspace')
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, path: requested, items: isNewFolder ? [] : [{ name: 'existing-project', path: `${requested}\\existing-project`, isDirectory: true, isFile: false }, { name: 'notes.txt', path: `${requested}\\notes.txt`, isDirectory: false, isFile: true }] }) })
+  })
+  await page.route('**/api/filesystem/directory', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, name: 'client-workspace', parent: 'C:\\Users\\demo', path: 'C:\\Users\\demo\\client-workspace' }) }))
   await page.route('**/api/memory-center/scope?**', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -164,6 +179,18 @@ try {
   await desktop.locator('.project-form-modal').waitFor({ state: 'detached' })
 
   await desktop.getByRole('button', { name: '新建项目', exact: true }).click()
+  await desktop.getByRole('button', { name: '浏览', exact: true }).click()
+  await desktop.locator('.folder-browser').waitFor()
+  assert.equal(await desktop.getByText('用户目录', { exact: true }).isVisible(), true)
+  assert.equal(await desktop.getByText('existing-project', { exact: true }).isVisible(), true)
+  await desktop.getByRole('button', { name: '新建文件夹', exact: true }).click()
+  await desktop.getByPlaceholder('输入文件夹名称').fill('client-workspace')
+  await desktop.getByRole('button', { name: '创建', exact: true }).click()
+  await desktop.getByText('这是一个空目录', { exact: true }).waitFor()
+  assert.equal(await desktop.getByText('C:\\Users\\demo\\client-workspace', { exact: true }).isVisible(), true)
+  report.checks.push({ name: 'project folder browser uses an office-style directory layout and creates a folder in place', pass: true })
+  await capture(desktop, 'desktop-project-folder-browser')
+  await desktop.getByRole('button', { name: '使用此目录', exact: true }).click()
   await desktop.getByRole('button', { name: 'GitHub 仓库', exact: true }).click()
   assert.equal(await desktop.getByPlaceholder('https://github.com/owner/repository').count(), 1)
   assert.equal(await desktop.getByText('克隆目标目录', { exact: true }).count(), 1)

@@ -559,6 +559,38 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   }
 
   // === 文件浏览器 API ===
+  if (pathname === "/api/filesystem/directory" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => {
+      body += String(chunk || "");
+      if (Buffer.byteLength(body, "utf-8") > 16 * 1024) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const parentInput = String(payload.parent || "").trim();
+        const name = String(payload.name || "").trim();
+        const reserved = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+        if (!parentInput) return sendJson(res, { success: false, error: "缺少当前目录" }, 400);
+        const parent = path.resolve(parentInput);
+        if (!path.isAbsolute(parent) || !fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) {
+          return sendJson(res, { success: false, error: "当前目录不存在或不可用" }, 400);
+        }
+        if (!name || name.length > 120 || name === "." || name === ".." || /[<>:\"/\\|?*\x00-\x1F]/.test(name) || /[. ]$/.test(name) || reserved.test(name)) {
+          return sendJson(res, { success: false, error: "文件夹名称无效" }, 400);
+        }
+        const target = path.resolve(parent, name);
+        if (path.dirname(target) !== parent) return sendJson(res, { success: false, error: "文件夹必须创建在当前目录下" }, 400);
+        if (fs.existsSync(target)) return sendJson(res, { success: false, error: "同名文件或文件夹已经存在" }, 409);
+        fs.mkdirSync(target, { recursive: false });
+        sendJson(res, { success: true, path: target, parent, name });
+      } catch (e: any) {
+        sendJson(res, { success: false, error: e.message || "创建文件夹失败" }, 400);
+      }
+    });
+    return true;
+  }
+
   if (pathname === "/api/filesystem/browse" && req.method === "GET") {
     const dir = parsed.query.dir || os.homedir();
     try {
@@ -653,4 +685,3 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
 
   return false;
 }
-

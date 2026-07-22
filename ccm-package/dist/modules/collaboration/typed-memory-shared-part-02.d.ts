@@ -1,4 +1,4 @@
-export declare function groupTypedMemoryPriority(type: any): 100 | 300 | 200 | 400;
+export declare function groupTypedMemoryPriority(type: any): 200 | 100 | 300 | 400;
 export declare function normalizeFileKey(file: string): string;
 export declare function isPathInside(baseDir: string, file: string): boolean;
 export declare function stripIncludePath(value: string): string;

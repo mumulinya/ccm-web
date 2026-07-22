@@ -1,13 +1,27 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
 const terminalSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'components', 'tools', 'Terminal.vue'), 'utf8')
 const terminalModuleUrl = pathToFileURL(path.join(root, 'ccm-package', 'dist', 'modules', 'tools', 'terminal.js')).href
-const { runTerminalModuleSelfTest } = await import(terminalModuleUrl)
+const { handleTerminalApi, runTerminalModuleSelfTest } = await import(terminalModuleUrl)
+let localServer = null
+const baseUrl = process.env.CCM_BASE_URL
+  ? String(process.env.CCM_BASE_URL).replace(/\/+$/, '')
+  : await new Promise((resolve, reject) => {
+      localServer = http.createServer((req, res) => {
+        const pathname = new URL(req.url || '/', 'http://localhost').pathname
+        if (!handleTerminalApi(pathname, req, res)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Not Found' }))
+        }
+      })
+      localServer.once('error', reject)
+      localServer.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${localServer.address().port}`))
+    })
 
 const jsonRequest = async (pathname, method = 'GET', body) => {
   const response = await fetch(`${baseUrl}${pathname}`, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined })
@@ -44,7 +58,8 @@ const original = await jsonRequest('/api/terminal/workspace')
 try {
   assert.equal(runTerminalModuleSelfTest().success, true)
   assert.match(terminalSource, /confirmDialog/)
-  assert.match(terminalSource, /terminalApi\.stop/)
+  assert.match(terminalSource, /terminalApi\.deleteSession/)
+  assert.match(terminalSource, /TerminalEmulatorPane/)
   assert.match(terminalSource, /terminalApi\.saveWorkspace/)
 
   const fixture = {
@@ -83,4 +98,5 @@ try {
   console.log(JSON.stringify({ success: true, checks: ['workspace persistence', 'streamed stdout', 'exit code and duration', 'running command stop', 'frontend safety and persistence controls'] }, null, 2))
 } finally {
   await jsonRequest('/api/terminal/workspace', 'PUT', { workspace: original.workspace || { sessions: [] } })
+  if (localServer) await new Promise(resolve => localServer.close(resolve))
 }

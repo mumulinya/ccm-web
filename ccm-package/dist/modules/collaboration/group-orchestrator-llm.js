@@ -1,22 +1,64 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mergeLlmTokenUsage = mergeLlmTokenUsage;
+exports.isGroupMainReadOnlyMcpTool = isGroupMainReadOnlyMcpTool;
+exports.buildGroupMainAgentToolContext = buildGroupMainAgentToolContext;
+exports.normalizeGroupMainToolRequests = normalizeGroupMainToolRequests;
+exports.executeGroupMainAgentToolRequests = executeGroupMainAgentToolRequests;
 exports.attachLlmTokenUsage = attachLlmTokenUsage;
 exports.runLlmCoordinatorSummary = runLlmCoordinatorSummary;
 exports.runLlmCoordinatorReview = runLlmCoordinatorReview;
 exports.decomposeRequirementWithCodedCoordinator = decomposeRequirementWithCodedCoordinator;
 exports.buildLlmCoordinatorMessages = buildLlmCoordinatorMessages;
+exports.buildLlmCoordinatorContextComponents = buildLlmCoordinatorContextComponents;
 exports.normalizeDocumentFindings = normalizeDocumentFindings;
 exports.enrichTaskWithDocumentFindings = enrichTaskWithDocumentFindings;
 exports.sanitizeLlmTargets = sanitizeLlmTargets;
 exports.normalizeLlmAnalysis = normalizeLlmAnalysis;
 exports.buildCoordinatorResultFromAnalysis = buildCoordinatorResultFromAnalysis;
 exports.runLlmGroupOrchestrator = runLlmGroupOrchestrator;
+const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client");
 const context_budget_1 = require("../../system/context-budget");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const role_skills_1 = require("../../skills/role-skills");
+const tool_manager_1 = require("../../tools/tool-manager");
+const tool_authorization_1 = require("../../tools/tool-authorization");
+const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const workflow_decision_1 = require("../../agents/workflow-decision");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const group_orchestrator_config_1 = require("./group-orchestrator-config");
@@ -35,6 +77,127 @@ function mergeLlmTokenUsage(...values) {
     const cacheCreationInputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.cacheCreationInputTokens || value.cache_creation_input_tokens || 0) || 0)), 0);
     const cacheReadInputTokens = usages.reduce((total, value) => total + Math.max(0, Math.floor(Number(value.cacheReadInputTokens || value.cache_read_input_tokens || 0) || 0)), 0);
     return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, reported: true, directInputTokens, cacheCreationInputTokens, cacheReadInputTokens };
+}
+function uniqueText(values) {
+    return Array.from(new Set(values.map(value => String(value || "").trim()).filter(Boolean)));
+}
+function isGroupMainReadOnlyMcpTool(tool) {
+    const annotations = tool?.annotations && typeof tool.annotations === "object" ? tool.annotations : {};
+    if (annotations.destructiveHint === true || annotations.readOnlyHint === false)
+        return false;
+    const name = String(tool?.name || "").trim();
+    if (!name)
+        return false;
+    if (/(?:create|add|update|edit|set|write|delete|remove|clear|send|post|publish|upload|move|copy|rename|execute|run|start|stop|restart|deploy|install|uninstall|merge|commit|push|apply|approve|reject|cancel|archive|restore|trigger|invoke|dispatch|assign|grant|revoke|login|logout|authenticate|pay|refund)/i.test(name))
+        return false;
+    if (annotations.readOnlyHint === true)
+        return true;
+    return /^(?:get|list|read|search|query|find|fetch|lookup|inspect|check|status|describe|resolve|preview|view|show|count|validate|verify|compare|diff|history|manifest)/i.test(name);
+}
+function buildGroupMainAgentToolContext(input) {
+    const group = (0, group_orchestrator_routing_1.normalizeGroupOrchestrator)(input.group);
+    const selectedRoleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, {
+        source: input.source || "",
+        phase: "planning",
+    });
+    const configured = (0, tool_authorization_1.normalizeToolAuthorization)(group?.tools || {});
+    const scope = {
+        mcp: configured.mcp,
+        skill: uniqueText([...configured.skill, ...selectedRoleSkills.names]),
+        auditContext: {
+            runtime: "group-main-agent",
+            project: (0, group_orchestrator_routing_1.getCoordinatorMember)(group)?.project || "",
+            groupId: String(group?.id || ""),
+            source: String(input.source || "group-main-planning"),
+        },
+    };
+    const scoped = tool_manager_1.toolManager.getScopedToolCatalog(scope);
+    const readOnlyTools = scoped.tools.filter(isGroupMainReadOnlyMcpTool);
+    const rejectedTools = scoped.tools.filter(tool => !isGroupMainReadOnlyMcpTool(tool));
+    const toolAudit = tool_manager_1.toolManager.buildScopeAudit(scope);
+    const mcpPrompt = readOnlyTools.length > 0
+        ? [
+            "群聊已授权给主 Agent 的只读 MCP 工具（仅可按 canonicalName 请求）：",
+            ...readOnlyTools.map(tool => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+        ].join("\n")
+        : "";
+    const skillPrompt = scoped.skills.length > 0
+        ? [
+            "群聊已授权给主 Agent 的 Skill：",
+            ...scoped.skills.map(skill => `- ${skill.name}: ${skill.description || "未提供描述"}; hash=${skill.contentHash || ""}`),
+        ].join("\n")
+        : "";
+    const unavailable = [
+        ...(Array.isArray(toolAudit?.missing_mcp_servers) ? toolAudit.missing_mcp_servers : []),
+        ...(Array.isArray(toolAudit?.missing_mcp_tools) ? toolAudit.missing_mcp_tools : []),
+        ...(Array.isArray(toolAudit?.missing_skills) ? toolAudit.missing_skills : []),
+    ];
+    const policyPrompt = (mcpPrompt || skillPrompt || rejectedTools.length || unavailable.length)
+        ? [
+            mcpPrompt,
+            skillPrompt,
+            rejectedTools.length ? `以下已配置 MCP 因可能产生写入或副作用，不向主 Agent 开放：${rejectedTools.map(tool => tool.canonicalName).join(", ")}` : "",
+            unavailable.length ? "部分已配置工具当前不可用；不要假装已经调用。" : "",
+            "如确实需要工具数据，在 JSON 的 toolRequests 中请求。MCP 仅限上面的只读 canonicalName；Skill 只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果会由 CCM 执行后重新交给你规划。不要把工具请求同时当作已完成事实。",
+        ].filter(Boolean).join("\n\n")
+        : "";
+    return {
+        scope,
+        configured,
+        selectedRoleSkills,
+        catalog: { mcp: readOnlyTools, skills: scoped.skills, rejectedMcp: rejectedTools },
+        toolAudit,
+        mcpPrompt,
+        skillPrompt,
+        policyPrompt,
+    };
+}
+function normalizeGroupMainToolRequests(value) {
+    const rows = Array.isArray(value) ? value : [];
+    const seen = new Set();
+    const result = [];
+    for (const row of rows) {
+        const name = String(row?.name || "").trim();
+        if (!name)
+            continue;
+        const args = row?.arguments && typeof row.arguments === "object" ? row.arguments : {};
+        const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ name, args })).digest("hex");
+        if (seen.has(fingerprint))
+            continue;
+        seen.add(fingerprint);
+        result.push({ name, arguments: args, reason: (0, group_orchestrator_prompts_1.compactText)(row?.reason || "", 240) });
+        if (result.length >= 2)
+            break;
+    }
+    return result;
+}
+async function executeGroupMainAgentToolRequests(input) {
+    const allowedMcp = new Set(input.toolContext.catalog.mcp.map(tool => tool.canonicalName));
+    const allowedSkills = new Set(input.toolContext.catalog.skills.map(skill => skill.name));
+    const execute = input.executeToolCall || ((name, args, scope) => tool_manager_1.toolManager.executeToolCall(name, args, scope));
+    const results = [];
+    for (const request of input.requests.slice(0, 2)) {
+        const skillName = request.name === "invoke_skill" ? String(request.arguments?.name || "").trim() : "";
+        const authorized = skillName ? allowedSkills.has(skillName) : allowedMcp.has(request.name);
+        if (!authorized) {
+            results.push({ name: request.name, ok: false, error: "GROUP_MAIN_TOOL_NOT_AUTHORIZED", reason: request.reason });
+            continue;
+        }
+        const output = String(await execute(request.name, request.arguments, input.toolContext.scope));
+        const outputTokens = (0, context_budget_1.estimateTextTokens)(output);
+        if (outputTokens > 8_000) {
+            results.push({ name: request.name, ok: false, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET", outputTokens, reason: request.reason });
+            continue;
+        }
+        results.push({
+            name: request.name,
+            ok: !/^\[(?:错误|工具错误)\]/.test(output),
+            output,
+            outputTokens,
+            reason: request.reason,
+        });
+    }
+    return results;
 }
 function attachLlmTokenUsage(error, usage) {
     if (error && usage)
@@ -379,6 +542,14 @@ function buildLlmCoordinatorMessages(input) {
     const extraInstructionsPart = input.extraInstructions ? `\n\n${input.extraInstructions}` : "";
     const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, { source: input.source || "", phase: "planning" });
     const roleSkillsPart = roleSkills.prompt ? `\n\n${roleSkills.prompt}` : "";
+    const mainAgentTools = buildGroupMainAgentToolContext(input);
+    const mainAgentToolsPart = mainAgentTools.policyPrompt ? `\n\n${mainAgentTools.policyPrompt}` : "";
+    const toolResults = Array.isArray(input.mainAgentToolResults)
+        ? input.mainAgentToolResults
+        : Array.isArray(input.main_agent_tool_results) ? input.main_agent_tool_results : [];
+    const toolResultsPart = toolResults.length
+        ? `\n\nCCM 已执行的群聊主 Agent 工具结果（只能据此得出结果中可验证的事实；不要重复相同请求）：\n${JSON.stringify(toolResults)}`
+        : "";
     const system = `你是 CCM 群聊的主 Agent（工作协调者）。
 
 ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
@@ -421,10 +592,15 @@ CCM 主 Agent 动作边界（必须按动作风险做决定）：
 - 文档中的关键契约、业务规则、来源和验收项必须进入 documentFindings 及相关工作单；缺失内容不得编造。
 - 子 Agent 默认不直接读取群聊知识库，执行所需摘要和来源必须由主 Agent 写入自包含工作单。
 
+权限审批边界：
+- targets[].permissionPlan 必须写明该 Worker 完成任务预计需要的额外权限；项目内读取、编辑、构建、测试和普通依赖安装不需要列入。
+- 群聊主 Agent只能审批目标项目内、可恢复、完成当前任务确有必要的权限。
+- 发布、生产部署、强推、密钥、系统提权、项目外路径、破坏性数据库操作和无法判断的事项必须列入 userApprovalRequired，不能提前授权。
+
 你必须只返回 JSON 对象，不要 Markdown，不要解释。
 
 允许分派的项目 Agent 只有：
-${(0, group_orchestrator_coded_1.buildAllowedProjectBrief)(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}${roleSkillsPart}
+${(0, group_orchestrator_coded_1.buildAllowedProjectBrief)(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}${roleSkillsPart}${mainAgentToolsPart}
 
 JSON 格式：
 {
@@ -468,6 +644,13 @@ JSON 格式：
     "dependencyRationale": ["每条跨项目依赖为什么存在"],
     "replanTriggers": ["出现什么事实变化或失败时必须重规划"]
   },
+  "toolRequests": [
+    {
+      "name": "只读 MCP 的 canonicalName，或 invoke_skill",
+      "arguments": { "工具参数": "值；Skill 使用 name 和 input" },
+      "reason": "为什么当前规划必须读取这项信息"
+    }
+  ],
   "shouldDelegate": true,
   "executionOrder": "parallel | sequential | backend_first",
   "targets": [
@@ -475,7 +658,8 @@ JSON 格式：
       "project": "必须是允许分派的项目 Agent 名称",
       "task": "给这个项目 Agent 的可执行工作单，包含背景、引用的文档/附件、负责的接口/字段/业务规则、边界、交付物、需要检查/修改的范围、风险和验证要求",
       "reason": "为什么分给它",
-      "dependsOn": "如果依赖其他 Agent 先完成，填其项目名；否则空字符串"
+      "dependsOn": "如果依赖其他 Agent 先完成，填其项目名；否则空字符串",
+      "permissionPlan": { "requestedOperations": ["预计需要主 Agent 审批的额外操作"], "userApprovalRequired": ["必须由用户审批的操作"] }
     }
   ],
   "friendlyResponse": "给用户看的友好自然语言回复，说明你的判断和安排，不要包含内部分析结构",
@@ -487,13 +671,27 @@ JSON 格式：
 ${input.context || "无"}
 
 用户最新消息：
-${input.message}
+${input.message}${toolResultsPart}
 
 请输出 JSON。`;
     return [
         { role: "system", content: system },
         { role: "user", content: user },
     ];
+}
+function buildLlmCoordinatorContextComponents(input) {
+    const group = (0, group_orchestrator_routing_1.normalizeGroupOrchestrator)(input.group);
+    const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, { source: input.source || "", phase: "planning" });
+    const mainAgentTools = buildGroupMainAgentToolContext(input);
+    return {
+        rules: [workflow_decision_1.WORKFLOW_DECISION_GUIDANCE, input.extraInstructions || ""].filter(Boolean).join("\n\n"),
+        skills: [roleSkills.prompt || "", mainAgentTools.skillPrompt].filter(Boolean).join("\n\n"),
+        mcpTools: mainAgentTools.mcpPrompt,
+        mcpResults: Array.isArray(input.mainAgentToolResults)
+            ? input.mainAgentToolResults
+            : Array.isArray(input.main_agent_tool_results) ? input.main_agent_tool_results : [],
+        subagentDefinitions: (0, group_orchestrator_coded_1.buildAllowedProjectBrief)(group),
+    };
 }
 function normalizeDocumentFindings(parsed) {
     return Array.isArray(parsed?.documentFindings)
@@ -529,17 +727,31 @@ function sanitizeLlmTargets(group, parsed, message, fallbackAnalysis, allowRuleR
         if (!allowed.has(project) || seen.has(project))
             continue;
         const enrichedTask = enrichTaskWithDocumentFindings(String(target?.task || "").trim() || message, documentFindings);
-        const task = (0, group_orchestrator_coded_1.buildSelfContainedWorkerTask)(project, enrichedTask, taskAnalysis, {
+        const permissionPlan = {
+            requestedOperations: Array.isArray(target?.permissionPlan?.requestedOperations) ? target.permissionPlan.requestedOperations.map((item) => String(item).slice(0, 300)).slice(0, 12) : [],
+            userApprovalRequired: Array.isArray(target?.permissionPlan?.userApprovalRequired) ? target.permissionPlan.userApprovalRequired.map((item) => String(item).slice(0, 300)).slice(0, 12) : [],
+        };
+        const baseTask = (0, group_orchestrator_coded_1.buildSelfContainedWorkerTask)(project, enrichedTask, taskAnalysis, {
             group,
             reason: target?.reason || "LLM 主 Agent 根据需求理解和项目职责派发",
             dependsOn: target?.dependsOn || "",
             coordinationStrategy: taskAnalysis.coordinationStrategy,
         });
+        const task = [
+            baseTask,
+            permissionPlan.requestedOperations.length || permissionPlan.userApprovalRequired.length ? [
+                "权限计划（不能替代实际租约）：",
+                ...permissionPlan.requestedOperations.map((item) => `- 主 Agent 可审批候选：${item}`),
+                ...permissionPlan.userApprovalRequired.map((item) => `- 必须等待用户审批：${item}`),
+                "实际执行前仍必须调用 ccm__permission_broker 权限工具。",
+            ].join("\n") : "",
+        ].filter(Boolean).join("\n\n");
         targets.push({
             member: allowed.get(project),
             task,
             reason: String(target?.reason || "").trim(),
             dependsOn: String(target?.dependsOn || "").trim(),
+            permissionPlan,
         });
         seen.add(project);
     }
@@ -660,48 +872,50 @@ async function runLlmGroupOrchestrator(input) {
     const group = (0, group_orchestrator_routing_1.normalizeGroupOrchestrator)(input.group);
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const fallbackAnalysis = (0, group_orchestrator_coded_1.buildDocumentAwareAnalysis)(group, input);
-    const messages = buildLlmCoordinatorMessages(input);
-    const estimatedContextTokens = messages.reduce((sum, message) => {
-        return sum + (0, context_budget_1.estimateTextTokens)(String(message?.content || ""));
-    }, 0);
     const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
-    const providerPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
-        scope: "group",
-        sessionId: `${group.id}:${groupSessionId}`,
-        recentMessages: messages,
-    });
     const anthropic = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config);
     let tokenUsage = null;
-    const captureTokenUsage = (usage) => {
-        tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
-        if (groupSessionId.startsWith("gcs_")) {
-            try {
-                (0, group_prompt_cache_break_detection_1.recordGroupPromptCacheUsage)({
-                    groupId: group.id,
-                    groupSessionId,
-                    source: "group_main_planning",
-                    provider: anthropic ? "anthropic" : "openai",
-                    model: config.model,
-                    usage,
-                    estimatedContextTokens,
-                    estimatedPayloadTokens: providerPayload.totalTokens,
-                    estimatedFixedTokens: providerPayload.tokenBreakdown.system + providerPayload.tokenBreakdown.tools,
-                    payloadChecksum: providerPayload.payloadChecksum,
-                    fixedContextChecksum: providerPayload.fixedContextChecksum,
-                });
+    const callPlanningModel = async (roundInput, round) => {
+        const messages = buildLlmCoordinatorMessages(roundInput);
+        const estimatedContextTokens = messages.reduce((sum, message) => {
+            return sum + (0, context_budget_1.estimateTextTokens)(String(message?.content || ""));
+        }, 0);
+        const providerPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+            scope: "group",
+            sessionId: `${group.id}:${groupSessionId}`,
+            system: messages.filter((message) => message.role === "system"),
+            contextComponents: buildLlmCoordinatorContextComponents(roundInput),
+            recentMessages: messages.filter((message) => message.role !== "system"),
+        });
+        const captureTokenUsage = (usage) => {
+            tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
+            if (groupSessionId.startsWith("gcs_")) {
+                try {
+                    (0, group_prompt_cache_break_detection_1.recordGroupPromptCacheUsage)({
+                        groupId: group.id,
+                        groupSessionId,
+                        source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning",
+                        provider: anthropic ? "anthropic" : "openai",
+                        model: config.model,
+                        usage,
+                        estimatedContextTokens,
+                        estimatedPayloadTokens: providerPayload.totalTokens,
+                        estimatedFixedTokens: (0, session_compaction_core_1.modelVisibleFixedTokens)(providerPayload),
+                        payloadChecksum: providerPayload.payloadChecksum,
+                        fixedContextChecksum: providerPayload.fixedContextChecksum,
+                        modelVisiblePayload: providerPayload,
+                    });
+                }
+                catch { }
             }
-            catch { }
-        }
-    };
-    let parsed;
-    try {
-        parsed = anthropic
+        };
+        const parsed = anthropic
             ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, {
                 messages,
                 maxTokens: 1500,
                 defaultTimeoutMs: 45000,
                 httpErrorPrefix: "主 Agent API 调用失败",
-                promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_planning" },
+                promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
                 onUsage: captureTokenUsage,
             })
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, {
@@ -710,6 +924,47 @@ async function runLlmGroupOrchestrator(input) {
                 httpErrorPrefix: "主 Agent API 调用失败",
                 onUsage: captureTokenUsage,
             });
+        return { parsed, messages, providerPayload };
+    };
+    let parsed;
+    let planningInput = { ...input, group };
+    const toolResults = [];
+    const executed = new Set();
+    try {
+        for (let round = 0; round <= 2; round += 1) {
+            const response = await callPlanningModel(planningInput, round);
+            parsed = response.parsed;
+            const requests = normalizeGroupMainToolRequests(parsed?.toolRequests || parsed?.tool_requests);
+            if (requests.length === 0)
+                break;
+            if (round >= 2)
+                throw new Error("GROUP_MAIN_TOOL_LOOP_MAX_ROUNDS");
+            const freshRequests = requests.filter(request => {
+                const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex");
+                if (executed.has(fingerprint))
+                    return false;
+                executed.add(fingerprint);
+                return true;
+            });
+            if (freshRequests.length === 0)
+                throw new Error("GROUP_MAIN_TOOL_LOOP_DUPLICATE_REQUEST");
+            const toolContext = buildGroupMainAgentToolContext(planningInput);
+            const roundResults = await executeGroupMainAgentToolRequests({ requests: freshRequests, toolContext });
+            toolResults.push(...roundResults);
+            planningInput = { ...planningInput, mainAgentToolResults: toolResults };
+            const hydratedMessages = buildLlmCoordinatorMessages(planningInput);
+            const hydratedPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+                scope: "group",
+                sessionId: `${group.id}:${groupSessionId}`,
+                system: hydratedMessages.filter((message) => message.role === "system"),
+                contextComponents: buildLlmCoordinatorContextComponents(planningInput),
+                recentMessages: hydratedMessages.filter((message) => message.role !== "system"),
+            });
+            const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
+            if (hydratedPayload.totalTokens >= threshold) {
+                throw new Error(`GROUP_MAIN_TOOL_RESULT_PAYLOAD_BLOCKED:${hydratedPayload.totalTokens}/${threshold}`);
+            }
+        }
     }
     catch (error) {
         throw attachLlmTokenUsage(error, tokenUsage);
@@ -719,6 +974,13 @@ async function runLlmGroupOrchestrator(input) {
     return {
         ...buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, input),
         usage: tokenUsage,
+        mainAgentToolUsage: {
+            schema: "ccm-group-main-tool-usage-v1",
+            groupId: String(group.id || ""),
+            groupSessionId,
+            calls: toolResults.length,
+            results: toolResults.map(row => ({ name: row.name, ok: row.ok, outputTokens: row.outputTokens || 0, error: row.error || "" })),
+        },
     };
 }
 //# sourceMappingURL=group-orchestrator-llm.js.map

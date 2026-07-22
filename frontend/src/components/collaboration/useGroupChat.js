@@ -93,7 +93,10 @@ export function useGroupChat(props, emit) {
       }
       if (target.messageId || Number.isInteger(target.messageIndex)) await loadMessages(1000)
       
-      if (target.autoMessage) {
+      if (target.draftMessage) {
+        await nextTick()
+        newMessage.value = String(target.draftMessage)
+      } else if (target.autoMessage) {
         await nextTick()
         newMessage.value = target.autoMessage
         await nextTick()

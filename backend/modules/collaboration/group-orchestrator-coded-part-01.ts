@@ -403,6 +403,8 @@ export function buildAssignment(member: any, task: string, reason = "", dependsO
     agent_type: agentType,
     provider_dispatch_override: providerDispatchOverride,
     providerDispatchOverride: providerDispatchOverride,
+    permissionPlan: options.permissionPlan || options.permission_plan || null,
+    permission_plan: options.permissionPlan || options.permission_plan || null,
   };
   const briefMatch = groupId ? findReplayRepairDispatchBriefForAssignment(groupId, baseAssignment) : null;
   const replayRepairDispatchBriefs = briefMatch?.brief ? [{
@@ -516,6 +518,7 @@ export function buildAssignmentsFromTargets(targets: any[], options: any = {}) {
     .map((item: any) => buildAssignment(item.member, item.task, item.reason, item.dependsOn, {
       ...options,
       providerSwitchRequest: item.providerSwitchRequest || item.provider_switch_request || options.providerSwitchRequest || options.provider_switch_request || null,
+      permissionPlan: item.permissionPlan || item.permission_plan || null,
     }))
     .filter((item: any) => item.project && item.task);
 }

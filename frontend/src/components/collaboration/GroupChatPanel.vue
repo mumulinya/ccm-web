@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import ChatComposer from '../common/ChatComposer.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
+import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import ConversationTurnControls from '../common/ConversationTurnControls.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import EmptyState from '../common/EmptyState.vue'
@@ -30,6 +31,7 @@ import TemplateVariablesModal from '../common/TemplateVariablesModal.vue'
 import AgentPipelineModal from '../agents/AgentPipelineModal.vue'
 import { useGroupChat } from './useGroupChat.js'
 import { useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
+import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -114,6 +116,20 @@ const {
   enabled: computed(() => props.active !== false && !!groupContextScopeId.value),
   refreshKey: computed(() => `${messages.value.length}:${isStreaming.value}`),
   activeRequest: isStreaming,
+})
+
+const {
+  requests: groupPermissionRequests,
+  busyId: groupPermissionBusyId,
+  approve: approveGroupPermission,
+  reject: rejectGroupPermission,
+} = usePermissionApprovals({
+  scope: computed(() => ({
+    originType: 'group',
+    originSessionId: currentGroupSessionId.value || '',
+    originGroupId: currentGroup.value?.id || '',
+  })),
+  active: computed(() => props.active !== false && !!currentGroup.value?.id && !!currentGroupSessionId.value),
 })
 </script>
 

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { runMusicSearchResultSelfTest, signSearchResults } = require('../ccm-package/dist/modules/music/search-results.js')
 const baseUrl = (process.env.CCM_MUSIC_URL || 'http://127.0.0.1:3082').replace(/\/$/, '')
+const authCookie = String(process.env.CCM_AUTH_COOKIE || '').trim()
 const unique = `ccm-music-test-${Date.now()}`
 const filename = `${unique}.wav`
 let playlistId = ''
@@ -18,7 +19,7 @@ function makeWav() {
 }
 
 async function json(url, init) {
-  const response = await fetch(`${baseUrl}${url}`, init)
+  const response = await fetch(`${baseUrl}${url}`, { ...(init || {}), headers: { ...(init?.headers || {}), ...(authCookie ? { Cookie: authCookie } : {}) } })
   const data = await response.json().catch(() => ({}))
   return { response, data }
 }
@@ -29,7 +30,7 @@ try {
   const unit = runMusicSearchResultSelfTest()
   await assert(unit.ok, 'search result signing self-test failed')
 
-  const health = await fetch(`${baseUrl}/api/music/list`)
+  const health = await fetch(`${baseUrl}/api/music/list`, { headers: authCookie ? { Cookie: authCookie } : {} })
   await assert(health.ok, `music API unavailable at ${baseUrl}`)
 
   const exactSearch = await json('/api/music/search-netease?q=' + encodeURIComponent('晴天 周杰伦'))
@@ -70,9 +71,9 @@ try {
   const upload = await json('/api/music/upload', { method: 'POST', body: form })
   await assert(upload.data.success && upload.data.uploaded.includes(filename), 'valid WAV upload failed')
 
-  const partial = await fetch(`${baseUrl}/api/music/stream?file=${encodeURIComponent(filename)}`, { headers: { Range: 'bytes=0-9' } })
+  const partial = await fetch(`${baseUrl}/api/music/stream?file=${encodeURIComponent(filename)}`, { headers: { Range: 'bytes=0-9', ...(authCookie ? { Cookie: authCookie } : {}) } })
   await assert(partial.status === 206 && (await partial.arrayBuffer()).byteLength === 10, 'valid byte range failed')
-  const invalidRange = await fetch(`${baseUrl}/api/music/stream?file=${encodeURIComponent(filename)}`, { headers: { Range: 'bytes=999999-' } })
+  const invalidRange = await fetch(`${baseUrl}/api/music/stream?file=${encodeURIComponent(filename)}`, { headers: { Range: 'bytes=999999-', ...(authCookie ? { Cookie: authCookie } : {}) } })
   await assert(invalidRange.status === 416 && invalidRange.headers.get('content-range')?.startsWith('bytes */'), 'invalid byte range did not return 416')
 
   const favorite = await json('/api/music/library-state/favorite', {

@@ -77,6 +77,13 @@ export type SessionCompactionStateV2 = {
 };
 type SessionCompactionHook = (input: any) => any | Promise<any>;
 export declare function sessionCompactionChecksum(value: any): string;
+type ContextComponentHints = {
+    rules?: any;
+    skills?: any;
+    mcpTools?: any;
+    mcpResults?: any;
+    subagentDefinitions?: any;
+};
 export declare function buildModelVisiblePayloadSnapshot(input: {
     scope: SessionCompactionScope;
     sessionId: string;
@@ -87,7 +94,22 @@ export declare function buildModelVisiblePayloadSnapshot(input: {
     currentRequest?: any;
     recoveryContext?: any;
     hookResults?: any[];
+    contextComponents?: ContextComponentHints;
 }): ModelVisiblePayloadSnapshot;
+export declare function modelVisibleFixedTokens(snapshot: Pick<ModelVisiblePayloadSnapshot, "tokenBreakdown"> | null | undefined): number;
+export declare function modelVisiblePayloadAccounting(snapshot: ModelVisiblePayloadSnapshot | null | undefined): {
+    schema: string;
+    scope: SessionCompactionScope;
+    sessionId: string;
+    tokenBreakdown: {
+        [x: string]: number;
+    };
+    totalTokens: number;
+    payloadChecksum: string;
+    fixedContextChecksum: string;
+    pendingRequestChecksum: string;
+    contentStored: boolean;
+};
 export declare function evaluateSessionMemoryCadence(messagesInput: any[], stateInput?: any): {
     schema: string;
     shouldExtract: boolean;

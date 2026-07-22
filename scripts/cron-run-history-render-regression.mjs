@@ -29,7 +29,17 @@ const job = {
 }
 fsSync.writeFileSync(path.join(ccmDir, 'tasks.json'), JSON.stringify([task], null, 2))
 fsSync.writeFileSync(path.join(ccmDir, 'cron-jobs.json'), JSON.stringify([job], null, 2))
-fsSync.writeFileSync(path.join(ccmDir, 'groups.json'), JSON.stringify([{ id: 'group-live', name: '订单项目群', projects: ['orders'], orchestrator: { enabled: true } }], null, 2))
+const ordersWorkDir = path.join(home, 'orders-project')
+fsSync.mkdirSync(ordersWorkDir, { recursive: true })
+fsSync.mkdirSync(path.join(ccmDir, 'configs'), { recursive: true })
+fsSync.writeFileSync(path.join(ccmDir, 'configs', 'config-orders.toml'), `[[projects]]\nname = "orders"\nwork_dir = "${ordersWorkDir.replace(/\\/g, '\\\\')}"\ntype = "claudecode"\n`)
+fsSync.writeFileSync(path.join(ccmDir, 'groups.json'), JSON.stringify([{
+  id: 'group-live',
+  name: '订单项目群',
+  projects: ['orders'],
+  orchestrator: { enabled: true, coordinator_project: 'coordinator' },
+  members: [{ project: 'coordinator', role: 'coordinator' }, { project: 'orders', role: 'member' }],
+}], null, 2))
 fsSync.writeFileSync(path.join(ccmDir, 'test-agent-artifacts', 'run-live', 'report.json'), JSON.stringify({ id: 'test-live', taskId: task.id, groupId: task.group_id, status: 'passed', recommendation: 'accept', summary: '真实浏览器验收通过', startedAt: '2026-07-13T01:05:00.000Z', finishedAt: '2026-07-13T01:08:00.000Z' }))
 fsSync.writeFileSync(path.join(ccmDir, 'test-agent-artifacts', 'run-live', 'page.png'), Buffer.from('89504e470d0a1a0a', 'hex'))
 fsSync.writeFileSync(path.join(ccmDir, 'test-agent-artifacts', 'run-live', 'artifact-manifest.json'), JSON.stringify({ files: [{ type: 'screenshot', title: '订单页面', path: 'page.png', status: 'passed' }] }))
@@ -52,6 +62,12 @@ async function assertNoOverflow(page, label) {
 
 async function openCron(page, mobile = false) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+  if (await page.locator('.auth-page').count()) {
+    await page.locator('input[name="username"]').fill('mumulin')
+    await page.locator('input[name="password"]').fill('lzy123167')
+    await page.locator('.auth-submit').click()
+    await page.locator('.auth-page').waitFor({ state: 'detached', timeout: 15_000 })
+  }
   if (mobile) {
     await page.locator('.bottom-item').filter({ hasText: '更多' }).click()
     await page.locator('.mobile-more-menu').getByRole('button', { name: '定时任务', exact: true }).click()
@@ -81,6 +97,42 @@ try {
   const errors = []
   desktop.on('pageerror', error => errors.push(error.message))
   await openCron(desktop)
+  const api = desktop.context().request
+  const attachmentBuffer = Buffer.from('attachment-live-api-marker：请读取这份需求资料后再执行。', 'utf8')
+  const taskUploadResponse = await api.post(`${baseUrl}api/tasks/create`, {
+    multipart: {
+      payload: JSON.stringify({ title: '附件 API 派发测试', description: '验证任务附件真实进入 Agent 上下文', target_project: 'coordinator', group_id: 'group-live', assign_type: 'group', priority: 'normal', auto_execute: false }),
+      files: { name: 'attachment-api-requirement.txt', mimeType: 'text/plain', buffer: attachmentBuffer },
+    },
+  })
+  const taskUploadPayload = await taskUploadResponse.json()
+  if (!taskUploadResponse.ok() || taskUploadPayload.task?.source_attachments?.[0]?.readable !== true || !String(taskUploadPayload.task?.source_attachment_context || '').includes('attachment-live-api-marker')) {
+    throw new Error(`task multipart attachment was not persisted and parsed: ${JSON.stringify(taskUploadPayload)}`)
+  }
+  const legacyJsonResponse = await api.post(`${baseUrl}api/tasks/create`, {
+    data: { title: 'JSON 兼容任务', description: '旧接口兼容检查', target_project: 'coordinator', group_id: 'group-live', assign_type: 'group', priority: 'low', auto_execute: false },
+  })
+  if (!legacyJsonResponse.ok() || !(await legacyJsonResponse.json()).success) throw new Error('legacy JSON task create API is no longer compatible')
+  const dailyDevUploadResponse = await api.post(`${baseUrl}api/tasks/create-daily-dev`, {
+    multipart: {
+      payload: JSON.stringify({ title: '业务开发附件 API 测试', business_goal: '根据上传的需求附件实现订单审核功能', scope: '订单审核后端接口与前端操作页面', acceptance: '主 Agent 验证附件要求已经落实并提供测试证据', group_id: 'group-live', priority: 'normal', requires_code_changes: true, persist_documents: false, auto_execute: false, force_quality_gate: true }),
+      files: { name: 'daily-dev-attachment-api.txt', mimeType: 'text/plain', buffer: attachmentBuffer },
+    },
+  })
+  const dailyDevUploadPayload = await dailyDevUploadResponse.json()
+  if (!dailyDevUploadResponse.ok() || dailyDevUploadPayload.task?.workflow_type !== 'daily_dev' || dailyDevUploadPayload.task?.source_attachments?.[0]?.readable !== true || !String(dailyDevUploadPayload.task?.source_attachment_context || '').includes('attachment-live-api-marker')) {
+    throw new Error(`daily-dev multipart attachment was not delivered to group main agent task context: ${JSON.stringify(dailyDevUploadPayload)}`)
+  }
+  const cronUploadResponse = await api.post(`${baseUrl}api/cron/create`, {
+    multipart: {
+      payload: JSON.stringify({ name: '附件定时任务 API 测试', target_type: 'group', group_id: 'group-live', workflow_type: 'general', schedule: '15 9 * * *', prompt: '执行附件中的需求', priority: 'normal', timezone: 'Asia/Shanghai', enabled: false }),
+      files: { name: 'cron-attachment-api.txt', mimeType: 'text/plain', buffer: attachmentBuffer },
+    },
+  })
+  const cronUploadPayload = await cronUploadResponse.json()
+  if (!cronUploadResponse.ok() || cronUploadPayload.job?.source_attachments?.[0]?.readable !== true || !String(cronUploadPayload.job?.source_attachment_context || '').includes('attachment-live-api-marker')) {
+    throw new Error(`cron multipart attachment was not persisted and parsed: ${JSON.stringify(cronUploadPayload)}`)
+  }
   await assertNoOverflow(desktop, 'desktop list')
   await desktop.screenshot({ path: path.join(outputDir, '01-list-desktop.png') })
   const search = desktop.locator('.cron-filter-bar input[type="search"]')
@@ -95,15 +147,33 @@ try {
   await desktop.locator('.cron-job-row .select-column input').check()
   await desktop.locator('.bulk-actions button').filter({ hasText: '启用' }).click()
   await desktop.waitForFunction(() => document.querySelector('.cron-job-row .toggle input')?.checked === true)
-  await desktop.getByRole('button', { name: '运行记录' }).click()
+  await desktop.locator('.cron-job-row').filter({ hasText: '订单审核每日回归' }).getByRole('button', { name: '运行记录' }).click()
   await desktop.getByRole('dialog', { name: '定时任务运行记录' }).waitFor()
   if (await desktop.locator('.run-technical').evaluate(element => element.open)) throw new Error('technical details must be collapsed')
   await desktop.screenshot({ path: path.join(outputDir, '02-run-controls-desktop.png') })
   await desktop.getByRole('button', { name: '关闭运行记录' }).click()
   await desktop.getByRole('button', { name: '新建定时任务' }).click()
   await desktop.getByText('调度可靠性').waitFor()
+  if (await desktop.locator('.task-attachment-picker').count() !== 1) throw new Error('cron form should expose one attachment picker')
   await desktop.waitForFunction(() => !document.querySelector('#toast-container .toast'), null, { timeout: 6000 })
   await desktop.screenshot({ path: path.join(outputDir, '03-reliability-form-desktop.png') })
+  await desktop.locator('.task-attachment-picker').scrollIntoViewIfNeeded()
+  await desktop.screenshot({ path: path.join(outputDir, '04-attachment-form-desktop.png') })
+  await desktop.locator('.modal-close').click()
+  await desktop.locator('.nav-item').filter({ hasText: '任务派发' }).click()
+  await desktop.locator('.task-dispatch-header').waitFor({ state: 'visible' })
+  await desktop.locator('.task-dispatch-header .primary-action').click()
+  await desktop.getByRole('menuitem').filter({ hasText: '普通任务' }).click()
+  await desktop.locator('.task-manager .task-attachment-picker').waitFor({ state: 'visible' })
+  if (await desktop.locator('.task-manager .task-attachment-picker').count() !== 1) throw new Error('task dispatch form should expose one attachment picker')
+  await desktop.screenshot({ path: path.join(outputDir, '05-task-attachment-form-desktop.png') })
+  await desktop.locator('.task-manager .modal-close').click()
+  await desktop.locator('.task-dispatch-header .primary-action').click()
+  await desktop.getByRole('menuitem').filter({ hasText: '业务开发任务' }).click()
+  await desktop.locator('.daily-dev-modal .task-attachment-picker').waitFor({ state: 'visible' })
+  if (await desktop.locator('.daily-dev-modal .task-attachment-picker').count() !== 1) throw new Error('daily development task form should expose one attachment picker')
+  await desktop.waitForTimeout(400)
+  await desktop.screenshot({ path: path.join(outputDir, '06-daily-dev-attachment-form-desktop.png') })
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } })
   mobile.on('pageerror', error => errors.push(error.message))
@@ -111,15 +181,15 @@ try {
   await assertNoOverflow(mobile, 'mobile list')
   const mobileOverview = await mobile.locator('.cron-overview').boundingBox()
   if (!mobileOverview || mobileOverview.height < 60) throw new Error(`mobile scheduling overview is not visible: ${JSON.stringify(mobileOverview)}`)
-  await mobile.screenshot({ path: path.join(outputDir, '04-list-mobile.png') })
-  await mobile.getByRole('button', { name: '运行记录' }).click()
+  await mobile.screenshot({ path: path.join(outputDir, '07-list-mobile.png') })
+  await mobile.locator('.cron-job-row').filter({ hasText: '订单审核每日回归' }).getByRole('button', { name: '运行记录' }).click()
   await mobile.getByRole('dialog', { name: '定时任务运行记录' }).waitFor()
   await assertNoOverflow(mobile, 'mobile history')
-  await mobile.screenshot({ path: path.join(outputDir, '05-run-controls-mobile.png') })
+  await mobile.screenshot({ path: path.join(outputDir, '08-run-controls-mobile.png') })
 
   if (errors.length) throw new Error(`browser errors: ${errors.join('; ')}`)
   const screenshots = (await fs.readdir(outputDir)).filter(name => name.endsWith('.png')).sort()
-  if (screenshots.length !== 5) throw new Error(`expected 5 screenshots, got ${screenshots.length}`)
+  if (screenshots.length !== 8) throw new Error(`expected 8 screenshots, got ${screenshots.length}`)
   console.log(JSON.stringify({ pass: true, baseUrl, realApi: true, screenshots: screenshots.map(name => path.join(outputDir, name)) }, null, 2))
 } catch (error) {
   console.error(JSON.stringify({ pass: false, error: error.message }, null, 2))

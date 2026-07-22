@@ -108,6 +108,7 @@
               <span v-if="job.workflow_type === 'daily_dev'">最多认领 {{ job.backlog_batch_limit || 1 }} 条需求</span>
               <span v-if="job.workflow_type === 'daily_dev' && job.continue_gaps !== false">自动续跑缺口</span>
               <span v-if="job.notification_enabled">已开启通知</span>
+              <span v-if="job.source_attachments?.length">附件 {{ job.source_attachments.length }} 个</span>
             </div>
             <p v-if="job.workflow_type === 'daily_dev' && isExecutionBlocked()" class="job-runtime-warning"><TriangleAlert :size="14" />执行通道阻塞，触发后会等待复检通过</p>
           </div>
@@ -159,7 +160,7 @@
       @control="handleRunControl"
     />
 
-    <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
+    <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false" @paste.capture="handleCronPaste">
       <div class="modal" role="dialog" aria-modal="true" :aria-label="editingId ? '编辑定时任务' : '新建定时任务'">
         <header class="modal-header">
           <span class="modal-title-icon"><CalendarClock :size="19" /></span>
@@ -328,6 +329,14 @@
             <button class="btn btn-secondary btn-sm" @click="applyDailyDevPrompt">套用日常开发模板</button>
           </div>
           <textarea v-model="newJob.prompt" rows="4" placeholder="告诉 Agent 到点后要做什么"></textarea>
+        </div>
+        <div class="form-group">
+          <TaskAttachmentPicker
+            :files="newJob.files"
+            :existing="newJob.existingAttachments"
+            @update:files="newJob.files = $event"
+            @remove-existing="removeExistingCronAttachment"
+          />
         </div>
         </div>
         <div class="form-actions">

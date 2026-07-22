@@ -94,7 +94,7 @@ const tools = [
         },
     },
 ];
-function callTool(context, name, args) {
+async function callTool(context, name, args) {
     if (name === "get_task_context")
         return { success: true, ...(0, internal_mcp_task_store_1.publicInternalMcpTaskContext)(context) };
     if (name === "update_todo") {

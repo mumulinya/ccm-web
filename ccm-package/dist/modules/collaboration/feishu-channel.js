@@ -52,6 +52,7 @@ const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const feishu_1 = require("./feishu");
+const runtime_events_1 = require("../../system/runtime-events");
 const STATE_FILE = path.join(utils_1.CCM_DIR, "feishu-channel-state.json");
 const SESSION_DIR = path.join(utils_1.CCM_DIR, "sessions");
 const CONTROL_BOT_PID_FILE = path.join(utils_1.CCM_DIR, "pids", "ccm-control-bot.pid");
@@ -324,6 +325,14 @@ async function attemptDelivery(deliveryId) {
             last_error: result.success ? "" : current.error,
         };
         saveState(state);
+        (0, runtime_events_1.publishRuntimeEvent)("feishu", "feishu.delivery_changed", {
+            deliveryId: current.id,
+            taskId: current.task_id,
+            runId: current.run_id,
+            status: current.status,
+            reason: current.error,
+            source: "feishu-outbox",
+        });
         return current;
     }
     finally {
@@ -423,6 +432,12 @@ function recordFeishuInbound(input) {
     saveState(state);
     if (destination)
         bindFeishuTaskContext({ sessionId: input.sessionId, destination, source: "feishu-control-bot" });
+    (0, runtime_events_1.publishRuntimeEvent)("feishu", "feishu.inbound", {
+        sessionId: input.sessionId,
+        id: input.messageId,
+        status: destination ? "bound" : "unbound",
+        source: "feishu-control-bot",
+    });
     return destination;
 }
 function taskStatusPresentation(status) {

@@ -37,6 +37,7 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
         localIntent?: LocalIntentResult | null;
         onEvent?: (event: any) => void;
         sourceIngestion?: RequirementIngestionResult | null;
+        knowledgeContext?: string;
     }) => GlobalAgentLoopRuntime;
     runAgenticGlobalRequest: (baseUrl: string, ctx: CollabCtx, input: {
         message: string;

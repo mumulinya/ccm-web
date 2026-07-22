@@ -72,7 +72,7 @@ const formatTime = value => {
         <div><dt>索引状态</dt><dd>{{ status?.state || 'idle' }}</dd></div>
         <div><dt>最后完成</dt><dd>{{ formatTime(status?.lastSuccessfulAt) }}</dd></div>
         <div><dt>缓存命中</dt><dd>{{ status?.cacheHits || 0 }} 份</dd></div>
-        <div><dt>向量模型</dt><dd>{{ semanticReady ? embedding.model : '未启用，使用 hashing 回退' }}</dd></div>
+        <div><dt>检索引擎</dt><dd>{{ semanticReady ? `远程语义 + 本地混合（${embedding.model}）` : '本地混合检索（无需配置）' }}</dd></div>
         <div><dt>语义向量</dt><dd>{{ status?.semanticReady || 0 }} 成功 / {{ status?.semanticFailed || 0 }} 失败</dd></div>
         <div><dt>解析失败</dt><dd>{{ status?.parseFailures?.length || 0 }} 份</dd></div>
       </dl>

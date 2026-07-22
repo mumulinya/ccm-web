@@ -8,4 +8,4 @@
 - [lifecycle-and-recovery](./lifecycle-and-recovery/)：群聊任务生命周期、恢复和同任务续跑。
 - [acceptance-and-delivery](./acceptance-and-delivery/)：群聊主 Agent 验收、交付总结和回传质量。
 - [test-agent-bridge](./test-agent-bridge/)：群聊主 Agent 向 TestAgent 发起复核并消费结论的链路。
-
+- [configured-tools-2026-07-22](./configured-tools-2026-07-22/)：群聊共享文件、授权 Skill 与只读 MCP 的主 Agent 使用链路。

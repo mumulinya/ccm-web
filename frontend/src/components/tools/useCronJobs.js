@@ -64,7 +64,9 @@ const newJob = ref({
   misfireGraceMinutes: 1440,
   notificationEnabled: false,
   notifyOn: ['failed', 'waiting', 'done'],
-  prompt: ''
+  prompt: '',
+  files: [],
+  existingAttachments: []
 })
 
 const weekOptions = [
@@ -118,8 +120,33 @@ const defaultJob = () => ({
   misfireGraceMinutes: 1440,
   notificationEnabled: false,
   notifyOn: ['failed', 'waiting', 'done'],
-  prompt: ''
+  prompt: '',
+  files: [],
+  existingAttachments: []
 })
+
+const addCronFiles = (incoming) => {
+  const rows = Array.from(incoming || []).filter(file => file?.name)
+  const keys = new Set(newJob.value.files.map(file => `${file.name}:${file.size}:${file.lastModified || 0}`))
+  for (const file of rows) {
+    if (newJob.value.files.length + newJob.value.existingAttachments.length >= 10) break
+    const key = `${file.name}:${file.size}:${file.lastModified || 0}`
+    if (file.size > 25 * 1024 * 1024 || keys.has(key)) continue
+    keys.add(key)
+    newJob.value.files.push(file)
+  }
+}
+
+const handleCronPaste = (event) => {
+  const files = Array.from(event.clipboardData?.files || [])
+  if (!files.length) return
+  event.preventDefault()
+  addCronFiles(files)
+}
+
+const removeExistingCronAttachment = (id) => {
+  newJob.value.existingAttachments = newJob.value.existingAttachments.filter(item => item.id !== id)
+}
 
 const parseTime = (value) => {
   const [hourRaw, minuteRaw] = String(value || '09:00').split(':')
@@ -224,6 +251,8 @@ const editJob = (job) => {
     notificationEnabled: job.notification_enabled === true,
     notifyOn: Array.isArray(job.notify_on) ? [...job.notify_on] : ['failed', 'waiting', 'done'],
     prompt: job.prompt || '',
+    files: [],
+    existingAttachments: Array.isArray(job.source_attachments) ? [...job.source_attachments] : [],
     ...scheduleFormFromCron(job.schedule),
   }
   showCreate.value = true
@@ -391,7 +420,7 @@ const toggleJob = async (id, enabled) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, enabled })
     })
-    await readResponse(res)
+    const data = await readResponse(res)
     await loadJobs()
   } catch (e) {
     toast.error(e.message)
@@ -501,16 +530,21 @@ const submitCreate = async () => {
   }
 
   try {
-    const res = await fetch(editingId.value ? '/api/cron/update' : '/api/cron/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(editingId.value ? { id: editingId.value, ...payload } : payload)
-    })
+    const requestPayload = editingId.value ? { id: editingId.value, ...payload } : payload
+    requestPayload.retained_attachment_ids = newJob.value.existingAttachments.map(item => item.id)
+    const form = new FormData()
+    form.append('payload', JSON.stringify(requestPayload))
+    newJob.value.files.forEach(file => form.append('files', file, file.name))
+    const res = await fetch(editingId.value ? '/api/cron/update' : '/api/cron/create', { method: 'POST', body: form })
     await readResponse(res)
     showCreate.value = false
     newJob.value = defaultJob()
     await loadJobs()
-    toast.success(editingId.value ? '定时任务修改成功' : '定时任务创建成功')
+    if (data.job?.source_attachment_warnings?.length) {
+      toast.warning(`定时任务已保存，但有 ${data.job.source_attachment_warnings.length} 个附件未完整解析；触发时会按原文件路径继续核验`)
+    } else {
+      toast.success(editingId.value ? '定时任务修改成功' : '定时任务创建成功')
+    }
     editingId.value = ''
   } catch (e) {
     toast.error(e.message)
@@ -561,6 +595,9 @@ onBeforeUnmount(() => {
     buildSchedule,
     schedulePreview,
     applyDailyDevPrompt,
+    addCronFiles,
+    handleCronPaste,
+    removeExistingCronAttachment,
     readResponse,
     loadJobs,
     scheduleFormFromCron,

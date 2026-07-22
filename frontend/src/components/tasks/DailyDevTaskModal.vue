@@ -1,4 +1,6 @@
 <script setup>
+import TaskAttachmentPicker from '../common/TaskAttachmentPicker.vue'
+
 defineProps({
   task: { type: Object, required: true },
   groups: { type: Array, default: () => [] },
@@ -10,10 +12,31 @@ defineProps({
 const emit = defineEmits(['close', 'submit', 'update-field'])
 
 const updateField = (field, value) => emit('update-field', { field, value })
+
+const appendFiles = (task, incoming) => {
+  const current = Array.isArray(task.files) ? task.files : []
+  const keys = new Set(current.map(file => `${file.name}:${file.size}:${file.lastModified || 0}`))
+  const next = [...current]
+  for (const file of Array.from(incoming || []).filter(item => item?.name)) {
+    if (next.length >= 10) break
+    const key = `${file.name}:${file.size}:${file.lastModified || 0}`
+    if (file.size > 25 * 1024 * 1024 || keys.has(key)) continue
+    keys.add(key)
+    next.push(file)
+  }
+  updateField('files', next)
+}
+
+const handlePaste = (task, event) => {
+  const files = Array.from(event.clipboardData?.files || [])
+  if (!files.length) return
+  event.preventDefault()
+  appendFiles(task, files)
+}
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
+  <div class="modal-overlay" @click.self="emit('close')" @paste.capture="handlePaste(task, $event)">
     <div class="modal daily-dev-modal">
       <button class="modal-close" @click="emit('close')">&times;</button>
       <h3>业务开发任务</h3>
@@ -32,6 +55,13 @@ const updateField = (field, value) => emit('update-field', { field, value })
       <div class="form-group">
         <label>业务/接口文档</label>
         <textarea :value="task.documents" rows="3" placeholder="粘贴 PRD、接口字段、共享文件名或文档链接" @input="updateField('documents', $event.target.value)"></textarea>
+      </div>
+      <div class="form-group">
+        <TaskAttachmentPicker
+          :files="task.files || []"
+          :existing="[]"
+          @update:files="updateField('files', $event)"
+        />
       </div>
       <div class="form-group">
         <label>验收标准</label>

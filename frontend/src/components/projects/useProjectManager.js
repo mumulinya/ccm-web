@@ -49,14 +49,20 @@ export function useProjectManager(props, emit) {
         await createSession()
       }
 
-      if (target.autoMessage) {
+      if (target.sessionId && target.sessionId !== currentSession.value) {
+        await nextTick()
+        await selectSession(target.sessionId)
+      }
+
+      if (target.draftMessage) {
+        await nextTick()
+        chatInput.value = String(target.draftMessage)
+      } else if (target.autoMessage) {
         await nextTick()
         chatInput.value = target.autoMessage
         await nextTick()
         sendMessage()
       } else if (target.sessionId) {
-        await nextTick()
-        await selectSession(target.sessionId)
         if (target.messageId || Number.isInteger(target.messageIndex) || target.keyword) {
           await nextTick()
           const kw = String(target.keyword || '').toLowerCase()
@@ -267,6 +273,9 @@ export function useProjectManager(props, emit) {
   const browseItems = ref([])
   const browseTarget = ref('')
   const drives = ref([])
+  const browseHome = ref('')
+  const browseLoading = ref(false)
+  const browseError = ref('')
   const showFolderBrowser = ref(false)
   // 表单数据
   const form = ref({
@@ -1096,7 +1105,9 @@ export function useProjectManager(props, emit) {
     browseTarget.value = target
     showFolderBrowser.value = true
     await loadDrives()
-    await loadFolderContents('')
+    const preferred = String(form.value[target] || '').trim()
+    await loadFolderContents(preferred || browseHome.value || '')
+    if (preferred && browseError.value) await loadFolderContents(browseHome.value || '')
   }
 
   const loadDrives = async () => {
@@ -1104,21 +1115,49 @@ export function useProjectManager(props, emit) {
       const res = await fetch('/api/filesystem/drives')
       const data = await res.json()
       drives.value = data.drives || []
+      browseHome.value = data.home || ''
     } catch (e) {
       drives.value = []
+      browseHome.value = ''
     }
   }
 
   const loadFolderContents = async (dir) => {
+    browseLoading.value = true
+    browseError.value = ''
     try {
       const res = await fetch(`/api/filesystem/browse?dir=${encodeURIComponent(dir)}`)
       const data = await res.json()
-      if (data.success) {
-        browsePath.value = data.path
-        browseItems.value = data.items || []
-      }
+      if (!res.ok || data.success === false) throw new Error(data.error || '目录读取失败')
+      browsePath.value = data.path
+      browseItems.value = data.items || []
     } catch (e) {
       browseItems.value = []
+      browseError.value = e.message || '目录读取失败'
+    } finally {
+      browseLoading.value = false
+    }
+  }
+
+  const createBrowseFolder = async (name) => {
+    if (!browsePath.value || !String(name || '').trim()) return
+    browseLoading.value = true
+    browseError.value = ''
+    try {
+      const res = await fetch('/api/filesystem/directory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent: browsePath.value, name: String(name).trim() })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.success === false) throw new Error(data.error || '创建文件夹失败')
+      toast.success(`已创建文件夹 ${data.name}`)
+      await loadFolderContents(data.path)
+    } catch (e) {
+      browseError.value = e.message || '创建文件夹失败'
+      toast.error(browseError.value)
+    } finally {
+      browseLoading.value = false
     }
   }
 
@@ -1381,7 +1420,7 @@ export function useProjectManager(props, emit) {
     agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
     showCreate, showEdit, showSwitchAgent, showTools, showSharedFiles, showArchives,
     mobileSessionsOpen, projectActionBusy, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
-    feishuQrLoading, feishuProjectSetupToken, browsePath, browseItems, browseTarget, drives,
+    feishuQrLoading, feishuProjectSetupToken, browsePath, browseItems, browseTarget, drives, browseHome, browseLoading, browseError,
     showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, activeSelectedTemplate,
     pendingTemplateToApply, selectProject, loadSessions, selectSession, startProject, stopProject,
     deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit, loadProjectGitStatus,
@@ -1392,7 +1431,7 @@ export function useProjectManager(props, emit) {
     sendMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
     closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsContent,
     toggleLogs, loadLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
-    loadFolderContents, browseGoUp, selectFolder, projectTools, allTools, projectToolAudit,
+    loadFolderContents, browseGoUp, createBrowseFolder, selectFolder, projectTools, allTools, projectToolAudit,
     projectAuthorizationReadiness, projectConnectionPreflight, projectToolVerification, projectVerificationCommands, inferredProjectVerificationCommands, projectVerificationSource,
     projectResponsibility, projectCapabilities, projectWritablePaths, projectForbiddenPaths, projectDeliveryContract, normalizeProjectTools,
     loadProjectTools, saveProjectTools, applyInferredVerificationCommands, updateProjectToolField, toggleProjectTool, projectFiles,

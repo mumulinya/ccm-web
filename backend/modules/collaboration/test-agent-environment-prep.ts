@@ -106,7 +106,7 @@ export function buildTestAgentEnvironmentPrepChecklist(report: any = null, verdi
   const blockedAuth = Number(authSummary?.blockedChecks || authSummary?.blocked_checks || 0);
   const pendingAuth = Number(authSummary?.pendingChecks || authSummary?.pending_checks || 0);
   if (blockedAuth > 0 || pendingAuth > 0) {
-    seedHints.push("登录态浏览器验收受阻：请确认测试账号可用、必要环境变量名已配置，或提供可用的 storageState 路径。");
+    seedHints.push("登录态浏览器验收受阻：请确认测试账号可用、必要环境变量名已配置，或提供可用的浏览器登录态文件。");
   }
 
   const uniqueMissing = uniqueStrings(missingEnvNames, 12);

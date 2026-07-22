@@ -7,9 +7,9 @@
     "workbenchReads": 0,
     "workbenchStreams": 1,
     "timing": {
-      "domContentLoadedMs": 1164,
-      "loadEventMs": 1695,
-      "transferBytes": 256387
+      "domContentLoadedMs": 1019,
+      "loadEventMs": 1490,
+      "transferBytes": 256271
     }
   },
   "memoryPrefetched": true,
@@ -17,9 +17,9 @@
   "musicEngineRetained": true,
   "remoteCommandWakesLazyEngine": true,
   "afterMusicTiming": {
-    "domContentLoadedMs": 1164,
-    "loadEventMs": 1695,
-    "transferBytes": 4387524
+    "domContentLoadedMs": 1019,
+    "loadEventMs": 1490,
+    "transferBytes": 4273058
   },
   "pageErrors": []
 }

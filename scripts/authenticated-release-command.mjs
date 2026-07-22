@@ -1,0 +1,45 @@
+import fs from 'node:fs'
+import net from 'node:net'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+
+const npmScript = String(process.argv[2] || '').trim()
+const baseUrlEnv = String(process.argv[3] || 'CCM_BASE_URL').trim()
+if (!npmScript) throw new Error('Usage: authenticated-release-command <npm-script|script.mjs> [base-url-env]')
+const root = path.resolve(import.meta.dirname, '..')
+const cli = path.join(root, 'ccm-package', 'bin', 'ccm.js')
+const fixtureHome = path.join(root, 'scratch', `authenticated-${npmScript.replace(/[^a-z0-9]+/gi, '-')}-${Date.now().toString(36)}`)
+const dataDir = path.join(fixtureHome, '.cc-connect')
+const lockFile = path.join(dataDir, 'run', 'ccm-server-instance.lock')
+fs.mkdirSync(fixtureHome, { recursive: true })
+const port = await new Promise((resolve, reject) => {
+  const server = net.createServer()
+  server.once('error', reject)
+  server.listen(0, '127.0.0.1', () => {
+    const selected = server.address().port
+    server.close(error => error ? reject(error) : resolve(selected))
+  })
+})
+const env = { ...process.env, HOME: fixtureHome, USERPROFILE: fixtureHome, CCM_TASK_STORE_DIR: dataDir, CCM_SERVER_LOCK_FILE: lockFile, NO_COLOR: '1' }
+const runCli = args => execFileSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 45_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+
+try {
+  runCli(['start', '--background', '--port', String(port)])
+  const registration = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: `release_${Date.now().toString(36)}`, password: `Release-${Date.now()}-Safe` }),
+  })
+  if (registration.status !== 201) throw new Error(`temporary registration failed: ${registration.status} ${await registration.text()}`)
+  const cookie = String(registration.headers.get('set-cookie') || '').split(';')[0]
+  if (!cookie) throw new Error('temporary auth cookie missing')
+  const directScript = npmScript.endsWith('.mjs') || npmScript.endsWith('.js')
+  const npmCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const command = directScript ? process.execPath : fs.existsSync(npmCli) ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm')
+  const args = directScript
+    ? [path.resolve(root, npmScript)]
+    : fs.existsSync(npmCli) ? [npmCli, 'run', npmScript] : ['run', npmScript]
+  execFileSync(command, args, { cwd: root, env: { ...env, [baseUrlEnv]: `http://127.0.0.1:${port}`, CCM_AUTH_COOKIE: cookie }, timeout: 180_000, windowsHide: true, stdio: 'inherit' })
+  console.log(JSON.stringify({ success: true, target: npmScript, mode: directScript ? 'node-script' : 'npm-script', authenticatedIsolation: true, port, paidProviderCalls: 0 }, null, 2))
+} finally {
+  try { runCli(['stop']) } catch {}
+}

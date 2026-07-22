@@ -1,4 +1,10 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+
+const root = path.resolve(import.meta.dirname, '..')
+const gitSource = fs.readFileSync(path.join(root, 'backend', 'modules', 'tools', 'git.ts'), 'utf8')
+assert.match(gitSource, /execFileSync\("git", args,[\s\S]*?windowsHide:\s*true/, 'Git child processes must stay hidden on Windows')
 
 const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
 const requestedProject = String(process.env.CCM_GIT_TEST_PROJECT || '')
@@ -30,6 +36,9 @@ assert.equal(typeof status.summary?.deletions, 'number')
 assert.equal(Array.isArray(status.summary?.modules), true)
 assert.equal(['exact', 'project_recent', 'none'].includes(status.context?.attribution), true)
 assert.equal(status.files.every(file => typeof file.staged === 'boolean' && typeof file.unstaged === 'boolean' && typeof file.conflict === 'boolean'), true)
+assert.equal(typeof status.repository?.ahead, 'number')
+assert.equal(typeof status.repository?.behind, 'number')
+assert.equal(typeof status.repository?.canFetch, 'boolean')
 
 const textFile = status.files.find(file => !file.binary)
 if (textFile) {
@@ -63,6 +72,19 @@ const patchTraversal = await request('/api/git/apply-patch', {
 assert.equal(patchTraversal.data.success, false)
 assert.match(patchTraversal.data.error, /非法文件路径/)
 
+const invalidRemoteOperation = await request('/api/git/remote-operation', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ project: selected.name, operation: 'force-push', confirmed: true }),
+})
+assert.equal(invalidRemoteOperation.response.status, 400)
+
+const unconfirmedRemoteOperation = await request('/api/git/remote-operation', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ project: selected.name, operation: 'push' }),
+})
+assert.equal(unconfirmedRemoteOperation.response.status, 409)
+assert.equal(unconfirmedRemoteOperation.data.confirmationRequired, true)
+
 console.log(JSON.stringify({
   success: true,
   project: selected.name,
@@ -76,5 +98,8 @@ console.log(JSON.stringify({
     selectedCommitPreview: !!chosen.length,
     traversalRejected: true,
     maliciousPatchRejectedBeforeApply: true,
+    remoteStateIsVisible: true,
+    unsafeRemoteOperationsAreRejected: true,
+    windowsGitProcessHidden: true,
   },
 }, null, 2))
