@@ -1,0 +1,37 @@
+name: CCM release matrix
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "ccm-package/**"
+      - "scripts/**"
+      - "package*.json"
+      - ".github/workflows/release-matrix.yml"
+
+jobs:
+  install-and-runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix frontend ci
+      - run: npm run check
+      - run: npm run build
+      - run: node scripts/node-pty-cross-platform-release-selftest.mjs
+      - run: node scripts/node-pty-degraded-runtime-selftest.mjs
+      - run: node scripts/cli-release-selftest.mjs
+      - run: node scripts/npm-package-install-release-selftest.mjs
+      - run: node scripts/release-acceptance-framework-selftest.mjs

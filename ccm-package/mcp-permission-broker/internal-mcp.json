@@ -1,0 +1,16 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "ccm__permission_broker",
+  "display_name": "Agent 权限审批 MCP",
+  "description": "让项目 Agent 和群聊项目子 Agent 申请、消费并通过受控运行器执行精确会话绑定的限时权限。",
+  "version": "1.0.0",
+  "entry": "../dist/integrations/permission-broker-mcp.js",
+  "lifecycle": "session_scoped",
+  "lifecycle_label": "按任务或项目会话签名注入",
+  "scopes": ["独立项目 Agent", "群聊项目子 Agent"],
+  "tools": [
+    { "name": "request_execution_permission", "label": "申请执行权限", "description": "在超出默认项目权限前提交带理由的精确权限申请。" },
+    { "name": "consume_execution_permission", "label": "消费权限租约", "description": "消费当前精确 Agent 会话的一次非命令权限。" },
+    { "name": "execute_approved_command", "label": "执行获批命令", "description": "通过 CCM 受控运行器执行授权绑定的精确命令并消费租约。" }
+  ]
+}
