@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { chromium } from 'playwright'
 
 const root = path.resolve(import.meta.dirname, '..')
 const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3080').replace(/\/+$/, '')
+
+const readInitialAdminPassword = () => {
+  try {
+    return fs.readFileSync(path.join(os.homedir(), '.cc-connect', 'auth', 'initial-admin-password.txt'), 'utf8').trim()
+  } catch {
+    return ''
+  }
+}
+const loginUsername = process.env.CCM_UI_USERNAME || 'mumulin'
+const loginPassword = process.env.CCM_UI_PASSWORD || readInitialAdminPassword() || 'lzy123167'
 const outputDir = path.join(root, 'scratch', 'session-context-usage-ui')
 assert.ok(outputDir.startsWith(`${root}${path.sep}`))
 fs.rmSync(outputDir, { recursive: true, force: true })
@@ -101,8 +112,8 @@ const overlapMetrics = selector => page.locator(`${selector}:visible`).first().e
 await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
 await page.locator('.auth-page, .app-container').first().waitFor({ state: 'visible', timeout: 15_000 })
 if (await page.locator('.auth-page').isVisible().catch(() => false)) {
-  await page.locator('input[name="username"]').fill('mumulin')
-  await page.locator('input[name="password"]').fill('lzy123167')
+  await page.locator('input[name="username"]').fill(loginUsername)
+  await page.locator('input[name="password"]').fill(loginPassword)
   await page.locator('.auth-submit').click()
 }
 await page.locator('.app-container').waitFor({ state: 'visible' })

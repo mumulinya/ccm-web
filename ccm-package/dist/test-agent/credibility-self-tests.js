@@ -48,14 +48,14 @@ exports.runTestAgentPetActivityKeySelfTest = runTestAgentPetActivityKeySelfTest;
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-const mcp_adapters_part_01_1 = require("./browser/mcp-adapters-part-01");
-const playwright_provider_part_02_1 = require("./browser/playwright-provider-part-02");
+const mcp_adapters_1 = require("./browser/mcp-adapters");
+const playwright_provider_1 = require("./browser/playwright-provider");
 function asPass(pass, detail = {}) {
     return { pass, ...detail };
 }
 async function runTestAgentMcpLiveUrlFailClosedSelfTest() {
-    const noReader = await (0, mcp_adapters_part_01_1.waitForMcpUrl)("mcp", "https://cached.example/ok", { type: "waitForUrl", url: "/dashboard" }, 400);
-    const mismatch = await (0, mcp_adapters_part_01_1.waitForMcpUrl)("mcp", "https://cached.example/ok", { type: "waitForUrl", url: "/dashboard" }, 400, async () => "https://live.example/login");
+    const noReader = await (0, mcp_adapters_1.waitForMcpUrl)("mcp", "https://cached.example/ok", { type: "waitForUrl", url: "/dashboard" }, 400);
+    const mismatch = await (0, mcp_adapters_1.waitForMcpUrl)("mcp", "https://cached.example/ok", { type: "waitForUrl", url: "/dashboard" }, 400, async () => "https://live.example/login");
     const pass = noReader.status === "failed"
         && !!noReader.error
         && mismatch.status === "failed"
@@ -69,13 +69,13 @@ function runTestAgentUploadPathEscapeSelfTest() {
         let escapeRejected = false;
         let escapeMessage = "";
         try {
-            (0, playwright_provider_part_02_1.uploadFilePayload)({ workDir: dir, targetUrl: "http://localhost" }, { type: "uploadFile", filePath: path.join(os.tmpdir(), `outside-escape-${Date.now()}.txt`) });
+            (0, playwright_provider_1.uploadFilePayload)({ workDir: dir, targetUrl: "http://localhost" }, { type: "uploadFile", filePath: path.join(os.tmpdir(), `outside-escape-${Date.now()}.txt`) });
         }
         catch (error) {
             escapeMessage = String(error?.message || error || "");
             escapeRejected = /outside workDir/i.test(escapeMessage);
         }
-        const inside = (0, playwright_provider_part_02_1.uploadFilePayload)({ workDir: dir, targetUrl: "http://localhost" }, { type: "uploadFile", filePath: "ok.txt" });
+        const inside = (0, playwright_provider_1.uploadFilePayload)({ workDir: dir, targetUrl: "http://localhost" }, { type: "uploadFile", filePath: "ok.txt" });
         const insideOk = typeof inside === "string" && path.basename(inside) === "ok.txt";
         return asPass(escapeRejected && insideOk, { escapeRejected, escapeMessage, insideOk, inside });
     }
@@ -89,7 +89,7 @@ function runTestAgentUploadPathEscapeSelfTest() {
 function runTestAgentIndependentReviewDecisionAlignmentSelfTest() {
     const { deriveIndependentReviewDecision, } = require("../modules/collaboration/test-agent-independent-review-decision");
     const { buildNativeTestAgentReviewSummary } = require("../modules/collaboration/collaboration-test-agent-runtime");
-    const { getIndependentReviewGateState } = require("../agents/workchain-part-01-part-01");
+    const { getIndependentReviewGateState } = require("../agents/workchain");
     const report = {
         schema: "ccm-test-agent-report-v1",
         status: "passed",
@@ -134,7 +134,7 @@ function runTestAgentIndependentReviewDecisionAlignmentSelfTest() {
 }
 function runTestAgentProviderGapForcesPlaywrightRecheckSelfTest() {
     const { applyTestAgentProviderGapPlaywrightReroute, } = require("../modules/collaboration/test-agent-independent-review-decision");
-    const { buildTestAgentReviewRecheckFollowUp, } = require("../modules/collaboration/collaboration-runtime-daily-dev-part-02");
+    const { buildTestAgentReviewRecheckFollowUp, } = require("../modules/collaboration/collaboration-runtime-daily-dev");
     const report = {
         schema: "ccm-test-agent-report-v1",
         browserProviderGaps: [{

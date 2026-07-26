@@ -118,7 +118,7 @@ if (process.argv.includes("--child")) {
   } catch (error) {
     blockedError = error;
   }
-  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-02-part-02.ts"), "utf8");
+  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents.ts"), "utf8");
   const snapshotSource = fs.readFileSync(path.join(root, "backend", "tasks", "agent-sessions-snapshot-rows.ts"), "utf8");
   const snapshotSession = agentSessions.openTaskAgentSession({
     scopeId: packet.task_id,

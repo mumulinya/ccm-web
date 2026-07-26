@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import { getConfigs, getConfigInfo, loadProjectConfigs, loadTasks } from "../../core/db";
 import { createTask, updateTask } from "../collaboration/collaboration-task-service";
 import { addTaskLog, appendTaskTimelineEvent } from "../collaboration/logs";
+import { AUTO_REWORK_MAX_ROUNDS } from "../collaboration/rework-policy";
 import {
   callAnthropicCompatibleChat,
   callAnthropicCompatibleJson,
@@ -803,11 +804,11 @@ export async function executeProjectMainTask(input: {
       || input.task.requires_independent_review === true
       || input.task.requires_verification === true;
     if (!requiresTestAgent) latestReview = { canAccept: true, status: "not_required" };
-    for (let round = 1; requiresTestAgent && round <= 3; round += 1) {
+    for (let round = 1; requiresTestAgent && round <= AUTO_REWORK_MAX_ROUNDS; round += 1) {
       assertNotCancelled();
-      updateTask(taskId, { status: "reviewing", acceptance_state: "test_agent_running", status_detail: `TestAgent 正在执行第 ${round}/3 轮独立验收`, review_round: round });
+      updateTask(taskId, { status: "reviewing", acceptance_state: "test_agent_running", status_detail: `TestAgent 正在执行第 ${round}/${AUTO_REWORK_MAX_ROUNDS} 轮独立验收`, review_round: round });
       appendTaskTimelineEvent(taskId, { type: "project_test_agent_started", title: `TestAgent 第 ${round} 轮验收`, detail: "独立读取源码和真实验证证据", status: "active", phase: "reviewing", agent: "test-agent" });
-      emit("testing", { status: "running", round, max_rounds: 3 });
+      emit("testing", { status: "running", round, max_rounds: AUTO_REWORK_MAX_ROUNDS });
       latestReview = await runProjectTaskTestAgentReview({
         task: getProjectMainTask(taskId) || input.task,
         project,
@@ -824,7 +825,7 @@ export async function executeProjectMainTask(input: {
       appendTaskTimelineEvent(taskId, { type: "project_test_agent_finished", title: latestReview.canAccept ? "TestAgent 验收通过" : "TestAgent 发现验收缺口", detail: latestReview.canAccept ? "证据门禁已通过" : projectTestAgentProblems(latestReview).join("；"), status: latestReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: "test-agent", data: { round, report: latestReview.report, verdict: latestReview.verdict } });
       emit("testing", { status: latestReview.canAccept ? "passed" : "failed", round, test_agent: latestReview });
       if (latestReview.canAccept) break;
-      if (round >= 3) break;
+      if (round >= AUTO_REWORK_MAX_ROUNDS) break;
       const problems = projectTestAgentProblems(latestReview);
       const reworkItem: ProjectMainWorkItem = {
         id: `rework_${round}`,

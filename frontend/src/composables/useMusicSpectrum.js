@@ -12,6 +12,8 @@ export function useMusicSpectrum(deps) {
 
   const audioCtx = ref(null)
   const analyser = ref(null)
+  const outputGain = ref(null)
+  const normalizer = ref(null)
   const canvasRef = ref(null)
   const dataArray = ref(null)
   const leftCaps = ref([])
@@ -53,14 +55,37 @@ export function useMusicSpectrum(deps) {
       analyser.value = audioCtx.value.createAnalyser()
       analyser.value.fftSize = 128
       const source = audioCtx.value.createMediaElementSource(audioEl.value)
+      normalizer.value = audioCtx.value.createDynamicsCompressor()
+      outputGain.value = audioCtx.value.createGain()
       source.connect(analyser.value)
-      analyser.value.connect(audioCtx.value.destination)
+      analyser.value.connect(normalizer.value)
+      normalizer.value.connect(outputGain.value)
+      outputGain.value.connect(audioCtx.value.destination)
       dataArray.value = new Uint8Array(analyser.value.frequencyBinCount)
       
       if (audioCtx.value.state === 'suspended') {
         audioCtx.value.resume()
       }
     } catch {}
+  }
+
+  const setVolumeNormalization = (enabled) => {
+    if (!normalizer.value) return
+    const node = normalizer.value
+    node.threshold.value = enabled ? -20 : 0
+    node.knee.value = enabled ? 18 : 0
+    node.ratio.value = enabled ? 5 : 1
+    node.attack.value = enabled ? 0.01 : 0
+    node.release.value = enabled ? 0.3 : 0.25
+  }
+
+  const setOutputGain = (value, seconds = 0) => {
+    if (!outputGain.value || !audioCtx.value) return
+    const gain = outputGain.value.gain
+    const at = audioCtx.value.currentTime
+    gain.cancelScheduledValues(at)
+    gain.setValueAtTime(gain.value, at)
+    gain.linearRampToValueAtTime(Math.max(0, Math.min(1, Number(value))), at + Math.max(0, Number(seconds) || 0))
   }
 
 
@@ -326,11 +351,15 @@ export function useMusicSpectrum(deps) {
   return {
     audioCtx,
     analyser,
+    outputGain,
+    normalizer,
     canvasRef,
     dataArray,
     leftCaps,
     rightCaps,
     initAnalyser,
+    setVolumeNormalization,
+    setOutputGain,
     drawSpectrums,
     stopSpectrum,
   }

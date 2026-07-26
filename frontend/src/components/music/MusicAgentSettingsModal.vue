@@ -1,17 +1,21 @@
 <script setup>
+import { Bot, Moon, Settings2, Sparkles, Volume2, X } from '@lucide/vue'
+
 defineProps({
   config: { type: Object, required: true },
+  playbackSettings: { type: Object, required: true },
+  aiSongQuoteEnabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close', 'save', 'update-proxy'])
+const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-location', 'update-setting', 'toggle-ai-quote'])
 </script>
 
 <template>
   <div class="settings-overlay" @click.self="emit('close')">
     <div class="settings-modal">
       <div class="settings-header">
-        <span>⚙️ 音乐 Agent 设置</span>
-        <button class="close-btn" @click="emit('close')">&times;</button>
+        <span><Settings2 :size="17" />音乐与 Agent 设置</span>
+        <button class="close-btn" title="关闭" @click="emit('close')"><X :size="17" /></button>
       </div>
       <div class="settings-body">
         <div class="config-summary">
@@ -39,6 +43,67 @@ const emit = defineEmits(['close', 'save', 'update-proxy'])
           <input :value="config.proxy" placeholder="http://127.0.0.1:7890" @input="emit('update-proxy', $event.target.value)" />
           <span class="hint">B站搜索被封时配置代理，支持 http/socks5</span>
         </div>
+        <div class="field">
+          <label>天气城市（可选）</label>
+          <input
+            :value="config.weatherLocation"
+            maxlength="80"
+            placeholder="例如：杭州、上海浦东"
+            @input="emit('update-weather-location', $event.target.value)"
+          />
+          <span class="hint">优先使用浏览器当前位置；定位不可用时使用这里配置的城市。留空才会按 IP 近似定位，VPN 环境可能不准。</span>
+        </div>
+        <section class="settings-section">
+          <div class="section-heading"><Volume2 :size="16" /><div><strong>播放设置</strong><span>作用于本地播放和后续网络歌曲下载</span></div></div>
+          <label class="setting-row">
+            <span><strong>下载音质</strong><small>已经下载的文件不会重复转码</small></span>
+            <select :value="playbackSettings.quality" @change="emit('update-setting', 'quality', $event.target.value)">
+              <option value="standard">标准 128 kbps</option>
+              <option value="high">高 192 kbps</option>
+              <option value="very_high">极高 320 kbps</option>
+              <option value="source">源音质优先</option>
+            </select>
+          </label>
+          <label class="setting-row vertical">
+            <span><strong>淡入淡出</strong><small>{{ Number(playbackSettings.fadeSeconds || 0).toFixed(1) }} 秒</small></span>
+            <input type="range" min="0" max="8" step="0.5" :value="playbackSettings.fadeSeconds" @input="emit('update-setting', 'fadeSeconds', Number($event.target.value))" />
+          </label>
+          <label class="setting-row switch-row">
+            <span><strong>音量均衡</strong><small>使用动态压缩器平衡歌曲响度</small></span>
+            <input type="checkbox" :checked="playbackSettings.volumeNormalization" @change="emit('update-setting', 'volumeNormalization', $event.target.checked)" />
+          </label>
+          <label class="setting-row switch-row">
+            <span><strong>记住播放进度</strong><small>重新打开歌曲时从上次位置继续</small></span>
+            <input type="checkbox" :checked="playbackSettings.rememberProgress" @change="emit('update-setting', 'rememberProgress', $event.target.checked)" />
+          </label>
+          <label class="setting-row">
+            <span><strong><Moon :size="13" />睡眠定时</strong><small>保存后立即开始计时</small></span>
+            <select :value="playbackSettings.sleepTimerMinutes" @change="emit('update-setting', 'sleepTimerMinutes', Number($event.target.value))">
+              <option :value="0">关闭</option><option :value="15">15 分钟</option><option :value="30">30 分钟</option><option :value="45">45 分钟</option><option :value="60">60 分钟</option><option :value="90">90 分钟</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-heading"><Bot :size="16" /><div><strong>AI 功能开关</strong><span>带“调用模型”的功能会产生一次大模型请求</span></div></div>
+          <label class="setting-row switch-row model-call">
+            <span><strong><Sparkles :size="13" />AI 文案</strong><small>切歌或刷新文案时调用模型</small></span>
+            <input type="checkbox" :checked="aiSongQuoteEnabled" @change="emit('toggle-ai-quote')" />
+          </label>
+          <label class="setting-row switch-row model-call">
+            <span><strong>AI 推荐</strong><small>全局或快捷点歌理解“心情不好”等模糊意图时调用模型</small></span>
+            <input type="checkbox" :checked="playbackSettings.aiRecommendationEnabled" @change="emit('update-setting', 'aiRecommendationEnabled', $event.target.checked)" />
+          </label>
+          <label class="setting-row switch-row model-call">
+            <span><strong>情绪识别</strong><small>切换歌曲时识别歌曲情绪并调用模型</small></span>
+            <input type="checkbox" :checked="playbackSettings.aiEmotionEnabled" @change="emit('update-setting', 'aiEmotionEnabled', $event.target.checked)" />
+          </label>
+          <label class="setting-row switch-row model-call">
+            <span><strong>自动选歌</strong><small>从多个候选中选择歌曲时调用模型</small></span>
+            <input type="checkbox" :checked="playbackSettings.aiAutoSelectEnabled" @change="emit('update-setting', 'aiAutoSelectEnabled', $event.target.checked)" />
+          </label>
+          <p class="model-note">统一搜索、播放控制、歌词、队列和本地筛选不会调用模型。音乐助手对话本身会调用统一大模型，不受这些功能开关影响。</p>
+        </section>
       </div>
       <div class="settings-footer">
         <button class="btn-aura" @click="emit('close')">取消</button>
@@ -61,7 +126,7 @@ const emit = defineEmits(['close', 'save', 'update-proxy'])
 }
 
 .settings-modal {
-  width: min(520px, 92vw);
+  width: min(640px, 92vw);
   max-height: 92vh;
   display: flex;
   flex-direction: column;
@@ -83,6 +148,9 @@ const emit = defineEmits(['close', 'save', 'update-proxy'])
 }
 
 .settings-header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 15px;
   font-weight: 800;
 }
@@ -164,6 +232,16 @@ const emit = defineEmits(['close', 'save', 'update-proxy'])
   color: #f5f0ff;
   font-size: 13px;
 }
+
+.settings-section { display: grid; gap: 2px; overflow: hidden; border: 1px solid rgba(165,139,255,.14); border-radius: 8px; background: rgba(255,255,255,.018); }
+.section-heading { padding: 12px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid rgba(165,139,255,.12); color: #cfc2fb; }
+.section-heading > div { display: flex; flex-direction: column; gap: 2px; }.section-heading strong { font-size: 12px; }.section-heading span { color: #897ca5; font-size: 10px; }
+.setting-row { min-height: 54px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid rgba(165,139,255,.07); }
+.setting-row:last-of-type { border-bottom: 0; }.setting-row > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }.setting-row strong { display: inline-flex; align-items: center; gap: 5px; color: #ddd4f5; font-size: 11px; }.setting-row small { color: #837799; font-size: 9px; line-height: 1.45; }
+.setting-row select { max-width: 170px; height: 31px; border: 1px solid rgba(165,139,255,.18); border-radius: 5px; color: #ded4f6; background: #100d1d; font-size: 10px; }
+.setting-row.vertical { align-items: stretch; flex-direction: column; gap: 7px; }.setting-row input[type="range"] { width: 100%; accent-color: #7fdce5; }
+.switch-row input[type="checkbox"] { width: 34px; height: 18px; accent-color: #65d6df; cursor: pointer; }
+.model-call { box-shadow: inset 2px 0 0 rgba(83,205,215,.3); }.model-note { margin: 0; padding: 9px 12px; color: #6f8794; background: rgba(83,205,215,.035); font-size: 9px; line-height: 1.55; }
 
 .hint {
   font-size: 11px;

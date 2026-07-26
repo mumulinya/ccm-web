@@ -7,8 +7,8 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { waitForMcpUrl } from "./browser/mcp-adapters-part-01";
-import { uploadFilePayload } from "./browser/playwright-provider-part-02";
+import { waitForMcpUrl } from "./browser/mcp-adapters";
+import { uploadFilePayload } from "./browser/playwright-provider";
 
 function asPass(pass: boolean, detail: Record<string, any> = {}) {
   return { pass, ...detail };
@@ -66,7 +66,7 @@ export function runTestAgentIndependentReviewDecisionAlignmentSelfTest() {
     deriveIndependentReviewDecision,
   } = require("../modules/collaboration/test-agent-independent-review-decision");
   const { buildNativeTestAgentReviewSummary } = require("../modules/collaboration/collaboration-test-agent-runtime");
-  const { getIndependentReviewGateState } = require("../agents/workchain-part-01-part-01");
+  const { getIndependentReviewGateState } = require("../agents/workchain");
 
   const report = {
     schema: "ccm-test-agent-report-v1",
@@ -117,7 +117,7 @@ export function runTestAgentProviderGapForcesPlaywrightRecheckSelfTest() {
   } = require("../modules/collaboration/test-agent-independent-review-decision");
   const {
     buildTestAgentReviewRecheckFollowUp,
-  } = require("../modules/collaboration/collaboration-runtime-daily-dev-part-02");
+  } = require("../modules/collaboration/collaboration-runtime-daily-dev");
 
   const report = {
     schema: "ccm-test-agent-report-v1",

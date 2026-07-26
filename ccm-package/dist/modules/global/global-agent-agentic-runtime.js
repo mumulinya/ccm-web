@@ -721,6 +721,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                         source_attachments: args.source_attachments || args.sourceAttachments || run.source_attachments || [],
                         source_ingestion: args.source_ingestion || args.sourceIngestion || run.source_ingestion || null,
                         group_id: args.group_id || args.groupId || "",
+                        group_session_id: args.group_session_id || args.groupSessionId || "",
                         target_project: args.target_project || args.targetProject || "",
                         source: run.source || "global-agent-requirement-epic",
                         channel: run.source || "global-agent",
@@ -824,6 +825,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                             targets: [{
                                     type: "group",
                                     group_id: args.group_id || args.groupId || "",
+                                    group_session_id: args.group_session_id || args.groupSessionId || "",
                                     task: args.business_goal || args.businessGoal || args.goal || args.message || run.original_user_message || run.user_message,
                                     reason: "全局 Agent 将复杂任务交给群聊主 Agent 计划、派发、验收和总结。",
                                     requires_code_changes: args.requires_code_changes !== false,

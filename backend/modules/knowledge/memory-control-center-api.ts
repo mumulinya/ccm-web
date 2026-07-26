@@ -48,7 +48,7 @@ import {
 } from "../collaboration/group-session-lifecycle-head";
 import { MemoryScope, CONTROL_DIR, AUDIT_FILE, GROUP_MEMORY_DIR, GROUP_SESSION_SCOPED_MEMORY_DIR, PROJECT_MEMORY_DIR, GLOBAL_MEMORY_FILE, now, readJson, hash, cleanId, readGroupSessionMemorySnapshotForCenter, readGroupToolContinuitySnapshotForCenter, appendAudit } from "./memory-control-center-types";
 import { getMemoryItemId, itemText, scopeControls, applyMemoryControls } from "./memory-control-center-controls";
-import { estimateGroupMessageTokens } from "../collaboration/group-compaction-projections-part-01";
+import { estimateGroupMessageTokens } from "../collaboration/group-compaction-projections";
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { readGroupCompactionActivity } from "../collaboration/group-compaction-activity";

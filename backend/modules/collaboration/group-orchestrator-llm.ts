@@ -71,6 +71,7 @@ import {
   loadOrchestratorConfig,
   buildGroupMainAgentBoundary,
 } from "./group-orchestrator-config";
+import { AUTO_REWORK_MAX_ROUNDS } from "./rework-policy";
 
 import {
   buildCoordinatorPlan,
@@ -360,7 +361,7 @@ export async function runLlmCoordinatorReview(
 
   const allowFollowUps = options.allowFollowUps !== false;
   const round = Math.max(1, Number(options.round || 1));
-  const maxRounds = Math.max(round, Number(options.maxRounds || 3));
+  const maxRounds = Math.max(round, Number(options.maxRounds || AUTO_REWORK_MAX_ROUNDS));
   const requiresCodeChanges = options.requiresCodeChanges !== false;
   const requiresVerification = options.requiresVerification !== false;
   const childReplies = validOutputs

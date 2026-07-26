@@ -30,6 +30,9 @@ type StoredAgentProviderSettings = {
 
 const SETTINGS_FILE = path.join(os.homedir(), ".cc-connect", "agent-provider-settings.json");
 const STATUS_CACHE = new Map<string, { expiresAt: number; value: any }>();
+// 状态探测涉及 spawnSync 外部 CLI（最长 8s），过期后由后台异步刷新兜底，
+// TTL 只决定刷新节奏，不再决定请求路径上的阻塞探测频率。
+const STATUS_CACHE_TTL_MS = 60_000;
 const INSTALL_OUTPUT_LIMIT = 12_000;
 type InstallState = {
   status: "idle" | "running" | "succeeded" | "failed";
@@ -224,7 +227,7 @@ export function saveAgentProviderSettings(updates: any) {
     updatedAt: next.updatedAt,
   };
   writeSettings(stored);
-  STATUS_CACHE.clear();
+  markAgentProviderStatusesStale();
   return loadAgentProviderSettings();
 }
 
@@ -436,28 +439,174 @@ function installState(provider: DevelopmentAgentProvider): InstallState {
   return INSTALL_STATES.get(provider) || { status: "idle" };
 }
 
-export function getAgentProviderStatuses(force = false) {
-  const cacheKey = "all";
-  const cached = STATUS_CACHE.get(cacheKey);
-  if (!force && cached && cached.expiresAt > Date.now()) return cached.value;
-  const config = loadAgentProviderSettings();
+type AgentProviderProbeResults = {
+  cursorCommand: string;
+  cursorInstalled: boolean;
+  cursor: { loggedIn: boolean; account: string; detail: string };
+  codexInstalled: boolean;
+  geminiInstalled: boolean;
+  openCodeInstalled: boolean;
+  claudeInstalled: boolean;
+  versions: { codex: string; cursor: string; gemini: string; opencode: string; claude: string };
+};
+
+// 与 spawnSync 默认 maxBuffer 对齐的输出上限，防止挂死的探测进程无界累积内存
+const PROBE_CAPTURE_LIMIT = 1024 * 1024;
+
+function runCommandCaptureAsync(
+  command: string,
+  args: string[],
+  options: { timeoutMs?: number; shell?: boolean } = {},
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise(resolve => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, {
+        shell: options.shell === true,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      resolve({ status: null, stdout: "", stderr: "" });
+      return;
+    }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (status: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // 结算即断流：shell:true 超时后孙进程可能仍持有管道写端，不断流会持续触发 data 回调
+      try { child.stdout?.destroy(); } catch {}
+      try { child.stderr?.destroy(); } catch {}
+      resolve({ status, stdout, stderr });
+    };
+    const timer = setTimeout(() => {
+      try {
+        if (process.platform === "win32" && child.pid) {
+          // shell:true 下直接子进程是 cmd.exe 包装层，必须杀树才能终结真实 CLI；
+          // 用异步 spawn 而非 spawnSync，避免在探测路径上重新引入事件循环阻塞
+          spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).once("error", () => {});
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {}
+      finish(null);
+    }, Math.max(1_000, Number(options.timeoutMs || 8_000)));
+    child.stdout?.on("data", chunk => { if (stdout.length < PROBE_CAPTURE_LIMIT) stdout = `${stdout}${String(chunk)}`.slice(0, PROBE_CAPTURE_LIMIT); });
+    child.stderr?.on("data", chunk => { if (stderr.length < PROBE_CAPTURE_LIMIT) stderr = `${stderr}${String(chunk)}`.slice(0, PROBE_CAPTURE_LIMIT); });
+    child.once("error", () => finish(null));
+    child.once("close", code => finish(typeof code === "number" ? code : null));
+  });
+}
+
+async function commandExistsAsync(command: string) {
+  // 与同步版保持一致：绝对/相对路径直接 stat（where.exe 无法匹配含路径分隔符的参数）
+  if (/[\\/]/.test(command)) {
+    try { return (await fs.promises.stat(command)).isFile(); } catch { return false; }
+  }
+  const probe = process.platform === "win32"
+    ? await runCommandCaptureAsync("where.exe", [command])
+    : await runCommandCaptureAsync("sh", ["-lc", `command -v ${command}`]);
+  return probe.status === 0;
+}
+
+async function commandVersionAsync(command: string, installed?: boolean) {
+  const exists = installed ?? await commandExistsAsync(command);
+  if (!exists) return "";
+  const result = await runCommandCaptureAsync(command, ["--version"], { shell: process.platform === "win32" });
+  return String(result.stdout || result.stderr || "").trim().split(/\r?\n/)[0].slice(0, 120);
+}
+
+async function resolveCursorAgentCommandAsync() {
+  if (await commandExistsAsync("cursor-agent")) return "cursor-agent";
+  if (await commandExistsAsync("agent")) return "agent";
+  if (process.platform === "win32") {
+    const localAppData = String(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"));
+    for (const name of ["cursor-agent.cmd", "agent.cmd"]) {
+      const candidate = path.join(localAppData, "cursor-agent", name);
+      if (await commandExistsAsync(candidate)) return candidate;
+    }
+  }
+  return "cursor-agent";
+}
+
+async function cursorStatusAsync(command: string, installed?: boolean) {
+  const exists = installed ?? await commandExistsAsync(command);
+  if (!exists) return { loggedIn: false, account: "", detail: "未安装 Cursor Agent CLI" };
+  const storedAccount = getAgentProviderAccountIdentity("cursor");
+  if (storedAccount) {
+    return { loggedIn: true, account: storedAccount, detail: "已读取 Cursor Agent 当前登录账号" };
+  }
+  const result = await runCommandCaptureAsync(command, ["status"], { shell: process.platform === "win32" });
+  return parseCursorAuthStatus(String(result.stdout || result.stderr || ""), result.status);
+}
+
+function collectAgentProviderProbes(): AgentProviderProbeResults {
   const cursorCommand = resolveCursorAgentCommand();
-  const cursor = cursorStatus(cursorCommand);
-  const codexInstalled = commandExists("codex");
+  return {
+    cursorCommand,
+    cursorInstalled: commandExists(cursorCommand),
+    cursor: cursorStatus(cursorCommand),
+    codexInstalled: commandExists("codex"),
+    geminiInstalled: commandExists("gemini"),
+    openCodeInstalled: commandExists("opencode"),
+    claudeInstalled: commandExists("claude"),
+    versions: {
+      codex: commandVersion("codex"),
+      cursor: commandVersion(cursorCommand),
+      gemini: commandVersion("gemini"),
+      opencode: commandVersion("opencode"),
+      claude: commandVersion("claude"),
+    },
+  };
+}
+
+async function collectAgentProviderProbesAsync(): Promise<AgentProviderProbeResults> {
+  const cursorCommand = await resolveCursorAgentCommandAsync();
+  // 阶段一：轻量存在性探测（where.exe / stat）并行执行
+  const [cursorInstalled, codexInstalled, geminiInstalled, openCodeInstalled, claudeInstalled] = await Promise.all([
+    commandExistsAsync(cursorCommand),
+    commandExistsAsync("codex"),
+    commandExistsAsync("gemini"),
+    commandExistsAsync("opencode"),
+    commandExistsAsync("claude"),
+  ]);
+  // 阶段二：只对已安装的 CLI 做重探测（--version / status），复用阶段一结果避免重复 where.exe
+  const [cursor, codexVersion, cursorVersion, geminiVersion, openCodeVersion, claudeVersion] = await Promise.all([
+    cursorStatusAsync(cursorCommand, cursorInstalled),
+    commandVersionAsync("codex", codexInstalled),
+    commandVersionAsync(cursorCommand, cursorInstalled),
+    commandVersionAsync("gemini", geminiInstalled),
+    commandVersionAsync("opencode", openCodeInstalled),
+    commandVersionAsync("claude", claudeInstalled),
+  ]);
+  return {
+    cursorCommand,
+    cursorInstalled,
+    cursor,
+    codexInstalled,
+    geminiInstalled,
+    openCodeInstalled,
+    claudeInstalled,
+    versions: { codex: codexVersion, cursor: cursorVersion, gemini: geminiVersion, opencode: openCodeVersion, claude: claudeVersion },
+  };
+}
+
+function assembleAgentProviderStatuses(probes: AgentProviderProbeResults) {
+  const config = loadAgentProviderSettings();
   const codexAuth = codexCredentialPresent();
-  const geminiInstalled = commandExists("gemini");
   const geminiAuth = geminiCredentialPresent();
-  const openCodeInstalled = commandExists("opencode");
   const openCodeAuth = openCodeCredentialPresent();
-  const claudeInstalled = commandExists("claude");
   const effectiveClaude = resolveEffectiveClaudeProviderSettings(config);
   const claudeReady = effectiveClaude.enabled && !!effectiveClaude.apiUrl && !!effectiveClaude.model && !!effectiveClaude.apiKey;
-  const value = {
+  return {
     codex: {
       provider: "codex",
       command: "codex",
-      installed: codexInstalled,
-      version: commandVersion("codex"),
+      installed: probes.codexInstalled,
+      version: probes.versions.codex,
       authState: codexAuth ? "logged_in" : "logged_out",
       account: codexAuth ? getAgentProviderAccountIdentity("codex") : "",
       detail: codexAuth ? "已发现本机 Codex CLI 登录凭据" : "尚未发现本机 Codex CLI 登录凭据",
@@ -465,19 +614,19 @@ export function getAgentProviderStatuses(force = false) {
     },
     cursor: {
       provider: "cursor",
-      command: cursorCommand,
-      installed: commandExists(cursorCommand),
-      version: commandVersion(cursorCommand),
-      authState: cursor.loggedIn ? "logged_in" : "logged_out",
-      account: cursor.account,
-      detail: cursor.detail,
+      command: probes.cursorCommand,
+      installed: probes.cursorInstalled,
+      version: probes.versions.cursor,
+      authState: probes.cursor.loggedIn ? "logged_in" : "logged_out",
+      account: probes.cursor.account,
+      detail: probes.cursor.detail,
       install: installState("cursor"),
     },
     gemini: {
       provider: "gemini",
       command: "gemini",
-      installed: geminiInstalled,
-      version: commandVersion("gemini"),
+      installed: probes.geminiInstalled,
+      version: probes.versions.gemini,
       authState: geminiAuth ? "logged_in" : "logged_out",
       account: geminiAuth ? getAgentProviderAccountIdentity("gemini") : "",
       detail: geminiAuth ? "已发现 Gemini CLI 的 Google 或 API 凭据" : "请启动 Gemini CLI 完成 Google 登录或配置 API 凭据",
@@ -486,8 +635,8 @@ export function getAgentProviderStatuses(force = false) {
     opencode: {
       provider: "opencode",
       command: "opencode",
-      installed: openCodeInstalled,
-      version: commandVersion("opencode"),
+      installed: probes.openCodeInstalled,
+      version: probes.versions.opencode,
       authState: openCodeAuth ? "logged_in" : "logged_out",
       account: openCodeAuth ? getAgentProviderAccountIdentity("opencode") : "",
       detail: openCodeAuth ? "已发现 OpenCode Provider 凭据" : "请使用 OpenCode 连接至少一个模型 Provider",
@@ -496,8 +645,8 @@ export function getAgentProviderStatuses(force = false) {
     claudecode: {
       provider: "claudecode",
       command: "claude",
-      installed: claudeInstalled,
-      version: commandVersion("claude"),
+      installed: probes.claudeInstalled,
+      version: probes.versions.claude,
       authState: claudeReady ? "configured" : "not_configured",
       credentialSource: effectiveClaude.source,
       providerName: effectiveClaude.providerName,
@@ -509,8 +658,73 @@ export function getAgentProviderStatuses(force = false) {
     },
     checkedAt: new Date().toISOString(),
   };
-  STATUS_CACHE.set(cacheKey, { expiresAt: Date.now() + 10_000, value });
+}
+
+function storeAgentProviderStatuses(value: any) {
+  STATUS_CACHE.set("all", { expiresAt: Date.now() + STATUS_CACHE_TTL_MS, value });
   return value;
+}
+
+// 占位结果：探测字段按"未安装"处理，凭据/配置类字段仍是实时读取的真实值。
+// 不写入 STATUS_CACHE，避免占位数据顶掉真实探测结果。
+function pendingAgentProviderStatuses() {
+  return assembleAgentProviderStatuses({
+    cursorCommand: "cursor-agent",
+    cursorInstalled: false,
+    cursor: { loggedIn: false, account: "", detail: "正在探测 Agent 状态，请稍后刷新" },
+    codexInstalled: false,
+    geminiInstalled: false,
+    openCodeInstalled: false,
+    claudeInstalled: false,
+    versions: { codex: "", cursor: "", gemini: "", opencode: "", claude: "" },
+  });
+}
+
+let statusRefreshPromise: Promise<any> | null = null;
+let statusRefreshDirty = false;
+
+export function refreshAgentProviderStatusesAsync(): Promise<any> {
+  if (!statusRefreshPromise) {
+    statusRefreshDirty = false;
+    statusRefreshPromise = collectAgentProviderProbesAsync()
+      .then(probes => storeAgentProviderStatuses(assembleAgentProviderStatuses(probes)))
+      .finally(() => {
+        statusRefreshPromise = null;
+        // 刷新期间发生过状态变更事件：本轮探测快照早于事件，重新标脏并补刷一轮
+        if (statusRefreshDirty) markAgentProviderStatusesStale();
+      });
+  }
+  return statusRefreshPromise;
+}
+
+function markAgentProviderStatusesStale() {
+  const cached = STATUS_CACHE.get("all");
+  if (cached) STATUS_CACHE.set("all", { ...cached, expiresAt: 0 });
+  if (statusRefreshPromise) {
+    // 在途探测启动于本次失效事件之前，join 拿到的是旧世界的快照；
+    // 记账并在其 finally 中补刷，保证事件之后总有一轮新探测落盘
+    statusRefreshDirty = true;
+    return;
+  }
+  void refreshAgentProviderStatusesAsync().catch(() => {});
+}
+
+export function getAgentProviderStatuses(force = false) {
+  const cached = STATUS_CACHE.get("all");
+  if (!force && cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) {
+    // 命中过期缓存（或 force）：立即返回上次结果并在后台异步刷新。
+    // 同步探测会 spawnSync 多个外部 CLI（单个最长 8s），在单进程服务里
+    // 会冻结全部请求，因此不允许出现在请求路径上。
+    void refreshAgentProviderStatusesAsync().catch(() => {});
+    return cached.value;
+  }
+  if (statusRefreshPromise) {
+    // 启动预热尚未完成的窗口：返回占位结果，绝不回退同步探测风暴
+    return pendingAgentProviderStatuses();
+  }
+  // 无缓存且无在途刷新：仅可能出现在非服务器上下文（脚本/CLI 直接调用），保留同步兜底
+  return storeAgentProviderStatuses(assembleAgentProviderStatuses(collectAgentProviderProbes()));
 }
 
 function loginCommand(provider: DevelopmentAgentProvider) {
@@ -594,8 +808,9 @@ export function startAgentProviderInstall(providerValue: string) {
   if (!["codex", "cursor", "gemini", "opencode", "claudecode"].includes(provider)) throw new Error("不支持的开发 Agent 安装目标");
   const current = installState(provider);
   if (current.status === "running") throw new Error("该 Agent 正在安装或更新");
-  const statuses = getAgentProviderStatuses(true);
-  const spec = installSpec(provider, statuses?.[provider]?.installed === true);
+  // installSpec 只有 cursor 分支消费 installed（决定全新安装还是 update），
+  // 用实时的轻量探测代替可能过期的缓存快照
+  const spec = installSpec(provider, provider === "cursor" && commandExists(resolveCursorAgentCommand()));
   const startedAt = new Date().toISOString();
   const child = spawn(spec.command, spec.args, {
     windowsHide: true,
@@ -612,7 +827,7 @@ export function startAgentProviderInstall(providerValue: string) {
       completedAt: new Date().toISOString(),
       error: String(error?.message || "安装进程启动失败").slice(0, 500),
     });
-    STATUS_CACHE.clear();
+    markAgentProviderStatusesStale();
   });
   child.once("close", code => {
     const previous = installState(provider);
@@ -624,9 +839,9 @@ export function startAgentProviderInstall(providerValue: string) {
       error: succeeded ? "" : `安装进程退出码 ${code ?? "unknown"}`,
       pid: undefined,
     });
-    STATUS_CACHE.clear();
+    markAgentProviderStatusesStale();
   });
-  STATUS_CACHE.clear();
+  markAgentProviderStatusesStale();
   return { provider, launched: true, install: installState(provider) };
 }
 
@@ -703,7 +918,8 @@ export function parseAgentProviderTestOutput(rawOutput: string, selectedModel = 
 }
 
 async function runAgentProviderTest(provider: DevelopmentAgentProvider, model: string) {
-  const statuses = getAgentProviderStatuses();
+  // 等待一轮真实探测而非信任过期快照，避免刚登录成功就测试被误拒
+  const statuses = await refreshAgentProviderStatusesAsync();
   const status = statuses?.[provider];
   const ready = status?.installed === true && (provider === "claudecode" ? status.authState === "configured" : status.authState === "logged_in");
   if (!ready) throw new Error(provider === "claudecode" ? "请先保存完整的 Claude Code API 配置" : "请先安装并登录该 Agent");
@@ -1060,10 +1276,13 @@ function appendLoginOutput(session: AgentProviderLoginSession, chunk: any) {
     session.detail = "网页授权后，请将 Google 授权码粘贴回 CCM";
   }
   if (progress.succeeded) {
+    // succeeded 正则作用于累积输出，命中后对每个后续 chunk 恒为真；
+    // 只在首次状态迁移时触发刷新，避免登录进程存活期间反复发起探测
+    const alreadySucceeded = session.status === "succeeded";
     session.status = "succeeded";
     session.detail = "网页登录成功";
     session.error = "";
-    STATUS_CACHE.clear();
+    if (!alreadySucceeded) markAgentProviderStatusesStale();
   } else if (progress.failed) {
     session.status = "failed";
     session.detail = "网页登录未完成";
@@ -1133,7 +1352,7 @@ export function startAgentProviderLogin(providerValue: string) {
   child.once("close", code => {
     session.child = undefined;
     session.pid = undefined;
-    STATUS_CACHE.clear();
+    markAgentProviderStatusesStale();
     const authenticated = provider === "cursor"
       ? cursorStatus(resolveCursorAgentCommand()).loggedIn
       : providerCredentialPresent(provider);
@@ -1149,7 +1368,7 @@ export function startAgentProviderLogin(providerValue: string) {
       session.error = `认证进程已结束${code == null ? "" : `（退出码 ${code}）`}`;
     }
   });
-  STATUS_CACHE.clear();
+  markAgentProviderStatusesStale();
   return { launched: true, browser: true, ...publicLoginSession(session) };
 }
 
@@ -1164,7 +1383,7 @@ export function getAgentProviderLoginSession(providerValue: string, sessionIdVal
     session.detail = "网页登录成功";
     session.error = "";
     stopLoginChild(session);
-    STATUS_CACHE.clear();
+    markAgentProviderStatusesStale();
   }
   return publicLoginSession(session);
 }
@@ -1194,13 +1413,13 @@ export function logoutAgentProvider(providerValue: string) {
     else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       throw new Error("Gemini 当前使用环境变量凭据，请在系统环境变量中移除后重新检查");
     }
-    STATUS_CACHE.clear();
+    markAgentProviderStatusesStale();
     return { provider, loggedOut: true };
   }
   if (provider === "opencode") {
     if (!commandExists("opencode")) throw new Error("opencode 未安装或不在 PATH 中");
     if (process.platform !== "win32") {
-      STATUS_CACHE.clear();
+      markAgentProviderStatusesStale();
       return {
         provider,
         loggedOut: false,
@@ -1217,7 +1436,7 @@ export function logoutAgentProvider(providerValue: string) {
       env: { ...process.env },
     });
     child.unref();
-    STATUS_CACHE.clear();
+    markAgentProviderStatusesStale();
     return { provider, loggedOut: false, interactive: true };
   }
   const command = provider === "codex" ? "codex" : resolveCursorAgentCommand();
@@ -1227,7 +1446,7 @@ export function logoutAgentProvider(providerValue: string) {
     encoding: "utf-8",
     timeout: 15_000,
   });
-  STATUS_CACHE.clear();
+  markAgentProviderStatusesStale();
   if (provider === "codex") {
     const sourceAuth = path.join(os.homedir(), ".codex", "auth.json");
     if (result.status !== 0) {

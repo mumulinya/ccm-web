@@ -156,7 +156,7 @@ export declare function markChildTypedMemoryDispatchStarted(wal: any, input?: an
 export declare function markChildTypedMemoryRunnerReturned(record: any, input?: any): any;
 export declare function markChildTypedMemoryDispatchCommitted(record: any, commit?: any): any;
 export declare function recoverDeliveryReceiptFromRunnerWal(record: any): {
-    session: import("../../tasks/agent-sessions-shared-part-01").TaskAgentSession;
+    session: import("../../tasks/agent-sessions-shared").TaskAgentSession;
     receipt: {
         checksum: string;
         receiptFile: string;

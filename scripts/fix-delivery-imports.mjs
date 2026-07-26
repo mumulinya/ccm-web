@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import fs from "fs";
 
-const p1 = "backend/agents/delivery-report-part-01-part-01.ts";
-const p2 = "backend/agents/delivery-report-part-01-part-02.ts";
+const p1 = "backend/agents/delivery-report.ts";
+const p2 = "backend/agents/delivery-report.ts";
 let s1 = fs.readFileSync(p1, "utf8");
 let s2 = fs.readFileSync(p2, "utf8");
 
@@ -32,7 +32,7 @@ for (const n of needed) {
 }
 fs.writeFileSync(p1, s1);
 
-s2 = s2.replace(/import\s*\{[\s\S]*?\}\s*from\s*["']\.\/delivery-report-part-01-part-01["'];\n*/g, "");
+s2 = s2.replace(/import\s*\{[\s\S]*?\}\s*from\s*["']\.\/delivery-report["'];\n*/g, "");
 const lines = s2.split(/\r?\n/);
 let insertAt = 0;
 for (let i = 0; i < lines.length; i++) {
@@ -43,7 +43,7 @@ for (let i = 0; i < lines.length; i++) {
     insertAt = i + 1;
   }
 }
-const imp = `import {\n  ${needed.join(",\n  ")},\n} from "./delivery-report-part-01-part-01";`;
+const imp = `import {\n  ${needed.join(",\n  ")},\n} from "./delivery-report";`;
 lines.splice(insertAt, 0, imp, "");
 fs.writeFileSync(p2, lines.join("\n"));
 console.log("delivery imports fixed");

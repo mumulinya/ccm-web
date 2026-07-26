@@ -41,6 +41,7 @@ const utils_1 = require("../../core/utils");
 const library_1 = require("./library");
 const FILE = path.join(utils_1.CCM_DIR, "music-library-state.json");
 const MAX_ITEMS = 1000;
+const MAX_HISTORY_EVENTS = 2000;
 function now() { return new Date().toISOString(); }
 function cleanName(value, max = 80) { return String(value || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max); }
 function validTrack(filename) {
@@ -50,14 +51,56 @@ function validTrack(filename) {
 function uniqueTracks(values) {
     return Array.from(new Set((Array.isArray(values) ? values : []).map(String).filter(validTrack))).slice(0, MAX_ITEMS);
 }
-function emptyState() { return { version: 1, favorites: [], playlists: [], queue: [], updatedAt: now() }; }
+function normalizePlayMode(value) {
+    return value === "random" || value === "single" ? value : "list";
+}
+function normalizeQueueSources(value, queue) {
+    const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const result = {};
+    for (const filename of queue) {
+        const item = input[filename];
+        result[filename] = {
+            label: cleanName(typeof item === "string" ? item : item?.label, 40) || "本地曲库",
+            addedAt: String(item?.addedAt || now()),
+        };
+    }
+    return result;
+}
+function normalizeHistory(value) {
+    return (Array.isArray(value) ? value : [])
+        .map((item) => ({
+        id: cleanName(item?.id, 100) || `history_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
+        filename: String(item?.filename || ""),
+        playedAt: String(item?.playedAt || now()),
+        source: cleanName(item?.source, 40) || "播放器",
+    }))
+        .filter((item) => validTrack(item.filename))
+        .slice(-MAX_HISTORY_EVENTS);
+}
+function emptyState() {
+    return {
+        version: 3,
+        favorites: [],
+        playlists: [],
+        queue: [],
+        queueSources: {},
+        currentFilename: "",
+        playMode: "list",
+        history: [],
+        updatedAt: now(),
+    };
+}
 class LibraryStateStore {
     state = emptyState();
     constructor() { this.load(); }
     get() {
         this.state.favorites = uniqueTracks(this.state.favorites);
         this.state.queue = uniqueTracks(this.state.queue);
+        this.state.queueSources = normalizeQueueSources(this.state.queueSources, this.state.queue);
         this.state.playlists = this.state.playlists.slice(0, 100).map(list => ({ ...list, tracks: uniqueTracks(list.tracks) }));
+        this.state.currentFilename = validTrack(this.state.currentFilename) ? this.state.currentFilename : "";
+        this.state.playMode = normalizePlayMode(this.state.playMode);
+        this.state.history = normalizeHistory(this.state.history);
         return JSON.parse(JSON.stringify(this.state));
     }
     toggleFavorite(filename, favorite) {
@@ -110,14 +153,45 @@ class LibraryStateStore {
         this.save();
         return this.get();
     }
-    setQueue(tracks) {
+    setQueue(tracks, input = {}) {
         this.state.queue = uniqueTracks(tracks);
+        this.state.queueSources = normalizeQueueSources({
+            ...this.state.queueSources,
+            ...(input.queueSources || {}),
+        }, this.state.queue);
+        if (input.currentFilename !== undefined) {
+            this.state.currentFilename = validTrack(input.currentFilename) ? String(input.currentFilename) : "";
+        }
+        if (input.playMode !== undefined)
+            this.state.playMode = normalizePlayMode(input.playMode);
+        this.save();
+        return this.get();
+    }
+    recordHistory(filename, source) {
+        if (!validTrack(filename))
+            throw new Error("歌曲不存在");
+        this.state.history.push({
+            id: `history_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
+            filename,
+            playedAt: now(),
+            source: cleanName(source, 40) || "播放器",
+        });
+        this.state.history = this.state.history.slice(-MAX_HISTORY_EVENTS);
+        this.save();
+        return this.get();
+    }
+    clearHistory() {
+        this.state.history = [];
         this.save();
         return this.get();
     }
     removeTrack(filename) {
         this.state.favorites = this.state.favorites.filter(item => item !== filename);
         this.state.queue = this.state.queue.filter(item => item !== filename);
+        delete this.state.queueSources[filename];
+        this.state.history = this.state.history.filter(item => item.filename !== filename);
+        if (this.state.currentFilename === filename)
+            this.state.currentFilename = "";
         for (const list of this.state.playlists)
             list.tracks = list.tracks.filter(item => item !== filename);
         this.save();
@@ -127,7 +201,15 @@ class LibraryStateStore {
             if (!fs.existsSync(FILE))
                 return;
             const value = JSON.parse(fs.readFileSync(FILE, "utf-8"));
-            this.state = { ...emptyState(), ...value, version: 1 };
+            this.state = {
+                ...emptyState(),
+                ...value,
+                version: 3,
+                queueSources: normalizeQueueSources(value?.queueSources, uniqueTracks(value?.queue)),
+                history: normalizeHistory(value?.history),
+                currentFilename: validTrack(value?.currentFilename) ? String(value.currentFilename) : "",
+                playMode: normalizePlayMode(value?.playMode),
+            };
         }
         catch (error) {
             console.warn("[MusicLibraryState] failed to load:", error?.message);

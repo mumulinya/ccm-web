@@ -84,6 +84,7 @@ const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 const internal_mcp_registry_1 = require("../tools/internal-mcp-registry");
 const runtime_events_1 = require("../system/runtime-events");
 const task_store_1 = require("./task-store");
+const atomic_json_file_1 = require("./atomic-json-file");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -110,50 +111,6 @@ if (!fs.existsSync(exports.SKILLS_DIR))
     fs.mkdirSync(exports.SKILLS_DIR, { recursive: true });
 if (!fs.existsSync(exports.SKILL_PACKAGES_DIR))
     fs.mkdirSync(exports.SKILL_PACKAGES_DIR, { recursive: true });
-function writeJsonAtomic(file, value) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}.tmp`;
-    if (fs.existsSync(file)) {
-        try {
-            fs.copyFileSync(file, `${file}.bak`);
-        }
-        catch { }
-    }
-    fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-    let lastError = null;
-    for (let attempt = 0; attempt < 8; attempt++) {
-        try {
-            fs.renameSync(temp, file);
-            return;
-        }
-        catch (error) {
-            lastError = error;
-            if (!["EPERM", "EACCES", "EBUSY", "EEXIST"].includes(String(error?.code || "")))
-                throw error;
-            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
-        }
-    }
-    for (let attempt = 0; attempt < 12; attempt++) {
-        try {
-            if (fs.existsSync(file))
-                fs.unlinkSync(file);
-            fs.renameSync(temp, file);
-            return;
-        }
-        catch (error) {
-            lastError = error;
-            if (!["EPERM", "EACCES", "EBUSY", "EEXIST", "ENOENT"].includes(String(error?.code || "")))
-                break;
-            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1));
-        }
-    }
-    try {
-        if (fs.existsSync(temp))
-            fs.unlinkSync(temp);
-    }
-    catch { }
-    throw lastError || new Error(`无法替换 JSON 文件：${file}`);
-}
 // === 代理类型定义 ===
 exports.AGENTS = [
     ...catalog_1.DEVELOPMENT_AGENT_CATALOG.map(agent => ({ type: agent.id, name: agent.label })),
@@ -299,7 +256,7 @@ function saveMcpTool(tool) {
         (0, credential_store_1.protectCredential)(scope, `env.${key}`, value),
     ]));
     const protectedTool = (0, credential_store_1.protectObjectSecrets)({ ...tool, env: protectedEnvironment }, scope);
-    writeJsonAtomic(path.join(exports.MCP_DIR, filename), protectedTool);
+    (0, atomic_json_file_1.writeJsonAtomic)(path.join(exports.MCP_DIR, filename), protectedTool);
 }
 function deleteMcpTool(name) {
     const filename = name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
@@ -344,7 +301,7 @@ function saveSkill(skill) {
                 throw error;
         }
     }
-    writeJsonAtomic(filePath, skill);
+    (0, atomic_json_file_1.writeJsonAtomic)(filePath, skill);
 }
 function deleteSkill(name) {
     (0, internal_skill_catalog_1.assertCcmInternalSkillMutable)(name, "删除");
@@ -533,20 +490,16 @@ function applyMetricToStore(value, agent, data = {}, now = new Date()) {
     return metrics;
 }
 function loadMetrics() {
-    try {
-        if (fs.existsSync(METRICS_FILE)) {
-            return normalizeMetricsStore(JSON.parse(fs.readFileSync(METRICS_FILE, "utf-8")));
-        }
-    }
-    catch { }
-    return emptyMetricsStore();
+    return normalizeMetricsStore((0, atomic_json_file_1.readJsonWithBackup)(METRICS_FILE, emptyMetricsStore()));
 }
 function saveMetrics(metrics) {
-    writeJsonAtomic(METRICS_FILE, normalizeMetricsStore(metrics));
+    (0, atomic_json_file_1.writeJsonAtomic)(METRICS_FILE, normalizeMetricsStore(metrics));
 }
 function recordMetric(agent, data) {
     try {
-        saveMetrics(applyMetricToStore(loadMetrics(), agent, data));
+        (0, atomic_json_file_1.withFileLock)(METRICS_FILE, () => {
+            saveMetrics(applyMetricToStore(loadMetrics(), agent, data));
+        }, { timeoutMs: 5000 });
         return true;
     }
     catch (error) {
@@ -623,46 +576,32 @@ function listTasksByParentId(parentId) {
 }
 // === Dialogue Templates ===
 function loadTemplates() {
-    try {
-        if (fs.existsSync(TEMPLATES_FILE)) {
-            return JSON.parse(fs.readFileSync(TEMPLATES_FILE, "utf-8"));
-        }
-    }
-    catch { }
-    return [];
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(TEMPLATES_FILE, []);
+    return Array.isArray(parsed) ? parsed : [];
 }
 function saveTemplates(templates) {
-    fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(TEMPLATES_FILE, templates);
 }
 // === Project Configs ===
 function loadProjectConfigs() {
-    try {
-        if (fs.existsSync(PROJECT_CONFIGS_FILE)) {
-            return JSON.parse(fs.readFileSync(PROJECT_CONFIGS_FILE, "utf-8"));
-        }
-    }
-    catch { }
-    return {};
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(PROJECT_CONFIGS_FILE, {});
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 function saveProjectConfigs(configs) {
-    fs.writeFileSync(PROJECT_CONFIGS_FILE, JSON.stringify(configs, null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(PROJECT_CONFIGS_FILE, configs);
 }
 // === Music Config ===
 function loadMusicConfig() {
-    try {
-        if (fs.existsSync(MUSIC_CONFIG_FILE)) {
-            return JSON.parse(fs.readFileSync(MUSIC_CONFIG_FILE, "utf-8"));
-        }
-    }
-    catch { }
-    return {
+    const fallback = {
         source: "bili",
         playMode: "loop",
         quality: "high"
     };
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(MUSIC_CONFIG_FILE, fallback);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback;
 }
 function saveMusicConfig(cfg) {
-    fs.writeFileSync(MUSIC_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(MUSIC_CONFIG_FILE, cfg);
 }
 // === Feishu Config ===
 function loadFeishuConfig() {
@@ -702,79 +641,44 @@ function loadCronJobs() {
     }
 }
 function saveCronJobs(jobs) {
-    writeJsonAtomic(CRON_FILE, jobs);
+    (0, atomic_json_file_1.writeJsonAtomic)(CRON_FILE, jobs);
 }
 // === Auto Dev Daily Reports ===
 function loadDevReports() {
-    if (!fs.existsSync(DEV_REPORTS_FILE))
-        return [];
-    try {
-        const parsed = JSON.parse(fs.readFileSync(DEV_REPORTS_FILE, "utf-8"));
-        return Array.isArray(parsed) ? parsed : [];
-    }
-    catch {
-        return [];
-    }
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(DEV_REPORTS_FILE, []);
+    return Array.isArray(parsed) ? parsed : [];
 }
 function saveDevReports(reports) {
-    fs.writeFileSync(DEV_REPORTS_FILE, JSON.stringify(reports, null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(DEV_REPORTS_FILE, reports);
 }
 function loadDevWeeklyReports() {
-    if (!fs.existsSync(DEV_WEEKLY_REPORTS_FILE))
-        return [];
-    try {
-        const parsed = JSON.parse(fs.readFileSync(DEV_WEEKLY_REPORTS_FILE, "utf-8"));
-        return Array.isArray(parsed) ? parsed : [];
-    }
-    catch {
-        return [];
-    }
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(DEV_WEEKLY_REPORTS_FILE, []);
+    return Array.isArray(parsed) ? parsed : [];
 }
 function saveDevWeeklyReports(reports) {
-    fs.writeFileSync(DEV_WEEKLY_REPORTS_FILE, JSON.stringify(reports, null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(DEV_WEEKLY_REPORTS_FILE, reports);
 }
 function loadAutoDevNotifyConfig() {
-    if (!fs.existsSync(AUTO_DEV_NOTIFY_FILE))
-        return {};
-    try {
-        const parsed = JSON.parse(fs.readFileSync(AUTO_DEV_NOTIFY_FILE, "utf-8"));
-        return parsed && typeof parsed === "object" ? parsed : {};
-    }
-    catch {
-        return {};
-    }
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(AUTO_DEV_NOTIFY_FILE, {});
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 function saveAutoDevNotifyConfig(config) {
-    fs.writeFileSync(AUTO_DEV_NOTIFY_FILE, JSON.stringify(config || {}, null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(AUTO_DEV_NOTIFY_FILE, config || {});
 }
 // === RAG Watch Paths ===
 function loadRagWatchPaths() {
-    if (!fs.existsSync(RAG_WATCH_PATHS_FILE))
-        return [];
-    try {
-        const parsed = JSON.parse(fs.readFileSync(RAG_WATCH_PATHS_FILE, "utf-8"));
-        return Array.isArray(parsed) ? parsed : [];
-    }
-    catch {
-        return [];
-    }
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(RAG_WATCH_PATHS_FILE, []);
+    return Array.isArray(parsed) ? parsed : [];
 }
 function saveRagWatchPaths(paths) {
-    fs.writeFileSync(RAG_WATCH_PATHS_FILE, JSON.stringify(paths || [], null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(RAG_WATCH_PATHS_FILE, paths || []);
 }
 // === RAG Metadata (Tags) ===
 function loadRagMetadata() {
-    if (!fs.existsSync(RAG_METADATA_FILE))
-        return {};
-    try {
-        const parsed = JSON.parse(fs.readFileSync(RAG_METADATA_FILE, "utf-8"));
-        return parsed && typeof parsed === "object" ? parsed : {};
-    }
-    catch {
-        return {};
-    }
+    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(RAG_METADATA_FILE, {});
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 function saveRagMetadata(metadata) {
-    fs.writeFileSync(RAG_METADATA_FILE, JSON.stringify(metadata || {}, null, 2));
+    (0, atomic_json_file_1.writeJsonAtomic)(RAG_METADATA_FILE, metadata || {});
 }
 //# sourceMappingURL=db.js.map

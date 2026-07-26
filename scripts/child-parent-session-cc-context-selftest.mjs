@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const contextModule = await import(pathToFileURL(path.join(root, "ccm-package/dist/modules/collaboration/group-memory-context-part-05.js")).href);
+const contextModule = await import(pathToFileURL(path.join(root, "ccm-package/dist/modules/collaboration/group-memory-context.js")).href);
 const gateModule = await import(pathToFileURL(path.join(root, "ccm-package/dist/agents/final-dispatch-payload-gate.js")).href);
 const { buildChildParentSessionContextProjection } = contextModule;
 const { buildFinalWorkerDispatchPayloadGate } = gateModule;
@@ -87,9 +87,9 @@ const compactGate = buildFinalWorkerDispatchPayloadGate({
 check(compactGate.status === "recompact_required", "final payload must use the child model capacity for compaction");
 check(compactGate.provider_call_allowed === false, "oversized full parent context must fail closed before Provider call");
 
-const source = fs.readFileSync(path.join(root, "backend/modules/collaboration/collaboration-cross-agents-part-01.ts"), "utf8");
-const fallbackSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/collaboration-cross-agents-part-02-part-02.ts"), "utf8");
-const bundleSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/group-memory-context-part-03-part-01.ts"), "utf8");
+const source = fs.readFileSync(path.join(root, "backend/modules/collaboration/collaboration-cross-agents.ts"), "utf8");
+const fallbackSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/collaboration-cross-agents.ts"), "utf8");
+const bundleSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/group-memory-context.ts"), "utf8");
 check(!source.includes("recentLimit: 15, olderLimit: 30, fullCount: 5"), "legacy fixed-count child context projection must be removed");
 check(source.includes("runGroupMemoryAutoCompactionNow"), "child dispatch must invoke the formal group compaction transaction");
 check(source.includes("formal_parent_compaction_not_committed"), "uncommitted formal compaction must fail closed");

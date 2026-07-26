@@ -24,6 +24,14 @@ import { useMusicPlayback } from '../../composables/useMusicPlayback.js'
 import { useMusicSpectrum } from '../../composables/useMusicSpectrum.js'
 import { useMusicDanmaku } from '../../composables/useMusicDanmaku.js'
 import { createMusicPlaybackCoordinator } from '../../composables/useMusicPlaybackCoordinator.js'
+import {
+  appendMusicQueue,
+  insertMusicQueueNext,
+  musicQueueFromTrack,
+  moveMusicQueueTrack,
+  reorderMusicQueue,
+  removeMusicQueueTrack,
+} from '../../utils/musicQueueHelpers.js'
 
 export function useMusicPlayer(options = {}) {
 
@@ -32,7 +40,7 @@ export function useMusicPlayer(options = {}) {
   const playbackCoordinator = createMusicPlaybackCoordinator()
 
   // === 基础核心状态 ===
-  const mode = ref(getPreferredMusicMode()) // local | cloud(B站) | netease(网易云)
+  const mode = ref(getPreferredMusicMode()) // local | cloud(B站) | netease(网易)
   watch(mode, (value) => setPreferredMusicMode(value))
   const tracks = ref([])
   const playlist = ref([])
@@ -54,6 +62,19 @@ export function useMusicPlayer(options = {}) {
   const duration = ref(0)
   const volume = ref(0.7)
   const playMode = ref('list') // list | random | single
+  const playbackSettings = ref({
+    quality: 'high',
+    fadeSeconds: 0,
+    volumeNormalization: false,
+    rememberProgress: true,
+    sleepTimerMinutes: 0,
+    aiRecommendationEnabled: true,
+    aiEmotionEnabled: true,
+    aiAutoSelectEnabled: true,
+  })
+  const aiRecommendationEnabled = computed(() => playbackSettings.value.aiRecommendationEnabled !== false)
+  const aiEmotionEnabled = computed(() => playbackSettings.value.aiEmotionEnabled !== false)
+  const aiAutoSelectEnabled = computed(() => playbackSettings.value.aiAutoSelectEnabled !== false)
   const filterText = ref('')
   const audioEl = ref(null)
   const leftCanvasRef = ref(null)
@@ -75,7 +96,50 @@ export function useMusicPlayer(options = {}) {
     updatePlaylist,
     deletePlaylist: persistDeletePlaylist,
     setPlaybackQueue,
+    recordPlaybackHistory,
+    clearPlaybackHistory: persistClearPlaybackHistory,
   } = useMusicLibraryState()
+
+  const playbackFailures = ref({})
+  const clearedQueueSnapshot = ref(null)
+  let clearedQueueTimer = null
+
+  const queueSourceLabel = (source) => {
+    const value = String(source || '').toLowerCase()
+    if (value.includes('netease')) return '网易'
+    if (value.includes('bili') || value.includes('cloud')) return 'B站'
+    if (value.includes('agent') || value.includes('global')) return '音乐 Agent'
+    if (value.includes('playlist')) return '歌单'
+    if (value.includes('history')) return '最近播放'
+    if (value.includes('random')) return '随机推荐'
+    if (value.includes('next')) return '下一首播放'
+    if (value.includes('queue')) return '播放队列'
+    if (value.includes('local') || value.includes('library')) return '本地曲库'
+    return String(source || '播放器').slice(0, 40)
+  }
+
+  const queueSources = computed(() => libraryState.value.queueSources || {})
+
+  const recentPlaybackRows = computed(() => {
+    const aggregate = new Map()
+    const events = [...(libraryState.value.history || [])].reverse()
+    for (const event of events) {
+      const track = tracks.value.find(item => item.filename === event.filename)
+      if (!track) continue
+      const existing = aggregate.get(event.filename)
+      if (existing) {
+        existing.historyCount += 1
+      } else {
+        aggregate.set(event.filename, {
+          ...track,
+          historyCount: 1,
+          historyLastPlayedAt: event.playedAt,
+          historySource: event.source || '播放器',
+        })
+      }
+    }
+    return Array.from(aggregate.values())
+  })
 
   const activePlaylist = computed(() => {
     if (!activeLibraryView.value.startsWith('playlist:')) return null
@@ -110,36 +174,51 @@ export function useMusicPlayer(options = {}) {
   const {
     lyrics,
     currentLyricIndex,
+    currentWordIndex,
     lyricsOffset,
+    lyricTimingOffsetMs,
+    showLyricTranslation,
+    adjustLyricTiming,
+    resetLyricTiming,
     loadLyrics,
     updateCurrentLyrics,
     resetLyrics,
     resetPetLyricIndex,
-  } = useMusicLyrics({ currentTime, isPlaying, notifyMusicPetSpeech })
+  } = useMusicLyrics({ currentTime, isPlaying, currentTrack, notifyMusicPetSpeech })
 
   const {
     currentEmotion,
     currentWeather,
+    weatherDetails,
+    weatherTitle,
     weatherIcon,
     weatherIconError,
     weatherEmoji,
     companionTimeStr,
     aiSongQuote,
+    aiSongQuoteEnabled,
+    songQuoteLoading,
+    toggleAiSongQuote,
+    refreshSongQuote,
     nextRecommendTrack,
     updatePreselectedTrack,
     recordCompanionSecond,
     fetchWeather,
     isRandomMusicKeyword,
-  } = useMusicAtmosphere({ currentTrack, playlist, currentIndex, playMode })
+  } = useMusicAtmosphere({ currentTrack, playlist, currentIndex, playMode, aiEmotionEnabled })
 
   const {
     audioCtx,
     analyser,
+    outputGain,
+    normalizer,
     canvasRef,
     dataArray,
     leftCaps,
     rightCaps,
     initAnalyser,
+    setVolumeNormalization,
+    setOutputGain,
     drawSpectrums,
     stopSpectrum,
   } = useMusicSpectrum({
@@ -240,13 +319,21 @@ export function useMusicPlayer(options = {}) {
     return {}
   })
 
-  const cyclePlayMode = () => {
+  const cyclePlayMode = async () => {
     if (playMode.value === 'list') {
       playMode.value = 'random'
     } else if (playMode.value === 'random') {
       playMode.value = 'single'
     } else {
       playMode.value = 'list'
+    }
+    try {
+      await setPlaybackQueue(playlist.value, {
+        currentFilename: activePlaybackFilename.value || currentTrack.value?.filename || '',
+        playMode: playMode.value,
+      })
+    } catch (error) {
+      toast.error(error?.message || '保存播放模式失败')
     }
   }
 
@@ -279,6 +366,8 @@ export function useMusicPlayer(options = {}) {
     appendAgentMessageContent,
     setAgentMessageContent,
     setAgentMessageResults,
+    setAgentMessageStreaming,
+    hasStreamingAgentMessage,
     buildAgentRequestHistory,
     getAgentMessageKey,
     captureAgentChatScroll,
@@ -339,9 +428,42 @@ export function useMusicPlayer(options = {}) {
     model: '',
     format: 'openai-compatible',
     proxy: '',
+    weatherLocation: '',
     hasKey: false,
     sourceLabel: '系统设置 / 统一大模型配置'
   })
+  const sleepTimerEndsAt = ref(0)
+  const sleepTimerRemaining = ref('')
+  let sleepTimerInterval = null
+
+  const refreshSleepTimer = () => {
+    const remaining = sleepTimerEndsAt.value - Date.now()
+    if (remaining <= 0) {
+      sleepTimerRemaining.value = ''
+      if (sleepTimerInterval) {
+        clearInterval(sleepTimerInterval)
+        sleepTimerInterval = null
+      }
+      if (sleepTimerEndsAt.value) {
+        sleepTimerEndsAt.value = 0
+        stopPlayback({ source: 'sleep-timer' })
+        toast.info('睡眠定时已结束，音乐已停止')
+      }
+      return
+    }
+    const minutes = Math.floor(remaining / 60000)
+    const seconds = Math.floor((remaining % 60000) / 1000)
+    sleepTimerRemaining.value = `${minutes}:${String(seconds).padStart(2, '0')}`
+  }
+
+  const scheduleSleepTimer = (minutes) => {
+    if (sleepTimerInterval) clearInterval(sleepTimerInterval)
+    const value = Math.max(0, Number(minutes || 0))
+    sleepTimerEndsAt.value = value ? Date.now() + value * 60 * 1000 : 0
+    playbackSettings.value.sleepTimerMinutes = value
+    refreshSleepTimer()
+    sleepTimerInterval = value ? setInterval(refreshSleepTimer, 1000) : null
+  }
   const agentConfigLoaded = ref(false)
 
   const loadAgentConfig = async () => {
@@ -350,6 +472,18 @@ export function useMusicPlayer(options = {}) {
       const data = await res.json()
       if (data.success) {
         agentConfig.value = { ...agentConfig.value, ...data.config }
+        playbackSettings.value = {
+          ...playbackSettings.value,
+          quality: data.config.quality || 'high',
+          fadeSeconds: Number(data.config.fadeSeconds || 0),
+          volumeNormalization: data.config.volumeNormalization === true,
+          rememberProgress: data.config.rememberProgress !== false,
+          sleepTimerMinutes: Math.max(0, Number(data.config.sleepTimerMinutes || 0)),
+          aiRecommendationEnabled: data.config.aiRecommendationEnabled !== false,
+          aiEmotionEnabled: data.config.aiEmotionEnabled !== false,
+          aiAutoSelectEnabled: data.config.aiAutoSelectEnabled !== false,
+        }
+        setVolumeNormalization?.(playbackSettings.value.volumeNormalization)
         agentConfigLoaded.value = true
       }
     } catch {}
@@ -361,15 +495,37 @@ export function useMusicPlayer(options = {}) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          proxy: agentConfig.value.proxy
+          proxy: agentConfig.value.proxy,
+          weatherLocation: agentConfig.value.weatherLocation,
+          quality: playbackSettings.value.quality,
+          fadeSeconds: Number(playbackSettings.value.fadeSeconds || 0),
+          volumeNormalization: playbackSettings.value.volumeNormalization === true,
+          rememberProgress: playbackSettings.value.rememberProgress !== false,
+          sleepTimerMinutes: Math.max(0, Number(playbackSettings.value.sleepTimerMinutes || 0)),
+          aiRecommendationEnabled: playbackSettings.value.aiRecommendationEnabled !== false,
+          aiEmotionEnabled: playbackSettings.value.aiEmotionEnabled !== false,
+          aiAutoSelectEnabled: playbackSettings.value.aiAutoSelectEnabled !== false,
         })
       })
       const data = await res.json()
+      if (!res.ok || data.success === false) throw new Error(data.error || '保存音乐设置失败')
       if (data.success && data.config) {
         agentConfig.value = { ...agentConfig.value, ...data.config }
       }
+      await fetchWeather()
+      setVolumeNormalization?.(playbackSettings.value.volumeNormalization)
+      scheduleSleepTimer(playbackSettings.value.sleepTimerMinutes)
       showSettings.value = false
-    } catch {}
+      toast.success('音乐设置已保存')
+    } catch (error) {
+      toast.error(error?.message || '保存音乐设置失败')
+    }
+  }
+
+  const updatePlaybackSetting = (key, value) => {
+    if (!(key in playbackSettings.value)) return
+    playbackSettings.value = { ...playbackSettings.value, [key]: value }
+    if (key === 'volumeNormalization') setVolumeNormalization?.(value === true)
   }
 
   // === 音乐列表 ===
@@ -441,8 +597,8 @@ export function useMusicPlayer(options = {}) {
     let source = tracks.value
     if (activeLibraryView.value === 'favorites') {
       source = source.filter(track => isFavorite(track.filename))
-    } else if (activeLibraryView.value === 'queue') {
-      source = (libraryState.value.queue || []).map(filename => tracks.value.find(track => track.filename === filename)).filter(Boolean)
+    } else if (activeLibraryView.value === 'history') {
+      source = recentPlaybackRows.value
     } else if (activeLibraryView.value.startsWith('playlist:')) {
       const id = activeLibraryView.value.slice('playlist:'.length)
       const item = (libraryState.value.playlists || []).find(list => list.id === id)
@@ -466,40 +622,58 @@ export function useMusicPlayer(options = {}) {
 
   const syncPlaybackQueue = async (nextTracks, options = {}) => {
     try {
-      const focusFilename = options.focusFilename
-        || getStreamFilenameFromAudio?.()
-        || activePlaybackFilename.value
-        || currentTrack.value?.filename
-      await setPlaybackQueue(nextTracks)
-      playlist.value = nextTracks.length ? nextTracks : tracks.value
+      const hasExplicitFocus = options.focusFilename !== undefined
+      const focusFilename = hasExplicitFocus
+        ? String(options.focusFilename || '')
+        : (getStreamFilenameFromAudio?.() || activePlaybackFilename.value || currentTrack.value?.filename || '')
+      const nextQueueSources = { ...(libraryState.value.queueSources || {}) }
+      if (options.sourceLabel) {
+        const targets = options.sourceFilename
+          ? nextTracks.filter(track => track.filename === options.sourceFilename)
+          : nextTracks
+        for (const track of targets) {
+          nextQueueSources[track.filename] = {
+            label: queueSourceLabel(options.sourceLabel),
+            addedAt: new Date().toISOString(),
+          }
+        }
+      }
+      await setPlaybackQueue(nextTracks, {
+        currentFilename: focusFilename,
+        playMode: playMode.value,
+        queueSources: nextQueueSources,
+      })
+      playlist.value = [...nextTracks]
       currentIndex.value = focusFilename ? playlist.value.findIndex(track => track.filename === focusFilename) : (playlist.value.length ? 0 : -1)
-      if (currentIndex.value < 0 && playlist.value.length) currentIndex.value = 0
-      if (focusFilename && currentIndex.value >= 0) activePlaybackFilename.value = focusFilename
+      if (focusFilename) activePlaybackFilename.value = focusFilename
+      else if (options.clearCurrent === true) activePlaybackFilename.value = ''
       syncUiFromAudio?.()
     } catch (error) { toast.error(error.message || '更新播放队列失败') }
   }
 
-  /** Empty queue → full local library (real-player default). */
-  const ensurePlaybackQueueFromLibrary = async (options = {}) => {
-    if (!tracks.value.length) return []
-    const forceFullLibrary = options.forceFullLibrary === true
+  const restorePlaybackQueue = () => {
     const savedQueue = (libraryState.value.queue || [])
       .map(filename => tracks.value.find(track => track.filename === filename))
       .filter(Boolean)
-    const next = forceFullLibrary || !savedQueue.length ? [...tracks.value] : savedQueue
-    const sameAsCurrent = next.length === playlist.value.length
-      && next.every((track, index) => track.filename === playlist.value[index]?.filename)
-    if (!sameAsCurrent) {
-      await syncPlaybackQueue(next, {
-        focusFilename: options.focusFilename
-          || activePlaybackFilename.value
-          || currentTrack.value?.filename
-          || next[0]?.filename,
-      })
-    } else if (!playlist.value.length) {
-      playlist.value = next
-    }
-    return playlist.value.filter(track => track?.filename)
+    playlist.value = savedQueue
+    playMode.value = ['list', 'random', 'single'].includes(libraryState.value.playMode)
+      ? libraryState.value.playMode
+      : 'list'
+    const savedCurrent = String(libraryState.value.currentFilename || '')
+    activePlaybackFilename.value = savedCurrent
+    currentIndex.value = savedCurrent
+      ? savedQueue.findIndex(track => track.filename === savedCurrent)
+      : (savedQueue.length ? 0 : -1)
+    return savedQueue
+  }
+
+  const useFullLibraryAsPlaybackQueue = async (options = {}) => {
+    const next = [...tracks.value]
+    await syncPlaybackQueue(next, {
+      focusFilename: options.focusFilename || next[0]?.filename || '',
+      sourceLabel: options.sourceLabel || '本地曲库',
+    })
+    return next
   }
 
   const resolvePlaylistTracks = (playlistItem) => (playlistItem?.tracks || [])
@@ -519,18 +693,27 @@ export function useMusicPlayer(options = {}) {
   }
 
   const addTrackToQueue = (track, options = {}) => {
-    const current = (libraryState.value.queue || []).map(filename => tracks.value.find(item => item.filename === filename)).filter(Boolean)
-    if (!current.some(item => item.filename === track.filename)) current.push(track)
-    // Prefer the freshly resolved track object when the queue only stored filenames.
-    const idx = current.findIndex(item => item.filename === track.filename)
-    if (idx >= 0) current[idx] = track
+    const current = appendMusicQueue(playlist.value, track)
     return syncPlaybackQueue(current, {
       focusFilename: options.focus ? track.filename : undefined,
+      sourceLabel: options.source || '手动加入',
+      sourceFilename: track.filename,
     })
   }
 
-  const removeTrackFromQueue = (track) => syncPlaybackQueue(
-    (libraryState.value.queue || []).filter(filename => filename !== track.filename).map(filename => tracks.value.find(item => item.filename === filename)).filter(Boolean)
+  const playTrackNext = (track) => syncPlaybackQueue(
+    insertMusicQueueNext(playlist.value, track, activePlaybackFilename.value || currentTrack.value?.filename || ''),
+    { sourceLabel: '下一首播放', sourceFilename: track.filename }
+  )
+
+  const removeTrackFromQueue = (track) => syncPlaybackQueue(removeMusicQueueTrack(playlist.value, track.filename))
+
+  const moveTrackInPlaybackQueue = (track, direction) => syncPlaybackQueue(
+    moveMusicQueueTrack(playlist.value, track.filename, direction)
+  )
+
+  const reorderPlaybackQueue = (fromIndex, toIndex) => syncPlaybackQueue(
+    reorderMusicQueue(playlist.value, fromIndex, toIndex)
   )
 
   const submitPlaylist = async () => {
@@ -656,6 +839,45 @@ export function useMusicPlayer(options = {}) {
     catch (error) { toast.error(error.message || '调整歌曲顺序失败') }
   }
 
+  const markTrackPlaybackFailure = (track, failure) => {
+    if (!track?.filename) return
+    playbackFailures.value = {
+      ...playbackFailures.value,
+      [track.filename]: failure,
+    }
+  }
+
+  const clearTrackPlaybackFailure = (track) => {
+    if (!track?.filename || !playbackFailures.value[track.filename]) return
+    const next = { ...playbackFailures.value }
+    delete next[track.filename]
+    playbackFailures.value = next
+  }
+
+  const PLAYBACK_PROGRESS_KEY = 'aura_music_playback_progress_v1'
+  let lastProgressPersistAt = 0
+  const loadPlaybackProgress = () => {
+    try { return JSON.parse(localStorage.getItem(PLAYBACK_PROGRESS_KEY) || '{}') || {} }
+    catch { return {} }
+  }
+  const getSavedPlaybackProgress = (track) => playbackSettings.value.rememberProgress
+    ? Number(loadPlaybackProgress()[track?.filename] || 0)
+    : 0
+  const savePlaybackProgress = (track, time, total) => {
+    if (!playbackSettings.value.rememberProgress || !track?.filename || Date.now() - lastProgressPersistAt < 4000) return
+    if (!Number.isFinite(time) || time < 2 || (Number.isFinite(total) && total > 0 && time >= total - 8)) return
+    lastProgressPersistAt = Date.now()
+    const map = loadPlaybackProgress()
+    map[track.filename] = Number(time.toFixed(1))
+    localStorage.setItem(PLAYBACK_PROGRESS_KEY, JSON.stringify(map))
+  }
+  const clearSavedPlaybackProgress = (track) => {
+    if (!track?.filename) return
+    const map = loadPlaybackProgress()
+    delete map[track.filename]
+    localStorage.setItem(PLAYBACK_PROGRESS_KEY, JSON.stringify(map))
+  }
+
 
   const {
     prevVolume,
@@ -699,7 +921,99 @@ export function useMusicPlayer(options = {}) {
     danmakuItems,
     addBubbleComment,
     playbackCoordinator,
+    persistPlaybackState: (nextTracks, metadata) => {
+      const nextQueueSources = { ...(libraryState.value.queueSources || {}) }
+      if (metadata?.sourceFilename) {
+        nextQueueSources[metadata.sourceFilename] = {
+          label: queueSourceLabel(metadata.source),
+          addedAt: nextQueueSources[metadata.sourceFilename]?.addedAt || new Date().toISOString(),
+        }
+      }
+      return setPlaybackQueue(nextTracks, {
+        ...metadata,
+        queueSources: nextQueueSources,
+      })
+    },
+    recordPlaybackHistory: (track, source) => recordPlaybackHistory(track, queueSourceLabel(source)),
+    markTrackPlaybackFailure,
+    clearTrackPlaybackFailure,
+    fadeSeconds: computed(() => playbackSettings.value.fadeSeconds),
+    setOutputGain,
+    getSavedPlaybackProgress,
+    savePlaybackProgress,
+    clearSavedPlaybackProgress,
+    volumeNormalization: computed(() => playbackSettings.value.volumeNormalization),
+    setVolumeNormalization,
   })
+
+  const playLibraryTrack = async (track) => {
+    const contextTracks = filteredTracks.value.filter(item => item?.filename)
+    const source = activeLibraryView.value === 'history'
+      ? '最近播放'
+      : activePlaylist.value?.name || (activeLibraryView.value === 'favorites' ? '我的收藏' : '本地曲库')
+    await syncPlaybackQueue(contextTracks, {
+      focusFilename: track.filename,
+      sourceLabel: source,
+    })
+    return play(track, { source })
+  }
+
+  const clearPlaybackQueue = async () => {
+    if (!playlist.value.length) return
+    const confirmed = await confirmDialog('将停止当前音乐并清空播放队列，是否继续？')
+    if (!confirmed) return
+    if (clearedQueueTimer) clearTimeout(clearedQueueTimer)
+    clearedQueueSnapshot.value = {
+      tracks: [...playlist.value],
+      currentFilename: activePlaybackFilename.value || currentTrack.value?.filename || '',
+      queueSources: { ...(libraryState.value.queueSources || {}) },
+    }
+    clearedQueueTimer = setTimeout(() => {
+      clearedQueueSnapshot.value = null
+      clearedQueueTimer = null
+    }, 10000)
+    stopPlayback({ resetPosition: true, notify: false })
+    await syncPlaybackQueue([], { focusFilename: '', clearCurrent: true })
+    resetLyrics()
+    toast.success('播放队列已清空')
+  }
+
+  const undoClearPlaybackQueue = async () => {
+    const snapshot = clearedQueueSnapshot.value
+    if (!snapshot?.tracks?.length) return
+    if (clearedQueueTimer) clearTimeout(clearedQueueTimer)
+    clearedQueueTimer = null
+    await setPlaybackQueue(snapshot.tracks, {
+      currentFilename: snapshot.currentFilename,
+      playMode: playMode.value,
+      queueSources: snapshot.queueSources,
+    })
+    playlist.value = [...snapshot.tracks]
+    activePlaybackFilename.value = snapshot.currentFilename || ''
+    currentIndex.value = snapshot.currentFilename
+      ? playlist.value.findIndex(track => track.filename === snapshot.currentFilename)
+      : (playlist.value.length ? 0 : -1)
+    clearedQueueSnapshot.value = null
+    toast.success('已恢复播放队列')
+  }
+
+  const playQueueFromTrack = async (track) => {
+    const next = musicQueueFromTrack(playlist.value, track?.filename)
+    await syncPlaybackQueue(next, { focusFilename: track?.filename || '' })
+    return play(track, { source: '播放队列' })
+  }
+
+  const clearPlaybackHistory = async () => {
+    if (!(libraryState.value.history || []).length) return
+    const confirmed = await confirmDialog('确定清空全部最近播放记录吗？歌曲文件不会被删除。')
+    if (!confirmed) return
+    try {
+      await persistClearPlaybackHistory()
+      toast.success('最近播放记录已清空')
+    } catch (error) {
+      toast.error(error?.message || '清空播放历史失败')
+    }
+  }
 
   const unregisterPlaybackStop = playbackCoordinator.registerLocalStop((intent) => {
     stopPlayback({
@@ -730,9 +1044,11 @@ export function useMusicPlayer(options = {}) {
     })
     const superseded = () => playbackCoordinator.supersededResult(playbackIntent)
     if (!playbackCoordinator.isCurrent(playbackIntent)) return superseded()
-    await syncPlaybackQueue(list, { focusFilename: start.filename })
+    await syncPlaybackQueue(list, {
+      focusFilename: start.filename,
+      sourceLabel: item.name,
+    })
     if (!playbackCoordinator.isCurrent(playbackIntent)) return superseded()
-    if (!activeLibraryView.value.startsWith('playlist:')) activeLibraryView.value = 'queue'
     const playResult = await play(start, { ...options, remote: options.remote === true, playbackIntent })
     if (playResult?.skipped) return playResult
     if (!playResult?.success) return { success: false, error: playResult?.error || '播放失败' }
@@ -792,18 +1108,20 @@ export function useMusicPlayer(options = {}) {
         source: 'frontend-fallback',
         reason: '',
       }
-      try {
-        const planRes = await fetch('/api/music/resolve-play-request', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestText, keyword: kw, mode: playModeHint }),
-        })
-        if (!isLatest()) return superseded()
-        const planData = await planRes.json()
-        if (!isLatest()) return superseded()
-        if (planData?.success && planData?.plan?.strategy) playbackPlan = planData.plan
-      } catch (error) {
-        console.warn('[GlobalPlay] 播放意图识别失败，使用精确/随机兜底:', error)
+      if (aiRecommendationEnabled.value) {
+        try {
+          const planRes = await fetch('/api/music/resolve-play-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestText, keyword: kw, mode: playModeHint }),
+          })
+          if (!isLatest()) return superseded()
+          const planData = await planRes.json()
+          if (!isLatest()) return superseded()
+          if (planData?.success && planData?.plan?.strategy) playbackPlan = planData.plan
+        } catch (error) {
+          console.warn('[GlobalPlay] 播放意图识别失败，使用精确/随机兜底:', error)
+        }
       }
       const effectiveQuery = String(playbackPlan.searchQuery || kw).trim()
       console.log('[GlobalPlay] 结构化播放计划:', playbackPlan)
@@ -817,6 +1135,14 @@ export function useMusicPlayer(options = {}) {
         if (!isLatest()) return superseded()
         const list = Array.isArray(candidates) ? candidates.slice(0, 8) : []
         if (!list.length) return { success: false, rejected: true, error: '没有可供选择的候选歌曲' }
+        if (!aiAutoSelectEnabled.value) {
+          const selected = plan.randomize === true || plan.strategy === 'artist_random'
+            ? pickRandomTrack(list)
+            : pickBestSearchResult(query, list)
+          return selected
+            ? { success: true, item: selected, source: 'local-selection', reason: 'AI 自动选歌已关闭' }
+            : { success: false, rejected: true, error: '没有足够匹配的歌曲' }
+        }
         try {
           const res = await fetch('/api/music/select-track', {
             method: 'POST',
@@ -860,7 +1186,6 @@ export function useMusicPlayer(options = {}) {
         if (!isLatest()) return superseded()
         await addTrackToQueue(track, { focus: true })
         if (!isLatest()) return superseded()
-        activeLibraryView.value = 'queue'
         const playResult = await play(track, { ...options, remote: true, source: sourceLabel, playbackIntent })
         if (!isLatest()) return superseded()
         syncUiFromAudio?.()
@@ -885,13 +1210,13 @@ export function useMusicPlayer(options = {}) {
           if (data.success && data.results?.length) {
             const picked = await selectTrackFromCandidates(q, data.results, plan)
             if (!isLatest()) return superseded()
-            if (!picked.success) return { success: false, error: picked.error || '网易云未找到足够匹配的歌曲' }
+            if (!picked.success) return { success: false, error: picked.error || '网易未找到足够匹配的歌曲' }
             const played = await convertNeteaseAndPlay(picked.item, { ...options, remote: true, playbackIntent })
             if (!isLatest()) return superseded()
             syncUiFromAudio?.()
             return played?.success ? { ...played, pickSource: picked.source } : played
           }
-          return { success: false, error: data.error || '网易云未找到相关歌曲' }
+          return { success: false, error: data.error || '网易未找到相关歌曲' }
         }
         console.log('[GlobalPlay] B站搜索:', q)
         const biliRes = await fetch(`/api/music/search?q=${encodeURIComponent(q)}`)
@@ -924,12 +1249,11 @@ export function useMusicPlayer(options = {}) {
       if (playbackPlan.strategy === 'random') {
         // 有本地曲：全库入队后在队列内随机，绝不先走云端热门
         if (tracks.value.length) {
-          const pool = await ensurePlaybackQueueFromLibrary({ forceFullLibrary: true })
+          const pool = await useFullLibraryAsPlaybackQueue()
           if (!isLatest()) return superseded()
           const randomTrack = pickRandomTrack(pool, { excludeTrack: currentTrack.value })
           if (randomTrack) {
             console.log('[GlobalPlay] 随机播放本地队列:', randomTrack.title || randomTrack.filename)
-            activeLibraryView.value = 'queue'
             const playResult = await play(randomTrack, { ...options, remote: true, source: 'local-random', playbackIntent })
             if (!isLatest()) return superseded()
             syncUiFromAudio?.()
@@ -991,8 +1315,7 @@ export function useMusicPlayer(options = {}) {
       toast.error(error?.message || '加载音乐库状态失败')
     })
     await loadTracks()
-    // 空队列时用全库填充，对齐真实播放器
-    await ensurePlaybackQueueFromLibrary().catch(() => {})
+    restorePlaybackQueue()
     loadDownloadJobs()
     loadAgentConfig()
     loadChatMessages()
@@ -1033,6 +1356,8 @@ export function useMusicPlayer(options = {}) {
     }
     if (companionTimer) clearInterval(companionTimer)
     if (weatherTimer) clearInterval(weatherTimer)
+    if (sleepTimerInterval) clearInterval(sleepTimerInterval)
+    if (clearedQueueTimer) clearTimeout(clearedQueueTimer)
     detachAgentChatResizeObserver()
     unregisterPlaybackStop()
     playbackCoordinator.dispose()
@@ -1116,7 +1441,7 @@ export function useMusicPlayer(options = {}) {
   }
 
   const sendToClaudeAgent = async (msg, signal) => {
-    const agentMsg = pushAgentMessage({ role: 'agent', content: '', time: formatTimeHHMMSS() })
+    const agentMsg = pushAgentMessage({ role: 'agent', content: '', time: formatTimeHHMMSS(), streaming: true })
     const requestHistory = buildAgentRequestHistory({ exclude: agentMsg })
     scrollChat()
     let petStreamStarted = false
@@ -1129,6 +1454,11 @@ export function useMusicPlayer(options = {}) {
         body: JSON.stringify({ message: msg, mode: mode.value, history: requestHistory }),
         signal,
       })
+      const contentType = String(res.headers.get('content-type') || '').toLowerCase()
+      if (!res.ok || !contentType.includes('text/event-stream') || !res.body) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload?.error || `音乐助手请求失败 (${res.status})`)
+      }
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -1169,6 +1499,9 @@ export function useMusicPlayer(options = {}) {
       if (petStreamStarted && !petStreamHadError) {
         notifyMusicPetSpeech('', { role: 'assistant', mode: 'append', final: true, source: 'music-chat' })
       }
+      if (!String(agentMsg.content || '').trim() && !(agentMsg.results || []).length) {
+        setAgentMessageContent(agentMsg, '音乐助手没有返回有效内容，请重试。')
+      }
       if (String(agentMsg.content || '').trim()) {
         await persistAssistantMessage(agentMsg.content, { action: musicAction, results: agentMsg.results || [] }).catch((error) => {
           console.error('Failed to persist music assistant response:', error)
@@ -1191,6 +1524,8 @@ export function useMusicPlayer(options = {}) {
       setAgentMessageContent(agentMsg, stopped ? '已停止本次回复。' : '连接失败，请检查系统设置里的统一大模型配置。')
       scrollChat({ anchor })
       notifyMusicPetSpeech(stopped ? '已停止回复' : '连接失败，请检查系统设置里的统一大模型配置', { role: stopped ? 'status' : 'error', mode: 'replace', final: true, source: 'music-chat' })
+    } finally {
+      setAgentMessageStreaming(agentMsg, false)
     }
   }
 
@@ -1282,7 +1617,7 @@ export function useMusicPlayer(options = {}) {
     if (!isLatest()) return superseded()
     converting.value = { ...converting.value, [identifier]: true }
     try {
-      const job = await createDownloadJob(item)
+      const job = await createDownloadJob(item, { quality: playbackSettings.value.quality })
       if (!isLatest()) return superseded()
       if (options.wait === false) return { success: true, queued: true, jobId: job.id, source: item.type, title }
       const completed = await waitForJob(job.id)
@@ -1292,10 +1627,12 @@ export function useMusicPlayer(options = {}) {
       const newTrack = tracks.value.find(track => track.filename === completed.filename)
       if (!newTrack) throw new Error('下载完成，但歌曲没有出现在本地曲库')
       if (!isLatest()) return superseded()
-      await addTrackToQueue(newTrack, { focus: options.play !== false })
+      if (options.queue !== false) {
+        if (options.queuePosition === 'next') await playTrackNext(newTrack)
+        else await addTrackToQueue(newTrack, { focus: options.play !== false, source: item.type === 'netease' ? '网易' : 'B站' })
+      }
       if (!isLatest()) return superseded()
       if (options.play !== false) {
-        activeLibraryView.value = 'queue'
         activePlaybackFilename.value = newTrack.filename || ''
         if (!isLatest()) return superseded()
         const playResult = await play(newTrack, { ...options, playbackIntent })
@@ -1317,6 +1654,39 @@ export function useMusicPlayer(options = {}) {
 
   const convertAndPlay = (item, options = {}) => downloadResult({ type: 'bilibili', ...item }, options)
   const convertNeteaseAndPlay = (item, options = {}) => downloadResult({ type: 'netease', ...item }, options)
+
+  const handleUnifiedSearchAction = async (action, item) => {
+    const source = item?.type || 'local'
+    const localTrack = source === 'local' ? item.track : null
+    if (action === 'play') {
+      if (localTrack) {
+        await addTrackToQueue(localTrack, { focus: true, source: '统一搜索 / 本地' })
+        return play(localTrack, { source: '统一搜索 / 本地' })
+      }
+      return downloadResult(item, { source: `统一搜索 / ${source === 'netease' ? '网易' : 'B站'}` })
+    }
+    if (action === 'next') {
+      if (localTrack) return playTrackNext(localTrack)
+      return downloadResult(item, { play: false, queuePosition: 'next', source: `统一搜索 / ${source}` })
+    }
+    if (action === 'download') {
+      const result = await downloadResult(item, { wait: false, play: false, queue: false, source: `统一搜索 / ${source}` })
+      if (result?.success) toast.success('已加入下载中心')
+      return result
+    }
+    if (action === 'playlist') {
+      let track = localTrack
+      if (!track) {
+        const result = await downloadResult(item, { play: false, queue: false, source: `统一搜索 / ${source}` })
+        if (!result?.success) return result
+        track = tracks.value.find(candidate => candidate.filename === result.filename)
+      }
+      if (!track) throw new Error('歌曲尚未准备完成')
+      openPlaylistPicker(track)
+      return { success: true }
+    }
+    return { success: false, error: '不支持的搜索操作' }
+  }
 
   const isTrackAdded = (identifier) => {
     return tracks.value.some(t => t.bvid === identifier || t.filename.includes(identifier))
@@ -1424,7 +1794,11 @@ export function useMusicPlayer(options = {}) {
     agentInput,
     agentLoading,
     agentMessages,
+    aiAutoSelectEnabled,
+    aiEmotionEnabled,
+    aiRecommendationEnabled,
     aiSongQuote,
+    aiSongQuoteEnabled,
     ambientBgStyle,
     analyser,
     sessionAnimeCover,
@@ -1441,8 +1815,10 @@ export function useMusicPlayer(options = {}) {
     canvasRef,
     captureAgentChatScroll,
     clearChatHistory,
+    clearPlaybackHistory,
     compactMusicMemory,
     clearFinishedDownloadJobs,
+    clearedQueueSnapshot,
     closePlaylistDialog,
     companionTimeStr,
     companionTimer,
@@ -1455,9 +1831,12 @@ export function useMusicPlayer(options = {}) {
     currentEmotion,
     currentIndex,
     currentLyricIndex,
+    currentWordIndex,
     currentTime,
     currentTrack,
     currentWeather,
+    weatherDetails,
+    weatherTitle,
     cyclePlayMode,
     danmakuItems,
     dataArray,
@@ -1506,6 +1885,8 @@ export function useMusicPlayer(options = {}) {
     loadTracks,
     lyrics,
     lyricsOffset,
+    lyricTimingOffsetMs,
+    showLyricTranslation,
     mode,
     musicMemoryContext,
     moveTrackInActivePlaylist,
@@ -1521,32 +1902,43 @@ export function useMusicPlayer(options = {}) {
     onTimeUpdate,
     parseMessageTracks,
     play,
+    playLibraryTrack,
     playActivePlaylistAll,
     playAddedTrack,
     playLocalTrack,
     playPlaylistById,
     playMode,
+    playbackSettings,
     playlist,
     playlistContainsTrack,
     playlistDialogOpen,
     playlistDialogTrack,
     playlistRenameId,
     playlistRenameName,
-    ensurePlaybackQueueFromLibrary,
+    clearPlaybackQueue,
     prevTrack,
     prevVolume,
     pushAgentMessage,
     recordCompanionSecond,
+    refreshSongQuote,
     remoteCommandTimer,
     removeTrackFromActivePlaylist,
     removeTrackFromQueue,
+    moveTrackInPlaybackQueue,
+    reorderPlaybackQueue,
+    playTrackNext,
+    playQueueFromTrack,
+    playbackFailures,
     resetLyrics,
+    adjustLyricTiming,
+    resetLyricTiming,
     resetPetLyricIndex,
     retryDownloadJob,
     retryLastAgentMessage,
     rightCanvasRef,
     rightCaps,
     saveAgentConfig,
+    sleepTimerRemaining,
     scrollChat,
     seekTo,
     savePlaylistRename,
@@ -1555,6 +1947,8 @@ export function useMusicPlayer(options = {}) {
     sendToSimpleAgent,
     setAgentMessageContent,
     setAgentMessageResults,
+    setAgentMessageStreaming,
+    hasStreamingAgentMessage,
     setPlaybackQueue,
     setVolume,
     showSettings,
@@ -1570,16 +1964,23 @@ export function useMusicPlayer(options = {}) {
     toggleMute,
     togglePlay,
     toggleTrackFavorite,
+    toggleAiSongQuote,
     toast,
     tracks,
+    queueSources,
+    recentPlaybackRows,
+    songQuoteLoading,
     updateAgentChatScrollState,
     updateCurrentLyrics,
+    updatePlaybackSetting,
     updatePlaylist,
+    handleUnifiedSearchAction,
     openPlaylistManager,
     openPlaylistPicker,
     openSavedPlaylist,
     updatePreselectedTrack,
     uploadFiles,
+    undoClearPlaybackQueue,
     uploading,
     volume,
     waitForJob,

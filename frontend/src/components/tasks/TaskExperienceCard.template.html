@@ -391,11 +391,12 @@
           <li v-for="(step, stepIndex) in planModeSteps" :key="step.id || step.label || step.content || stepIndex" :class="step.status">
             <span>{{ stepIndex + 1 }}</span>
             <div>
-              <b>{{ step.label || step.content || step }}</b>
+              <b>{{ step.label || step.content || step }}<em v-if="step.source === 'user_followup'" class="plan-step-followup-tag">追加</em></b>
               <small v-if="step.detail || step.activeForm">{{ step.detail || step.activeForm }}</small>
             </div>
           </li>
         </ol>
+        <small v-if="planModeHiddenStepCount" class="plan-mode-steps-hidden">还有 {{ planModeHiddenStepCount }} 个计划步骤，可在任务详情中查看。</small>
       </div>
       <div class="plan-mode-grid">
         <div v-if="planMode.impact_scope?.projects?.length || planMode.impact_scope?.areas?.length">

@@ -13,6 +13,7 @@ exports.runProjectMainAgentContractSelfTest = runProjectMainAgentContractSelfTes
 const db_1 = require("../../core/db");
 const collaboration_task_service_1 = require("../collaboration/collaboration-task-service");
 const logs_1 = require("../collaboration/logs");
+const rework_policy_1 = require("../collaboration/rework-policy");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const project_validation_1 = require("./project-validation");
@@ -667,11 +668,11 @@ async function executeProjectMainTask(input) {
             || input.task.requires_verification === true;
         if (!requiresTestAgent)
             latestReview = { canAccept: true, status: "not_required" };
-        for (let round = 1; requiresTestAgent && round <= 3; round += 1) {
+        for (let round = 1; requiresTestAgent && round <= rework_policy_1.AUTO_REWORK_MAX_ROUNDS; round += 1) {
             assertNotCancelled();
-            (0, collaboration_task_service_1.updateTask)(taskId, { status: "reviewing", acceptance_state: "test_agent_running", status_detail: `TestAgent 正在执行第 ${round}/3 轮独立验收`, review_round: round });
+            (0, collaboration_task_service_1.updateTask)(taskId, { status: "reviewing", acceptance_state: "test_agent_running", status_detail: `TestAgent 正在执行第 ${round}/${rework_policy_1.AUTO_REWORK_MAX_ROUNDS} 轮独立验收`, review_round: round });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_test_agent_started", title: `TestAgent 第 ${round} 轮验收`, detail: "独立读取源码和真实验证证据", status: "active", phase: "reviewing", agent: "test-agent" });
-            emit("testing", { status: "running", round, max_rounds: 3 });
+            emit("testing", { status: "running", round, max_rounds: rework_policy_1.AUTO_REWORK_MAX_ROUNDS });
             latestReview = await (0, project_test_agent_gate_1.runProjectTaskTestAgentReview)({
                 task: getProjectMainTask(taskId) || input.task,
                 project,
@@ -689,7 +690,7 @@ async function executeProjectMainTask(input) {
             emit("testing", { status: latestReview.canAccept ? "passed" : "failed", round, test_agent: latestReview });
             if (latestReview.canAccept)
                 break;
-            if (round >= 3)
+            if (round >= rework_policy_1.AUTO_REWORK_MAX_ROUNDS)
                 break;
             const problems = (0, project_test_agent_gate_1.projectTestAgentProblems)(latestReview);
             const reworkItem = {

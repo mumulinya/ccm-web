@@ -43,7 +43,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
-const group_compaction_engine_part_01_1 = require("../collaboration/group-compaction-engine-part-01");
+const group_compaction_engine_1 = require("../collaboration/group-compaction-engine");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const model_capability_cache_1 = require("../collaboration/model-capability-cache");
@@ -271,7 +271,7 @@ function scheduleProjectSessionMemoryExtraction(project, projectSessionId, optio
         transcriptChecksum: (0, session_compaction_core_1.sessionCompactionChecksum)(history.map((message) => [message.id, message.role, message.content])),
         cadence,
     };
-    const invoke = options.modelCall || ((request) => (0, group_compaction_engine_part_01_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
+    const invoke = options.modelCall || ((request) => (0, group_compaction_engine_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
     const scheduled = (0, session_compaction_core_1.scheduleSessionMemoryExtraction)({
         scope: "project",
         sessionId: `${safeProject}:${safeSessionId}`,
@@ -567,7 +567,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
         };
         const maxInputTokens = Math.max(18_000, Number(compactionModelCapacity.effectiveContextWindow || 180_000) - 3_000);
         const promptFit = fitProjectCompactionPrompt(system, promptPayload, maxInputTokens);
-        const invoke = options.modelCall || (async (request) => (0, group_compaction_engine_part_01_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
+        const invoke = options.modelCall || (async (request) => (0, group_compaction_engine_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
         let result = null;
         let validation = { valid: false, issues: ["summary_missing"] };
         let lastError = null;

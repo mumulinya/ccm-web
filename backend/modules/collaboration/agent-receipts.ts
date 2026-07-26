@@ -114,10 +114,11 @@ export function checkTaskCompletion(response: string) {
   if (!response) return false;
   const completionMarkers = [
     "✅ 任务完成", "✅ 已完成", "✅ 完成", "任务已完成",
-    "已完成任务", "已经完成", "done", "completed", "finished"
+    "已完成任务", "已经完成"
   ];
-  const lowerResponse = response.toLowerCase();
-  return completionMarkers.some(marker => lowerResponse.includes(marker.toLowerCase()));
+  if (completionMarkers.some(marker => response.includes(marker))) return true;
+  // 英文标记必须整词匹配，否则 "abandoned" 之类的词会误命中 "done"
+  return /\b(?:done|completed|finished)\b/i.test(response);
 }
 
 export function checkTaskFailure(response: string) {

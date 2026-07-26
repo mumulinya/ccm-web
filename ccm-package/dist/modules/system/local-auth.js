@@ -54,8 +54,23 @@ const SCRYPT_KEY_BYTES = 64;
 const MAX_LOGIN_FAILURES = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const INITIAL_USERNAME = "mumulin";
-const INITIAL_PASSWORD = "lzy123167";
+const INITIAL_PASSWORD_FILE = path.join(AUTH_DIR, "initial-admin-password.txt");
 const loginFailures = new Map();
+let usersReadCache = null;
+let sessionsReadCache = null;
+function fileSignature(file) {
+    try {
+        const stat = fs.statSync(file);
+        return { mtimeMs: stat.mtimeMs, size: stat.size };
+    }
+    catch (error) {
+        // ENOENT 是可信的「文件不存在」状态，可作为可匹配签名；
+        // 其余（Windows 瞬时 EPERM/EBUSY 等）签名未知，不参与缓存比较，也不回填缓存
+        if (String(error?.code || "") === "ENOENT")
+            return { mtimeMs: -1, size: -1 };
+        return null;
+    }
+}
 function now() {
     return new Date().toISOString();
 }
@@ -81,6 +96,29 @@ function validatePassword(value) {
     if (password.length < 8 || password.length > 128)
         throw new Error("密码长度需为 8～128 个字符");
     return password;
+}
+function resolveInitialAdminPassword() {
+    const fromEnv = String(process.env.CCM_INITIAL_ADMIN_PASSWORD || "");
+    if (fromEnv.length >= 8 && fromEnv.length <= 128)
+        return { password: fromEnv, generated: false };
+    return { password: crypto.randomBytes(18).toString("base64url"), generated: true };
+}
+function persistInitialAdminPassword(password) {
+    try {
+        ensureAuthDir();
+        fs.writeFileSync(INITIAL_PASSWORD_FILE, `${password}\n`, { encoding: "utf-8", mode: 0o600 });
+        try {
+            fs.chmodSync(INITIAL_PASSWORD_FILE, 0o600);
+        }
+        catch { }
+    }
+    catch { }
+}
+function discardInitialAdminPassword() {
+    try {
+        fs.unlinkSync(INITIAL_PASSWORD_FILE);
+    }
+    catch { }
 }
 function normalizeLoginTheme(value) {
     return ["command", "minimal", "light"].includes(String(value || "")) ? value : "command";
@@ -126,6 +164,7 @@ function saveUsers(store) {
         fs.chmodSync(USERS_FILE, 0o600);
     }
     catch { }
+    usersReadCache = null;
 }
 function saveSessions(store) {
     ensureAuthDir();
@@ -134,6 +173,7 @@ function saveSessions(store) {
         fs.chmodSync(SESSIONS_FILE, 0o600);
     }
     catch { }
+    sessionsReadCache = null;
 }
 function readUsersUnlocked() {
     ensureAuthDir();
@@ -159,18 +199,23 @@ function readUsersUnlocked() {
     };
     if (!store.users.length) {
         const createdAt = now();
+        const initial = resolveInitialAdminPassword();
         store.users.push({
             id: `usr_${crypto.randomUUID()}`,
             username: INITIAL_USERNAME,
             normalizedUsername: normalizedUsername(INITIAL_USERNAME),
             role: "admin",
-            password: hashPassword(INITIAL_PASSWORD),
+            password: hashPassword(initial.password),
             createdAt,
             updatedAt: createdAt,
         });
         store.registrationEnabled = false;
         store.onboardingCompleted = false;
         saveUsers(store);
+        if (initial.generated) {
+            persistInitialAdminPassword(initial.password);
+            console.log(`[ccm][auth] 已创建初始管理员 ${INITIAL_USERNAME}，随机初始密码已写入 ${INITIAL_PASSWORD_FILE}（仅本机可读），请登录后尽快在「账户与安全」中修改密码`);
+        }
     }
     else if (!hasOnboardingFlag) {
         // Persist the inferred legacy state once, without changing users or passwords.
@@ -192,6 +237,26 @@ function readSessionsUnlocked() {
 }
 function loadSessions() {
     return (0, atomic_json_file_1.withFileLock)(SESSIONS_FILE, readSessionsUnlocked);
+}
+// 读路径缓存：签名在加载前采集，若加载期间发生并发写，下一次探测会因签名
+// 不匹配而重新加载，只多付一次读取，不会长期停留在旧数据上。
+function peekUsers() {
+    const signature = fileSignature(USERS_FILE);
+    if (signature && usersReadCache && usersReadCache.mtimeMs === signature.mtimeMs && usersReadCache.size === signature.size) {
+        return usersReadCache.value;
+    }
+    const value = loadUsers();
+    usersReadCache = signature ? { value, ...signature } : null;
+    return value;
+}
+function peekSessions() {
+    const signature = fileSignature(SESSIONS_FILE);
+    if (signature && sessionsReadCache && sessionsReadCache.mtimeMs === signature.mtimeMs && sessionsReadCache.size === signature.size) {
+        return sessionsReadCache.value;
+    }
+    const value = loadSessions();
+    sessionsReadCache = signature ? { value, ...signature } : null;
+    return value;
 }
 function publicUser(user) {
     return user ? { id: user.id, username: user.username, role: user.role, created_at: user.createdAt } : null;
@@ -254,10 +319,12 @@ function resolveLocalAuthSession(req) {
     const token = parseCookies(req)[SESSION_COOKIE];
     if (!token)
         return null;
-    const session = loadSessions().sessions.find(item => item.tokenHash === tokenHash(token));
-    if (!session)
+    const hash = tokenHash(token);
+    const session = peekSessions().sessions.find(item => item.tokenHash === hash);
+    // 缓存副本不会随时间收缩，过期判断必须在这里显式执行
+    if (!session || !(Date.parse(session.expiresAt) > Date.now()))
         return null;
-    const user = loadUsers().users.find(item => item.id === session.userId);
+    const user = peekUsers().users.find(item => item.id === session.userId);
     return user ? { user, session } : null;
 }
 function deleteRequestSession(req, res) {
@@ -369,7 +436,7 @@ function browserApiAccessAllowed(req) {
     return !isBrowserRequest(req) && isTrustedLocalAgentRequest(req);
 }
 function localAuthPublicState(req) {
-    const users = loadUsers();
+    const users = peekUsers();
     const auth = resolveLocalAuthSession(req);
     return {
         authenticated: !!auth,
@@ -515,6 +582,8 @@ function handleLocalAuthApi(pathname, req, res) {
                 user.updatedAt = now();
                 saveUsers(store);
             });
+            if (auth.user.normalizedUsername === normalizedUsername(INITIAL_USERNAME))
+                discardInitialAdminPassword();
             (0, atomic_json_file_1.withFileLock)(SESSIONS_FILE, () => {
                 const sessions = readSessionsUnlocked();
                 saveSessions({ ...sessions, sessions: sessions.sessions.filter(session => session.userId !== auth.user.id) });

@@ -1,6 +1,6 @@
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
-const DEFAULT_GREETING = '你好！我是你的音乐助手\n告诉我你想听什么，我帮你找。\n\n支持：\n• B站音乐搜索与转码播放\n• 网易云音乐搜索与下载播放\n• 本地音乐库播放\n• 播放时歌词同步给音乐宠物'
+const DEFAULT_GREETING = '你好！我是你的音乐助手\n告诉我你想听什么，我帮你找。\n\n支持：\n• B站音乐搜索与转码播放\n• 网易音乐搜索与下载播放\n• 本地音乐库播放\n• 播放时歌词同步给音乐宠物'
 
 export function useMusicAgentChat(options = {}) {
   const agentMessages = ref([])
@@ -10,6 +10,7 @@ export function useMusicAgentChat(options = {}) {
   const agentChatEl = ref(null)
   const isAgentChatPinnedToBottom = ref(true)
   const agentRequestStopped = ref(false)
+  const hasStreamingAgentMessage = computed(() => agentMessages.value.some(item => item?.role === 'agent' && item?.streaming === true))
 
   const agentMessageKeyMap = new WeakMap()
   let agentMessageKeySeq = 0
@@ -57,6 +58,10 @@ export function useMusicAgentChat(options = {}) {
 
   const setAgentMessageResults = (target, results) => {
     updateAgentMessage(target, (item) => { item.results = Array.isArray(results) ? results : [] })
+  }
+
+  const setAgentMessageStreaming = (target, streaming) => {
+    updateAgentMessage(target, (item) => { item.streaming = streaming === true })
   }
 
   const buildAgentRequestHistory = ({ exclude = null, limit = 10 } = {}) => {
@@ -245,6 +250,8 @@ export function useMusicAgentChat(options = {}) {
     appendAgentMessageContent,
     setAgentMessageContent,
     setAgentMessageResults,
+    setAgentMessageStreaming,
+    hasStreamingAgentMessage,
     buildAgentRequestHistory,
     getAgentMessageKey,
     captureAgentChatScroll,

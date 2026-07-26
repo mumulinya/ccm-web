@@ -6,6 +6,7 @@ export type MusicDownloadJob = {
     sourceId: string;
     title: string;
     artist: string;
+    quality: "standard" | "high" | "very_high" | "source";
     status: MusicDownloadStatus;
     progress: number | null;
     phase: string;
@@ -25,7 +26,7 @@ declare class MusicDownloadJobStore {
     constructor();
     list(): MusicDownloadJob[];
     get(id: string): MusicDownloadJob;
-    create(source: MusicSource, token: string): MusicDownloadJob;
+    create(source: MusicSource, token: string, requestedQuality?: any): MusicDownloadJob;
     cancel(id: string): MusicDownloadJob;
     retry(id: string): MusicDownloadJob;
     clearFinished(): MusicDownloadJob[];

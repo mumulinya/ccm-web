@@ -134,6 +134,10 @@
   background:var(--accent-soft);
   color:var(--text-secondary);
 }
+.plan-mode-steps b .plan-step-followup-tag { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; background:#fef3c7; color:#92400e; font-size:10px; font-weight:900; font-style:normal; vertical-align:middle; }
+.plan-mode-steps .plan-mode-steps-hidden { color:var(--text-muted); font-size:11px; }
+:global([data-theme="dark"] .task-experience-card .plan-step-followup-tag) { background:rgba(245,158,11,.18); color:#fbbf24; }
+:global([data-theme="dark"] .task-experience-card .plan-mode-steps-hidden) { color:var(--text-muted); }
 .task-experience-card .task-card-button{ min-height:var(--control-height-sm); border-radius:var(--radius-md); }
 .task-experience-card .plan-mode-accept-feedback textarea,.task-experience-card select,.task-experience-card input{ border-radius:var(--radius-md); min-height:var(--control-height); }
 

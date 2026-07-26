@@ -287,7 +287,16 @@ function loadMusicAgentConfig() {
     return {
         ...llm,
         proxy: music.proxy || "",
+        weatherLocation: String(music.weatherLocation || ""),
         defaultMode: String(music.defaultMode || music.mode || "cloud"),
+        quality: ["standard", "high", "very_high", "source"].includes(String(music.quality)) ? String(music.quality) : "high",
+        fadeSeconds: Math.max(0, Math.min(8, Number(music.fadeSeconds) || 0)),
+        volumeNormalization: music.volumeNormalization === true,
+        rememberProgress: music.rememberProgress !== false,
+        sleepTimerMinutes: Math.max(0, Math.min(180, Number(music.sleepTimerMinutes) || 0)),
+        aiRecommendationEnabled: music.aiRecommendationEnabled !== false,
+        aiEmotionEnabled: music.aiEmotionEnabled !== false,
+        aiAutoSelectEnabled: music.aiAutoSelectEnabled !== false,
     };
 }
 function publicMusicAgentConfig() {
@@ -296,7 +305,16 @@ function publicMusicAgentConfig() {
         ...(0, group_orchestrator_1.publicOrchestratorConfig)(config),
         source: "orchestrator",
         sourceLabel: "系统设置 / 统一大模型配置",
+        weatherLocation: config.weatherLocation || "",
         defaultMode: config.defaultMode || "cloud",
+        quality: config.quality,
+        fadeSeconds: config.fadeSeconds,
+        volumeNormalization: config.volumeNormalization,
+        rememberProgress: config.rememberProgress,
+        sleepTimerMinutes: config.sleepTimerMinutes,
+        aiRecommendationEnabled: config.aiRecommendationEnabled,
+        aiEmotionEnabled: config.aiEmotionEnabled,
+        aiAutoSelectEnabled: config.aiAutoSelectEnabled,
     };
 }
 //# sourceMappingURL=state.js.map

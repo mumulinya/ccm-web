@@ -16,8 +16,8 @@ const { buildProjectSessionBoundMemoryMcpServer } = require(path.join(root, "ccm
 const receiptModule = require(path.join(root, "ccm-package", "dist", "integrations", "memory-context-consumption-receipt.js"));
 const { buildFinalWorkerDispatchPayloadGate } = require(path.join(root, "ccm-package", "dist", "agents", "final-dispatch-payload-gate.js"));
 const { syncRuntimeToolsWithCatalog } = require(path.join(root, "ccm-package", "dist", "tools", "runtime-tool-sync.js"));
-const { hashValue } = require(path.join(root, "ccm-package", "dist", "tasks", "agent-sessions-shared-part-01.js"));
-const { extractGroupSessionMemoryBinding } = require(path.join(root, "ccm-package", "dist", "tasks", "agent-sessions-shared-part-02.js"));
+const { hashValue } = require(path.join(root, "ccm-package", "dist", "tasks", "agent-sessions-shared.js"));
+const { extractGroupSessionMemoryBinding } = require(path.join(root, "ccm-package", "dist", "tasks", "agent-sessions-shared.js"));
 
 const project = "memory-mcp-project";
 const projectSessionId = "s1";
@@ -208,7 +208,7 @@ try {
 
   const serverSource = fs.readFileSync(path.join(root, "backend", "server.ts"), "utf8");
   const runnerSource = fs.readFileSync(path.join(root, "backend", "server-agent-runner.ts"), "utf8");
-  const groupSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-01.ts"), "utf8");
+  const groupSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents.ts"), "utf8");
   assert.match(serverSource, /buildProjectSessionBoundMemoryMcpServer/);
   assert.match(serverSource, /memoryDeliveryMode:\s*memoryMcpEnabled\s*\?\s*"mcp"/);
   assert.match(runnerSource, /第三方 Agent 未完成必需记忆加载/);

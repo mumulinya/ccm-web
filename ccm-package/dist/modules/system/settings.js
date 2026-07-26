@@ -87,7 +87,9 @@ function handleSystemSettingsApi(pathname, req, res) {
         return true;
     }
     if (pathname === "/api/system/agent-providers/status" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, statuses: (0, agent_provider_settings_1.getAgentProviderStatuses)(true) });
+        (0, agent_provider_settings_1.refreshAgentProviderStatusesAsync)()
+            .then(statuses => (0, utils_1.sendJson)(res, { success: true, statuses }))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "刷新 Agent 状态失败" }, 500));
         return true;
     }
     const modelsMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/models$/);
@@ -106,9 +108,10 @@ function handleSystemSettingsApi(pathname, req, res) {
         return true;
     }
     if (pathname === "/api/system/agent-providers" && req.method === "POST") {
-        readJsonBody(req).then(payload => {
+        readJsonBody(req).then(async (payload) => {
             const config = (0, agent_provider_settings_1.saveAgentProviderSettings)(payload);
-            (0, utils_1.sendJson)(res, { success: true, config: (0, agent_provider_settings_1.publicAgentProviderSettings)(config), statuses: (0, agent_provider_settings_1.getAgentProviderStatuses)(true) });
+            const statuses = await (0, agent_provider_settings_1.refreshAgentProviderStatusesAsync)();
+            (0, utils_1.sendJson)(res, { success: true, config: (0, agent_provider_settings_1.publicAgentProviderSettings)(config), statuses });
         }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "保存开发 Agent 配置失败" }, 400));
         return true;
     }

@@ -14,7 +14,7 @@ const SCRYPT_KEY_BYTES = 64;
 const MAX_LOGIN_FAILURES = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const INITIAL_USERNAME = "mumulin";
-const INITIAL_PASSWORD = "lzy123167";
+const INITIAL_PASSWORD_FILE = path.join(AUTH_DIR, "initial-admin-password.txt");
 
 type AuthRole = "admin" | "user";
 type LoginTheme = "command" | "minimal" | "light";
@@ -59,6 +59,25 @@ type SessionStore = {
 
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 
+// 每个 /api 请求都要解析会话，若每次都 withFileLock（创建锁文件 + fsync + 删除）
+// 会在事件循环上产生持续的同步 IO。写入走 writeJsonAtomic 的原子 rename，
+// 读侧无需加锁：用 mtime+size 判断文件是否变化，未变化直接复用内存副本。
+type CachedJsonRead<T> = { value: T; mtimeMs: number; size: number };
+let usersReadCache: CachedJsonRead<UserStore> | null = null;
+let sessionsReadCache: CachedJsonRead<SessionStore> | null = null;
+
+function fileSignature(file: string): { mtimeMs: number; size: number } | null {
+  try {
+    const stat = fs.statSync(file);
+    return { mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch (error: any) {
+    // ENOENT 是可信的「文件不存在」状态，可作为可匹配签名；
+    // 其余（Windows 瞬时 EPERM/EBUSY 等）签名未知，不参与缓存比较，也不回填缓存
+    if (String(error?.code || "") === "ENOENT") return { mtimeMs: -1, size: -1 };
+    return null;
+  }
+}
+
 function now() {
   return new Date().toISOString();
 }
@@ -84,6 +103,24 @@ function validatePassword(value: any) {
   const password = String(value || "");
   if (password.length < 8 || password.length > 128) throw new Error("密码长度需为 8～128 个字符");
   return password;
+}
+
+function resolveInitialAdminPassword() {
+  const fromEnv = String(process.env.CCM_INITIAL_ADMIN_PASSWORD || "");
+  if (fromEnv.length >= 8 && fromEnv.length <= 128) return { password: fromEnv, generated: false };
+  return { password: crypto.randomBytes(18).toString("base64url"), generated: true };
+}
+
+function persistInitialAdminPassword(password: string) {
+  try {
+    ensureAuthDir();
+    fs.writeFileSync(INITIAL_PASSWORD_FILE, `${password}\n`, { encoding: "utf-8", mode: 0o600 });
+    try { fs.chmodSync(INITIAL_PASSWORD_FILE, 0o600); } catch {}
+  } catch {}
+}
+
+function discardInitialAdminPassword() {
+  try { fs.unlinkSync(INITIAL_PASSWORD_FILE); } catch {}
 }
 
 function normalizeLoginTheme(value: any): LoginTheme {
@@ -130,12 +167,14 @@ function saveUsers(store: UserStore) {
   ensureAuthDir();
   writeJsonAtomic(USERS_FILE, { ...store, updatedAt: now() });
   try { fs.chmodSync(USERS_FILE, 0o600); } catch {}
+  usersReadCache = null;
 }
 
 function saveSessions(store: SessionStore) {
   ensureAuthDir();
   writeJsonAtomic(SESSIONS_FILE, { ...store, updatedAt: now() });
   try { fs.chmodSync(SESSIONS_FILE, 0o600); } catch {}
+  sessionsReadCache = null;
 }
 
 function readUsersUnlocked() {
@@ -162,18 +201,23 @@ function readUsersUnlocked() {
   };
   if (!store.users.length) {
     const createdAt = now();
+    const initial = resolveInitialAdminPassword();
     store.users.push({
       id: `usr_${crypto.randomUUID()}`,
       username: INITIAL_USERNAME,
       normalizedUsername: normalizedUsername(INITIAL_USERNAME),
       role: "admin",
-      password: hashPassword(INITIAL_PASSWORD),
+      password: hashPassword(initial.password),
       createdAt,
       updatedAt: createdAt,
     });
     store.registrationEnabled = false;
     store.onboardingCompleted = false;
     saveUsers(store);
+    if (initial.generated) {
+      persistInitialAdminPassword(initial.password);
+      console.log(`[ccm][auth] 已创建初始管理员 ${INITIAL_USERNAME}，随机初始密码已写入 ${INITIAL_PASSWORD_FILE}（仅本机可读），请登录后尽快在「账户与安全」中修改密码`);
+    }
   } else if (!hasOnboardingFlag) {
     // Persist the inferred legacy state once, without changing users or passwords.
     saveUsers(store);
@@ -196,6 +240,28 @@ function readSessionsUnlocked() {
 
 function loadSessions() {
   return withFileLock(SESSIONS_FILE, readSessionsUnlocked);
+}
+
+// 读路径缓存：签名在加载前采集，若加载期间发生并发写，下一次探测会因签名
+// 不匹配而重新加载，只多付一次读取，不会长期停留在旧数据上。
+function peekUsers(): UserStore {
+  const signature = fileSignature(USERS_FILE);
+  if (signature && usersReadCache && usersReadCache.mtimeMs === signature.mtimeMs && usersReadCache.size === signature.size) {
+    return usersReadCache.value;
+  }
+  const value = loadUsers();
+  usersReadCache = signature ? { value, ...signature } : null;
+  return value;
+}
+
+function peekSessions(): SessionStore {
+  const signature = fileSignature(SESSIONS_FILE);
+  if (signature && sessionsReadCache && sessionsReadCache.mtimeMs === signature.mtimeMs && sessionsReadCache.size === signature.size) {
+    return sessionsReadCache.value;
+  }
+  const value = loadSessions();
+  sessionsReadCache = signature ? { value, ...signature } : null;
+  return value;
 }
 
 function publicUser(user: StoredUser | null | undefined) {
@@ -261,9 +327,11 @@ function createSession(req: IncomingMessage, res: ServerResponse, user: StoredUs
 export function resolveLocalAuthSession(req: IncomingMessage) {
   const token = parseCookies(req)[SESSION_COOKIE];
   if (!token) return null;
-  const session = loadSessions().sessions.find(item => item.tokenHash === tokenHash(token));
-  if (!session) return null;
-  const user = loadUsers().users.find(item => item.id === session.userId);
+  const hash = tokenHash(token);
+  const session = peekSessions().sessions.find(item => item.tokenHash === hash);
+  // 缓存副本不会随时间收缩，过期判断必须在这里显式执行
+  if (!session || !(Date.parse(session.expiresAt) > Date.now())) return null;
+  const user = peekUsers().users.find(item => item.id === session.userId);
   return user ? { user, session } : null;
 }
 
@@ -371,7 +439,7 @@ export function browserApiAccessAllowed(req: IncomingMessage) {
 }
 
 export function localAuthPublicState(req: IncomingMessage) {
-  const users = loadUsers();
+  const users = peekUsers();
   const auth = resolveLocalAuthSession(req);
   return {
     authenticated: !!auth,
@@ -517,6 +585,7 @@ export function handleLocalAuthApi(pathname: string, req: IncomingMessage, res: 
         user.updatedAt = now();
         saveUsers(store);
       });
+      if (auth.user.normalizedUsername === normalizedUsername(INITIAL_USERNAME)) discardInitialAdminPassword();
       withFileLock(SESSIONS_FILE, () => {
         const sessions = readSessionsUnlocked();
         saveSessions({ ...sessions, sessions: sessions.sessions.filter(session => session.userId !== auth.user.id) });

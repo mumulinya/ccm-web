@@ -9,13 +9,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const playbackModulePath = path.join(root, 'frontend/src/composables/useMusicPlayback.js')
 const playbackSource = fs.readFileSync(playbackModulePath, 'utf8')
 globalThis.__ccMusicPlaybackVue = await import('../frontend/node_modules/vue/index.mjs')
-globalThis.__ccMusicPlaybackToast = { error() {} }
+globalThis.__ccMusicPlaybackToast = { error() {}, warning() {} }
 let isolatedPlaybackSource = playbackSource
   .replace("import { ref, watch } from 'vue'", 'const { ref, watch } = globalThis.__ccMusicPlaybackVue')
   .replace("import { toast } from '../utils/toast.js'", 'const toast = globalThis.__ccMusicPlaybackToast')
   .replace(
-    "import { formatTrackLabel, pickRandomTrack, rememberPlayedTrack } from '../utils/musicTrackHelpers.js'",
-    "const formatTrackLabel = (track) => track?.title || track?.filename || ''; const pickRandomTrack = (rows) => rows?.[0]; const rememberPlayedTrack = () => {}",
+    "import { formatTrackLabel, rememberPlayedTrack, selectNextPlaybackTrack } from '../utils/musicTrackHelpers.js'",
+    "const formatTrackLabel = (track) => track?.title || track?.filename || ''; const rememberPlayedTrack = () => {}; const selectNextPlaybackTrack = (rows, options = {}) => rows?.[(Number(options.currentIndex ?? -1) + 1 + (rows?.length || 1)) % (rows?.length || 1)]",
   )
 const { useMusicPlayback } = await import(`data:text/javascript;base64,${Buffer.from(isolatedPlaybackSource).toString('base64')}`)
 
@@ -207,6 +207,69 @@ assert.equal(currentTrack.value?.filename, 'song-b.mp3')
 assert.equal(isPlaying.value, true)
 localCoordinator.dispose()
 
+let retryAttempts = 0
+const retryHistory = []
+const retryFailures = []
+const retryAudio = {
+  src: '', currentSrc: '', paused: true, ended: false, currentTime: 0, duration: 180, volume: 0.7,
+  addEventListener() {}, pause() { this.paused = true }, load() {},
+  async play() {
+    retryAttempts += 1
+    if (retryAttempts < 3) throw Object.assign(new Error('temporary media error'), { name: 'NotSupportedError' })
+    this.paused = false
+  },
+}
+const retryPlaylist = ref([tracks[0]])
+const retryIndex = ref(-1)
+const retryPlayback = useMusicPlayback({
+  audioEl: ref(retryAudio), audioCtx: ref(null), playlist: retryPlaylist, currentIndex: retryIndex,
+  currentTrack: computed(() => retryPlaylist.value[retryIndex.value] || null), activePlaybackFilename: ref(''),
+  isPlaying: ref(false), currentTime: ref(0), duration: ref(0), volume: ref(0.7), playMode: ref('list'),
+  nextRecommendTrack: ref(null), loadLyrics() {}, resetLyrics() {}, resetPetLyricIndex() {}, updateCurrentLyrics() {},
+  notifyMusicPetPlaying() {}, notifyMusicPetIdle() {}, notifyMusicPet() {}, updatePreselectedTrack() {}, loadDanmaku() {},
+  initAnalyser() {}, drawSpectrums() {}, danmakuItems: ref([]), addBubbleComment() {},
+  recordPlaybackHistory(track) { retryHistory.push(track.filename) },
+  markTrackPlaybackFailure(track) { retryFailures.push(track.filename) },
+})
+const retryResult = await retryPlayback.play(tracks[0], { maxAttempts: 3 })
+assert.equal(retryResult.success, true)
+assert.equal(retryResult.attempts, 3, 'temporary playback errors should retry before succeeding')
+assert.deepEqual(retryHistory, [tracks[0].filename], 'history should only record a successful playback once')
+assert.deepEqual(retryFailures, [], 'a recovered track should not be marked failed')
+
+let brokenAttempts = 0
+const brokenFailures = []
+const recoveryHistory = []
+const brokenAudio = {
+  src: '', currentSrc: '', paused: true, ended: false, currentTime: 0, duration: 180, volume: 0.7,
+  addEventListener() {}, pause() { this.paused = true }, load() {},
+  async play() {
+    if (this.src.includes('song-a.mp3')) {
+      brokenAttempts += 1
+      throw Object.assign(new Error('damaged file'), { name: 'NotSupportedError' })
+    }
+    this.paused = false
+  },
+}
+const recoveryPlaylist = ref([...tracks])
+const recoveryIndex = ref(-1)
+const recoveryPlayback = useMusicPlayback({
+  audioEl: ref(brokenAudio), audioCtx: ref(null), playlist: recoveryPlaylist, currentIndex: recoveryIndex,
+  currentTrack: computed(() => recoveryPlaylist.value[recoveryIndex.value] || null), activePlaybackFilename: ref(''),
+  isPlaying: ref(false), currentTime: ref(0), duration: ref(0), volume: ref(0.7), playMode: ref('list'),
+  nextRecommendTrack: ref(null), loadLyrics() {}, resetLyrics() {}, resetPetLyricIndex() {}, updateCurrentLyrics() {},
+  notifyMusicPetPlaying() {}, notifyMusicPetIdle() {}, notifyMusicPet() {}, updatePreselectedTrack() {}, loadDanmaku() {},
+  initAnalyser() {}, drawSpectrums() {}, danmakuItems: ref([]), addBubbleComment() {},
+  recordPlaybackHistory(track) { recoveryHistory.push(track.filename) },
+  markTrackPlaybackFailure(track, failure) { brokenFailures.push({ filename: track.filename, ...failure }) },
+})
+const recoveryResult = await recoveryPlayback.play(tracks[0], { maxAttempts: 2 })
+assert.equal(brokenAttempts, 2, 'a damaged file should stop retrying at the configured limit')
+assert.equal(recoveryResult.skippedTo, tracks[1].filename, 'terminal playback failure should skip to the next available track')
+assert.equal(brokenFailures[0]?.filename, tracks[0].filename)
+assert.equal(brokenFailures[0]?.reason, 'damaged file')
+assert.deepEqual(recoveryHistory, [tracks[1].filename], 'the recovered next track should become the successful history event')
+
 const playerSource = fs.readFileSync(path.join(root, 'frontend/src/components/music/useMusicPlayer.js'), 'utf8')
 const playerTemplate = fs.readFileSync(path.join(root, 'frontend/src/components/music/MusicPlayer.template.html'), 'utf8')
 const waitIndex = playerSource.indexOf('await waitForJob(job.id)')
@@ -226,6 +289,8 @@ console.log(JSON.stringify({
     reverse_completion_keeps_latest_track: true,
     stale_download_autoplay_guarded: true,
     one_audio_element_per_page: true,
+    playback_retry_then_success: true,
+    terminal_failure_skips_next: true,
   },
   paid_provider_calls: 0,
 }, null, 2))

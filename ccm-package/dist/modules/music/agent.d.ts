@@ -44,7 +44,7 @@ export declare function classifyMusicAgentAction(cfg: any, message: string, mode
     reason: string;
     error: any;
 }>;
-export declare function getMusicHelpText(chatMode: string): "🎵 本地音乐助手\n\n你可以说：\n• \"播放 周杰伦\" - 搜索并播放\n• \"搜索 轻音乐\" - 搜索本地曲库\n• \"来首钢琴曲\" - 自然语言搜索\n\n将 MP3 文件放入 ~/.cc-connect/music/ 目录" | "🎵 网易云音乐助手\n\n你可以说：\n• \"我想听周杰伦的歌\" - 搜索网易云\n• \"搜索 轻音乐\" - 搜索网易云音乐\n• \"来首适合学习的音乐\" - 智能推荐\n\n点击搜索结果可一键下载为本地 MP3" | "🎵 B站音乐助手\n\n你可以说：\n• \"我想听周杰伦的歌\" - 搜索B站\n• \"搜索 轻音乐\" - 搜索B站视频\n• \"来首适合编程的音乐\" - 智能推荐\n\n点击搜索结果可一键转码为本地 MP3";
+export declare function getMusicHelpText(chatMode: string): "🎵 本地音乐助手\n\n你可以说：\n• \"播放 周杰伦\" - 搜索并播放\n• \"搜索 轻音乐\" - 搜索本地曲库\n• \"来首钢琴曲\" - 自然语言搜索\n\n将 MP3 文件放入 ~/.cc-connect/music/ 目录" | "🎵 网易音乐助手\n\n你可以说：\n• \"我想听周杰伦的歌\" - 搜索网易\n• \"搜索 轻音乐\" - 搜索网易音乐\n• \"来首适合学习的音乐\" - 智能推荐\n\n点击搜索结果可一键下载为本地 MP3" | "🎵 B站音乐助手\n\n你可以说：\n• \"我想听周杰伦的歌\" - 搜索B站\n• \"搜索 轻音乐\" - 搜索B站视频\n• \"来首适合编程的音乐\" - 智能推荐\n\n点击搜索结果可一键转码为本地 MP3";
 export declare function writeSse(res: any, data: any): void;
 export declare function callClaudeAgent(cfg: any, system: string, messages: any[], res: any, chatMode: string): Promise<void>;
 export declare function runMusicAgentIntentSelfTest(): {

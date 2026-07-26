@@ -105,7 +105,7 @@ function childRestart(fixtureFile) {
   const before = sessions.inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker(fixture.sessionId, identity);
   const inventoryBefore = sessions.buildTaskAgentMemoryContextSnapshotInventory({ sessionId: fixture.sessionId });
   const rowBefore = inventoryBefore.rows?.[0] || {};
-  const source = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-02-part-02.ts"), "utf8");
+  const source = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents.ts"), "utf8");
   const successfulAttemptIndex = source.indexOf("if (!effectiveFailedAttempt) {");
   const successOutcomeIndex = source.indexOf('outcome: "success"', successfulAttemptIndex);
   const successBreakIndex = source.indexOf("break;", successOutcomeIndex);

@@ -4,6 +4,7 @@ exports.executeTask = executeTask;
 // Mechanically extracted from collaboration.ts; keep orchestration behavior unchanged.
 const group_session_model_context_1 = require("./group-session-model-context");
 const project_test_agent_gate_1 = require("../projects/project-test-agent-gate");
+const rework_policy_1 = require("./rework-policy");
 async function executeTask(task, ctx, deps) {
     const { addTaskLog, admitChildTypedMemoryDelivery, alignRequirementEpicAssignments, appendGroupMessage, appendTaskTimelineEvent, assertRuntimeToolDispatchReady, attachExecutionWorkspace, attachInvokedSkillsToReceipt, attachMemoryContextConsumptionChallenge, bindTaskAgentInvocationContext, bindTaskAgentInvocationMemoryDelivery, bindTaskAgentInvocationRunnerRequest, bindTaskAgentMemoryContextSnapshot, buildAgentMemoryContextBundleWithManifestSelection, buildAgentToolContext, buildChildAgentDevelopmentContract, buildChildAgentTaskText, buildChildAgentWorkerHandoff, buildChildAgentWorktreeNotice, buildCoordinatorSharedFilesContext, buildProjectVerificationHints, buildQueuedGroupTaskMessage, buildTaskProviderSwitchRequests, buildTaskSandboxRehearsal, buildTaskSourceDocumentsContext, buildUserCoordinationAcknowledgement, buildWorkerContinuationHandoff, buildWorkflowMeta, captureReasoningFacts, checkTaskFailure, claimTaskWorkItemForAgent, commitChildTypedMemoryDelivery, commitTaskAgentSessionCapacityRevalidation, compactMemoryText, compactRuntimeToolAudit, completeTaskAgentInvocationEdge, createChildTypedMemoryDispatchWal, createExecutionCheckpoint, createMemoryContextConsumptionChallenge, dispatchTaskAgentInvocationEdge, ensureExecution, evaluateGreenContract, explainReasoningDecision, extractAgentReceipt, extractRunnerVerificationEvidence, getChildAgentIsolationMode, getConfigInfo, getConfigs, getCoordinatorActionMentions, getCoordinatorMember, getGroupTaskExecutionStatus, getInitialWorkflowMeta, getRoutableMembers, getTaskAgentSessionOptions, getTaskExecutionFromReceipt, groupSessionIdForTask, loadExecution, loadGroups, loadTasks, markChildTypedMemoryDispatchCommitted, markChildTypedMemoryDispatchStarted, markChildTypedMemoryRunnerReturned, markGroupCoordinationDependencyStarted, memoryContextConsumptionReceiptFile, mergeCoordinatorDocumentContexts, normalizeAgentReasoningState, normalizePlanAssignments, openTaskAgentSession, prepareAgentRuntimeTools, prepareChildAgentWorkDir, prepareTaskAgentInvocationEdge, prepareTaskAgentSessionCapacityRevalidation, processCrossAgents, recordAgentRuntimeLifecycle, recordReasoningDeviation, recordReplayRepairTimelineBindingsForMention, recordTaskAgentMemoryContextDelivery, recordTaskAgentSessionTurn, requirementEpicExecutionBoundary, runCoordinatorReviewLoop, runGroupOrchestrator, runtimeToolDispatchBlockedReceipt, runtimeToolSnapshotFromAudit, safeAddGroupLog, saveTasks, setReasoningAssertion, summarizeReplayRepairTimelineBindingsForEvent, summarizeWorkerHandoffForUser, taskAgentInvocationMemoryOptions, taskAgentSessionLifecycleRunnerOptions, taskRequiresCodeChanges, transitionExecution, updateGroupMemory, updateReasoningPlan, updateTask, updateTaskWorkItemFromReceipt } = deps;
     const configs = getConfigs();
@@ -875,12 +876,12 @@ ${requirementEpicExecutionBoundary(task)}
             || changedFiles.length > 0;
         let projectReview = null;
         if (requiresProjectReview) {
-            const reviewRound = Math.max(1, Math.min(3, Number(task.review_round || 0) + 1));
+            const reviewRound = Math.max(1, Math.min(rework_policy_1.AUTO_REWORK_MAX_ROUNDS, Number(task.review_round || 0) + 1));
             updateTask(task.id, {
                 status: "reviewing",
                 acceptance_state: "test_agent_running",
                 review_round: reviewRound,
-                status_detail: `TestAgent 正在执行第 ${reviewRound}/3 轮独立验收`,
+                status_detail: `TestAgent 正在执行第 ${reviewRound}/${rework_policy_1.AUTO_REWORK_MAX_ROUNDS} 轮独立验收`,
             });
             appendTaskTimelineEvent(task.id, {
                 type: "project_test_agent_started",
@@ -913,7 +914,7 @@ ${requirementEpicExecutionBoundary(task)}
             });
             if (!projectReview.canAccept) {
                 const detail = problems.join("；") || projectReview.error || "TestAgent 验收未通过";
-                if (reviewRound < 3) {
+                if (reviewRound < rework_policy_1.AUTO_REWORK_MAX_ROUNDS) {
                     updateTask(task.id, {
                         status: "pending",
                         acceptance_state: "reworking",

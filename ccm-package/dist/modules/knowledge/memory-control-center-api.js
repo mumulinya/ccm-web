@@ -60,7 +60,7 @@ const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const memory_control_center_types_1 = require("./memory-control-center-types");
 const memory_control_center_controls_1 = require("./memory-control-center-controls");
-const group_compaction_projections_part_01_1 = require("../collaboration/group-compaction-projections-part-01");
+const group_compaction_projections_1 = require("../collaboration/group-compaction-projections");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const group_compaction_activity_1 = require("../collaboration/group-compaction-activity");
@@ -434,7 +434,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
             durableMemories: activeDurable,
             resources: memory?.resources || {},
         };
-        currentTokens = (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)({ role: "system", content: JSON.stringify(projectedContext) });
+        currentTokens = (0, group_compaction_projections_1.estimateGroupMessageTokens)({ role: "system", content: JSON.stringify(projectedContext) });
         currentMessageCount = activeDurable.length;
         tokenSource = "project_long_term_injection_estimate";
         tokenUpdatedAt = memory?.updatedAt || tokenUpdatedAt;
@@ -464,7 +464,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
         else if (currentTokens <= 0) {
             try {
                 const messages = require("../collaboration/storage").getGroupMessages(parts.groupId, parts.sessionId);
-                currentTokens = messages.reduce((sum, message) => sum + (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)(message), 0);
+                currentTokens = messages.reduce((sum, message) => sum + (0, group_compaction_projections_1.estimateGroupMessageTokens)(message), 0);
                 currentMessageCount = messages.length;
                 tokenSource = "message_estimate";
             }
@@ -484,13 +484,13 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
                 const transcript = require("../../agents/global/memory").loadGlobalAgentTranscript(sessionId);
                 const lastCompactedIndex = Number(compaction.lastCompactedIndex ?? memory?.lastCompactedIndex ?? -1);
                 const visibleMessages = (Array.isArray(transcript?.messages) ? transcript.messages : []).slice(Math.max(0, lastCompactedIndex + 1));
-                currentTokens = visibleMessages.reduce((sum, message) => sum + (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)(message), 0);
+                currentTokens = visibleMessages.reduce((sum, message) => sum + (0, group_compaction_projections_1.estimateGroupMessageTokens)(message), 0);
                 currentMessageCount = visibleMessages.length;
                 const summarySource = String(memory?.summarySource || memory?.summary_source || compaction.summarySource || compaction.summary_source || "").toLowerCase();
                 if (["model", "session_memory", "session-memory"].includes(summarySource)) {
                     const activeSummary = compaction.activeSummary || memory?.summary;
                     if (activeSummary)
-                        currentTokens += (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary });
+                        currentTokens += (0, group_compaction_projections_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary });
                 }
                 tokenSource = "encrypted_transcript_estimate";
                 tokenUpdatedAt = transcript?.updatedAt || tokenUpdatedAt;
@@ -509,7 +509,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
                 : Array.isArray(memory?.messages) ? memory.messages : [];
             const lastCompactedIndex = Number(compaction.lastCompactedIndex ?? compaction.last_compacted_index ?? -1);
             const visibleMessages = history.slice(Math.max(0, lastCompactedIndex + 1));
-            const messageTokens = visibleMessages.reduce((sum, message) => sum + (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)(message), 0);
+            const messageTokens = visibleMessages.reduce((sum, message) => sum + (0, group_compaction_projections_1.estimateGroupMessageTokens)(message), 0);
             const summarySource = String(memory?.compaction?.summary_source
                 || memory?.compaction?.summarySource
                 || compaction.summarySource
@@ -517,7 +517,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
                 || "").toLowerCase();
             const activeSummary = compaction.activeSummary || compaction.active_summary || null;
             const summaryTokens = activeSummary && ["model", "session_memory", "session-memory"].includes(summarySource)
-                ? (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary })
+                ? (0, group_compaction_projections_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary })
                 : 0;
             currentTokens = messageTokens + summaryTokens;
             currentMessageCount = visibleMessages.length;

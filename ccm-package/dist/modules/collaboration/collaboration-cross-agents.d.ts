@@ -1,3 +1,26 @@
 type CollabCtx = any;
 export declare function processCrossAgents(groupId: string, group: any, sourceProject: string, output: string, atMentions: any[], configs: any[], ctx: CollabCtx, streamRes: any, depth: number, seenMentions: Set<string>, executionOrder: string, planMessageId: string, taskId: string, deps: any): Promise<string[]>;
+export type CrossAgentEnv = {
+    deps: any;
+    groupId: string;
+    group: any;
+    sourceProject: string;
+    output: string;
+    configs: any[];
+    ctx: any;
+    streamRes: any;
+    depth: number;
+    seenMentions: Set<string>;
+    executionOrder: string;
+    planMessageId: string;
+    taskId: string;
+    sourceTask: any;
+    completedOutputsByAgent: Map<string, string[]>;
+    processCrossAgents: typeof import("./collaboration-cross-agents").processCrossAgents;
+    _locals?: any;
+};
+export declare function executeMentionJob(mention: any, env: CrossAgentEnv): Promise<string[]>;
+export declare function executeMentionJobTryA(mention: any, env: CrossAgentEnv): Promise<string[]>;
+export declare function handleExecuteMentionJobCatch(error: any, ctx: any): any;
+export declare function executeMentionJobTryB(mention: any, env: CrossAgentEnv): Promise<string[]>;
 export {};

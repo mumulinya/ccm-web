@@ -423,7 +423,10 @@ function createRequirementEpicWithChildren(payload) {
             acceptance_criteria: requirementEpicTextList(item.acceptance_criteria),
             target_project: target.target_project,
             group_id: target.group_id,
-            group_session_id: payload.group_session_id || payload.groupSessionId || null,
+            // 请求的会话只属于 payload 指定的群；跨群子任务留空，由记录构建器按各自群解析可写会话。
+            group_session_id: target.group_id && String(target.group_id) === String(payload.group_id || payload.groupId || "")
+                ? (payload.group_session_id || payload.groupSessionId || null)
+                : null,
             project_session_id: payload.project_session_id || payload.projectSessionId || null,
             queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
             assign_type: target.assign_type,
@@ -575,7 +578,10 @@ function updateRequirementEpicFromPlan(payload) {
             acceptance_criteria: requirementEpicTextList(item.acceptance_criteria),
             target_project: target.target_project,
             group_id: target.group_id,
-            group_session_id: epic.group_session_id,
+            // Epic 的会话只属于 Epic 主群；子任务落在其他群时按该群自行解析，避免跨群传错会话。
+            group_session_id: target.group_id && String(target.group_id) === String(epic.group_id || "")
+                ? epic.group_session_id
+                : null,
             assign_type: target.assign_type,
             workflow_type: "daily_dev",
             status: "pending",

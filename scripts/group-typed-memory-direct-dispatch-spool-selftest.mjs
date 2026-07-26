@@ -254,7 +254,7 @@ try {
   const kernelSource = fs.readFileSync(path.join(root, "backend", "agents", "execution-kernel.ts"), "utf8");
   ok(kernelSource.includes('child.once("spawn", () => input.onStarted?.'), "managed direct CLI must expose actual OS spawn witness");
   const collaborationSource = [
-    "collaboration-cross-agents-part-02-part-02.ts",
+    "collaboration-cross-agents.ts",
     "collaboration-task-executor.ts",
   ].map(file => fs.readFileSync(path.join(root, "backend", "modules", "collaboration", file), "utf8")).join("\n");
   equal((collaborationSource.match(/durableDispatch: \w*typedMemoryDispatchAdmission\.required === true/gi) || []).length, 3, "all three typed-memory child paths must enable direct durable spool");

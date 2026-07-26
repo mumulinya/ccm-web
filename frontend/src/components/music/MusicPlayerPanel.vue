@@ -3,7 +3,11 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useMusicPlayer } from './useMusicPlayer.js'
 import { useMusicVisualExperience } from '../../composables/useMusicVisualExperience.js'
 import ConversationFindBar from '../common/ConversationFindBar.vue'
-import { ChevronDown, ChevronUp, Download, Heart, ListMusic, Maximize2, MessageCircle, Minimize2, MoreHorizontal, PanelRightClose, Pause, Pencil, Play, Plus, Repeat1, Repeat2, Search, Shuffle, SkipBack, SkipForward, Trash2, Upload, Volume2, VolumeX, X } from '@lucide/vue'
+import MusicPlaybackQueueDrawer from './MusicPlaybackQueueDrawer.vue'
+import MusicDuplicateManager from './MusicDuplicateManager.vue'
+import MusicLyricsPanel from './MusicLyricsPanel.vue'
+import MusicUnifiedSearch from './MusicUnifiedSearch.vue'
+import { ChevronDown, ChevronUp, Download, Files, Globe2, Heart, History, Languages, ListMusic, Maximize2, MessageCircle, Minimize2, MoreHorizontal, PanelRightClose, Pause, Pencil, Play, Plus, RefreshCw, Repeat1, Repeat2, Search, Shuffle, SkipBack, SkipForward, Sparkles, Trash2, Upload, Volume2, VolumeX, X } from '@lucide/vue'
 
 const props = defineProps({
   agentLabel: { type: String, default: '乖乖' },
@@ -25,7 +29,11 @@ const {
   agentInput,
   agentLoading,
   agentMessages,
+  aiAutoSelectEnabled,
+  aiEmotionEnabled,
+  aiRecommendationEnabled,
   aiSongQuote,
+  aiSongQuoteEnabled,
   ambientBgStyle,
   sessionAnimeCover,
   analyser,
@@ -42,10 +50,13 @@ const {
   canvasRef,
   captureAgentChatScroll,
   clearChatHistory,
+  clearPlaybackHistory,
+  clearPlaybackQueue,
   clearFinishedDownloadJobs,
   closePlaylistDialog,
   companionTimeStr,
   companionTimer,
+  clearedQueueSnapshot,
   convertAndPlay,
   convertNeteaseAndPlay,
   converting,
@@ -55,9 +66,12 @@ const {
   currentEmotion,
   currentIndex,
   currentLyricIndex,
+  currentWordIndex,
   currentTime,
   currentTrack,
   currentWeather,
+  weatherDetails,
+  weatherTitle,
   cyclePlayMode,
   danmakuItems,
   dataArray,
@@ -106,8 +120,12 @@ const {
   loadTracks,
   lyrics,
   lyricsOffset,
+  lyricTimingOffsetMs,
+  showLyricTranslation,
   mode,
   moveTrackInActivePlaylist,
+  moveTrackInPlaybackQueue,
+  reorderPlaybackQueue,
   musicAgentLabel,
   musicMemoryContext,
   newPlaylistName,
@@ -121,11 +139,16 @@ const {
   onTimeUpdate,
   parseMessageTracks,
   play,
+  playLibraryTrack,
+  playTrackNext,
+  playQueueFromTrack,
+  playbackFailures,
   playActivePlaylistAll,
   playAddedTrack,
   playLocalTrack,
   playPlaylistById,
   playMode,
+  playbackSettings,
   playlist,
   playlistContainsTrack,
   playlistDialogOpen,
@@ -136,10 +159,13 @@ const {
   prevVolume,
   pushAgentMessage,
   recordCompanionSecond,
+  refreshSongQuote,
   remoteCommandTimer,
   removeTrackFromActivePlaylist,
   removeTrackFromQueue,
   resetLyrics,
+  adjustLyricTiming,
+  resetLyricTiming,
   resetPetLyricIndex,
   retryDownloadJob,
   retryLastAgentMessage,
@@ -147,6 +173,7 @@ const {
   rightCaps,
   savePlaylistRename,
   saveAgentConfig,
+  sleepTimerRemaining,
   scrollChat,
   seekTo,
   sendAgentMessage,
@@ -154,6 +181,7 @@ const {
   sendToSimpleAgent,
   setAgentMessageContent,
   setAgentMessageResults,
+  hasStreamingAgentMessage,
   setPlaybackQueue,
   setVolume,
   showSettings,
@@ -169,16 +197,23 @@ const {
   toggleMute,
   togglePlay,
   toggleTrackFavorite,
+  toggleAiSongQuote,
   toast,
   tracks,
+  queueSources,
+  recentPlaybackRows,
+  songQuoteLoading,
   updateAgentChatScrollState,
   updateCurrentLyrics,
+  updatePlaybackSetting,
   updatePlaylist,
+  handleUnifiedSearchAction,
   openPlaylistManager,
   openPlaylistPicker,
   openSavedPlaylist,
   updatePreselectedTrack,
   uploadFiles,
+  undoClearPlaybackQueue,
   uploading,
   volume,
   waitForJob,
@@ -193,6 +228,16 @@ const {
 const musicAssistantOpen = ref(false)
 const immersiveMode = ref(false)
 const mobilePlayerExpanded = ref(false)
+const playbackQueueOpen = ref(false)
+const duplicateManagerOpen = ref(false)
+const unifiedSearchOpen = ref(false)
+const lyricsPanelOpen = ref(false)
+const isAgentMessageVisible = (msg) => (
+  String(msg?.content || '').trim()
+  || getMessageResults(msg)?.length
+  || msg?.streaming === true
+)
+const showStandaloneAgentLoading = computed(() => agentLoading.value && !hasStreamingAgentMessage.value)
 const musicMemoryLabel = computed(() => {
   const current = Math.max(0, Number(musicMemoryContext.value?.currentTokens || 0))
   const threshold = Math.max(0, Number(musicMemoryContext.value?.autoCompactThreshold || 0))
@@ -211,7 +256,11 @@ const toggleMusicAssistant = async (force) => {
 }
 
 const openPlaybackQueueFromPlayer = () => {
-  activeLibraryView.value = 'queue'
+  playbackQueueOpen.value = !playbackQueueOpen.value
+}
+
+const toggleLyricTranslation = () => {
+  showLyricTranslation.value = !showLyricTranslation.value
 }
 
 const toggleImmersiveMode = () => {
@@ -220,7 +269,8 @@ const toggleImmersiveMode = () => {
 }
 
 const handleExperienceKeydown = (event) => {
-  if (event.key === 'Escape' && immersiveMode.value) immersiveMode.value = false
+  if (event.key === 'Escape' && playbackQueueOpen.value) playbackQueueOpen.value = false
+  else if (event.key === 'Escape' && immersiveMode.value) immersiveMode.value = false
   if (event.code !== 'Space' || event.repeat || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
   if (target?.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')) return

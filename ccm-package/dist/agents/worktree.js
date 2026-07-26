@@ -68,6 +68,27 @@ function ensureManagedWorktreesIgnored(repoRoot) {
 function normalizeChildAgentIsolationMode(value) {
     return String(value || "").trim().toLowerCase() === "worktree" ? "worktree" : "shared";
 }
+function isRegisteredWorktree(repoRoot, worktreePath) {
+    const target = path.resolve(worktreePath).toLowerCase();
+    try {
+        return runGit(repoRoot, ["worktree", "list", "--porcelain"])
+            .split(/\r?\n/)
+            .filter(line => line.startsWith("worktree "))
+            .some(line => path.resolve(line.slice("worktree ".length).trim()).toLowerCase() === target);
+    }
+    catch {
+        return false;
+    }
+}
+function branchExists(repoRoot, branch) {
+    try {
+        runGit(repoRoot, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 function createChildAgentWorktree(baseWorkDir, options = {}) {
     const rawWorkDir = String(baseWorkDir || "").trim();
     const originalWorkDir = rawWorkDir ? path.resolve(rawWorkDir) : "";
@@ -90,10 +111,29 @@ function createChildAgentWorktree(baseWorkDir, options = {}) {
     const worktreeBranch = `ccm/${slug}`;
     ensureManagedWorktreesIgnored(repoRoot);
     if (fs.existsSync(worktreePath)) {
-        return { worktreePath, worktreeBranch, reused: true, baseHead, baseBranch };
+        if (isRegisteredWorktree(repoRoot, worktreePath)) {
+            return { worktreePath, worktreeBranch, reused: true, baseHead, baseBranch };
+        }
+        // 目录残留但 git 已不再管理它：清掉过期元数据后，空目录可安全重建；
+        // 非空目录拒绝复用，避免把遗留改动当成干净工作区。
+        try {
+            runGit(repoRoot, ["worktree", "prune"]);
+        }
+        catch { }
+        if (fs.readdirSync(worktreePath).length === 0) {
+            fs.rmdirSync(worktreePath);
+        }
+        else {
+            throw new Error(`worktree 目录已存在但未被 git 管理，拒绝复用：${worktreePath}`);
+        }
     }
     fs.mkdirSync(worktreesDir, { recursive: true });
-    runGit(repoRoot, ["worktree", "add", "-b", worktreeBranch, worktreePath, "HEAD"]);
+    if (branchExists(repoRoot, worktreeBranch)) {
+        runGit(repoRoot, ["worktree", "add", worktreePath, worktreeBranch]);
+    }
+    else {
+        runGit(repoRoot, ["worktree", "add", "-b", worktreeBranch, worktreePath, "HEAD"]);
+    }
     return { worktreePath, worktreeBranch, reused: false, baseHead, baseBranch };
 }
 function prepareChildAgentWorkDir(baseWorkDir, options = {}) {

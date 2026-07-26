@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR, SESSIONS_DIR } from "../../core/utils";
-import { callCompactionModel } from "../collaboration/group-compaction-engine-part-01";
+import { callCompactionModel } from "../collaboration/group-compaction-engine";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { resolveTrustedModelContextCapacity } from "../collaboration/model-capability-cache";

@@ -1,6 +1,15 @@
 import { computed, ref } from 'vue'
 
-const emptyState = () => ({ favorites: [], playlists: [], queue: [] })
+const emptyState = () => ({
+  version: 3,
+  favorites: [],
+  playlists: [],
+  queue: [],
+  queueSources: {},
+  currentFilename: '',
+  playMode: 'list',
+  history: [],
+})
 
 export function useMusicLibraryState() {
   const libraryState = ref(emptyState())
@@ -39,9 +48,38 @@ export function useMusicLibraryState() {
 
   const deletePlaylist = (id) => request(`/api/music/library-state/playlists/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
-  const setPlaybackQueue = (tracks) => request('/api/music/library-state/queue', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tracks: tracks.map(track => track.filename || track) })
+  const setPlaybackQueue = (tracks, options = {}) => request('/api/music/library-state/queue', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tracks: tracks.map(track => track.filename || track),
+      currentFilename: options.currentFilename,
+      playMode: options.playMode,
+      queueSources: options.queueSources,
+    })
   })
 
-  return { libraryState, libraryStateLoading, activeLibraryView, favoriteSet, isFavorite, loadLibraryState, toggleFavorite, createPlaylist, updatePlaylist, deletePlaylist, setPlaybackQueue }
+  const recordPlaybackHistory = (track, source = '播放器') => request('/api/music/library-state/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: track?.filename || track, source }),
+  })
+
+  const clearPlaybackHistory = () => request('/api/music/library-state/history', { method: 'DELETE' })
+
+  return {
+    libraryState,
+    libraryStateLoading,
+    activeLibraryView,
+    favoriteSet,
+    isFavorite,
+    loadLibraryState,
+    toggleFavorite,
+    createPlaylist,
+    updatePlaylist,
+    deletePlaylist,
+    setPlaybackQueue,
+    recordPlaybackHistory,
+    clearPlaybackHistory,
+  }
 }

@@ -33,7 +33,7 @@ checks.groupIntentFailsClosed = groupIntent.includes('classifyGroupProjectTaskIn
   && groupIntent.includes('explicit_task_choice: true')
   && !groupIntent.includes('llm_backed: false, explicit: true')
 
-const groupLive = read('backend/modules/collaboration/group-live-routes-part-02-part-01.ts')
+const groupLive = read('backend/modules/collaboration/group-live-routes.ts')
 checks.explicitGroupTasksKeepModelSemantics = groupLive.includes('forceProjectTask: forceProjectTask || !!explicitContinuationTask')
   && groupLive.includes('explicitWorkflowDecision("execute_direct"')
   && !groupLive.includes('workflowDecision: { mode: "execute_direct"')
@@ -100,20 +100,20 @@ checks.qualityCenterFailsClosedWithoutModelIntent = qualityCenter.includes('cate
   && !qualityCenter.includes('const wholeWorkspace =')
   && !qualityCenter.includes('模型未提供结构化语义时的服务端安全兜底')
 
-const globalLoop = read('backend/agents/global/global-agent-loop-engine-part-02.ts')
+const globalLoop = read('backend/agents/global/global-agent-loop-engine.ts')
 const globalProjection = read('backend/agents/global/global-agent-run-projection.ts')
 checks.globalClarificationAndLoopStayModelBound = globalLoop.includes('clarificationDecision = await decideWorkflowWithModel')
   && !globalLoop.includes('const deniesAction =')
   && globalLoop.includes('parseGlobalAgentDecision(rawDecision, run.workflow_decision')
   && globalProjection.includes('fallbackWorkflowDecision')
 
-const typedMemory = read('backend/modules/collaboration/typed-memory-shared-part-02.ts')
+const typedMemory = read('backend/modules/collaboration/typed-memory-shared.ts')
 const ignoreMemoryBody = typedMemory.slice(typedMemory.indexOf('export function shouldIgnoreGroupMemoryRequest'), typedMemory.indexOf('\n}', typedMemory.indexOf('export function shouldIgnoreGroupMemoryRequest')) + 2)
 checks.memoryPolicyIsStructured = ignoreMemoryBody.includes('decision?.memoryPolicy')
   && !ignoreMemoryBody.includes('do not use')
   && !ignoreMemoryBody.includes('(忽略|')
 
-const intakePreview = read('backend/modules/collaboration/collaboration-routes-part-02-part-01.ts')
+const intakePreview = read('backend/modules/collaboration/collaboration-routes.ts')
 checks.intakePreviewFailsClosedAndUsesModelScope = intakePreview.includes('requirement_model_decision_required')
   && intakePreview.includes('const workflowDecision = await decideWorkflowWithModel')
   && intakePreview.includes('extractedRequirement.scope')
@@ -124,7 +124,7 @@ checks.reworkRoutingUsesStructuredSignals = reworkRuntime.includes('const reques
   && reworkRuntime.includes('item?.goalRevision === true')
   && !reworkRuntime.includes('wrong\\s+(?:direction|approach)')
 
-const reviewHelpers = read('backend/modules/collaboration/collaboration-runtime-status-helpers-part-02.ts')
+const reviewHelpers = read('backend/modules/collaboration/collaboration-runtime-status-helpers.ts')
 checks.reviewVerdictUsesStructuredStatus = reviewHelpers.includes('["passed", "approved", "success"].includes(normalized)')
   && !reviewHelpers.includes('风险未解决')
 

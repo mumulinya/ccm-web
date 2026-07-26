@@ -12,14 +12,14 @@ function mod(b) {
   return m ? m[1] : "";
 }
 
-const p01 = "backend/modules/collaboration/collaboration-task-card-part-01.ts";
+const p01 = "backend/modules/collaboration/collaboration-task-card.ts";
 const external = extractImports(fs.readFileSync(p01, "utf8")).filter(
   (b) => !mod(b).includes("collaboration-task-card-part-")
 );
 
 for (const f of [
-  "backend/modules/collaboration/collaboration-task-card-part-02-part-01.ts",
-  "backend/modules/collaboration/collaboration-task-card-part-02-part-02.ts",
+  "backend/modules/collaboration/collaboration-task-card.ts",
+  "backend/modules/collaboration/collaboration-task-card.ts",
 ]) {
   let t = fs.readFileSync(f, "utf8");
   const existing = new Set(extractImports(t).map(mod));
@@ -37,11 +37,11 @@ for (const f of [
 }
 
 fs.writeFileSync(
-  "backend/modules/collaboration/collaboration-task-card-part-02.ts",
+  "backend/modules/collaboration/collaboration-task-card.ts",
   [
     "// Behavior-freeze facade — implementation split into focused modules.",
-    'export * from "./collaboration-task-card-part-02-part-01";',
-    'export * from "./collaboration-task-card-part-02-part-02";',
+    'export * from "./collaboration-task-card";',
+    'export * from "./collaboration-task-card";',
     "",
   ].join("\n")
 );

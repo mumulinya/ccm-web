@@ -648,6 +648,12 @@ const planModeSteps = computed(() => {
       })
     : []
 })
+const planModeHiddenStepCount = computed(() => {
+  const rawSteps = planMode.value?.steps || planMode.value?.plan_steps || planMode.value?.planSteps || []
+  const backendHidden = Number(planMode.value?.steps_hidden_count || 0)
+  const frontendHidden = Array.isArray(rawSteps) ? Math.max(0, rawSteps.length - 8) : 0
+  return backendHidden + frontendHidden
+})
 const planRiskSummary = computed(() => planMode.value?.risk?.summary ? planCopy(planMode.value.risk.summary, '', 220) : '')
 const planAcceptanceItems = computed(() => asList(planMode.value?.acceptance).map(item => planCopy(item, '验收标准已整理。', 260)).slice(0, 8))
 const planPermissionBoundaries = computed(() => asList(planMode.value?.permission_boundaries).map(item => planCopy(item, '执行边界已整理。', 260)).slice(0, 8))

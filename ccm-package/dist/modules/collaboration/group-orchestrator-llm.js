@@ -63,6 +63,7 @@ const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const workflow_decision_1 = require("../../agents/workflow-decision");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const group_orchestrator_config_1 = require("./group-orchestrator-config");
+const rework_policy_1 = require("./rework-policy");
 const group_orchestrator_routing_1 = require("./group-orchestrator-routing");
 const group_orchestrator_prompts_1 = require("./group-orchestrator-prompts");
 const group_orchestrator_coded_1 = require("./group-orchestrator-coded");
@@ -295,7 +296,7 @@ async function runLlmCoordinatorReview(group, userMessage, coordinatorPlan, outp
     };
     const allowFollowUps = options.allowFollowUps !== false;
     const round = Math.max(1, Number(options.round || 1));
-    const maxRounds = Math.max(round, Number(options.maxRounds || 3));
+    const maxRounds = Math.max(round, Number(options.maxRounds || rework_policy_1.AUTO_REWORK_MAX_ROUNDS));
     const requiresCodeChanges = options.requiresCodeChanges !== false;
     const requiresVerification = options.requiresVerification !== false;
     const childReplies = validOutputs

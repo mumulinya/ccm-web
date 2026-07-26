@@ -53,7 +53,7 @@ export declare function bindProjectSessionAgentExecution(input: {
 };
 export declare function rotateProjectSessionAgentBinding(project: string, projectSessionId: string, reason?: string): {
     scopeId: string;
-    closed: import("../../tasks/agent-sessions-shared-part-01").TaskAgentSession[];
+    closed: import("../../tasks/agent-sessions-shared").TaskAgentSession[];
     nextGeneration: any;
 };
 export declare function purgeProjectSessionAgentBinding(project: string, projectSessionId: string): {
@@ -62,5 +62,5 @@ export declare function purgeProjectSessionAgentBinding(project: string, project
 };
 export declare function reopenProjectSessionAgentBinding(project: string, projectSessionId: string, reason?: string): {
     scopeId: string;
-    reopened: import("../../tasks/agent-sessions-shared-part-01").TaskAgentSession[];
+    reopened: import("../../tasks/agent-sessions-shared").TaskAgentSession[];
 };

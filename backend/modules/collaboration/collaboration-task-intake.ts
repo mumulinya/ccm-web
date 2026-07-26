@@ -452,6 +452,8 @@ import {
   userAgentRole,
 } from "./collaboration";
 
+import { mergeFollowupIntoPlanMode, planStepText } from "./main-agent-plan-core";
+
 export function getTaskPlanMode(task: any) {
   return task?.workflow_meta?.plan_mode || task?.workflow_meta?.intake?.plan_mode || task?.intake_draft || null;
 }
@@ -523,10 +525,15 @@ export function buildDispatchLaunchSummary(input: {
 }
 
 export function buildRevisedPlanModeDraft(planMode: any = {}, feedback = "") {
-  const now = new Date().toISOString();
-  const text = compactMemoryText(feedback || "请调整执行前计划。", 520);
-  const revisionCount = Number(planMode.revision_count || planMode.revisionCount || 0) + 1;
-  const revision = { count: revisionCount, feedback: text, at: now, status: "revision_requested" };
+  // 修订步骤与历史的核心逻辑在 main-agent-plan-core 中，与群聊追加消息共用同一套并入规则。
+  const merged = mergeFollowupIntoPlanMode(planMode, {
+    message: feedback || "请调整执行前计划。",
+    kind: "intake_revise",
+    source: "intake_revise",
+    executing: false,
+  });
+  const now = merged.revised_at;
+  const text = merged.last_revision_feedback;
   const answeredQuestions = (Array.isArray(planMode.clarification_questions) ? planMode.clarification_questions : [])
     .map((item: any) => ({
       ...item,
@@ -535,18 +542,7 @@ export function buildRevisedPlanModeDraft(planMode: any = {}, feedback = "") {
       answered_at: now,
     }));
   return {
-    ...planMode,
-    title: planMode.title || "执行前计划",
-    requires_confirmation: true,
-    auto_continue: false,
-    revision_status: "revision_requested",
-    revision_count: revisionCount,
-    last_revision_feedback: text,
-    revised_at: now,
-    plan_revisions: [
-      ...(Array.isArray(planMode.plan_revisions) ? planMode.plan_revisions : []),
-      revision,
-    ].slice(-10),
+    ...merged,
     clarification_questions: answeredQuestions,
     needs_clarification: false,
     acceptance: uniqueStrings([
@@ -557,7 +553,6 @@ export function buildRevisedPlanModeDraft(planMode: any = {}, feedback = "") {
       ...(Array.isArray(planMode.permission_boundaries) ? planMode.permission_boundaries : []),
       "调整后的计划重新确认前不得派发执行成员或修改文件",
     ]).slice(0, 8),
-    next_step: "请重新确认调整后的执行前计划；确认后才会派发执行成员。",
   };
 }
 
@@ -890,20 +885,20 @@ export function buildGroupPlanModePreflight(input: { group: any; message: string
   const steps = [
     {
       id: "understand_goal",
-      label: "理解需求与验收目标",
+      label: planStepText("understand_goal").content,
       detail: selectedProjects.length ? `已锁定相关项目：${selectedProjects.join("、")}` : "从群聊消息和项目上下文中整理目标。",
       status: "completed",
     },
     {
       id: "read_only_explore",
-      label: "只读探索影响范围",
+      label: planStepText("read_only_explore").content,
       detail: compactMemoryText(readOnlyContext || "已完成只读探索。", 220),
       status: "completed",
     },
     ...modelPlanSteps,
     {
       id: "confirm_boundary",
-      label: "确认执行边界",
+      label: planStepText("confirm_boundary").content,
       detail: clarificationQuestions.length
         ? "需要先补充关键问题，再进入派发。"
         : requiresConfirmation ? "模型选择先规划，或服务端安全下限要求确认后执行。" : "模型选择直接执行，当前安全边界允许自动继续。",
@@ -911,13 +906,13 @@ export function buildGroupPlanModePreflight(input: { group: any; message: string
     },
     {
       id: "dispatch_sub_agents",
-      label: "派发子 Agent 工作单",
+      label: planStepText("dispatch_sub_agents").content,
       detail: "每个子 Agent 会收到目标、允许范围、禁止事项和验收标准。",
       status: requiresConfirmation ? "pending" : "in_progress",
     },
     {
       id: "verify_and_summarize",
-      label: "验收结果并总结给用户",
+      label: planStepText("verify_and_summarize").content,
       detail: "完成后主 Agent 必须核对文件变更、验证结果、风险和下一步。",
       status: "pending",
     },

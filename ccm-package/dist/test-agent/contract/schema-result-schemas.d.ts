@@ -4628,6 +4628,7 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
     }>, "many">;
 }, "strict", z.ZodTypeAny, {
     schema?: "ccm-test-agent-browser-execution-plan-v1";
+    createdAt?: string;
     items?: {
         project?: string;
         name?: string;
@@ -4641,13 +4642,13 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         plannedProvider?: "mcp" | "none" | "playwright";
         providerRoutingReason?: string;
     }[];
-    createdAt?: string;
     planId?: string;
     expectedRunCount?: number;
     preferredProvider?: string;
     plannedCheckCount?: number;
 }, {
     schema?: "ccm-test-agent-browser-execution-plan-v1";
+    createdAt?: string;
     items?: {
         project?: string;
         name?: string;
@@ -4661,7 +4662,6 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         plannedProvider?: "mcp" | "none" | "playwright";
         providerRoutingReason?: string;
     }[];
-    createdAt?: string;
     planId?: string;
     expectedRunCount?: number;
     preferredProvider?: string;

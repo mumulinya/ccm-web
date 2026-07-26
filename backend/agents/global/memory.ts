@@ -11,7 +11,7 @@ import {
 } from "../../system/session-memory-window";
 import { CCM_DIR } from "../../core/utils";
 import { applyMemoryControls, recordMemoryMetric, recordMemoryOperation } from "../../modules/knowledge/memory-control-center";
-import { callCompactionModel } from "../../modules/collaboration/group-compaction-engine-part-01";
+import { callCompactionModel } from "../../modules/collaboration/group-compaction-engine";
 import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../../modules/collaboration/group-compaction-strategy";
 import {

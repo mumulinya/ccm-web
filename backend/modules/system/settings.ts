@@ -5,6 +5,7 @@ import { credentialStoreStatus } from "../../core/credential-store";
 import { sendJson } from "../../core/utils";
 import {
   getAgentProviderStatuses,
+  refreshAgentProviderStatusesAsync,
   getAgentProviderLoginSession,
   getAgentProviderModels,
   loadAgentProviderSettings,
@@ -67,7 +68,9 @@ export function handleSystemSettingsApi(pathname: string, req: IncomingMessage, 
   }
 
   if (pathname === "/api/system/agent-providers/status" && req.method === "GET") {
-    sendJson(res, { success: true, statuses: getAgentProviderStatuses(true) });
+    refreshAgentProviderStatusesAsync()
+      .then(statuses => sendJson(res, { success: true, statuses }))
+      .catch((error: any) => sendJson(res, { success: false, error: error?.message || "刷新 Agent 状态失败" }, 500));
     return true;
   }
 
@@ -89,9 +92,10 @@ export function handleSystemSettingsApi(pathname: string, req: IncomingMessage, 
   }
 
   if (pathname === "/api/system/agent-providers" && req.method === "POST") {
-    readJsonBody(req).then(payload => {
+    readJsonBody(req).then(async payload => {
       const config = saveAgentProviderSettings(payload);
-      sendJson(res, { success: true, config: publicAgentProviderSettings(config), statuses: getAgentProviderStatuses(true) });
+      const statuses = await refreshAgentProviderStatusesAsync();
+      sendJson(res, { success: true, config: publicAgentProviderSettings(config), statuses });
     }).catch((error: any) => sendJson(res, { success: false, error: error?.message || "保存开发 Agent 配置失败" }, 400));
     return true;
   }

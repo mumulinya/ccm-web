@@ -80,7 +80,7 @@ function verifyStage(fixtureFile, restart) {
     },
   });
   const anonymousVerification = gate.verifyFinalDispatchProviderUsageBaseline(anonymousModelBaseline, { ...expected, model: "" });
-  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-02-part-02.ts"), "utf8");
+  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents.ts"), "utf8");
   const deliverySource = fs.readFileSync(path.join(root, "backend", "tasks", "agent-sessions-delivery.ts"), "utf8");
   const checks = {
     baselineBindsModelContractAndRuntime: baseline?.model === expected.model && baseline?.provider_contract_id === expected.providerContractId && baseline?.provider_runtime_version === expected.providerRuntimeVersion,

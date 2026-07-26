@@ -162,6 +162,7 @@ export declare function parseCursorAuthStatus(rawOutput: string, exitCode: numbe
     account: string;
     detail: string;
 };
+export declare function refreshAgentProviderStatusesAsync(): Promise<any>;
 export declare function getAgentProviderStatuses(force?: boolean): any;
 export declare function startAgentProviderInstall(providerValue: string): {
     provider: DevelopmentAgentProvider;

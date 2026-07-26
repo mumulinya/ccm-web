@@ -111,7 +111,7 @@ await assert.rejects(
 );
 checks += 1;
 
-const liveRoutesSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/group-live-routes-part-02-part-02.ts"), "utf8");
+const liveRoutesSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/group-live-routes.ts"), "utf8");
 const taskExecutorSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/collaboration-task-executor.ts"), "utf8");
 const routingSource = fs.readFileSync(path.join(root, "backend/modules/collaboration/group-orchestrator-routing.ts"), "utf8");
 check(!liveRoutesSource.includes("buildGroupContextPacket("), "live group model routes must not use fixed-count context packets");

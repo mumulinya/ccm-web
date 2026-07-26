@@ -4,10 +4,13 @@ export function useMusicLyrics(options = {}) {
   const currentTime = options.currentTime || { value: 0 }
   const isPlaying = options.isPlaying || { value: false }
   const notifyMusicPetSpeech = options.notifyMusicPetSpeech || (() => {})
+  const currentTrack = options.currentTrack || { value: null }
 
   const lyrics = ref([])
   const currentLyricIndex = ref(-1)
   const compactViewport = ref(false)
+  const lyricTimingOffsetMs = ref(0)
+  const showLyricTranslation = ref(true)
   let lastPetLyricIndex = -1
   let compactViewportQuery = null
 
@@ -21,6 +24,43 @@ export function useMusicLyrics(options = {}) {
     if (currentLyricIndex.value < 0) return 0
     return (wrapH / 2) - (currentLyricIndex.value * lineH) - (lineH / 2)
   })
+
+  const effectiveLyricTime = computed(() => Math.max(0, Number(currentTime.value || 0) + lyricTimingOffsetMs.value / 1000))
+  const currentWordIndex = computed(() => {
+    const words = lyrics.value[currentLyricIndex.value]?.words || []
+    let index = -1
+    for (let i = 0; i < words.length; i++) {
+      if (effectiveLyricTime.value >= Number(words[i].start || 0)) index = i
+      else break
+    }
+    return index
+  })
+
+  const loadOffsetMap = () => {
+    try { return JSON.parse(localStorage.getItem('aura_lyric_timing_offsets_v1') || '{}') || {} }
+    catch { return {} }
+  }
+
+  const persistLyricOffset = () => {
+    const filename = currentTrack.value?.filename
+    if (!filename) return
+    const map = loadOffsetMap()
+    if (lyricTimingOffsetMs.value) map[filename] = lyricTimingOffsetMs.value
+    else delete map[filename]
+    localStorage.setItem('aura_lyric_timing_offsets_v1', JSON.stringify(map))
+  }
+
+  const adjustLyricTiming = (deltaMs) => {
+    lyricTimingOffsetMs.value = Math.max(-5000, Math.min(5000, lyricTimingOffsetMs.value + Number(deltaMs || 0)))
+    persistLyricOffset()
+    updateCurrentLyrics()
+  }
+
+  const resetLyricTiming = () => {
+    lyricTimingOffsetMs.value = 0
+    persistLyricOffset()
+    updateCurrentLyrics()
+  }
 
   onMounted(() => {
     compactViewportQuery = window.matchMedia('(max-width: 760px)')
@@ -44,7 +84,7 @@ export function useMusicLyrics(options = {}) {
     if (lyrics.value.length === 0) return
     let activeIdx = -1
     for (let i = 0; i < lyrics.value.length; i++) {
-      if (currentTime.value >= lyrics.value[i].time) {
+      if (effectiveLyricTime.value >= lyrics.value[i].time) {
         activeIdx = i
       } else {
         break
@@ -66,6 +106,7 @@ export function useMusicLyrics(options = {}) {
       return
     }
     try {
+      lyricTimingOffsetMs.value = Number(loadOffsetMap()[track.filename] || 0)
       const res = await fetch(`/api/music/lyric?filename=${encodeURIComponent(track.filename || '')}&bvid=${encodeURIComponent(track.bvid || '')}&title=${encodeURIComponent(track.title || '')}`)
       const data = await res.json()
       if (data.success && data.lyrics) {
@@ -79,12 +120,19 @@ export function useMusicLyrics(options = {}) {
     }
     currentLyricIndex.value = -1
     resetPetLyricIndex()
+    updateCurrentLyrics()
   }
 
   return {
     lyrics,
     currentLyricIndex,
+    currentWordIndex,
     lyricsOffset,
+    lyricTimingOffsetMs,
+    showLyricTranslation,
+    effectiveLyricTime,
+    adjustLyricTiming,
+    resetLyricTiming,
     loadLyrics,
     updateCurrentLyrics,
     resetLyrics,

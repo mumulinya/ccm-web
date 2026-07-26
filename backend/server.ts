@@ -144,7 +144,14 @@ import {
   planProjectMainTask,
   projectMainTaskPublic,
 } from "./modules/projects/project-main-agent";
-import { appendProjectSessionTaskMessage, handleSessionsApi, scheduleProjectSessionAutoTitle } from "./modules/projects/sessions";
+import {
+  appendProjectSessionTaskMessage,
+  handleSessionsApi,
+  scheduleProjectSessionAutoTitle,
+  getSessionDetail,
+  getSessions,
+  syncSessions,
+} from "./modules/projects/sessions";
 import { handleConversationSearchApi } from "./modules/search/conversation-search";
 import { handleGitApi } from "./modules/tools/git";
 import { handleMarketplaceApi } from "./modules/tools/marketplace";
@@ -181,6 +188,7 @@ import { migrateConfigDirectory, migrateTomlCredentials } from "./core/credentia
 import { handleFeishuReactionFeedbackApi } from "./integrations/feishu-reaction-feedback";
 import { handleUsabilityApi, startUsabilityArchiveScheduler, stopUsabilityArchiveScheduler } from "./modules/system/usability";
 import { handleSystemSettingsApi } from "./modules/system/settings";
+import { refreshAgentProviderStatusesAsync } from "./modules/system/agent-provider-settings";
 import { browserApiAccessAllowed, handleLocalAuthApi } from "./modules/system/local-auth";
 import { buildSelectedSkillUsageDirective, ensureRoleSkillsInstalled, selectRoleSkills } from "./skills/role-skills";
 import {
@@ -199,7 +207,7 @@ import {
   runCleanupAction,
 } from "./system/cleanup-center";
 
-import { getSessionDetail, getSessions, syncSessions } from "./modules/projects/sessions";
+
 import {
   acquireProjectSessionAgentDispatch,
   bindProjectSessionAgentExecution,
@@ -1517,6 +1525,8 @@ function startServer(port: number, host = process.env.CCM_HOST || "127.0.0.1") {
     startTaskPermissionNotificationScheduler(startupCollabCtx);
     startModelCapabilityRefreshScheduler();
     startRuntimeToolRealCliMatrixScheduler();
+    // 预热提供商状态缓存：让首个请求也走缓存路径，避免同步 spawnSync 探测冻结事件循环
+    void refreshAgentProviderStatusesAsync().catch(() => {});
     console.log("");
     console.log(`CCM Workspace  v${CCM_RUNTIME_VERSION}`);
     console.log("------------------------------------------------------");

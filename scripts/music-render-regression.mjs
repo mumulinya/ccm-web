@@ -33,7 +33,7 @@ async function installRoutes(page) {
       value() { mediaPlaying.set(this, false); this.dispatchEvent(new Event('pause')) },
     })
   })
-  let state = { version: 1, favorites: [], playlists: [], queue: [], updatedAt: new Date().toISOString() }
+  let state = { version: 2, favorites: [], playlists: [], queue: [], currentFilename: '', playMode: 'list', updatedAt: new Date().toISOString() }
   await page.route('**/api/music/list', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, tracks: fakeTracks }) }))
   await page.route('**/api/music/config', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, config: { enabled: false, hasKey: false, model: '', sourceLabel: '系统设置 / 统一大模型配置' } }) }))
   await page.route('**/api/music/library-state**', async route => {
@@ -41,7 +41,11 @@ async function installRoutes(page) {
     const method = route.request().method()
     const body = route.request().postDataJSON?.() || {}
     if (url.pathname.endsWith('/favorite') && method === 'POST') state.favorites = body.favorite ? [body.filename] : []
-    else if (url.pathname.endsWith('/queue') && method === 'PUT') state.queue = body.tracks || []
+    else if (url.pathname.endsWith('/queue') && method === 'PUT') {
+      state.queue = body.tracks || []
+      state.currentFilename = body.currentFilename ?? state.currentFilename
+      state.playMode = body.playMode || state.playMode
+    }
     else if (url.pathname.endsWith('/playlists') && method === 'POST') state.playlists.push({ id: `visual-list-${state.playlists.length + 1}`, name: body.name, tracks: [], createdAt: state.updatedAt, updatedAt: state.updatedAt })
     else if (url.pathname.includes('/playlists/') && method === 'PUT') {
       const id = decodeURIComponent(url.pathname.split('/').pop())
@@ -159,14 +163,13 @@ try {
   await desktop.locator('.aura-player.is-immersive').waitFor({ state: 'detached' })
   const queueScrollBefore = await queueButtonScrollSnapshot(desktop)
   await desktop.locator('.mega-btn.queue').click()
-  await desktop.locator('.library-tabs button').filter({ hasText: '播放队列' }).evaluate(element => {
-    if (!element.classList.contains('active')) throw new Error('bottom queue shortcut did not activate the queue view')
-  })
+  await desktop.locator('.playback-queue-drawer').waitFor()
+  if (await desktop.locator('.library-tabs button').filter({ hasText: '播放队列' }).count()) throw new Error('playback queue should not remain a library filter tab')
   const queueScrollAfter = await queueButtonScrollSnapshot(desktop)
   if (JSON.stringify(queueScrollAfter) !== JSON.stringify(queueScrollBefore)) {
     throw new Error(`bottom queue shortcut changed workspace scroll: ${JSON.stringify({ before: queueScrollBefore, after: queueScrollAfter })}`)
   }
-  await desktop.locator('.library-tabs button').filter({ hasText: '全部' }).click()
+  await desktop.locator('.playback-queue-header-actions button[title="关闭"]').click()
   if (await desktop.locator('.chat-console-card').count()) throw new Error('music assistant drawer should be closed by default')
   await desktop.locator('.assistant-dock-toggle').click()
   await desktop.locator('.chat-console-card').waitFor()

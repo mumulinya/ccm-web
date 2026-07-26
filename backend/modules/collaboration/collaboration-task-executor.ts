@@ -1,6 +1,7 @@
 // Mechanically extracted from collaboration.ts; keep orchestration behavior unchanged.
 import { buildExactGroupSessionModelContextPacket } from "./group-session-model-context";
 import { projectTestAgentProblems, runProjectTaskTestAgentReview } from "../projects/project-test-agent-gate";
+import { AUTO_REWORK_MAX_ROUNDS } from "./rework-policy";
 
 type CollabCtx = any;
 
@@ -990,12 +991,12 @@ ${requirementEpicExecutionBoundary(task)}
       || changedFiles.length > 0;
     let projectReview: any = null;
     if (requiresProjectReview) {
-      const reviewRound = Math.max(1, Math.min(3, Number(task.review_round || 0) + 1));
+      const reviewRound = Math.max(1, Math.min(AUTO_REWORK_MAX_ROUNDS, Number(task.review_round || 0) + 1));
       updateTask(task.id, {
         status: "reviewing",
         acceptance_state: "test_agent_running",
         review_round: reviewRound,
-        status_detail: `TestAgent 正在执行第 ${reviewRound}/3 轮独立验收`,
+        status_detail: `TestAgent 正在执行第 ${reviewRound}/${AUTO_REWORK_MAX_ROUNDS} 轮独立验收`,
       });
       appendTaskTimelineEvent(task.id, {
         type: "project_test_agent_started",
@@ -1028,7 +1029,7 @@ ${requirementEpicExecutionBoundary(task)}
       });
       if (!projectReview.canAccept) {
         const detail = problems.join("；") || projectReview.error || "TestAgent 验收未通过";
-        if (reviewRound < 3) {
+        if (reviewRound < AUTO_REWORK_MAX_ROUNDS) {
           updateTask(task.id, {
             status: "pending",
             acceptance_state: "reworking",

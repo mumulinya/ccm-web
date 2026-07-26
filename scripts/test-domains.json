@@ -101,6 +101,9 @@
           "music-production-selftest.mjs",
           "music-latest-playback-wins-selftest.mjs",
           "music-next-recommendation-selftest.mjs",
+          "music-playback-queue-selftest.mjs",
+          "music-quote-mode-selftest.mjs",
+          "music-platform-features-selftest.mjs",
           "pet-workspace-companion-selftest.mjs"
       ]
     },

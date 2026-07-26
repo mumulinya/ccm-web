@@ -297,7 +297,7 @@ function getMusicHelpText(chatMode) {
         return `🎵 本地音乐助手\n\n你可以说：\n• "播放 周杰伦" - 搜索并播放\n• "搜索 轻音乐" - 搜索本地曲库\n• "来首钢琴曲" - 自然语言搜索\n\n将 MP3 文件放入 ~/.cc-connect/music/ 目录`;
     }
     if (chatMode === "netease") {
-        return `🎵 网易云音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索网易云\n• "搜索 轻音乐" - 搜索网易云音乐\n• "来首适合学习的音乐" - 智能推荐\n\n点击搜索结果可一键下载为本地 MP3`;
+        return `🎵 网易音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索网易\n• "搜索 轻音乐" - 搜索网易音乐\n• "来首适合学习的音乐" - 智能推荐\n\n点击搜索结果可一键下载为本地 MP3`;
     }
     return `🎵 B站音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索B站\n• "搜索 轻音乐" - 搜索B站视频\n• "来首适合编程的音乐" - 智能推荐\n\n点击搜索结果可一键转码为本地 MP3`;
 }
@@ -322,7 +322,7 @@ const AGENT_TOOLS_LIST = [
     },
     {
         name: "search_netease",
-        description: "搜索网易云音乐。当用户想从网易云搜索歌曲时使用此工具。",
+        description: "搜索网易音乐。当用户想从网易搜索歌曲时使用此工具。",
         input_schema: { type: "object", properties: { keyword: { type: "string", description: "搜索关键词" } }, required: ["keyword"] }
     }
 ];
@@ -337,7 +337,7 @@ async function execToolCall(toolName, toolInput) {
     }
     if (toolName === "search_netease") {
         const results = await (0, netease_1.neteaseSearch)(toolInput.keyword || "");
-        return results.slice(0, 8).map((r, i) => `${i + 1}. ${r.title} - ${(r.artist && r.artist !== "undefined" && r.artist !== "null" ? r.artist : "") || "未知歌手"} (${r.duration}) [ID: ${r.songId}]`).join("\n") || "网易云没有找到相关音乐";
+        return results.slice(0, 8).map((r, i) => `${i + 1}. ${r.title} - ${(r.artist && r.artist !== "undefined" && r.artist !== "null" ? r.artist : "") || "未知歌手"} (${r.duration}) [ID: ${r.songId}]`).join("\n") || "网易没有找到相关音乐";
     }
     return "未知工具";
 }

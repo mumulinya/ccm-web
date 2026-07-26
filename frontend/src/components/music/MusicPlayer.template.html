@@ -37,7 +37,7 @@
 
         <div class="header-listening-context">
           <span class="listening-time">陪伴 {{ companionTimeStr }}</span>
-          <span class="weather-compact">
+          <span class="weather-compact" :title="weatherTitle">
             <img v-if="weatherIcon && !weatherIconError" :src="weatherIcon" @error="weatherIconError = true" />
             <span v-else>{{ weatherEmoji }}</span>
             {{ currentWeather }}
@@ -77,7 +77,7 @@
               :class="{ active: mode === 'netease' }" 
               @click="mode = 'netease'"
             >
-              网易云
+              网易
             </button>
             <div class="switch-slider" :class="{ 'slide-bili': mode === 'cloud', 'slide-netease': mode === 'netease' }"></div>
           </div>
@@ -95,7 +95,7 @@
               <button type="button" :disabled="!currentTrack" :title="currentTrack && isFavorite(currentTrack.filename) ? '取消收藏' : '收藏'" @click="currentTrack && toggleTrackFavorite(currentTrack)">
                 <Heart :size="16" :fill="currentTrack && isFavorite(currentTrack.filename) ? 'currentColor' : 'none'" />
               </button>
-              <button type="button" title="播放队列" @click="activeLibraryView = 'queue'"><MoreHorizontal :size="17" /></button>
+              <button type="button" title="播放队列" @click="openPlaybackQueueFromPlayer"><MoreHorizontal :size="17" /></button>
             </div>
           </div>
 
@@ -124,11 +124,32 @@
             <h2 :key="`title-${trackVisualKey}`" :title="currentTrack?.title || '等待播放'">{{ currentTrack?.title || '选择一首歌，开始今晚的聆听' }}</h2>
             <p :key="`artist-${trackVisualKey}`">{{ currentTrack?.artist || 'Aura Music' }}</p>
             <div class="track-context-chips">
-              <span :class="`source-${mode}`">{{ mode === 'local' ? '本地音源' : mode === 'netease' ? '网易云' : 'B站音源' }}</span>
+              <span :class="`source-${mode}`">{{ mode === 'local' ? '本地音源' : mode === 'netease' ? '网易' : 'B站音源' }}</span>
               <span>{{ currentEmotion }}</span>
+              <button
+                type="button"
+                class="quote-mode-toggle"
+                :class="{ active: aiSongQuoteEnabled }"
+                role="switch"
+                :aria-checked="aiSongQuoteEnabled"
+                :title="aiSongQuoteEnabled ? '关闭后使用本地随机文案' : '打开后由大模型根据歌曲生成文案'"
+                @click="toggleAiSongQuote"
+              >
+                <Sparkles :size="10" />
+                {{ aiSongQuoteEnabled ? 'AI 文案' : '本地文案' }}
+              </button>
             </div>
           </div>
-          <p class="stage-quote">{{ aiSongQuote }}</p>
+          <div class="stage-quote" :class="{ loading: songQuoteLoading }">
+            <span>{{ aiSongQuote }}</span>
+            <button
+              type="button"
+              :disabled="songQuoteLoading"
+              :title="aiSongQuoteEnabled ? '重新生成文案' : '随机换一句本地文案'"
+              aria-label="换一句文案"
+              @click="refreshSongQuote"
+            ><RefreshCw :size="11" /></button>
+          </div>
         </section>
 
         <!-- 2. 歌词与声音舞台 -->
@@ -138,7 +159,11 @@
               <span class="stage-kicker">当前歌词</span>
               <h3 :key="`lyric-title-${trackVisualKey}`">{{ currentTrack?.title || 'Aura Music' }}</h3>
             </div>
-            <span class="lyric-time-indicator">{{ formatTime(currentTime) }} / {{ formatTime(duration) }}</span>
+            <div class="lyric-stage-actions">
+              <span v-if="sleepTimerRemaining" class="sleep-timer-indicator">睡眠 {{ sleepTimerRemaining }}</span>
+              <span class="lyric-time-indicator">{{ formatTime(currentTime) }} / {{ formatTime(duration) }}</span>
+              <button type="button" title="打开独立歌词模式" @click="lyricsPanelOpen = true"><Languages :size="14" /></button>
+            </div>
           </div>
 
           <div class="lyrics-stage-body">
@@ -152,7 +177,17 @@
                     'lyric-line-past': idx < currentLyricIndex,
                   }"
                   :aria-current="currentLyricIndex === idx ? 'true' : undefined">
-                  {{ line.text }}
+                  <span class="lyric-primary-line">
+                    <template v-if="line.words?.length">
+                      <span
+                        v-for="(word, wordIndex) in line.words"
+                        :key="`${word.start}-${wordIndex}`"
+                        :class="{ 'lyric-word-sung': idx < currentLyricIndex || (idx === currentLyricIndex && wordIndex <= currentWordIndex) }"
+                      >{{ word.text }}</span>
+                    </template>
+                    <template v-else>{{ line.text }}</template>
+                  </span>
+                  <small v-if="showLyricTranslation && line.translation" class="lyric-translation">{{ line.translation }}</small>
                 </div>
                 <div v-if="lyrics.length === 0" class="lyric-empty">
                   歌词会在音乐开始后出现在这里
@@ -188,6 +223,10 @@
                 <Search class="search-icon" :size="13" />
                 <input v-model="filterText" class="queue-filter-input" placeholder="搜索歌曲/艺术家/专辑/文件名" />
               </div>
+              <button class="unified-search-button" title="同时搜索本地、网易和B站" @click="unifiedSearchOpen = true">
+                <Globe2 :size="13" />
+                <span>全源搜索</span>
+              </button>
               <label class="upload-btn">
                 <Upload :size="13" />
                 <span>{{ uploading ? '上传中' : '上传' }}</span>
@@ -204,7 +243,8 @@
             <div class="library-tabs" aria-label="音乐库视图">
               <button :class="{ active: activeLibraryView === 'all' }" @click="activeLibraryView = 'all'">全部 <small>{{ tracks.length }}</small></button>
               <button :class="{ active: activeLibraryView === 'favorites' }" @click="activeLibraryView = 'favorites'">收藏 <small>{{ libraryState.favorites.length }}</small></button>
-              <button :class="{ active: activeLibraryView === 'queue' }" @click="activeLibraryView = 'queue'">播放队列 <small>{{ libraryState.queue.length }}</small></button>
+              <button :class="{ active: activeLibraryView === 'history' }" @click="activeLibraryView = 'history'" title="最近播放"><History :size="12" />最近播放 <small>{{ recentPlaybackRows.length }}</small></button>
+              <button @click="duplicateManagerOpen = true" title="扫描并治理重复歌曲"><Files :size="12" />重复项</button>
             </div>
             <div class="saved-playlist-tabs" aria-label="我的歌单">
               <button class="playlist-directory-button" :class="{ active: activeLibraryView.startsWith('playlist:') }" @click="openPlaylistManager" title="管理歌单">
@@ -235,6 +275,15 @@
                 <button class="danger-text" title="删除歌单" @click="deleteActivePlaylist"><Trash2 :size="13" /></button>
               </div>
             </div>
+            <div v-else-if="activeLibraryView === 'history'" class="active-playlist-context">
+              <div class="active-playlist-copy">
+                <strong>最近播放</strong>
+                <span>{{ libraryState.history.length }} 次播放 · {{ recentPlaybackRows.length }} 首歌曲</span>
+              </div>
+              <div class="active-playlist-actions">
+                <button class="danger-text" title="清空最近播放" :disabled="!libraryState.history.length" @click="clearPlaybackHistory"><Trash2 :size="13" />清空历史</button>
+              </div>
+            </div>
           </div>
 
           <!-- 列表头 -->
@@ -256,7 +305,7 @@
             <div v-for="(track, idx) in filteredTracks" :key="track.filename" 
               class="queue-item" 
               :class="{ 'queue-item-active': currentTrack && currentTrack.filename === track.filename }"
-              @click="play(track)"
+              @click="playLibraryTrack(track)"
             >
               <div class="qi-num">
                 <span v-if="currentTrack && currentTrack.filename === track.filename && isPlaying" class="mini-spectrum-icon">
@@ -273,14 +322,15 @@
                 </div>
                 <div class="qi-info">
                   <span class="qi-title" :title="track.title">{{ formatDisplayTitle(track.title) || track.title }}</span>
+                  <span v-if="activeLibraryView === 'history'" class="qi-history-meta">{{ track.historyCount }} 次 · {{ track.historySource }} · {{ new Date(track.historyLastPlayedAt).toLocaleString() }}</span>
                 </div>
               </div>
               <div class="qi-artist-col" :title="track.artist || '未知'">{{ track.artist || '未知' }}</div>
               <div class="qi-duration-col">{{ track.duration || '--:--' }}</div>
               <div class="qi-actions-group" @click.stop>
                 <button class="qi-like-btn" :class="{ liked: isFavorite(track.filename) }" :title="isFavorite(track.filename) ? '取消收藏' : '收藏'" @click="toggleTrackFavorite(track)">{{ isFavorite(track.filename) ? '♥' : '♡' }}</button>
-                <button v-if="activeLibraryView === 'queue'" class="qi-action" title="移出播放队列" @click="removeTrackFromQueue(track)">−</button>
-                <button v-else class="qi-action" title="加入播放队列" @click="addTrackToQueue(track)">＋</button>
+                <button class="qi-action" title="下一首播放" @click="playTrackNext(track)">下一首</button>
+                <button class="qi-action" title="加入播放队列" @click="addTrackToQueue(track)">＋</button>
                 <button class="qi-action" title="添加到歌单" @click="openPlaylistPicker(track)"><ListMusic :size="13" /></button>
                 <template v-if="activePlaylist">
                   <span class="qi-reorder-controls">
@@ -325,7 +375,7 @@
           </div>
 
           <div class="agent-chat-messages" id="agent-chat" ref="agentChatEl" @scroll="updateAgentChatScrollState">
-            <div v-for="(msg, index) in agentMessages" :id="'music-agent-msg-' + index" :key="getAgentMessageKey(msg)" class="aura-chat-row" :class="msg.role">
+            <div v-for="(msg, index) in agentMessages" v-show="isAgentMessageVisible(msg)" :id="'music-agent-msg-' + index" :key="getAgentMessageKey(msg)" class="aura-chat-row" :class="msg.role">
               
               <!-- 消息气泡 -->
               <div class="chat-bubble-container">
@@ -333,7 +383,7 @@
                   <span class="meta-role">{{ msg.role === 'agent' ? musicAgentLabel : msg.role === 'operator' ? '我' : '系统' }}</span>
                   <span class="meta-time">{{ msg.time || '00:00:00' }}</span>
                 </div>
-                <div class="chat-body-text">{{ displayMessageContent(msg.content) }}</div>
+                <div class="chat-body-text" :class="{ 'blink-cursor': msg.streaming }">{{ displayMessageContent(msg.content) || (msg.streaming ? '正在理解你的需求...' : '') }}</div>
                 
                 <!-- 推荐歌曲卡片列表 -->
                 <div v-if="getMessageResults(msg)" class="tracks-card-box">
@@ -370,7 +420,7 @@
               </div>
             </div>
             
-            <div v-if="agentLoading" class="aura-chat-row agent">
+            <div v-if="showStandaloneAgentLoading" class="aura-chat-row agent">
               <div class="chat-bubble-container">
                 <div class="chat-meta">
                   <span class="meta-role">{{ musicAgentLabel }}</span>
@@ -462,7 +512,7 @@
               <button class="mega-btn next" @click="nextTrack" title="下一首" aria-label="下一首">
                 <SkipForward :size="17" fill="currentColor" />
               </button>
-              <button class="mega-btn queue" :class="{ active: activeLibraryView === 'queue' }" @click="openPlaybackQueueFromPlayer" title="播放队列" aria-label="播放队列">
+              <button class="mega-btn queue" :class="{ active: playbackQueueOpen }" @click="openPlaybackQueueFromPlayer" :title="`播放队列（${playlist.length}）`" aria-label="播放队列">
                 <ListMusic :size="17" />
               </button>
             </div>
@@ -560,10 +610,61 @@
       @clear="clearFinishedDownloadJobs().catch(error => toast.error(error.message))"
     />
 
+    <MusicPlaybackQueueDrawer
+      :open="playbackQueueOpen"
+      :tracks="playlist"
+      :current-filename="currentTrack?.filename || ''"
+      :is-playing="isPlaying"
+      :queue-sources="queueSources"
+      :failure-map="playbackFailures"
+      :can-undo-clear="!!clearedQueueSnapshot"
+      @close="playbackQueueOpen = false"
+      @play="track => play(track, { source: queueSources[track.filename]?.label || '播放队列' })"
+      @play-next="playTrackNext"
+      @play-from-here="playQueueFromTrack"
+      @remove="removeTrackFromQueue"
+      @move="moveTrackInPlaybackQueue"
+      @reorder="reorderPlaybackQueue"
+      @clear="clearPlaybackQueue"
+      @undo-clear="undoClearPlaybackQueue"
+    />
+
+    <MusicDuplicateManager
+      v-if="duplicateManagerOpen"
+      @close="duplicateManagerOpen = false"
+      @changed="loadLibraryState(); loadTracks()"
+    />
+
+    <MusicUnifiedSearch
+      :open="unifiedSearchOpen"
+      :initial-query="filterText"
+      :action-handler="handleUnifiedSearchAction"
+      @close="unifiedSearchOpen = false"
+    />
+
+    <MusicLyricsPanel
+      :open="lyricsPanelOpen"
+      :track="currentTrack"
+      :lyrics="lyrics"
+      :current-index="currentLyricIndex"
+      :current-word-index="currentWordIndex"
+      :timing-offset-ms="lyricTimingOffsetMs"
+      :show-translation="showLyricTranslation"
+      @close="lyricsPanelOpen = false"
+      @adjust-offset="adjustLyricTiming"
+      @reset-offset="resetLyricTiming"
+      @toggle-translation="toggleLyricTranslation"
+    />
+
     <MusicAgentSettingsModal
       v-if="showSettings"
       :config="agentConfig"
+      :playback-settings="playbackSettings"
+      :ai-song-quote-enabled="aiSongQuoteEnabled"
       @update-proxy="agentConfig.proxy = $event"
+      @update-weather-location="agentConfig.weatherLocation = $event"
+      @update-setting="updatePlaybackSetting"
+      @toggle-ai-quote="toggleAiSongQuote"
       @save="saveAgentConfig"
       @close="showSettings = false"
     />

@@ -10,8 +10,8 @@ const {
   removeUploadedFiles,
   validateTaskUploadedFiles,
 } = require('../ccm-package/dist/system/task-attachments.js')
-const { buildTaskFromCronJob } = require('../ccm-package/dist/modules/scheduling/cron-part-01.js')
-const { buildChildAgentTaskText } = require('../ccm-package/dist/modules/collaboration/collaboration-runtime-task-queue-part-02.js')
+const { buildTaskFromCronJob } = require('../ccm-package/dist/modules/scheduling/cron.js')
+const { buildChildAgentTaskText } = require('../ccm-package/dist/modules/collaboration/collaboration-runtime-task-queue.js')
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
 const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`

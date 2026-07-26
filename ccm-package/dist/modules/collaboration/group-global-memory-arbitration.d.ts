@@ -343,7 +343,7 @@ export declare function distillGroupGlobalMemoryArbitrationToTypedMemory(groupId
         file: string;
         changed: boolean;
         slug: string;
-        type: import("./typed-memory-shared-part-01").GroupTypedMemoryType;
+        type: import("./typed-memory-shared").GroupTypedMemoryType;
         name: string;
         writeShapeTelemetry: any;
         writeShapeTelemetryError: string;
@@ -356,7 +356,7 @@ export declare function distillGroupGlobalMemoryArbitrationToTypedMemory(groupId
             relPath: string;
             name: any;
             description: any;
-            type: import("./typed-memory-shared-part-01").GroupTypedMemoryType;
+            type: import("./typed-memory-shared").GroupTypedMemoryType;
             source: any;
             paths: string[];
             updatedAt: any;

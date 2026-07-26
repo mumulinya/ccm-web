@@ -12,11 +12,11 @@ const repo = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/(.
 const read = relative => fs.readFileSync(path.join(repo, relative), "utf8");
 
 try {
-  const liveRoutes = read("backend/modules/collaboration/group-live-routes-part-02-part-02.ts");
+  const liveRoutes = read("backend/modules/collaboration/group-live-routes.ts");
   const routing = read("backend/modules/collaboration/group-orchestrator-routing.ts");
   const groupStream = read("frontend/src/components/collaboration/useGroupChatStream.js");
   const globalRuntime = read("backend/modules/global/global-agent-agentic-runtime.ts");
-  const globalLoop = read("backend/agents/global/global-agent-loop-engine-part-02.ts");
+  const globalLoop = read("backend/agents/global/global-agent-loop-engine.ts");
 
   assert.doesNotMatch(liveRoutes, /\/api\/groups\/broadcast/);
   assert.doesNotMatch(liveRoutes, /target_project_actual|preparedDirectPayload|preparedBroadcastPayload|并行处理中/);

@@ -204,7 +204,7 @@ try {
 
   const apiSource = fs.readFileSync(path.join(root, 'backend/modules/system/settings.ts'), 'utf-8')
   const uiSource = fs.readFileSync(path.join(root, 'frontend/src/components/settings/SettingsAgentProvidersPanel.vue'), 'utf-8')
-  const runtimeSource = fs.readFileSync(path.join(root, 'backend/tools/runtime-tool-sync-part-01.ts'), 'utf-8')
+  const runtimeSource = fs.readFileSync(path.join(root, 'backend/tools/runtime-tool-sync.ts'), 'utf-8')
   const catalogSource = fs.readFileSync(path.join(root, 'backend/agents/catalog.ts'), 'utf-8')
   const projectSource = fs.readFileSync(path.join(root, 'frontend/src/components/projects/useProjectManager.js'), 'utf-8')
   const appSource = fs.readFileSync(path.join(root, 'frontend/src/App.vue'), 'utf-8')

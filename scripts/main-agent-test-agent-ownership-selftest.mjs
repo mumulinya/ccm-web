@@ -20,8 +20,8 @@ const collaboration = readMany(
   'backend/modules/collaboration/collaboration-global-missions.ts',
   'backend/modules/collaboration/collaboration-test-agent-runtime.ts',
   'backend/modules/collaboration/collaboration-cross-agents-part-02-part-02-native-test.ts',
-  'backend/modules/collaboration/collaboration-runtime-coordinator-review-part-01.ts',
-  'backend/modules/collaboration/group-live-routes-part-02-part-02.ts',
+  'backend/modules/collaboration/collaboration-runtime-coordinator-review.ts',
+  'backend/modules/collaboration/group-live-routes.ts',
 )
 const testAgentRunner = read('backend/modules/collaboration/test-agent-runner.ts')
 

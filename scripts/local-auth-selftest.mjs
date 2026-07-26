@@ -10,6 +10,7 @@ const outputDir = path.join(root, 'scratch', 'local-auth-selftest')
 fs.mkdirSync(outputDir, { recursive: true })
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-local-auth-'))
 const serverPath = path.join(root, 'ccm-package', 'dist', 'server.js')
+const initialAdminPassword = 'Selftest-Init-9x!'
 const checks = []
 
 const getFreePort = () => new Promise((resolve, reject) => {
@@ -51,6 +52,7 @@ const run = async () => {
       USERPROFILE: tempHome,
       CCM_FEISHU_CONTROL_BOT_AUTO_START: '0',
       CCM_LOCAL_AUTH_SELFTEST: '1',
+      CCM_INITIAL_ADMIN_PASSWORD: initialAdminPassword,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -104,7 +106,7 @@ const run = async () => {
 
     const wrongLogin = await request('/api/auth/login', json({ username: 'mumulin', password: 'wrong-password' }))
     assert.equal(wrongLogin.response.status, 401)
-    const login = await request('/api/auth/login', json({ username: 'mumulin', password: 'lzy123167' }))
+    const login = await request('/api/auth/login', json({ username: 'mumulin', password: initialAdminPassword }))
     assert.equal(login.response.status, 200)
     assert.equal(login.data.user.username, 'mumulin')
     assert.equal(login.data.first_install, false)
@@ -164,7 +166,7 @@ const run = async () => {
     assert.equal(newPassword.response.status, 200)
     checks.push({ name: 'password changes invalidate old sessions and require the new password', pass: true })
 
-    const adminRelogin = await request('/api/auth/login', json({ username: 'mumulin', password: 'lzy123167' }))
+    const adminRelogin = await request('/api/auth/login', json({ username: 'mumulin', password: initialAdminPassword }))
     assert.equal(adminRelogin.response.status, 200)
     const disable = await request('/api/auth/settings', json({ registration_enabled: false }, { method: 'PUT' }), adminRelogin.cookie)
     assert.equal(disable.response.status, 200)
@@ -177,7 +179,7 @@ const run = async () => {
     assert.equal(stateAfterRestart.onboardingCompleted, true)
     assert.equal(stateAfterRestart.loginTheme, 'light')
     assert.equal(stateAfterRestart.users.length, 2)
-    assert.equal(stateAfterRestart.users.some(user => user.password?.hash?.includes('lzy123167')), false)
+    assert.equal(stateAfterRestart.users.some(user => user.password?.hash?.includes(initialAdminPassword)), false)
     assert.equal(stateAfterRestart.users.some(user => user.password?.hash?.includes('Newpass456!')), false)
     checks.push({ name: 'auth storage persists policy and stores only scrypt password hashes', pass: true })
 

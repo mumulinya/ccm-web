@@ -78,6 +78,7 @@ class MusicDownloadJobStore {
             for (const row of Array.isArray(rows) ? rows : []) {
                 if (!row?.id)
                     continue;
+                row.quality = ["standard", "high", "very_high", "source"].includes(row.quality) ? row.quality : "high";
                 if (["resolving", "running"].includes(row.status)) {
                     row.status = "queued";
                     row.phase = "等待恢复";
@@ -95,8 +96,11 @@ class MusicDownloadJobStore {
         return Array.from(this.jobs.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     get(id) { return this.jobs.get(id) || null; }
-    create(source, token) {
+    create(source, token, requestedQuality = "high") {
         const payload = (0, search_results_1.verifyDownloadToken)(token, source);
+        const quality = (["standard", "high", "very_high", "source"].includes(String(requestedQuality))
+            ? String(requestedQuality)
+            : "high");
         const existing = this.list().find(job => job.source === source && job.sourceId === payload.sourceId && ["queued", "resolving", "running"].includes(job.status));
         if (existing)
             return existing;
@@ -107,6 +111,7 @@ class MusicDownloadJobStore {
             sourceId: payload.sourceId,
             title: payload.title,
             artist: payload.artist,
+            quality,
             status: "queued",
             progress: 0,
             phase: "等待下载",
@@ -231,7 +236,14 @@ class MusicDownloadJobStore {
             job.progress = null;
             job.updatedAt = now();
             this.persist();
-            const child = (0, child_process_1.spawn)("ffmpeg", ["-headers", headers, "-i", audioUrl, "-vn", "-y", "-q:a", "0", "-f", "mp3", "-progress", "pipe:1", "-nostats", partial], {
+            const qualityArgs = job.quality === "standard"
+                ? ["-b:a", "128k"]
+                : job.quality === "high"
+                    ? ["-b:a", "192k"]
+                    : job.quality === "very_high"
+                        ? ["-b:a", "320k"]
+                        : ["-q:a", "0"];
+            const child = (0, child_process_1.spawn)("ffmpeg", ["-headers", headers, "-i", audioUrl, "-vn", "-y", ...qualityArgs, "-f", "mp3", "-progress", "pipe:1", "-nostats", partial], {
                 stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
             });
             this.children.set(job.id, child);

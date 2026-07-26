@@ -1,4 +1,5 @@
 "use strict";
+// collaboration-runtime-task-queue.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -10,11 +11,1368 @@ var __createBinding = (this && this.__createBinding) || (Object.create ? (functi
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
 }));
-var __exportStar = (this && this.__exportStar) || function(m, exports) {
-    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
-};
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-// Behavior-freeze facade — implementation split into focused modules.
-__exportStar(require("./collaboration-runtime-task-queue-part-01"), exports);
-__exportStar(require("./collaboration-runtime-task-queue-part-02"), exports);
+exports.PRIORITY_WEIGHT = exports.agentRecoveryProbeInFlight = exports.agentRecoveryMonitorTimer = exports.taskWatchdogTimer = exports.AGENT_PROBE_TARGET_STATUS_DIR = exports.AGENT_PROBE_STATUS_FILE = exports.AGENT_RUNNER_DIR = exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = exports.AGENT_PROBE_FAILURE_BLOCK_MS = exports.AGENT_PROBE_SUCCESS_FRESH_MS = exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = exports.TASK_WATCHDOG_GAP_REWORK_MAX = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = exports.TASK_WATCHDOG_STALE_MS = exports.TASK_WATCHDOG_INTERVAL_MS = exports.coordinationSettlementInFlight = exports.runningTaskIds = exports.runningTasks = exports.taskQueues = exports.markDailyDevBacklogStatus = exports.importSharedDocsToDailyDevBacklog = exports.claimReadyDailyDevBacklog = exports.runGroupMemoryStorageRecoverySelfTest = exports.loadGroups = exports.sendFeishuReportMessage = exports.FEISHU_SCOPES = void 0;
+exports.setTaskWatchdogTimer = setTaskWatchdogTimer;
+exports.setAgentRecoveryMonitorTimer = setAgentRecoveryMonitorTimer;
+exports.setAgentRecoveryProbeInFlight = setAgentRecoveryProbeInFlight;
+exports.runCronDailyDevProtocolSelfTestSafe = runCronDailyDevProtocolSelfTestSafe;
+exports.isTaskPaused = isTaskPaused;
+exports.getTaskFailureText = getTaskFailureText;
+exports.getChildAgentIsolationMode = getChildAgentIsolationMode;
+exports.isRecoverableRuntimeFailure = isRecoverableRuntimeFailure;
+exports.isAgentExecutionBlockedPendingTask = isAgentExecutionBlockedPendingTask;
+exports.hasStrongTaskAcceptanceEvidence = hasStrongTaskAcceptanceEvidence;
+exports.deriveTaskLifecycle = deriveTaskLifecycle;
+exports.buildTaskPreflightReasoning = buildTaskPreflightReasoning;
+exports.userAgentRole = userAgentRole;
+exports.isVisibleChildAgentName = isVisibleChildAgentName;
+exports.getTaskWorkItems = getTaskWorkItems;
+exports.persistTaskWorkItems = persistTaskWorkItems;
+exports.claimTaskWorkItemForAgent = claimTaskWorkItemForAgent;
+exports.updateTaskWorkItemFromReceipt = updateTaskWorkItemFromReceipt;
+exports.requeueTaskWorkItemsForWatchdog = requeueTaskWorkItemsForWatchdog;
+exports.groupSessionIdForTask = groupSessionIdForTask;
+exports.buildTaskEntityChain = buildTaskEntityChain;
+exports.buildTaskCardView = buildTaskCardView;
+exports.normalizeContinuationKind = normalizeContinuationKind;
+exports.buildContinuationUserDecision = buildContinuationUserDecision;
+exports.buildUserContinuationStatus = buildUserContinuationStatus;
+exports.shouldResumeAfterGoalRevisionInterruption = shouldResumeAfterGoalRevisionInterruption;
+exports.buildGoalRevisionInterruptedStatus = buildGoalRevisionInterruptedStatus;
+exports.buildUserAgentQuestionRows = buildUserAgentQuestionRows;
+exports.splitUserAcceptanceText = splitUserAcceptanceText;
+exports.getTaskPlanMode = getTaskPlanMode;
+exports.buildUserCompletionReadinessSummary = buildUserCompletionReadinessSummary;
+exports.buildUserAcceptanceReview = buildUserAcceptanceReview;
+exports.normalizeMemoryGateAgent = normalizeMemoryGateAgent;
+exports.getTaskAgentMemoryContextSnapshotSources = getTaskAgentMemoryContextSnapshotSources;
+exports.summarizeTaskAgentMemoryContextSnapshot = summarizeTaskAgentMemoryContextSnapshot;
+exports.evaluateReceiptTaskAgentMemoryContextSnapshot = evaluateReceiptTaskAgentMemoryContextSnapshot;
+exports.collectTaskMemoryDispatchFreshnessGates = collectTaskMemoryDispatchFreshnessGates;
+exports.evaluateReceiptMemoryDispatchGate = evaluateReceiptMemoryDispatchGate;
+exports.collectTaskReadPlanRevalidationGates = collectTaskReadPlanRevalidationGates;
+exports.evaluateReceiptReadPlanRevalidationGate = evaluateReceiptReadPlanRevalidationGate;
+exports.collectTaskPostCompactReinjectionGates = collectTaskPostCompactReinjectionGates;
+exports.collectTaskPostCompactDispatchMarkers = collectTaskPostCompactDispatchMarkers;
+exports.evaluateReceiptPostCompactReinjectionGate = evaluateReceiptPostCompactReinjectionGate;
+exports.collectTaskApiMicrocompactEditPlans = collectTaskApiMicrocompactEditPlans;
+exports.evaluateReceiptApiMicrocompactEditPlan = evaluateReceiptApiMicrocompactEditPlan;
+exports.collectTaskGlobalMemoryReceiptGates = collectTaskGlobalMemoryReceiptGates;
+exports.collectTaskGlobalMemoryHealthGates = collectTaskGlobalMemoryHealthGates;
+exports.configuredProjectWorkDir = configuredProjectWorkDir;
+exports.collectTaskTypedMemoryConsumptionRows = collectTaskTypedMemoryConsumptionRows;
+exports.collectTaskTypedMemoryPressureRecallUsageRows = collectTaskTypedMemoryPressureRecallUsageRows;
+exports.evaluateReceiptGlobalMemoryUsageGate = evaluateReceiptGlobalMemoryUsageGate;
+exports.evaluateReceiptGlobalMemoryHealthGate = evaluateReceiptGlobalMemoryHealthGate;
+exports.buildMemoryGateVisibleSummary = buildMemoryGateVisibleSummary;
+exports.buildGlobalMemoryReceiptVisibleSummary = buildGlobalMemoryReceiptVisibleSummary;
+exports.buildGlobalMemoryHealthGateVisibleSummary = buildGlobalMemoryHealthGateVisibleSummary;
+exports.buildReadPlanRevalidationGateVisibleSummary = buildReadPlanRevalidationGateVisibleSummary;
+exports.buildPostCompactReinjectionGateVisibleSummary = buildPostCompactReinjectionGateVisibleSummary;
+exports.buildApiMicrocompactReceiptVisibleSummary = buildApiMicrocompactReceiptVisibleSummary;
+exports.buildPostCompactDispatchMarkerVisibleSummary = buildPostCompactDispatchMarkerVisibleSummary;
+exports.evaluateChildAgentHandoffQuality = evaluateChildAgentHandoffQuality;
+exports.scoreChildAgentReceipt = scoreChildAgentReceipt;
+exports.compactRuntimeToolAudit = compactRuntimeToolAudit;
+exports.runtimeToolSnapshotFromAudit = runtimeToolSnapshotFromAudit;
+exports.attachInvokedSkillsToReceipt = attachInvokedSkillsToReceipt;
+exports.collectRuntimeToolingFromSources = collectRuntimeToolingFromSources;
+exports.buildRuntimeKernelSnapshot = buildRuntimeKernelSnapshot;
+exports.buildUserCoordinationAcknowledgement = buildUserCoordinationAcknowledgement;
+exports.sanitizeDispatchLaunchText = sanitizeDispatchLaunchText;
+exports.normalizeGroupDispatchLaunchRowStatus = normalizeGroupDispatchLaunchRowStatus;
+exports.buildDispatchLaunchSummary = buildDispatchLaunchSummary;
+exports.buildRevisedPlanModeDraft = buildRevisedPlanModeDraft;
+exports.buildAcceptedPlanModeDraft = buildAcceptedPlanModeDraft;
+exports.classifyGroupProjectTaskIntent = classifyGroupProjectTaskIntent;
+exports.normalizeGroupAgentGatewayTaskIntent = normalizeGroupAgentGatewayTaskIntent;
+exports.classifyGroupProjectTaskIntentWithAgent = classifyGroupProjectTaskIntentWithAgent;
+exports.shouldUseProjectAnalysisMode = shouldUseProjectAnalysisMode;
+exports.shouldCreatePersistentGroupTask = shouldCreatePersistentGroupTask;
+exports.classifyPlanModeRisk = classifyPlanModeRisk;
+exports.buildPlanModeClarificationQuestions = buildPlanModeClarificationQuestions;
+exports.buildGroupPlanModePreflight = buildGroupPlanModePreflight;
+exports.buildGroupProjectAnalysisContext = buildGroupProjectAnalysisContext;
+exports.buildProjectCodeReadOnlySnapshot = buildProjectCodeReadOnlySnapshot;
+exports.runCollaborationUxSelfTest = runCollaborationUxSelfTest;
+exports.buildInlineTaskRuntime = buildInlineTaskRuntime;
+exports.updateGroupTaskInlineStatus = updateGroupTaskInlineStatus;
+exports.buildChildAgentWorkerHandoff = buildChildAgentWorkerHandoff;
+exports.taskAgentInvocationMemoryOptions = taskAgentInvocationMemoryOptions;
+exports.taskAgentSessionLifecycleRunnerOptions = taskAgentSessionLifecycleRunnerOptions;
+exports.buildWorkerContinuationHandoff = buildWorkerContinuationHandoff;
+exports.buildChildAgentDevelopmentContract = buildChildAgentDevelopmentContract;
+exports.getTaskById = getTaskById;
+exports.buildChildAgentTaskText = buildChildAgentTaskText;
+exports.buildQueuedGroupTaskMessage = buildQueuedGroupTaskMessage;
+exports.normalizePlanAssignments = normalizePlanAssignments;
+exports.buildWorkflowMeta = buildWorkflowMeta;
+exports.getInitialWorkflowMeta = getInitialWorkflowMeta;
+exports.updateGroupMessageAssignmentStatus = updateGroupMessageAssignmentStatus;
+exports.sendTaskCompletionNotification = sendTaskCompletionNotification;
+exports.sendTaskFailureNotification = sendTaskFailureNotification;
+exports.appendTaskGroupReport = appendTaskGroupReport;
+exports.buildTaskProviderSwitchRequests = buildTaskProviderSwitchRequests;
+exports.appendLegacyTaskExecutionGroupReport = appendLegacyTaskExecutionGroupReport;
+exports.appendLegacyCodeReviewGroupReport = appendLegacyCodeReviewGroupReport;
+exports.syncTaskBacklogStatus = syncTaskBacklogStatus;
+exports.getTaskTargetKey = getTaskTargetKey;
+exports.isActionableMentionText = isActionableMentionText;
+exports.normalizeMentionTask = normalizeMentionTask;
+exports.escapeRegExp = escapeRegExp;
+exports.extractActionableMentions = extractActionableMentions;
+exports.buildAgentQaProtocolInstructions = buildAgentQaProtocolInstructions;
+const path = __importStar(require("path"));
+const crypto = __importStar(require("crypto"));
+const utils_1 = require("../../core/utils");
+const db_1 = require("../../core/db");
+const display_1 = require("./display");
+const project_analysis_1 = require("./project-analysis");
+const memory_1 = require("./memory");
+const feishu_1 = require("./feishu");
+const feishu_channel_1 = require("./feishu-channel");
+const group_coordination_mcp_1 = require("../../integrations/group-coordination-mcp");
+const task_delivery_report_1 = require("./task-delivery-report");
+const logs_1 = require("./logs");
+const storage_1 = require("./storage");
+const daily_dev_backlog_1 = require("./daily-dev-backlog");
+const execution_kernel_1 = require("../../agents/execution-kernel");
+const agent_sessions_1 = require("../../tasks/agent-sessions");
+const memory_2 = require("../../projects/memory");
+const work_items_1 = require("../../agents/work-items");
+const collaboration_runtime_plan_tools_1 = require("./collaboration-runtime-plan-tools");
+const collaboration_runtime_runtime_tools_1 = require("./collaboration-runtime-runtime-tools");
+// ===== merged from collaboration-runtime-task-queue-part-01.ts =====
+var feishu_2 = require("./feishu");
+Object.defineProperty(exports, "FEISHU_SCOPES", { enumerable: true, get: function () { return feishu_2.FEISHU_SCOPES; } });
+Object.defineProperty(exports, "sendFeishuReportMessage", { enumerable: true, get: function () { return feishu_2.sendFeishuReportMessage; } });
+var storage_2 = require("./storage");
+Object.defineProperty(exports, "loadGroups", { enumerable: true, get: function () { return storage_2.loadGroups; } });
+var memory_3 = require("./memory");
+Object.defineProperty(exports, "runGroupMemoryStorageRecoverySelfTest", { enumerable: true, get: function () { return memory_3.runGroupMemoryStorageRecoverySelfTest; } });
+var daily_dev_backlog_2 = require("./daily-dev-backlog");
+Object.defineProperty(exports, "claimReadyDailyDevBacklog", { enumerable: true, get: function () { return daily_dev_backlog_2.claimReadyDailyDevBacklog; } });
+Object.defineProperty(exports, "importSharedDocsToDailyDevBacklog", { enumerable: true, get: function () { return daily_dev_backlog_2.importSharedDocsToDailyDevBacklog; } });
+Object.defineProperty(exports, "markDailyDevBacklogStatus", { enumerable: true, get: function () { return daily_dev_backlog_2.markDailyDevBacklogStatus; } });
+// === 任务队列系统（支持并行执行）===
+exports.taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
+exports.runningTasks = new Map(); // 正在运行的任务目标
+exports.runningTaskIds = new Set(); // 正在运行的任务 ID
+exports.coordinationSettlementInFlight = new Set();
+exports.TASK_WATCHDOG_INTERVAL_MS = 60 * 1000;
+exports.TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
+exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = 60 * 1000;
+exports.TASK_WATCHDOG_GAP_REWORK_MAX = 3;
+exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = 5 * 60 * 1000;
+exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = 45 * 1000;
+exports.AGENT_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
+exports.AGENT_PROBE_FAILURE_BLOCK_MS = 15 * 60 * 1000;
+exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = 5 * 60 * 1000;
+exports.AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
+exports.AGENT_PROBE_STATUS_FILE = path.join(exports.AGENT_RUNNER_DIR, "probe-status.json");
+exports.AGENT_PROBE_TARGET_STATUS_DIR = path.join(exports.AGENT_RUNNER_DIR, "probe-targets");
+exports.taskWatchdogTimer = null;
+exports.agentRecoveryMonitorTimer = null;
+exports.agentRecoveryProbeInFlight = false;
+function setTaskWatchdogTimer(value) {
+    exports.taskWatchdogTimer = value;
+}
+function setAgentRecoveryMonitorTimer(value) {
+    exports.agentRecoveryMonitorTimer = value;
+}
+function setAgentRecoveryProbeInFlight(value) {
+    exports.agentRecoveryProbeInFlight = value;
+}
+function runCronDailyDevProtocolSelfTestSafe() {
+    try {
+        const cronModule = require("../scheduling/cron");
+        if (typeof cronModule.runCronDailyDevProtocolSelfTest === "function") {
+            return cronModule.runCronDailyDevProtocolSelfTest();
+        }
+        return {
+            pass: false,
+            error: "cron 模块未导出 runCronDailyDevProtocolSelfTest",
+        };
+    }
+    catch (error) {
+        return {
+            pass: false,
+            error: error?.message || String(error || "cron 协议自测加载失败"),
+        };
+    }
+}
+// 优先级权重
+exports.PRIORITY_WEIGHT = { high: 3, normal: 2, low: 1 };
+function isTaskPaused(task) {
+    return require("./collaboration-task-card").isTaskPaused.apply(null, arguments);
+}
+function getTaskFailureText(task) {
+    return require("./collaboration-task-card").getTaskFailureText.apply(null, arguments);
+}
+function getChildAgentIsolationMode(group = null, task = null) {
+    return require("./collaboration-task-card").getChildAgentIsolationMode.apply(null, arguments);
+}
+function isRecoverableRuntimeFailure(task) {
+    return require("./collaboration-task-card").isRecoverableRuntimeFailure.apply(null, arguments);
+}
+function isAgentExecutionBlockedPendingTask(task) {
+    return require("./collaboration-task-card").isAgentExecutionBlockedPendingTask.apply(null, arguments);
+}
+function isPositiveAcceptanceEvidenceText(value) {
+    return require("./collaboration-task-card").isPositiveAcceptanceEvidenceText.apply(null, arguments);
+}
+function isBareAcceptanceMarker(value) {
+    return require("./collaboration-task-card").isBareAcceptanceMarker.apply(null, arguments);
+}
+function isStrongExecutedVerificationText(value) {
+    return require("./collaboration-task-card").isStrongExecutedVerificationText.apply(null, arguments);
+}
+function flattenAcceptanceEvidenceRows(...values) {
+    return require("./collaboration-task-card").flattenAcceptanceEvidenceRows.apply(null, arguments);
+}
+function evidenceRowText(row) {
+    return require("./collaboration-task-card").evidenceRowText.apply(null, arguments);
+}
+function rowEvidenceCount(row) {
+    return require("./collaboration-task-card").rowEvidenceCount.apply(null, arguments);
+}
+function isStrongPositiveReviewRow(row) {
+    return require("./collaboration-task-card").isStrongPositiveReviewRow.apply(null, arguments);
+}
+function hasStrongTaskAcceptanceEvidence(task, executions = [], explicitSummary = null) {
+    return require("./collaboration-task-card").hasStrongTaskAcceptanceEvidence.apply(null, arguments);
+}
+function deriveTaskLifecycle(task, executions = []) {
+    return require("./collaboration-task-card").deriveTaskLifecycle.apply(null, arguments);
+}
+function buildTaskPreflightReasoning(task, reason = "任务执行前复核", recovery = false) {
+    return require("./collaboration-task-card").buildTaskPreflightReasoning.apply(null, arguments);
+}
+function getTaskRecoveryChecks(task) {
+    return require("./collaboration-task-card").getTaskRecoveryChecks.apply(null, arguments);
+}
+function hasTaskRecoveryEvidence(task) {
+    return require("./collaboration-task-card").hasTaskRecoveryEvidence.apply(null, arguments);
+}
+function buildMainAgentRecoverySummary(task, phase, sessions = [], workItems = [], gapItems = []) {
+    return require("./collaboration-task-card").buildMainAgentRecoverySummary.apply(null, arguments);
+}
+function taskCardPhase(task, executions) {
+    return require("./collaboration-task-card").taskCardPhase.apply(null, arguments);
+}
+function taskCardGapLabel(item) {
+    return require("./collaboration-task-card").taskCardGapLabel.apply(null, arguments);
+}
+function userAgentRole(project) {
+    return require("./collaboration-task-card").userAgentRole.apply(null, arguments);
+}
+function userAgentProgress(worker) {
+    return require("./collaboration-task-card").userAgentProgress.apply(null, arguments);
+}
+function sanitizeUserAgentProgressText(value, fallback = "", max = 180) {
+    return require("./collaboration-task-card").sanitizeUserAgentProgressText.apply(null, arguments);
+}
+function normalizeUserAgentProgressStatus(status, phase = "") {
+    return require("./collaboration-task-card").normalizeUserAgentProgressStatus.apply(null, arguments);
+}
+function userAgentProgressStatusLabel(status) {
+    return require("./collaboration-task-card").userAgentProgressStatusLabel.apply(null, arguments);
+}
+function userAgentProgressDefaultSummary(agent, status, currentFocus = "", blockers = []) {
+    return require("./collaboration-task-card").userAgentProgressDefaultSummary.apply(null, arguments);
+}
+function userAgentProgressNextAction(status, currentFocus = "") {
+    return require("./collaboration-task-card").userAgentProgressNextAction.apply(null, arguments);
+}
+function userAgentSessionStatus(session) {
+    return require("./collaboration-task-card").userAgentSessionStatus.apply(null, arguments);
+}
+function userAgentSessionSummary(session, status) {
+    return require("./collaboration-task-card").userAgentSessionSummary.apply(null, arguments);
+}
+function userAgentSessionEvidence(session, status) {
+    return require("./collaboration-task-card").userAgentSessionEvidence.apply(null, arguments);
+}
+function agentNameMatches(value, name) {
+    return require("./collaboration-task-card").agentNameMatches.apply(null, arguments);
+}
+function latestAgentMatch(rows, name, picker) {
+    return require("./collaboration-task-card").latestAgentMatch.apply(null, arguments);
+}
+function isVisibleChildAgentName(name) {
+    return require("./collaboration-task-card").isVisibleChildAgentName.apply(null, arguments);
+}
+function buildUserAgentProgressSummary(task, summary = {}, workers = [], executions = [], sessions = [], workItems = [], phase = "") {
+    return require("./collaboration-task-card").buildUserAgentProgressSummary.apply(null, arguments);
+}
+function normalizeUserChangeFile(item, fallback = {}) {
+    return require("./collaboration-task-card").normalizeUserChangeFile.apply(null, arguments);
+}
+function pushUserChangeFiles(target, value, fallback = {}) {
+    return require("./collaboration-task-card").pushUserChangeFiles.apply(null, arguments);
+}
+function userChangeFileKey(file) {
+    return require("./collaboration-task-card").userChangeFileKey.apply(null, arguments);
+}
+function isGenericChangeOwner(value) {
+    return require("./collaboration-task-card").isGenericChangeOwner.apply(null, arguments);
+}
+function pickChangeOwner(current, incoming) {
+    return require("./collaboration-task-card").pickChangeOwner.apply(null, arguments);
+}
+function mergeUserChangeFile(current, incoming) {
+    return require("./collaboration-task-card").mergeUserChangeFile.apply(null, arguments);
+}
+function uniqueUserChangeFiles(rawFiles) {
+    return require("./collaboration-task-card").uniqueUserChangeFiles.apply(null, arguments);
+}
+function buildUserChangeSummary(task, summary = {}, workers = [], workItems = []) {
+    return require("./collaboration-task-card").buildUserChangeSummary.apply(null, arguments);
+}
+function buildUserTaskActions(task, phase, executions) {
+    return require("./collaboration-task-card").buildUserTaskActions.apply(null, arguments);
+}
+function getTaskWorkItems(task, executions = []) {
+    return require("./collaboration-task-card").getTaskWorkItems.apply(null, arguments);
+}
+function persistTaskWorkItems(taskId, items, meta = {}) {
+    if (!taskId || !Array.isArray(items))
+        return null;
+    return (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+        work_items: items,
+        work_item_summary: (0, work_items_1.buildMainAgentWorkItemSummary)(items),
+        work_item_runtime: {
+            ...(getTaskById(taskId)?.work_item_runtime || {}),
+            ...meta,
+            updated_at: new Date().toISOString(),
+        },
+    });
+}
+function claimTaskWorkItemForAgent(taskId, agent, detail = "", options = {}) {
+    const task = getTaskById(taskId);
+    const target = String(agent || "").trim();
+    if (!task || !target) {
+        const claim = { ok: false, reason: "task_not_found", items: [] };
+        return { ...claim, summary: (0, work_items_1.buildMainAgentWorkItemClaimSummary)(claim, target, options.itemRef || target) };
+    }
+    const items = getTaskWorkItems(task);
+    const claim = (0, work_items_1.claimMainAgentWorkItem)(items, options.itemRef || target, target, {
+        checkOwnerBusy: options.checkOwnerBusy === true,
+        now: new Date().toISOString(),
+    });
+    const at = new Date().toISOString();
+    const claimSummary = (0, work_items_1.buildMainAgentWorkItemClaimSummary)(claim, target, options.itemRef || target);
+    const runtimeMeta = {
+        last_claim_summary: claimSummary,
+        last_claim_attempt: {
+            agent: target,
+            item_id: claim.item?.id || "",
+            result: claim.ok ? "claimed" : "waiting",
+            reason: claim.reason || "",
+            at,
+        },
+    };
+    if (claim.ok) {
+        runtimeMeta.last_claim = { agent: target, item_id: claim.item?.id || "", at, detail: detail || claimSummary.headline };
+    }
+    else if (claim.reason === "blocked") {
+        runtimeMeta.last_claim_blocked = { agent: target, blocking: claim.blocking || [], at };
+    }
+    persistTaskWorkItems(taskId, claim.items, runtimeMeta);
+    (0, logs_1.addTaskLog)(taskId, claim.ok ? "info" : "warning", claimSummary.headline);
+    (0, logs_1.appendTaskTimelineEvent)(taskId, {
+        type: claim.ok ? "work_item_claimed" : "work_item_claim_waiting",
+        title: claim.ok ? `${target} 已接下工作项` : "工作项暂未派发",
+        detail: claimSummary.headline,
+        status: claim.ok ? "active" : "warn",
+        phase: claim.ok ? "executing" : claim.reason === "blocked" ? "waiting_dependency" : "waiting_dispatch",
+        agent: target,
+        data: {
+            work_item_id: claim.item?.id || "",
+            reason: claim.reason || "",
+            blocking: claim.blocking || [],
+            busy_work_item_id: claim.busy?.id || "",
+        },
+    });
+    return { ...claim, summary: claimSummary };
+}
+function updateTaskWorkItemFromReceipt(taskId, agent, receipt = null, fileChanges = null, detail = "", options = {}) {
+    const task = getTaskById(taskId);
+    const target = String(agent || receipt?.agent || receipt?.project || "").trim();
+    if (!task || !target)
+        return null;
+    const rawFiles = Array.isArray(receipt?.filesChanged || receipt?.files_changed || receipt?.files)
+        ? (receipt.filesChanged || receipt.files_changed || receipt.files)
+        : Array.isArray(fileChanges?.files)
+            ? fileChanges.files.map((item) => item?.path || item?.file || item).filter(Boolean)
+            : [];
+    const patch = {
+        status: (0, work_items_1.normalizeMainAgentWorkItemStatus)(receipt?.status || receipt?.receipt_status || "blocked"),
+        lastReceipt: receipt || null,
+        evidence: [receipt?.summary || detail].filter(Boolean),
+        filesChanged: rawFiles,
+        verification: Array.isArray(receipt?.verification || receipt?.tests) ? (receipt.verification || receipt.tests) : [],
+        blockers: Array.isArray(receipt?.blockers) ? receipt.blockers : [],
+        needs: Array.isArray(receipt?.needs) ? receipt.needs : [],
+        completedAt: (0, work_items_1.normalizeMainAgentWorkItemStatus)(receipt?.status || "") === "completed" ? new Date().toISOString() : "",
+    };
+    const previousItems = getTaskWorkItems(task);
+    const nextItems = (0, work_items_1.updateMainAgentWorkItem)(previousItems, target, patch);
+    let unlockSummary = patch.status === "completed"
+        ? (0, work_items_1.buildMainAgentWorkItemUnlockSummary)(previousItems, nextItems, { completedAgent: target })
+        : null;
+    const updated = persistTaskWorkItems(taskId, nextItems, {
+        last_receipt: { agent: target, status: receipt?.status || "", at: new Date().toISOString() },
+        ...(unlockSummary ? { last_unlock_summary: unlockSummary } : {}),
+    });
+    if (unlockSummary) {
+        (0, logs_1.addTaskLog)(taskId, "info", unlockSummary.headline);
+        (0, logs_1.appendTaskTimelineEvent)(taskId, {
+            type: "work_item_dependency_unlocked",
+            title: unlockSummary.title,
+            detail: unlockSummary.headline,
+            status: "ok",
+            phase: "dispatching",
+            agent: target,
+            data: { unlocked_work_item_ids: unlockSummary.technical.unlocked_work_item_ids },
+        });
+        const next = unlockSummary.next_claimable[0];
+        const canAutoContinue = options.ctx
+            && options.autoContinueUnlocked !== false
+            && task.auto_execute !== false
+            && task.status !== "done"
+            && !isTaskPaused(task)
+            && next?.id;
+        if (canAutoContinue) {
+            const latestTask = getTaskById(taskId) || updated || task;
+            const message = (0, collaboration_runtime_runtime_tools_1.buildTargetedReworkContinuationDraft)(latestTask, {
+                rework_kind: "next_claimable_work_item",
+                work_item_id: next.id,
+                target: next.target || next.owner || "",
+                reason: next.subject || "继续处理已解锁工作项",
+                title: "自动派发已解锁工作项",
+            });
+            const autoResult = (0, collaboration_runtime_runtime_tools_1.continueTaskWithMessage)(taskId, message, options.ctx, {
+                source: "dependency_unlocked_next_work_item",
+                internal: true,
+                auto_execute: true,
+                rework_kind: "next_claimable_work_item",
+                work_item_id: next.id,
+                target: next.target || next.owner || "",
+                reason: next.subject || "继续处理已解锁工作项",
+                title: "自动派发已解锁工作项",
+                status_detail: sanitizeUserAgentProgressText(`${target} 前置工作已完成，我已自动接上 ${next.target || next.owner || "后续执行成员"} 的下一步`, "前置工作已完成，我已自动接上下一步。", 220),
+                idempotency_key: `dependency-unlock:${taskId}:${next.id}:${target}`,
+            });
+            const autoStatus = autoResult.success
+                ? autoResult.deferred
+                    ? "auto_dispatch_deferred"
+                    : autoResult.queued
+                        ? "auto_dispatch_queued"
+                        : "ready_to_dispatch"
+                : "auto_dispatch_blocked";
+            unlockSummary = (0, work_items_1.buildMainAgentWorkItemUnlockSummary)(previousItems, nextItems, {
+                completedAgent: target,
+                status: autoStatus,
+                headline: autoResult.success
+                    ? `${target} 完成后，“${next.subject || "后续工作项"}”已经解锁，我已自动接上派发。`
+                    : `${target} 完成后，“${next.subject || "后续工作项"}”已经解锁，但自动接续暂未开始。`,
+                next_action: autoResult.success
+                    ? autoResult.deferred
+                        ? "当前执行轮结束后，我会继续派发这个已解锁工作项。"
+                        : autoResult.queued
+                            ? "任务已加入执行队列，我会继续跟踪执行成员结果。"
+                            : "我已记录接续请求，会继续跟踪派发状态。"
+                    : "执行通道暂时不可用，我会保留已解锁工作项并稍后重试。",
+                auto_dispatch: { success: autoResult.success, queued: autoResult.queued, deferred: autoResult.deferred, error: autoResult.error || "" },
+            }) || unlockSummary;
+            persistTaskWorkItems(taskId, getTaskWorkItems(getTaskById(taskId) || latestTask), { last_unlock_summary: unlockSummary });
+            (0, logs_1.addTaskLog)(taskId, autoResult.success ? "info" : "warning", unlockSummary.headline);
+        }
+    }
+    (0, logs_1.appendTaskTimelineEvent)(taskId, {
+        type: "work_item_receipt",
+        title: `${target} 工作项结果说明`,
+        detail: receipt?.summary || detail || `状态 ${receipt?.status || "unknown"}`,
+        status: patch.status === "completed" ? "ok" : patch.status === "failed" ? "fail" : "warn",
+        phase: patch.status === "completed" ? "reviewing" : "rework",
+        agent: target,
+        data: { receipt, files: rawFiles },
+    });
+    return updated;
+}
+function requeueTaskWorkItemsForWatchdog(task, staleMs, reason, nowMs = Date.now()) {
+    const currentItems = getTaskWorkItems(task);
+    const result = (0, work_items_1.requeueStaleMainAgentWorkItems)(currentItems, { staleMs, nowMs, reason });
+    if (!result.requeued.length)
+        return result;
+    persistTaskWorkItems(task.id, result.items, {
+        last_requeue: {
+            at: new Date(nowMs).toISOString(),
+            reason,
+            item_ids: result.requeued.map((item) => item.id),
+        },
+    });
+    (0, logs_1.addTaskLog)(task.id, "warning", `看门狗释放 ${result.requeued.length} 个卡住的子 Agent 工作项：${reason}`);
+    (0, logs_1.appendTaskTimelineEvent)(task.id, {
+        type: "work_item_requeued",
+        title: "看门狗已释放卡住的工作项",
+        detail: result.requeued.map((item) => `${item.target || item.owner}:${item.subject}`).join("；").slice(0, 500),
+        status: "warn",
+        phase: "reworking",
+        data: { item_ids: result.requeued.map((item) => item.id), reason },
+    });
+    return result;
+}
+function stableTaskEntityId(prefix, value) {
+    return require("./collaboration-task-card").stableTaskEntityId.apply(null, arguments);
+}
+function groupSessionIdForTask(task) {
+    return require("./collaboration-task-card").groupSessionIdForTask.apply(null, arguments);
+}
+function buildTaskEntityChain(taskId) {
+    return require("./collaboration-task-card").buildTaskEntityChain.apply(null, arguments);
+}
+function buildTaskCardView(task, executions, sessions) {
+    return require("./collaboration-task-card").buildTaskCardView.apply(null, arguments);
+}
+function normalizeContinuationKind(kind) {
+    return require("./collaboration-task-card").normalizeContinuationKind.apply(null, arguments);
+}
+function buildContinuationUserDecision(input = {}) {
+    return require("./collaboration-task-card").buildContinuationUserDecision.apply(null, arguments);
+}
+function buildUserContinuationStatus(task, phase = "") {
+    return require("./collaboration-task-card").buildUserContinuationStatus.apply(null, arguments);
+}
+function shouldResumeAfterGoalRevisionInterruption(task, executionFollowupRevision = 0) {
+    return require("./collaboration-task-card").shouldResumeAfterGoalRevisionInterruption.apply(null, arguments);
+}
+function buildGoalRevisionInterruptedStatus(pending = []) {
+    return require("./collaboration-task-card").buildGoalRevisionInterruptedStatus.apply(null, arguments);
+}
+function shouldShowUserTaskCard(task, summary = {}, executions = []) {
+    return require("./collaboration-task-card").shouldShowUserTaskCard.apply(null, arguments);
+}
+function timelineStatusForUser(item) {
+    return require("./collaboration-task-card").timelineStatusForUser.apply(null, arguments);
+}
+function timelineLabelForUser(item) {
+    return require("./collaboration-task-card").timelineLabelForUser.apply(null, arguments);
+}
+function buildUserWorkflowTimeline(task, summary, phase) {
+    return require("./collaboration-task-card").buildUserWorkflowTimeline.apply(null, arguments);
+}
+function buildUserAgentQuestionRows(summary) {
+    return require("./collaboration-task-card").buildUserAgentQuestionRows.apply(null, arguments);
+}
+function buildUserConflictWarnings(summary) {
+    return require("./collaboration-task-card").buildUserConflictWarnings.apply(null, arguments);
+}
+function splitUserAcceptanceText(value) {
+    return require("./collaboration-task-card").splitUserAcceptanceText.apply(null, arguments);
+}
+function getTaskPlanMode(task) {
+    return require("./collaboration-task-card").getTaskPlanMode.apply(null, arguments);
+}
+function buildUserWorkOrderPreview(task, summary = {}, planMode = null) {
+    return require("./collaboration-task-card").buildUserWorkOrderPreview.apply(null, arguments);
+}
+function executionStoryStatus(conditionDone, conditionActive, phase) {
+    return require("./collaboration-task-card").executionStoryStatus.apply(null, arguments);
+}
+function buildUserExecutionStory(task, summary = {}, executions = [], phase = "planning", workOrderPreview = null) {
+    return require("./collaboration-task-card").buildUserExecutionStory.apply(null, arguments);
+}
+function buildUserCompletionReadinessSummary(task, summary = {}, workItems = [], phase = "planning") {
+    return require("./collaboration-task-card").buildUserCompletionReadinessSummary.apply(null, arguments);
+}
+function sanitizeAcceptanceVisibleText(value, fallback = "验收检查已整理。", max = 220) {
+    return require("./collaboration-task-card").sanitizeAcceptanceVisibleText.apply(null, arguments);
+}
+function normalizeUserAcceptanceCheck(item, context = {}) {
+    return require("./collaboration-task-card").normalizeUserAcceptanceCheck.apply(null, arguments);
+}
+function buildUserAcceptanceReview(task, summary = {}, executions = [], phase = "planning") {
+    return require("./collaboration-task-card").buildUserAcceptanceReview.apply(null, arguments);
+}
+function planAlignmentEvidenceLabels(summary = {}, task = {}) {
+    return require("./collaboration-task-card").planAlignmentEvidenceLabels.apply(null, arguments);
+}
+function planCriterionStatus(criterion, summary = {}, task = {}, acceptanceReview = null) {
+    return require("./collaboration-task-card").planCriterionStatus.apply(null, arguments);
+}
+function buildUserPlanAlignmentReview(task, summary = {}, phase = "planning", planMode = null, workOrderPreview = null, acceptanceReview = null) {
+    return require("./collaboration-task-card").buildUserPlanAlignmentReview.apply(null, arguments);
+}
+function buildUserHandoffSummary(task, summary = {}, phase = "planning", nextAction = "", blockers = [], acceptanceReview = null, planAlignment = null, changeSummary = null) {
+    return require("./collaboration-task-card").buildUserHandoffSummary.apply(null, arguments);
+}
+function extractMemoryDispatchFreshnessGateFromValue(value) {
+    return require("./collaboration-memory-gates").extractMemoryDispatchFreshnessGateFromValue.apply(null, arguments);
+}
+function normalizeMemoryGateAgent(value) {
+    return require("./collaboration-memory-gates").normalizeMemoryGateAgent.apply(null, arguments);
+}
+function getTaskAgentMemoryContextSnapshotSources(context = {}) {
+    return require("./collaboration-memory-gates").getTaskAgentMemoryContextSnapshotSources.apply(null, arguments);
+}
+function forEachTaskAgentMemoryContextSnapshotSource(context = {}, visit) {
+    return require("./collaboration-memory-gates").forEachTaskAgentMemoryContextSnapshotSource.apply(null, arguments);
+}
+function summarizeTaskAgentMemoryContextSnapshot(snapshot = {}) {
+    return require("./collaboration-memory-gates").summarizeTaskAgentMemoryContextSnapshot.apply(null, arguments);
+}
+function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").evaluateReceiptTaskAgentMemoryContextSnapshot.apply(null, arguments);
+}
+function collectTaskMemoryDispatchFreshnessGates(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskMemoryDispatchFreshnessGates.apply(null, arguments);
+}
+function evaluateReceiptMemoryDispatchGate(task, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").evaluateReceiptMemoryDispatchGate.apply(null, arguments);
+}
+function extractReadPlanRevalidationGateFromValue(value) {
+    return require("./collaboration-memory-gates").extractReadPlanRevalidationGateFromValue.apply(null, arguments);
+}
+function collectTaskReadPlanRevalidationGates(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskReadPlanRevalidationGates.apply(null, arguments);
+}
+function evaluateReceiptReadPlanRevalidationGate(task, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").evaluateReceiptReadPlanRevalidationGate.apply(null, arguments);
+}
+function extractPostCompactReinjectionGateFromValue(value) {
+    return require("./collaboration-memory-gates").extractPostCompactReinjectionGateFromValue.apply(null, arguments);
+}
+function collectTaskPostCompactReinjectionGates(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskPostCompactReinjectionGates.apply(null, arguments);
+}
+function extractPostCompactDispatchMarkerFromValue(value) {
+    return require("./collaboration-memory-gates").extractPostCompactDispatchMarkerFromValue.apply(null, arguments);
+}
+function collectTaskPostCompactDispatchMarkers(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskPostCompactDispatchMarkers.apply(null, arguments);
+}
+function normalizePostCompactCandidateUsageState(value) {
+    return require("./collaboration-memory-gates").normalizePostCompactCandidateUsageState.apply(null, arguments);
+}
+function collectReceiptPostCompactCandidateUsageRows(receipt = {}) {
+    return require("./collaboration-memory-gates").collectReceiptPostCompactCandidateUsageRows.apply(null, arguments);
+}
+function structuredUsageMatchesCandidate(row, gate, candidate) {
+    return require("./collaboration-memory-gates").structuredUsageMatchesCandidate.apply(null, arguments);
+}
+function evaluatePostCompactReinjectionCandidateReference(gate, declarationText = "", structuredUsageRows = []) {
+    return require("./collaboration-memory-gates").evaluatePostCompactReinjectionCandidateReference.apply(null, arguments);
+}
+function evaluateReceiptPostCompactReinjectionGate(task, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").evaluateReceiptPostCompactReinjectionGate.apply(null, arguments);
+}
+function extractApiMicrocompactEditPlanFromValue(value) {
+    return require("./collaboration-memory-gates").extractApiMicrocompactEditPlanFromValue.apply(null, arguments);
+}
+function extractApiMicrocompactNativeApplyPlanFromValue(value) {
+    return require("./collaboration-memory-gates").extractApiMicrocompactNativeApplyPlanFromValue.apply(null, arguments);
+}
+function extractApiMicrocompactSessionBindingFromValue(value) {
+    return require("./collaboration-memory-gates").extractApiMicrocompactSessionBindingFromValue.apply(null, arguments);
+}
+function collectTaskApiMicrocompactEditPlans(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskApiMicrocompactEditPlans.apply(null, arguments);
+}
+function normalizeApiMicrocompactUsageState(value) {
+    return require("./collaboration-memory-gates").normalizeApiMicrocompactUsageState.apply(null, arguments);
+}
+function collectReceiptApiMicrocompactUsageRows(receipt = {}) {
+    return require("./collaboration-memory-gates").collectReceiptApiMicrocompactUsageRows.apply(null, arguments);
+}
+function evaluateReceiptApiMicrocompactEditPlan(task, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").evaluateReceiptApiMicrocompactEditPlan.apply(null, arguments);
+}
+function extractGlobalAgentMemoryRecallFromValue(value) {
+    return require("./collaboration-memory-gates").extractGlobalAgentMemoryRecallFromValue.apply(null, arguments);
+}
+function collectTaskGlobalMemoryReceiptGates(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskGlobalMemoryReceiptGates.apply(null, arguments);
+}
+function extractGlobalMemoryHealthGateFromValue(value) {
+    return require("./collaboration-memory-gates").extractGlobalMemoryHealthGateFromValue.apply(null, arguments);
+}
+function collectTaskGlobalMemoryHealthGates(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskGlobalMemoryHealthGates.apply(null, arguments);
+}
+function extractTypedMemoryRecallFromValue(value, depth = 0) {
+    return require("./collaboration-memory-gates").extractTypedMemoryRecallFromValue.apply(null, arguments);
+}
+function collectTaskTypedMemoryPressureRecallDocs(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskTypedMemoryPressureRecallDocs.apply(null, arguments);
+}
+function collectTaskTypedMemoryRecallDocs(task = {}, context = {}) {
+    return require("./collaboration-memory-gates").collectTaskTypedMemoryRecallDocs.apply(null, arguments);
+}
+function collectReceiptTypedMemoryUsageRows(receipt = {}) {
+    return require("./collaboration-memory-gates").collectReceiptTypedMemoryUsageRows.apply(null, arguments);
+}
+function configuredProjectWorkDir(project) {
+    return require("./collaboration-memory-gates").configuredProjectWorkDir.apply(null, arguments);
+}
+function verifyTypedMemoryCurrentSourceEvidence(evidence = null, project = "", context = {}) {
+    return require("./collaboration-memory-gates").verifyTypedMemoryCurrentSourceEvidence.apply(null, arguments);
+}
+function typedMemoryUsageStateFromReceipt(doc, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").typedMemoryUsageStateFromReceipt.apply(null, arguments);
+}
+function collectTaskTypedMemoryConsumptionRows(task = {}, receipts = [], context = {}) {
+    return require("./collaboration-memory-gates").collectTaskTypedMemoryConsumptionRows.apply(null, arguments);
+}
+function typedMemoryPressureRecallDocRefs(doc = {}) {
+    return require("./collaboration-memory-gates").typedMemoryPressureRecallDocRefs.apply(null, arguments);
+}
+function normalizeTypedMemoryPressureUsageState(value) {
+    return require("./collaboration-memory-gates").normalizeTypedMemoryPressureUsageState.apply(null, arguments);
+}
+function collectReceiptMemoryProvenanceUsageRows(receipt = {}) {
+    return require("./collaboration-memory-gates").collectReceiptMemoryProvenanceUsageRows.apply(null, arguments);
+}
+function pressureRecallUsageStateFromReceipt(doc = {}, receipt = {}) {
+    return require("./collaboration-memory-gates").pressureRecallUsageStateFromReceipt.apply(null, arguments);
+}
+function collectTaskTypedMemoryPressureRecallUsageRows(task = {}, receipts = [], context = {}) {
+    return require("./collaboration-memory-gates").collectTaskTypedMemoryPressureRecallUsageRows.apply(null, arguments);
+}
+function normalizeGlobalMemoryUsageState(value) {
+    return require("./collaboration-memory-gates").normalizeGlobalMemoryUsageState.apply(null, arguments);
+}
+function globalMemoryUsageSnippet(text, id) {
+    return require("./collaboration-memory-gates").globalMemoryUsageSnippet.apply(null, arguments);
+}
+function collectReceiptGlobalMemoryUsageRows(receipt = {}) {
+    return require("./collaboration-memory-gates").collectReceiptGlobalMemoryUsageRows.apply(null, arguments);
+}
+function evaluateReceiptGlobalMemoryUsageGate(task, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").evaluateReceiptGlobalMemoryUsageGate.apply(null, arguments);
+}
+function evaluateReceiptGlobalMemoryHealthGate(task, receipt = {}, context = {}) {
+    return require("./collaboration-memory-gates").evaluateReceiptGlobalMemoryHealthGate.apply(null, arguments);
+}
+function buildMemoryGateVisibleSummary(summary = {}) {
+    return require("./collaboration-memory-gates").buildMemoryGateVisibleSummary.apply(null, arguments);
+}
+function buildGlobalMemoryReceiptVisibleSummary(summary = {}) {
+    return require("./collaboration-memory-gates").buildGlobalMemoryReceiptVisibleSummary.apply(null, arguments);
+}
+function buildGlobalMemoryHealthGateVisibleSummary(summary = {}) {
+    return require("./collaboration-memory-gates").buildGlobalMemoryHealthGateVisibleSummary.apply(null, arguments);
+}
+function buildReadPlanRevalidationGateVisibleSummary(summary = {}) {
+    return require("./collaboration-memory-gates").buildReadPlanRevalidationGateVisibleSummary.apply(null, arguments);
+}
+function buildPostCompactReinjectionGateVisibleSummary(summary = {}) {
+    return require("./collaboration-memory-gates").buildPostCompactReinjectionGateVisibleSummary.apply(null, arguments);
+}
+function buildApiMicrocompactReceiptVisibleSummary(summary = {}) {
+    return require("./collaboration-memory-gates").buildApiMicrocompactReceiptVisibleSummary.apply(null, arguments);
+}
+function buildPostCompactDispatchMarkerVisibleSummary(summary = {}) {
+    return require("./collaboration-memory-gates").buildPostCompactDispatchMarkerVisibleSummary.apply(null, arguments);
+}
+function receiptEvidenceStrings(...values) {
+    return require("./collaboration-coordination-ux").receiptEvidenceStrings.apply(null, arguments);
+}
+function isConcreteReceiptFileEvidence(value) {
+    return require("./collaboration-coordination-ux").isConcreteReceiptFileEvidence.apply(null, arguments);
+}
+function isConcreteReceiptActionEvidence(value) {
+    return require("./collaboration-coordination-ux").isConcreteReceiptActionEvidence.apply(null, arguments);
+}
+function evaluateChildAgentHandoffQuality(task, receipt = {}) {
+    return require("./collaboration-coordination-ux").evaluateChildAgentHandoffQuality.apply(null, arguments);
+}
+function scoreChildAgentReceipt(task, receipt = {}, context = {}) {
+    return require("./collaboration-coordination-ux").scoreChildAgentReceipt.apply(null, arguments);
+}
+function buildCoordinationEventStream(task, summary = {}, executions = [], ackReview = null, contractTransfer = null, receiptRows = [], targetedRework = []) {
+    return require("./collaboration-coordination-ux").buildCoordinationEventStream.apply(null, arguments);
+}
+function compactRuntimeToolAudit(audit = {}) {
+    return require("./collaboration-coordination-ux").compactRuntimeToolAudit.apply(null, arguments);
+}
+function runtimeToolSnapshotFromAudit(audit = {}, allowedTools = {}) {
+    return require("./collaboration-coordination-ux").runtimeToolSnapshotFromAudit.apply(null, arguments);
+}
+function attachInvokedSkillsToReceipt(receipt, text, allowedTools = {}, audit = null) {
+    return require("./collaboration-coordination-ux").attachInvokedSkillsToReceipt.apply(null, arguments);
+}
+function collectRuntimeToolingFromSources(task = {}, execution = {}, lifecycle = [], receipts = []) {
+    return require("./collaboration-coordination-ux").collectRuntimeToolingFromSources.apply(null, arguments);
+}
+function buildRuntimeKernelSnapshot(task = {}, summary = {}) {
+    return require("./collaboration-coordination-ux").buildRuntimeKernelSnapshot.apply(null, arguments);
+}
+function buildTargetedReworkSuggestions(task, summary = {}, acceptanceReview = null, receiptQualityRows = []) {
+    return require("./collaboration-coordination-ux").buildTargetedReworkSuggestions.apply(null, arguments);
+}
+function buildChildAgentPlanReviewSummary(ackReview = {}, orders = []) {
+    return require("./collaboration-coordination-ux").buildChildAgentPlanReviewSummary.apply(null, arguments);
+}
+function buildUserAgentCoordinationProtocol(task, summary = {}, executions = [], workOrderPreview = null, acceptanceReview = null) {
+    return require("./collaboration-coordination-ux").buildUserAgentCoordinationProtocol.apply(null, arguments);
+}
+function buildUserReceiptReworkSummary(task, summary = {}, agentCoordination = null) {
+    return require("./collaboration-coordination-ux").buildUserReceiptReworkSummary.apply(null, arguments);
+}
+function buildUserCoordinationAcknowledgement(task, assignments = []) {
+    return require("./collaboration-coordination-ux").buildUserCoordinationAcknowledgement.apply(null, arguments);
+}
+function sanitizeDispatchLaunchText(value, fallback = "", max = 220) {
+    return require("./collaboration-coordination-ux").sanitizeDispatchLaunchText.apply(null, arguments);
+}
+function normalizeGroupDispatchLaunchRowStatus(rawValue = "dispatched") {
+    return require("./collaboration-coordination-ux").normalizeGroupDispatchLaunchRowStatus.apply(null, arguments);
+}
+function buildDispatchLaunchSummary(input) {
+    return require("./collaboration-task-intake").buildDispatchLaunchSummary(input);
+}
+function buildRevisedPlanModeDraft(planMode = {}, feedback = "") {
+    return require("./collaboration-task-intake").buildRevisedPlanModeDraft(planMode, feedback);
+}
+function buildAcceptedPlanModeDraft(planMode = {}, feedback = "", acceptedAt = new Date().toISOString()) {
+    return require("./collaboration-task-intake").buildAcceptedPlanModeDraft(planMode, feedback, acceptedAt);
+}
+function classifyGroupProjectTaskIntent(message, uploadedFiles = []) {
+    return require("./collaboration-task-intake").classifyGroupProjectTaskIntent(message, uploadedFiles);
+}
+function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messageMode = "conversation") {
+    return require("./collaboration-task-intake").normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messageMode);
+}
+async function classifyGroupProjectTaskIntentWithAgent(input) {
+    return require("./collaboration-task-intake").classifyGroupProjectTaskIntentWithAgent(input);
+}
+function shouldUseProjectAnalysisMode(input) {
+    return require("./collaboration-task-intake").shouldUseProjectAnalysisMode(input);
+}
+function shouldCreatePersistentGroupTask(input) {
+    return require("./collaboration-task-intake").shouldCreatePersistentGroupTask(input);
+}
+function classifyPlanModeRisk(message, group, taskIntent = {}, attachmentCount = 0) {
+    return require("./collaboration-task-intake").classifyPlanModeRisk(message, group, taskIntent, attachmentCount);
+}
+// ===== merged from collaboration-runtime-task-queue-part-02.ts =====
+function buildPlanModeClarificationQuestions(message, risk = {}, selectedProjects = []) {
+    return require("./collaboration-task-intake").buildPlanModeClarificationQuestions(message, risk, selectedProjects);
+}
+function buildGroupPlanModePreflight(input) {
+    return require("./collaboration-task-intake").buildGroupPlanModePreflight(input);
+}
+function buildGroupProjectAnalysisContext(group, message, ctx, configs = (0, db_1.getConfigs)()) {
+    return (0, project_analysis_1.buildGroupProjectAnalysisContext)(group, message, ctx, configs, {
+        compactMemoryText: memory_1.compactMemoryText,
+        compactPreserveLines: memory_1.compactPreserveLines,
+        getProjectExtraConfig: collaboration_runtime_plan_tools_1.getProjectExtraConfig,
+        buildProjectMemoryPacket: memory_2.buildProjectMemoryPacket,
+    });
+}
+function buildProjectCodeReadOnlySnapshot(project, workDir, message) {
+    return require("./collaboration-task-intake").buildProjectCodeReadOnlySnapshot(project, workDir, message);
+}
+function runCollaborationUxSelfTest() {
+    return require("./collaboration-ux-self-tests").runCollaborationUxSelfTest();
+}
+function buildInlineTaskRuntime(task) {
+    const executions = (0, execution_kernel_1.listExecutions)({ taskId: task.id });
+    const sessions = (0, agent_sessions_1.listTaskAgentSessions)({ taskId: task.id });
+    const running = executions.filter(item => ["spawning", "ready", "prompt_accepted", "running"].includes(item.state));
+    const failed = executions.filter(item => item.state === "failed");
+    const reviewing = executions.filter(item => item.state === "reviewing");
+    const mergeReady = executions.filter(item => item.green?.level === "merge_ready");
+    return {
+        taskId: task.id,
+        status: task.status,
+        statusText: task.status_detail || "",
+        updatedAt: task.updated_at || new Date().toISOString(),
+        lifecycle: deriveTaskLifecycle(task, executions),
+        reasoning: task.reasoning_loop ? {
+            planVersion: Number(task.reasoning_loop.plan_version || 0),
+            openAssertions: (task.reasoning_loop.assertions || []).filter((item) => item.status !== "passed").length,
+            deviations: (task.reasoning_loop.deviations || []).length,
+            recoveryChecks: (task.reasoning_loop.recovery_checks || []).length,
+            lastDecision: task.reasoning_loop.explanations?.[task.reasoning_loop.explanations.length - 1] || null,
+        } : null,
+        counts: { total: executions.length, running: running.length, reviewing: reviewing.length, failed: failed.length, mergeReady: mergeReady.length },
+        agents: executions.map(item => ({
+            project: item.project,
+            state: item.state,
+            green: item.green?.level || "none",
+            failureClass: item.failure?.failureClass || "",
+            runtimeFallbacks: (item.events || []).filter((event) => event.name === "runtime.fallback").length,
+            conflictGroup: item.workspace?.conflictGroup || "",
+        })),
+        sessions: sessions.map(session => ({
+            project: session.project,
+            agentType: session.agentType,
+            status: session.status,
+            nativeSessionId: session.nativeSessionId || "",
+            ...(0, agent_sessions_1.getTaskAgentSessionContinuity)(session),
+        })),
+        taskCard: buildTaskCardView(task, executions, sessions),
+        task_card: buildTaskCardView(task, executions, sessions),
+    };
+}
+function updateGroupTaskInlineStatus(task, status, detail = "") {
+    if (!task?.group_id || !task?.id)
+        return null;
+    const sessionId = groupSessionIdForTask(task);
+    const messages = (0, storage_1.getGroupMessages)(task.group_id, sessionId);
+    const runtime = buildInlineTaskRuntime({ ...task, status, status_detail: detail || task.status_detail });
+    let changed = false;
+    const next = messages.map((message) => {
+        if (message?.task_id !== task.id)
+            return message;
+        changed = true;
+        const { taskRuntime: _storedTaskRuntime, task_runtime: _storedTaskRuntimeSnake, taskCard: _storedTaskCard, task_card: _storedTaskCardSnake, ...messageWithoutStoredRuntime } = message;
+        return {
+            ...messageWithoutStoredRuntime,
+            task: message.task ? { ...message.task, status, status_detail: detail || task.status_detail || "" } : message.task,
+            workflow: { ...(message.workflow || {}), phase: status === "done" ? "complete" : status === "failed" || status === "cancelled" ? "needs_rework" : status === "in_progress" ? "executing" : (message.workflow?.phase || "dispatching"), updated_at: new Date().toISOString() },
+        };
+    });
+    if (changed)
+        (0, storage_1.saveGroupMessages)(task.group_id, next, sessionId);
+    return runtime;
+}
+function buildChildAgentWorkerHandoff(targetProject, taskText = "", options = {}) {
+    return require("./collaboration-task-intake").buildChildAgentWorkerHandoff(targetProject, taskText, options);
+}
+function taskAgentInvocationMemoryOptions(edge) {
+    return require("./collaboration-coordination-ux").taskAgentInvocationMemoryOptions.apply(null, arguments);
+}
+function taskAgentSessionLifecycleRunnerOptions(snapshot) {
+    return require("./collaboration-coordination-ux").taskAgentSessionLifecycleRunnerOptions.apply(null, arguments);
+}
+function buildWorkerContinuationHandoff(task, targetProject = "", options = {}) {
+    return require("./collaboration-coordination-ux").buildWorkerContinuationHandoff.apply(null, arguments);
+}
+function extractMemoryDispatchFreshnessGate(memory) {
+    return require("./collaboration-coordination-ux").extractMemoryDispatchFreshnessGate.apply(null, arguments);
+}
+function renderMemoryDispatchFreshnessGateForContract(memory, handoff = null) {
+    return require("./collaboration-coordination-ux").renderMemoryDispatchFreshnessGateForContract.apply(null, arguments);
+}
+function buildChildAgentDevelopmentContract(targetProject, taskText = "", options = {}) {
+    return require("./collaboration-coordination-ux").buildChildAgentDevelopmentContract.apply(null, arguments);
+}
+function getTaskById(taskId) {
+    if (!taskId)
+        return null;
+    return (0, db_1.loadTasks)().find((task) => task.id === taskId) || null;
+}
+function buildChildAgentTaskText(childTaskText, task = null) {
+    if (!task)
+        return childTaskText;
+    const attachmentContext = (0, memory_1.compactMemoryText)(task.source_attachment_context || task.sourceAttachmentContext || "", 50_000);
+    if (task.workflow_type !== "daily_dev") {
+        return [
+            childTaskText,
+            attachmentContext,
+            attachmentContext ? "附件是任务事实来源；必须读取可用正文或本地文件后再修改代码，解析失败时要明确报告，不能根据文件名猜测。" : "",
+        ].filter(Boolean).join("\n\n");
+    }
+    return [
+        "原始业务开发任务上下文：",
+        `- 任务：${task.title || "未命名任务"}`,
+        task.business_goal || task.businessGoal ? `- 业务目标：${(0, memory_1.compactMemoryText)(task.business_goal || task.businessGoal, 700)}` : "",
+        task.acceptance_criteria || task.acceptanceCriteria ? `- 全局验收标准：${(0, memory_1.compactMemoryText)(task.acceptance_criteria || task.acceptanceCriteria, 700)}` : "",
+        task.source_documents || task.sourceDocuments ? `- 关联文档摘要：${(0, memory_1.compactMemoryText)(task.source_documents || task.sourceDocuments, 900)}` : "",
+        attachmentContext,
+        "",
+        "主 Agent 指派给你的子任务：",
+        childTaskText || "请根据原始业务开发任务上下文完成你负责的实现与验证。",
+    ].filter(line => line !== "").join("\n");
+}
+function buildQueuedGroupTaskMessage(task) {
+    return require("./collaboration-task-intake").buildQueuedGroupTaskMessage(task);
+}
+function normalizePlanAssignments(assignments) {
+    return (assignments || []).map((item) => ({
+        ...item,
+        status: item.status || "pending",
+        statusText: item.statusText || "待处理",
+        attempt: Number(item.attempt || 1),
+        rework: !!item.rework,
+        continuationOf: String(item.continuationOf || item.continuation_of || "").trim(),
+        continuationStrategy: String(item.continuationStrategy || item.continuation_strategy || "").trim(),
+    }));
+}
+function getWorkflowPhaseFromAssignments(assignments = []) {
+    const items = assignments || [];
+    if (items.length === 0)
+        return "understanding";
+    const statuses = items.map((item) => String(item.status || "pending"));
+    if (statuses.some(s => ["failed", "blocked", "needs_info", "partial"].includes(s)))
+        return "needs_rework";
+    if (statuses.some(s => s === "running"))
+        return "executing";
+    if (statuses.every(s => s === "done"))
+        return "reviewing";
+    return "dispatching";
+}
+function buildWorkflowMeta(phase, label = "") {
+    return {
+        phase,
+        label: label || phase,
+        updated_at: new Date().toISOString(),
+    };
+}
+function getInitialWorkflowMeta(assignments, dispatchPolicy, label = "主 Agent 初始计划") {
+    const action = String(dispatchPolicy?.action || "");
+    if (action === "ask_user")
+        return buildWorkflowMeta("needs_user", "等待用户补充");
+    if (action === "hold")
+        return buildWorkflowMeta("hold", "暂不执行");
+    if (action === "direct_answer")
+        return buildWorkflowMeta("complete", "直接回复");
+    if (dispatchPolicy?.requiresConfirmation)
+        return buildWorkflowMeta("needs_user", "等待用户确认");
+    return buildWorkflowMeta((assignments || []).length ? "dispatching" : "understanding", label);
+}
+function updateGroupMessageAssignmentStatus(groupId, messageId, project, status, statusText = "") {
+    if (!messageId || !project)
+        return null;
+    const located = (0, storage_1.findGroupChatSessionContainingMessage)(groupId, messageId);
+    const sessionId = located?.session?.id || "";
+    const messages = located?.messages || (0, storage_1.getGroupMessages)(groupId);
+    let changed = false;
+    let workflow = null;
+    for (const msg of messages) {
+        if (msg.id !== messageId || !Array.isArray(msg.assignments))
+            continue;
+        msg.assignments = msg.assignments.map((item) => {
+            if (item.project !== project)
+                return item;
+            changed = true;
+            return {
+                ...item,
+                status,
+                statusText: statusText || status,
+                updated_at: new Date().toISOString(),
+            };
+        });
+        const phase = getWorkflowPhaseFromAssignments(msg.assignments);
+        msg.workflow = {
+            ...(msg.workflow || {}),
+            ...buildWorkflowMeta(phase),
+            phase,
+        };
+        workflow = msg.workflow;
+    }
+    if (changed)
+        (0, storage_1.saveGroupMessages)(groupId, messages, sessionId);
+    return workflow;
+}
+async function sendTaskCompletionNotification(task, result) {
+    // Tasks bound to Feishu are already delivered to their originating chat by
+    // the task status hook. Preserve the fixed webhook as a legacy fallback.
+    if ((0, feishu_channel_1.hasFeishuTaskBinding)({ taskId: task?.id, missionId: task?.parent_task_id || task?.root_task_id }))
+        return;
+    const summary = task?.delivery_summary || {};
+    const sourceReport = String(summary.user_report || result || "");
+    const resultSummary = sourceReport.substring(0, 900) + (sourceReport.length > 900 ? "..." : "");
+    const fileCount = summary.actual_file_change_count ?? summary.files_changed?.length ?? 0;
+    const verificationCount = summary.verification?.length || 0;
+    const missingVerificationCount = summary.verification_required_missing?.length || 0;
+    const reviewStatus = summary.has_final_review ? (summary.review_status || "complete") : "无";
+    const priority = task.priority === "high" ? "高" : task.priority === "normal" ? "中" : "低";
+    const markdown = [
+        `**任务标题**：${task.title || "未命名任务"}`,
+        `**目标项目**：${task.target_project || "群聊"}`,
+        `**优先级**：${priority}`,
+        `**完成时间**：${new Date().toLocaleString("zh-CN")}`,
+        `**实际文件变更**：${fileCount} 个`,
+        `**验证记录**：${verificationCount} 条`,
+        `**缺命令验证**：${missingVerificationCount} 项`,
+        `**主 Agent 复盘**：${reviewStatus}`,
+        "",
+        `**用户交付报告**：\n${resultSummary || "无"}`,
+    ].join("\n");
+    const notification = await (0, feishu_1.sendFeishuReportMessage)({
+        title: "任务完成通知",
+        markdown,
+    });
+    if (!notification.success)
+        console.warn("[飞书通知] 任务完成通知发送失败:", notification.error || "未知错误");
+}
+async function sendTaskFailureNotification(task, errorMsg) {
+    if ((0, feishu_channel_1.hasFeishuTaskBinding)({ taskId: task?.id, missionId: task?.parent_task_id || task?.root_task_id }))
+        return;
+    const markdown = [
+        `**任务标题**：${task.title || "未命名任务"}`,
+        `**目标项目**：${task.target_project || "群聊"}`,
+        `**失败时间**：${new Date().toLocaleString("zh-CN")}`,
+        "",
+        `**错误信息**：\n${String(errorMsg || "未知错误").substring(0, 900)}`,
+    ].join("\n");
+    const notification = await (0, feishu_1.sendFeishuReportMessage)({
+        title: "任务执行失败",
+        markdown,
+    });
+    if (!notification.success)
+        console.warn("[飞书通知] 任务失败通知发送失败:", notification.error || "未知错误");
+}
+function appendTaskGroupReport(task, status, detail = "") {
+    if (!task?.group_id)
+        return;
+    const deliveryReport = (0, task_delivery_report_1.buildTaskDeliveryReport)(task, task?.delivery_summary || {}, status, detail);
+    (0, storage_1.appendGroupMessage)(task.group_id, {
+        id: "m" + Date.now().toString(36) + "delivery" + crypto.randomBytes(2).toString("hex"),
+        role: "assistant",
+        agent: "system",
+        content: deliveryReport.user_text || (0, task_delivery_report_1.buildTaskGroupReportMessage)(task, status, detail),
+        timestamp: new Date().toISOString(),
+        task_id: task.id,
+        delivery_summary: task.delivery_summary || null,
+        delivery_report: deliveryReport,
+    });
+}
+function buildTaskProviderSwitchRequests(task = {}) {
+    const overrides = task?.runtime_overrides && typeof task.runtime_overrides === "object"
+        ? task.runtime_overrides
+        : {};
+    const requests = {};
+    for (const [project, provider] of Object.entries(overrides)) {
+        const requestedAgentType = String(provider || "").trim();
+        if (!requestedAgentType)
+            continue;
+        requests[String(project || "*")] = {
+            requested_agent_type: requestedAgentType,
+            compatibility_confirmed: true,
+            compatibility_evidence: [
+                `task-local runtime override targets provider ${requestedAgentType}`,
+                `project scope ${project || "*"} remains unchanged`,
+                "existing project workDir and configured provider candidate must pass the provider-switch gate",
+            ],
+            reason: "task-local runtime override selected for this child-agent dispatch",
+            authority: {
+                kind: "task_runtime_override",
+                authority_id: String(task.id || task.task_id || ""),
+                approved: true,
+                local_policy_authority: true,
+                allow_switch_away_from_held_provider: true,
+            },
+        };
+    }
+    const wildcard = String(task?.runtime_override || "").trim();
+    if (wildcard && !requests["*"]) {
+        requests["*"] = {
+            requested_agent_type: wildcard,
+            compatibility_confirmed: true,
+            compatibility_evidence: [
+                `task-local runtime override targets provider ${wildcard}`,
+                "project scope remains unchanged",
+                "existing project workDir and configured provider candidate must pass the provider-switch gate",
+            ],
+            reason: "task-local wildcard runtime override selected for this child-agent dispatch",
+            authority: {
+                kind: "task_runtime_override",
+                authority_id: String(task.id || task.task_id || ""),
+                approved: true,
+                local_policy_authority: true,
+                allow_switch_away_from_held_provider: true,
+            },
+        };
+    }
+    return requests;
+}
+function appendLegacyTaskExecutionGroupReport(input) {
+    if (!input.groupId || !input.task)
+        return;
+    const deliveryReport = (0, task_delivery_report_1.buildTaskDeliveryReport)(input.task, input.task?.delivery_summary || {}, input.status, input.detail || "");
+    (0, storage_1.appendGroupMessage)(input.groupId, {
+        id: "m" + Date.now().toString(36) + "legacyexec" + crypto.randomBytes(2).toString("hex"),
+        role: "assistant",
+        agent: "system",
+        type: "task_execution_result",
+        content: deliveryReport.user_text || (0, task_delivery_report_1.buildTaskGroupReportMessage)(input.task, input.status, input.detail || ""),
+        timestamp: new Date().toISOString(),
+        task_id: input.task.id,
+        delivery_summary: input.task.delivery_summary || null,
+        delivery_report: deliveryReport,
+        fileChanges: input.fileChanges || null,
+        file_changes: input.fileChanges || null,
+        technical_content: String(input.rawResult || ""),
+        raw_result: String(input.rawResult || ""),
+        display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+    });
+}
+function parseLegacyReviewSummary(value) {
+    const text = String(value || "").trim();
+    if (!text)
+        return "";
+    const jsonText = text.match(/\{[\s\S]*\}/)?.[0] || "";
+    if (jsonText) {
+        try {
+            const parsed = JSON.parse(jsonText);
+            const overall = (0, display_1.sanitizeMainAgentUserText)(parsed.overall || parsed.summary || "", "", 180);
+            const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
+            const high = issues.filter((item) => String(item?.severity || "").toLowerCase() === "high").length;
+            const medium = issues.filter((item) => String(item?.severity || "").toLowerCase() === "medium").length;
+            const low = issues.filter((item) => String(item?.severity || "").toLowerCase() === "low").length;
+            const issueText = issues.length ? `发现 ${issues.length} 个建议（高 ${high} / 中 ${medium} / 低 ${low}）` : "暂未发现明确问题";
+            return [issueText, overall].filter(Boolean).join("；");
+        }
+        catch { }
+    }
+    return (0, display_1.sanitizeMainAgentUserText)(text, "审查结果已整理，技术细节已放入技术详情。", 220);
+}
+function appendLegacyCodeReviewGroupReport(input) {
+    if (!input.groupId)
+        return;
+    const rows = (input.reviewResults || []).map((row) => {
+        const reviewer = (0, display_1.sanitizeMainAgentUserText)(row?.reviewer || "Reviewer", "Reviewer", 80);
+        if (row?.error)
+            return `- ${reviewer}：审查失败，排障信息已放入技术详情。`;
+        return `- ${reviewer}：${parseLegacyReviewSummary(row?.result) || "审查结果已整理。"}`;
+    });
+    const failed = (input.reviewResults || []).filter((row) => row?.error).length;
+    const content = [
+        `代码审查完成：${(0, display_1.sanitizeMainAgentUserText)(input.project, "当前项目", 120)}`,
+        rows.length ? rows.join("\n") : "暂未收到可展示的审查结论。",
+        failed ? `有 ${failed} 个审查 Agent 遇到问题，详细原因已放入技术详情。` : "原始审查输出默认收在技术详情里。",
+    ].join("\n");
+    (0, storage_1.appendGroupMessage)(input.groupId, {
+        id: "m" + Date.now().toString(36) + "review" + crypto.randomBytes(2).toString("hex"),
+        role: "assistant",
+        agent: input.coordinator || "coordinator",
+        type: "code_review_result",
+        content,
+        timestamp: new Date().toISOString(),
+        review_results: input.reviewResults || [],
+        technical_content: JSON.stringify(input.reviewResults || [], null, 2),
+        display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+    });
+}
+function syncTaskBacklogStatus(task, status, result = "") {
+    const backlogFile = task?.workflow_meta?.intake?.backlog_file;
+    if (!task?.group_id || !backlogFile)
+        return null;
+    return (0, daily_dev_backlog_1.markDailyDevBacklogStatus)(task.group_id, backlogFile, status, {
+        task_id: task.id,
+        result: result || task.status_detail || task.result || status,
+    });
+}
+// === 协作与辅助规则 ===
+function getTaskTargetKey(task) {
+    if (task?.queue_scope === "isolated_parallel" && task?.id) {
+        return `isolated:${task.target_project || "unknown"}:${task.id}`;
+    }
+    if (task?.queue_scope === "conversation_serial") {
+        const projectSessionId = String(task.project_session_id || task.projectSessionId || "").trim();
+        const groupSessionId = String(task.group_session_id || task.groupSessionId || "").trim();
+        if (task.assign_type === "group" && task.group_id && groupSessionId)
+            return `conversation:group:${task.group_id}:${groupSessionId}`;
+        if (task.target_project && projectSessionId)
+            return `conversation:project:${task.target_project}:${projectSessionId}`;
+    }
+    if (task.assign_type === "group" && task.group_id) {
+        return `group:${task.group_id}`;
+    }
+    return `project:${task.target_project}`;
+}
+function isActionableMentionText(text) {
+    const value = String(text || "").trim();
+    if (value.length < 4)
+        return false;
+    if (/^(收到|好的|了解|谢谢|辛苦了|已完成|完成了|确认收到|ok|OK)[。！!,.，\s]*$/.test(value))
+        return false;
+    return true;
+}
+function normalizeMentionTask(text) {
+    return String(text || "").replace(/\s+/g, " ").trim().slice(0, 240);
+}
+function stripMessageListPrefix(line) {
+    return String(line || "").trim().replace(/^([>*-]|\d+[.)、]|[（(]\d+[）)])\s*/, "").trim();
+}
+function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function extractActionableMentions(text, group, sourceProject = "") {
+    const memberNames = (group.members || [])
+        .map((m) => String(m.project || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+    const members = new Set(memberNames);
+    const results = [];
+    const seen = new Set();
+    for (const line of String(text || "").split(/\r?\n/)) {
+        const normalized = stripMessageListPrefix(line);
+        let targetName = "";
+        let message = "";
+        for (const name of memberNames) {
+            const token = `@${name}`;
+            if (!normalized.startsWith(token))
+                continue;
+            const rest = normalized.slice(token.length);
+            if (rest && !/^[\s：:，,、\-—]/.test(rest))
+                continue;
+            targetName = name;
+            message = rest.replace(/^[\s：:，,、\-—]+/, "").trim();
+            break;
+        }
+        if (!targetName) {
+            const match = normalized.match(/^@([^\s：:，,、\-—]+)(?:\s+|[：:，,、\-—]+)([\s\S]+)$/);
+            if (!match)
+                continue;
+            targetName = match[1];
+            message = match[2].trim();
+        }
+        if (!members.has(targetName) || targetName === sourceProject)
+            continue;
+        if (!isActionableMentionText(message))
+            continue;
+        const key = `${targetName}\n${normalizeMentionTask(message)}`;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        results.push({ mention: `@${targetName}`, targetName, message });
+    }
+    return results;
+}
+function buildAgentQaProtocolInstructions(currentAgent, memberList) {
+    const members = memberList || "暂无可询问成员";
+    return [
+        "",
+        "[群聊主 Agent 协调协议]",
+        `- 你是 ${currentAgent || "当前子 Agent"}。可协作成员仅用于了解团队能力：${members}。你不能直接给其他子 Agent 派活，也不能私下扩大其他 Agent 的写权限。`,
+        `- 需要跨 Agent 信息、实现、评审或风险确认时，必须调用内部 MCP ${group_coordination_mcp_1.GROUP_COORDINATION_MCP_SERVER_NAME} 的 request_coordination、request_review 或 report_blocker。只描述需求、证据、能力和验收标准，由群聊主 Agent 选择执行者、建立依赖并验收。`,
+        "- 前端需要后端新增接口等写依赖时，kind 必须填 implementation，并给出 acceptance_criteria/requested_write_paths；主 Agent 会创建正式工作项，完成验收后再恢复你的原任务会话。",
+        "- 只需要接口解释、字段确认或代码评审时，使用 information/review；目标 Agent 只能只读回答。涉及账号、密钥、生产数据、业务方向或高风险权限时使用 risk/report_blocker，由主 Agent 询问用户。",
+        "- target_hint 只是能力建议，不是派发命令；主 Agent 可以改派。回答或实现结果必须尽量附文件、接口、文档、命令或截图证据。",
+        "- 如果你正在回答其他 Agent 的问题，可以直接自然语言回答；也可以用 reply_agent：<tool_call>{\"name\":\"reply_agent\",\"arguments\":{\"answer\":\"结论...\",\"evidence\":\"接口/文件/验证证据...\"}}</tool_call>",
+        "- 兼容旧运行时的降级格式：CCM_COORDINATION_REQUESTS [{\"kind\":\"information\",\"summary\":\"确认订单接口契约\",\"question\":\"...\",\"required_capabilities\":[\"api\"],\"blocking\":true}]。旧 ask_agent 会被平台转换为主 Agent 协调请求，不再视为直接派发。",
+        "- 如果没有真实依赖或阻塞，不要调用协调 MCP，也不要输出协调标记。",
+        "",
+    ].join("\n");
+}
 //# sourceMappingURL=collaboration-runtime-task-queue.js.map

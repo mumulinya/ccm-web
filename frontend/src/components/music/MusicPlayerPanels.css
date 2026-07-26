@@ -46,6 +46,22 @@
   font-size: 10px;
   font-weight: 700;
 }
+.unified-search-button {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid rgba(98, 211, 223, 0.26);
+  border-radius: 6px;
+  background: rgba(36, 130, 143, 0.1);
+  color: #8bdce3;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.unified-search-button:hover { border-color: rgba(98, 211, 223, 0.48); background: rgba(36, 130, 143, 0.18); color: #c0f3f5; }
 .download-center-button span {
   display: inline-flex;
   align-items: center;
@@ -377,6 +393,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+.qi-history-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  color: #7894a2;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .queue-item-active .qi-title {
   color: #FFF;
@@ -1146,6 +1170,10 @@
   }
   .queue-tools {
     max-width: none;
+    flex-wrap: wrap;
+  }
+  .queue-tools .search-input-wrapper {
+    flex: 1 0 100%;
   }
   .active-playlist-context {
     align-items: flex-start;

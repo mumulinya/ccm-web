@@ -222,8 +222,8 @@ const loadProviderModels = async provider => {
 }
 
 const load = async (force = false, quiet = false) => {
-  if (force) checking.value = true
-  else loading.value = true
+  if (force && !quiet) checking.value = true
+  else if (!force) loading.value = true
   try {
     const response = await fetch(force ? '/api/system/agent-providers/status' : '/api/system/agent-providers')
     const data = await response.json()
@@ -456,6 +456,9 @@ const clearClaudeKey = async () => {
 onMounted(async () => {
   await load()
   if (Object.values(statuses.value).some(status => status?.install?.status === 'running')) pollInstallStatus()
+  // 首屏用缓存秒开后，静默做一次强制复检：外部终端里的 CLI 登录/登出
+  // 不会触发服务端缓存失效，这里主动等一轮真实探测纠正过期状态
+  void load(true, true)
 })
 onBeforeUnmount(() => {
   if (installPollTimer) window.clearInterval(installPollTimer)

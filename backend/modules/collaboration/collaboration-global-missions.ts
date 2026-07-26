@@ -1131,11 +1131,22 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       }
       const key = `group:${group.id}`;
       if (seen.has(key)) continue;
+      // 会话绑定在目标解析时一次性显式决定，子任务与执行队列全程使用同一个精确 gcs_* 会话。
+      let groupSession: any;
+      try {
+        groupSession = resolveWritableGroupChatSession(group.id, String(target.group_session_id || target.groupSessionId || ""), {
+          title: compactFormText(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
+        });
+      } catch (error: any) {
+        rejected.push({ target, reason: `群聊会话绑定失败：${error?.message || error}` });
+        continue;
+      }
       seen.add(key);
       resolved.push({
         ...target,
         type: "group",
         group_id: group.id,
+        group_session_id: String(groupSession?.id || ""),
         name: group.name || group.id,
         coordinator: readiness.coordinator.project,
         ownership_chain: buildGlobalGroupTestAgentOwnership(),
@@ -1175,11 +1186,25 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
     }
     const key = `group:${selectedGroup.id}:project:${config.name}`;
     if (seen.has(key)) continue;
+    // 用户指定的精确会话只在最终选中的群与请求的群一致时生效，避免把别的群的会话 id 带进来。
+    const requestedSession = selectedGroup.id === requestedGroupId || selectedGroup.name === requestedGroupId
+      ? String(target.group_session_id || target.groupSessionId || "")
+      : "";
+    let selectedGroupSession: any;
+    try {
+      selectedGroupSession = resolveWritableGroupChatSession(selectedGroup.id, requestedSession, {
+        title: compactFormText(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
+      });
+    } catch (error: any) {
+      rejected.push({ target, reason: `群聊会话绑定失败：${error?.message || error}` });
+      continue;
+    }
     seen.add(key);
     resolved.push({
       ...target,
       type: "group",
       group_id: selectedGroup.id,
+      group_session_id: String(selectedGroupSession?.id || ""),
       name: selectedGroup.name || selectedGroup.id,
       coordinator: selectedReadiness.coordinator.project,
       requested_target_type: "project",
@@ -1287,12 +1312,13 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       }),
       target_project: target.type === "group" ? target.coordinator : target.project,
       group_id: target.type === "group" ? target.group_id : null,
+      group_session_id: target.type === "group" ? (target.group_session_id || null) : null,
       project_session_id: projectSession?.sessionId || null,
       assign_type: target.type === "group" ? "group" : "project",
       orchestration_scope: target.type === "group" ? "group_session" : "project_session",
       queue_scope: "conversation_serial",
       request_origin: payload.source || "global-agent",
-      origin_session_id: projectSession?.sessionId || payload.session_id || payload.sessionId || null,
+      origin_session_id: projectSession?.sessionId || (target.type === "group" ? target.group_session_id : "") || payload.session_id || payload.sessionId || null,
       priority: payload.priority || "normal",
       auto_execute: autoExecute,
       workflow_type: "daily_dev",

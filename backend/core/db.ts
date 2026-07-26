@@ -14,6 +14,7 @@ import {
   saveTasksToSqlite,
   updateTaskByIdInSqlite,
 } from "./task-store";
+import { readJsonWithBackup, withFileLock, writeJsonAtomic } from "./atomic-json-file";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -40,39 +41,6 @@ export const SKILL_PACKAGES_DIR = path.join(CCM_DIR, "skill-packages");
 if (!fs.existsSync(MCP_DIR)) fs.mkdirSync(MCP_DIR, { recursive: true });
 if (!fs.existsSync(SKILLS_DIR)) fs.mkdirSync(SKILLS_DIR, { recursive: true });
 if (!fs.existsSync(SKILL_PACKAGES_DIR)) fs.mkdirSync(SKILL_PACKAGES_DIR, { recursive: true });
-
-function writeJsonAtomic(file: string, value: any) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}.tmp`;
-  if (fs.existsSync(file)) {
-    try { fs.copyFileSync(file, `${file}.bak`); } catch {}
-  }
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-  let lastError: any = null;
-  for (let attempt = 0; attempt < 8; attempt++) {
-    try {
-      fs.renameSync(temp, file);
-      return;
-    } catch (error: any) {
-      lastError = error;
-      if (!["EPERM", "EACCES", "EBUSY", "EEXIST"].includes(String(error?.code || ""))) throw error;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
-    }
-  }
-  for (let attempt = 0; attempt < 12; attempt++) {
-    try {
-      if (fs.existsSync(file)) fs.unlinkSync(file);
-      fs.renameSync(temp, file);
-      return;
-    } catch (error: any) {
-      lastError = error;
-      if (!["EPERM", "EACCES", "EBUSY", "EEXIST", "ENOENT"].includes(String(error?.code || ""))) break;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (attempt + 1));
-    }
-  }
-  try { if (fs.existsSync(temp)) fs.unlinkSync(temp); } catch {}
-  throw lastError || new Error(`无法替换 JSON 文件：${file}`);
-}
 
 // === 代理类型定义 ===
 export const AGENTS = [
@@ -441,12 +409,7 @@ export function applyMetricToStore(value: any, agent: string, data: any = {}, no
 }
 
 export function loadMetrics(): any {
-  try {
-    if (fs.existsSync(METRICS_FILE)) {
-      return normalizeMetricsStore(JSON.parse(fs.readFileSync(METRICS_FILE, "utf-8")));
-    }
-  } catch {}
-  return emptyMetricsStore();
+  return normalizeMetricsStore(readJsonWithBackup(METRICS_FILE, emptyMetricsStore()));
 }
 
 export function saveMetrics(metrics: any) {
@@ -455,7 +418,9 @@ export function saveMetrics(metrics: any) {
 
 export function recordMetric(agent: string, data: any) {
   try {
-    saveMetrics(applyMetricToStore(loadMetrics(), agent, data));
+    withFileLock(METRICS_FILE, () => {
+      saveMetrics(applyMetricToStore(loadMetrics(), agent, data));
+    }, { timeoutMs: 5000 });
     return true;
   } catch (error: any) {
     console.warn("[性能指标] 写入失败:", error?.message || error);
@@ -540,48 +505,37 @@ export function listTasksByParentId(parentId: string) {
 
 // === Dialogue Templates ===
 export function loadTemplates(): any[] {
-  try {
-    if (fs.existsSync(TEMPLATES_FILE)) {
-      return JSON.parse(fs.readFileSync(TEMPLATES_FILE, "utf-8"));
-    }
-  } catch {}
-  return [];
+  const parsed = readJsonWithBackup<any>(TEMPLATES_FILE, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 export function saveTemplates(templates: any[]) {
-  fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(templates, null, 2));
+  writeJsonAtomic(TEMPLATES_FILE, templates);
 }
 
 // === Project Configs ===
 export function loadProjectConfigs(): any {
-  try {
-    if (fs.existsSync(PROJECT_CONFIGS_FILE)) {
-      return JSON.parse(fs.readFileSync(PROJECT_CONFIGS_FILE, "utf-8"));
-    }
-  } catch {}
-  return {};
+  const parsed = readJsonWithBackup<any>(PROJECT_CONFIGS_FILE, {});
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
 export function saveProjectConfigs(configs: any) {
-  fs.writeFileSync(PROJECT_CONFIGS_FILE, JSON.stringify(configs, null, 2));
+  writeJsonAtomic(PROJECT_CONFIGS_FILE, configs);
 }
 
 // === Music Config ===
 export function loadMusicConfig(): any {
-  try {
-    if (fs.existsSync(MUSIC_CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(MUSIC_CONFIG_FILE, "utf-8"));
-    }
-  } catch {}
-  return {
+  const fallback = {
     source: "bili",
     playMode: "loop",
     quality: "high"
   };
+  const parsed = readJsonWithBackup<any>(MUSIC_CONFIG_FILE, fallback);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback;
 }
 
 export function saveMusicConfig(cfg: any) {
-  fs.writeFileSync(MUSIC_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+  writeJsonAtomic(MUSIC_CONFIG_FILE, cfg);
 }
 
 // === Feishu Config ===
@@ -624,73 +578,48 @@ export function saveCronJobs(jobs: any[]) {
 
 // === Auto Dev Daily Reports ===
 export function loadDevReports(): any[] {
-  if (!fs.existsSync(DEV_REPORTS_FILE)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(DEV_REPORTS_FILE, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const parsed = readJsonWithBackup<any>(DEV_REPORTS_FILE, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 export function saveDevReports(reports: any[]) {
-  fs.writeFileSync(DEV_REPORTS_FILE, JSON.stringify(reports, null, 2));
+  writeJsonAtomic(DEV_REPORTS_FILE, reports);
 }
 
 export function loadDevWeeklyReports(): any[] {
-  if (!fs.existsSync(DEV_WEEKLY_REPORTS_FILE)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(DEV_WEEKLY_REPORTS_FILE, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const parsed = readJsonWithBackup<any>(DEV_WEEKLY_REPORTS_FILE, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 export function saveDevWeeklyReports(reports: any[]) {
-  fs.writeFileSync(DEV_WEEKLY_REPORTS_FILE, JSON.stringify(reports, null, 2));
+  writeJsonAtomic(DEV_WEEKLY_REPORTS_FILE, reports);
 }
 
 export function loadAutoDevNotifyConfig(): any {
-  if (!fs.existsSync(AUTO_DEV_NOTIFY_FILE)) return {};
-  try {
-    const parsed = JSON.parse(fs.readFileSync(AUTO_DEV_NOTIFY_FILE, "utf-8"));
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
+  const parsed = readJsonWithBackup<any>(AUTO_DEV_NOTIFY_FILE, {});
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
 export function saveAutoDevNotifyConfig(config: any) {
-  fs.writeFileSync(AUTO_DEV_NOTIFY_FILE, JSON.stringify(config || {}, null, 2));
+  writeJsonAtomic(AUTO_DEV_NOTIFY_FILE, config || {});
 }
 
 // === RAG Watch Paths ===
 export function loadRagWatchPaths(): string[] {
-  if (!fs.existsSync(RAG_WATCH_PATHS_FILE)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(RAG_WATCH_PATHS_FILE, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const parsed = readJsonWithBackup<any>(RAG_WATCH_PATHS_FILE, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 export function saveRagWatchPaths(paths: string[]) {
-  fs.writeFileSync(RAG_WATCH_PATHS_FILE, JSON.stringify(paths || [], null, 2));
+  writeJsonAtomic(RAG_WATCH_PATHS_FILE, paths || []);
 }
 
 // === RAG Metadata (Tags) ===
 export function loadRagMetadata(): Record<string, { tags: string[] }> {
-  if (!fs.existsSync(RAG_METADATA_FILE)) return {};
-  try {
-    const parsed = JSON.parse(fs.readFileSync(RAG_METADATA_FILE, "utf-8"));
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
+  const parsed = readJsonWithBackup<any>(RAG_METADATA_FILE, {});
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
 export function saveRagMetadata(metadata: Record<string, { tags: string[] }>) {
-  fs.writeFileSync(RAG_METADATA_FILE, JSON.stringify(metadata || {}, null, 2));
+  writeJsonAtomic(RAG_METADATA_FILE, metadata || {});
 }

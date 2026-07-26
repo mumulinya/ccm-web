@@ -105,11 +105,11 @@ const credential_store_1 = require("./core/credential-store");
 const feishu_reaction_feedback_1 = require("./integrations/feishu-reaction-feedback");
 const usability_1 = require("./modules/system/usability");
 const settings_1 = require("./modules/system/settings");
+const agent_provider_settings_1 = require("./modules/system/agent-provider-settings");
 const local_auth_1 = require("./modules/system/local-auth");
 const role_skills_1 = require("./skills/role-skills");
 const chat_runs_1 = require("./projects/chat-runs");
 const cleanup_center_1 = require("./system/cleanup-center");
-const sessions_2 = require("./modules/projects/sessions");
 const project_session_agent_binding_1 = require("./modules/projects/project-session-agent-binding");
 const project_session_compaction_1 = require("./modules/projects/project-session-compaction");
 const server_pet_activity_1 = require("./server-pet-activity");
@@ -420,7 +420,7 @@ function handleRequest(req, res) {
     // 3. 构建依赖注入上下文 (Contexts)
     const projectsCtx = {
         PORT,
-        getSessions: sessions_2.getSessions,
+        getSessions: sessions_1.getSessions,
         getAgentState,
     };
     const petsCtx = {
@@ -684,7 +684,7 @@ function handleRequest(req, res) {
             if (!config)
                 return (0, utils_1.sendJson)(res, { error: "项目不存在" }, 400);
             const exactProjectSessionId = String(projectSessionId || "").trim();
-            if (exactProjectSessionId && !(0, sessions_2.getSessionDetail)(project, exactProjectSessionId)) {
+            if (exactProjectSessionId && !(0, sessions_1.getSessionDetail)(project, exactProjectSessionId)) {
                 return (0, utils_1.sendJson)(res, { error: "项目会话不存在" }, 404);
             }
             const scheduleFeishuSessionTitle = (assistantMessage) => {
@@ -719,7 +719,7 @@ function handleRequest(req, res) {
             const resolvedRuntime = (0, runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
             const agentType = resolvedRuntime.selected;
             if (exactProjectSessionId)
-                (0, sessions_2.syncSessions)(project);
+                (0, sessions_1.syncSessions)(project);
             let projectKnowledge = { context: "", citations: [], embeddingMode: "hashing", fallback: true };
             try {
                 projectKnowledge = await (0, knowledge_access_1.searchAgentKnowledge)(finalMessage, { role: "project-agent", project }, { limit: 6, maxContextChars: 18000 });
@@ -1452,6 +1452,8 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         (0, task_permission_broker_1.startTaskPermissionNotificationScheduler)(startupCollabCtx);
         (0, model_capability_cache_1.startModelCapabilityRefreshScheduler)();
         (0, runtime_tool_real_cli_matrix_1.startRuntimeToolRealCliMatrixScheduler)();
+        // 预热提供商状态缓存：让首个请求也走缓存路径，避免同步 spawnSync 探测冻结事件循环
+        void (0, agent_provider_settings_1.refreshAgentProviderStatusesAsync)().catch(() => { });
         console.log("");
         console.log(`CCM Workspace  v${CCM_RUNTIME_VERSION}`);
         console.log("------------------------------------------------------");

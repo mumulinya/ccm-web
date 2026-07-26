@@ -56,6 +56,10 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
         clarification_context: msg.clarification_context || msg.clarificationContext || current.clarification_context || current.clarificationContext,
         taskRuntime: msg.taskRuntime || msg.task_runtime || current.taskRuntime || current.task_runtime,
         task_runtime: msg.task_runtime || msg.taskRuntime || current.task_runtime || current.taskRuntime,
+        // 服务端重拉的 taskRuntime 带有按当前任务状态重建的卡片（含修订后的计划书）；
+        // 必须同步刷新消息上固化的 taskCard，否则 getTaskCard 会一直优先读到 SSE 建卡时的旧卡。
+        taskCard: (msg.taskRuntime || msg.task_runtime)?.taskCard || msg.taskCard || msg.task_card || current.taskCard || current.task_card,
+        task_card: (msg.task_runtime || msg.taskRuntime)?.task_card || (msg.taskRuntime || msg.task_runtime)?.taskCard || msg.task_card || msg.taskCard || current.task_card || current.taskCard,
         delivery_summary: msg.delivery_summary || current.delivery_summary,
         deliverySummary: msg.deliverySummary || current.deliverySummary,
         receipts: msg.receipts || current.receipts,

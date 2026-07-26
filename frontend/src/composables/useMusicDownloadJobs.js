@@ -22,12 +22,12 @@ export function useMusicDownloadJobs(options = {}) {
     pollTimer = setTimeout(loadDownloadJobs, delay)
   }
 
-  const createDownloadJob = async (item) => {
+  const createDownloadJob = async (item, settings = {}) => {
     if (!item?.downloadToken) throw new Error('该搜索结果已失效，请重新搜索')
     const source = item.type === 'netease' ? 'netease' : 'bilibili'
     const res = await fetch('/api/music/download-jobs', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source, downloadToken: item.downloadToken })
+      body: JSON.stringify({ source, downloadToken: item.downloadToken, quality: settings.quality || 'high' })
     })
     const data = await res.json()
     if (!res.ok || !data.success) throw new Error(data.error || '创建下载任务失败')

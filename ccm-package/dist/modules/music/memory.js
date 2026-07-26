@@ -51,7 +51,7 @@ const atomic_json_file_1 = require("../../core/atomic-json-file");
 const context_budget_1 = require("../../system/context-budget");
 const session_memory_window_1 = require("../../system/session-memory-window");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
-const group_compaction_engine_part_01_1 = require("../collaboration/group-compaction-engine-part-01");
+const group_compaction_engine_1 = require("../collaboration/group-compaction-engine");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 exports.MUSIC_AGENT_MEMORY_FILE = path.join(utils_1.CCM_DIR, "music-agent-memory.json");
@@ -299,7 +299,7 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
             hookResults: preHooks,
             timeline: segment.map((message) => ({ id: message.id, role: message.role, content: message.content, timestamp: message.timestamp })),
         };
-        const invoke = options.modelCall || (async (request) => (0, group_compaction_engine_part_01_1.callCompactionModel)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), request.system, request.user, 8_000));
+        const invoke = options.modelCall || (async (request) => (0, group_compaction_engine_1.callCompactionModel)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), request.system, request.user, 8_000));
         let timeline = basePayload.timeline;
         let attempts = 0;
         let candidate = null;
@@ -318,7 +318,7 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
             }
             catch (error) {
                 lastError = error;
-                if (!(0, group_compaction_engine_part_01_1.isGroupCompactionPromptTooLongError)(error) || attempts >= 3)
+                if (!(0, group_compaction_engine_1.isGroupCompactionPromptTooLongError)(error) || attempts >= 3)
                     break;
                 const peeled = (0, session_memory_window_1.peelOldestCompleteConversationRound)(timeline);
                 if (!peeled.peeled)
@@ -454,7 +454,7 @@ function scheduleMusicLongTermMemoryExtraction(userMessage, assistantMessage, so
             "支持用户纠正旧偏好；删除字段为 removePreferences,removeDislikes,removeFavoriteArtists,removeFavoriteGenres,removeListeningContexts,removePlaybackPreferences。",
             "新增字段为 preferences,dislikes,favoriteArtists,favoriteGenres,listeningContexts,playbackPreferences。所有字段都是字符串数组。",
         ].join("\n");
-        const result = await (0, group_compaction_engine_part_01_1.callCompactionModel)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), system, JSON.stringify({ existing: store.longTermMemory, userMessage, assistantMessage }), 2_000);
+        const result = await (0, group_compaction_engine_1.callCompactionModel)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), system, JSON.stringify({ existing: store.longTermMemory, userMessage, assistantMessage }), 2_000);
         const candidate = result?.summary || result;
         if (!candidate || typeof candidate !== "object")
             throw new Error("音乐长期记忆模型结果无效");

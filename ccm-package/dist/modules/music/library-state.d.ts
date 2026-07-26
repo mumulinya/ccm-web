@@ -5,11 +5,26 @@ export type MusicPlaylist = {
     createdAt: string;
     updatedAt: string;
 };
+export type MusicPlayMode = "list" | "random" | "single";
+export type MusicQueueSource = {
+    label: string;
+    addedAt: string;
+};
+export type MusicPlaybackHistoryEvent = {
+    id: string;
+    filename: string;
+    playedAt: string;
+    source: string;
+};
 export type MusicLibraryState = {
-    version: 1;
+    version: 3;
     favorites: string[];
     playlists: MusicPlaylist[];
     queue: string[];
+    queueSources: Record<string, MusicQueueSource>;
+    currentFilename: string;
+    playMode: MusicPlayMode;
+    history: MusicPlaybackHistoryEvent[];
     updatedAt: string;
 };
 declare class LibraryStateStore {
@@ -23,7 +38,13 @@ declare class LibraryStateStore {
         tracks?: string[];
     }): any;
     deletePlaylist(id: string): any;
-    setQueue(tracks: string[]): any;
+    setQueue(tracks: string[], input?: {
+        currentFilename?: string;
+        playMode?: MusicPlayMode;
+        queueSources?: Record<string, MusicQueueSource | string>;
+    }): any;
+    recordHistory(filename: string, source?: string): any;
+    clearHistory(): any;
     removeTrack(filename: string): void;
     private load;
     private save;

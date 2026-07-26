@@ -128,7 +128,7 @@ if (process.argv.includes("--child")) {
   });
   const inventory = sessions.buildTaskAgentMemoryContextSnapshotInventory({ sessionId: session.id });
   const row = inventory.rows?.[0] || {};
-  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents-part-02-part-02.ts"), "utf8");
+  const productionSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents.ts"), "utf8");
   const recoveryIndex = productionSource.indexOf("recoverFinalWorkerDispatchPayload({");
   const providerIndex = productionSource.indexOf("const attemptOutput = await ctx.callAgentForGroupStream", recoveryIndex);
   const checks = {

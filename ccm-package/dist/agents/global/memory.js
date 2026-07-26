@@ -67,7 +67,7 @@ const context_budget_1 = require("../../system/context-budget");
 const session_memory_window_1 = require("../../system/session-memory-window");
 const utils_1 = require("../../core/utils");
 const memory_control_center_1 = require("../../modules/knowledge/memory-control-center");
-const group_compaction_engine_part_01_1 = require("../../modules/collaboration/group-compaction-engine-part-01");
+const group_compaction_engine_1 = require("../../modules/collaboration/group-compaction-engine");
 const group_orchestrator_config_1 = require("../../modules/collaboration/group-orchestrator-config");
 const group_compaction_strategy_1 = require("../../modules/collaboration/group-compaction-strategy");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
@@ -1323,7 +1323,7 @@ async function compactGlobalAgentSessionWithModel(sessionId, options = {}) {
             timeline: retryTimeline,
             fullTranscriptRetained: true,
         });
-        const invoke = options.modelCall || (async ({ system, user, maxOutputTokens }) => (0, group_compaction_engine_part_01_1.callCompactionModel)(config, system, user, maxOutputTokens));
+        const invoke = options.modelCall || (async ({ system, user, maxOutputTokens }) => (0, group_compaction_engine_1.callCompactionModel)(config, system, user, maxOutputTokens));
         let modelResult = null;
         let validation = { valid: false, issues: ["model_summary_missing"] };
         let lastError = null;
@@ -1539,7 +1539,7 @@ function scheduleGlobalAgentSessionMemoryExtraction(sessionId, options = {}) {
         transcriptChecksum: (0, session_compaction_core_1.sessionCompactionChecksum)(transcript.messages.map((message) => [message.id, message.role, message.content])),
         cadence: { ...cadence, sourceLastMessageId: String(timeline.at(-1)?.id || ""), sourceMessageIds },
     };
-    const invoke = options.modelCall || ((request) => (0, group_compaction_engine_part_01_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
+    const invoke = options.modelCall || ((request) => (0, group_compaction_engine_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
     const scheduled = (0, session_compaction_core_1.scheduleSessionMemoryExtraction)({
         scope: "global",
         sessionId: exactSessionId,

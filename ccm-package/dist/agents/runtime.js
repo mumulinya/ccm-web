@@ -470,16 +470,25 @@ function getPublicAgentRuntimes() {
         };
     }).filter(Boolean);
 }
+// spawnSync 探测会阻塞事件循环，isAgentRuntimeAvailable 位于 API 热路径上，
+// 结果缓存 60s，避免每个请求都同步 spawn where.exe。
+const COMMAND_EXISTS_CACHE = new Map();
 function commandExists(command) {
+    const cached = COMMAND_EXISTS_CACHE.get(command);
+    if (cached && cached.expiresAt > Date.now())
+        return cached.value;
+    let value = false;
     try {
         const result = process.platform === "win32"
             ? (0, child_process_1.spawnSync)("where.exe", [command], { windowsHide: true, stdio: "ignore" })
             : (0, child_process_1.spawnSync)("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
-        return result.status === 0;
+        value = result.status === 0;
     }
     catch {
-        return false;
+        value = false;
     }
+    COMMAND_EXISTS_CACHE.set(command, { value, expiresAt: Date.now() + 60_000 });
+    return value;
 }
 function isAgentRuntimeAvailable(agentType) {
     const runtime = normalizeAgentRuntimeId(agentType);
