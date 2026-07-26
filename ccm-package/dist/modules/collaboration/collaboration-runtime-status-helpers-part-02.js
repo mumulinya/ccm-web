@@ -24,20 +24,15 @@ function independentReviewVerdictState(value) {
     if (!text)
         return "unknown";
     const normalized = text.toLowerCase();
-    const riskText = normalized
-        .replace(/未发现.{0,20}(?:阻塞|问题|风险|缺陷)/g, "")
-        .replace(/无.{0,12}(?:阻塞|问题|风险|缺陷)/g, "")
-        .replace(/\bno\s+(?:blocking\s+)?(?:blockers?|issues?|risks?|critical\s+issues?)\b/g, "")
-        .replace(/\bwithout\s+(?:blocking\s+)?(?:blockers?|issues?|risks?)\b/g, "");
-    if (/needs?[_\s-]*recheck|recheck|需复验|重新复验|重新验证|复核.{0,18}(?:未闭环|没有闭环)|证据.{0,18}(?:未闭环|没有闭环)/.test(normalized))
+    if (["needs_recheck", "recheck"].includes(normalized))
         return "needs_recheck";
-    if (/needs?[_\s-]*environment|补齐环境|补充环境|环境.{0,18}(?:阻塞|不足|缺失)|登录条件.{0,18}(?:阻塞|不足|缺失)|运行条件.{0,18}(?:阻塞|不足|缺失)/.test(normalized))
+    if (["needs_environment", "environment_blocked"].includes(normalized))
         return "needs_environment";
-    if (/needs?[_\s-]*(?:human|user)|需要人工确认|等待用户确认|等你确认|待确认/.test(normalized))
+    if (["needs_user", "waiting_user", "manual_review"].includes(normalized))
         return "needs_user";
-    if (/fail|failed|reject|rejected|block|blocked|问题|风险未解决|不通过|未通过|拒绝|阻塞/.test(riskText))
+    if (["failed", "rejected", "blocked"].includes(normalized))
         return "failed";
-    if (/pass|passed|approve|approved|lgtm|ok|success|通过|批准|已复核|无阻塞|无高风险/.test(normalized))
+    if (["passed", "approved", "success"].includes(normalized))
         return "passed";
     return "unknown";
 }
@@ -53,7 +48,7 @@ function normalizeIndependentReviewEntry(raw, fallback = {}) {
     const reviewSubject = String(item.reviewSubject || item.review_subject || item.subject || fallback.reviewSubject || fallback.review_subject || "").trim();
     if (!reviewer && !verdict && !summary && evidence.length === 0)
         return null;
-    const state = independentReviewVerdictState([verdict, summary, ...evidence].join("\n"));
+    const state = independentReviewVerdictState(verdict);
     return {
         reviewer,
         requester,
@@ -102,7 +97,7 @@ function collectIndependentReviewEvidence(receipts = [], agentQa = []) {
             if (normalized)
                 evidence.push(normalized);
         }
-        if (reviewItems.length === 0 && /review|verifier|verification|qa|tester|审查|复核|验证/i.test(String(receipt?.role || ""))) {
+        if (reviewItems.length === 0 && ["reviewer", "verifier", "qa", "test-agent", "test_agent"].includes(String(receipt?.role || "").trim().toLowerCase())) {
             const normalized = normalizeIndependentReviewEntry({
                 reviewer: receipt?.reviewer || receipt?.agent,
                 verdict: receipt?.status === "done" ? "passed" : receipt?.status,
@@ -162,7 +157,11 @@ function buildAcceptanceGate(task, execution, summary, finalStatus) {
 function taskRequiresCodeChanges(task) {
     if (task?.requires_code_changes === false || task?.requiresCodeChanges === false)
         return false;
-    return task?.workflow_type === "daily_dev";
+    if (task?.requires_code_changes === true || task?.requiresCodeChanges === true)
+        return true;
+    return task?.workflowDecision?.requiresCodeChanges === true
+        || task?.workflow_decision?.requires_code_changes === true
+        || task?.intake_draft?.workflowDecision?.requiresCodeChanges === true;
 }
 function selectLatestDurableReceipts(receiptCandidates = []) {
     return require("./collaboration-acceptance").selectLatestDurableReceipts(receiptCandidates);

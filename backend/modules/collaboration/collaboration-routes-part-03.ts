@@ -26,6 +26,7 @@ import { decomposeRequirementToTaskPlan, ingestRequirementSources, requirementTo
 import { runRequirementEpicSelfTest } from "../requirements/requirement-epic-self-tests";
 import { startGlobalMissionSupervisor } from "../../agents/global/mission-supervisor";
 import { buildTaskAttachmentMutation, parseRetainedAttachmentIds, removeUploadedFiles } from "../../system/task-attachments";
+import { decideWorkflowWithModel } from "../../agents/workflow-decision";
 
 import {
   loadCronJobs,
@@ -571,10 +572,26 @@ export function handleCollaborationApiTaskLifecycleRoutes(
         }
         const validationError = validateTaskManualStatusUpdate(current, updates);
         if (validationError) return sendJson(res, { error: validationError }, 409);
+        const priorityChanged = updates.priority && updates.priority !== current.priority;
         const task = updateTask(id, updates);
         if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        let queueResult: any = null;
+        if (priorityChanged && !runningTaskIds.has(id)) {
+          const removed = removeTaskFromQueues(id);
+          if (removed > 0) {
+            queueResult = enqueueTask(id, ctx);
+            appendTaskTimelineEvent(id, {
+              type: "task_queue_reprioritized",
+              title: updates.priority === "high" ? "任务已插队" : "任务优先级已调整",
+              detail: `优先级 ${current.priority || "normal"} -> ${updates.priority}，队列位置 ${queueResult.position || "待定"}`,
+              status: "ok",
+              phase: "dispatching",
+              agent: "user",
+            });
+          }
+        }
         updateGroupTaskInlineStatus(task, task.status, task.status_detail || "任务状态已更新");
-        sendJson(res, { success: true, task });
+        sendJson(res, { success: true, task, queue_result: queueResult, queue_status: getQueueStatus() });
       } catch (e: any) {
         removeUploadedFiles(files);
         sendJson(res, { error: e.message }, 400);
@@ -618,16 +635,30 @@ export function handleCollaborationApiTaskLifecycleRoutes(
   if (pathname === "/api/tasks/continue" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const payload = body ? JSON.parse(body) : {};
         const taskId = payload.task_id || payload.id;
         const message = compactFormText(payload.message || payload.followup || payload.note, "");
+        const currentTask = loadTasks().find((task: any) => task.id === taskId);
+        if (!currentTask) return sendJson(res, { error: "任务不存在" }, 404);
+        const requestedKind = String(payload.continuation_kind || payload.continuationKind || "auto");
+        const continuationKind = requestedKind === "auto"
+          ? (await decideWorkflowWithModel({
+              message,
+              scope: "group",
+              context: {
+                current_goal: currentTask.business_goal || currentTask.title || "",
+                current_status: currentTask.status || "",
+                task_id: currentTask.id,
+              },
+            })).continuationKind
+          : requestedKind;
         const result = continueTaskWithMessage(taskId, message, ctx, {
           source: payload.source || "user",
           auto_execute: payload.auto_execute,
           autoExecute: payload.autoExecute,
-          continuationKind: payload.continuation_kind || payload.continuationKind || "auto",
+          continuationKind,
           idempotencyKey: payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId,
         });
         if (!result.success) return sendJson(res, { error: result.error, new_task_suggested: result.new_task_suggested === true, continuation_kind: result.new_task_suggested ? "new_task" : undefined }, result.status || 400);

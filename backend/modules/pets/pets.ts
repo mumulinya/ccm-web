@@ -15,6 +15,7 @@ import { runPetActivityCoordinatorSelfTest } from "./pet-activity-coordinator";
 const PET_WEB_ASSETS_DIR = path.join(PUBLIC_DIR, "pets");
 const PET_DESKTOP_ASSETS_DIR = PET_WEB_ASSETS_DIR;
 const MAX_PET_ASSET_BYTES = 2 * 1024 * 1024;
+const ELECTRON_RUNTIME = "electron@35.7.5";
 
 function syncGeneratedPetDisplayNames(customTypes: any[]) {
   const list = Array.isArray(customTypes) ? customTypes : [];
@@ -77,7 +78,7 @@ function launchPet(port: number) {
     if (!fs.existsSync(path.join(petDir, "main.js"))) return { success: false, error: "宠物应用未安装" };
     const electronBin = findElectronBin();
     const cmd = electronBin || "npx";
-    const args = electronBin ? [petDir] : ["electron", petDir];
+    const args = electronBin ? [petDir] : ["--yes", ELECTRON_RUNTIME, petDir];
     const child = spawn(cmd, args, {
       detached: true,
       stdio: "ignore",

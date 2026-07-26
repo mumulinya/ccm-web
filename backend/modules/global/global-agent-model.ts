@@ -1,10 +1,11 @@
 import { callAnthropicCompatibleChat, callOpenAiCompatibleChat, normalizeAnthropicMessagesUrl, normalizeChatCompletionsUrl, shouldUseAnthropic } from "../collaboration/group-orchestrator-llm-client";
+import { shouldRetryModelCallError } from "../../system/model-call-retry";
 import { compactPetText } from "./global-agent-test-agent-display";
 
 export async function callLlm(
   config: any,
   messages: any[],
-  options: { onUsage?: (usage: any) => void } = {},
+  options: { onUsage?: (usage: any) => void; onDelta?: (delta: string) => void } = {},
 ): Promise<string> {
   const requestBytes = Buffer.byteLength(JSON.stringify(messages));
   const maxRequestBytes = 512 * 1024;
@@ -28,6 +29,8 @@ export async function callLlm(
       defaultTimeoutMs: 60_000,
       httpErrorPrefix: "统一大模型 API 调用失败:",
       onUsage: options.onUsage,
+      stream: typeof options.onDelta === "function",
+      onDelta: options.onDelta,
     });
   }
 
@@ -37,25 +40,26 @@ export async function callLlm(
     defaultTimeoutMs: 60_000,
     httpErrorPrefix: "统一大模型 API 调用失败:",
     onUsage: options.onUsage,
+    stream: typeof options.onDelta === "function",
+    onDelta: options.onDelta,
   });
 }
 
 export function shouldRetryGlobalModelError(error: any) {
-  const message = String(error?.message || error || "");
-  const status = Number(message.match(/HTTP\s+(\d{3})/i)?.[1] || 0);
-  if (status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status)) return false;
-  return true;
+  return shouldRetryModelCallError(error);
 }
 
 export async function callGlobalModelWithRetry(config: any, messages: any[], options: {
   attempts?: number;
   delayMs?: number;
   onUsage?: (usage: any) => void;
+  onDelta?: (delta: string) => void;
   call?: (config: any, messages: any[]) => Promise<string>;
 } = {}) {
-  const attempts = Math.max(1, Math.min(3, Number(options.attempts || 2)));
+  if (!options.call) return callLlm(config, messages, { onUsage: options.onUsage, onDelta: options.onDelta });
+  const attempts = Math.max(1, Math.min(5, Number(options.attempts || 5)));
   const delayMs = Math.max(0, Math.min(5_000, Number(options.delayMs ?? 500)));
-  const call = options.call || ((cfg: any, msgs: any[]) => callLlm(cfg, msgs, { onUsage: options.onUsage }));
+  const call = options.call;
   let lastError: any = null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
@@ -103,4 +107,3 @@ export async function runGlobalModelRetrySelfTest() {
   };
   return { pass: Object.values(checks).every(Boolean), checks };
 }
-

@@ -103,11 +103,16 @@ export declare function diffRequirementDecompositionPlans(previous: RequirementD
     has_changes: boolean;
 };
 export declare function extractOnlineDocumentUrls(text: string): string[];
-/** 各通道统一的开发意图识别：命中后应设置 decomposeRequirement: true。 */
+/**
+ * 兼容入口只接受上游模型已经给出的结构化决定。
+ * 自然语言是否属于可拆解需求必须由 WorkflowDecision 决定。
+ */
 export declare function shouldDecomposeRequirementIntent(input?: {
-    userText?: string;
-    files?: Array<any> | null;
-    urls?: string[] | null;
+    modelDecision?: {
+        actionRequired?: boolean;
+        intentKind?: string;
+        decomposeRequirement?: boolean;
+    } | null;
 }): boolean;
 export declare function decomposeRequirementToTaskPlan(input: {
     requirement: BusinessRequirementExtraction;
@@ -139,7 +144,7 @@ export declare function requirementToIntakeDraft(requirement: BusinessRequiremen
     risks: any;
     clarification_questions: string[];
     source_evidence: string[];
-    extraction_method: "model" | "deterministic_fallback";
+    extraction_method: string;
     generated_at: string;
 };
 export {};

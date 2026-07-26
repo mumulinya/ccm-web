@@ -18,6 +18,7 @@ export function useGroupChatStream({
   messages,
   currentGroup,
   currentGroupSessionId,
+  ensureGroupSession,
   mainAgentStatus,
   groupAgentQa,
   lastGroupMsgCount,
@@ -200,10 +201,31 @@ export function useGroupChatStream({
     window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
   }
 
+  const guideGroupQueuedTurn = async (turn) => {
+    if (!turn?.id) return
+    const guidedTurn = await groupTurnControl.guide(turn)
+    toast.success('这条消息已移到队首，将作为当前任务的补充要求')
+    if (isStreaming.value) await stopGroupCurrentWork({ preserveTask: true })
+    window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
+    return guidedTurn
+  }
+
   const sendMessage = async (options = {}) => {
     const queuedTurn = options?.queueTurn || null
     if (isStreaming.value && !queuedTurn) return submitGroupMessageWhileBusy()
     if ((!queuedTurn && !newMessage.value.trim() && messageFiles.value.length === 0) || !currentGroup.value) return
+    if (!currentGroupSessionId.value) {
+      try {
+        await ensureGroupSession?.()
+      } catch (error) {
+        toast.error(error?.message || '创建群聊会话失败')
+        return { success: false, error: error?.message || '创建群聊会话失败' }
+      }
+    }
+    if (!currentGroupSessionId.value) {
+      toast.error('当前群聊会话尚未创建')
+      return { success: false, error: '当前群聊会话尚未创建' }
+    }
     const msg = queuedTurn ? String(queuedTurn.message || '').trim() : newMessage.value.trim()
     const filesToSend = queuedTurn ? [] : [...messageFiles.value]
     const taskSupplementTarget = isTaskSupplementMode.value ? { ...pendingGroupTaskInput.value } : null
@@ -704,6 +726,7 @@ export function useGroupChatStream({
     stoppingGroupTurn,
     groupTurnConversationId,
     groupTurnControl,
+    guideGroupQueuedTurn,
     stopGroupCurrentWork,
     drainGroupTurnQueue,
     submitGroupMessageWhileBusy,

@@ -817,7 +817,11 @@ export function uniqueStrings(...lists: any[]) {
 
 export function taskRequiresVerification(task: any) {
   if (task?.requires_verification === false || task?.requiresVerification === false) return false;
-  return task?.workflow_type === "daily_dev";
+  if (task?.requires_verification === true || task?.requiresVerification === true) return true;
+  const modes = task?.workflowDecision?.verificationModes
+    || task?.workflow_decision?.verification_modes
+    || task?.intake_draft?.workflowDecision?.verificationModes;
+  return Array.isArray(modes) && modes.length > 0;
 }
 
 function isSuggestedOnlyVerification(value: any) {
@@ -1192,11 +1196,11 @@ function inferTaskImpactScope(task: any, assignments: any[] = [], mentions: any[
     mentions.map((item: any) => item.targetName || String(item.mention || "").replace(/^@/, "")),
     [task?.target_project].filter(Boolean)
   ).filter(Boolean);
-  const areas: string[] = [];
-  if (/前端|页面|组件|vue|react|css|样式|表单|路由|frontend|web|ui/i.test(text)) areas.push("前端页面/组件");
-  if (/后端|接口|api|服务|controller|service|route|数据库|sql|schema|backend/i.test(text)) areas.push("后端接口/服务");
-  if (/测试|验证|test|spec|e2e|lint|build/i.test(text)) areas.push("测试/构建验证");
-  if (/文档|README|markdown|prd|说明/i.test(text)) areas.push("文档/说明");
+  const areas = uniqueStrings(
+    task?.impact_scope || task?.impactScope || [],
+    task?.workflowDecision?.impactScope || task?.workflow_decision?.impact_scope || [],
+    task?.intake_draft?.workflowDecision?.impactScope || [],
+  );
   const fileHints = uniqueStrings((text.match(/[\w@./-]+\.(?:vue|tsx?|jsx?|css|scss|json|md|yml|yaml|py|go|rs|java|kt|sql)/gi) || []).slice(0, 20));
   return {
     projects: projectNames,
@@ -1294,10 +1298,10 @@ export function changeLooksHighRiskForIndependentReview(change: any) {
 export function explainIndependentReviewTriggerDecision(task: any, actualFileChanges: any[] = []) {
   const changes = Array.isArray(actualFileChanges) ? actualFileChanges : [];
   const highRiskFiles = changes.filter(changeLooksHighRiskForIndependentReview);
-  const goalText = [task?.title, task?.business_goal, task?.description, task?.acceptance_criteria, task?.source_documents]
-    .filter(Boolean)
-    .join("\n");
-  const goalNeedsReview = changes.length > 0 && /后端|接口|API|数据库|权限|登录|认证|支付|安全|迁移|配置|部署|基础设施|跨项目/i.test(goalText);
+  const workflowDecision = task?.workflowDecision || task?.workflow_decision || task?.intake_draft?.workflowDecision || task?.intake_draft?.workflow_decision || null;
+  const goalNeedsReview = changes.length > 0 && (workflowDecision?.requiresIndependentReview === true
+    || workflowDecision?.requires_independent_review === true
+    || ["write", "high"].includes(String(workflowDecision?.riskLevel || workflowDecision?.risk_level || "")));
   const triggerReasons: string[] = [];
   const skipReasons: string[] = [];
 
@@ -1312,11 +1316,11 @@ export function explainIndependentReviewTriggerDecision(task: any, actualFileCha
   } else {
     if (changes.length >= 3) triggerReasons.push(`涉及 ${changes.length} 个文件（≥3）`);
     if (highRiskFiles.length) triggerReasons.push(`包含 ${highRiskFiles.length} 个后端/API/配置等高风险文件`);
-    if (goalNeedsReview) triggerReasons.push("目标描述命中后端/API/权限/支付等复杂变更关键词");
+    if (goalNeedsReview) triggerReasons.push("模型决策要求独立复核或标记为写入/高风险任务");
     if (!triggerReasons.length && !(task?.requires_independent_review === true || task?.requiresIndependentReview === true)) {
       if (!changes.length) skipReasons.push("尚无真实文件变更证据，未达到自动触发条件");
       else if (changes.length < 3 && !highRiskFiles.length && !goalNeedsReview) {
-        skipReasons.push(`仅 ${changes.length} 个低风险文件变更，且目标未命中复杂变更关键词`);
+        skipReasons.push(`仅 ${changes.length} 个低风险文件变更，且模型未要求独立复核`);
       }
     }
   }

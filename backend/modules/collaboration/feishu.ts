@@ -224,6 +224,10 @@ export async function sendFeishuMessageToTarget(options: {
   title?: string;
   markdown?: string;
   text?: string;
+  replyToMessageId?: string;
+  updateMessageId?: string;
+  replyInThread?: boolean;
+  actions?: Array<{ text: string; type?: "primary" | "default" | "danger"; value: Record<string, any> }>;
 }): Promise<any> {
   const receiveId = String(options.receiveId || "").trim();
   const receiveIdType = options.receiveIdType || "chat_id";
@@ -233,17 +237,35 @@ export async function sendFeishuMessageToTarget(options: {
   if (!token) return { success: false, error: "无法获取飞书控制机器人 Token" };
   const title = String(options.title || "任务进度").slice(0, 80);
   const markdown = String(options.markdown || options.text || "暂无内容").slice(0, 12000);
-  const card = buildFeishuReportCard(title, markdown);
+  const card = buildFeishuReportCard(title, markdown, options.actions || []);
   try {
-    const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
-      method: "POST",
+    const updateMessageId = String(options.updateMessageId || "").trim();
+    const replyToMessageId = String(options.replyToMessageId || "").trim();
+    const endpoint = updateMessageId
+      ? `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(updateMessageId)}`
+      : replyToMessageId
+        ? `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(replyToMessageId)}/reply`
+        : `https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`;
+    const payload: any = updateMessageId
+      ? { content: JSON.stringify(card) }
+      : { msg_type: "interactive", content: JSON.stringify(card) };
+    if (replyToMessageId && options.replyInThread === true) payload.reply_in_thread = true;
+    if (!updateMessageId && !replyToMessageId) payload.receive_id = receiveId;
+    const response = await fetch(endpoint, {
+      method: updateMessageId ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ receive_id: receiveId, msg_type: "interactive", content: JSON.stringify(card) }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(15000),
     });
     const result = await response.json() as any;
     if (response.ok && result.code === 0) {
-      return { success: true, target_type: receiveIdType, target_id: receiveId, message_id: result.data?.message_id || "" };
+      return {
+        success: true,
+        target_type: receiveIdType,
+        target_id: receiveId,
+        message_id: result.data?.message_id || updateMessageId || "",
+        delivery_mode: updateMessageId ? "update" : replyToMessageId ? "reply" : "send",
+      };
     }
     return { success: false, error: result.msg || `飞书消息接口错误 ${result.code ?? response.status}`, code: result.code ?? response.status };
   } catch (error: any) {
@@ -272,8 +294,12 @@ export async function probeFeishuControlBotApi(): Promise<any> {
   }
 }
 
-function buildFeishuReportCard(title: string, markdown: string) {
-  return {
+export function buildFeishuReportCard(
+  title: string,
+  markdown: string,
+  actions: Array<{ text: string; type?: "primary" | "default" | "danger"; value: Record<string, any> }> = [],
+) {
+  const card: any = {
     config: { wide_screen_mode: true },
     header: { title: { tag: "plain_text", content: String(title || "开发报告").slice(0, 80) }, template: "blue" },
     elements: [{
@@ -281,6 +307,18 @@ function buildFeishuReportCard(title: string, markdown: string) {
       text: { tag: "lark_md", content: String(markdown || "暂无内容").slice(0, 12000) },
     }],
   };
+  if (actions.length) {
+    card.elements.push({
+      tag: "action",
+      actions: actions.slice(0, 4).map(action => ({
+        tag: "button",
+        text: { tag: "plain_text", content: String(action.text || "操作").slice(0, 30) },
+        type: action.type || "default",
+        value: action.value || {},
+      })),
+    });
+  }
+  return card;
 }
 
 async function sendFeishuWebhookReportMessage(config: any, options: { title: string; markdown: string }): Promise<any> {

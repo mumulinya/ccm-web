@@ -14,8 +14,9 @@ const { runToolManagerRuntimeSelfTest } = require("../ccm-package/dist/tools/too
 const { runAgentRunnerSelfTest } = require("../ccm-package/dist/agents/runner.js");
 const { runToolChainVerificationSelfTest } = require("../ccm-package/dist/modules/tools/tools.js");
 const { runToolCatalogManagementSelfTest } = require("../ccm-package/dist/tools/tool-catalog-management.js");
-const projectManagerSource = fs.readFileSync(new URL("../frontend/src/components/projects/ProjectManager.vue", import.meta.url), "utf-8");
+const projectManagerSource = fs.readFileSync(new URL("../frontend/src/components/projects/useProjectManager.js", import.meta.url), "utf-8");
 const projectToolsModalSource = fs.readFileSync(new URL("../frontend/src/components/projects/ProjectToolsModal.vue", import.meta.url), "utf-8");
+const agentToolsModalSource = fs.readFileSync(new URL("../frontend/src/components/common/AgentToolsModal.vue", import.meta.url), "utf-8");
 const toolsConfigSource = fs.readFileSync(new URL("../frontend/src/components/tools/ToolsConfig.vue", import.meta.url), "utf-8");
 const appSource = fs.readFileSync(new URL("../frontend/src/App.vue", import.meta.url), "utf-8");
 const mcpEditorSource = fs.readFileSync(new URL("../frontend/src/components/tools/McpServerEditor.vue", import.meta.url), "utf-8");
@@ -28,7 +29,8 @@ const projectToolUiChecks = {
   projectWritablePathsStateDeclared: /const projectWritablePaths = ref\(''\)/.test(projectManagerSource),
   projectForbiddenPathsStateDeclared: /const projectForbiddenPaths = ref\(''\)/.test(projectManagerSource),
   projectDeliveryContractStateDeclared: /const projectDeliveryContract = ref\(''\)/.test(projectManagerSource),
-  projectToolOverlayAboveMobileNavigation: /\.modal-overlay\s*\{[\s\S]*?z-index:\s*10001\s*!important;[\s\S]*?\}/.test(projectToolsModalSource),
+  projectToolOverlayAboveMobileNavigation: /<AgentToolsModal/.test(projectToolsModalSource)
+    && /\.agent-tools-overlay\{[^}]*z-index:12000/.test(agentToolsModalSource),
   incompleteScopeActionNavigatesToBusinessSurface: /action\?\.kind === 'open_scope_real_task'[\s\S]*?emit\('navigate', \{ tab: 'groups', groupId: scopeId \}\)[\s\S]*?emit\('navigate', \{ tab: 'projects', project: scopeId \}\)/.test(toolsConfigSource),
   incompleteScopeActionDoesNotRunGenericMatrix: !/action\?\.kind === 'run_child_agent_e2e'[\s\S]*?runRealCliMatrix\(\)/.test(toolsConfigSource),
   toolsNavigationUsesWorkspaceRouter: /<ToolsConfig @navigate="applyPetNavigationTarget" \/>/.test(appSource),
@@ -56,7 +58,7 @@ const results = {
 };
 
 for (const [name, result] of Object.entries(results)) {
-  assert.equal(result?.pass, true, `${name} self-test failed`);
+  assert.equal(result?.pass, true, `${name} self-test failed${name === "projectToolUi" ? `: ${JSON.stringify(result?.checks || {})}` : ""}`);
 }
 
 console.log(JSON.stringify({

@@ -110,7 +110,7 @@ async function run() {
       }),
     })
     const ssrf = await api.ingestRequirementSources({ userText: 'http://127.0.0.1/private-doc', extractRequirement: false })
-    const fallback = await api.ingestRequirementSources({
+    const modelUnavailable = await api.ingestRequirementSources({
       userText: '实现退款审批页面和后端接口，必须完成测试验收',
       extractRequirement: true,
       requirementConfig: { enabled: false },
@@ -161,10 +161,10 @@ async function run() {
       attachmentEvidenceRecorded: result.attachments.length === files.length && result.attachments.every(item => item.readable && ['parsed', 'partial'].includes(item.status)),
       tencentAuthorizationExplicit: tencent.sources[0]?.status === 'needs_authorization' && /授权|登录/.test(tencent.sources[0]?.error || ''),
       privateNetworkBlocked: ssrf.sources[0]?.status === 'failed' && /本机|局域网/.test(ssrf.sources[0]?.error || ''),
-      deterministicFallbackAvailable: fallback.requirement?.extraction_method === 'deterministic_fallback' && fallback.requirement.scope.includes('前端页面与交互') && fallback.requirement.scope.includes('后端接口与数据'),
-      fallbackWarningRecorded: fallback.warnings.some(item => /本地规则/.test(item))
-        && fallback.technical?.fallback_used === true
-        && /未配置|未启用/.test(fallback.technical?.extraction_error || ''),
+      modelUnavailableFailsClosed: modelUnavailable.requirement === null && modelUnavailable.decomposition === null,
+      modelFailureRecordedWithoutLocalFallback: modelUnavailable.warnings.some(item => /未生成本地语义替代结果/.test(item))
+        && modelUnavailable.technical?.fallback_used === false
+        && /未配置|未启用/.test(modelUnavailable.technical?.extraction_error || ''),
       sharedTechnicalDetailsExposeSourceDiagnostics: technicalSections.some(section => section.id === 'requirement-sources')
         && technicalSections.some(section => section.id === 'requirement-ingestion-detail'
           && section.items.some(item => item.label === '提取错误' && item.value === 'simulated extraction error')),

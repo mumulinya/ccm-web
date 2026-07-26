@@ -160,7 +160,7 @@ const taskStatusLabel = computed(() => {
   padding: 7px 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.68);
+  background: var(--surface-subtle);
 }
 .project-task-next-grid small {
   color: var(--text-muted);

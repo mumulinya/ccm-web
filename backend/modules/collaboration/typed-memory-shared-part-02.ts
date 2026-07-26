@@ -516,9 +516,10 @@ export function extractTaskStateSignal(fact: any) {
   const text = String(fact?.text || "");
   const taskId = String(fact?.taskId || (text.match(/\[([^\]]+)\]/)?.[1]) || "").trim();
   if (!taskId) return null;
-  const state = /(失败|阻塞|未完成|超时|异常|failed|blocked|timeout|needs_info|need info)/i.test(text)
+  const rawState = String(fact?.state || fact?.status || fact?.outcome || "").trim().toLowerCase();
+  const state = ["blocked", "failed", "timed_out", "timeout", "needs_info"].includes(rawState)
     ? "blocked"
-    : /(完成|修复|通过|done|success|completed|passed|fixed)/i.test(text)
+    : ["done", "completed", "passed", "fixed", "success"].includes(rawState)
       ? "done"
       : "";
   if (!state) return null;
@@ -526,12 +527,17 @@ export function extractTaskStateSignal(fact: any) {
 }
 
 export function shouldIgnoreGroupMemoryRequest(query: string, options: any = {}) {
+  void query;
   if (options.forceMemory === true || options.force_memory === true || options.disableIgnoreMemoryDetection === true || options.disable_ignore_memory_detection === true) return false;
   if (options.ignoreMemory === true || options.ignore_memory === true) return true;
-  const text = String(query || "")
-    .replace(/\bmemoryIgnored\b|\bmemory_ignored\b|\bmemoryUsed\b|\bmemory_used\b|\bmemoryUsed\s*\/\s*memoryIgnored\b|\bmemoryProvenanceUsage\b/gi, "receipt_field");
-  return /(忽略|不要|不使用|别用|\bignore\b|\bignored\b|do not use|don't use)[^\n]{0,20}(记忆|\bmemory\b)/i.test(text)
-    || /(记忆|\bmemory\b)[^\n]{0,20}(忽略|不要|不使用|\bignore\b|\bignored\b)/i.test(text);
+  const task = options.task || {};
+  const decision = options.workflowDecision || options.workflow_decision
+    || task.workflowDecision || task.workflow_decision
+    || task.intake_draft?.workflowDecision || task.intake_draft?.workflow_decision
+    || task.workflow_meta?.intake?.task_intent?.workflowDecision
+    || task.workflow_meta?.intake?.task_intent?.workflow_decision
+    || null;
+  return String(decision?.memoryPolicy || decision?.memory_policy || "use") === "ignore";
 }
 
 export function typedMemoryDeliveryLeaseChecksum(lease: any = {}) {

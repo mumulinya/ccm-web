@@ -314,21 +314,10 @@ export function handleMusicApiPartB(pathname: string, req: any, res: any, parsed
         }
         const emotionLabels = ["惬意", "治愈", "温柔", "怀念", "放空", "舒缓", "思念", "平静", "动感", "感动"];
         const cfg = loadOrchestratorConfig();
-        if (cfg.enabled && cfg.apiKey && cfg.model) {
-          try {
-            const matched = await classifySongEmotion(cfg, String(title), String(artist || "未知"), emotionLabels);
-            if (matched) return sendJson(res, { success: true, emotion: matched });
-          } catch (error: any) { console.warn("[MusicEmotion] model fallback:", error?.message); }
-        }
-        const t = String(title).toLowerCase();
-        let fallback = "惬意";
-        if (t.includes("晚安") || t.includes("夜")) fallback = "舒缓";
-        else if (t.includes("思念") || t.includes("想你")) fallback = "思念";
-        else if (t.includes("再见") || t.includes("离别")) fallback = "怀念";
-        else if (t.includes("治愈") || t.includes("温暖")) fallback = "治愈";
-        else if (t.includes("快乐") || t.includes("开心")) fallback = "动感";
-        else fallback = emotionLabels[Math.floor(Math.random() * emotionLabels.length)];
-        sendJson(res, { success: true, emotion: fallback });
+        if (!cfg.enabled || !cfg.apiKey || !cfg.model) return sendJson(res, { success: false, error: "统一大模型尚未配置，无法识别歌曲情绪" }, 503);
+        const matched = await classifySongEmotion(cfg, String(title), String(artist || "未知"), emotionLabels);
+        if (!matched) return sendJson(res, { success: false, error: "统一大模型没有返回有效歌曲情绪" }, 503);
+        sendJson(res, { success: true, emotion: matched });
       } catch (e: any) {
         sendJson(res, { success: false, error: e.message }, 500);
       }
@@ -345,16 +334,10 @@ export function handleMusicApiPartB(pathname: string, req: any, res: any, parsed
         const cfg = loadMusicAgentConfig();
         const memoryContext = await prepareMusicAgentTurn(message, chatMode);
         let action: any;
-        try {
-          action = await classifyMusicAgentAction(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
-        } catch {
-          const intent = extractMusicIntent(message);
-          action = normalizeMusicAgentAction(
-            { action: intent.type === "play" ? "play_music" : intent.type === "search" ? "search_music" : intent.type === "convert" ? "convert_music" : "none", keyword: intent.keyword },
-            message,
-            chatMode,
-            "simple-fallback",
-          );
+        action = await classifyMusicAgentAction(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
+        if (action.error) {
+          sendJson(res, { success: false, error: `音乐意图识别失败：${action.error}`, action }, 503);
+          return;
         }
         const intentType = action.type === "play_music" ? "play"
           : action.type === "search_music" ? "search"

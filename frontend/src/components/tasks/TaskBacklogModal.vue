@@ -134,7 +134,7 @@ const emit = defineEmits(['close', 'import-shared-docs', 'dispatch-ready', 'disp
 .backlog-bulk-result span { padding: 4px 8px; border-radius: 6px; background: rgba(34, 197, 94, 0.08); color: var(--accent-green); font-size: 11px; font-weight: 700; }
 .empty-mini { padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: 13px; }
 .backlog-list { display: flex; flex-direction: column; gap: 10px; }
-.backlog-item { display: flex; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--border-color); border-left: 4px solid rgba(100, 116, 139, 0.28); border-radius: 8px; background: rgba(255,255,255,0.7); }
+.backlog-item { display: flex; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--border-color); border-left: 4px solid rgba(100, 116, 139, 0.28); border-radius: 8px; background: var(--surface-subtle); }
 .backlog-item.needs_user, .backlog-item.blocked, .backlog-item.failed { border-left-color: #f59e0b; }
 .backlog-item.ready { border-left-color: #22c55e; }
 .backlog-item.planned, .backlog-item.dispatched, .backlog-item.queued, .backlog-item.running, .backlog-item.in_progress, .backlog-item.reviewing { border-left-color: #3b82f6; }

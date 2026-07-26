@@ -63,6 +63,7 @@ export declare class ConversationTurnControlStore {
     claim(input: any): ConversationTurnRecord;
     settle(input: any): ConversationTurnRecord;
     cancel(id: string, reason?: string): ConversationTurnRecord;
+    guide(id: string): ConversationTurnRecord;
     retry(id: string): ConversationTurnRecord;
 }
 export declare const conversationTurnControl: ConversationTurnControlStore;
@@ -72,6 +73,7 @@ export declare function runConversationTurnControlSelfTest(): {
     checks: {
         idempotentEnqueue: boolean;
         fifoClaim: boolean;
+        guidedTurnPromoted: boolean;
         restartRecovery: boolean;
         terminalStates: boolean;
         persistedSchema: boolean;

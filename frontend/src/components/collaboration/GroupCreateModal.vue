@@ -42,7 +42,7 @@ const emit = defineEmits(['close', 'submit', 'update:name', 'toggle-project'])
 .group-create-modal { min-width: 420px; }
 .form-group { margin-bottom: 18px; }
 .form-group label { display: block; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 8px; font-weight: 500; }
-.form-group input { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; }
+.form-group input { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); font-size: 13px; outline: none; }
 .checkbox-list { max-height: 200px; overflow-y: auto; padding: 6px 0; }
 .checkbox-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; transition: background 0.2s; }
 .checkbox-item:hover { background: rgba(0,0,0,0.02); }

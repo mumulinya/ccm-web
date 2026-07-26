@@ -5,6 +5,7 @@ exports.shouldRetryGlobalModelError = shouldRetryGlobalModelError;
 exports.callGlobalModelWithRetry = callGlobalModelWithRetry;
 exports.runGlobalModelRetrySelfTest = runGlobalModelRetrySelfTest;
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
+const model_call_retry_1 = require("../../system/model-call-retry");
 const global_agent_test_agent_display_1 = require("./global-agent-test-agent-display");
 async function callLlm(config, messages, options = {}) {
     const requestBytes = Buffer.byteLength(JSON.stringify(messages));
@@ -28,6 +29,8 @@ async function callLlm(config, messages, options = {}) {
             defaultTimeoutMs: 60_000,
             httpErrorPrefix: "统一大模型 API 调用失败:",
             onUsage: options.onUsage,
+            stream: typeof options.onDelta === "function",
+            onDelta: options.onDelta,
         });
     }
     return (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, {
@@ -36,19 +39,19 @@ async function callLlm(config, messages, options = {}) {
         defaultTimeoutMs: 60_000,
         httpErrorPrefix: "统一大模型 API 调用失败:",
         onUsage: options.onUsage,
+        stream: typeof options.onDelta === "function",
+        onDelta: options.onDelta,
     });
 }
 function shouldRetryGlobalModelError(error) {
-    const message = String(error?.message || error || "");
-    const status = Number(message.match(/HTTP\s+(\d{3})/i)?.[1] || 0);
-    if (status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status))
-        return false;
-    return true;
+    return (0, model_call_retry_1.shouldRetryModelCallError)(error);
 }
 async function callGlobalModelWithRetry(config, messages, options = {}) {
-    const attempts = Math.max(1, Math.min(3, Number(options.attempts || 2)));
+    if (!options.call)
+        return callLlm(config, messages, { onUsage: options.onUsage, onDelta: options.onDelta });
+    const attempts = Math.max(1, Math.min(5, Number(options.attempts || 5)));
     const delayMs = Math.max(0, Math.min(5_000, Number(options.delayMs ?? 500)));
-    const call = options.call || ((cfg, msgs) => callLlm(cfg, msgs, { onUsage: options.onUsage }));
+    const call = options.call;
     let lastError = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
         try {

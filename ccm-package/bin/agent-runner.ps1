@@ -1,5 +1,6 @@
 param(
   [switch]$Watch,
+  [switch]$HiddenChild,
   [int]$IntervalSeconds = 2
 )
 
@@ -375,6 +376,21 @@ function Invoke-RunnerOnce {
   }
   Write-Heartbeat -Status "idle" -Detail ""
   return $handled
+}
+
+if ($Watch -and -not $HiddenChild -and $env:OS -eq "Windows_NT") {
+  $arguments = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-WindowStyle", "Hidden",
+    "-File", $PSCommandPath,
+    "-Watch",
+    "-HiddenChild",
+    "-IntervalSeconds", [string]$IntervalSeconds
+  )
+  Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WindowStyle Hidden
+  Write-Host "[agent-runner.ps1] hidden background runner started"
+  exit 0
 }
 
 Ensure-Dirs

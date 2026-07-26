@@ -27,6 +27,7 @@ export declare function createAgentRunnerRuntime(deps: any): {
             dispatch_gate: any;
             catalogRevision: string;
         };
+        selectedRoleSkills: any;
     };
     callAgent: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, workspaceTarget?: any) => Promise<any>;
     callAgentForGroupStream: (projectName: string, message: string, workDir: string, agentType: string, options?: any) => Promise<string>;

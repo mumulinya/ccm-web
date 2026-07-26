@@ -678,8 +678,9 @@ export async function runAgentCliProbe(payload: any, ctx: CollabCtx) {
 export function taskRequiresAgentQa(task: any) {
   if (task?.requires_agent_qa === false || task?.requiresAgentQa === false) return false;
   if (task?.requires_agent_qa === true || task?.requiresAgentQa === true) return true;
-  const text = [task?.title, task?.description, task?.business_goal, task?.acceptance_criteria, task?.source_documents].filter(Boolean).join("\n");
-  return /(?:必须|需要|要求).{0,24}(?:Agent[- ]?to[- ]?Agent|Agent\s*QA|ask_agent|子\s*Agent.{0,8}(?:询问|问答)|向.{0,16}Agent.{0,8}(?:提问|询问))/i.test(text);
+  return task?.workflowDecision?.requiresAgentQa === true
+    || task?.workflow_decision?.requires_agent_qa === true
+    || task?.intake_draft?.workflowDecision?.requiresAgentQa === true;
 }
 
 export function getTaskAgentQaGate(task: any) {
@@ -852,14 +853,16 @@ export function getReceiptIndependentReviewSubject(receipt: any, fallback = "") 
 export function findLatestTestAgentReviewReceipt(receipts: any[] = [], route = "") {
   return [...(receipts || [])].reverse().find((receipt: any) => {
     const verdict = getReceiptTestAgentVerdict(receipt);
-    const reviewState = independentReviewVerdictState([
+    const reviewStates = [
       verdict?.reviewRoute,
       verdict?.status,
       verdict?.recommendation,
       receipt?.status,
-      ...(Array.isArray(receipt?.independentReview) ? receipt.independentReview.map((item: any) => item?.verdict || item?.status || item?.summary) : []),
-      ...(Array.isArray(receipt?.independent_review) ? receipt.independent_review.map((item: any) => item?.verdict || item?.status || item?.summary) : []),
-    ].filter(Boolean).join("\n"));
+      ...(Array.isArray(receipt?.independentReview) ? receipt.independentReview.map((item: any) => item?.verdict || item?.status) : []),
+      ...(Array.isArray(receipt?.independent_review) ? receipt.independent_review.map((item: any) => item?.verdict || item?.status) : []),
+    ].filter(Boolean).map(independentReviewVerdictState);
+    const reviewState = (["needs_recheck", "needs_environment", "needs_user", "failed", "passed"] as const)
+      .find(state => reviewStates.includes(state)) || "unknown";
     if (route === "needs_recheck") return verdict?.needsRecheck === true || verdict?.reviewRoute === "test_agent_recheck" || reviewState === "needs_recheck";
     if (route === "needs_environment") return verdict?.needsEnvironment === true || verdict?.reviewRoute === "environment" || reviewState === "needs_environment";
     if (route === "failed") return verdict?.needsRework === true || verdict?.reviewRoute === "implementation_rework" || reviewState === "failed";

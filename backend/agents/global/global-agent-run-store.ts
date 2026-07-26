@@ -355,6 +355,8 @@ export const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[] = [
   { name: "list_cron", description: "查询定时任务。", risk: "read" },
   { name: "query_knowledge", description: "查询当前全局作用域知识库。优先使用已配置的语义 Embedding，未配置或失败时自动使用本地混合检索；只用于获取回答或规划依据。", required: ["query"], risk: "read" },
   { name: "query_global_memory", description: "查询全局 Agent 的长期记忆、历史任务结论和来源引用。", required: ["query"], risk: "read" },
+  { name: "invoke_skill", description: "调用全局 Agent 工具配置中已授权的 Skill。name 必须来自当前上下文的授权 Skill 目录，input 传入本轮完整目标或必要上下文。", required: ["name"], risk: "read" },
+  { name: "invoke_mcp", description: "调用全局 Agent 工具配置中已授权且当前可用的 MCP 工具。tool_name 必须使用当前上下文目录中的完整名称，arguments 为该工具参数。由于第三方 MCP 可能产生外部副作用，统一按写操作执行授权门禁。", required: ["tool_name"], risk: "write" },
   { name: "manage_global_memory", description: "查询状态、压缩、重建、启用或禁用全局 Agent 长期记忆；变更操作必须提供 reason。", required: ["operation"], risk: args => String(args?.operation || "").toLowerCase() === "status" ? "read" : ["disable", "rebuild"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
   { name: "inspect_mission", description: "查询全局开发任务及子任务交付状态。", required: ["id"], risk: "read" },
   { name: "inspect_supervision", description: "查询长期任务跟进、恢复动作、交付验收和等待人工事项。", required: ["id"], risk: "read" },

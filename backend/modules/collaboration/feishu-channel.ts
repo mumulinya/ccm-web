@@ -5,6 +5,7 @@ import { CCM_DIR } from "../../core/utils";
 import { loadAutoDevNotifyConfig, loadFeishuConfig } from "../../core/db";
 import { sendFeishuMessageToTarget } from "./feishu";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import { extractFeishuInboundIdentity, publicFeishuUserMapping, signFeishuCardAction } from "./feishu-access";
 
 const STATE_FILE = path.join(CCM_DIR, "feishu-channel-state.json");
 const SESSION_DIR = path.join(CCM_DIR, "sessions");
@@ -19,16 +20,29 @@ const MAX_DELIVERIES = 1600;
 type FeishuDestination = {
   chat_id: string;
   open_id: string;
+  user_id: string;
   receive_id: string;
   receive_id_type: "chat_id" | "open_id";
   platform_session_key: string;
+  message_id: string;
+  root_message_id: string;
+  thread_id: string;
 };
+
+type FeishuChannelAlertHandler = (payload: { role: string; text: string; source: string; deliveryId: string }) => void;
+let channelAlertHandler: FeishuChannelAlertHandler | null = null;
+
+export function setFeishuChannelAlertHandler(handler: FeishuChannelAlertHandler | null) {
+  channelAlertHandler = handler;
+}
 
 function emptyState() {
   return {
     schema: "ccm-feishu-channel-state-v1",
     bindings: [] as any[],
     deliveries: [] as any[],
+    cards: [] as any[],
+    identities: [] as any[],
     report_deliveries: [] as any[],
     inbound: { count: 0, last_at: "", last_message_id: "", last_session_id: "" },
     outbound: { sent: 0, failed: 0, last_success_at: "", last_failure_at: "", last_error: "" },
@@ -44,6 +58,8 @@ function loadState() {
       ...value,
       bindings: Array.isArray(value.bindings) ? value.bindings : [],
       deliveries: Array.isArray(value.deliveries) ? value.deliveries : [],
+      cards: Array.isArray(value.cards) ? value.cards : [],
+      identities: Array.isArray(value.identities) ? value.identities : [],
       report_deliveries: Array.isArray(value.report_deliveries) ? value.report_deliveries : [],
     };
   } catch {
@@ -57,6 +73,8 @@ function saveState(state: any) {
     ...state,
     bindings: (state.bindings || []).slice(-MAX_BINDINGS),
     deliveries: (state.deliveries || []).slice(-MAX_DELIVERIES),
+    cards: (state.cards || []).slice(-500),
+    identities: (state.identities || []).slice(-500),
     report_deliveries: (state.report_deliveries || []).slice(-240),
     updated_at: new Date().toISOString(),
   };
@@ -83,7 +101,7 @@ function parsePlatformSessionKey(value: any): FeishuDestination | null {
   if (!match) return null;
   const chatId = match[1];
   const openId = match[2];
-  return { chat_id: chatId, open_id: openId, receive_id: chatId || openId, receive_id_type: chatId ? "chat_id" : "open_id", platform_session_key: text };
+  return { chat_id: chatId, open_id: openId, user_id: "", receive_id: chatId || openId, receive_id_type: chatId ? "chat_id" : "open_id", platform_session_key: text, message_id: "", root_message_id: "", thread_id: "" };
 }
 
 function directDestination(payload: any = {}): FeishuDestination | null {
@@ -91,8 +109,12 @@ function directDestination(payload: any = {}): FeishuDestination | null {
   const sender = payload?.event?.sender?.sender_id || payload?.sender || {};
   const chatId = String(message.chat_id || payload.chat_id || payload.chatId || "").trim();
   const openId = String(sender.open_id || payload.open_id || payload.openId || "").trim();
+  const userId = String(sender.user_id || payload.user_id || payload.userId || "").trim();
+  const messageId = String(message.message_id || payload.message_id || payload.messageId || "").trim();
+  const rootMessageId = String(message.root_id || message.root_message_id || payload.root_id || payload.rootMessageId || "").trim();
+  const threadId = String(message.thread_id || payload.thread_id || payload.threadId || rootMessageId || "").trim();
   if (!chatId && !openId) return null;
-  return { chat_id: chatId, open_id: openId, receive_id: chatId || openId, receive_id_type: chatId ? "chat_id" : "open_id", platform_session_key: chatId && openId ? `feishu:${chatId}:${openId}` : "" };
+  return { chat_id: chatId, open_id: openId, user_id: userId, receive_id: chatId || openId, receive_id_type: chatId ? "chat_id" : "open_id", platform_session_key: chatId && openId ? `feishu:${chatId}:${openId}` : "", message_id: messageId, root_message_id: rootMessageId, thread_id: threadId };
 }
 
 function sessionFiles() {
@@ -163,16 +185,112 @@ export function bindFeishuTaskContext(input: {
     task_ids: uniqueStrings([...(existing?.task_ids || []), ...(input.taskIds || [])]),
     chat_id: destination.chat_id,
     open_id: destination.open_id,
+    user_id: destination.user_id || existing?.user_id || "",
     receive_id: destination.receive_id,
     receive_id_type: destination.receive_id_type,
     platform_session_key: destination.platform_session_key,
+    latest_message_id: destination.message_id || existing?.latest_message_id || "",
+    root_message_id: destination.message_id ? (destination.root_message_id || destination.message_id) : existing?.root_message_id || "",
+    thread_id: destination.message_id ? (destination.thread_id || "") : existing?.thread_id || "",
+    active_card_key: existing?.active_card_key || "",
+    active_session_id: existing?.active_session_id || String(input.sessionId || ""),
     source: input.source || existing?.source || "feishu-control-bot",
     created_at: existing?.created_at || now,
     updated_at: now,
   };
+  const identifiersAdded = uniqueStrings([...(input.runIds || []), ...(input.missionIds || []), ...(input.taskIds || [])]);
+  if (identifiersAdded.length) {
+    const activeCard = [...(state.cards || [])].reverse().find((row: any) => row.binding_id === binding.id && row.active !== false);
+    if (activeCard) {
+      activeCard.run_ids = uniqueStrings([...(activeCard.run_ids || []), ...(input.runIds || [])]);
+      activeCard.mission_ids = uniqueStrings([...(activeCard.mission_ids || []), ...(input.missionIds || [])]);
+      activeCard.task_ids = uniqueStrings([...(activeCard.task_ids || []), ...(input.taskIds || [])]);
+      binding.active_card_key = activeCard.key;
+    }
+  }
   state.bindings = [...state.bindings.filter((row: any) => row.id !== binding.id), binding];
   saveState(state);
   return binding;
+}
+
+export function resolveBoundFeishuGlobalSessionId(payload: any = {}, fallbackSessionId = "") {
+  const nativeSessionId = String(payload?.sessionId || payload?.session_id || payload?.sessionKey || "").trim();
+  const destination = resolveFeishuDestination(payload, nativeSessionId);
+  if (!destination) return String(fallbackSessionId || "");
+  const state = loadState();
+  const binding = [...state.bindings].reverse().find((row: any) =>
+    (destination.platform_session_key && row.platform_session_key === destination.platform_session_key)
+    || (destination.chat_id && row.chat_id === destination.chat_id && (!destination.open_id || !row.open_id || row.open_id === destination.open_id)));
+  return String(binding?.active_session_id || fallbackSessionId || "");
+}
+
+export function getFeishuGlobalSessionBindings() {
+  const state = loadState();
+  const identities = state.identities || [];
+  return (state.bindings || []).map((binding: any) => {
+    const identity = identities.find((item: any) =>
+      (binding.open_id && item.open_id === binding.open_id)
+      || (binding.user_id && item.user_id === binding.user_id));
+    return {
+      id: binding.id,
+      chat_id: binding.chat_id || "",
+      open_id: binding.open_id || "",
+      user_id: binding.user_id || "",
+      label: identity?.name || binding.chat_id || binding.open_id || "飞书会话",
+      platform_session_key: binding.platform_session_key || "",
+      active_session_id: binding.active_session_id || "",
+      latest_message_id: binding.latest_message_id || "",
+      thread_id: binding.thread_id || "",
+      source: binding.source || "feishu-control-bot",
+      updated_at: binding.updated_at || "",
+    };
+  }).sort((a: any, b: any) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+}
+
+export function bindFeishuGlobalSession(input: { bindingId: string; sessionId?: string; action?: "bind" | "unbind" }) {
+  const bindingId = String(input.bindingId || "").trim();
+  const sessionId = String(input.sessionId || "").trim();
+  const state = loadState();
+  const binding = state.bindings.find((row: any) => row.id === bindingId);
+  if (!binding) throw new Error("飞书目标绑定不存在");
+  if (input.action === "unbind") {
+    if (!sessionId || binding.active_session_id === sessionId) binding.active_session_id = "";
+  } else {
+    if (!sessionId) throw new Error("缺少要绑定的全局会话 ID");
+    binding.active_session_id = sessionId;
+    binding.session_ids = uniqueStrings([...(binding.session_ids || []), sessionId]);
+  }
+  binding.updated_at = new Date().toISOString();
+  saveState(state);
+  publishRuntimeEvent("feishu", "feishu.session_binding_changed", {
+    sessionId: binding.active_session_id,
+    id: binding.id,
+    status: binding.active_session_id ? "bound" : "unbound",
+    source: "feishu-session-binding",
+  });
+  return getFeishuGlobalSessionBindings().find((row: any) => row.id === bindingId) || null;
+}
+
+export function getFeishuBindingByMessageId(messageId: string) {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+  const state = loadState();
+  const card = state.cards.find((row: any) => row.message_id === id);
+  if (card?.binding_id) return state.bindings.find((row: any) => row.id === card.binding_id) || null;
+  const delivery = state.deliveries.find((row: any) => row.message_id === id);
+  if (delivery?.binding_id) return state.bindings.find((row: any) => row.id === delivery.binding_id) || null;
+  return [...state.bindings].reverse().find((row: any) => [row.latest_message_id, row.root_message_id].includes(id)) || null;
+}
+
+export function getFeishuChannelIdentitySnapshot() {
+  const state = loadState();
+  return (state.identities || []).slice().sort((a: any, b: any) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || ""))).map((item: any) => ({
+    ...publicFeishuUserMapping(item),
+    chat_id: safeText(item.chat_id || "", 160),
+    first_seen_at: item.first_seen_at || "",
+    last_seen_at: item.last_seen_at || "",
+    message_count: Number(item.message_count || 0),
+  }));
 }
 
 function identifiersFromValue(value: any, depth = 0, result: any = { runIds: [], missionIds: [], taskIds: [] }) {
@@ -214,8 +332,52 @@ export function hasFeishuTaskBinding(input: any) {
   return !!findBinding(input || {});
 }
 
+export function createFeishuPermissionActions(request: any) {
+  const binding = findBinding({
+    runId: request?.globalRunId,
+    missionId: request?.globalMissionId,
+    taskId: String(request?.taskId || "").startsWith("project-session:") ? "" : request?.taskId,
+    sessionId: request?.originSessionId,
+  });
+  if (!binding?.id || !request?.id) return [];
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+  const makeValue = (decision: "approve" | "reject") => {
+    const value: any = {
+      ccm_action: "permission_decision",
+      request_id: request.id,
+      decision,
+      binding_id: binding.id,
+      expires_at: expiresAt,
+    };
+    value.signature = signFeishuCardAction(value);
+    return value;
+  };
+  return [
+    { text: "批准一次", type: "primary" as const, value: makeValue("approve") },
+    { text: "拒绝", type: "danger" as const, value: makeValue("reject") },
+  ];
+}
+
 function retryAt(attempts: number) {
   return new Date(Date.now() + Math.min(30, Math.max(1, 2 ** Math.max(0, attempts - 1))) * 60_000).toISOString();
+}
+
+function taskCardKey(input: any) {
+  const stage = String(input.stage || "");
+  if (["global_agent_reply", "permission_approval", "waiting_confirmation"].includes(stage)) return "";
+  const explicit = String(input.cardKey || input.card_key || "").trim();
+  if (explicit) return explicit.startsWith("task:") ? explicit : `task:${explicit}`;
+  const identity = String(input.missionId || input.mission_id || input.taskId || input.task_id || input.runId || input.run_id || "").trim();
+  return identity ? `task:${identity}` : "";
+}
+
+function renderTaskCardMarkdown(card: any) {
+  const rows = (card?.history || []).slice(-8);
+  if (!rows.length) return safeText(card?.markdown || "任务正在处理", 10000);
+  return rows.map((row: any, index: number) => {
+    const marker = index === rows.length - 1 ? "▶" : "✓";
+    return `${marker} **${safeText(row.title || row.stage || "任务进度", 80)}**\n${safeText(row.markdown || "", 1400)}`;
+  }).join("\n\n");
 }
 
 function acquireDeliveryLease(deliveryId: string): (() => void) | null {
@@ -246,20 +408,49 @@ function acquireDeliveryLease(deliveryId: string): (() => void) | null {
 async function attemptDelivery(deliveryId: string) {
   const releaseLease = acquireDeliveryLease(deliveryId);
   if (!releaseLease) return loadState().deliveries.find((row: any) => row.id === deliveryId) || null;
+  let releaseCardLease: (() => void) | null = null;
   try {
     let state = loadState();
     const delivery = state.deliveries.find((row: any) => row.id === deliveryId);
     if (!delivery || delivery.status === "sent") return delivery || null;
+    if (delivery.card_key) {
+      const cardLockId = `card_${crypto.createHash("sha256").update(`${delivery.binding_id}:${delivery.card_key}`).digest("hex").slice(0, 24)}`;
+      releaseCardLease = acquireDeliveryLease(cardLockId);
+      if (!releaseCardLease) return delivery;
+      state = loadState();
+    }
     const binding = state.bindings.find((row: any) => row.id === delivery.binding_id);
     if (!binding?.receive_id) {
       delivery.status = "failed";
       delivery.error = "飞书原会话绑定不存在";
       delivery.attempts = Number(delivery.attempts || 0) + 1;
-      delivery.next_attempt_at = retryAt(delivery.attempts);
+      delivery.next_attempt_at = delivery.attempts >= 5 ? "" : retryAt(delivery.attempts);
+      if (delivery.attempts >= 5) delivery.exhausted_alerted = true;
       saveState(state);
+      publishRuntimeEvent(delivery.attempts >= 5 ? "system" : "feishu", delivery.attempts >= 5 ? "feishu.delivery_exhausted" : "feishu.delivery_changed", {
+        deliveryId: delivery.id,
+        taskId: delivery.task_id,
+        runId: delivery.run_id,
+        status: "failed",
+        reason: delivery.error,
+        source: "feishu-outbox",
+      });
+      if (delivery.attempts >= 5) try {
+        channelAlertHandler?.({ role: "error", text: `飞书通知连续 5 次发送失败：${delivery.title}。原飞书会话绑定已失效，请在设置中检查后重试。`, source: "feishu-delivery", deliveryId: delivery.id });
+      } catch {}
       return delivery;
     }
-    const result = await sendFeishuMessageToTarget({ receiveId: binding.receive_id, receiveIdType: binding.receive_id_type, title: delivery.title, markdown: delivery.markdown });
+    const card = delivery.card_key ? state.cards.find((row: any) => row.key === delivery.card_key && row.binding_id === binding.id) : null;
+    const result = await sendFeishuMessageToTarget({
+      receiveId: binding.receive_id,
+      receiveIdType: binding.receive_id_type,
+      title: delivery.title,
+      markdown: delivery.markdown,
+      actions: Array.isArray(delivery.actions) ? delivery.actions : [],
+      updateMessageId: card?.message_id || "",
+      replyToMessageId: card?.message_id ? "" : delivery.reply_to_message_id || binding.latest_message_id || binding.root_message_id || "",
+      replyInThread: !!(binding.thread_id || binding.root_message_id),
+    });
     state = loadState();
     const current = state.deliveries.find((row: any) => row.id === deliveryId);
     if (!current) return null;
@@ -268,8 +459,26 @@ async function attemptDelivery(deliveryId: string) {
     current.status = result.success ? "sent" : "failed";
     current.sent_at = result.success ? current.last_attempt_at : "";
     current.message_id = result.message_id || "";
+    current.delivery_mode = result.delivery_mode || "send";
     current.error = result.success ? "" : safeText(result.error || "发送失败", 300);
     current.next_attempt_at = result.success || current.attempts >= 5 ? "" : retryAt(current.attempts);
+    if (result.success && current.card_key && result.message_id) {
+      const cardIndex = state.cards.findIndex((row: any) => row.key === current.card_key && row.binding_id === current.binding_id);
+      const cardRecord = {
+        ...(cardIndex >= 0 ? state.cards[cardIndex] : {}),
+        key: current.card_key,
+        binding_id: current.binding_id,
+        message_id: result.message_id,
+        reply_to_message_id: current.reply_to_message_id || "",
+        run_id: current.run_id || "",
+        mission_id: current.mission_id || "",
+        task_id: current.task_id || "",
+        latest_stage: current.stage,
+        updated_at: current.last_attempt_at,
+      };
+      if (cardIndex >= 0) state.cards[cardIndex] = cardRecord;
+      else state.cards.push(cardRecord);
+    }
     state.outbound = {
       ...(state.outbound || {}),
       sent: Number(state.outbound?.sent || 0) + (result.success ? 1 : 0),
@@ -287,8 +496,24 @@ async function attemptDelivery(deliveryId: string) {
       reason: current.error,
       source: "feishu-outbox",
     });
+    if (!result.success && current.attempts >= 5 && current.exhausted_alerted !== true) {
+      current.exhausted_alerted = true;
+      saveState(state);
+      publishRuntimeEvent("system", "feishu.delivery_exhausted", {
+        deliveryId: current.id,
+        taskId: current.task_id,
+        runId: current.run_id,
+        status: "failed",
+        reason: current.error,
+        source: "feishu-outbox",
+      });
+      try {
+        channelAlertHandler?.({ role: "error", text: `飞书通知连续 5 次发送失败：${current.title}。请在设置的飞书投递记录中检查并重试。`, source: "feishu-delivery", deliveryId: current.id });
+      } catch {}
+    }
     return current;
   } finally {
+    releaseCardLease?.();
     releaseLease();
   }
 }
@@ -302,6 +527,9 @@ export async function notifyFeishuTaskStage(input: {
   missionId?: string;
   taskId?: string;
   sessionId?: string;
+  cardKey?: string;
+  actions?: Array<{ text: string; type?: "primary" | "default" | "danger"; value: Record<string, any> }>;
+  forceNewMessage?: boolean;
 }) {
   const binding = findBinding(input);
   if (!binding) return { success: false, queued: false, reason: "no_binding" };
@@ -310,13 +538,44 @@ export async function notifyFeishuTaskStage(input: {
   const existing = state.deliveries.find((row: any) => row.dedupe_key === dedupeKey);
   if (existing) return { success: existing.status === "sent", queued: existing.status !== "sent", duplicate: true, delivery: existing };
   const now = new Date().toISOString();
+  const requestedCardKey = input.forceNewMessage ? "" : taskCardKey(input);
+  const identifiers = uniqueStrings([input.runId, input.missionId, input.taskId]);
+  const matchedCard = identifiers.length ? [...(state.cards || [])].reverse().find((row: any) => row.binding_id === binding.id && identifiers.some(id =>
+    row.run_ids?.includes(id) || row.mission_ids?.includes(id) || row.task_ids?.includes(id))) : null;
+  const cardKey = matchedCard?.key || requestedCardKey;
+  let markdown = safeText(input.markdown, 10000);
+  if (cardKey) {
+    const cardIndex = state.cards.findIndex((row: any) => row.key === cardKey && row.binding_id === binding.id);
+    const existingCard = cardIndex >= 0 ? state.cards[cardIndex] : null;
+    const cardRecord = {
+      ...(existingCard || {}),
+      key: cardKey,
+      binding_id: binding.id,
+      message_id: existingCard?.message_id || "",
+      reply_to_message_id: existingCard?.reply_to_message_id || binding.latest_message_id || binding.root_message_id || "",
+      history: [...(existingCard?.history || []), { stage: input.stage, title: input.title, markdown: input.markdown, at: now }].slice(-12),
+      run_ids: uniqueStrings([...(existingCard?.run_ids || []), input.runId]),
+      mission_ids: uniqueStrings([...(existingCard?.mission_ids || []), input.missionId]),
+      task_ids: uniqueStrings([...(existingCard?.task_ids || []), input.taskId]),
+      active: !["completion", "failure", "cancelled"].includes(String(input.stage || "")),
+      updated_at: now,
+    };
+    markdown = renderTaskCardMarkdown(cardRecord);
+    if (cardIndex >= 0) state.cards[cardIndex] = cardRecord;
+    else state.cards.push(cardRecord);
+  }
   const delivery = {
     id: `fsd_${crypto.randomBytes(8).toString("hex")}`,
     binding_id: binding.id,
     dedupe_key: dedupeKey,
     stage: safeText(input.stage, 60),
     title: safeText(input.title, 80),
-    markdown: safeText(input.markdown, 10000),
+    markdown,
+    actions: Array.isArray(input.actions) ? input.actions : [],
+    card_key: cardKey,
+    reply_to_message_id: cardKey
+      ? state.cards.find((row: any) => row.key === cardKey && row.binding_id === binding.id)?.reply_to_message_id || ""
+      : binding.latest_message_id || binding.root_message_id || "",
     run_id: input.runId || "",
     mission_id: input.missionId || "",
     task_id: input.taskId || "",
@@ -328,11 +587,28 @@ export async function notifyFeishuTaskStage(input: {
     sent_at: "",
     message_id: "",
     error: "",
+    delivery_mode: "",
+    exhausted_alerted: false,
   };
   state.deliveries.push(delivery);
   saveState(state);
   const attempted = await attemptDelivery(delivery.id);
   return { success: attempted?.status === "sent", queued: attempted?.status !== "sent" && Number(attempted?.attempts || 0) < 5, delivery: attempted };
+}
+
+export async function retryFeishuNotificationDelivery(deliveryId: string) {
+  const id = String(deliveryId || "").trim();
+  const state = loadState();
+  const delivery = state.deliveries.find((row: any) => row.id === id);
+  if (!delivery) throw new Error("飞书投递记录不存在");
+  if (delivery.status === "sent") return delivery;
+  delivery.status = "pending";
+  delivery.attempts = 0;
+  delivery.error = "";
+  delivery.next_attempt_at = new Date().toISOString();
+  delivery.exhausted_alerted = false;
+  saveState(state);
+  return attemptDelivery(id);
 }
 
 export async function tickFeishuNotificationOutbox(now = new Date()) {
@@ -383,24 +659,56 @@ export function getFeishuChannelDeliverySnapshot(limit = 50) {
       next_attempt_at: row.next_attempt_at,
       sent_at: row.sent_at,
       message_id: row.message_id || "",
+      delivery_mode: row.delivery_mode || "",
+      exhausted: row.status === "failed" && Number(row.attempts || 0) >= 5,
       error: row.error || "",
       run_id: row.run_id || "",
       mission_id: row.mission_id || "",
       task_id: row.task_id || "",
     })),
     reports: state.report_deliveries.slice(-bounded).reverse(),
+    identities: getFeishuChannelIdentitySnapshot().slice(0, bounded),
+    summary: {
+      pending: state.deliveries.filter((row: any) => row.status !== "sent" && Number(row.attempts || 0) < 5).length,
+      exhausted: state.deliveries.filter((row: any) => row.status === "failed" && Number(row.attempts || 0) >= 5).length,
+      sent: state.deliveries.filter((row: any) => row.status === "sent").length,
+    },
   };
 }
 
 export function recordFeishuInbound(input: { payload?: any; sessionId?: string; messageId?: string }) {
   const destination = resolveFeishuDestination(input.payload || {}, input.sessionId || "");
   const state = loadState();
+  const extractedIdentity = extractFeishuInboundIdentity(input.payload || {});
+  const identity = {
+    ...extractedIdentity,
+    open_id: extractedIdentity.open_id || destination?.open_id || "",
+    user_id: extractedIdentity.user_id || destination?.user_id || "",
+  };
   state.inbound = {
     count: Number(state.inbound?.count || 0) + 1,
     last_at: new Date().toISOString(),
     last_message_id: safeText(input.messageId || "", 120),
     last_session_id: safeText(input.sessionId || "", 160),
   };
+  if (identity.open_id || identity.user_id || identity.union_id) {
+    const now = new Date().toISOString();
+    const index = state.identities.findIndex((item: any) =>
+      (identity.open_id && item.open_id === identity.open_id)
+      || (identity.user_id && item.user_id === identity.user_id)
+      || (identity.union_id && item.union_id === identity.union_id));
+    const existing = index >= 0 ? state.identities[index] : null;
+    const next = {
+      ...(existing || {}),
+      ...identity,
+      chat_id: destination?.chat_id || existing?.chat_id || "",
+      first_seen_at: existing?.first_seen_at || now,
+      last_seen_at: now,
+      message_count: Number(existing?.message_count || 0) + 1,
+    };
+    if (index >= 0) state.identities[index] = next;
+    else state.identities.push(next);
+  }
   saveState(state);
   if (destination) bindFeishuTaskContext({ sessionId: input.sessionId, destination, source: "feishu-control-bot" });
   publishRuntimeEvent("feishu", "feishu.inbound", {

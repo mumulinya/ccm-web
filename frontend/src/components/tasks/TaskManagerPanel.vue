@@ -7,14 +7,14 @@ import { useTaskManager } from './useTaskManager.js'
 import { Inbox, ListTodo, Plus, RefreshCw, Route, Sparkles } from '@lucide/vue'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
-const emit = defineEmits(['navigated', 'resume-project-permission'])
+const emit = defineEmits(['navigated', 'resume-project-permission', 'navigate'])
 
 const {
-  AgentPipeline, TaskListItem, TaskBacklogModal, DailyDevTaskModal, TaskDispatchHeader, tasks,
+  AgentPipeline, TaskListItem, TaskBacklogModal, DailyDevTaskModal, TaskDispatchHeader, AutomatedTaskIntakeModal, tasks,
   pendingPermissionRequests, standalonePermissionRequests, permissionDecisionBusyId,
   groups, projects, stats, orchestratorDiagnostics, taskExecutions, executionActionBusy,
   showArchivedTasks, archivedTaskCount, selectedTaskIds, editingTaskId, activeTaskView, taskSearch,
-  taskStatusFilter, showCreate, showDailyDevCreate, showQueue, showLogs, showReport,
+  taskStatusFilter, showCreate, showDailyDevCreate, showAutomatedIntake, showQueue, showLogs, showReport,
   showContinue, currentTaskLogs, currentTaskId, currentTaskReport, currentTaskTrace, taskTraceLoading,
   currentContinueTask, continueMessage, executionDashboard, executionDashboardLoading, activeAgentRuns, activeAgentRunsLoading,
   runtimeDebtPreview, runtimeDebtLoading, dashboardFilter, dashboardSummary, dashboardItems, dashboardQueue,
@@ -41,7 +41,7 @@ const {
   visibleTaskTitle, visibleTaskStatusDetail, visibleRequiredVerification, visibleDeliveryBlockers, visibleUserDeliveryReport, loadTaskTrace,
   viewReport, cancelTask, rollbackExecution, mergeExecution, cleanupExecution, openContinueTask,
   continueFromReport, submitContinuationPayload, submitTaskContinuation, autoContinueFromReport, resendTask, priorityLabel,
-  visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission
+  visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission, openTaskReplay, changeTaskPriority
 } = useTaskManager(props, emit)
 </script>
 

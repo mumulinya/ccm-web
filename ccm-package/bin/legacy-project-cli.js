@@ -681,7 +681,7 @@ if (args[0] === "interactive") {
     const mainBin = path.join(__dirname, "..", "node_modules", ".bin", "electron");
     const electronBin = fs.existsSync(petExe) ? petExe : fs.existsSync(mainExe) ? mainExe : fs.existsSync(petBin) ? petBin : fs.existsSync(mainBin) ? mainBin : null;
     const cmd = electronBin || "npx";
-    const args2 = electronBin ? [petDir] : ["electron", petDir];
+    const args2 = electronBin ? [petDir] : ["--yes", "electron@35.7.5", petDir];
     const child = spawn(cmd, args2, {
       detached: true,
       stdio: "ignore",

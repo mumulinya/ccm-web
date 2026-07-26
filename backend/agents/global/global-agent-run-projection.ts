@@ -1,6 +1,6 @@
 import { GLOBAL_AGENT_TOOL_SPECS, MAX_OBSERVATION_CHARS } from "./global-agent-run-store";
 import { buildGlobalAgentToolDefinitions } from "./runtime";
-import { buildRoleSkillPrompt } from "../../skills/role-skills";
+import { buildModelSelectableSkillCatalog, buildRoleSkillPrompt } from "../../skills/role-skills";
 import { captureReasoningFacts, type AgentReasoningState } from "../reasoning-loop";
 import { WORKFLOW_DECISION_GUIDANCE, normalizeWorkflowDecision } from "../workflow-decision";
 import type { GlobalAgentDecision, GlobalAgentDecisionState, GlobalAgentLoopRuntime, GlobalAgentRun } from "./loop";
@@ -138,27 +138,26 @@ export function projectGlobalAgentReasoningForModel(reasoning: AgentReasoningSta
 }
 
 
-export function parseGlobalAgentDecision(raw: string | GlobalAgentDecision): GlobalAgentDecision {
-  if (raw && typeof raw === "object") return normalizeDecision(raw as GlobalAgentDecision);
+export function parseGlobalAgentDecision(raw: string | GlobalAgentDecision, fallbackWorkflowDecision: any = null): GlobalAgentDecision {
+  if (raw && typeof raw === "object") return normalizeDecision(raw as GlobalAgentDecision, fallbackWorkflowDecision);
   const text = String(raw || "").trim();
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
   const candidates = [fenced, text, text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)].filter(Boolean) as string[];
   let lastError: any;
   for (const candidate of candidates) {
-    try { return normalizeDecision(JSON.parse(candidate)); } catch (error) { lastError = error; }
+    try { return normalizeDecision(JSON.parse(candidate), fallbackWorkflowDecision); } catch (error) { lastError = error; }
   }
   throw new Error(`Agent 决策不是合法 JSON：${lastError?.message || "无法解析"}`);
 }
 
-export function normalizeDecision(value: any): GlobalAgentDecision {
+export function normalizeDecision(value: any, fallbackWorkflowDecision: any = null): GlobalAgentDecision {
   const state = String(value?.state || "").toLowerCase() as GlobalAgentDecisionState;
   if (!["answer", "investigate", "plan", "execute", "needs_confirmation", "complete"].includes(state)) throw new Error(`无效决策状态：${state || "空"}`);
   const tool = value?.tool && value.tool.name ? { name: String(value.tool.name), arguments: value.tool.arguments && typeof value.tool.arguments === "object" ? value.tool.arguments : {} } : null;
   const rawCompletion = value?.completion && typeof value.completion === "object" ? value.completion : null;
   const compactItem = (item: any) => typeof item === "string" ? item : JSON.stringify(item);
-  const workflowDecision = value?.workflowDecision || value?.workflow_decision
-    ? normalizeWorkflowDecision(value.workflowDecision || value.workflow_decision)
-    : normalizeWorkflowDecision({
+  const rawWorkflowDecision = value?.workflowDecision || value?.workflow_decision || null;
+  const derivedWorkflowDecision = {
         mode: tool?.name === "decompose_requirement_epic"
           ? "decompose_epic"
           : state === "plan"
@@ -168,13 +167,33 @@ export function normalizeDecision(value: any): GlobalAgentDecision {
               : "answer",
         reason: "根据大模型返回的状态和工具选择生成工作流记录",
         confidence: Number(value?.intent?.confidence ?? 0.8),
-      });
+      };
+  const workflowDecision = normalizeWorkflowDecision({
+    ...(fallbackWorkflowDecision || {}),
+    ...(rawWorkflowDecision || derivedWorkflowDecision),
+  });
+  const intent = value?.intent && typeof value.intent === "object" ? value.intent : {
+    category: workflowDecision.riskLevel === "high"
+      ? "high_risk"
+      : workflowDecision.actionRequired
+        ? "execution"
+        : workflowDecision.mode === "project_analysis"
+          ? "analysis"
+          : workflowDecision.intentKind === "question" ? "question" : "conversation",
+    goal: String(value?.message || ""),
+    action_required: workflowDecision.actionRequired,
+    target_refs: workflowDecision.targetRefs,
+    impact_scope: workflowDecision.impactScope,
+    confidence: workflowDecision.confidence,
+    authorization_basis: "none",
+    reason: workflowDecision.reason,
+  };
   return {
     state,
     message: String(value?.message || "").slice(0, 20_000),
     plan: Array.isArray(value?.plan) ? value.plan.map((item: any) => String(item).slice(0, 500)).slice(0, 12) : [],
     tool,
-    intent: value?.intent && typeof value.intent === "object" ? value.intent : undefined,
+    intent,
     workflowDecision,
     completion: rawCompletion ? {
       summary: String(rawCompletion.summary || ""),
@@ -209,7 +228,13 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
   const roleSkills = buildRoleSkillPrompt(
     "global-agent",
     run.reasoning_loop.effective_goal || run.user_message,
-    { source: (run as any).source || "", phase: "planning" },
+    {
+      source: (run as any).source || "",
+      phase: "planning",
+      forceWork: true,
+      selectedSkillNames: (run.workflow_decision || run.workflowDecision)?.selectedSkills || [],
+      modelDecision: run.workflow_decision || run.workflowDecision || null,
+    },
   );
   const system = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
 
@@ -240,8 +265,10 @@ ${WORKFLOW_DECISION_GUIDANCE}
 可用工具：
 ${buildToolPrompt()}
 
+${buildModelSelectableSkillCatalog()}
+
 只输出一个合法 JSON 对象，不要输出 Markdown：
-{"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"完整语义判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[]},"intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
+{"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"完整语义判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false},"intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
 不调用工具时 tool 必须为 null。${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
   const continuation = options.sessionContinuationOverride !== undefined
     ? options.sessionContinuationOverride

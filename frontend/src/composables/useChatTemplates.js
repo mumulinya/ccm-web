@@ -12,17 +12,6 @@ const extractTemplateVariables = (template) => {
   return matches
 }
 
-const inferTemplateId = (value) => {
-  const text = String(value || '').toLowerCase()
-  if (!text || text.startsWith('/') || text.length < 5) return null
-  if (text.includes('bug') || text.includes('报错') || text.includes('崩溃') || text.includes('闪退') || text.includes('卡顿') || text.includes('异常')) return 'tpl_bug_fix'
-  if (text.includes('前端') || text.includes('页面') || text.includes('组件') || text.includes('写个页面') || text.includes('开发页面') || text.includes('ui')) return 'tpl_frontend_dev'
-  if (text.includes('接口') || text.includes('api') || text.includes('后端') || text.includes('服务') || text.includes('路由')) return 'tpl_backend_api'
-  if (text.includes('重构') || text.includes('优化') || text.includes('改写') || text.includes('整理')) return 'tpl_refactor'
-  if (text.includes('审查') || text.includes('review') || text.includes('看下代码') || text.includes('质量')) return 'tpl_code_review'
-  return null
-}
-
 export function useChatTemplates(options = {}) {
   const input = options.input
   const showTemplateSelector = ref(false)
@@ -107,7 +96,7 @@ export function useChatTemplates(options = {}) {
   }
 
   const detectRecommendation = (value) => {
-    const templateId = inferTemplateId(value)
+    const templateId = options.modelRecommendation?.value?.templateId || options.modelRecommendation?.value?.template_id || null
     if (!templateId) {
       showRecommendation.value = false
       recommendedTemplate.value = null

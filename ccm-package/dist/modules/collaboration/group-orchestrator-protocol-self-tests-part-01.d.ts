@@ -20,7 +20,7 @@ export declare function runCoordinatorProtocolSelfTest(): {
     executionOrder: any;
     coordinationStrategy: any;
     frontendDependsOnBackend: boolean;
-    llmDocumentGuardPass: any;
+    llmDocumentGuardPass: boolean;
     semanticReasoningPass: any;
     shortDocBackendFirstPass: any;
     shortDocExecutionOrder: any;

@@ -62,6 +62,7 @@ const global_agent_test_agent_relay_1 = require("./global-agent-test-agent-relay
 const global_agent_history_1 = require("./global-agent-history");
 const global_agent_status_1 = require("./global-agent-status");
 const session_title_1 = require("../../system/session-title");
+const runtime_events_1 = require("../../system/runtime-events");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -117,6 +118,14 @@ const globalAgentHistoryRuntime = (0, global_agent_history_1.createGlobalAgentHi
     ingestGlobalAgentConversation: memory_2.ingestGlobalAgentConversation,
     isMeaningfulSessionTitleInput: session_title_1.isMeaningfulSessionTitleInput,
     isSessionTitlePlaceholder: session_title_1.isSessionTitlePlaceholder,
+    onSessionTitleChanged: (session) => {
+        if (String(session?.source || "") !== "feishu")
+            return;
+        (0, runtime_events_1.publishRuntimeEvent)("feishu", "feishu.session_title_changed", {
+            sessionId: String(session?.id || ""),
+            source: "global-session-auto-title",
+        });
+    },
     writeGlobalJsonAtomic,
 });
 function runGlobalAgentHistorySyncSelfTest() {
@@ -130,6 +139,12 @@ function loadGlobalAgentHistoryStore() {
 }
 function syncGlobalAgentWebHistory(payload) {
     return globalAgentHistoryRuntime.syncGlobalAgentWebHistory(payload);
+}
+function createGlobalAgentConversationSession(payload) {
+    return globalAgentHistoryRuntime.createGlobalAgentConversationSession(payload);
+}
+function deleteGlobalAgentConversationSession(sessionId, expectedSource = "") {
+    return globalAgentHistoryRuntime.deleteGlobalAgentConversationSession(sessionId, expectedSource);
 }
 function getGlobalAgentConversationMessages(sessionId) {
     return globalAgentHistoryRuntime.getGlobalAgentConversationMessages(sessionId);
@@ -166,7 +181,7 @@ const processedFeishuMessageIds = new Set();
 const GLOBAL_MANAGEMENT_ACTIONS = {
     manage_cron: { label: "定时任务管理", operations: ["list", "create", "update", "enable", "disable", "run", "delete"], destructive: ["delete"] },
     manage_group: { label: "群聊与成员管理", operations: ["list", "create", "rename", "add_member", "remove_member", "delete"], destructive: ["delete"] },
-    manage_project: { label: "项目与 Agent 管理", operations: ["list", "create", "update", "start", "stop", "delete"], destructive: ["delete"] },
+    manage_project: { label: "项目与 Agent 管理", operations: ["list", "create", "update", "start", "stop", "restart", "build", "connect_agent", "disconnect_agent", "delete"], destructive: ["start", "stop", "restart", "build", "connect_agent", "disconnect_agent", "delete"] },
     manage_task: { label: "开发任务管理", operations: ["list", "pause", "resume", "continue", "retry", "queue", "delete"], destructive: ["delete"] },
     manage_tool: { label: "MCP 与 Skill 管理", operations: ["list", "create", "delete", "reload", "status"], destructive: ["delete"] },
     system_status: { label: "系统状态检查", operations: ["inspect"], destructive: [] },
@@ -192,6 +207,10 @@ const GLOBAL_MANAGEMENT_REQUIRED_PARAMS = {
         update: ["project"],
         start: ["project"],
         stop: ["project"],
+        restart: ["project"],
+        build: ["project"],
+        connect_agent: ["project"],
+        disconnect_agent: ["project"],
         delete: ["project"],
     },
     manage_task: {
@@ -659,13 +678,14 @@ const globalAgentFeishuChannel = (0, global_agent_feishu_channel_1.createGlobalA
     listTaskPermissionRequests: task_permission_broker_1.listTaskPermissionRequests,
     postLocalApi,
     recordFeishuInbound: feishu_channel_1.recordFeishuInbound,
+    resolveBoundFeishuGlobalSessionId: feishu_channel_1.resolveBoundFeishuGlobalSessionId,
     resolveFeishuGlobalAgentSessionId,
     resumeGlobalAgentRun: loop_1.resumeGlobalAgentRun,
     runAgenticGlobalRequest,
     sendFeishuReportMessage: collaboration_1.sendFeishuReportMessage,
     steerGlobalAgentRun: loop_1.steerGlobalAgentRun,
 });
-const { normalizeFeishuEventPayload, verifyFeishuEventToken, extractFeishuMessageText, extractCcConnectHookText, processFeishuGlobalAgentMessage, processFeishuControlledMessage } = globalAgentFeishuChannel;
+const { normalizeFeishuEventPayload, verifyFeishuEventToken, extractFeishuMessageText, extractCcConnectHookText, processFeishuGlobalAgentMessage, processFeishuControlledMessage, processFeishuCardAction } = globalAgentFeishuChannel;
 function parseFeishuConversationTurnCommand(value) { return globalAgentFeishuChannel.parseFeishuConversationTurnCommand(value); }
 function startFeishuConversationTurnRecoveryForServer(baseUrl, ctx) { return globalAgentFeishuChannel.startFeishuConversationTurnRecoveryForServer(baseUrl, ctx); }
 function stopFeishuConversationTurnRecoveryForServer() { return globalAgentFeishuChannel.stopFeishuConversationTurnRecoveryForServer(); }
@@ -703,10 +723,12 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
     completeIdempotency: reliability_ledger_1.completeIdempotency,
     controlGlobalMissionSupervisor: mission_supervisor_1.controlGlobalMissionSupervisor,
     createAgenticRuntime,
+    createGlobalAgentConversationSession,
     createGlobalDevelopmentMission: collaboration_1.createGlobalDevelopmentMission,
     createRequirementEpicWithChildren: collaboration_1.createRequirementEpicWithChildren,
     createMissionSupervisorRuntime,
     deleteGlobalAgentHook: runtime_1.deleteGlobalAgentHook,
+    deleteGlobalAgentConversationSession,
     deleteGlobalAgentPermissionRule: runtime_1.deleteGlobalAgentPermissionRule,
     ensureTraceId: reliability_ledger_1.ensureTraceId,
     extractCcConnectHookText,
@@ -717,6 +739,7 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
     getConfigInfo: db_1.getConfigInfo,
     getConfigs: db_1.getConfigs,
     getFeishuMessageId,
+    getFeishuGlobalSessionBindings: feishu_channel_1.getFeishuGlobalSessionBindings,
     getGlobalAgentBackgroundOutput: runtime_1.getGlobalAgentBackgroundOutput,
     getGlobalAgentRun: loop_1.getGlobalAgentRun,
     getGlobalDevelopmentMission: collaboration_1.getGlobalDevelopmentMission,
@@ -747,6 +770,7 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
     pauseGlobalAgentRun: loop_1.pauseGlobalAgentRun,
     processedFeishuMessageIds,
     processFeishuControlledMessage,
+    processFeishuCardAction,
     publicGlobalAgentRun,
     publicGlobalAgentRunSummary,
     refreshGlobalDevelopmentMissions: collaboration_1.refreshGlobalDevelopmentMissions,
@@ -774,6 +798,7 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
     startGlobalMissionSupervisor: mission_supervisor_1.startGlobalMissionSupervisor,
     steerGlobalAgentRun: loop_1.steerGlobalAgentRun,
     syncGlobalAgentWebHistory,
+    bindFeishuGlobalSession: feishu_channel_1.bindFeishuGlobalSession,
     updateGlobalAgentSupervisionState: loop_1.updateGlobalAgentSupervisionState,
     verifyFeishuEventToken,
     waitForIdempotencyResult,

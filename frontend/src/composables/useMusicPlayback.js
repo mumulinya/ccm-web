@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import { toast } from '../utils/toast.js'
-import { formatTrackLabel, pickRandomTrack, rememberPlayedTrack } from '../utils/musicTrackHelpers.js'
+import { formatTrackLabel, rememberPlayedTrack, selectNextPlaybackTrack } from '../utils/musicTrackHelpers.js'
 
 export function getStreamFilenameFromAudio(el) {
   if (!el) return ''
@@ -207,13 +207,20 @@ export function useMusicPlayback(deps) {
 
   const nextTrack = () => {
     if (!playlist.value.length) return
-    if (playMode.value === 'random') {
-      const picked = pickRandomTrack(playlist.value, { excludeTrack: currentTrack.value })
-      if (picked) play(picked)
-    } else {
-      const next = playMode.value === 'single' ? currentIndex.value : (currentIndex.value + 1) % playlist.value.length
-      play(playlist.value[next])
-    }
+    const preselected = nextRecommendTrack?.value
+    const candidateIsCurrent = preselected?.filename && preselected.filename === currentTrack.value?.filename
+    const candidateInPlaylist = playlist.value.some(track => track.filename === preselected?.filename)
+    const candidateAllowed = playMode.value === 'single'
+      ? candidateIsCurrent
+      : candidateInPlaylist && (playMode.value !== 'random' || !candidateIsCurrent || playlist.value.length === 1)
+    const next = candidateAllowed
+      ? preselected
+      : selectNextPlaybackTrack(playlist.value, {
+          currentIndex: currentIndex.value,
+          currentTrack: currentTrack.value,
+          playMode: playMode.value,
+        })
+    if (next) play(next)
   }
 
   const prevTrack = () => {

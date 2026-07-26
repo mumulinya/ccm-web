@@ -530,13 +530,6 @@ const executeManagementAction = async (action) => {
   }
 }
 
-const inferGlobalProjectCommandRequiresCodeChanges = (message) => {
-  const text = String(message || '').trim()
-  const explicitCodeChange = /(修改|修复|实现|新增|删除|重构|改代码|开发|接入|对接|bug|页面|接口|字段|schema|配置)/i.test(text)
-  const readOnlyOnly = /(只读|仅分析|只分析|不要修改|不修改|不改代码|无需代码|无需修改|运行测试|执行测试|跑测试|检查|审查|review)/i.test(text)
-  return !(readOnlyOnly && !explicitCodeChange)
-}
-
 const dispatchTrackedGlobalMission = async ({ params = {}, title, businessGoal, source, attachments = [] }) => {
   const missionRes = await fetch('/api/global-agent/orchestrate', {
     method: 'POST',
@@ -674,7 +667,7 @@ const executeAction = async (action, actionFiles = []) => {
     } else if (action.type === 'send_project_cmd') {
       const project = getActionParam(action, 'project', 'projectName')
       const message = getActionParam(action, 'message', 'prompt', 'command')
-      const requiresCodeChanges = inferGlobalProjectCommandRequiresCodeChanges(message)
+      const requiresCodeChanges = getActionParam(action, 'requires_code_changes', 'requiresCodeChanges') === true
       toast.info(`正在为 ${project} 建立持续监督任务...`)
       await dispatchTrackedGlobalMission({
         title: `${project} 项目任务`,
@@ -722,7 +715,7 @@ const executeAction = async (action, actionFiles = []) => {
             message_mode: 'project_task',
             force_task: true,
             auto_execute: true,
-            requires_code_changes: inferGlobalProjectCommandRequiresCodeChanges(message),
+            requires_code_changes: getActionParam(action, 'requires_code_changes', 'requiresCodeChanges') === true,
             global_direct_dispatch: {
               schema: 'ccm-global-direct-dispatch-v1',
               source: 'global-agent-web-direct-dispatch',

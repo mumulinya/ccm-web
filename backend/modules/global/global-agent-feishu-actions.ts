@@ -1,11 +1,10 @@
 // Feishu-triggered management, media, and development dispatch actions.
 export function createGlobalAgentFeishuActions(deps: any) {
-  const { GLOBAL_MANAGEMENT_ACTIONS, RANDOM_MUSIC_KEYWORD, buildGlobalDirectDispatchHandoff, buildGlobalSingleProjectMissionPayload, callLocalApi, formatGlobalDevelopmentDispatchVisibleResult, formatSystemStatus, getConfigs, guessCronSchedule, inferGlobalDirectDispatchRequiresCodeChanges, loadGroups, normalizeText, parseMusicKeyword, postLocalApi, postLocalSseOrJsonApi, relayGlobalTestAgentEventFromGroup, renderGlobalDirectGroupDispatchAcceptedSummary, renderGlobalDirectGroupWorkOrder } = deps
+  const { GLOBAL_MANAGEMENT_ACTIONS, RANDOM_MUSIC_KEYWORD, buildGlobalDirectDispatchHandoff, buildGlobalSingleProjectMissionPayload, callLocalApi, formatGlobalDevelopmentDispatchVisibleResult, formatSystemStatus, getConfigs, inferGlobalDirectDispatchRequiresCodeChanges, loadGroups, postLocalApi, postLocalSseOrJsonApi, relayGlobalTestAgentEventFromGroup, renderGlobalDirectGroupDispatchAcceptedSummary, renderGlobalDirectGroupWorkOrder } = deps
 
   async function executePlayMusic(baseUrl: string, input: { keyword?: string; mode?: string; source?: string; originalText?: string } = {}) {
-    const raw = String(input.keyword || input.originalText || "").trim();
-    const normalizedKeyword = parseMusicKeyword(raw)
-      || (/(播放|放一首|放|来一首|来点|听|听歌|音乐|歌曲|歌)/.test(raw) ? RANDOM_MUSIC_KEYWORD : normalizeText(raw));
+    const raw = String(input.keyword || "").trim();
+    const normalizedKeyword = raw;
     if (!normalizedKeyword) {
       return {
         success: false,
@@ -72,22 +71,15 @@ export function createGlobalAgentFeishuActions(deps: any) {
     return played.message;
   }
   
-  function fillCronParams(params: any, originalText: string, groups: any[] = [], projects: string[] = []) {
-    const schedule = params.schedule || params.cron || guessCronSchedule(originalText);
-    const namedFromText = (originalText.match(/(?:名字|名称|标题)(?:叫|为|是)?[「\"']?([^，。,.\n「\"']+)/)?.[1] || "").trim();
-    const explicitName = namedFromText || String(params.name || params.title || "").trim();
-    const cleanedPrompt = originalText
-      .replace(/(?:名字|名称|标题)(?:叫|为|是)?[「\"']?([^，。,.\n「\"']+)/g, "")
-      .replace(/创建|新建|添加|一个|定时任务|计划任务/g, "")
-      .replace(/^[：:，,\s]+/, "")
-      .trim();
-    const paramPrompt = String(params.prompt || params.message || params.command || "").trim();
-    const prompt = (paramPrompt && !/名字|名称|标题/.test(paramPrompt) ? paramPrompt : "") || cleanedPrompt || originalText;
-    const name = explicitName || prompt.slice(0, 28) || "全局助手定时任务";
-    const targetType = params.target_type || params.targetType || (params.group_id || params.groupId ? "group" : (params.project ? "project" : (groups[0] ? "group" : "project")));
-    const groupId = params.group_id || params.groupId || (targetType === "group" ? groups[0]?.id : undefined);
-    const project = params.project || params.projectName || (targetType === "project" ? projects[0] : undefined);
-    return { ...params, operation: params.operation || "create", name, schedule, prompt, target_type: targetType, group_id: groupId, project, workflow_type: params.workflow_type || params.workflowType || "general", enabled: params.enabled !== false };
+  function fillCronParams(params: any, _originalText: string, _groups: any[] = [], _projects: string[] = []) {
+    const modelSchedule = String(params.schedule || params.cron || "").trim();
+    const modelPrompt = String(params.prompt || params.message || params.command || "").trim();
+    const modelName = String(params.name || params.title || "").trim();
+    const modelTargetType = String(params.target_type || params.targetType || "").trim();
+    if (modelSchedule && modelPrompt && modelName && ["group", "project"].includes(modelTargetType)) {
+      return { ...params, operation: params.operation || "create", name: modelName, schedule: modelSchedule, prompt: modelPrompt, target_type: modelTargetType, group_id: params.group_id || params.groupId, project: params.project || params.projectName, workflow_type: params.workflow_type || params.workflowType || "general", enabled: params.enabled !== false, semantic_params_missing: false };
+    }
+    return { ...params, operation: params.operation || "create", name: modelName, schedule: modelSchedule, prompt: modelPrompt, target_type: modelTargetType, group_id: params.group_id || params.groupId, project: params.project || params.projectName, semantic_params_missing: true };
   }
   
   async function executeFeishuManagementAction(baseUrl: string, action: any, originalText = ""): Promise<string> {
@@ -97,7 +89,9 @@ export function createGlobalAgentFeishuActions(deps: any) {
     const operation = params.operation || (action.type === "system_status" ? "inspect" : "");
     if (action.type === "manage_cron" && operation === "create") {
       params = fillCronParams(params, originalText, groups, projects);
-      action = { ...action, params, needs_user_input: false, validated: true, missing_params: [] };
+      action = params.semantic_params_missing
+        ? { ...action, params, needs_user_input: true, validated: false, missing_params: ["name", "schedule", "prompt", "target_type"] }
+        : { ...action, params, needs_user_input: false, validated: true, missing_params: [] };
     }
     if ((action.requires_confirmation || ["delete", "remove_member"].includes(operation)) && action.confirmed !== true) {
       return "这是一条高风险操作，控制机器人不会直接执行。请到 CCM 全局助手界面确认后操作。";
@@ -130,8 +124,9 @@ export function createGlobalAgentFeishuActions(deps: any) {
       if (operation === "list") result = await callLocalApi(baseUrl, "/api/projects");
       else if (operation === "create") result = await postLocalApi(baseUrl, "/api/projects/create", params);
       else if (operation === "update") result = await postLocalApi(baseUrl, "/api/projects/update", { ...params, name: project });
-      else if (operation === "start") result = await postLocalApi(baseUrl, "/api/start", { project, agent: params.agent });
-      else if (operation === "stop") result = await postLocalApi(baseUrl, "/api/stop", { project });
+      else if (["start", "stop", "restart", "build"].includes(operation)) result = await postLocalApi(baseUrl, "/api/projects/runtime/action", { project, profile_id: params.profile_id || params.profileId, action: operation });
+      else if (operation === "connect_agent") result = await postLocalApi(baseUrl, "/api/projects/agent-connection", { project, action: "connect", agent: params.agent });
+      else if (operation === "disconnect_agent") result = await postLocalApi(baseUrl, "/api/projects/agent-connection", { project, action: "disconnect" });
       else if (operation === "delete") result = await postLocalApi(baseUrl, "/api/projects/archive", { name: project });
     } else if (action.type === "manage_group") {
       if (operation === "list") result = await callLocalApi(baseUrl, "/api/groups");
@@ -247,6 +242,7 @@ export function createGlobalAgentFeishuActions(deps: any) {
         message: rawMessage,
         originalText,
         traceId,
+        requiresCodeChanges: params.requires_code_changes === true,
       });
       const workOrderMessage = renderGlobalDirectGroupWorkOrder({
         group,
@@ -262,7 +258,7 @@ export function createGlobalAgentFeishuActions(deps: any) {
         message_mode: "project_task",
         force_task: true,
         auto_execute: true,
-        requires_code_changes: inferGlobalDirectDispatchRequiresCodeChanges(rawMessage),
+        requires_code_changes: params.requires_code_changes === true,
         global_handoff: dispatch.summary,
         global_direct_dispatch: {
           schema: "ccm-global-direct-dispatch-v1",
@@ -309,6 +305,7 @@ export function createGlobalAgentFeishuActions(deps: any) {
         sessionId: options.sessionId,
         source: options.source || "feishu-control-bot-single-project",
         idempotencyKey: traceId ? `feishu:${traceId}:single-project` : "",
+        requiresCodeChanges: params.requires_code_changes === true,
       });
       const result = await postLocalApi(baseUrl, "/api/global-agent/orchestrate", missionPayload);
       return formatGlobalDevelopmentDispatchVisibleResult(result, {

@@ -608,35 +608,9 @@ export function buildAcceptedPlanModeDraft(planMode: any = {}, feedback = "", ac
 }
 
 export function classifyGroupProjectTaskIntent(message: string, uploadedFiles: any[] = []) {
-  const text = String(message || "").trim();
-  const compact = text.replace(/\s+/g, "");
-  const hasAttachment = Array.isArray(uploadedFiles) && uploadedFiles.length > 0;
-  const greetingOnly = /^(你好|您好|hi|hello|hey|在吗|在不在|早上好|下午好|晚上好|谢谢|感谢|ok|好的|嗯|哦|哈喽)[。.!！?？\s]*$/i.test(compact);
-  const questionOnly = /^(这个|那个|你|我|项目|知识库|群聊|全局Agent|主Agent|子Agent).{0,40}(是什么|是啥|什么意思|怎么用|能用吗|可以用吗|怎么样|有问题吗|需要吗)[。.!！?？\s]*$/i.test(compact);
-  const projectAnalysisSignals = /项目|代码|仓库|架构|技术栈|目录|文件|模块|接口|页面|组件|数据库|配置|依赖|知识库|主\s*Agent|子\s*Agent|agent|Agent|这个.*项目|什么项目/i.test(text);
-  const actionSignals = [
-    /(?:帮我|给我|请|麻烦|需要|开始|继续).{0,24}(?:实现|新增|添加|修改|修复|删除|优化|重构|接入|配置|部署|测试|检查|创建|开发|完成|生成|编写|补充|对接|支持|运行|跑|改|加|做|写)/i,
-    /(?:实现|新增|添加|修改|修复|删除|优化|重构|接入|配置|部署|测试|检查|创建|开发|完成|生成|编写|补充|对接|支持|运行|跑).{0,40}(?:功能|接口|页面|组件|代码|项目|文件|数据库|服务|测试|配置|bug|Bug|API|api)/i,
-    /(?:把|将).{1,80}(?:改成|修改为|接入|迁移|重构|删掉|删除|加上|加入|换成|拆成|合并)/i,
-    /(?:报错|错误|bug|Bug|失败|不能用|崩溃|异常).{0,40}(?:修|修复|看一下|排查|解决|处理)/i,
-    /(?:PR|提交|发布|上线|构建|编译|单测|测试|接口|页面|组件|schema|数据库|路由|权限|登录|支付|订单|表单|样式|前端|后端).{0,40}(?:实现|新增|修改|修复|优化|检查|补充|接入|部署)/i,
-  ];
-  const executable = hasAttachment || (!greetingOnly && !questionOnly && actionSignals.some(pattern => pattern.test(text)));
-  const analysisEligible = !executable && !greetingOnly && projectAnalysisSignals;
-  return {
-    executable,
-    analysisEligible,
-    kind: executable ? "task" : analysisEligible ? "project_analysis" : greetingOnly ? "greeting" : questionOnly ? "question" : "conversation",
-    reason: executable
-      ? (hasAttachment ? "包含附件，按项目任务处理" : "包含明确开发/修改/执行意图")
-      : greetingOnly
-        ? "普通问候，不创建任务卡"
-        : analysisEligible
-          ? "项目/知识库相关只读询问，进入项目分析但不创建任务卡"
-        : questionOnly
-          ? "普通询问，不创建任务卡"
-          : "未发现明确项目执行动作",
-  };
+  void message;
+  void uploadedFiles;
+  throw new Error("同步关键词群聊意图分类已停用；请调用 classifyGroupProjectTaskIntentWithAgent");
 }
 
 export function normalizeGroupAgentGatewayTaskIntent(fallback: any, coordinatorResult: any, messageMode = "conversation") {
@@ -698,21 +672,32 @@ export async function classifyGroupProjectTaskIntentWithAgent(input: {
   groupSessionId?: string;
   group_session_id?: string;
 }) {
-  const fallback = classifyGroupProjectTaskIntent(input.message, input.uploadedFiles || []);
+  const fallback = {
+    executable: false,
+    analysisEligible: false,
+    kind: "model_required",
+    reason: "等待统一大模型语义决策",
+  };
   const mode = String(input.messageMode || "conversation").trim().toLowerCase();
-  if (input.forceProjectTask) {
-    const workflowDecision = explicitWorkflowDecision("execute_direct", "用户显式要求创建并执行项目任务");
-    return {
-      executable: true,
-      analysisEligible: false,
-      kind: "task",
-      reason: workflowDecision.reason,
-      confidence: 1,
-      workflowDecision,
-      agent_gateway: { runtime: "explicit-user-choice", llm_backed: false, explicit: true },
-    };
-  }
   try {
+    if (input.forceProjectTask) {
+      const modelDecision = await decideWorkflowWithModel({
+        message: input.message,
+        scope: "group",
+        sourceCount: (input.uploadedFiles || []).length,
+        context: { group_id: input.group?.id || "", message_mode: mode, target: input.isOrchestrated ? "group" : "direct-project", explicit_task_choice: true },
+      });
+      const workflowDecision = explicitWorkflowDecision("execute_direct", "用户显式要求创建并执行项目任务", modelDecision);
+      return {
+        executable: true,
+        analysisEligible: false,
+        kind: "task",
+        reason: workflowDecision.reason,
+        confidence: workflowDecision.confidence,
+        workflowDecision,
+        agent_gateway: { runtime: "llm-api", llm_backed: true, explicit: true },
+      };
+    }
     if (!input.isOrchestrated) {
       const workflowDecision = await decideWorkflowWithModel({
         message: input.message,
@@ -762,15 +747,16 @@ export function shouldCreatePersistentGroupTask(input: { isOrchestrated?: boolea
 }
 
 export function classifyPlanModeRisk(message: string, group: any, taskIntent: any = {}, attachmentCount = 0) {
-  const text = String(message || "");
-  const routableCount = getRoutableMembers(group || {}).length;
-  const lower = text.toLowerCase();
+  void message;
+  void group;
+  void attachmentCount;
+  const workflowDecision = taskIntent?.workflowDecision || null;
   const signals = {
-    destructive: /删除|清空|清理|移除|drop\s+table|truncate|purge|永久|销毁|撤销|覆盖/i.test(text),
-    migration: /数据库迁移|schema|权限模型|支付|部署|上线|生产|线上|环境变量|密钥|secret/i.test(text),
-    crossProject: /跨项目|多项目|所有项目|全部项目|前后端|全栈|多个 Agent|多个项目/i.test(text) || routableCount > 1 && /前端|后端|接口|页面|数据库|全栈/i.test(text),
-    vague: false,
-    attachment: attachmentCount > 0,
+    destructive: workflowDecision?.riskLevel === "high",
+    migration: false,
+    crossProject: Array.isArray(workflowDecision?.targetRefs) && workflowDecision.targetRefs.length > 1,
+    vague: Array.isArray(workflowDecision?.clarificationQuestions) && workflowDecision.clarificationQuestions.length > 0,
+    attachment: false,
   };
   const reasons = [
     signals.destructive ? "包含删除、清理、覆盖或不可逆操作" : "",
@@ -779,15 +765,15 @@ export function classifyPlanModeRisk(message: string, group: any, taskIntent: an
     signals.vague ? "需求较短或范围模糊，需要先确认影响范围" : "",
     signals.attachment ? "包含附件，需要先只读解析需求文档" : "",
   ].filter(Boolean);
-  const requiresConfirmation = signals.destructive || signals.migration;
-  const level = requiresConfirmation ? "high" : "low";
+  const requiresConfirmation = workflowDecision?.requiresUserConfirmation === true;
+  const level = workflowDecision?.riskLevel || "low";
   return {
     level,
     requiresConfirmation,
     reasons,
     signals,
     summary: reasons.length ? reasons.join("；") : "低风险明确开发需求，可自动进入执行队列",
-    lower,
+    lower: "",
   };
 }
 

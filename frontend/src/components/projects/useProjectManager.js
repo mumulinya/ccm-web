@@ -9,7 +9,6 @@ import MessageNavigator from '../common/MessageNavigator.vue'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import ProjectAgentMessage from './ProjectAgentMessage.vue'
 import UnifiedDiffModal from '../common/UnifiedDiffModal.vue'
-import TemplateVariablesModal from '../common/TemplateVariablesModal.vue'
 import ProjectFormModal from './ProjectFormModal.vue'
 import ProjectFeishuQrModal from './ProjectFeishuQrModal.vue'
 import ProjectFolderBrowserModal from './ProjectFolderBrowserModal.vue'
@@ -19,10 +18,13 @@ import ProjectAgentSwitchModal from './ProjectAgentSwitchModal.vue'
 import ProjectWorkspaceHeader from './ProjectWorkspaceHeader.vue'
 import ProjectSessionSidebar from './ProjectSessionSidebar.vue'
 import ProjectArchiveManager from './ProjectArchiveManager.vue'
+import ProjectRuntimeBar from './ProjectRuntimeBar.vue'
+import ProjectRuntimeConfigModal from './ProjectRuntimeConfigModal.vue'
+import ProjectRunConsole from './ProjectRunConsole.vue'
+import GroupTestTargetsModal from '../collaboration/GroupTestTargetsModal.vue'
 import { PanelLeft } from '@lucide/vue'
 import { useSlashCommands } from '../../composables/useSlashCommands.js'
 import { createSlashCommandClientActions } from '../../composables/useSlashCommandClientActions.js'
-import { useChatTemplates } from '../../composables/useChatTemplates.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
@@ -31,6 +33,7 @@ import { notifySessionContextUsage } from '../../composables/useSessionContextUs
 import { projectExecutionTaskCard } from '../../utils/taskExperience.js'
 import { shouldShowProjectTaskCard } from '../../utils/projectChatPresentation.js'
 import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
+import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 
 export function useProjectManager(props, emit) {
   // 搜索跳转高亮
@@ -98,7 +101,13 @@ export function useProjectManager(props, emit) {
   const projects = ref([])
   const currentProject = ref(null)
   const currentSession = ref(null)
+  const currentSessionDraft = ref(false)
+  const hasProjectConversation = computed(() => !!currentSession.value || currentSessionDraft.value)
   const sessions = ref([])
+  const projectFeishuTargets = ref([])
+  const projectFeishuBindingSession = ref(null)
+  const projectFeishuBindingOpen = ref(false)
+  const projectFeishuBindingBusy = ref(false)
   const messages = ref([])
   const messagesEl = ref(null)
   const chatInput = ref('')
@@ -129,7 +138,7 @@ export function useProjectManager(props, emit) {
     newSession: async () => {
       if (!currentProject.value) throw new Error('请先选择项目')
       await createSession()
-      return { success: true, summary: '已新建项目 Agent 会话。', metrics: { 项目: currentProject.value, 会话: currentSession.value || '新会话' } }
+      return { success: true, summary: '已打开空白项目会话，发送第一条消息后才会创建。', metrics: { 项目: currentProject.value, 状态: '未创建' } }
     },
     compactSession: async (payload = {}) => {
       if (!currentProject.value || !currentSession.value) throw new Error('请先选择项目会话')
@@ -189,35 +198,6 @@ export function useProjectManager(props, emit) {
     onError: (message) => toast.error(message),
     onConfirm: (message) => confirmDialog(message)
   })
-  const focusProjectInput = () => {
-    const el = document.getElementById('projectChatInput')
-    if (!el) return
-    el.focus()
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }
-  const {
-    showTemplateSelector,
-    allTemplates,
-    templateSearchQuery,
-    activeTemplateIndex,
-    recommendedTemplate,
-    activeTemplate,
-    templateVariables,
-    showVariableModal,
-    openTemplateSelector,
-    selectChatTemplate,
-    applyTemplateVariables,
-    detectRecommendation,
-    applyRecommendation,
-    handleTemplateKeydown,
-    hideTemplateAssist,
-  } = useChatTemplates({
-    input: chatInput,
-    focusInput: focusProjectInput,
-    onError: (message) => toast.error(message),
-  })
-
   const chatFiles = ref([])
   const diffViewer = ref({ visible: false, file: null })
   const pageInfo = ref('')
@@ -254,10 +234,23 @@ export function useProjectManager(props, emit) {
   const showEdit = ref(false)
   const showSwitchAgent = ref(false)
   const showTools = ref(false)
+  const showProjectTestTargets = ref(false)
   const showSharedFiles = ref(false)
   const showArchives = ref(false)
   const mobileSessionsOpen = ref(false)
   const projectActionBusy = ref('')
+  const projectRuntime = ref(null)
+  const projectRuntimeLoading = ref(false)
+  const projectRuntimeBusy = ref('')
+  const selectedRuntimeProfileId = ref('')
+  const showRuntimeConfig = ref(false)
+  const projectToolchainTestResult = ref(null)
+  const selectedRuntimeProcess = computed(() => projectRuntime.value?.processes?.find(row => row.profileId === selectedRuntimeProfileId.value)
+    || { status: 'stopped', pid: 0 })
+  const preferredRuntimeProfileId = snapshot => snapshot?.selected_profile_id
+    || snapshot?.profiles?.find(profile => profile.enabled !== false && !profile.stale && profile.runCommand)?.id
+    || snapshot?.profiles?.find(profile => profile.enabled !== false && !profile.stale)?.id
+    || ''
 
   const showFeishuQr = ref(false)
   const editProject = ref(null)
@@ -280,6 +273,7 @@ export function useProjectManager(props, emit) {
   // 表单数据
   const form = ref({
     name: '',
+    display_name: '',
     work_dir: '',
     agent: 'claudecode',
     platform: 'feishu',
@@ -297,7 +291,10 @@ export function useProjectManager(props, emit) {
     form.value[field] = value
     if (field === 'repository_url' && showCreate.value && !String(form.value.name || '').trim()) {
       const match = String(value || '').trim().match(/[/:]([^/:]+?)(?:\.git)?$/)
-      if (match?.[1]) form.value.name = match[1]
+      if (match?.[1]) {
+        form.value.name = match[1]
+        if (!String(form.value.display_name || '').trim()) form.value.display_name = match[1]
+      }
     }
   }
 
@@ -315,28 +312,89 @@ export function useProjectManager(props, emit) {
   const loadProjects = async () => {
     const data = await projectsApi.list()
     projects.value = data.projects || []
-    pageInfo.value = `${projects.value.length} 个项目 · ${projects.value.filter(p => p.running).length} 个运行中`
+    const connected = projects.value.filter(project => project.agent_connection?.running || project.running).length
+    const running = projects.value.reduce((total, project) => total + Number(project.runtime_summary?.running_count || 0), 0)
+    pageInfo.value = `${projects.value.length} 个项目 · ${connected} 个 Agent 已连接 · ${running} 个源码进程`
     // 自动选择第一个项目
     if (projects.value.length > 0 && !currentProject.value) {
       await selectProject(projects.value[0].name)
     }
   }
 
-  // 全局对话模板分发总线
-  const activeSelectedTemplate = inject('activeSelectedTemplate', null)
-  const pendingTemplateToApply = ref(null)
+  const loadProjectRuntime = async (project = currentProject.value) => {
+    if (!project) {
+      projectRuntime.value = null
+      selectedRuntimeProfileId.value = ''
+      return
+    }
+    projectRuntimeLoading.value = true
+    try {
+      const snapshot = await projectsApi.runtime(project)
+      if (project !== currentProject.value && currentProject.value) return
+      projectRuntime.value = snapshot
+      projectToolchainTestResult.value = null
+      const currentExists = snapshot.profiles?.some(profile => profile.id === selectedRuntimeProfileId.value && profile.enabled !== false)
+      if (!currentExists) selectedRuntimeProfileId.value = preferredRuntimeProfileId(snapshot)
+    } catch (error) {
+      projectRuntime.value = null
+      toast.error(error?.message || '读取项目运行配置失败')
+    } finally {
+      projectRuntimeLoading.value = false
+    }
+  }
 
-  if (activeSelectedTemplate) {
-    watch(activeSelectedTemplate, (newVal) => {
-      if (newVal && newVal.targetTab === 'projects' && newVal.projectName) {
-        if (currentProject.value === newVal.projectName) {
-          selectChatTemplate(newVal.template)
-          activeSelectedTemplate.value = null
-        } else {
-          pendingTemplateToApply.value = newVal.template
-        }
-      }
-    })
+  const rescanProjectRuntime = async () => {
+    if (!currentProject.value || projectRuntimeBusy.value) return
+    projectRuntimeBusy.value = 'rescan'
+    try {
+      projectRuntime.value = await projectsApi.runtimeRescan(currentProject.value)
+      selectedRuntimeProfileId.value = preferredRuntimeProfileId(projectRuntime.value)
+      toast.success(projectRuntime.value.profiles?.length ? `已识别 ${projectRuntime.value.profiles.length} 个运行配置` : '未识别到可靠命令，可手动添加')
+    } catch (error) { toast.error(error?.message || '扫描运行配置失败') }
+    finally { projectRuntimeBusy.value = '' }
+  }
+
+  const saveProjectRuntime = async data => {
+    if (!currentProject.value || projectRuntimeBusy.value) return
+    projectRuntimeBusy.value = 'save'
+    try {
+      projectRuntime.value = await projectsApi.runtimeSave(currentProject.value, data)
+      selectedRuntimeProfileId.value = projectRuntime.value.selected_profile_id || ''
+      projectToolchainTestResult.value = null
+      showRuntimeConfig.value = false
+      toast.success('运行配置已保存')
+    } catch (error) { toast.error(error?.message || '保存运行配置失败') }
+    finally { projectRuntimeBusy.value = '' }
+  }
+
+  const testProjectRuntimeToolchain = async toolchain => {
+    if (!currentProject.value || projectRuntimeBusy.value) return
+    projectRuntimeBusy.value = 'toolchain-test'
+    projectToolchainTestResult.value = null
+    try {
+      projectToolchainTestResult.value = await projectsApi.runtimeToolchainTest(currentProject.value, toolchain)
+      if (projectToolchainTestResult.value.success) toast.success('JDK 与 Maven 工具链验证通过')
+      else toast.error('工具链验证未通过，请检查检测结果')
+    } catch (error) {
+      projectToolchainTestResult.value = { success: false, error: error?.message || '工具链验证失败' }
+      toast.error(projectToolchainTestResult.value.error)
+    } finally {
+      projectRuntimeBusy.value = ''
+    }
+  }
+
+  const runProjectRuntimeAction = async action => {
+    if (!currentProject.value || !selectedRuntimeProfileId.value || projectRuntimeBusy.value) return
+    if (['start', 'restart', 'build'].includes(action)) openProjectRuntimeLogs(action === 'build' ? 'build' : 'run')
+    projectRuntimeBusy.value = action
+    try {
+      const result = await projectsApi.runtimeAction(currentProject.value, selectedRuntimeProfileId.value, action)
+      await loadProjectRuntime(currentProject.value)
+      await loadProjects()
+      const labels = { start: '源码项目已启动', stop: '源码项目已暂停', restart: '源码项目已重新运行', build: '构建任务已开始' }
+      toast.success(result.message || labels[action] || '项目运行操作已执行')
+    } catch (error) { toast.error(error?.message || '项目运行操作失败') }
+    finally { projectRuntimeBusy.value = '' }
   }
 
   // 选择项目
@@ -344,37 +402,67 @@ export function useProjectManager(props, emit) {
     if (isStreaming.value) stopStreaming()
     currentProject.value = name
     currentSession.value = null
-    await loadSessions(name)
+    currentSessionDraft.value = false
+    selectedRuntimeProfileId.value = ''
+    projectTools.value = { mcp: [], skill: [] }
+    projectAuthorizationReadiness.value = null
+    void loadProjectTools({ open: false })
+    await loadProjectRuntime(name)
+    if (name !== currentProject.value) return
+    const sessionsLoaded = await loadSessions(name)
+    if (!sessionsLoaded || name !== currentProject.value) return
     // 如果会话列表非空，且没有选中会话，则默认选中第一个会话，以便载入单聊输入框
     if (sessions.value.length > 0 && !currentSession.value) {
       const remembered = localStorage.getItem(`ccm:project-session:${name}`)
       const target = sessions.value.find(item => item.id === remembered) || sessions.value[0]
       await selectSession(target.id)
     }
-    // 如果有挂起的待使用模板，在此应用
-    if (pendingTemplateToApply.value) {
-      selectChatTemplate(pendingTemplateToApply.value)
-      pendingTemplateToApply.value = null
-      if (activeSelectedTemplate) {
-        activeSelectedTemplate.value = null
-      }
-    }
   }
 
   // 加载会话列表
   const loadSessions = async (project) => {
     if (!project) return
-    const data = await sessionsApi.list(project)
+    const [data, feishuData] = await Promise.all([
+      sessionsApi.list(project),
+      sessionsApi.feishuTargets(project).catch(() => ({ targets: [] })),
+    ])
+    if (project !== currentProject.value) return false
     sessions.value = data.sessions || []
+    projectFeishuTargets.value = feishuData.targets || []
+    if (projectFeishuBindingSession.value) {
+      projectFeishuBindingSession.value = sessions.value.find(item => item.id === projectFeishuBindingSession.value.id) || null
+      if (!projectFeishuBindingSession.value) projectFeishuBindingOpen.value = false
+    }
+    return true
+  }
+
+  let projectSessionRefreshSequence = 0
+  const refreshCurrentProjectSession = async (expectedSessionId = '') => {
+    const project = currentProject.value
+    const sessionId = currentSession.value
+    if (!project || !sessionId || (expectedSessionId && expectedSessionId !== sessionId)) return false
+    const sequence = ++projectSessionRefreshSequence
+    const wasPinned = isMessagesPinnedToBottom.value
+    const [detail] = await Promise.all([
+      sessionsApi.detail(project, sessionId),
+      loadSessions(project),
+    ])
+    if (sequence !== projectSessionRefreshSequence || project !== currentProject.value || sessionId !== currentSession.value) return false
+    messages.value = detail.history || []
+    if (wasPinned) nextTick(() => scrollToBottom({ force: true }))
+    return true
   }
 
   // 选择会话
   const selectSession = async (sessionId, newSession = false) => {
     if (isStreaming.value) stopStreaming()
+    const project = currentProject.value
     currentSession.value = sessionId
+    currentSessionDraft.value = false
     currentSessionNew.value = newSession
-    if (currentProject.value) localStorage.setItem(`ccm:project-session:${currentProject.value}`, sessionId)
-    const data = await sessionsApi.detail(currentProject.value, sessionId)
+    if (project) localStorage.setItem(`ccm:project-session:${project}`, sessionId)
+    const data = await sessionsApi.detail(project, sessionId)
+    if (project !== currentProject.value || sessionId !== currentSession.value) return
     messages.value = data.history || []
     scrollToBottom({ force: true })
   }
@@ -384,10 +472,10 @@ export function useProjectManager(props, emit) {
     if (!name || projectActionBusy.value) return
     projectActionBusy.value = 'start'
     try {
-      const result = await projectsApi.start(name)
+      const result = await projectsApi.agentConnection(name, 'connect')
       await loadProjects()
-      toast.success(result.message || '项目 Agent 已启动')
-    } catch (error) { toast.error(error?.message || '项目 Agent 启动失败') }
+      toast.success(result.message || 'Agent 与协作通道已连接')
+    } catch (error) { toast.error(error?.message || 'Agent 连接失败') }
     finally { projectActionBusy.value = '' }
   }
 
@@ -396,10 +484,10 @@ export function useProjectManager(props, emit) {
     if (!name || projectActionBusy.value) return
     projectActionBusy.value = 'stop'
     try {
-      const result = await projectsApi.stop(name)
+      const result = await projectsApi.agentConnection(name, 'disconnect')
       await loadProjects()
-      toast.success(result.message || '项目 Agent 已停止')
-    } catch (error) { toast.error(error?.message || '项目 Agent 停止失败') }
+      toast.success(result.message || 'Agent 与协作通道已断开')
+    } catch (error) { toast.error(error?.message || 'Agent 断开失败') }
     finally { projectActionBusy.value = '' }
   }
 
@@ -434,7 +522,7 @@ export function useProjectManager(props, emit) {
       || agentOptions.value[0]?.type
       || ''
     form.value = {
-      name: '', work_dir: '', agent: defaultAgent, platform: 'feishu', source_type: 'local',
+      name: '', display_name: '', work_dir: '', agent: defaultAgent, platform: 'feishu', source_type: 'local',
       repository_url: '', repository_original_url: '', repository_branch: '', initialize_repository: false, git_loading: false, git_status: null
     }
     showCreate.value = true
@@ -486,6 +574,7 @@ export function useProjectManager(props, emit) {
     const mappedPlatform = platformMap[rawPlatform] || rawPlatform
     form.value = {
       name: project.name,
+      display_name: project.display_name || project.name,
       work_dir: project.work_dir || '',
       agent: project.agent || 'claudecode',
       platform: mappedPlatform,
@@ -545,16 +634,89 @@ export function useProjectManager(props, emit) {
     return result
   }
 
-  // 创建会话
-  const createSession = async () => {
+  let projectDraftCreation = null
+
+  const materializeProjectSessionDraft = async () => {
+    if (currentSession.value) return currentSession.value
+    if (!currentSessionDraft.value || !currentProject.value) return ''
+    if (projectDraftCreation) return projectDraftCreation
+    const project = currentProject.value
+    projectDraftCreation = (async () => {
+      const res = await sessionsApi.create({ project, source: 'web' })
+      if (!res?.success || !res.sessionId) throw new Error(res?.error || '创建项目会话失败')
+      if (project !== currentProject.value) throw new Error('项目已切换，请在当前项目重新发送')
+      currentSession.value = res.sessionId
+      currentSessionDraft.value = false
+      currentSessionNew.value = true
+      localStorage.setItem(`ccm:project-session:${project}`, res.sessionId)
+      if (!sessions.value.some(session => session.id === res.sessionId)) {
+        sessions.value.unshift({
+          id: res.sessionId,
+          name: '新会话',
+          source: 'web',
+          created_at: new Date().toISOString(),
+        })
+      }
+      return res.sessionId
+    })()
+    try {
+      return await projectDraftCreation
+    } finally {
+      projectDraftCreation = null
+    }
+  }
+
+  // 网页会话先打开本地草稿；飞书会话需要外部绑定，因此立即创建。
+  const createSession = async (source = 'web') => {
     if (!currentProject.value) {
       toast.info('请先选择项目')
       return
     }
-    const res = await sessionsApi.create({ project: currentProject.value })
+    const resolvedSource = source === 'feishu' ? 'feishu' : 'web'
+    if (resolvedSource === 'web') {
+      if (isStreaming.value) await stopStreaming()
+      currentSession.value = null
+      currentSessionDraft.value = true
+      currentSessionNew.value = true
+      messages.value = []
+      localStorage.removeItem(`ccm:project-session:${currentProject.value}`)
+      await nextTick()
+      document.getElementById('projectChatInput')?.focus()
+      return { success: true, draft: true }
+    }
+    const res = await sessionsApi.create({ project: currentProject.value, source: resolvedSource })
     if (res.success) {
       await loadSessions(currentProject.value)
       await selectSession(res.sessionId, true)
+      if (resolvedSource === 'feishu') {
+        projectFeishuBindingSession.value = sessions.value.find(item => item.id === res.sessionId) || null
+        projectFeishuBindingOpen.value = true
+        toast.success('飞书会话已创建，请选择当前项目的飞书目标')
+      }
+    }
+  }
+
+  const openProjectFeishuBinding = (session) => {
+    projectFeishuBindingSession.value = session
+    projectFeishuBindingOpen.value = true
+  }
+
+  const updateProjectFeishuBinding = async (targetId, action = 'bind') => {
+    if (!currentProject.value || !projectFeishuBindingSession.value?.id || !targetId) return
+    projectFeishuBindingBusy.value = true
+    try {
+      await sessionsApi.bindFeishu({
+        project: currentProject.value,
+        sessionId: projectFeishuBindingSession.value.id,
+        targetId,
+        action,
+      })
+      await loadSessions(currentProject.value)
+      toast.success(action === 'unbind' ? '项目飞书目标已解除绑定' : '项目飞书目标已绑定到当前会话')
+    } catch (error) {
+      toast.error(error?.message || '更新项目飞书绑定失败')
+    } finally {
+      projectFeishuBindingBusy.value = false
     }
   }
 
@@ -615,7 +777,34 @@ export function useProjectManager(props, emit) {
     const card = getProjectTaskCard(msg)
     const id = card?.task_id || msg?.task_id
     const isProjectRun = String(id || '').startsWith('pchat_')
+    const isProjectMainTask = card?.orchestration_scope === 'project_session'
+    const projectMainRunId = card?.project_main_run_id || msg?.projectRun?.id || ''
     try {
+      if (action.kind === 'confirm_plan') {
+        const data = await postTaskAction('/api/projects/main-agent/plan-confirm', {
+          task_id: id,
+          project: currentProject.value,
+          project_session_id: currentSession.value,
+        })
+        pendingProjectParentRunId.value = data.resume_parent_run_id || id
+        chatInput.value = '我确认按当前计划执行。'
+        await nextTick()
+        await sendMessage()
+        return
+      }
+      if (action.kind === 'revise_plan') {
+        const requirement = window.prompt('需要怎样调整这份计划？', '')
+        if (!requirement) return
+        await postTaskAction('/api/projects/main-agent/task-action', {
+          action: 'cancel', task_id: id, project: currentProject.value, project_session_id: currentSession.value,
+          reason: '用户要求修改原计划，旧计划已停止',
+        })
+        pendingProjectParentRunId.value = ''
+        chatInput.value = requirement
+        await nextTick()
+        await sendMessage()
+        return
+      }
       if (action.kind === 'view_changes') {
         if (msg?.fileChanges?.files?.length) openCodeChangeDrawer(msg.fileChanges, { title: card?.title || '项目 Agent 代码改动', subtitle: card?.goal || '' })
         else toast.info('暂无可查看的文件改动')
@@ -643,7 +832,7 @@ export function useProjectManager(props, emit) {
         if (!await confirmDialog(`确定停止任务“${card.title}”？`)) return
         await postTaskAction(isProjectRun ? '/api/project-runs/cancel' : '/api/tasks/cancel', { id, reason: '用户从项目聊天任务卡停止' })
       } else if (action.kind === 'retry') {
-        if (isProjectRun) {
+        if (isProjectRun || isProjectMainTask) {
           pendingProjectParentRunId.value = id
           chatInput.value = msg.requestText || card.goal || card.title
           await nextTick()
@@ -655,7 +844,9 @@ export function useProjectManager(props, emit) {
       } else if (action.kind === 'rollback') {
         if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法安全撤销')
         if (!await confirmDialog(`确定安全撤销任务“${card.title}”的最近一轮改动？`)) return
-        await postTaskAction(isProjectRun ? '/api/project-runs/rollback' : '/api/tasks/rollback', { id, reason: '用户从项目聊天任务卡安全撤销' })
+        const rollbackRunId = isProjectRun ? id : isProjectMainTask ? projectMainRunId : ''
+        if (isProjectMainTask && !rollbackRunId) return toast.info('当前项目主任务没有可核验的源码运行检查点，已阻止撤销')
+        await postTaskAction(rollbackRunId ? '/api/project-runs/rollback' : '/api/tasks/rollback', { id: rollbackRunId || id, reason: '用户从项目聊天任务卡安全撤销' })
         if (msg.taskExperience) {
           msg.taskExperience.status = 'reverted'
           msg.taskExperience.phase = 'reverted'
@@ -684,10 +875,10 @@ export function useProjectManager(props, emit) {
 
   // 发送消息
   const isStreaming = ref(false)
-  const thinkingMessages = ref([]) // 存储思考过程消息
   const pendingProjectParentRunId = ref('')
   const streamController = ref(null)
   const activeProjectRunId = ref('')
+  const activeProjectMainTaskId = ref('')
   const stoppingProjectTurn = ref(false)
   const makeProjectMessageId = () => `pmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -700,14 +891,19 @@ export function useProjectManager(props, emit) {
     busy: isStreaming,
   })
   const projectComposerSendLabel = computed(() => isStreaming.value
-    ? (projectTurnControl.mode.value === 'steer' ? '引导' : '排队')
+    ? '排队'
     : '发送')
 
   const stopStreaming = async () => {
     if (!isStreaming.value || stoppingProjectTurn.value) return
     stoppingProjectTurn.value = true
     try {
-      if (activeProjectRunId.value) {
+      if (activeProjectMainTaskId.value) {
+        await postTaskAction('/api/tasks/cancel', {
+          id: activeProjectMainTaskId.value,
+          reason: '用户从项目会话停止当前项目主 Agent 任务',
+        }).catch((error) => toast.warning(error?.message || '后端停止请求未完成，正在中断当前连接'))
+      } else if (activeProjectRunId.value) {
         await postTaskAction('/api/project-runs/cancel', {
           id: activeProjectRunId.value,
           reason: '用户从项目会话停止当前工作',
@@ -758,10 +954,27 @@ export function useProjectManager(props, emit) {
     return turn
   }
 
+  const guideProjectQueuedTurn = async (turn) => {
+    if (!turn?.id) return
+    const guidedTurn = await projectTurnControl.guide(turn)
+    toast.success('这条消息已移到队首，将作为当前任务的补充要求')
+    if (isStreaming.value) await stopStreaming()
+    window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
+    return guidedTurn
+  }
+
   const sendMessage = async (options = {}) => {
     const queuedTurn = options?.queueTurn || null
     if (isStreaming.value && !queuedTurn) return submitProjectMessageWhileBusy()
     if ((!queuedTurn && !chatInput.value.trim() && chatFiles.value.length === 0) || !currentProject.value) return
+    if (!currentSession.value && currentSessionDraft.value) {
+      try {
+        await materializeProjectSessionDraft()
+      } catch (error) {
+        toast.error(error?.message || '创建项目会话失败')
+        return { success: false, error: error?.message || '创建项目会话失败' }
+      }
+    }
     if (!currentSession.value) {
       toast.info('请先新建或选择一个会话')
       return
@@ -781,21 +994,12 @@ export function useProjectManager(props, emit) {
     const userMsg = { id: makeProjectMessageId(), role: 'user', content: `${msg || '请处理附件'}${attachmentText}`, timestamp: new Date().toISOString() }
     messages.value.push(userMsg)
 
-    const thinkingMsg = {
-      id: makeProjectMessageId(),
-      role: 'thinking',
-      content: '',
-      messageMode: 'conversation',
-      timestamp: new Date().toISOString()
-    }
-    messages.value.push(thinkingMsg)
     scrollToBottom({ force: true })
 
     const agentMsg = { id: makeProjectMessageId(), role: 'assistant', content: '', workEvents: [], requestText: msg, messageMode: 'conversation', streaming: true, timestamp: new Date().toISOString() }
     const controller = new AbortController()
     streamController.value = controller
     isStreaming.value = true
-    thinkingMessages.value = []
     let agentMsgAdded = false
     let responseAccepted = false
     let userPersisted = false
@@ -807,11 +1011,6 @@ export function useProjectManager(props, emit) {
       messages.value.push(agentMsg)
       agentMsgAdded = true
     }
-    const removeThinkingMessage = () => {
-      const index = messages.value.indexOf(thinkingMsg)
-      if (index !== -1) messages.value.splice(index, 1)
-    }
-
     const handleSseEvent = (rawEvent) => {
       const dataText = rawEvent
         .split(/\r?\n/)
@@ -823,16 +1022,14 @@ export function useProjectManager(props, emit) {
         const data = JSON.parse(dataText)
         if (data.type === 'presentation') {
           const mode = String(data.message_mode || data.messageMode || 'conversation')
-          thinkingMsg.messageMode = mode
           agentMsg.messageMode = mode
-        } else if (data.type === 'status') {
-          thinkingMessages.value.push(data.text)
-          thinkingMsg.content = thinkingMessages.value.join('\n')
-          scrollToBottom()
         } else if (data.type === 'task_runtime') {
           agentMsg.projectRun = data.run || agentMsg.projectRun
           activeProjectRunId.value = data.run?.id || activeProjectRunId.value
           agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
+          activeProjectMainTaskId.value = data.taskExperience?.orchestration_scope === 'project_session'
+            ? (data.taskExperience?.task_id || activeProjectMainTaskId.value)
+            : activeProjectMainTaskId.value
           agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
           if (agentMsg.messageMode === 'task') {
             addAgentMessage()
@@ -854,7 +1051,6 @@ export function useProjectManager(props, emit) {
           agentMsg.content += data.text
           scrollToBottom()
         } else if (data.type === 'done') {
-          removeThinkingMessage()
           if (data.usage_anchor_id) agentMsg.id = data.usage_anchor_id
           if (data.provider_usage) agentMsg.provider_usage = data.provider_usage
           notifySessionContextUsage('project_session', `${projectAtSend}::${sessionAtSend}`, { reason: 'provider_usage_updated' })
@@ -934,12 +1130,12 @@ export function useProjectManager(props, emit) {
         }
       }
     } finally {
-      removeThinkingMessage()
       agentMsg.streaming = false
       isStreaming.value = false
       if (streamController.value === controller) streamController.value = null
       const completedRunId = agentMsg.projectRun?.id || activeProjectRunId.value
       if (!agentMsg.projectRun || agentMsg.projectRun?.id === activeProjectRunId.value) activeProjectRunId.value = ''
+      if (agentMsg.task_id === activeProjectMainTaskId.value) activeProjectMainTaskId.value = ''
       const hasAgentResult = agentMsg.content || agentMsg.taskExperience || agentMsg.workEvents.length
       if (hasAgentResult) {
         addAgentMessage()
@@ -1014,30 +1210,27 @@ export function useProjectManager(props, emit) {
   // 聊天目标提示
   const chatTarget = computed(() => {
     if (currentProject.value) {
-      return `发送到: ${currentProject.value}`
+      const project = projects.value.find(item => item.name === currentProject.value)
+      return `发送到: ${project?.display_name || currentProject.value}`
     }
     return '未选择项目'
   })
 
   // 日志面板
   const showLogsPanel = ref(false)
-  const logsContent = ref('')
+  const logsTitle = ref('Agent 运行日志')
+  const logsProfileId = ref('')
+  const logsKind = ref('run')
+  const logsRuntimeProcess = computed(() => projectRuntime.value?.processes?.find(row => row.profileId === logsProfileId.value)
+    || { status: 'stopped', pid: 0 })
 
-  const toggleLogs = () => {
-    showLogsPanel.value = !showLogsPanel.value
-    if (showLogsPanel.value && currentProject.value) {
-      loadLogs()
-    }
-  }
-
-  const loadLogs = async () => {
-    if (!currentProject.value) return
-    try {
-      const res = await api(`/api/projects/${encodeURIComponent(currentProject.value)}/logs?lines=200`)
-      logsContent.value = res.logs || '(暂无日志)'
-    } catch (e) {
-      logsContent.value = '加载日志失败: ' + e.message
-    }
+  const openProjectRuntimeLogs = kind => {
+    if (!currentProject.value || !selectedRuntimeProfileId.value) return
+    const profile = projectRuntime.value?.profiles?.find(item => item.id === selectedRuntimeProfileId.value)
+    logsTitle.value = `${profile?.label || '项目'} · ${kind === 'build' ? '构建日志' : '运行日志'}`
+    logsProfileId.value = selectedRuntimeProfileId.value
+    logsKind.value = kind === 'build' ? 'build' : 'run'
+    showLogsPanel.value = true
   }
 
   // 飞书扫码创建机器人
@@ -1195,12 +1388,21 @@ export function useProjectManager(props, emit) {
     skill: Array.from(new Set((Array.isArray(tools.skill) ? tools.skill : []).map(item => String(item || '').trim()).filter(Boolean)))
   })
 
-  const loadProjectTools = async () => {
+  const loadProjectTools = async (options = {}) => {
     if (!currentProject.value) return
-
-    // 加载项目工具配置
-    const projRes = await fetch(`/api/projects/tools?project=${encodeURIComponent(currentProject.value)}`)
+    const project = currentProject.value
+    const open = options?.open !== false
+    const [projRes, optionsData, verification] = await Promise.all([
+      fetch(`/api/projects/tools?project=${encodeURIComponent(project)}`, { cache: 'no-store' }),
+      fetch('/api/tools/authorization-options', { cache: 'no-store' }).then(r => r.json()).catch(() => ({ mcp: [], skill: [] })),
+      fetch(`/api/tools/chain-verification?project=${encodeURIComponent(project)}`, { cache: 'no-store' }).then(r => r.json()).catch(() => ({ rows: [] })),
+    ])
     const projData = await projRes.json()
+    if (!projRes.ok || projData.success === false) {
+      if (open) toast.error(projData.error || '读取项目工具配置失败')
+      return
+    }
+    if (project !== currentProject.value) return
     projectTools.value = normalizeProjectTools(projData.tools)
     projectToolAudit.value = projData.tool_audit || null
     projectAuthorizationReadiness.value = projData.authorization_readiness || null
@@ -1218,13 +1420,10 @@ export function useProjectManager(props, emit) {
     projectForbiddenPaths.value = Array.isArray(projData.forbidden_paths) ? projData.forbidden_paths.join('\n') : ''
     projectDeliveryContract.value = projData.delivery_contract || ''
 
-    const options = await fetch('/api/tools/authorization-options').then(r => r.json()).catch(() => ({ mcp: [], skill: [] }))
-    allTools.value.mcp = options.mcp || []
-    allTools.value.skill = options.skill || []
-    const verification = await fetch(`/api/tools/chain-verification?project=${encodeURIComponent(currentProject.value)}`).then(r => r.json()).catch(() => ({ rows: [] }))
+    allTools.value.mcp = optionsData.mcp || []
+    allTools.value.skill = optionsData.skill || []
     projectToolVerification.value = verification.rows?.[0] || null
-
-    showTools.value = true
+    if (open) showTools.value = true
   }
 
   const saveProjectTools = async () => {
@@ -1265,6 +1464,80 @@ export function useProjectManager(props, emit) {
       }
     } else {
       toast.error('保存失败: ' + (data.error || '未知错误'))
+    }
+  }
+
+  const projectTestTargets = ref([])
+  const projectTestAuth = ref(null)
+  const projectTestTargetsLoading = ref(false)
+  const projectTestTargetsSaving = ref(false)
+
+  const loadProjectTestTargets = async () => {
+    if (!currentProject.value) return
+    projectTestTargetsLoading.value = true
+    try {
+      const response = await fetch(`/api/projects/test-targets?project=${encodeURIComponent(currentProject.value)}`)
+      const data = await response.json()
+      if (!response.ok || data.error) throw new Error(data.error || '测试目标读取失败')
+      projectTestTargets.value = data.targets || []
+      projectTestAuth.value = data.projectAuth || null
+      showProjectTestTargets.value = true
+    } catch (error) {
+      toast.error(error?.message || '测试目标读取失败')
+    } finally {
+      projectTestTargetsLoading.value = false
+    }
+  }
+
+  const saveProjectTestTarget = async (target) => {
+    if (!currentProject.value || projectTestTargetsSaving.value) return
+    projectTestTargetsSaving.value = true
+    try {
+      const projectAuthInput = target?.projectAuth || null
+      if (projectAuthInput) {
+        const authResponse = await fetch('/api/projects/test-auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: currentProject.value, profile: projectAuthInput }),
+        })
+        const authData = await authResponse.json()
+        if (!authResponse.ok || !authData.success) throw new Error(authData.error || '项目登录信息保存失败')
+        projectTestAuth.value = authData.profile || projectTestAuth.value
+      }
+      const { projectAuth: _projectAuth, ...targetInput } = target || {}
+      const response = await fetch('/api/projects/test-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: currentProject.value, target: { ...targetInput, project: currentProject.value } }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error(data.error || '测试目标保存失败')
+      const index = projectTestTargets.value.findIndex(item => item.id === data.target.id)
+      if (index >= 0) projectTestTargets.value.splice(index, 1, data.target)
+      else projectTestTargets.value.push(data.target)
+      toast.success(`测试目标“${data.target.name}”已保存`)
+    } catch (error) {
+      toast.error(error?.message || '测试目标保存失败')
+    } finally {
+      projectTestTargetsSaving.value = false
+    }
+  }
+
+  const deleteProjectTestTarget = async (targetId) => {
+    const target = projectTestTargets.value.find(item => item.id === targetId)
+    if (!await confirmDialog(`确定删除测试目标“${target?.name || targetId}”？`)) return
+    try {
+      const response = await fetch('/api/projects/test-targets/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: currentProject.value, target_id: targetId }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error(data.error || '测试目标删除失败')
+      projectTestTargets.value = projectTestTargets.value.filter(item => item.id !== targetId)
+      toast.success('测试目标已删除')
+    } catch (error) {
+      toast.error(error?.message || '测试目标删除失败')
     }
   }
 
@@ -1370,35 +1643,57 @@ export function useProjectManager(props, emit) {
     toast.success('文件已删除')
   }
 
+  let unsubscribeProjectRuntime = null
+  let projectSessionRefreshTimer = null
+  let projectFeishuFallbackTimer = null
   onMounted(() => {
     loadAgentOptions()
     loadProjects()
+    unsubscribeProjectRuntime = subscribeRuntimeEvents(['project'], event => {
+      const eventProject = String(event?.data?.project || '')
+      if (!eventProject || eventProject !== currentProject.value) return
+      if (event?.type === 'project.session_messages_changed') {
+        const eventSessionId = String(event?.data?.sessionId || event?.data?.session_id || '')
+        window.clearTimeout(projectSessionRefreshTimer)
+        projectSessionRefreshTimer = window.setTimeout(() => {
+          void refreshCurrentProjectSession(eventSessionId)
+        }, 120)
+        return
+      }
+      if (event?.type === 'project.feishu_session_binding_changed'
+        || event?.type === 'project.session_title_changed') {
+        void loadSessions(eventProject)
+        return
+      }
+      if (String(event?.type || '').startsWith('project.main_agent.')) return
+      window.clearTimeout(loadProjectRuntime._eventTimer)
+      loadProjectRuntime._eventTimer = window.setTimeout(() => {
+        loadProjectRuntime(eventProject)
+        loadProjects()
+      }, 180)
+    })
+    projectFeishuFallbackTimer = window.setInterval(() => {
+      const selected = sessions.value.find(item => item.id === currentSession.value)
+      if (selected?.source === 'feishu') void refreshCurrentProjectSession(selected.id)
+    }, 60000)
     nextTick(attachMessagesResizeObserver)
   })
 
   onUnmounted(() => {
     stopStreaming()
+    unsubscribeProjectRuntime?.()
+    window.clearTimeout(loadProjectRuntime._eventTimer)
+    window.clearTimeout(projectSessionRefreshTimer)
+    window.clearInterval(projectFeishuFallbackTimer)
     detachMessagesResizeObserver()
   })
 
-  const handleInput = (e) => {
-    const value = e.target.value
-    if (slash.onInput()) {
-      hideTemplateAssist()
-      return
-    }
-    if (value.startsWith('/')) {
-      hideTemplateAssist()
-      return
-    }
-
-    showTemplateSelector.value = false
-    detectRecommendation(value)
+  const handleInput = () => {
+    slash.onInput()
   }
 
   const handleKeydown = async (e) => {
     if (await slash.onKeydown(e)) return
-    if (handleTemplateKeydown(e)) return
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -1408,32 +1703,32 @@ export function useProjectManager(props, emit) {
 
   return {
     ChatComposer, ConversationTurnControls, CommandResultCard, MessageNavigator, AgentCodeChangeDrawer, ProjectAgentMessage,
-    UnifiedDiffModal, TemplateVariablesModal, ProjectFormModal, ProjectFeishuQrModal, ProjectFolderBrowserModal, ProjectToolsModal,
-    ProjectSharedFilesModal, ProjectAgentSwitchModal, ProjectWorkspaceHeader, ProjectSessionSidebar, ProjectArchiveManager, PanelLeft,
-    highlightMsgIndex, handleNavigation, scrollToMessage, projects, currentProject, currentSession,
-    sessions, messages, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
+    UnifiedDiffModal, ProjectFormModal, ProjectFeishuQrModal, ProjectFolderBrowserModal, ProjectToolsModal,
+    ProjectSharedFilesModal, ProjectAgentSwitchModal, ProjectWorkspaceHeader, ProjectSessionSidebar, ProjectArchiveManager, ProjectRuntimeBar, ProjectRuntimeConfigModal, ProjectRunConsole, GroupTestTargetsModal, PanelLeft,
+    highlightMsgIndex, handleNavigation, scrollToMessage, projects, currentProject, currentSession, currentSessionDraft, hasProjectConversation,
+    sessions, projectFeishuTargets, projectFeishuBindingSession, projectFeishuBindingOpen, projectFeishuBindingBusy,
+    messages, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
     scrollToBottom, attachMessagesResizeObserver, detachMessagesResizeObserver, navMessages, codeChangeDrawer, openCodeChangeDrawer,
-    openSingleFileChange, closeCodeChangeDrawer, slashNavigate, runProjectClientCommand, slash, focusProjectInput,
-    showTemplateSelector, allTemplates, templateSearchQuery, activeTemplateIndex, recommendedTemplate, activeTemplate,
-    templateVariables, showVariableModal, openTemplateSelector, selectChatTemplate, applyTemplateVariables, detectRecommendation,
-    applyRecommendation, handleTemplateKeydown, hideTemplateAssist, chatFiles, diffViewer, pageInfo,
+    openSingleFileChange, closeCodeChangeDrawer, slashNavigate, runProjectClientCommand, slash,
+    chatFiles, diffViewer, pageInfo,
     agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
-    showCreate, showEdit, showSwitchAgent, showTools, showSharedFiles, showArchives,
-    mobileSessionsOpen, projectActionBusy, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
+    showCreate, showEdit, showSwitchAgent, showTools, showProjectTestTargets, showSharedFiles, showArchives,
+    mobileSessionsOpen, projectActionBusy, projectRuntime, projectRuntimeLoading, projectRuntimeBusy, selectedRuntimeProfileId, selectedRuntimeProcess, showRuntimeConfig, projectToolchainTestResult, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
     feishuQrLoading, feishuProjectSetupToken, browsePath, browseItems, browseTarget, drives, browseHome, browseLoading, browseError,
-    showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, activeSelectedTemplate,
-    pendingTemplateToApply, selectProject, loadSessions, selectSession, startProject, stopProject,
+    showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, loadProjectRuntime, rescanProjectRuntime, saveProjectRuntime, testProjectRuntimeToolchain, runProjectRuntimeAction,
+    selectProject, loadSessions, selectSession, startProject, stopProject,
     deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit, loadProjectGitStatus,
-    openSwitchAgent, switchAgent, startProjectWithAgent, createSession, renameSession, deleteSession,
+    openSwitchAgent, switchAgent, startProjectWithAgent, createSession, openProjectFeishuBinding, updateProjectFeishuBinding, renameSession, deleteSession,
     saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
-    thinkingMessages, pendingProjectParentRunId, streamController, activeProjectRunId, stoppingProjectTurn, makeProjectMessageId,
-    projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, submitProjectMessageWhileBusy,
+    pendingProjectParentRunId, streamController, activeProjectRunId, activeProjectMainTaskId, stoppingProjectTurn, makeProjectMessageId,
+    projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
     sendMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
-    closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsContent,
-    toggleLogs, loadLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
+    closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
+    openProjectRuntimeLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
     loadFolderContents, browseGoUp, createBrowseFolder, selectFolder, projectTools, allTools, projectToolAudit,
     projectAuthorizationReadiness, projectConnectionPreflight, projectToolVerification, projectVerificationCommands, inferredProjectVerificationCommands, projectVerificationSource,
     projectResponsibility, projectCapabilities, projectWritablePaths, projectForbiddenPaths, projectDeliveryContract, normalizeProjectTools,
+    projectTestTargets, projectTestAuth, projectTestTargetsLoading, projectTestTargetsSaving, loadProjectTestTargets, saveProjectTestTarget, deleteProjectTestTarget,
     loadProjectTools, saveProjectTools, applyInferredVerificationCommands, updateProjectToolField, toggleProjectTool, projectFiles,
     showAddFile, showEditFile, editFileName, editFileContent, updateProjectSharedFileField, loadProjectSharedFiles,
     addProjectFile, submitAddProjectFile, editProjectFile, submitEditProjectFile, deleteProjectFile, handleInput,

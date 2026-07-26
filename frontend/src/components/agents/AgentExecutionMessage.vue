@@ -319,7 +319,7 @@ const textOnly = computed(() => !(
   padding: 8px 9px;
   border: 1px solid rgba(245, 158, 11, 0.2);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--surface-subtle);
 }
 .clarification-question small {
   color: #92400e;
@@ -467,7 +467,7 @@ const textOnly = computed(() => !(
 .workflow-board {
   padding: 10px;
   border-bottom: 1px solid rgba(59, 130, 246, 0.1);
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface-subtle);
 }
 .workflow-title {
   margin-bottom: 8px;
@@ -619,4 +619,7 @@ const textOnly = computed(() => !(
   font-size: 11px;
   line-height: 1.5;
 }
+.clarification-summary,
+.clarification-head span { background:var(--warning-soft); color:var(--accent-yellow); }
+.clarification-head strong { color:var(--accent-yellow); }
 </style>

@@ -5,12 +5,15 @@
       :page-info="pageInfo"
       :busy-action="projectActionBusy"
       :has-session="!!currentSession"
+      :tool-counts="{ mcp: projectTools.mcp?.length || 0, skill: projectTools.skill?.length || 0 }"
+      :tools-ready="projectAuthorizationReadiness?.dispatchReady !== false"
       @select="selectProject"
       @start="startProject($event.name)"
       @stop="stopProject($event.name)"
       @switch-agent="openSwitchAgent"
       @edit="openEditModal"
       @tools="loadProjectTools"
+      @test-targets="loadProjectTestTargets"
       @files="loadProjectSharedFiles"
       @save-knowledge="saveCurrentProjectSessionKnowledge"
       @archive="deleteProject($event.name)"
@@ -18,24 +21,49 @@
       @create="openCreateModal"
     />
 
+    <ProjectRuntimeBar
+      v-model:selected-profile-id="selectedRuntimeProfileId"
+      :project="currentProject || ''"
+      :snapshot="projectRuntime"
+      :loading="projectRuntimeLoading"
+      :busy-action="projectRuntimeBusy"
+      @action="runProjectRuntimeAction"
+      @rescan="rescanProjectRuntime"
+      @configure="showRuntimeConfig = true"
+      @logs="openProjectRuntimeLogs"
+    />
+
     <div class="main-content">
       <ProjectSessionSidebar
         :project="currentProject || ''"
         :sessions="sessions"
+        :feishu-targets="projectFeishuTargets"
         :current-session="currentSession || ''"
         :open="mobileSessionsOpen"
         @select="selectSession"
         @create="createSession"
+        @create-feishu="createSession('feishu')"
+        @bind-feishu="openProjectFeishuBinding"
         @refresh="loadSessions(currentProject)"
         @rename="renameSession"
         @delete="deleteSession"
         @close="mobileSessionsOpen = false"
       />
 
+      <GlobalAgentFeishuBindingModal
+        :open="projectFeishuBindingOpen"
+        :session="projectFeishuBindingSession"
+        :bindings="projectFeishuTargets"
+        :busy="projectFeishuBindingBusy"
+        @close="projectFeishuBindingOpen = false"
+        @bind="updateProjectFeishuBinding($event, 'bind')"
+        @unbind="updateProjectFeishuBinding($event, 'unbind')"
+      />
+
       <div class="content">
         <div class="content-header">
           <button class="mobile-session-trigger" title="打开会话列表" @click="mobileSessionsOpen = true"><PanelLeft :size="18" /></button>
-          <span>{{ currentSession ? `${currentProject} · ${sessions.find(item => item.id === currentSession)?.name || '当前会话'}` : '项目对话' }}</span>
+          <span>{{ currentSessionDraft ? `${projects.find(item => item.name === currentProject)?.display_name || currentProject} · 新会话` : (currentSession ? `${projects.find(item => item.name === currentProject)?.display_name || currentProject} · ${sessions.find(item => item.id === currentSession)?.name || '当前会话'}` : '项目对话') }}</span>
           <ConversationFindBar
             :messages="messages"
             :scroll-container="messagesEl"
@@ -45,13 +73,17 @@
           />
         </div>
         <div id="messages" ref="messagesEl" class="messages" @scroll="updateMessageScrollState">
-          <EmptyState
-            v-if="!currentSession"
-            large
-            icon="💬"
-            title="选择一个会话开始对话"
-            hint="在左侧新建或打开会话后即可开始"
-          />
+          <div v-if="!hasProjectConversation" class="conversation-empty">
+            <span class="conversation-empty-icon"><MessageSquareText :size="25" /></span>
+            <strong>{{ currentProject ? (sessions.length ? '选择一个会话继续工作' : '为这个项目创建第一个会话') : '先选择一个项目' }}</strong>
+            <p>{{ currentProject ? (sessions.length ? '会话各自保留独立上下文、任务与验收记录。' : '项目主 Agent 将在会话中理解需求、分派开发并完成验收。') : '选择项目后即可查看会话、运行源码和管理开发任务。' }}</p>
+            <button v-if="currentProject" type="button" class="conversation-empty-action" @click="createSession"><Plus :size="16" />新建会话</button>
+          </div>
+          <div v-else-if="currentSessionDraft" class="conversation-empty conversation-draft">
+            <span class="conversation-empty-icon"><MessageSquareText :size="25" /></span>
+            <strong>想让项目主 Agent 做什么？</strong>
+            <p>输入需求、粘贴图片或添加附件。发送第一条消息后，这个会话才会创建并进入列表。</p>
+          </div>
           <template v-else>
             <div
               v-for="(msg, i) in messages"
@@ -90,7 +122,10 @@
                   @open-file-diff="openFileDiff"
                 />
               </div>
-              <div class="msg-meta">{{ new Date(msg.timestamp).toLocaleString('zh-CN') }}</div>
+              <MessageTimestamp
+                class="msg-meta"
+                :value="msg.timestamp || msg.created_at || msg.createdAt"
+              />
             </div>
           </template>
         </div>
@@ -108,11 +143,11 @@
         />
         <ConversationTurnControls
           :busy="isStreaming"
-          v-model:mode="projectTurnControl.mode.value"
           :turns="projectTurnControl.turns.value"
           :stopping="stoppingProjectTurn"
           @stop="stopStreaming"
           @cancel="projectTurnControl.cancel"
+          @guide="guideProjectQueuedTurn"
           @retry="(turn) => projectTurnControl.retry(turn).then(() => drainProjectTurnQueue())"
         />
         <ChatComposer
@@ -122,20 +157,12 @@
           :send-label="projectComposerSendLabel"
           :files="chatFiles"
           :slash="slash"
-          :templates-open="showTemplateSelector"
-          :templates="allTemplates"
-          :template-search-query="templateSearchQuery"
-          :active-template-index="activeTemplateIndex"
-          :recommended-template="recommendedTemplate"
-          :disabled="!currentProject || !currentSession"
+          :show-template-button="false"
+          :disabled="!currentProject || !hasProjectConversation"
           :busy="isStreaming"
           :allow-input-while-busy="true"
           @files-selected="onChatFilesSelected"
           @remove-file="removeChatFile"
-          @open-template="openTemplateSelector"
-          @update:template-search-query="templateSearchQuery = $event"
-          @select-template="selectChatTemplate"
-          @apply-recommendation="applyRecommendation"
           @keydown="handleKeydown"
           @input="handleInput"
           @send="sendMessage"
@@ -151,14 +178,17 @@
             />
           </template>
         </ChatComposer>
-        <!-- 日志面板 -->
-        <div v-if="showLogsPanel" class="logs-panel">
-          <div class="logs-header" @click="showLogsPanel = false">
-            <span>📋 运行日志</span>
-            <span style="font-size:12px;color:var(--text-muted)">{{ currentProject }}</span>
-          </div>
-          <div class="logs-content">{{ logsContent }}</div>
-        </div>
+        <ProjectRunConsole
+          :open="showLogsPanel"
+          :title="logsTitle"
+          :project="currentProject || ''"
+          :profile-id="logsProfileId"
+          :kind="logsKind"
+          :status="logsRuntimeProcess.status"
+          :busy="projectRuntimeBusy"
+          @close="showLogsPanel = false"
+          @action="runProjectRuntimeAction"
+        />
       </div>
     </div>
 
@@ -241,6 +271,17 @@
       @close="showSwitchAgent = false"
     />
 
+    <ProjectRuntimeConfigModal
+      v-if="showRuntimeConfig"
+      :snapshot="projectRuntime"
+      :busy="!!projectRuntimeBusy"
+      :test-result="projectToolchainTestResult"
+      @rescan="rescanProjectRuntime"
+      @save="saveProjectRuntime"
+      @test-toolchain="testProjectRuntimeToolchain"
+      @close="showRuntimeConfig = false"
+    />
+
     <ProjectToolsModal
       v-if="showTools"
       :project-name="currentProject"
@@ -263,6 +304,20 @@
       @apply-inferred="applyInferredVerificationCommands"
       @save="saveProjectTools"
       @close="showTools = false"
+    />
+
+    <GroupTestTargetsModal
+      v-if="showProjectTestTargets"
+      :owner-label="currentProject"
+      :fixed-project="currentProject"
+      :projects="currentProject ? [currentProject] : []"
+      :targets="projectTestTargets"
+      :project-auth="projectTestAuth"
+      :loading="projectTestTargetsLoading"
+      :saving="projectTestTargetsSaving"
+      @save="saveProjectTestTarget"
+      @delete="deleteProjectTestTarget"
+      @close="showProjectTestTargets = false"
     />
 
     <ProjectSharedFilesModal
@@ -291,12 +346,4 @@
       @notify="handleArchiveNotify"
     />
 
-    <TemplateVariablesModal
-      v-if="showVariableModal && activeTemplate"
-      :template="activeTemplate"
-      :variables="templateVariables"
-      @update-variable="({ key, value }) => { templateVariables[key] = value }"
-      @apply="applyTemplateVariables"
-      @close="showVariableModal = false"
-    />
   </div>

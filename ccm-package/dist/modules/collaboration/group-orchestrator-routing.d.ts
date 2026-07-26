@@ -113,6 +113,7 @@ export type GroupOrchestratorInput = {
     auto_worker_context_compact_retry?: boolean;
     workerContextRetryOptions?: any;
     worker_context_retry_options?: any;
+    onDelta?: (delta: string) => void;
 };
 export declare function measureGroupMainAgentPayload(input: any): {
     messages: {
@@ -258,6 +259,12 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {
@@ -304,6 +311,12 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {
@@ -315,103 +328,6 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     executionOrder: string;
     coordinationStrategy: string;
     content: string;
-} | {
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    executionOrder?: undefined;
-    coordinationStrategy?: undefined;
-    coordinationPlan?: undefined;
-    usage?: undefined;
-    contextRecovery?: undefined;
-} | {
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    executionOrder: string;
-    coordinationStrategy: string;
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    usage?: undefined;
-    contextRecovery?: undefined;
 } | {
     agent: any;
     delegated: any[];
@@ -458,6 +374,12 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {
@@ -510,6 +432,12 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {
@@ -521,113 +449,6 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     executionOrder: string;
     coordinationStrategy: string;
     content: string;
-} | {
-    runtime: string;
-    usage: any;
-    contextRecovery: {
-        type: string;
-        ownership: any;
-        originalChars?: undefined;
-        recoveredChars?: undefined;
-    };
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    executionOrder?: undefined;
-    coordinationStrategy?: undefined;
-    coordinationPlan?: undefined;
-} | {
-    runtime: string;
-    usage: any;
-    contextRecovery: {
-        type: string;
-        ownership: any;
-        originalChars?: undefined;
-        recoveredChars?: undefined;
-    };
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    executionOrder: string;
-    coordinationStrategy: string;
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
 } | {
     agent: any;
     delegated: any[];
@@ -649,431 +470,6 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     content: string;
 }>;
 export declare function summarizeGroupOrchestratorProviderError(error: any): string;
-export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<{
-    selectedRoleSkills: string[];
-    usage: LlmTokenUsage;
-    mainAgentToolUsage: {
-        schema: string;
-        groupId: string;
-        groupSessionId: string;
-        calls: number;
-        results: {
-            name: any;
-            ok: any;
-            outputTokens: any;
-            error: any;
-        }[];
-    };
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: any;
-    workflowDecision: WorkflowDecision;
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    coordinationPlan?: undefined;
-    executionOrder?: undefined;
-    coordinationStrategy?: undefined;
-} | {
-    selectedRoleSkills: string[];
-    usage: LlmTokenUsage;
-    mainAgentToolUsage: {
-        schema: string;
-        groupId: string;
-        groupSessionId: string;
-        calls: number;
-        results: {
-            name: any;
-            ok: any;
-            outputTokens: any;
-            error: any;
-        }[];
-    };
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: any;
-    workflowDecision: WorkflowDecision;
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    executionOrder: string;
-    coordinationStrategy: string;
-    content: string;
-} | {
-    selectedRoleSkills: string[];
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    executionOrder?: undefined;
-    coordinationStrategy?: undefined;
-    coordinationPlan?: undefined;
-    usage?: undefined;
-    contextRecovery?: undefined;
-} | {
-    selectedRoleSkills: string[];
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    executionOrder: string;
-    coordinationStrategy: string;
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    usage?: undefined;
-    contextRecovery?: undefined;
-} | {
-    selectedRoleSkills: string[];
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    usage?: undefined;
-    contextRecovery?: undefined;
-} | {
-    selectedRoleSkills: string[];
-    usage: LlmTokenUsage;
-    contextRecovery: {
-        type: string;
-        originalChars: number;
-        recoveredChars: number;
-        ownership: any;
-    };
-    mainAgentToolUsage: {
-        schema: string;
-        groupId: string;
-        groupSessionId: string;
-        calls: number;
-        results: {
-            name: any;
-            ok: any;
-            outputTokens: any;
-            error: any;
-        }[];
-    };
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: any;
-    workflowDecision: WorkflowDecision;
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    coordinationPlan?: undefined;
-    executionOrder?: undefined;
-    coordinationStrategy?: undefined;
-} | {
-    selectedRoleSkills: string[];
-    usage: LlmTokenUsage;
-    contextRecovery: {
-        type: string;
-        originalChars: number;
-        recoveredChars: number;
-        ownership: any;
-    };
-    mainAgentToolUsage: {
-        schema: string;
-        groupId: string;
-        groupSessionId: string;
-        calls: number;
-        results: {
-            name: any;
-            ok: any;
-            outputTokens: any;
-            error: any;
-        }[];
-    };
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: any;
-    workflowDecision: WorkflowDecision;
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    runtime: string;
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    executionOrder: string;
-    coordinationStrategy: string;
-    content: string;
-} | {
-    selectedRoleSkills: string[];
-    runtime: string;
-    usage: any;
-    contextRecovery: {
-        type: string;
-        ownership: any;
-        originalChars?: undefined;
-        recoveredChars?: undefined;
-    };
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-    executionOrder?: undefined;
-    coordinationStrategy?: undefined;
-    coordinationPlan?: undefined;
-} | {
-    selectedRoleSkills: string[];
-    runtime: string;
-    usage: any;
-    contextRecovery: {
-        type: string;
-        ownership: any;
-        originalChars?: undefined;
-        recoveredChars?: undefined;
-    };
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    executionOrder: string;
-    coordinationStrategy: string;
-    analysis: {
-        documentFindings: string[];
-        ragContext: {
-            citations: string[];
-            scoped: boolean;
-            injected: boolean;
-        };
-        coordinationStrategy: string;
-        constraints: string[];
-        needsCoordination: boolean;
-        confidence: number;
-        raw: string;
-        summary: string;
-        intent: string;
-        domains: string[];
-        deliverables: string[];
-        explicitProjects: any;
-        missingInfo: string[];
-        contextSignal: string;
-    };
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
-    dispatchPolicy: {
-        action: string;
-        reason: string;
-        requiresConfirmation: boolean;
-        risk: string;
-        nextStep: string;
-        confidence: any;
-    };
-} | {
-    selectedRoleSkills: string[];
-    agent: any;
-    delegated: any[];
-    assignments: any[];
-    runtime: string;
-    usage: any;
-    contextRecovery: {
-        type: string;
-        ownership: any;
-        originalChars?: undefined;
-        recoveredChars?: undefined;
-    };
-    agentBoundary: {
-        layer: string;
-        planner: string;
-        runtime: string;
-        responsibility: string;
-    };
-    content: string;
-}>;
+export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<any>;
 export declare function isContextLimitError(error: any): boolean;
 export declare function buildReactiveCompactionContext(context: string, maxChars?: number): string;

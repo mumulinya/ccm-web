@@ -25,8 +25,10 @@ import {
 } from "../../core/utils";
 
 import { decomposeRequirementToTaskPlan, ingestRequirementSources, requirementToIntakeDraft } from "../requirements/source-ingestion";
+import { decideWorkflowWithModel } from "../../agents/workflow-decision";
 import { runRequirementEpicSelfTest } from "../requirements/requirement-epic-self-tests";
 import { startGlobalMissionSupervisor } from "../../agents/global/mission-supervisor";
+import { appendProjectSessionTaskMessage, ensureProjectAutomationSession } from "../projects/sessions";
 
 import {
   loadCronJobs,
@@ -568,6 +570,13 @@ export function handleCollaborationApiIntakeRoutesPartA(
           availableTargets,
         });
         const extractedRequirement = sourceIngestion.requirement;
+        if (!extractedRequirement) {
+          return sendJson(res, {
+            error: sourceIngestion.warnings?.[0] || "统一大模型未能形成可靠需求结构，本轮未创建任务",
+            code: "requirement_model_decision_required",
+            source_ingestion: sourceIngestion.technical,
+          }, 503);
+        }
         const requirement = compactFormText(extractedRequirement?.business_goal || userRequirement, "");
         if (!requirement && sourceIngestion.sources.length === 0) return sendJson(res, { error: "请先说说你想完成什么，或者上传需求资料" }, 400);
         const group = groups.find((item: any) => item.id === (payload.group_id || payload.groupId)) || null;
@@ -575,12 +584,25 @@ export function handleCollaborationApiIntakeRoutesPartA(
         const coordinator = group?.members?.find((member: any) => member.role === "coordinator")?.project || group?.members?.[0]?.project || "";
         const targetProject = requestedProject || coordinator || configs[0]?.name || "";
         if (!targetProject && !group) return sendJson(res, { error: "还没有可执行项目，请先添加项目或开发群聊" }, 409);
-        const lower = `${requirement}\n${sourceIngestion.source_documents}`.toLowerCase();
-        const areas = [
-          /(页面|前端|ui|组件|样式)/i.test(lower) ? "前端页面与交互" : "",
-          /(接口|后端|服务|数据库|api)/i.test(lower) ? "后端接口与数据" : "",
-          /(测试|修复|bug|报错)/i.test(lower) ? "测试与回归验证" : "",
-        ].filter(Boolean);
+        const requestedProjectSessionId = compactFormText(payload.project_session_id || payload.projectSessionId, "");
+        const projectSession = !group
+          ? ensureProjectAutomationSession(targetProject, requestedProjectSessionId, compactFormText(payload.title || requirement, "自动开发任务").slice(0, 80))
+          : null;
+        const requestedGroupSessionId = compactFormText(payload.group_session_id || payload.groupSessionId, "");
+        const workflowDecision = await decideWorkflowWithModel({
+          message: requirement,
+          scope: group ? "group" : "project",
+          sourceCount: sourceIngestion.sources.length,
+          context: {
+            explicit_intake_preview: true,
+            target_project: targetProject,
+            group_id: group?.id || "",
+            extracted_requirement: extractedRequirement,
+          },
+        });
+        const areas = Array.isArray(extractedRequirement.scope)
+          ? extractedRequirement.scope.map((item: any) => compactFormText(item, "")).filter(Boolean)
+          : [];
         if (!areas.length) areas.push(group ? "群聊内相关项目" : "目标项目");
         const acceptanceFallback = compactFormText(payload.acceptance_criteria || payload.acceptanceCriteria, "") || [
           "目标功能按描述完成，并覆盖主要正常流程",
@@ -604,10 +626,13 @@ export function handleCollaborationApiIntakeRoutesPartA(
           project: targetProject,
           group_id: group?.id || "",
           group_name: group?.name || "",
+          project_session_id: projectSession?.sessionId || "",
+          group_session_id: requestedGroupSessionId,
           source_summary: sourceIngestion.user_summary,
           source_ingestion: sourceIngestion.technical,
           decomposition_plan: sourceIngestion.decomposition,
           requirement_content_hash: sourceIngestion.content_hash,
+          workflow_decision: workflowDecision,
         };
         const sourceDocuments = [
           userRequirement ? `用户输入：\n${userRequirement}` : "",
@@ -628,17 +653,25 @@ export function handleCollaborationApiIntakeRoutesPartA(
           source_ingestion: sourceIngestion.technical,
           target_project: targetProject,
           group_id: group?.id || null,
+          group_session_id: requestedGroupSessionId || null,
+          project_session_id: projectSession?.sessionId || null,
           assign_type: group ? "group" : "project",
+          orchestration_scope: group ? "group_session" : "project_session",
+          queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
+          request_origin: payload.source || payload.request_origin || payload.requestOrigin || "usability-intake",
           workflow_type: "requirement_epic",
-          requires_code_changes: payload.requires_code_changes !== false,
-          requires_verification: true,
+          requires_code_changes: typeof payload.requires_code_changes === "boolean" ? payload.requires_code_changes : workflowDecision.requiresCodeChanges,
+          requires_verification: Array.isArray(workflowDecision.verificationModes) && workflowDecision.verificationModes.length > 0,
           auto_execute: false,
           intake_state: "awaiting_confirmation",
           intake_draft: intakeDraft,
+          workflow_decision: workflowDecision,
           workflow_meta: {
             intake: {
-              source: "usability-intake",
+              source: payload.source || payload.request_origin || payload.requestOrigin || "usability-intake",
               channel: payload.channel || "web",
+              project_session_id: projectSession?.sessionId || "",
+              group_session_id: requestedGroupSessionId,
               client_message_id: payload.client_message_id || payload.clientMessageId || "",
               source_ingestion: sourceIngestion.technical,
             },
@@ -751,11 +784,16 @@ export function handleCollaborationApiIntakeRoutesPartA(
             source_ingestion: current.source_ingestion,
             group_id: current.group_id,
             group_session_id: current.group_session_id,
+            project_session_id: current.project_session_id,
+            queue_scope: current.queue_scope || "conversation_serial",
+            orchestration_scope: current.orchestration_scope || (current.group_id ? "group_session" : "project_session"),
+            request_origin: current.request_origin || current.workflow_meta?.intake?.source || "usability-intake",
+            origin_session_id: current.origin_session_id || current.group_session_id || current.project_session_id,
             target_project: current.target_project,
             priority: current.priority,
             source: current.workflow_meta?.intake?.source || "usability-intake",
             channel: current.workflow_meta?.intake?.channel || "web",
-            conversation_id: current.group_session_id || current.group_id || "global",
+            conversation_id: current.group_session_id || current.project_session_id || current.group_id || current.target_project || "global",
             client_message_id: current.workflow_meta?.intake?.client_message_id || current.id,
             trace_id: current.trace_id,
             idempotency_key: current.idempotency_key,
@@ -778,7 +816,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
             mission_id: epicResult.epic.id,
             global_run_id: current.workflow_meta?.global_run_id || "",
             trace_id: epicResult.epic.trace_id,
-            session_id: current.group_session_id || current.group_id || "web",
+            session_id: current.group_session_id || current.project_session_id || current.group_id || "web",
             source: current.workflow_meta?.intake?.source || "usability-intake",
             business_goal: epicResult.epic.business_goal,
             acceptance: epicResult.epic.acceptance_criteria,
@@ -791,6 +829,25 @@ export function handleCollaborationApiIntakeRoutesPartA(
             const result = enqueueTask(child.id, ctx);
             return { task_id: child.id, ...result };
           });
+          for (const child of epicResult.children.filter((item: any) => item.assign_type === "project" && item.project_session_id)) {
+            appendProjectSessionTaskMessage(child.target_project, child.project_session_id, {
+              id: `task-intake-${child.id}`,
+              role: "user",
+              content: child.business_goal || child.description || child.title,
+              timestamp: child.created_at || confirmedAt,
+              task_id: child.id,
+              type: "task_dispatch_intake",
+            });
+            appendProjectSessionTaskMessage(child.target_project, child.project_session_id, {
+              id: `task-queued-${child.id}`,
+              role: "assistant",
+              agent: "project-main-agent",
+              content: `已创建分派任务“${child.title}”，将按当前项目会话队列顺序执行；完成开发后进入 TestAgent 独立验收。`,
+              timestamp: confirmedAt,
+              task_id: child.id,
+              type: "task_dispatch_queued",
+            });
+          }
           const updatedEpic = updateTask(epicResult.epic.id, {
             intake_state: "confirmed",
             confirmed_at: confirmedAt,

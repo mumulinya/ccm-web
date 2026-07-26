@@ -13,6 +13,8 @@ npm install -g @mumulinya167/cc-web@latest
 ccm start --open
 ```
 
+服务器安装不会下载 Electron。桌面宠物第一次启动时才会按需获取固定版本的 Electron；纯 Web/Linux 服务器无需安装桌面运行时。
+
 默认地址：<http://localhost:3080>。默认只监听 `127.0.0.1`，不会意外暴露到局域网或公网。
 
 首次安装时，登录页会提供初始账户或注册入口。账户、项目、会话和运行数据保存在用户目录下的 `.cc-connect`，不会写入 npm 安装目录。
@@ -74,6 +76,7 @@ ccm pet [stop]
 
 - 基于 `node-pty` 与 xterm 的持久 Shell，会话在页面刷新后可重新连接。
 - `node-pty` 是可选原生能力；当前平台无法安装或加载时，CCM 核心服务仍可启动，终端页面自动切换为逐条命令兼容模式。
+- Electron 不属于默认服务端依赖，避免 Linux 安装阶段静默下载桌面运行时；执行 `ccm pet` 时按需获取。
 - 支持 ANSI、交互式 CLI、Shell 切换、项目脚本、Git 分支、PID 与监听端口。
 - 危险命令在后端 Enter 边界要求一次性确认。
 - 终端输出可以预填到全局、项目或群聊 Agent，但不会自动发送。

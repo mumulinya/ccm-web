@@ -44,9 +44,9 @@ const riskLabel = (risk) => ({ high: '高风险', medium: '需复核', low: '常
 .permission-approval-copy { min-width: 0; display: grid; gap: 3px; }
 .permission-approval-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .permission-approval-heading strong { color: var(--text-primary); font-size: 12.5px; }
-.permission-risk { padding: 2px 6px; border-radius: 5px; color: #92400e; background: #fef3c7; font-size: 10px; font-weight: 800; white-space: nowrap; }
-.permission-risk.high { color: #991b1b; background: #fee2e2; }
-.permission-risk.low { color: #166534; background: #dcfce7; }
+.permission-risk { padding: 2px 6px; border-radius: 5px; color: var(--accent-yellow); background: var(--warning-soft); font-size: 10px; font-weight: 800; white-space: nowrap; }
+.permission-risk.high { color: var(--accent-red); background: var(--danger-soft); }
+.permission-risk.low { color: var(--accent-green); background: var(--success-soft); }
 .permission-approval-copy p { margin: 0; color: var(--text-primary); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .permission-approval-copy small { color: var(--text-secondary); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .permission-risk-reason { color: #92400e !important; }

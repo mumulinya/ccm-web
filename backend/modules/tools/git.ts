@@ -34,9 +34,32 @@ function tryGit(workDir: string, args: string[]) {
 function safeGitError(error: any) {
   return String(error?.stderr || error?.stdout || error?.message || error || "Git 操作失败")
     .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1")
+    .replace(/([?&](?:access_token|auth_token|token|key|password)=)[^&\s]+/gi, "$1[已隐藏]")
+    .replace(/(authorization:\s*(?:bearer|basic)\s+)[^\s]+/gi, "$1[已隐藏]")
     .replace(/[\0\r]+/g, " ")
     .trim()
     .slice(0, 2_000);
+}
+
+function gitFailureDetails(error: any, operation: string) {
+  const raw = safeGitError(error);
+  const lower = raw.toLowerCase();
+  if (/authentication failed|could not read username|terminal prompts disabled|permission denied \(publickey\)|http basic: access denied|403 forbidden|error:\s*403/.test(lower)) {
+    return { error: "Git 远端认证失败，请先在服务器配置 Git 凭据或 SSH Key", errorCode: "authentication_required", suggestion: "完成 git credential 或 SSH 登录后重新执行推送", raw };
+  }
+  if (/repository not found|does not appear to be a git repository/.test(lower)) {
+    return { error: "远端仓库不存在或当前账号没有访问权限", errorCode: "repository_unavailable", suggestion: "检查 origin 地址及仓库访问权限", raw };
+  }
+  if (/non-fast-forward|fetch first|rejected.*behind|updates were rejected/.test(lower)) {
+    return { error: "远端分支包含本地没有的提交，当前推送已被拒绝", errorCode: "remote_ahead", suggestion: "先拉取代码并处理差异，再重新推送", raw };
+  }
+  if (/no upstream branch|has no upstream branch/.test(lower)) {
+    return { error: "当前分支还没有关联远端分支", errorCode: "upstream_missing", suggestion: "使用首次推送建立 upstream", raw };
+  }
+  if (/timed out|timeout/.test(lower)) {
+    return { error: "Git 远端连接超时", errorCode: "remote_timeout", suggestion: "检查服务器网络、代理和 GitHub 连通性后重试", raw };
+  }
+  return { error: raw || `${operation} 失败`, errorCode: "git_operation_failed", suggestion: "打开 Git 终端检查远端配置和当前分支状态", raw };
 }
 
 function sanitizeRemoteUrl(value: any) {
@@ -86,6 +109,9 @@ export function inspectGitRemoteState(workDir: string, changedFiles = -1) {
     canFetch: !!remoteUrl,
     canPull: !!remoteUrl && !detached && changed === 0,
     canPush: !!remoteUrl && !detached,
+    canCommitAndPush: !!remoteUrl && !detached,
+    pushTarget: upstream || (remoteUrl && branch ? `origin/${branch}` : ""),
+    pullTarget: upstream || (remoteUrl && branch ? `origin/${branch}` : ""),
   };
 }
 
@@ -111,6 +137,25 @@ function performGitRemoteOperation(workDir: string, operation: string) {
     output: output.slice(-4_000),
     repository: inspectGitRemoteState(workDir),
   };
+}
+
+function commitSelectedChanges(workDir: string, message: string, requested: string[], allFiles: boolean) {
+  if (requested.length) {
+    const preview = commitPreview(workDir, requested);
+    if (preview.blocked) {
+      const error: any = new Error(preview.conflicts.length ? "存在冲突文件，不能提交" : "所选文件已变化，请刷新后重试");
+      error.preview = preview;
+      throw error;
+    }
+    runGit(workDir, ["add", "-A", "--", ...requested]);
+    runGit(workDir, ["commit", "--only", "-m", message, "--", ...requested]);
+  } else if (allFiles) {
+    runGit(workDir, ["add", "-A"]);
+    runGit(workDir, ["commit", "-m", message]);
+  } else {
+    throw new Error("请明确选择本次要提交的文件");
+  }
+  return runGit(workDir, ["rev-parse", "--short", "HEAD"]).trim();
 }
 
 function readJson(file: string, fallback: any) {
@@ -481,7 +526,7 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
           : operation === "pull" ? "本地分支已更新" : "本地提交已推送";
         sendJson(res, { success: true, message, ...result });
       } catch (error: any) {
-        sendJson(res, { success: false, error: safeGitError(error), operation }, 409);
+        sendJson(res, { success: false, ...gitFailureDetails(error, operation), operation }, 409);
       }
     });
     return true;
@@ -551,25 +596,46 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
     readBody(req, res, body => {
       const project = String(body.project || "");
       const message = String(body.message || "").trim();
+      const action = String(body.action || "commit").trim().toLowerCase();
       const resolved = projectWorkDir(project);
       if (!project || !message) return sendJson(res, { success: false, error: "缺少项目或提交信息" }, 400);
+      if (!["commit", "commit_and_push"].includes(action)) return sendJson(res, { success: false, error: "不支持的提交操作" }, 400);
       if (message.length > 300) return sendJson(res, { success: false, error: "提交信息不能超过 300 个字符" }, 400);
       if ("error" in resolved) return sendJson(res, { success: false, error: resolved.error }, resolved.status);
       try {
         const requested = Array.isArray(body.files) ? Array.from(new Set(body.files.map(normalizeRepoPath).filter(Boolean))) as string[] : [];
-        if (requested.length) {
-          const preview = commitPreview(resolved.workDir, requested);
-          if (preview.blocked) return sendJson(res, { success: false, error: preview.conflicts.length ? "存在冲突文件，不能提交" : "所选文件已变化，请刷新后重试", preview }, 409);
-          runGit(resolved.workDir, ["add", "-A", "--", ...requested]);
-          runGit(resolved.workDir, ["commit", "--only", "-m", message, "--", ...requested]);
-        } else {
-          runGit(resolved.workDir, ["add", "-A"]);
-          runGit(resolved.workDir, ["commit", "-m", message]);
+        const allFiles = body.allFiles === true && body.confirmed === true;
+        if (!requested.length && !allFiles) return sendJson(res, { success: false, error: "请明确选择本次要提交的文件" }, 400);
+        if (action === "commit_and_push") {
+          const preflight = inspectGitRemoteState(resolved.workDir);
+          if (!preflight.remoteUrl) return sendJson(res, { success: false, error: "当前项目没有配置 origin 远端仓库", errorCode: "remote_missing" }, 409);
+          if (preflight.detached) return sendJson(res, { success: false, error: "当前处于 detached HEAD，不能提交并推送", errorCode: "detached_head" }, 409);
         }
-        const hash = runGit(resolved.workDir, ["rev-parse", "--short", "HEAD"]).trim();
-        sendJson(res, { success: true, message: "提交成功", hash, committedFiles: requested, verification: body.verification || "not_recorded" });
+        const hash = commitSelectedChanges(resolved.workDir, message, requested, allFiles);
+        const base = { hash, committedFiles: requested, committedAllFiles: allFiles, verification: body.verification || "not_recorded" };
+        if (action === "commit") {
+          sendJson(res, { success: true, action, outcome: "committed", message: "代码已提交到本地仓库", commit: { success: true, hash }, push: null, ...base });
+          return;
+        }
+        try {
+          const pushed = performGitRemoteOperation(resolved.workDir, "push");
+          sendJson(res, { success: true, action, outcome: "committed_and_pushed", message: "代码已提交并推送到远端", commit: { success: true, hash }, push: { success: true, ...pushed }, ...base });
+        } catch (pushError: any) {
+          const failure = gitFailureDetails(pushError, "push");
+          sendJson(res, {
+            success: true,
+            action,
+            outcome: "committed_push_failed",
+            partialSuccess: true,
+            message: `本地提交 ${hash} 已创建，但推送失败`,
+            commit: { success: true, hash },
+            push: { success: false, ...failure },
+            ...base,
+          });
+        }
       } catch (error: any) {
-        sendJson(res, { success: false, error: "提交失败: " + String(error.stderr || error.message).trim() });
+        const preview = error?.preview;
+        sendJson(res, { success: false, error: "提交失败: " + safeGitError(error), ...(preview ? { preview } : {}) }, preview ? 409 : 400);
       }
     });
     return true;

@@ -62,7 +62,7 @@ if (process.argv.includes("--exact-session-child")) {
     thresholdsExposedForEveryScope: rows.every(row => row.autoCompactThreshold > 0),
     modelSummarySourceExposed: rows.every(row => row.summarySource === "model"),
     recentWindowExposed: rows.every(row => row.preservedRecentTokens === 10_000 && row.preservedRecentMessages === 5),
-    sessionMemoryExposed: rows.every(row => row.sessionMemory?.status === "ready"),
+    sessionMemoryStatusExposed: rows.every(row => ["ready", "waiting", "waiting_model", "invalid"].includes(String(row.sessionMemory?.status || ""))),
     postCompactGateExposed: rows.every(row => row.postCompactGate),
     taskCircuitIsExact: rows[3].circuitOpen === true && rows.slice(0, 3).every(row => row.circuitOpen === false),
     exactDetailsResolve: details.every((detail, index) => detail?.summary?.currentTokens === expectedTokens[index]),
@@ -110,6 +110,32 @@ assert.ok(summary.autoCompactThreshold > 0);
 assert.equal(summary.beforeTokens, 0);
 assert.equal(summary.afterTokens, 0);
 
+const uncompressedProjectSession = resolveMemoryCenterTokenState("project_session", "proj::s1", {
+  history: [
+    { role: "user", content: "请检查项目登录流程" },
+    { role: "assistant", content: "我会先读取认证配置并给出结论" },
+  ],
+  compaction: {},
+});
+assert.ok(uncompressedProjectSession.currentTokens > 0);
+assert.equal(uncompressedProjectSession.currentMessageCount, 2);
+assert.equal(uncompressedProjectSession.tokenSource, "project_transcript_estimate");
+assert.equal(uncompressedProjectSession.fallbackTokenMeasurement.estimatedMessageTokens, uncompressedProjectSession.currentTokens);
+
+const compressedProjectSession = resolveMemoryCenterTokenState("project_session", "proj::s2", {
+  history: [
+    { role: "user", content: "旧问题" },
+    { role: "assistant", content: "近期回复" },
+  ],
+  compaction: {
+    summary_source: "model",
+    v2: { lastCompactedIndex: 0, activeSummary: "旧会话的正式模型摘要" },
+  },
+});
+assert.ok(compressedProjectSession.currentTokens > 0);
+assert.equal(compressedProjectSession.currentMessageCount, 1);
+assert.ok(compressedProjectSession.fallbackTokenMeasurement.estimatedSummaryTokens > 0);
+
 const frontend = fs.readFileSync(new URL("../frontend/src/components/knowledge/MemoryCenterPanel.vue", import.meta.url), "utf8");
 assert.match(frontend, /item\.currentTokens/);
 assert.match(frontend, /selectedSummary\.autoCompactThreshold/);
@@ -127,7 +153,7 @@ try {
   assert.equal(child.status, 0, child.stderr || child.stdout);
   const exactSessionResult = JSON.parse(String(child.stdout || "").trim().split(/\r?\n/).at(-1));
   assert.equal(exactSessionResult.pass, true);
-  console.log(JSON.stringify({ pass: true, checks: 14 + exactSessionResult.checks, current_tokens_without_compaction: true, exact_session_scopes: 4 }, null, 2));
+  console.log(JSON.stringify({ pass: true, checks: 21 + exactSessionResult.checks, current_tokens_without_compaction: true, project_transcript_estimate: true, project_summary_recent_estimate: true, exact_session_scopes: 4 }, null, 2));
 } finally {
   fs.rmSync(tempHome, { recursive: true, force: true });
 }

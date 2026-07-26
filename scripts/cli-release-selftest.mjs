@@ -31,7 +31,7 @@ const env = {
 const run = (args, options = {}) => execFileSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: options.timeout || 45_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 
 try {
-  assert.match(run(['--version']), /@mumulinya167\/cc-web 1\.0\.16/)
+  assert.match(run(['--version']), /@mumulinya167\/cc-web 1\.0\.24/)
   const help = run(['help'])
   for (const command of ['start', 'stop', 'restart', 'status', 'doctor', 'open', 'logs', 'update', 'project']) assert.match(help, new RegExp(`\\b${command}\\b`))
   assert.match(help, /--host 127\.0\.0\.1/)
@@ -41,7 +41,7 @@ try {
   assert.match(started, new RegExp(`http://localhost:${port}`))
 
   const status = JSON.parse(run(['status', '--json']))
-  assert.equal(status.package.version, '1.0.16')
+  assert.equal(status.package.version, '1.0.24')
   assert.equal(status.service.active, true)
   assert.equal(status.service.port, port)
   assert.equal(status.service.host, '127.0.0.1')
@@ -60,7 +60,7 @@ try {
   const logDeadline = Date.now() + 5_000
   while ((!fs.existsSync(logFile) || !fs.readFileSync(logFile, 'utf8').includes('CCM Workspace')) && Date.now() < logDeadline) await new Promise(resolve => setTimeout(resolve, 100))
   const startupLog = fs.readFileSync(logFile, 'utf8')
-  assert.match(startupLog, /CCM Workspace  v1\.0\.16/)
+  assert.match(startupLog, /CCM Workspace  v1\.0\.24/)
   assert.match(startupLog, new RegExp(`Local URL\\s+http://localhost:${port}`))
   assert.match(startupLog, new RegExp(`Listen\\s+127\\.0\\.0\\.1:${port}`))
   assert.doesNotMatch(startupLog, /╔|cc-web 控制台/)

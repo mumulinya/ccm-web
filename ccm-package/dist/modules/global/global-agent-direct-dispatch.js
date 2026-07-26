@@ -58,13 +58,10 @@ function createGlobalAgentDirectDispatchRuntime(deps) {
             platform: info.platform || "",
         };
     }
-    function inferGlobalDirectDispatchRequiresCodeChanges(message) {
-        const text = normalizeText(message);
-        const explicitCodeChange = /(修改|修复|实现|新增|删除|重构|改代码|开发|接入|对接|bug|页面|接口|字段|schema|配置)/i.test(text);
-        const readOnlyOnly = /(只读|仅分析|只分析|不要修改|不修改|不改代码|无需代码|无需修改|运行测试|执行测试|跑测试|检查|审查|review)/i.test(text);
-        if (readOnlyOnly && !explicitCodeChange)
-            return false;
-        return true;
+    function inferGlobalDirectDispatchRequiresCodeChanges(_message, modelValue) {
+        if (typeof modelValue !== "boolean")
+            throw new Error("缺少统一大模型的 requiresCodeChanges 语义决策");
+        return modelValue;
     }
     function buildGlobalDirectDispatchHandoff(input) {
         const targetProject = input.project || input.targetProject || "coordinator";
@@ -103,7 +100,7 @@ function createGlobalAgentDirectDispatchRuntime(deps) {
                 "涉及代码时必须说明实际文件变更和验证结果。",
                 "如被阻塞，明确还需要用户或其他 Agent 补充什么。",
             ],
-            requiresCodeChanges: inferGlobalDirectDispatchRequiresCodeChanges(input.message),
+            requiresCodeChanges: inferGlobalDirectDispatchRequiresCodeChanges(input.message, input.requiresCodeChanges),
         });
         return { handoff, summary: summarizeWorkerHandoffForUser(handoff), runtime };
     }
@@ -111,7 +108,7 @@ function createGlobalAgentDirectDispatchRuntime(deps) {
         const project = String(input.project || "").trim();
         const message = String(input.message || input.originalText || "").trim();
         const userGoal = String(input.originalText || message).trim();
-        const requiresCodeChanges = inferGlobalDirectDispatchRequiresCodeChanges(message);
+        const requiresCodeChanges = inferGlobalDirectDispatchRequiresCodeChanges(message, input.requiresCodeChanges);
         return {
             title: compactPetText(userGoal || message || `处理 ${project} 项目任务`, 100),
             business_goal: userGoal || message,

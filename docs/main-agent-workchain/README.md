@@ -1,6 +1,6 @@
 # Main Agent Workchain 文档中心
 
-这个目录统一管理全局 Agent、群聊主 Agent 以及它们与项目 Agent、TestAgent、任务系统和外部通道之间的完整工作链记录。
+这个目录统一管理全局 Agent、群聊主 Agent、项目主 Agent以及它们与项目开发 Agent、TestAgent、任务系统和外部通道之间的完整工作链记录。
 
 > 当前已确认的业务结构以 [确认项目结构](../confirmed-project-architecture/README.md) 和 [当前状态](../CURRENT.md) 为准。本目录主要保存各阶段实现、迁移和验收证据；日期较早的方案不自动代表当前行为。
 
@@ -9,7 +9,7 @@
 1. 理解用户需求和影响范围。
 2. 形成用户能看懂的计划。
 3. 调度工具、群聊主 Agent 或项目 Agent 执行。
-4. 由群聊主 Agent 验收执行结果，并与 TestAgent 完成独立复核。
+4. 由群聊主 Agent或项目主 Agent验收执行结果，并与 TestAgent完成独立复核。
 5. 保存可回放的过程、证据和友好的最终总结。
 
 ## 业务分类

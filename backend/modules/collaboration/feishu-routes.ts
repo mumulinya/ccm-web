@@ -13,10 +13,27 @@ import {
 } from "./feishu";
 import {
   getFeishuChannelDeliverySnapshot,
+  getFeishuChannelIdentitySnapshot,
   getFeishuChannelHealth,
+  retryFeishuNotificationDelivery,
   runFeishuChannelSelfTest,
   tickFeishuNotificationOutbox,
 } from "./feishu-channel";
+import { publicFeishuUserMapping } from "./feishu-access";
+
+function readJsonBody(req: IncomingMessage) {
+  return new Promise<any>((resolve, reject) => {
+    let body = "";
+    req.on("data", chunk => {
+      body += String(chunk || "");
+      if (body.length > 256 * 1024) reject(new Error("请求体过大"));
+    });
+    req.on("end", () => {
+      try { resolve(body ? JSON.parse(body) : {}); } catch (error) { reject(error); }
+    });
+    req.on("error", reject);
+  });
+}
 
 export function handleFeishuRoutes(
   req: IncomingMessage,
@@ -45,6 +62,10 @@ export function handleFeishuRoutes(
         control_bot_ready: !!(config.control_bot_enabled && (config.control_bot_app_id || config.app_id) && (config.control_bot_app_secret || config.app_secret)),
         control_bot_event_path: "/api/feishu/bot/event",
         control_bot_public_base_url: config.control_bot_public_base_url || "",
+        control_bot_access_mode: config.control_bot_access_mode === "mapped" ? "mapped" : "open",
+        control_bot_users: (Array.isArray(config.control_bot_users) ? config.control_bot_users : []).map(publicFeishuUserMapping),
+        authorized_user: config.authorized_user ? publicFeishuUserMapping({ ...config.authorized_user, role: "admin", enabled: true }) : null,
+        observed_users: getFeishuChannelIdentitySnapshot().slice(0, 100),
       }
     });
     return true;
@@ -68,6 +89,15 @@ export function handleFeishuRoutes(
         if (updates.control_bot_verification_token !== undefined && updates.control_bot_verification_token !== "******") config.control_bot_verification_token = String(updates.control_bot_verification_token || "").trim();
         if (updates.control_bot_encrypt_key !== undefined && updates.control_bot_encrypt_key !== "******") config.control_bot_encrypt_key = String(updates.control_bot_encrypt_key || "").trim();
         if (updates.control_bot_public_base_url !== undefined) config.control_bot_public_base_url = String(updates.control_bot_public_base_url || "").trim().replace(/\/$/, "");
+        if (updates.control_bot_access_mode !== undefined) config.control_bot_access_mode = updates.control_bot_access_mode === "mapped" ? "mapped" : "open";
+        if (updates.control_bot_users !== undefined) {
+          if (!Array.isArray(updates.control_bot_users)) throw new Error("飞书用户映射格式无效");
+          config.control_bot_users = updates.control_bot_users.slice(0, 200).map(publicFeishuUserMapping)
+            .filter((item: any) => item.open_id || item.user_id || item.union_id);
+        }
+        if (config.control_bot_access_mode === "mapped" && !config.authorized_user?.open_id && !(config.control_bot_users || []).some((item: any) => item.enabled !== false)) {
+          throw new Error("仅允许名单用户时，至少需要配置一名已启用用户");
+        }
 
         console.log("[飞书配置] 保存配置:", { channel: "webhook", webhook: config.webhook_url ? "已配置" : "空", control_bot: config.control_bot_enabled ? "启用" : "关闭" });
         saveFeishuConfig(config);
@@ -224,8 +254,16 @@ export function handleFeishuRoutes(
   }
 
   if (pathname === "/api/feishu/channel/outbox/retry" && req.method === "POST") {
-    tickFeishuNotificationOutbox(new Date()).then((result) => sendJson(res, { success: true, ...result }))
-      .catch((error: any) => sendJson(res, { success: false, error: error?.message || "飞书通知重试失败" }, 500));
+    void readJsonBody(req).then(async payload => {
+      const deliveryId = String(payload?.delivery_id || payload?.deliveryId || "").trim();
+      if (deliveryId) {
+        const delivery = await retryFeishuNotificationDelivery(deliveryId);
+        sendJson(res, { success: delivery?.status === "sent", delivery }, delivery?.status === "sent" ? 200 : 409);
+        return;
+      }
+      const result = await tickFeishuNotificationOutbox(new Date());
+      sendJson(res, { success: true, ...result });
+    }).catch((error: any) => sendJson(res, { success: false, error: error?.message || "飞书通知重试失败" }, 500));
     return true;
   }
 

@@ -55,6 +55,7 @@ export interface RunTestAgentJobInput {
     timeoutMs?: number;
     idempotencyKey?: string;
     allowedWorkDirs?: string[];
+    runtimeEnv?: Record<string, string>;
 }
 export interface TestAgentRunnerResult {
     schema: "ccm-test-agent-runner-result-v1";

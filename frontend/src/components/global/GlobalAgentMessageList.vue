@@ -5,6 +5,7 @@ import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import ChatAvatar from '../common/ChatAvatar.vue'
+import MessageTimestamp from '../common/MessageTimestamp.vue'
 import {
   buildGlobalStreamCurrentTodoSummary,
   globalDispatchLaunchRows,
@@ -29,6 +30,7 @@ import {
 defineProps({
   messages: { type: Array, default: () => [] },
   currentSessionId: { type: String, default: '' },
+  draft: Boolean,
   searchHighlightMsgIndex: { type: Number, default: -1 },
   executingAction: { type: Object, default: null },
   isSending: Boolean,
@@ -66,9 +68,9 @@ defineProps({
             <LoadingSkeleton v-if="!messages.length && isSending" :rows="5" />
             <EmptyState
               v-else-if="!messages.length"
-              icon="💬"
-              title="还没有消息"
-              hint="在下方输入开始对话"
+              icon="＋"
+              :title="draft ? '想让全局 Agent 做什么？' : '还没有消息'"
+              :hint="draft ? '输入需求、粘贴图片或添加附件。发送第一条消息后，这个会话才会创建并进入列表。' : '在下方输入开始对话'"
             />
             <div 
               v-for="(msg, index) in messages" 
@@ -406,7 +408,10 @@ defineProps({
                 </div>
               </div>
   
-              <div class="bubble-time">{{ new Date(msg.timestamp).toLocaleTimeString() }}</div>
+              <MessageTimestamp
+                class="bubble-time"
+                :value="msg.timestamp || msg.created_at || msg.createdAt"
+              />
             </div>
           </div>
           

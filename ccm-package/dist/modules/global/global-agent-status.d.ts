@@ -1,5 +1,5 @@
 export declare function createGlobalAgentStatusRuntime(deps: any): {
-    isGlobalProgressStatusRequest: (message: string) => boolean;
+    isGlobalProgressStatusRequest: (message: string, modelDecision?: any) => boolean;
     formatMissionStatus: (input?: {
         missions?: any[];
         tasks?: any[];

@@ -1,13 +1,15 @@
 <script setup>
 import { computed } from 'vue'
-import EmptyState from '../common/EmptyState.vue'
 import ChatAvatar from '../common/ChatAvatar.vue'
+import MessageTimestamp from '../common/MessageTimestamp.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import ConversationFindBar from '../common/ConversationFindBar.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import { useProjectManager } from './useProjectManager.js'
 import { useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
+import { MessageSquareText, Plus } from '@lucide/vue'
+import GlobalAgentFeishuBindingModal from '../global/GlobalAgentFeishuBindingModal.vue'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -17,32 +19,32 @@ const emit = defineEmits(['navigated'])
 
 const {
   ChatComposer, ConversationTurnControls, CommandResultCard, MessageNavigator, AgentCodeChangeDrawer, ProjectAgentMessage,
-  UnifiedDiffModal, TemplateVariablesModal, ProjectFormModal, ProjectFeishuQrModal, ProjectFolderBrowserModal, ProjectToolsModal,
-  ProjectSharedFilesModal, ProjectAgentSwitchModal, ProjectWorkspaceHeader, ProjectSessionSidebar, ProjectArchiveManager, PanelLeft,
-  highlightMsgIndex, handleNavigation, scrollToMessage, projects, currentProject, currentSession,
-  sessions, messages, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
+  UnifiedDiffModal, ProjectFormModal, ProjectFeishuQrModal, ProjectFolderBrowserModal, ProjectToolsModal,
+  ProjectSharedFilesModal, ProjectAgentSwitchModal, ProjectWorkspaceHeader, ProjectSessionSidebar, ProjectArchiveManager, ProjectRuntimeBar, ProjectRuntimeConfigModal, ProjectRunConsole, GroupTestTargetsModal, PanelLeft,
+  highlightMsgIndex, handleNavigation, scrollToMessage, projects, currentProject, currentSession, currentSessionDraft, hasProjectConversation,
+  sessions, projectFeishuTargets, projectFeishuBindingSession, projectFeishuBindingOpen, projectFeishuBindingBusy,
+  messages, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
   scrollToBottom, attachMessagesResizeObserver, detachMessagesResizeObserver, navMessages, codeChangeDrawer, openCodeChangeDrawer,
-  openSingleFileChange, closeCodeChangeDrawer, slashNavigate, runProjectClientCommand, slash, focusProjectInput,
-  showTemplateSelector, allTemplates, templateSearchQuery, activeTemplateIndex, recommendedTemplate, activeTemplate,
-  templateVariables, showVariableModal, openTemplateSelector, selectChatTemplate, applyTemplateVariables, detectRecommendation,
-  applyRecommendation, handleTemplateKeydown, hideTemplateAssist, chatFiles, diffViewer, pageInfo,
+  openSingleFileChange, closeCodeChangeDrawer, slashNavigate, runProjectClientCommand, slash,
+  chatFiles, diffViewer, pageInfo,
   agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
-  showCreate, showEdit, showSwitchAgent, showTools, showSharedFiles, showArchives,
-  mobileSessionsOpen, projectActionBusy, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
+  showCreate, showEdit, showSwitchAgent, showTools, showProjectTestTargets, showSharedFiles, showArchives,
+  mobileSessionsOpen, projectActionBusy, projectRuntime, projectRuntimeLoading, projectRuntimeBusy, selectedRuntimeProfileId, selectedRuntimeProcess, showRuntimeConfig, projectToolchainTestResult, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
   feishuQrLoading, feishuProjectSetupToken, browsePath, browseItems, browseTarget, drives, browseHome, browseLoading, browseError,
-  showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, activeSelectedTemplate,
-  pendingTemplateToApply, selectProject, loadSessions, selectSession, startProject, stopProject,
+  showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, loadProjectRuntime, rescanProjectRuntime, saveProjectRuntime, testProjectRuntimeToolchain, runProjectRuntimeAction,
+  selectProject, loadSessions, selectSession, startProject, stopProject,
   deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit, loadProjectGitStatus,
-  openSwitchAgent, switchAgent, startProjectWithAgent, createSession, renameSession, deleteSession,
+  openSwitchAgent, switchAgent, startProjectWithAgent, createSession, openProjectFeishuBinding, updateProjectFeishuBinding, renameSession, deleteSession,
   saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
-  thinkingMessages, pendingProjectParentRunId, streamController, activeProjectRunId, stoppingProjectTurn, makeProjectMessageId,
-  projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, submitProjectMessageWhileBusy,
+  pendingProjectParentRunId, streamController, activeProjectRunId, stoppingProjectTurn, makeProjectMessageId,
+  projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
   sendMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
-  closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsContent,
-  toggleLogs, loadLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
+  closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
+  openProjectRuntimeLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
   loadFolderContents, browseGoUp, createBrowseFolder, selectFolder, projectTools, allTools, projectToolAudit,
   projectAuthorizationReadiness, projectConnectionPreflight, projectToolVerification, projectVerificationCommands, inferredProjectVerificationCommands, projectVerificationSource,
   projectResponsibility, projectCapabilities, projectWritablePaths, projectForbiddenPaths, projectDeliveryContract, normalizeProjectTools,
+  projectTestTargets, projectTestAuth, projectTestTargetsLoading, projectTestTargetsSaving, loadProjectTestTargets, saveProjectTestTarget, deleteProjectTestTarget,
   loadProjectTools, saveProjectTools, applyInferredVerificationCommands, updateProjectToolField, toggleProjectTool, projectFiles,
   showAddFile, showEditFile, editFileName, editFileContent, updateProjectSharedFileField, loadProjectSharedFiles,
   addProjectFile, submitAddProjectFile, editProjectFile, submitEditProjectFile, deleteProjectFile, handleInput,

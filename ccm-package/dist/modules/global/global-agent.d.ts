@@ -15,8 +15,8 @@ export declare function runFeishuGlobalAgentSessionRoutingSelfTest(): {
     pass: boolean;
     checks: {
         removesDeletedWebSession: boolean;
-        usesValidCurrentSession: boolean;
-        fallsBackToMostRecentWebSession: boolean;
+        isolatesAcpSessionFromWebHistory: boolean;
+        ignoresRecentWebSessionFallback: boolean;
         onlyUsesAcpSessionWithoutWebHistory: boolean;
     };
 };

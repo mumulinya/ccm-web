@@ -7,7 +7,7 @@ import { sendJson } from "../../core/utils";
 import { getConfigs, loadTasks } from "../../core/db";
 import {
   buildCoordinatorCollaborationInstructions,
-  decomposeRequirementWithCodedCoordinator,
+  decomposeRequirementWithModelCoordinator,
   getCoordinatorMember,
   getRoutableMembers,
   normalizeGroupOrchestrator,
@@ -247,8 +247,10 @@ export function handleGroupLiveRoutes(
           });
           const requestedAutoExecute = flagEnabled(payload.auto_execute ?? payload.autoExecute, true);
           const autoExecute = requestedAutoExecute && planModePreflight.requires_confirmation !== true;
-          const inferredAgentQa = /(?:必须|需要|要求).{0,24}(?:Agent[- ]?to[- ]?Agent|Agent\s*QA|ask_agent|子\s*Agent.{0,8}(?:询问|问答)|向.{0,16}Agent.{0,8}(?:提问|询问))/i.test(effectiveUserMessage);
-          const requiresAgentQa = flagEnabled(payload.requires_agent_qa ?? payload.requiresAgentQa, inferredAgentQa);
+          const requiresAgentQa = flagEnabled(
+            payload.requires_agent_qa ?? payload.requiresAgentQa,
+            taskIntent?.workflowDecision?.requiresAgentQa === true,
+          );
           const globalDirectDispatch = payload.global_direct_dispatch || payload.globalDirectDispatch || (payload.global_handoff || payload.globalHandoff ? {
             schema: "ccm-global-direct-dispatch-v1",
             source: payload.source || "global-agent-direct-dispatch",
@@ -275,13 +277,27 @@ export function handleGroupLiveRoutes(
             group_id,
             group_session_id: groupSessionId || undefined,
             assign_type: "group",
+            orchestration_scope: "group_session",
+            queue_scope: "conversation_serial",
+            request_origin: globalDirectDispatch ? "global-agent" : "group-session",
+            origin_session_id: groupSessionId || undefined,
             priority: payload.priority || "normal",
             auto_execute: autoExecute,
             workflow_type: requirementEpicPlan ? "requirement_epic" : "daily_dev",
-            requires_code_changes: flagEnabled(payload.requires_code_changes ?? payload.requiresCodeChanges, true),
-            requires_verification: flagEnabled(payload.requires_verification ?? payload.requiresVerification, true),
-            requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, false),
+            requires_code_changes: flagEnabled(
+              payload.requires_code_changes ?? payload.requiresCodeChanges,
+              taskIntent?.workflowDecision?.requiresCodeChanges === true,
+            ),
+            requires_verification: flagEnabled(
+              payload.requires_verification ?? payload.requiresVerification,
+              Array.isArray(taskIntent?.workflowDecision?.verificationModes) && taskIntent.workflowDecision.verificationModes.length > 0,
+            ),
+            requires_independent_review: flagEnabled(
+              payload.requires_independent_review ?? payload.requiresIndependentReview,
+              taskIntent?.workflowDecision?.requiresIndependentReview === true,
+            ),
             requires_agent_qa: requiresAgentQa,
+            workflow_decision: taskIntent?.workflowDecision || null,
             business_goal: businessGoal,
             acceptance_criteria: acceptanceCriteria,
             source_documents: sourceDocuments,
@@ -566,6 +582,14 @@ export function handleGroupLiveRoutes(
             source: "user",
             groupSessionId,
             sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
+            onDelta: delta => {
+              if (!delta) return;
+              writeSse(res, {
+                type: "chunk",
+                agent: coordinator.project,
+                text: delta,
+              });
+            },
           });
 
           try {
@@ -766,7 +790,7 @@ export function handleGroupLiveRoutes(
         const members = getRoutableMembers(group);
         const memberList = members.map((m: any) => `${m.project}(${m.agent})`).join(", ");
 
-        const tasks = decomposeRequirementWithCodedCoordinator(group, requirement);
+        const tasks = await decomposeRequirementWithModelCoordinator(group, requirement);
         const output = JSON.stringify({ coordinator: coordinator.project, members: memberList, tasks }, null, 2);
 
         const createdTasks = tasks.map(t => createTask({

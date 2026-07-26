@@ -2,7 +2,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { conversationTurnsApi } from '../api/index.js'
 
 export function useConversationTurnControl(options = {}) {
-  const mode = ref(options.defaultMode || 'steer')
+  const mode = ref(options.defaultMode || 'queue')
   const turns = ref([])
   const loading = ref(false)
   const draining = ref(false)
@@ -63,6 +63,13 @@ export function useConversationTurnControl(options = {}) {
     await refresh()
   }
 
+  const guide = async (turn) => {
+    if (!turn?.id) return null
+    const data = await conversationTurnsApi.guide(turn.id)
+    await refresh()
+    return data.turn
+  }
+
   const retry = async (turn) => {
     if (!turn?.id) return
     await conversationTurnsApi.retry(turn.id)
@@ -111,5 +118,5 @@ export function useConversationTurnControl(options = {}) {
   onUnmounted(stopPolling)
   watch(() => conversationId(), () => refresh().catch(() => {}))
 
-  return { mode, turns, activeTurns, loading, draining, refresh, enqueue, settle, cancel, retry, drain }
+  return { mode, turns, activeTurns, loading, draining, refresh, enqueue, settle, cancel, guide, retry, drain }
 }

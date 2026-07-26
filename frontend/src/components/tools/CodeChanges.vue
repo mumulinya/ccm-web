@@ -43,6 +43,7 @@ const commitPreview = ref(null)
 const commitPreviewLoading = ref(false)
 const commitMessage = ref('')
 const committing = ref(false)
+const commitAction = ref('')
 const historyVisible = ref(false)
 const historyLoading = ref(false)
 const commits = ref([])
@@ -59,7 +60,11 @@ const selectedAreaStats = computed(() => {
 const fetchJson = async (url, options) => {
   const response = await fetch(url, options)
   const data = await response.json().catch(() => ({}))
-  if (!response.ok || data.success === false) throw new Error(data.error || `请求失败 (${response.status})`)
+  if (!response.ok || data.success === false) {
+    const error = new Error(data.error || `请求失败 (${response.status})`)
+    error.payload = data
+    throw error
+  }
   return data
 }
 
@@ -148,9 +153,9 @@ const remoteOperationTitle = operation => {
   if (!repository.value?.remoteUrl) return '当前项目没有配置 origin 远端仓库'
   if (operation === 'pull' && repository.value?.dirty) return '请先提交或处理工作区改动，再更新本地分支'
   if (repository.value?.detached && operation !== 'fetch') return 'detached HEAD 不能更新或推送分支'
-  if (operation === 'fetch') return '拉取 origin 的远端分支和引用，不修改本地文件'
-  if (operation === 'pull') return '使用 fast-forward only 更新当前本地分支'
-  return repository.value?.upstream ? '推送当前分支的本地提交' : '首次推送并设置当前分支的 upstream'
+  if (operation === 'fetch') return '获取 origin 的最新分支和引用，不修改本地文件'
+  if (operation === 'pull') return '拉取远端提交并使用 fast-forward only 更新当前分支'
+  return repository.value?.upstream ? '推送当前分支中已经提交的代码' : '首次推送当前分支并设置 upstream'
 }
 
 const runRemoteOperation = async operation => {
@@ -172,7 +177,8 @@ const runRemoteOperation = async operation => {
     toast.success(data.message || 'Git 远端操作完成')
     await loadGitStatus({ preserveSelection: true })
   } catch (error) {
-    toast.error(error.message || 'Git 远端操作失败')
+    const suggestion = error.payload?.suggestion ? `；${error.payload.suggestion}` : ''
+    toast.error(`${error.message || 'Git 远端操作失败'}${suggestion}`)
   } finally {
     remoteBusy.value = ''
   }
@@ -275,20 +281,29 @@ const openCommitPanel = async () => {
   } finally { commitPreviewLoading.value = false }
 }
 
-const commitChanges = async ({ verification }) => {
+const commitChanges = async ({ verification, action = 'commit' }) => {
   committing.value = true
+  commitAction.value = action
   try {
     const data = await fetchJson('/api/git/commit', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: selectedProject.value, message: commitMessage.value.trim(), files: [...selectedFiles.value], verification }),
+      body: JSON.stringify({ project: selectedProject.value, message: commitMessage.value.trim(), files: [...selectedFiles.value], verification, reviewed: true, action }),
     })
-    toast.success(`提交成功 ${data.hash || ''}`.trim())
+    if (data.partialSuccess) {
+      const suggestion = data.push?.suggestion ? `；${data.push.suggestion}` : ''
+      toast.warning(`${data.message}：${data.push?.error || '远端推送失败'}${suggestion}`)
+    } else {
+      toast.success(data.message || `提交成功 ${data.hash || ''}`.trim())
+    }
     commitPanelVisible.value = false
     commitMessage.value = ''
     selectedFiles.value = new Set()
     await loadGitStatus()
-  } catch (error) { toast.error(error.message || '提交失败') }
-  finally { committing.value = false }
+  } catch (error) {
+    const suggestion = error.payload?.suggestion ? `；${error.payload.suggestion}` : ''
+    toast.error(`${error.message || '提交失败'}${suggestion}`)
+  }
+  finally { committing.value = false; commitAction.value = '' }
 }
 
 const openHistory = async () => {
@@ -321,7 +336,7 @@ onMounted(loadProjects)
       </div>
       <div class="toolbar-actions">
         <button title="查看提交历史" :disabled="!selectedProject" @click="openHistory"><History :size="15" /><span>历史</span></button>
-        <button class="commit-button" :disabled="!selectedFiles.size || summary.conflicts" @click="openCommitPanel"><GitCommitHorizontal :size="15" /><span>检查并提交</span><strong>{{ selectedFiles.size }}</strong></button>
+        <button class="commit-button" title="检查所选文件后创建本地 Git 提交" :disabled="!selectedFiles.size || summary.conflicts" @click="openCommitPanel"><GitCommitHorizontal :size="15" /><span>提交代码</span><strong>{{ selectedFiles.size }}</strong></button>
       </div>
     </header>
 
@@ -341,13 +356,13 @@ onMounted(loadProjects)
       </div>
       <div class="repository-actions">
         <button :title="remoteOperationTitle('fetch')" :disabled="remoteBusy || !repository.canFetch" @click="runRemoteOperation('fetch')">
-          <CloudDownload :size="15" :class="{ spinning: remoteBusy === 'fetch' }" /><span>拉取远端</span>
+          <CloudDownload :size="15" :class="{ spinning: remoteBusy === 'fetch' }" /><span>获取远端</span>
         </button>
         <button :title="remoteOperationTitle('pull')" :disabled="remoteBusy || !repository.canPull" @click="runRemoteOperation('pull')">
-          <GitPullRequestArrow :size="15" :class="{ spinning: remoteBusy === 'pull' }" /><span>更新本地</span>
+          <GitPullRequestArrow :size="15" :class="{ spinning: remoteBusy === 'pull' }" /><span>拉取代码</span>
         </button>
         <button class="push-button" :title="remoteOperationTitle('push')" :disabled="remoteBusy || !repository.canPush" @click="runRemoteOperation('push')">
-          <CloudUpload :size="15" :class="{ spinning: remoteBusy === 'push' }" /><span>推送提交</span>
+          <CloudUpload :size="15" :class="{ spinning: remoteBusy === 'push' }" /><span>推送代码</span>
         </button>
       </div>
     </section>
@@ -376,7 +391,7 @@ onMounted(loadProjects)
       </section>
     </div>
 
-    <CodeCommitPanel v-model:message="commitMessage" :visible="commitPanelVisible" :preview="commitPreview" :loading="commitPreviewLoading" :committing="committing" @close="commitPanelVisible = false" @commit="commitChanges" />
+    <CodeCommitPanel v-model:message="commitMessage" :visible="commitPanelVisible" :preview="commitPreview" :loading="commitPreviewLoading" :committing="committing" :busy-action="commitAction" :can-push="repository.canCommitAndPush !== false && !!repository.remoteUrl" :push-target="repository.pushTarget || repository.upstream || ''" @close="commitPanelVisible = false" @commit="commitChanges" />
     <CodeCommitHistoryDrawer :visible="historyVisible" :commits="commits" :loading="historyLoading" @close="historyVisible = false" />
   </div>
 </template>
@@ -390,8 +405,10 @@ onMounted(loadProjects)
 .repository-identity { min-width:0;display:flex;align-items:center;gap:9px }.repository-icon { width:32px;height:32px;flex:0 0 auto;display:grid;place-items:center;border:1px solid color-mix(in srgb,#2563eb 22%,transparent);border-radius:6px;background:color-mix(in srgb,#2563eb 8%,transparent);color:#2563eb }.repository-identity>div { min-width:0 }.repository-identity strong,.repository-identity small { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }.repository-identity strong { color:var(--text-primary);font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace }.repository-identity small { margin-top:3px;color:var(--text-muted);font-size:10px }
 .repository-state { display:flex;align-items:center;gap:7px }.repository-state>span { min-height:25px;display:inline-flex;align-items:center;gap:4px;padding:0 8px;border:1px solid var(--border-color,rgba(15,23,42,.09));border-radius:5px;color:var(--text-muted);font-size:10px;white-space:nowrap }.repository-state strong { color:var(--text-secondary);font-size:11px }.repository-state .active { border-color:color-mix(in srgb,#2563eb 22%,transparent);background:color-mix(in srgb,#2563eb 6%,transparent);color:#2563eb }.repository-state .warning { border-color:color-mix(in srgb,#d97706 28%,transparent);background:color-mix(in srgb,#f59e0b 7%,transparent);color:#b45309 }
 .repository-actions { display:flex;align-items:center;gap:6px }.repository-actions button { min-height:32px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border-color,rgba(15,23,42,.11));border-radius:6px;background:var(--surface,var(--bg-primary,#fff));color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap }.repository-actions button:hover:not(:disabled) { border-color:color-mix(in srgb,#2563eb 30%,transparent);background:color-mix(in srgb,#2563eb 6%,transparent);color:#2563eb }.repository-actions .push-button { border-color:color-mix(in srgb,#2563eb 28%,transparent);color:#2563eb }.repository-actions button:disabled { opacity:.42;cursor:not-allowed }
-.changes-layout { flex:1;min-height:0;display:flex;overflow:hidden }.diff-pane { flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden }.diff-toolbar { min-height:46px;padding:7px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--border-color,rgba(15,23,42,.09));background:color-mix(in srgb,var(--bg-primary,#fff) 97%,#f1f5f9) }.file-title { min-width:0;display:flex;align-items:center;gap:7px }.file-title strong { max-width:min(420px,35vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600 }.line-stats { display:flex;gap:5px;font:10px ui-monospace,monospace }.line-stats b { color:#047857 }.line-stats i { color:#b91c1c;font-style:normal }.diff-search { width:150px;height:29px;padding:0 7px;display:flex;align-items:center;gap:5px;border:1px solid var(--border-color,rgba(15,23,42,.1));border-radius:6px;color:var(--text-muted) }.diff-search input { min-width:0;width:100%;border:0;outline:0;background:transparent;color:var(--text-primary);font-size:11px }.diff-toolbar button { width:30px;padding:0 }.diff-toolbar button.active { border-color:rgba(37,99,235,.35);background:rgba(37,99,235,.1);color:#2563eb }.diff-toolbar .danger-action { color:#b91c1c }.status-error { padding:9px 16px;display:flex;align-items:center;gap:7px;background:#fef2f2;color:#b91c1c;font-size:12px }
+.code-changes-workbench > :deep(.change-summary) { flex:0 0 auto; }
+.changes-layout { flex:1;min-height:0;display:grid;grid-template-columns:340px minmax(0,1fr);align-items:stretch;gap:10px;padding:10px;overflow:hidden;background:color-mix(in srgb,var(--bg-secondary,#f8fafc) 55%,transparent) }.diff-pane { min-width:0;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--border-color,rgba(15,23,42,.09));border-radius:7px;background:var(--surface,var(--bg-primary,#fff));box-shadow:var(--shadow-sm) }.diff-toolbar { position:relative;z-index:2;flex:0 0 auto;min-height:46px;padding:7px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--border-color,rgba(15,23,42,.09));background:color-mix(in srgb,var(--bg-primary,#fff) 97%,#f1f5f9) }.file-title { min-width:0;display:flex;align-items:center;gap:7px }.file-title strong { max-width:min(420px,35vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600 }.line-stats { display:flex;gap:5px;font:10px ui-monospace,monospace }.line-stats b { color:#047857 }.line-stats i { color:#b91c1c;font-style:normal }.diff-search { width:150px;height:29px;padding:0 7px;display:flex;align-items:center;gap:5px;border:1px solid var(--border-color,rgba(15,23,42,.1));border-radius:6px;color:var(--text-muted) }.diff-search input { min-width:0;width:100%;border:0;outline:0;background:transparent;color:var(--text-primary);font-size:11px }.diff-toolbar button { width:30px;padding:0 }.diff-toolbar button.active { border-color:rgba(37,99,235,.35);background:rgba(37,99,235,.1);color:#2563eb }.diff-toolbar .danger-action { color:#b91c1c }.status-error { flex:0 0 auto;padding:9px 16px;display:flex;align-items:center;gap:7px;background:#fef2f2;color:#b91c1c;font-size:12px }
 .spinning { animation:spin .8s linear infinite }@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:1180px){.repository-toolbar{grid-template-columns:minmax(180px,1fr) auto}.repository-state{display:none}.diff-search{display:none}.file-title strong{max-width:220px}.change-summary+:deep(*){min-width:0}}
-@media(max-width:768px){.page-toolbar{align-items:stretch;flex-direction:column;padding:8px 10px}.toolbar-primary,.toolbar-actions{width:100%}.project-select{flex:1}.project-select>span{display:none}.project-select select{width:100%;min-width:0}.toolbar-actions{justify-content:flex-end}.repository-toolbar{grid-template-columns:minmax(0,1fr);gap:8px;padding:9px 10px}.repository-actions{min-width:0;width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.repository-actions button{min-width:0;width:100%;padding:0 5px;white-space:nowrap}.repository-actions button span{font-size:10px}.changes-layout{overflow:auto;flex-direction:column}.diff-pane{min-height:520px;overflow:visible}.diff-toolbar{position:sticky;top:0;z-index:5;align-items:flex-start;flex-direction:column}.diff-tools{width:100%;overflow-x:auto;padding-bottom:2px}.file-title strong{max-width:calc(100vw - 130px)}.diff-toolbar button[title="左右对比"]{display:none}.page-toolbar button span{display:none}.page-toolbar .commit-button span{display:inline}.code-changes-workbench{overflow:auto}.changes-layout{flex:none}.toolbar-primary>.page-toolbar button{width:32px}}
+@media(max-width:768px){.code-changes-workbench{overflow-y:auto;overscroll-behavior:contain}.page-toolbar{align-items:stretch;flex-direction:column;padding:8px 10px}.toolbar-primary,.toolbar-actions{width:100%}.project-select{flex:1}.project-select>span{display:none}.project-select select{width:100%;min-width:0}.toolbar-actions{justify-content:flex-end}.repository-toolbar{grid-template-columns:minmax(0,1fr);gap:8px;padding:9px 10px}.repository-actions{min-width:0;width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.repository-actions button{min-width:0;width:100%;padding:0 5px;white-space:nowrap}.repository-actions button span{font-size:10px}.changes-layout{flex:0 0 auto;height:920px;min-height:920px;grid-template-columns:minmax(0,1fr);grid-template-rows:repeat(2,minmax(0,1fr));overflow:visible}.diff-pane{height:100%;min-height:0}.diff-toolbar{align-items:flex-start;flex-direction:column}.diff-tools{width:100%;overflow-x:auto;padding-bottom:2px}.file-title strong{max-width:calc(100vw - 130px)}.diff-toolbar button[title="左右对比"]{display:none}.page-toolbar button span{display:none}.page-toolbar .commit-button span{display:inline}.toolbar-primary>.page-toolbar button{width:32px}}
+.status-error { background:var(--danger-soft); color:var(--accent-red); }
 </style>

@@ -19,6 +19,9 @@ const autoCompactThreshold = computed(() => Math.max(0, Number(props.usage?.auto
 const contextPercent = computed(() => contextWindow.value > 0
   ? Math.max(0, Math.round((currentTokens.value / contextWindow.value) * 1000) / 10)
   : 0)
+const contextPercentLabel = computed(() => currentTokens.value > 0 && contextWindow.value > 0 && contextPercent.value === 0
+  ? '<0.1%'
+  : `${contextPercent.value}%`)
 const compactPercent = computed(() => autoCompactThreshold.value > 0
   ? Math.max(0, Math.round((currentTokens.value / autoCompactThreshold.value) * 100))
   : 0)
@@ -52,14 +55,16 @@ const formatTokens = value => {
 }
 
 const accessibleLabel = computed(() => props.usage
-  ? `${contextPercent.value}% context used, ${formatTokens(currentTokens.value)} / ${formatTokens(contextWindow.value)} tokens`
+  ? `${contextPercentLabel.value} context used, ${formatTokens(currentTokens.value)} / ${formatTokens(contextWindow.value)} tokens`
   : stateLabel.value)
 const tokenSourceLabel = computed(() => ({
   provider_usage_plus_estimate: 'Provider 实测 + 后续增量',
   provider_usage: 'Provider 实测',
   context_pressure_sample: '完整上下文采样',
   model_visible_payload: '完整模型可见上下文估算',
+  model_visible_payload_projection: '当前模型可见上下文投影',
   message_estimate: '会话消息估算',
+  project_transcript_estimate: '项目会话原文估算',
   post_compact_record: '压缩后门禁记录',
   empty: '暂无样本',
 })[String(props.usage?.tokenSource || '')] || '模型可见上下文计量')
@@ -91,7 +96,12 @@ const breakdownRows = computed(() => {
   ].filter(row => Number.isFinite(row.tokens) && row.tokens > 0)
   const accountedTokens = rows.reduce((sum, row) => sum + row.tokens, 0)
   const providerRemainder = Math.max(0, currentTokens.value - accountedTokens)
-  if (providerRemainder > 0) rows.push({ key: 'providerRemainder', label: 'Provider observed remainder', tokens: providerRemainder, tone: 'remainder' })
+  if (providerRemainder > 0) rows.push({
+    key: 'providerRemainder',
+    label: hasPayloadBreakdown ? 'Provider 其余上下文' : '历史 Provider 总量（无分项快照）',
+    tokens: providerRemainder,
+    tone: 'remainder',
+  })
   const usedDenominator = Math.max(1, currentTokens.value, rows.reduce((sum, row) => sum + row.tokens, 0))
   return rows.map(row => ({
     ...row,
@@ -116,7 +126,9 @@ const summarySourceLabel = computed(() => ({
 const measurementMethodLabel = computed(() => ({
   latest_provider_usage_plus_new_message_estimate: 'Provider 实测 + 后续增量',
   model_visible_payload_estimate: '完整模型可见上下文估算',
+  current_model_visible_payload_projection: '当前模型可见上下文投影',
   encrypted_transcript_estimate: '加密会话原文估算',
+  project_transcript_estimate: '项目会话原文估算',
   message_estimate: '会话消息估算',
 })[String(props.usage?.tokenMeasurement?.method || '')] || tokenSourceLabel.value)
 const sessionLabel = computed(() => String(props.usage?.label || props.usage?.id || '当前会话').replace(/^session:/, ''))
@@ -158,10 +170,10 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
   >
     <RefreshCw v-if="loading || isCompacting" :size="13" class="context-spinner" />
     <Gauge v-else :size="14" />
-    <span>{{ usage ? `${contextPercent}%` : '--' }}</span>
+    <span>{{ usage ? contextPercentLabel : '--' }}</span>
     <div v-if="detailsOpen" class="context-usage-popover" role="dialog" aria-label="当前会话上下文详情" @click.stop>
       <header class="context-popover-header">
-        <div><span>CONTEXT</span><strong>{{ usage ? `${contextPercent}% Full` : stateLabel }}</strong></div>
+        <div><span>CONTEXT</span><strong>{{ usage ? `${contextPercentLabel} Full` : stateLabel }}</strong></div>
         <button type="button" class="context-popover-close" aria-label="关闭上下文详情" @click="detailsOpen = false"><X :size="14" /></button>
       </header>
       <div v-if="usage" class="context-popover-session">{{ sessionLabel }}<span>{{ compactStateLabel }}</span></div>
@@ -232,22 +244,22 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
   z-index: 80;
   width: min(380px, calc(100vw - 24px));
   padding: 14px;
-  border: 1px solid #cbd8d1;
+  border: 1px solid var(--border-color);
   border-radius: 10px;
-  background: #fff;
-  color: #25342d;
+  background: var(--surface-raised);
+  color: var(--text-primary);
   box-shadow: 0 18px 44px rgba(20, 40, 30, .20), 0 3px 10px rgba(20, 40, 30, .08);
   text-align: left;
 }
-.context-popover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 11px; border-bottom: 1px solid #edf1ee; }
-.context-popover-header div { display: grid; gap: 5px; }.context-popover-header span { color: #60746a; font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: 0; }.context-popover-header strong { color: #1d3027; font-size: 14px; font-weight: 750; }
-.context-popover-close { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #edf1ee; color: #61746a; cursor: pointer; }.context-popover-close:hover { background: #dfeae3; color: #1b5c44; }
-.context-popover-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0 4px; color: #6d7e75; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.context-popover-session span { flex: 0 0 auto; color: #168260; font-size: 10px; font-weight: 700; }
-.context-popover-total { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0 8px; color: #6c7c73; font-size: 10px; }.context-popover-total b { color: #273b31; font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; }
-.context-meter { position: relative; display: flex; height: 8px; overflow: hidden; border-radius: 4px; background: #edf1ef; }.context-meter-segment { display: block; flex: 0 0 auto; height: 100%; transition: width .25s ease; }.context-meter-segment + .context-meter-segment { box-shadow: inset 1px 0 rgba(255,255,255,.55); }.context-meter-threshold { position: absolute; top: 0; bottom: 0; z-index: 2; width: 2px; background: #bd7b27; box-shadow: 0 0 0 1px rgba(255,255,255,.6); }
-.context-meter-labels { display: flex; justify-content: space-between; gap: 6px; padding: 5px 0 10px; color: #87958d; font-family: var(--font-mono, monospace); font-size: 8px; }.context-meter-labels span:nth-child(2) { color: #aa741f; }
-.context-breakdown { display: grid; gap: 0; max-height: 246px; overflow: auto; padding: 4px 0 5px; border-top: 1px solid #edf1ee; border-bottom: 1px solid #edf1ee; }.context-breakdown-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 27px; color: #394a41; font-size: 10px; }.context-breakdown-name { display: inline-flex; align-items: center; min-width: 0; gap: 8px; }.context-breakdown-name i { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 2px; background: #7c8b83; }.tone-system { background: #777d7a !important; }.tone-tools { background: #7654d9 !important; }.tone-rules { background: #188d65 !important; }.tone-skills { background: #c58928 !important; }.tone-mcp { background: #bd438c !important; }.tone-subagents { background: #398dc0 !important; }.tone-summary { background: #d12858 !important; }.tone-conversation { background: #db6b42 !important; }.tone-request { background: #287f9d !important; }.tone-recovery { background: #745dc9 !important; }.tone-hooks { background: #4e9d7a !important; }.tone-bootstrap { background: #3d728f !important; }.tone-hydration { background: #a85791 !important; }.tone-envelope { background: #5f6f68 !important; }.tone-remainder { background: #a2aea8 !important; }.context-breakdown-value { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 7px; min-width: 78px; }.context-breakdown-row b { color: #52645a; font-family: var(--font-mono, monospace); font-size: 10px; font-weight: 600; }.context-breakdown-row small { min-width: 31px; color: #91a098; font-family: var(--font-mono, monospace); font-size: 8px; text-align: right; }.context-breakdown-empty, .context-popover-empty { padding: 8px 0; color: #84928a; font-size: 10px; line-height: 1.5; }
-.context-popover-meta { display: grid; gap: 5px; padding-top: 10px; color: #7b8a82; font-size: 9px; }.context-popover-meta span { display: flex; justify-content: space-between; gap: 8px; }.context-popover-meta strong { color: #53665b; font-weight: 700; }
+.context-popover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 11px; border-bottom: 1px solid var(--border-color); }
+.context-popover-header div { display: grid; gap: 5px; }.context-popover-header span { color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: 0; }.context-popover-header strong { color: var(--text-primary); font-size: 14px; font-weight: 750; }
+.context-popover-close { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--panel-muted); color: var(--text-muted); cursor: pointer; }.context-popover-close:hover { background: var(--control-hover); color: var(--accent-green); }
+.context-popover-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0 4px; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.context-popover-session span { flex: 0 0 auto; color: var(--accent-green); font-size: 10px; font-weight: 700; }
+.context-popover-total { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0 8px; color: var(--text-muted); font-size: 10px; }.context-popover-total b { color: var(--text-primary); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; }
+.context-meter { position: relative; display: flex; height: 8px; overflow: hidden; border-radius: 4px; background: var(--panel-muted); }.context-meter-segment { display: block; flex: 0 0 auto; height: 100%; transition: width .25s ease; }.context-meter-segment + .context-meter-segment { box-shadow: inset 1px 0 color-mix(in srgb, var(--surface) 70%, transparent); }.context-meter-threshold { position: absolute; top: 0; bottom: 0; z-index: 2; width: 2px; background: var(--accent-yellow); box-shadow: 0 0 0 1px var(--surface); }
+.context-meter-labels { display: flex; justify-content: space-between; gap: 6px; padding: 5px 0 10px; color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 8px; }.context-meter-labels span:nth-child(2) { color: var(--accent-yellow); }
+.context-breakdown { display: grid; gap: 0; max-height: 246px; overflow: auto; padding: 4px 0 5px; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }.context-breakdown-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 27px; color: var(--text-secondary); font-size: 10px; }.context-breakdown-name { display: inline-flex; align-items: center; min-width: 0; gap: 8px; }.context-breakdown-name i { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 2px; background: var(--text-muted); }.tone-system { background: #777d7a !important; }.tone-tools { background: #7654d9 !important; }.tone-rules { background: #188d65 !important; }.tone-skills { background: #c58928 !important; }.tone-mcp { background: #bd438c !important; }.tone-subagents { background: #398dc0 !important; }.tone-summary { background: #d12858 !important; }.tone-conversation { background: #db6b42 !important; }.tone-request { background: #287f9d !important; }.tone-recovery { background: #745dc9 !important; }.tone-hooks { background: #4e9d7a !important; }.tone-bootstrap { background: #3d728f !important; }.tone-hydration { background: #a85791 !important; }.tone-envelope { background: #5f6f68 !important; }.tone-remainder { background: #a2aea8 !important; }.context-breakdown-value { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 7px; min-width: 78px; }.context-breakdown-row b { color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 10px; font-weight: 600; }.context-breakdown-row small { min-width: 31px; color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 8px; text-align: right; }.context-breakdown-empty, .context-popover-empty { padding: 8px 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
+.context-popover-meta { display: grid; gap: 5px; padding-top: 10px; color: var(--text-muted); font-size: 9px; }.context-popover-meta span { display: flex; justify-content: space-between; gap: 8px; }.context-popover-meta strong { color: var(--text-secondary); font-weight: 700; }
 
 .context-spinner { animation: context-spin 0.9s linear infinite; }
 @keyframes context-spin { to { transform: rotate(360deg); } }

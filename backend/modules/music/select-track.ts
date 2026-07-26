@@ -130,7 +130,7 @@ function shouldUseAnthropicMusicApi(config: any) {
 
 /**
  * Pick the best track for a keyword from candidates.
- * Prefers model judgment; falls back to score matching when the model fails.
+ * Semantic selection is model-only; lexical scoring only validates an exact-song result.
  */
 export async function selectMusicTrack(input: { keyword?: string; candidates?: any[]; selectionMode?: string; randomize?: boolean; originalRequest?: string; allowModel?: boolean; modelConfig?: any } = {}) {
   const keyword = String(input.keyword || "").trim();
@@ -152,8 +152,6 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
         candidate?.artist,
         candidate?.author,
         candidate?.singer,
-        candidate?.title,
-        candidate?.name,
       ].filter(Boolean).join(" ")).includes(normalizedArtist));
     if (!candidateEntries.length) {
       return { success: false, index: -1, source: "reject", reason: `候选中没有歌手“${keyword}”的作品`, rejected: true };
@@ -170,8 +168,6 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
   }
   const candidates = candidateEntries.map((entry) => entry.candidate);
   const toOriginalIndex = (index: number) => candidateEntries[index]?.index ?? index;
-  const fallback = pickBestCandidateByScore(keyword, candidates);
-
   if (canCallModel) {
     try {
       const listText = candidates.map((item, index) => {
@@ -218,17 +214,6 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
       const index = Number(parsed.index);
       const reason = String(parsed.reason || "").trim().slice(0, 300);
       if (rejected || !Number.isInteger(index) || index < 0 || index >= candidates.length) {
-        if (!strictMatch) {
-          const fallbackIndex = Math.floor(Math.random() * candidates.length);
-          return {
-            success: true,
-            index: toOriginalIndex(fallbackIndex),
-            source: "recommendation-fallback",
-            reason: reason || "模型未指定候选，从相关搜索结果中选择",
-            rejected: false,
-            candidate: candidates[fallbackIndex],
-          };
-        }
         return {
           success: false,
           index: -1,
@@ -250,18 +235,6 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
       // 精确点歌仍要过规则分：点了歌手时不能接受「歌名撞车、歌手不对」的结果
       const modelScore = scoreMusicCandidate(keyword, candidates[index] || {});
       if (modelScore < MUSIC_MATCH_MIN_SCORE) {
-        if (fallback.index >= 0) {
-          return {
-            success: true,
-            index: toOriginalIndex(fallback.index),
-            source: "fallback",
-            reason: reason
-              ? `${reason}；模型候选分不足(${modelScore})，改用规则选曲`
-              : `模型候选分不足(${modelScore})，改用规则选曲`,
-            rejected: false,
-            candidate: candidates[fallback.index],
-          };
-        }
         return {
           success: false,
           index: -1,
@@ -279,50 +252,20 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
         candidate: candidates[index],
       };
     } catch (error: any) {
-      // Fall through to score-based selection.
-      if (!strictMatch) {
-        const index = Math.floor(Math.random() * candidates.length);
-        return { success: true, index: toOriginalIndex(index), source: "recommendation-fallback", reason: `模型不可用，从相关候选中选择：${error?.message || error}`, rejected: false, candidate: candidates[index] };
-      }
-      if (fallback.index >= 0) {
-        return {
-          success: true,
-          index: toOriginalIndex(fallback.index),
-          source: "fallback",
-          reason: `${fallback.reason}；模型不可用：${error?.message || error}`,
-          rejected: false,
-          candidate: candidates[fallback.index],
-        };
-      }
       return {
         success: false,
         index: -1,
         source: "reject",
-        reason: `模型选曲失败且规则也未匹配：${error?.message || error}`,
+        reason: `模型选曲失败，未使用本地语义替代：${error?.message || error}`,
         rejected: true,
       };
     }
-  }
-
-  if (!strictMatch) {
-    const index = Math.floor(Math.random() * candidates.length);
-    return { success: true, index: toOriginalIndex(index), source: "recommendation-fallback", reason: "未配置模型，从相关候选中选择", rejected: false, candidate: candidates[index] };
-  }
-  if (fallback.index >= 0) {
-    return {
-      success: true,
-      index: toOriginalIndex(fallback.index),
-      source: "fallback",
-      reason: fallback.reason,
-      rejected: false,
-      candidate: candidates[fallback.index],
-    };
   }
   return {
     success: false,
     index: -1,
     source: "reject",
-    reason: fallback.reason || "未找到足够匹配的歌曲",
+    reason: "统一大模型未配置，未执行本地选曲替代",
     rejected: true,
   };
 }

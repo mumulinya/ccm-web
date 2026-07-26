@@ -57,6 +57,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const context_budget_1 = require("../../system/context-budget");
 const utils_1 = require("../../core/utils");
+const db_1 = require("../../core/db");
 const memory_control_center_types_1 = require("./memory-control-center-types");
 const memory_control_center_controls_1 = require("./memory-control-center-controls");
 const group_compaction_projections_part_01_1 = require("../collaboration/group-compaction-projections-part-01");
@@ -89,6 +90,135 @@ function latestGroupContextAccounting(scopeId, memory) {
     catch {
         return null;
     }
+}
+function rebuildCurrentGroupContextAccounting(scopeId, memory) {
+    try {
+        const exact = parseGroupMemoryScopeId(scopeId, memory);
+        if (!exact.groupId || !exact.sessionId.startsWith("gcs_"))
+            return null;
+        const storage = require("../collaboration/storage");
+        const group = storage.loadGroups().find((item) => String(item?.id || "") === exact.groupId);
+        if (!group)
+            return null;
+        const projection = require("../collaboration/group-session-model-context");
+        const routing = require("../collaboration/group-orchestrator-routing");
+        const core = require("../../system/session-compaction-core");
+        const context = projection.buildExactGroupSessionModelContextPacket(exact.groupId, { groupSessionId: exact.sessionId }).rendered;
+        const measurement = routing.measureGroupMainAgentPayload({
+            group,
+            message: "",
+            context,
+            source: "memory-center-live-accounting",
+            groupSessionId: exact.sessionId,
+        });
+        const payload = core.modelVisiblePayloadAccounting(measurement.snapshot);
+        if (!payload?.tokenBreakdown || payload.totalTokens <= 0)
+            return null;
+        const transcriptFile = storage.getGroupChatSessionMessagesFile(exact.groupId, exact.sessionId);
+        const updatedAtMs = Math.max(fs.existsSync(transcriptFile) ? fs.statSync(transcriptFile).mtimeMs : 0, fs.existsSync(path.join(utils_1.CCM_DIR, "groups.json")) ? fs.statSync(path.join(utils_1.CCM_DIR, "groups.json")).mtimeMs : 0);
+        return {
+            payload,
+            updatedAt: updatedAtMs > 0 ? new Date(updatedAtMs).toISOString() : "",
+            source: "current_model_visible_payload_rebuild",
+        };
+    }
+    catch {
+        return null;
+    }
+}
+function rebuildCurrentSessionContextAccounting(scope, scopeId, memory) {
+    try {
+        const core = require("../../system/session-compaction-core");
+        if (scope === "global_session") {
+            const sessionId = scopeId.replace(/^session:/, "");
+            const globalAgent = require("../global/global-agent");
+            const context = globalAgent.buildAgenticContext("", sessionId, {
+                includeSessionContinuity: true,
+                recordMemoryMetric: false,
+                source: "memory-center-live-accounting",
+            });
+            const compaction = memory?.compaction?.v2 || memory?.compaction || {};
+            const globalToolSpecs = require("../../agents/global/global-agent-run-store").GLOBAL_AGENT_TOOL_SPECS;
+            const snapshot = core.buildModelVisiblePayloadSnapshot({
+                scope: "global",
+                sessionId,
+                system: [{ role: "system", content: context }],
+                tools: globalToolSpecs,
+                activeSummary: compaction.activeSummary || compaction.active_summary || null,
+                recentMessages: recentSessionMessagesForMemoryCenter(scope, scopeId, memory),
+                contextComponents: {
+                    rules: {
+                        memory_context_boundary: context.memory_context_boundary,
+                        context_source_manifest: context.context_source_manifest,
+                        authorization_readiness: context.tools?.authorization_readiness,
+                    },
+                    skills: context.tools?.skills || [],
+                    mcpTools: context.tools?.mcp || [],
+                    subagentDefinitions: { projects: context.projects || [], groups: context.groups || [] },
+                },
+            });
+            const payload = core.modelVisiblePayloadAccounting(snapshot);
+            if (!payload?.tokenBreakdown || payload.totalTokens <= 0)
+                return null;
+            const updatedAtMs = Date.parse(String(memory?.transcriptUpdatedAt || memory?.updatedAt || "")) || Date.now();
+            return { payload, updatedAt: new Date(updatedAtMs).toISOString(), source: "current_model_visible_payload_projection" };
+        }
+        if (scope === "project_session") {
+            const separator = scopeId.indexOf("::");
+            const project = (0, memory_control_center_types_1.cleanId)(separator >= 0 ? scopeId.slice(0, separator) : "");
+            const projectSessionId = (0, memory_control_center_types_1.cleanId)(separator >= 0 ? scopeId.slice(separator + 2) : "");
+            if (!project || !projectSessionId)
+                return null;
+            const projectCompaction = require("../projects/project-session-compaction");
+            const projection = projectCompaction.buildProjectSessionModelContextProjection(project, projectSessionId);
+            if (!projection)
+                return null;
+            const authorization = require("../../tools/tool-authorization");
+            const manager = require("../../tools/tool-manager");
+            const configured = authorization.normalizeToolAuthorization((0, db_1.loadProjectConfigs)()?.[project]?.tools || {});
+            const catalog = manager.toolManager.getScopedToolCatalog({
+                mcp: configured.mcp,
+                skill: configured.skill,
+                auditContext: { runtime: "project-main-agent", project, source: "memory-center-live-accounting" },
+            });
+            let projectMemory = null;
+            try {
+                projectMemory = require("../../projects/memory").buildProjectMemoryPacket(project, { query: "" });
+            }
+            catch { }
+            const projectConfig = (0, db_1.getConfigs)().find((item) => String(item?.name || "") === project) || null;
+            const rules = {
+                scope: "exact_project_session_only",
+                project,
+                projectSessionId,
+                mainAgent: "plan_delegate_test_accept",
+                crossProjectAccess: false,
+                groupContextIncluded: false,
+            };
+            const snapshot = core.buildModelVisiblePayloadSnapshot({
+                scope: "project",
+                sessionId: `${project}:${projectSessionId}`,
+                system: [{ role: "system", content: { rules, projectMemory, authorizedSkills: catalog.skills } }],
+                tools: catalog.tools,
+                activeSummary: projection.summary || null,
+                recentMessages: projection.visibleMessages,
+                contextComponents: {
+                    rules,
+                    skills: catalog.skills,
+                    mcpTools: catalog.tools,
+                    subagentDefinitions: projectConfig ? [{ project, agent: projectConfig.agent || projectConfig.agent_type || "" }] : [],
+                },
+            });
+            const payload = core.modelVisiblePayloadAccounting(snapshot);
+            if (!payload?.tokenBreakdown || payload.totalTokens <= 0)
+                return null;
+            const file = scopeFile(scope, scopeId);
+            const updatedAtMs = fs.existsSync(file) ? fs.statSync(file).mtimeMs : Date.now();
+            return { payload, updatedAt: new Date(updatedAtMs).toISOString(), source: "current_model_visible_payload_projection" };
+        }
+    }
+    catch { }
+    return null;
 }
 function currentCompactionActivity(scope, scopeId, memory) {
     try {
@@ -290,6 +420,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
                 : measurementMethod === "final_provider_payload_gate" ? "provider_usage"
                     : "post_compact_record";
     let tokenUpdatedAt = warning.createdAt || decision.createdAt || compaction.lastPressureSampleAt || compaction.lastCompactedAt || "";
+    let fallbackTokenMeasurement = null;
     if (scope === "project") {
         const activeDurable = (Array.isArray(memory?.durableMemories) ? memory.durableMemories : [])
             .filter((item) => item?.content && !["resolved", "superseded"].includes(String(item.status || "active")))
@@ -371,6 +502,41 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
             tokenSource = String(compaction.tokenMeasurement?.source || compaction.token_measurement?.source || tokenSource);
         }
     }
+    else if (scope === "project_session") {
+        if (currentTokens <= 0) {
+            const history = Array.isArray(memory?.history)
+                ? memory.history
+                : Array.isArray(memory?.messages) ? memory.messages : [];
+            const lastCompactedIndex = Number(compaction.lastCompactedIndex ?? compaction.last_compacted_index ?? -1);
+            const visibleMessages = history.slice(Math.max(0, lastCompactedIndex + 1));
+            const messageTokens = visibleMessages.reduce((sum, message) => sum + (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)(message), 0);
+            const summarySource = String(memory?.compaction?.summary_source
+                || memory?.compaction?.summarySource
+                || compaction.summarySource
+                || compaction.summary_source
+                || "").toLowerCase();
+            const activeSummary = compaction.activeSummary || compaction.active_summary || null;
+            const summaryTokens = activeSummary && ["model", "session_memory", "session-memory"].includes(summarySource)
+                ? (0, group_compaction_projections_part_01_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary })
+                : 0;
+            currentTokens = messageTokens + summaryTokens;
+            currentMessageCount = visibleMessages.length;
+            tokenSource = "project_transcript_estimate";
+            tokenUpdatedAt = String(visibleMessages.at(-1)?.timestamp || memory?.updated_at || memory?.updatedAt || tokenUpdatedAt);
+            fallbackTokenMeasurement = {
+                method: "project_transcript_estimate",
+                source: "project_transcript_estimate",
+                activeTokens: currentTokens,
+                estimatedMessageTokens: messageTokens,
+                estimatedSummaryTokens: summaryTokens,
+            };
+        }
+        else {
+            currentMessageCount = Number((compaction.preservedRecentMessageIds || compaction.preserved_recent_message_ids || []).length
+                || (Array.isArray(memory?.history) ? memory.history.length : 0));
+            tokenSource = String(compaction.tokenMeasurement?.source || compaction.token_measurement?.source || tokenSource);
+        }
+    }
     const autoCompactThreshold = scope === "project" ? 0 : Number(memory?.compaction?.auto_compact_threshold
         || compaction.autoCompactThreshold
         || compaction.auto_compact_threshold
@@ -390,6 +556,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
         tokenPressure: scope !== "project" && autoCompactThreshold > 0 ? Math.round((currentTokens / autoCompactThreshold) * 1000) / 10 : 0,
         tokenUpdatedAt,
         sampledAutoCompactThreshold: Number(warning.thresholds?.autoCompactThreshold || decision.triggerTokens || 0),
+        fallbackTokenMeasurement,
     };
 }
 function healthAlerts(scope, scopeId, memory) {
@@ -438,7 +605,7 @@ function healthAlerts(scope, scopeId, memory) {
     }
     return alerts;
 }
-function memorySummary(scope, scopeId, memory, label) {
+function memorySummary(scope, scopeId, memory, label, options = {}) {
     const groupScope = scope === "group" ? parseGroupMemoryScopeId(scopeId, memory) : null;
     const controls = (0, memory_control_center_controls_1.scopeControls)(scope, scopeId);
     const alerts = healthAlerts(scope, scopeId, memory);
@@ -459,10 +626,28 @@ function memorySummary(scope, scopeId, memory, label) {
     const tokenState = resolveMemoryCenterTokenState(scope, scopeId, memory);
     const storedModelVisiblePayload = compaction.modelVisiblePayload || compaction.model_visible_payload || compactionContainer.model_visible_payload || memory?.modelVisiblePayload || null;
     const groupAccounting = scope === "group" ? latestGroupContextAccounting(scopeId, memory) : null;
-    const modelVisiblePayload = groupAccounting
+    let modelVisiblePayload = groupAccounting
         && (!tokenState.tokenUpdatedAt || Date.parse(groupAccounting.updatedAt) >= Date.parse(String(tokenState.tokenUpdatedAt)))
         ? groupAccounting.payload
         : storedModelVisiblePayload;
+    const rebuiltAccounting = options.rebuildCurrentPayload === true && !modelVisiblePayload
+        ? scope === "group"
+            ? rebuildCurrentGroupContextAccounting(scopeId, memory)
+            : rebuildCurrentSessionContextAccounting(scope, scopeId, memory)
+        : null;
+    if (rebuiltAccounting?.payload)
+        modelVisiblePayload = rebuiltAccounting.payload;
+    const currentTokens = rebuiltAccounting?.payload
+        ? Number(rebuiltAccounting.payload.totalTokens || 0)
+        : tokenState.currentTokens;
+    const tokenSource = rebuiltAccounting?.source === "current_model_visible_payload_projection"
+        ? "model_visible_payload_projection"
+        : rebuiltAccounting ? "model_visible_payload" : tokenState.tokenSource;
+    const tokenUpdatedAt = rebuiltAccounting?.updatedAt || tokenState.tokenUpdatedAt;
+    const remainingTokens = Math.max(0, tokenState.effectiveContextWindow - currentTokens);
+    const tokenPressure = tokenState.effectiveContextWindow > 0
+        ? Math.min(100, Math.round((currentTokens / tokenState.effectiveContextWindow) * 1000) / 10)
+        : tokenState.tokenPressure;
     const compactionActivity = currentCompactionActivity(scope, scopeId, memory);
     return {
         scope, id: scopeId, label, health: alerts.some(item => item.severity === "critical") ? "critical" : alerts.length ? "warning" : "healthy",
@@ -472,15 +657,15 @@ function memorySummary(scope, scopeId, memory, label) {
         pinned: controls.filter((item) => item.pinned && !item.deprecated).length,
         edited: controls.filter((item) => item.editedText !== undefined && !item.deprecated).length,
         deprecated: controls.filter((item) => item.deprecated).length,
-        tokenPressure: tokenState.tokenPressure,
-        currentTokens: tokenState.currentTokens,
+        tokenPressure,
+        currentTokens,
         currentMessageCount: tokenState.currentMessageCount,
-        tokenSource: tokenState.tokenSource,
-        tokenUpdatedAt: tokenState.tokenUpdatedAt,
+        tokenSource,
+        tokenUpdatedAt,
         compacting: compactionActivity.active === true,
         compactionActivity,
         autoCompactThreshold: tokenState.autoCompactThreshold,
-        remainingTokens: tokenState.remainingTokens,
+        remainingTokens,
         effectiveContextWindow: tokenState.effectiveContextWindow,
         preCompactPressure: Number(compaction.pressurePercent || 0),
         beforeTokens: Number(compaction.preCompactTokenCount ?? compactionContainer.before_tokens ?? 0),
@@ -499,7 +684,7 @@ function memorySummary(scope, scopeId, memory, label) {
         consecutiveFailures: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? memory?.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures ?? 0),
         circuitOpen: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? memory?.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures ?? 0) >= 3,
         postCompactGate: compaction.postCompactGate || compaction.post_compact_gate || compactionContainer.post_compact_gate || null,
-        tokenMeasurement: compaction.tokenMeasurement || compaction.token_measurement || compactionContainer.token_measurement || null,
+        tokenMeasurement: compaction.tokenMeasurement || compaction.token_measurement || compactionContainer.token_measurement || tokenState.fallbackTokenMeasurement || null,
         modelVisiblePayload,
         resolvedModelCapacity: compaction.resolvedModelCapacity || compaction.resolved_model_capacity || compactionContainer.resolved_model_capacity || memory?.model?.modelContextCapacity || null,
         pendingRequestTokens: Number(compaction.pendingRequestTokens ?? compaction.pending_request_tokens ?? compactionContainer.pending_request_tokens ?? 0),
@@ -816,7 +1001,7 @@ function getMemoryCenterScope(scope, scopeId) {
         groupId: groupScope?.groupId || "",
         groupSessionId: groupScope?.sessionId || "",
         policy,
-        summary: memorySummary(scope, scopeId, rawMemory, scopeId), alerts: healthAlerts(scope, scopeId, rawMemory),
+        summary: memorySummary(scope, scopeId, rawMemory, scopeId, { rebuildCurrentPayload: true }), alerts: healthAlerts(scope, scopeId, rawMemory),
         memory: (0, memory_control_center_controls_1.applyMemoryControls)(scope, scopeId, rawMemory), rawMemory,
         itemGroups: collectItems(scope, scopeId, rawMemory),
     };

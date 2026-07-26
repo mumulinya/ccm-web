@@ -367,8 +367,8 @@ watch([selectedFile, mode], () => {
 
 <style scoped>
 .code-drawer-overlay { position: fixed; inset: 0; z-index: 1200; display: flex; justify-content: flex-end; background: rgba(15, 23, 42, .35); backdrop-filter: blur(2px); }
-.code-drawer { width: min(1180px, 94vw); height: 100%; display: flex; flex-direction: column; background: #f8fafc; color: #0f172a; box-shadow: -20px 0 60px rgba(15, 23, 42, .25); }
-.code-drawer-head { display: flex; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+.code-drawer { width: min(1180px, 94vw); height: 100%; display: flex; flex-direction: column; background: var(--bg-primary); color: var(--text-primary); box-shadow: var(--shadow-lg); }
+.code-drawer-head { display: flex; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid var(--border-color); background: var(--surface); }
 .drawer-kicker { font-size: 12px; color: #2563eb; font-weight: 800; }
 .code-drawer-head h3 { margin: 4px 0; font-size: 18px; }
 .code-drawer-head p { margin: 0; color: #64748b; font-size: 13px; }
@@ -378,21 +378,21 @@ watch([selectedFile, mode], () => {
 .drawer-summary .plus { color: #059669; margin-left: 12px; }
 .drawer-summary .minus { color: #dc2626; }
 .drawer-summary button { margin-left: auto; padding: 6px 10px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; cursor: pointer; }
-.drawer-empty,.diff-empty { margin: 24px; padding: 40px 24px; border: 1px dashed #cbd5e1; border-radius: 14px; color: #64748b; text-align: center; background: #fff; }
+.drawer-empty,.diff-empty { margin: 24px; padding: 40px 24px; border: 1px dashed var(--border-strong); border-radius: 14px; color: var(--text-muted); text-align: center; background: var(--surface); }
 .drawer-body { min-height: 0; flex: 1; display: grid; grid-template-columns: 310px 1fr; }
-.drawer-files { overflow: auto; padding: 12px; border-right: 1px solid #e2e8f0; background: #fff; }
+.drawer-files { overflow: auto; padding: 12px; border-right: 1px solid var(--border-color); background: var(--surface); }
 .drawer-files button { width: 100%; display: grid; grid-template-columns: 10px 1fr; gap: 4px 8px; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
 .drawer-files button.active { border-color: #bfdbfe; background: #eff6ff; }
 .file-dot { width: 8px; height: 8px; border-radius: 999px; margin-top: 6px; }
 .file-path { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .drawer-files small { grid-column: 2; color: #64748b; font-size: 11px; }
 .drawer-diff { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.diff-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+.diff-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border-color); background: var(--surface); }
 .diff-toolbar strong { display: block; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .diff-toolbar span { margin-left: 8px; color: #b45309; font-size: 12px; }
 .diff-actions { display: flex; gap: 6px; align-items: center; }
 .diff-actions input { width: 180px; padding: 6px 9px; border: 1px solid #cbd5e1; border-radius: 8px; }
-.diff-actions button { padding: 6px 9px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; cursor: pointer; }
+.diff-actions button { padding: 6px 9px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface-raised); color: var(--text-secondary); cursor: pointer; }
 .diff-actions button.active { border-color: #2563eb; background: #dbeafe; color: #1d4ed8; }
 .diff-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .unified-diff,.split-diff,.file-preview { flex: 1; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.55; background: #0f172a; color: #cbd5e1; }
@@ -428,4 +428,18 @@ watch([selectedFile, mode], () => {
   .diff-toolbar { align-items: stretch; flex-direction: column; }
   .diff-actions { flex-wrap: wrap; }
 }
+/* This drawer is part of the app shell, so it must consume the active theme. */
+.code-drawer { background: var(--bg-primary); color: var(--text-primary); }
+.code-drawer-head,
+.drawer-empty,
+.diff-empty,
+.drawer-files,
+.diff-toolbar,
+.diff-actions button {
+  border-color: var(--border-color);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+.drawer-files button:hover,
+.diff-actions button:hover { background: var(--control-hover); }
 </style>

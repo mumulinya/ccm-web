@@ -120,7 +120,7 @@ const formatWorkDuration = () => {
 }
 .main-agent-technical-events {
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface-subtle);
 }
 .main-agent-summary {
   display: flex;

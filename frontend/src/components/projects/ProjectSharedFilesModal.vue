@@ -173,7 +173,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
   padding: 12px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--control-bg);
   color: var(--text-primary);
   font-family: monospace;
   font-size: 13px;

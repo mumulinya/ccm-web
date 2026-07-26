@@ -15,6 +15,7 @@ const require = createRequire(import.meta.url)
 const read = (path) => readFileSync(join(root, path), 'utf-8')
 
 const component = read('frontend/src/components/agents/AgentCodeChangeDrawer.vue')
+const appShell = read('frontend/src/App.vue')
 const project = [
   read('frontend/src/components/projects/ProjectManagerPanel.vue'),
   read('frontend/src/components/projects/ProjectManager.template.html'),
@@ -31,6 +32,8 @@ const gitModule = read('backend/modules/tools/git.ts')
 const workspace = read('frontend/src/components/tools/CodeChanges.vue')
 const summaryComponent = read('frontend/src/components/tools/code-changes/CodeChangeSummary.vue')
 const fileListComponent = read('frontend/src/components/tools/code-changes/CodeChangeFileList.vue')
+const treeNodeComponent = read('frontend/src/components/tools/code-changes/CodeChangeTreeNode.vue')
+const diffViewerComponent = read('frontend/src/components/tools/code-changes/CodeDiffViewer.vue')
 const commitPanel = read('frontend/src/components/tools/code-changes/CodeCommitPanel.vue')
 
 const transpiledGit = ts.transpileModule(gitModule, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
@@ -60,9 +63,27 @@ const checks = {
   backendFilePreviewEndpointExists: gitModule.includes('pathname === "/api/git/file"') && gitModule.includes('非法文件路径') && gitModule.includes('readWorkingFileText'),
   workspaceHasUserSummary: workspace.includes('<CodeChangeSummary') && summaryComponent.includes('任务来源') && summaryComponent.includes('查看任务回放'),
   workspaceGroupsFileState: workspace.includes('<CodeChangeFileList') && fileListComponent.includes('同时存在暂存与工作区改动') && fileListComponent.includes('未跟踪'),
+  workspaceGroupsByDirectoryModuleAndStatus: fileListComponent.includes("groupingMode === 'directory'")
+    && fileListComponent.includes("groupingMode === 'module'")
+    && fileListComponent.includes('CodeChangeTreeNode')
+    && treeNodeComponent.includes('选择目录')
+    && treeNodeComponent.includes('descendantFiles'),
+  workspaceUsesIndependentPaneScroll: appShell.includes('tab-pane code-changes-pane')
+    && appShell.includes('.tab-pane.code-changes-pane')
+    && workspace.includes('.code-changes-workbench { height:100%; min-height:0;')
+    && workspace.includes('grid-template-columns:340px minmax(0,1fr)')
+    && fileListComponent.includes('.file-scroll { flex:1; min-height:0; overflow:auto;')
+    && diffViewerComponent.includes('.diff-viewer { flex:1; min-height:0; overflow:auto;'),
   workspaceHasSafeCommitPreview: workspace.includes('/api/git/commit-preview') && commitPanel.includes('只提交你明确选择的文件') && commitPanel.includes('验证状态'),
+  workspaceHasIdeaStyleGitActions: ['获取远端', '拉取代码', '推送代码'].every(label => workspace.includes(label))
+    && commitPanel.includes("action: 'commit'") && commitPanel.includes("action: 'commit_and_push'")
+    && commitPanel.includes('提交并推送'),
   workspaceHasDiffUtilities: workspace.includes('downloadPatch') && workspace.includes('navigateHunk') && workspace.includes('compactDiff') && workspace.includes("diffMode = 'split'"),
   backendHasWriteGuards: gitModule.includes('resolveSafeProjectFile') && gitModule.includes('validatePatchPaths') && gitModule.includes('"--check"') && gitModule.includes('"--only"'),
+  backendSeparatesCommitPushOutcomes: gitModule.includes('committed_and_pushed')
+    && gitModule.includes('committed_push_failed')
+    && gitModule.includes('请明确选择本次要提交的文件')
+    && gitModule.includes('authentication_required'),
   backendHasProvenanceContext: gitModule.includes('buildChangeContext') && gitModule.includes('test-agent-runs') && gitModule.includes('project_recent'),
 }
 

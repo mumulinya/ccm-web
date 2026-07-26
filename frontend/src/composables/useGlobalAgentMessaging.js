@@ -14,7 +14,7 @@ export function useGlobalAgentMessaging(context) {
     currentSupervisedRunMessage, activeGlobalRunMessage, activeGlobalExecutionConfirmed,
     isExplicitSupervisionContinuation,
     pendingGlobalMissionInput, selectedFiles, chatInputElement, postJson, visibleGlobalText, isSending,
-    pendingGlobalClarificationInput, createNewSession, pendingGlobalRequestRetry, globalRequestRetrySignature,
+    pendingGlobalClarificationInput, createNewSession, materializeCurrentSession, pendingGlobalRequestRetry, globalRequestRetrySignature,
     ensureGlobalStreamMessage, sanitizeGlobalVisibleStreamText, GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN,
     GLOBAL_RESULT_VISIBLE_FALLBACK, trackGlobalMission, emit,
   } = context
@@ -179,6 +179,41 @@ const submitGlobalMessageWhileBusy = async () => {
   return turn
 }
 
+const guideGlobalQueuedTurn = async (turn) => {
+  if (!turn?.id) return
+  const guidedTurn = await globalTurnControl.guide(turn)
+  const supervisedMessage = currentSupervisedRunMessage.value
+  const activeMessage = activeGlobalRunMessage.value?.agenticRun?.id === activeGlobalRunId.value
+    ? activeGlobalRunMessage.value
+    : null
+  const runId = globalActiveRunId.value
+  const targetMessage = activeMessage || supervisedMessage
+  const supervision = !activeMessage && !!supervisedMessage
+  const canSteer = globalTurnBusy.value
+    && !!runId
+    && (activeGlobalExecutionConfirmed.value || supervision)
+
+  if (!canSteer) {
+    toast.info('当前运行还没有准备好接收引导，消息已移到队首')
+    if (!globalTurnBusy.value) window.setTimeout(() => drainGlobalTurnQueue().catch(() => {}), 0)
+    return guidedTurn
+  }
+
+  const result = await sendGlobalRunSteer({
+    userText: guidedTurn.message,
+    runId,
+    agentMsg: targetMessage || undefined,
+    supervision,
+  })
+  await globalTurnControl.settle(
+    guidedTurn,
+    result?.success ? 'applied' : 'failed',
+    result?.success ? {} : { error: result?.error || '引导没有接入当前工作' },
+  )
+  if (result?.success) toast.success('这条消息已纳入当前工作')
+  return guidedTurn
+}
+
 const beginGlobalMissionInput = async (msg, card = {}) => {
   const missionId = msg?.globalMission?.id || card?.task_id || ''
   const supervisorId = msg?.globalMissionSupervisor?.id || msg?.globalMission?.supervisor_id || missionId
@@ -302,6 +337,7 @@ const sendMessage = async (options = {}) => {
   if (!currentSession.value) {
     createNewSession()
   }
+  materializeCurrentSession()
   
   const userText = queuedTurn ? String(queuedTurn.message || '').trim() : chatInput.value.trim()
   const clarificationTarget = pendingGlobalClarificationInput.value
@@ -583,5 +619,14 @@ const sendMessage = async (options = {}) => {
 }
 
 
-  return { sendGlobalRunSteer, stopGlobalCurrentWork, drainGlobalTurnQueue, submitGlobalMessageWhileBusy, beginGlobalMissionInput, sendGlobalMissionInput, sendMessage }
+  return {
+    sendGlobalRunSteer,
+    stopGlobalCurrentWork,
+    drainGlobalTurnQueue,
+    guideGlobalQueuedTurn,
+    submitGlobalMessageWhileBusy,
+    beginGlobalMissionInput,
+    sendGlobalMissionInput,
+    sendMessage,
+  }
 }

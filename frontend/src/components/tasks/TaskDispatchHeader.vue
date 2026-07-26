@@ -57,8 +57,8 @@ const chooseCreateType = (type) => {
           </button>
           <div v-if="createMenuOpen" class="create-menu" role="menu">
             <button type="button" role="menuitem" @click="chooseCreateType('business')">
-              <strong>业务开发任务</strong>
-              <small>由群聊主 Agent 拆分、派发并组织验收</small>
+              <strong>自动开发任务</strong>
+              <small>提交描述或资料，由模型拆分、顺序执行并验收</small>
             </button>
             <button type="button" role="menuitem" @click="chooseCreateType('standard')">
               <strong>普通任务</strong>

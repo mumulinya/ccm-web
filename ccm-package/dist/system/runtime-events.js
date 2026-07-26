@@ -20,6 +20,7 @@ function publicData(value) {
         "id", "taskId", "task_id", "project", "groupId", "group_id", "sessionId", "session_id",
         "originType", "originSessionId", "state", "status", "operation", "runId", "run_id",
         "deliveryId", "delivery_id", "count", "reason", "source",
+        "profileId", "profile_id", "exitCode", "exit_code", "runtimeKind", "runtime_kind",
     ]) {
         if (!Object.prototype.hasOwnProperty.call(source, key))
             continue;

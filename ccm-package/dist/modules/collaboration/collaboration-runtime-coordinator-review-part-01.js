@@ -636,6 +636,29 @@ async function processTargetQueue(targetKey, ctx) {
                 await ctx.onTaskStatusChange?.(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
                 continue;
             }
+            if (execution.status === "blocked") {
+                const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "failed");
+                const detail = execution.detail || "独立验收三轮后仍未通过，等待用户处理";
+                const blockedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                    status: "blocked",
+                    result: result.substring(0, 500),
+                    final_report: execution.report || result,
+                    status_detail: detail,
+                    receipt: execution.receipt || null,
+                    review: execution.review || execution.testAgent || null,
+                    file_changes: execution.fileChanges || null,
+                    delivery_summary: deliverySummary,
+                    reasoning_loop: deliverySummary.reasoning_loop,
+                    acceptance_state: "blocked",
+                }) || { ...task, status: "blocked", result: result.substring(0, 500) };
+                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
+                finalizeTaskKernel(task, execution, deliverySummary, "failed", detail);
+                (0, logs_1.addTaskLog)(taskId, "warning", `任务已阻塞：${detail}`);
+                (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
+                await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+                (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
+                continue;
+            }
             if (execution.status === "failed") {
                 const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "failed");
                 (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: "fail", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
@@ -761,8 +784,9 @@ async function processTargetQueue(targetKey, ctx) {
                     await (0, collaboration_runtime_task_queue_1.sendTaskCompletionNotification)(completedTask, result);
                 }
                 else {
+                    const shouldRequeue = execution.requeue === true;
                     const waitingTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
-                        status: "in_progress",
+                        status: shouldRequeue ? "pending" : "in_progress",
                         result: result.substring(0, 500),
                         final_report: execution.report || result,
                         status_detail: execution.detail || "等待补充信息或返工",
@@ -772,12 +796,14 @@ async function processTargetQueue(targetKey, ctx) {
                         delivery_summary: deliverySummary,
                         reasoning_loop: deliverySummary.reasoning_loop,
                     }) || { ...task, status: "in_progress", result: result.substring(0, 500) };
-                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, "in_progress", execution.detail || "等待补充信息或返工");
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, shouldRequeue ? "pending" : "in_progress", execution.detail || "等待补充信息或返工");
                     finalizeTaskKernel(task, execution, deliverySummary, "reviewing", execution.detail || "等待补充信息或返工");
                     (0, logs_1.addTaskLog)(taskId, "warning", `任务仍需继续：${execution.detail || "验收未完成"}`);
-                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(waitingTask, "blocked", execution.detail || result.substring(0, 500));
+                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(waitingTask, shouldRequeue ? "queued" : "blocked", execution.detail || result.substring(0, 500));
                     await ctx.onTaskStatusChange?.(waitingTask, "waiting", result.substring(0, 500));
                     (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(waitingTask, "waiting", execution.detail || result.substring(0, 500));
+                    if (shouldRequeue)
+                        enqueueFollowupAfterRound = true;
                 }
             }
         }
@@ -916,6 +942,14 @@ function getQueueStatus(taskSnapshot) {
 function getTaskTargetKeyFromTask(task) {
     if (task?.queue_scope === "isolated_parallel" && task?.id)
         return `isolated:${task.target_project || "unknown"}:${task.id}`;
+    if (task?.queue_scope === "conversation_serial") {
+        const projectSessionId = String(task.project_session_id || task.projectSessionId || "").trim();
+        const groupSessionId = String(task.group_session_id || task.groupSessionId || "").trim();
+        if (task?.assign_type === "group" && task?.group_id && groupSessionId)
+            return `conversation:group:${task.group_id}:${groupSessionId}`;
+        if (task?.target_project && projectSessionId)
+            return `conversation:project:${task.target_project}:${projectSessionId}`;
+    }
     if (task?.assign_type === "group" && task?.group_id)
         return `group:${task.group_id}`;
     return `project:${task?.target_project || "unknown"}`;

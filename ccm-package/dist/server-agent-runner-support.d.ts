@@ -114,6 +114,7 @@ export declare function createAgentRunnerSupport(deps: any): {
             dispatch_gate: any;
             catalogRevision: string;
         };
+        selectedRoleSkills: any;
     };
     sendRuntimeToolDispatchBlocked: (res: any, toolContext: any) => any;
     ensureAgentRunnerDirs: () => void;

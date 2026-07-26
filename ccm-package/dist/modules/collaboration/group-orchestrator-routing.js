@@ -70,6 +70,7 @@ exports.isContextLimitError = isContextLimitError;
 exports.buildReactiveCompactionContext = buildReactiveCompactionContext;
 const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
+const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const group_session_model_context_1 = require("./group-session-model-context");
@@ -616,23 +617,7 @@ async function runGroupOrchestratorCore(input) {
         enrichedInput = (await prepareExactGroupMainAgentInput(enrichedInput, group, groupSessionId, config)).input;
     }
     const coordinator = getCoordinatorMember(group);
-    const informationalFallback = false;
-    // 规则编排只允许继续已经结构化、已授权的内部工作单；自动对话入口模型失败时安全停止。
-    const safeCodedFallback = isStructuredCoordinatorFallbackAllowed(enrichedInput);
     if (configIssue) {
-        if (config.fallbackToRules && safeCodedFallback) {
-            const fallback = (0, group_orchestrator_coded_1.runCodedGroupOrchestrator)({
-                ...enrichedInput,
-                group,
-                context: [enrichedInput.context || "", enrichedInput.extraInstructions || ""].filter(Boolean).join("\n\n"),
-            });
-            return {
-                ...fallback,
-                runtime: "coded-fallback",
-                agentBoundary: (0, group_orchestrator_config_1.buildGroupMainAgentBoundary)("coded_fallback"),
-                content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${configIssue}`,
-            };
-        }
         return {
             agent: coordinator.project,
             delegated: [],
@@ -797,21 +782,6 @@ async function runGroupOrchestratorCore(input) {
                 }
         }
         const providerErrorSummary = summarizeGroupOrchestratorProviderError(error);
-        if (config.fallbackToRules && safeCodedFallback) {
-            const fallback = (0, group_orchestrator_coded_1.runCodedGroupOrchestrator)({
-                ...enrichedInput,
-                group,
-                context: [enrichedInput.context || "", enrichedInput.extraInstructions || ""].filter(Boolean).join("\n\n"),
-            });
-            return {
-                ...fallback,
-                runtime: "coded-fallback",
-                usage: error?.usage || null,
-                contextRecovery: reactiveCompactOwnership ? { type: "reactive-compact-not-retried", ownership: reactiveCompactOwnership } : undefined,
-                agentBoundary: (0, group_orchestrator_config_1.buildGroupMainAgentBoundary)("coded_fallback"),
-                content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${providerErrorSummary}`,
-            };
-        }
         return {
             agent: coordinator.project,
             delegated: [],
@@ -848,23 +818,93 @@ async function runGroupOrchestrator(input) {
     const group = normalizeGroupOrchestrator(input.group);
     const coordinator = getCoordinatorMember(group);
     try {
-        const result = await runGroupOrchestratorCore(input);
-        const selectedRoleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, { source: input.source || "", phase: "planning" }).names;
+        let result = await runGroupOrchestratorCore(input);
         const runtime = String(result?.runtime || "");
+        if (input.onDelta && !["llm-error", "llm-not-configured"].includes(runtime)) {
+            const canonicalReply = String(result?.content || "").trim();
+            if (canonicalReply) {
+                const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+                let emitted = false;
+                let visibleUsage = null;
+                try {
+                    const messages = [
+                        {
+                            role: "system",
+                            content: "你是 CCM 群聊主 Agent 的正式回复输出层。完整保留给定正式回复中的事实、任务分派、验收标准、风险与待补充问题，仅改善自然语言可读性。不得增加未提供的事实，不得输出 JSON、内部协议、工具参数或分析过程，只输出面向用户的最终正文。",
+                        },
+                        {
+                            role: "user",
+                            content: JSON.stringify({ user_request: input.message, official_reply: canonicalReply }),
+                        },
+                    ];
+                    const rendered = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
+                        ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, {
+                            messages,
+                            maxTokens: 1800,
+                            temperature: 0.2,
+                            defaultTimeoutMs: 60_000,
+                            httpErrorPrefix: "群聊主 Agent 正式回复流式输出失败",
+                            stream: true,
+                            onDelta: delta => {
+                                if (!delta)
+                                    return;
+                                emitted = true;
+                                input.onDelta?.(delta);
+                            },
+                            onUsage: usage => { visibleUsage = usage; },
+                        })
+                        : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, {
+                            messages,
+                            maxTokens: 1800,
+                            temperature: 0.2,
+                            defaultTimeoutMs: 60_000,
+                            httpErrorPrefix: "群聊主 Agent 正式回复流式输出失败",
+                            stream: true,
+                            onDelta: delta => {
+                                if (!delta)
+                                    return;
+                                emitted = true;
+                                input.onDelta?.(delta);
+                            },
+                            onUsage: usage => { visibleUsage = usage; },
+                        });
+                    if (String(rendered || "").trim()) {
+                        result = {
+                            ...result,
+                            content: String(rendered).trim(),
+                            usage: (0, group_orchestrator_llm_1.mergeLlmTokenUsage)(result?.usage, visibleUsage),
+                        };
+                    }
+                }
+                catch (error) {
+                    console.warn(`[群聊主 Agent] 正式回复流式输出失败：${error?.message || error}`);
+                    if (!emitted)
+                        input.onDelta(canonicalReply);
+                }
+            }
+        }
+        const workflowDecision = result?.workflowDecision || result?.analysis?.workflowDecision || null;
+        const selectedRoleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, {
+            source: input.source || "",
+            phase: "planning",
+            selectedSkillNames: workflowDecision?.selectedSkills || [],
+            modelDecision: workflowDecision,
+        }).names;
+        const finalRuntime = String(result?.runtime || "");
         (0, db_1.recordMetric)(coordinator.project, {
-            success: !["llm-error", "llm-not-configured"].includes(runtime),
+            success: !["llm-error", "llm-not-configured"].includes(finalRuntime),
             durationMs: Date.now() - startedAt,
             fileChangeCount: 0,
             scopeType: "group",
             groupId: group.id,
             role: "main_agent",
             source: String(input.source || "group-orchestrator"),
-            runtime,
+            runtime: finalRuntime,
             traceId: input.traceId || input.trace_id || "",
             taskId: input.taskId || input.task_id || "",
             executionId: input.executionId || input.execution_id || "",
             usage: result?.usage || null,
-            error: runtime === "llm-error" ? "群聊主 Agent 大模型调用失败" : runtime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
+            error: finalRuntime === "llm-error" ? "群聊主 Agent 大模型调用失败" : finalRuntime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
         });
         return { ...result, selectedRoleSkills };
     }

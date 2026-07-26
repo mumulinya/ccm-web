@@ -165,7 +165,7 @@ const onInput = (event) => {
   width: 44px;
   min-width: 44px;
   padding: 0;
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--surface-translucent);
   font-size: 16px;
 }
 
@@ -189,7 +189,7 @@ const onInput = (event) => {
   opacity: 0.55;
 }
 
-.send-button.stopping { background:#fff; border-color:#dc2626; color:#dc2626; }
+.send-button.stopping { background:var(--surface-raised); border-color:var(--accent-red); color:var(--accent-red); }
 
 .chat-input-wrap {
   position: relative;
@@ -209,7 +209,7 @@ textarea {
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 12px;
   outline: none;
-  background: rgba(255, 255, 255, 0.86);
+  background: var(--control-bg);
   color: var(--text-primary);
   font-size: 13.5px;
   line-height: 1.5;
@@ -258,7 +258,7 @@ textarea:focus {
   flex: 0 0 auto;
   padding: 2px 7px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.38);
+  background: var(--surface-subtle);
   font-weight: 700;
 }
 

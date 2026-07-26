@@ -113,9 +113,13 @@ function event(input: Partial<WorkJournalEvent> & { id: string; at: string; type
 }
 
 function isWorkRequest(message: any) {
-  const content = compact(message?.content, "", 4000);
-  if (!content || message?.role !== "user" || NON_WORK_RE.test(content)) return false;
-  return !!(message?.task_id || message?.taskId || message?.mission_id || message?.attachments?.length || message?.files?.length || WORK_INTENT_RE.test(content));
+  if (message?.role !== "user") return false;
+  return !!(message?.task_id
+    || message?.taskId
+    || message?.mission_id
+    || message?.workflowDecision?.actionRequired
+    || message?.workflow_decision?.actionRequired
+    || message?.agenticRun?.workflow_decision?.actionRequired);
 }
 
 function sourceFromMessage(message: any, fallback: string) {

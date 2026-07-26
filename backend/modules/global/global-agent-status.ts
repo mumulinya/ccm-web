@@ -3,13 +3,11 @@
 export function createGlobalAgentStatusRuntime(deps: any) {
   const { collectGlobalTestAgentFailureItemsFromSource, getConfigs, getGlobalAgentRun, globalSafeArray, globalUniqueStrings, globalVisibleText, hasExplicitDevelopmentExecutionIntent, hasExplicitGlobalWriteAuthorization, listGlobalAgentRuns, loadCronJobs, loadGroups, loadTasks, normalizeText, refreshGlobalDevelopmentMissions, sanitizeGlobalDirectAgentOutput, scrubGlobalTestAgentEvidencePathText, summarizeGlobalTestAgentDiagnosticItem, summarizeGlobalTestAgentFailureItem } = deps
 
-  function isGlobalProgressStatusRequest(message: string) {
+  function isGlobalProgressStatusRequest(message: string, modelDecision: any = null) {
     const text = normalizeText(message);
     if (!text) return false;
-    if (hasExplicitDevelopmentExecutionIntent(text) || hasExplicitGlobalWriteAuthorization(text)) return false;
-    if (/^(?:\/status|status|progress|任务状态|查看任务状态|全局任务|最近任务)$/i.test(text)) return true;
-    if (/(设置|修改|标记|改成|更新|创建|新建|删除|移除)/.test(text) && /(任务状态|状态)/.test(text)) return false;
-    return /(进展|进度|做到哪|处理到哪|现在怎么样|怎么样了|完成了吗|有结果了吗|还在(?:执行|处理|跑)|任务状态|最近任务|全局任务|how'?s it going|how is it going|what'?s the status)/i.test(text);
+    if (/^(?:\/status|status|progress)$/i.test(text)) return true;
+    return modelDecision?.intentKind === "status" && modelDecision?.actionRequired !== true;
   }
   
   function globalStatusLabel(status: any) {

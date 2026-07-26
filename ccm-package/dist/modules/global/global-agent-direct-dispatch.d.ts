@@ -10,7 +10,7 @@ export declare function createGlobalAgentDirectDispatchRuntime(deps: any): {
         agentType: any;
         platform: any;
     };
-    inferGlobalDirectDispatchRequiresCodeChanges: (message: string) => boolean;
+    inferGlobalDirectDispatchRequiresCodeChanges: (_message: string, modelValue?: any) => boolean;
     buildGlobalDirectDispatchHandoff: (input: {
         kind: "group" | "project";
         message: string;
@@ -19,6 +19,7 @@ export declare function createGlobalAgentDirectDispatchRuntime(deps: any): {
         group?: any;
         targetProject?: string;
         traceId?: string;
+        requiresCodeChanges?: boolean;
     }) => {
         handoff: any;
         summary: any;
@@ -39,6 +40,7 @@ export declare function createGlobalAgentDirectDispatchRuntime(deps: any): {
         sessionId?: string;
         source?: string;
         idempotencyKey?: string;
+        requiresCodeChanges?: boolean;
     }) => {
         title: any;
         business_goal: string;

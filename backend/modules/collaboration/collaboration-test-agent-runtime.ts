@@ -508,7 +508,9 @@ export function buildCoordinatorReworkRoutingDecision(item: any, input: { previo
     requires_fresh_verifier: !!extra.requires_fresh_verifier,
     signals: uniqueStrings(signals.filter(Boolean)).slice(0, 8),
   });
-  const wrongDirection = /(?:方向|方案|目标|需求).{0,16}(?:错|不对|调整|改变|变更|改成)|用户.{0,12}(?:改|调整|变更)|不要.{0,40}(?:而是|改为|改成)|停止.{0,24}(?:旧|当前|原|错误)|wrong\s+(?:direction|approach)|user\s+changed|stop\s+worker/i.test(text);
+  const requestedStrategy = String(item?.reworkStrategy || item?.rework_strategy || item?.continuationStrategy || item?.continuation_strategy || "").trim();
+  const wrongDirection = item?.goalRevision === true || item?.goal_revision === true
+    || requestedStrategy === "stop_wrong_direction_then_continue";
   if (wrongDirection) {
     return route(
       "stop_wrong_direction_then_continue",
@@ -524,8 +526,8 @@ export function buildCoordinatorReworkRoutingDecision(item: any, input: { previo
     || item?.test_agent_review_recheck === true;
   const failedReviewRework = !explicitTestAgentReviewRecheck && (
     item?.reviewFailed === true
-    || /test_agent_failed_review_rework|failed_review_rework|review_failed_rework/i.test(text)
-    || /(?:TestAgent|复核|验证).{0,40}(?:未通过|不通过|需要返工).{0,40}(?:原实现成员|同一子\s*Agent|修复后重新复核)/i.test(text)
+    || item?.review_failed === true
+    || requestedStrategy === "continue_same_worker_after_failed_review"
   );
   if (failedReviewRework) {
     return route(
@@ -539,7 +541,7 @@ export function buildCoordinatorReworkRoutingDecision(item: any, input: { previo
 
   const testAgentEnvironmentPreparation = item?.testAgentEnvironmentPreparation === true
     || item?.test_agent_environment_preparation === true
-    || /test_agent_environment_prepare|补齐.{0,16}(?:复核环境|登录条件|运行条件)/i.test(text);
+    || requestedStrategy === "prepare_verification_environment";
   if (testAgentEnvironmentPreparation) {
     return route(
       "prepare_verification_environment",
@@ -551,7 +553,7 @@ export function buildCoordinatorReworkRoutingDecision(item: any, input: { previo
   }
 
   const testAgentReviewRecheck = explicitTestAgentReviewRecheck
-    || /test_agent_review_recheck|test_agent_recheck|重新运行\s*TestAgent|重新复验.{0,24}TestAgent/i.test(text);
+    || requestedStrategy === "resume_verifier";
   if (testAgentReviewRecheck) {
     const hasCarriedHandoff = !!(item?.testAgentHandoff || item?.test_agent_handoff || item?.testAgentWorkOrder || item?.test_agent_work_order);
     return route(
@@ -567,7 +569,7 @@ export function buildCoordinatorReworkRoutingDecision(item: any, input: { previo
   }
 
   const postReviewSpotCheckReverify = item?.postReviewSpotCheckReverify === true
-    || /post_review_spot_check_reverify|spot_check_reverify|完成前抽查.{0,30}(?:不一致|需复验|重新复验)/i.test(text);
+    || item?.post_review_spot_check_reverify === true;
   if (postReviewSpotCheckReverify) {
     return route(
       "resume_verifier",
@@ -578,9 +580,12 @@ export function buildCoordinatorReworkRoutingDecision(item: any, input: { previo
     );
   }
 
-  const independentVerification = /独立.{0,12}(?:验证|复核|检查)|(?:非|不是)原实现者|另(?:一个|外).{0,12}(?:验证|复核|检查)|交叉复核|只读复核|request_review|fresh\s+verifier|independent\s+(?:verification|review)|code\s+review/i.test(text);
-  const failureOrCorrection = /(?:测试|验证|构建|编译|lint|typecheck|npm|pnpm|yarn|pytest|jest|vitest).{0,18}(?:失败|报错|未通过)|(?:失败|报错|错误|异常|blocked|failed|error|file not found|not found|missing_receipt|needs_info|partial)|缺少(?:结果说明|验证|证据|文件|回执)|补(?:齐|跑|充)|修复|继续处理/i.test(text);
-  const independentReviewGate = item?.independentReviewGate?.required === true || /independent_review_gate|independent_review_required/i.test(text);
+  const independentVerification = item?.requiresFreshVerifier === true || item?.requires_fresh_verifier === true
+    || requestedStrategy === "fresh_verification_worker";
+  const previousStatus = String(previous?.status || previous?.receiptStatus || "").trim().toLowerCase();
+  const failureOrCorrection = item?.failureOrCorrection === true || item?.failure_or_correction === true
+    || ["failed", "blocked", "needs_info", "partial", "missing_receipt"].includes(previousStatus);
+  const independentReviewGate = item?.independentReviewGate?.required === true || item?.independent_review_gate?.required === true;
   if ((independentVerification || independentReviewGate) && (!failureOrCorrection || independentReviewGate)) {
     return route(
       "fresh_verification_worker",
@@ -592,7 +597,8 @@ export function buildCoordinatorReworkRoutingDecision(item: any, input: { previo
     );
   }
 
-  const spawnFresh = /重新派发|换(?:一个|给)|新的?子\s*Agent|另(?:一个|外).{0,10}(?:Agent|worker)|fresh\s+worker|spawn\s+fresh|从零(?:实现|处理)|研究.{0,18}(?:后|完).{0,18}(?:实现|修复)/i.test(text);
+  const spawnFresh = item?.spawnFreshWorker === true || item?.spawn_fresh_worker === true
+    || requestedStrategy === "spawn_fresh_worker";
   if (spawnFresh && !failureOrCorrection) {
     return route(
       "spawn_fresh_worker",
@@ -622,13 +628,15 @@ export function selectCoordinatorIndependentVerifier(group: any, originalTarget 
     .filter((member: any) => String(member?.project || "").trim())
     .filter((member: any) => String(member.project || "").trim().toLowerCase() !== originalKey)
     .map((member: any) => {
-      const profile = [member.project, member.role, member.agent, member.type, member.description, member.tags].map((value: any) => String(value || "")).join(" ");
-      const score = /test[-_\s]*agent|测试\s*agent/i.test(profile)
+      const declaredRole = String(member.verification_role || member.verificationRole || member.role || member.type || "").trim().toLowerCase();
+      const capabilities = new Set((Array.isArray(member.capabilities) ? member.capabilities : [])
+        .map((value: any) => String(value || "").trim().toLowerCase()));
+      const score = ["test-agent", "test_agent", "verifier", "reviewer", "qa"].includes(declaredRole)
         ? 120
-        : /qa|test|tester|verify|verification|review|reviewer|audit|checker|quality|验|测|审|复核|检查/i.test(profile)
+        : capabilities.has("independent-review") || capabilities.has("independent_review") || capabilities.has("verification")
           ? 100
           : 10;
-      return { member, score, profile };
+      return { member, score, profile: declaredRole };
     })
     .sort((a: any, b: any) => b.score - a.score || String(a.member.project).localeCompare(String(b.member.project)));
   const configuredVerifier = candidates.find((item: any) => item.score >= 100)?.member || null;

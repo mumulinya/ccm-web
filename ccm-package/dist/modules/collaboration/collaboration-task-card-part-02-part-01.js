@@ -805,8 +805,7 @@ function shouldShowUserTaskCard(task, summary = {}, executions = []) {
         || (Array.isArray(executions) && executions.length > 0 && executions.some((item) => ["running", "reviewing", "succeeded", "failed"].includes(String(item.state || ""))));
     if (hasWorkEvidence)
         return true;
-    const intent = (0, collaboration_1.classifyGroupProjectTaskIntent)(String(task?.business_goal || task?.title || ""));
-    return intent.executable;
+    return false;
 }
 function timelineStatusForUser(item) {
     const status = String(item?.status || "").toLowerCase();

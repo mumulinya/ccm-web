@@ -11,6 +11,13 @@ import {
   type RequirementIngestionResult,
 } from "../requirements/source-ingestion";
 import { searchAgentKnowledge } from "../knowledge/knowledge-access";
+import { projectDisplayName } from "../projects/project-runtime";
+import { decideWorkflowWithModel } from "../../agents/workflow-decision";
+import {
+  buildGlobalAgentToolRuntimeContext,
+  executeGlobalAgentAuthorizedTool,
+} from "./global-agent-tool-authorization";
+import { saveRun as saveGlobalAgentRun } from "../../agents/global/global-agent-run-store";
 
 type LocalIntentResult = any;
 
@@ -23,6 +30,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       const info = getConfigInfo(config.path)?.[0] || {};
       return {
         name: config.name,
+        display_name: projectDisplayName(config.name),
         work_dir: info.workDir || "",
         agent: info.agent || "claudecode",
         platform: info.platform || "",
@@ -84,7 +92,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       }
     }
     for (const project of Array.isArray(context?.projects) ? context.projects : []) {
-      for (const key of Object.keys(project || {})) if (!new Set(["name", "work_dir", "agent", "platform"]).has(key)) issues.push(`global_context_project_directory_field_not_allowed:${key}`);
+      for (const key of Object.keys(project || {})) if (!new Set(["name", "display_name", "work_dir", "agent", "platform"]).has(key)) issues.push(`global_context_project_directory_field_not_allowed:${key}`);
     }
     if (context?.task_summary?.policy !== "global_agent_owned_tasks_only") issues.push("global_context_task_boundary_missing");
     for (const task of Array.isArray(context?.task_summary?.recent) ? context.task_summary.recent : []) {
@@ -165,6 +173,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     const tasks = loadTasks();
     const groups = Array.isArray(options.groups) ? options.groups : loadGroups();
     const globalTasks = tasks.filter(isGlobalAgentOwnedTask);
+    const authorizedTools = buildGlobalAgentToolRuntimeContext({
+      taskId: String(options.runId || options.run_id || ""),
+      executionId: String(options.executionId || options.execution_id || ""),
+      source: String(options.source || "global-agent-context"),
+    });
     const context: any = {
       projects: safeProjectRows(),
       groups: groups.map((group: any) => ({ id: group.id, name: group.name, members: (group.members || []).map((member: any) => ({ project: member.project, agent: member.agent })) })),
@@ -176,8 +189,25 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       },
       cron_jobs: loadCronJobs().map((job: any) => ({ id: job.id, name: job.name, schedule: job.schedule, enabled: job.enabled !== false, target_type: job.target_type, group_id: job.group_id, project: job.project })),
       tools: {
-        mcp: loadMcpTools().map((tool: any) => tool.name),
-        skills: loadSkills().map((skill: any) => skill.name),
+        schema: authorizedTools.schema,
+        authorization_checksum: authorizedTools.checksum,
+        authorization_readiness: authorizedTools.authorization_readiness,
+        connection_preflight: authorizedTools.connection_preflight,
+        configured_counts: authorizedTools.configured_counts,
+        available_counts: authorizedTools.counts,
+        mcp: authorizedTools.catalog.tools.map((tool: any) => ({
+          name: tool.canonicalName,
+          server: tool.server,
+          description: tool.description,
+          input_schema: tool.inputSchema,
+          annotations: tool.annotations,
+        })),
+        skills: authorizedTools.catalog.skills.map((skill: any) => ({
+          name: skill.name,
+          description: skill.description,
+          content_hash: skill.contentHash,
+        })),
+        policy: "global_scope_authorized_only",
       },
       global_memory: query ? buildGlobalAgentMemoryPacket(query, {
         sessionId,
@@ -220,12 +250,33 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
   }
 
   function buildGlobalProviderPayloadSnapshot(messages: Array<{ role: string; content: string }>, sessionId: string) {
+    const systemMessages = messages.filter(message => message.role === "system");
+    const systemText = systemMessages.map(message => String(message.content || "")).join("\n");
+    const skillSections: string[] = [];
+    const catalogStart = systemText.indexOf("[CCM 可由模型选择的 Skill 目录]");
+    if (catalogStart >= 0) {
+      const catalogEnd = systemText.indexOf("\n\n只输出一个合法 JSON", catalogStart);
+      skillSections.push(systemText.slice(catalogStart, catalogEnd > catalogStart ? catalogEnd : undefined));
+    }
+    const selectedSkillStart = systemText.indexOf("[CCM 本轮角色 Skill]");
+    if (selectedSkillStart >= 0) skillSections.push(systemText.slice(selectedSkillStart));
+    const authorizedTools = buildGlobalAgentToolRuntimeContext({ source: "global-agent-provider-payload" });
+    const configuredSkills = authorizedTools.catalog.skills.map((skill: any) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill: any) => skill.name);
+    const configuredMcpTools = authorizedTools.catalog.tools.map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name);
     return buildModelVisiblePayloadSnapshot({
       scope: "global",
       sessionId,
-      system: messages.filter(message => message.role === "system"),
+      system: systemMessages,
       tools: GLOBAL_AGENT_TOOL_SPECS,
       recentMessages: messages.filter(message => message.role !== "system"),
+      contextComponents: {
+        skills: [...skillSections, ...configuredSkills],
+        mcpTools: configuredMcpTools,
+        subagentDefinitions: {
+          projects: getConfigs().map((project: any) => String(project?.name || "")).filter(Boolean),
+          groups: loadGroups().map((group: any) => ({ id: String(group?.id || ""), name: String(group?.name || "") })),
+        },
+      },
     });
   }
 
@@ -453,7 +504,19 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
   
     try {
       let observation: any;
-      if (name === "inspect_system") {
+      if (name === "invoke_skill") {
+        observation = await executeGlobalAgentAuthorizedTool("skill", args, {
+          taskId: run.id,
+          executionId: operationKey,
+          source: run.source || "global-agent",
+        });
+      } else if (name === "invoke_mcp") {
+        observation = await executeGlobalAgentAuthorizedTool("mcp", args, {
+          taskId: run.id,
+          executionId: operationKey,
+          source: run.source || "global-agent",
+        });
+      } else if (name === "inspect_system") {
         observation = { success: true, ...buildAgenticContext(), missions: refreshGlobalDevelopmentMissions().slice(-8) };
       } else if (name === "list_projects") {
         observation = { success: true, projects: safeProjectRows() };
@@ -517,7 +580,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
               name: group.name || group.id,
               capabilities: (group.members || []).flatMap((member: any) => member.skills || member.capabilities || []),
             })),
-            ...getConfigs().map((config: any) => ({ type: "project", id: config.name, name: config.name })),
+            ...getConfigs().map((config: any) => ({ type: "project", id: config.name, name: projectDisplayName(config.name) })),
           ];
           const requirement = args.requirement_extraction
             || args.requirementExtraction
@@ -669,6 +732,9 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
               sessionId: run.session_id,
               source: run.source || "global-agent-single-project-dispatch",
               idempotencyKey: args.idempotency_key || `${run.id}:single-project-mission`,
+              requiresCodeChanges: typeof args.requires_code_changes === "boolean"
+                ? args.requires_code_changes
+                : !!(run.workflow_decision || run.workflowDecision)?.requiresCodeChanges,
             })
           : name === "create_task"
             ? {
@@ -776,7 +842,8 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       } else if (name === "git_review") {
         observation = await postLocalApi(baseUrl, "/api/global-agent/git-review", { project: args.project });
       } else if (name === "git_commit") {
-        observation = await postLocalApi(baseUrl, "/api/git/commit", { project: args.project, message: args.message || "chore: 由全局 Agent 提交变更", files: args.files || [] });
+        const files = Array.isArray(args.files) ? args.files : [];
+        observation = await postLocalApi(baseUrl, "/api/git/commit", { project: args.project, message: args.message || "chore: 由全局 Agent 提交变更", files, allFiles: files.length === 0, confirmed: true, action: "commit" });
       } else if (name === "create_template") {
         observation = await postLocalApi(baseUrl, "/api/templates", { name: args.name, category: args.category || "custom", prompt: args.content || args.prompt || "" });
       } else {
@@ -831,12 +898,15 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         attachGlobalRunRequirementSources(run, input.sourceIngestion);
         if (!config.apiKey || !config.apiUrl || !config.model) throw new Error("统一大模型尚未配置");
         const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
-        const invoke = (providerMessages: Array<{ role: string; content: string }>) => callGlobalModelWithRetry(config, providerMessages, {
+        const invoke = (providerMessages: Array<{ role: string; content: string }>) => {
+          (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""));
+          return callGlobalModelWithRetry(config, providerMessages, {
           onUsage: (usage: any) => {
             (run as any).latest_context_usage = usage;
             accumulateGlobalAgentRunUsage(run, usage);
           },
-        });
+          });
+        };
         try {
           return await invoke(messages);
         } catch (error: any) {
@@ -846,7 +916,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         }
       },
       prepareModelMessages: (messages, run) => prepareGlobalProviderMessages(messages, run, runtime),
-      getContext: (run) => buildAgenticContext(run.user_message, run.session_id, { knowledgeContext: input.knowledgeContext || "" }),
+      getContext: (run) => buildAgenticContext(run.user_message, run.session_id, {
+        knowledgeContext: input.knowledgeContext || "",
+        runId: run.id,
+        source: run.source || "global-agent",
+      }),
       verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
       executeTool: (name, args, run) => {
         attachGlobalRunRequirementSources(run, input.sourceIngestion);
@@ -875,13 +949,23 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     sourceIngestion?: RequirementIngestionResult | null;
   }) {
     const sessionId = input.sessionId || "default";
+    let deferredTerminalEvent: any = null;
+    const runtimeEventSink = input.onEvent
+      ? (event: any) => {
+          if (["completed", "failed", "cancelled"].includes(String(event?.type || ""))) {
+            deferredTerminalEvent = event;
+            return;
+          }
+          input.onEvent?.(event);
+        }
+      : undefined;
     let globalKnowledgeContext = "";
     try {
       globalKnowledgeContext = (await searchAgentKnowledge(input.message, { role: "global-agent" }, { limit: 5, maxContextChars: 14000 })).context;
     } catch (error: any) {
       console.warn(`[全局知识检索] 已使用无知识上下文继续：${error?.message || error}`);
     }
-    const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: input.onEvent, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
+    const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: runtimeEventSink, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
     if (!/feishu/i.test(input.source || "")) {
       ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
     }
@@ -899,20 +983,34 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     if (compaction?.reason === "circuit_breaker") {
       throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
     }
-    const startsNewTopic = /^(?:新问题|换个问题|另外(?:一个)?问题|忽略刚才|取消刚才|重新开始)/.test(String(input.message || "").trim());
     const requestedClarificationRunId = String(input.clarificationRunId || "").trim();
-    let waitingClarification: any = null;
-    if (!startsNewTopic && requestedClarificationRunId) {
+    let clarificationCandidate: any = null;
+    if (requestedClarificationRunId) {
       const requestedRun = getGlobalAgentRun(requestedClarificationRunId);
       if (!requestedRun || requestedRun.session_id !== sessionId) throw new Error("当前会话中没有这个待补充请求");
       if (requestedRun.status !== "waiting_clarification") throw new Error("这个请求已不再等待补充，请刷新后查看最新状态");
-      waitingClarification = requestedRun;
-    } else if (!startsNewTopic) {
-      waitingClarification = findClarifyingGlobalAgentRun(sessionId);
+      clarificationCandidate = requestedRun;
+    } else {
+      clarificationCandidate = findClarifyingGlobalAgentRun(sessionId);
     }
+    const workflowDecision = await decideWorkflowWithModel({
+      message: input.message,
+      scope: "global",
+      sourceCount: Number((input.sourceIngestion as any)?.source_count || (input.sourceIngestion as any)?.sources?.length || 0),
+      context: {
+        session_id: sessionId,
+        current_goal: clarificationCandidate?.original_user_message || clarificationCandidate?.user_message || "",
+        current_phase: clarificationCandidate?.status || "new",
+        has_waiting_clarification: !!clarificationCandidate,
+      },
+    });
+    const waitingClarification = clarificationCandidate && workflowDecision.continuationKind !== "new_task"
+      ? clarificationCandidate
+      : null;
+    const explicitWriteAuthorization = workflowDecision.actionRequired === true;
     const run = waitingClarification
       ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, {
-          explicitWriteAuthorization: hasExplicitGlobalWriteAuthorization(input.message),
+          explicitWriteAuthorization,
         })
       : await startGlobalAgentRun({
           message: input.message,
@@ -920,14 +1018,66 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           sessionId,
           source: input.source || "web",
           traceId: input.traceId,
-          explicitWriteAuthorization: hasExplicitGlobalWriteAuthorization(input.message),
+          explicitWriteAuthorization,
+          workflowDecision,
           maxSteps: 10,
           timeoutMs: 12 * 60 * 1000,
         }, runtime);
     attachGlobalRunRequirementSources(run, input.sourceIngestion);
+    if (input.onEvent) {
+      const canonicalReply = globalRunVisibleReply(run, "我已整理处理结果，技术细节已放入技术详情。");
+      if (canonicalReply.trim()) {
+        let emittedVisibleDelta = false;
+        try {
+          const config = loadOrchestratorConfig();
+          const renderMessages = [
+            {
+              role: "system",
+              content: "你是 CCM 的正式回复输出层。请完整保留给定正式回复中的事实、结论、风险、未完成事项、文件和验证结果，仅改善自然语言可读性。不得增加未提供的事实，不得输出 JSON、协议字段、分析过程或代码围栏，只输出面向用户的最终正文。",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({ user_request: input.message, official_reply: canonicalReply }),
+            },
+          ];
+          (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(renderMessages, String(run.session_id || ""));
+          const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
+          const renderedReply = await callGlobalModelWithRetry(config, renderMessages, {
+            onDelta: (delta: string) => {
+              if (!delta) return;
+              emittedVisibleDelta = true;
+              input.onEvent?.({ type: "text", text: delta, run_id: run.id, trace_id: run.trace_id });
+            },
+            onUsage: (usage: any) => {
+              (run as any).latest_context_usage = usage;
+              accumulateGlobalAgentRunUsage(run, usage);
+            },
+          });
+          if (String(renderedReply || "").trim()) {
+            run.final_reply = String(renderedReply).trim().slice(0, 12000);
+            run.updated_at = new Date().toISOString();
+            saveGlobalAgentRun(run, runtime.persist !== false);
+          }
+        } catch (error: any) {
+          console.warn(`[全局 Agent] 正式回复流式输出失败：${error?.message || error}`);
+          if (!emittedVisibleDelta) {
+            input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, fallback: true });
+          }
+        }
+      }
+      if (deferredTerminalEvent) {
+        input.onEvent({
+          ...deferredTerminalEvent,
+          reply: run.final_reply,
+          run,
+        });
+        deferredTerminalEvent = null;
+      }
+    }
+    let assistantMessageId = "";
     if (!/feishu/i.test(input.source || "")) {
       try {
-        const assistantMessageId = `gam_${String(run.id || "result")}_assistant`;
+        assistantMessageId = `gam_${String(run.id || "result")}_assistant`;
         ingestGlobalAgentConversation({
           sessionId,
           source: input.source || "web",
@@ -941,18 +1091,30 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
             mission_id: run.mission_id,
           }],
         });
-        recordGlobalAgentSessionProviderUsage(sessionId, {
-          usage: (run as any).latest_context_usage || null,
-          provider: String((run as any).latest_context_usage?.provider || ""),
-          model: String((run as any).latest_context_usage?.model || loadOrchestratorConfig()?.model || ""),
-          anchorMessageId: assistantMessageId,
-          currentRequest: { role: "user", content: input.message },
-          fixedContext: compactionFixedContext,
-          tools: GLOBAL_AGENT_TOOL_SPECS,
-        });
       } catch (error: any) {
         console.warn(`[全局记忆] Agentic 结果写入失败：${error?.message || error}`);
       }
+    }
+    try {
+      recordGlobalAgentSessionProviderUsage(sessionId, {
+        usage: (run as any).latest_context_usage || null,
+        provider: String((run as any).latest_context_usage?.provider || ""),
+        model: String((run as any).latest_context_usage?.model || loadOrchestratorConfig()?.model || ""),
+        anchorMessageId: assistantMessageId,
+        currentRequest: { role: "user", content: input.message },
+        fixedContext: compactionFixedContext,
+        tools: GLOBAL_AGENT_TOOL_SPECS,
+        modelVisiblePayload: (run as any).latest_model_visible_payload || null,
+        contextComponents: (() => {
+          const authorizedTools = buildGlobalAgentToolRuntimeContext({ taskId: run.id, source: run.source || "global-agent-usage" });
+          return {
+            skills: authorizedTools.catalog.skills.map((skill: any) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill: any) => skill.name),
+            mcpTools: authorizedTools.catalog.tools.map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name),
+          };
+        })(),
+      });
+    } catch (error: any) {
+      console.warn(`[全局记忆] 上下文计量写入失败：${error?.message || error}`);
     }
     return run;
   }

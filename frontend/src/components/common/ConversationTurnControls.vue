@@ -1,21 +1,19 @@
 <script setup>
 import { computed } from 'vue'
-import { ListEnd, RotateCcw, Square, X } from '@lucide/vue'
+import { CornerDownRight, ListEnd, RotateCcw, Square, Trash2 } from '@lucide/vue'
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
-  mode: { type: String, default: 'steer' },
   turns: { type: Array, default: () => [] },
   stopping: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:mode', 'stop', 'cancel', 'retry'])
+const emit = defineEmits(['stop', 'cancel', 'guide', 'retry'])
 const visibleTurns = computed(() => (props.turns || [])
-  .filter(turn => ['queued', 'sending', 'failed'].includes(String(turn.status || '')))
-  .slice(-4))
+  .filter(turn => ['queued', 'sending', 'failed'].includes(String(turn.status || ''))))
 const statusLabel = (turn) => ({
-  queued: turn.position ? `排队第 ${turn.position} 条` : '等待发送',
+  queued: turn.mode === 'steer' ? '等待引导' : (turn.position ? `第 ${turn.position} 条` : '等待发送'),
   sending: '正在发送',
   failed: '发送失败',
 }[turn.status] || turn.status)
@@ -23,51 +21,192 @@ const statusLabel = (turn) => ({
 
 <template>
   <div v-if="busy || visibleTurns.length" class="turn-control" :class="{ compact: props.compact }" data-testid="conversation-turn-controls">
-    <div v-if="busy" class="turn-control-toolbar">
-      <div class="turn-mode" role="group" aria-label="工作中消息处理方式">
-        <button type="button" :class="{ active: mode === 'steer' }" title="让 Agent 在安全节点把这条要求纳入当前工作" @click="emit('update:mode', 'steer')">引导当前</button>
-        <button type="button" :class="{ active: mode === 'queue' }" title="当前工作结束后自动发送这条独立消息" @click="emit('update:mode', 'queue')">排队下一条</button>
+    <div v-if="visibleTurns.length" class="turn-queue" aria-live="polite">
+      <div v-for="turn in visibleTurns" :key="turn.id" class="turn-row" :class="`status-${turn.status}`">
+        <ListEnd class="turn-handle" :size="15" aria-hidden="true" />
+        <span class="turn-message" :title="turn.message">{{ turn.message || '附件消息' }}</span>
+        <span class="turn-status">{{ statusLabel(turn) }}</span>
+        <button
+          v-if="busy && turn.status === 'queued' && turn.mode !== 'steer'"
+          class="guide-turn"
+          type="button"
+          title="把这条消息优先纳入当前工作"
+          @click="emit('guide', turn)"
+        >
+          <CornerDownRight :size="14" />
+          <span>引导</span>
+        </button>
+        <button v-if="turn.status === 'failed'" type="button" title="重新排队" aria-label="重新排队" @click="emit('retry', turn)">
+          <RotateCcw :size="14" />
+        </button>
+        <button v-else-if="turn.status === 'queued'" type="button" title="删除这条排队消息" aria-label="删除这条排队消息" @click="emit('cancel', turn)">
+          <Trash2 :size="14" />
+        </button>
       </div>
+    </div>
+    <div v-if="busy" class="turn-control-footer">
+      <span v-if="visibleTurns.length">新消息会在当前工作结束后按顺序发送</span>
+      <span v-else>Agent 正在工作，新消息可继续排队</span>
       <button class="stop-turn" type="button" :disabled="stopping" title="停止当前工作" aria-label="停止当前工作" @click="emit('stop')">
-        <Square :size="14" fill="currentColor" />
+        <Square :size="12" fill="currentColor" />
         <span>{{ stopping ? '停止中' : '停止' }}</span>
       </button>
-    </div>
-
-    <div v-if="visibleTurns.length" class="turn-queue" aria-live="polite">
-      <div class="turn-queue-title"><ListEnd :size="14" /><span>后续消息</span><strong>{{ visibleTurns.length }}</strong></div>
-      <div v-for="turn in visibleTurns" :key="turn.id" class="turn-row" :class="`status-${turn.status}`">
-        <span class="turn-status">{{ statusLabel(turn) }}</span>
-        <span class="turn-message" :title="turn.message">{{ turn.message || '附件消息' }}</span>
-        <button v-if="turn.status === 'failed'" type="button" title="重新排队" aria-label="重新排队" @click="emit('retry', turn)"><RotateCcw :size="13" /></button>
-        <button v-else-if="turn.status === 'queued'" type="button" title="取消这条消息" aria-label="取消这条消息" @click="emit('cancel', turn)"><X :size="14" /></button>
-      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.turn-control { padding: 8px 14px 0; border-top: 1px solid rgba(15,23,42,.08); background: color-mix(in srgb,var(--surface,#fff) 88%,transparent); }
-.turn-control-toolbar,.turn-queue-title,.turn-row { display:flex; align-items:center; gap:8px; }
-.turn-control-toolbar { justify-content:space-between; }
-.turn-mode { display:inline-flex; padding:2px; border:1px solid rgba(15,23,42,.1); border-radius:7px; background:rgba(148,163,184,.09); }
-.turn-mode button { min-height:28px; padding:0 10px; border:0; border-radius:5px; background:transparent; color:var(--text-muted,#64748b); cursor:pointer; font-size:12px; }
-.turn-mode button.active { background:var(--surface,#fff); color:var(--text-primary,#0f172a); box-shadow:0 1px 3px rgba(15,23,42,.12); font-weight:700; }
-.stop-turn { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 10px; border:1px solid rgba(220,38,38,.25); border-radius:7px; background:rgba(220,38,38,.05); color:#b91c1c; cursor:pointer; font-size:12px; font-weight:700; }
-.stop-turn:disabled { opacity:.55; cursor:wait; }
-.turn-queue { margin-top:7px; padding:7px 9px; border:1px solid rgba(15,23,42,.08); border-radius:7px; background:rgba(148,163,184,.05); }
-.turn-queue-title { color:var(--text-secondary,#475569); font-size:11px; font-weight:700; }
-.turn-queue-title strong { min-width:18px; padding:1px 5px; border-radius:5px; background:rgba(37,99,235,.1); color:#2563eb; text-align:center; }
-.turn-row { min-height:28px; margin-top:4px; border-top:1px solid rgba(15,23,42,.06); padding-top:4px; font-size:11px; }
-.turn-status { flex:0 0 auto; color:#2563eb; font-weight:700; }
-.turn-message { min-width:0; flex:1; overflow:hidden; color:var(--text-secondary,#475569); text-overflow:ellipsis; white-space:nowrap; }
-.turn-row button { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; border:0; border-radius:5px; background:transparent; color:var(--text-muted,#64748b); cursor:pointer; }
-.turn-row button:hover { background:rgba(15,23,42,.08); color:var(--text-primary,#0f172a); }
-.status-failed .turn-status { color:#dc2626; }
-.status-sending .turn-status { color:#059669; }
-.compact { padding-inline:0; }
-:global([data-theme="dark"] .turn-control) { border-color:rgba(255,255,255,.08); background:rgba(15,23,42,.78); }
-:global([data-theme="dark"] .turn-mode),:global([data-theme="dark"] .turn-queue) { border-color:rgba(255,255,255,.1); }
-:global([data-theme="dark"] .turn-mode button.active) { background:#1e293b; color:#f8fafc; }
-@media (max-width:720px) { .turn-control-toolbar { align-items:stretch; } .turn-mode { flex:1; } .turn-mode button { flex:1; padding-inline:6px; } .stop-turn span { display:none; } }
+.turn-control {
+  padding: 0 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color, rgba(15, 23, 42, .1)) 72%, transparent);
+  background: color-mix(in srgb, var(--surface, #fff) 94%, transparent);
+}
+
+.turn-queue {
+  max-height: 176px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.turn-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color, rgba(15, 23, 42, .1)) 66%, transparent);
+  color: var(--text-secondary, #475569);
+}
+
+.turn-row:last-child {
+  border-bottom: 0;
+}
+
+.turn-handle {
+  flex: 0 0 auto;
+  color: var(--text-muted, #94a3b8);
+}
+
+.turn-message {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-primary, #0f172a);
+  font-size: 13px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-status {
+  flex: 0 0 auto;
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+}
+
+.turn-row button,
+.stop-turn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  cursor: pointer;
+}
+
+.turn-row button {
+  flex: 0 0 auto;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+}
+
+.turn-row button:hover {
+  background: color-mix(in srgb, var(--accent-blue, #2563eb) 9%, transparent);
+  color: var(--text-primary, #0f172a);
+}
+
+.turn-row .guide-turn {
+  gap: 5px;
+  min-width: auto;
+  padding-inline: 8px;
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+}
+
+.turn-control-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+}
+
+.stop-turn {
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.stop-turn:hover {
+  background: rgba(220, 38, 38, .07);
+  color: #dc2626;
+}
+
+.stop-turn:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.status-failed .turn-status,
+.status-failed .turn-message {
+  color: #b91c1c;
+}
+
+.status-sending .turn-status {
+  color: #059669;
+}
+
+.compact {
+  padding-inline: 10px;
+}
+
+:global([data-theme="dark"] .turn-control) {
+  border-color: rgba(255, 255, 255, .08);
+  background: color-mix(in srgb, var(--surface, #111827) 92%, transparent);
+}
+
+@media (max-width: 720px) {
+  .turn-control {
+    padding-inline: 10px;
+  }
+
+  .turn-status {
+    display: none;
+  }
+
+  .turn-row .guide-turn span,
+  .stop-turn span {
+    display: none;
+  }
+
+  .turn-row .guide-turn {
+    width: 28px;
+    padding: 0;
+  }
+
+  .turn-control-footer > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 </style>

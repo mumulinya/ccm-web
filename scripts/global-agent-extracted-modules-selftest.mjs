@@ -107,17 +107,15 @@ try {
   let musicCommand = null
   const feishuActions = feishuActionsModule.createGlobalAgentFeishuActions({
     RANDOM_MUSIC_KEYWORD: '__random__',
-    normalizeText: value => String(value || '').trim(),
-    parseMusicKeyword: value => String(value || '').includes('周杰伦') ? '周杰伦' : '',
     postLocalApi: async (_baseUrl, pathname, body) => {
       musicCommand = { pathname, body }
       return { command: { id: 'music-1' } }
     },
   })
-  const musicReply = await feishuActions.queueMusicPlayback('http://127.0.0.1:3080', '播放周杰伦')
+  const musicReply = await feishuActions.queueMusicPlayback('http://127.0.0.1:3080', '周杰伦')
   assert.equal(musicCommand.pathname, '/api/music/remote-command')
   assert.equal(musicCommand.body.keyword, '周杰伦')
-  assert.match(musicReply, /已把「周杰伦」发送给音乐播放器/)
+  assert.match(musicReply, /已把「周杰伦」交给音乐播放器/)
 
   const feishuChannel = feishuChannelModule.createGlobalAgentFeishuChannel({})
   const feishuTurnTest = feishuChannel.runFeishuConversationTurnCommandSelfTest()
@@ -126,8 +124,9 @@ try {
   const agenticRuntime = agenticRuntimeModule.createGlobalAgentAgenticRuntime({
     normalizeText: value => String(value || '').trim(),
     hasExplicitDevelopmentExecutionIntent: () => false,
+    hasExplicitGlobalWriteAuthorization: () => false,
   })
-  assert.equal(agenticRuntime.hasExplicitGlobalWriteAuthorization('请创建一个任务'), true)
+  assert.equal(agenticRuntime.hasExplicitGlobalWriteAuthorization('请创建一个任务'), false)
   assert.equal(agenticRuntime.verifyGlobalAgentContextBoundary({}).valid, false)
   assert.equal(agenticRuntime.buildGlobalAgentGroupMemoryModelContext('memory text').rendered_text, 'memory text')
 

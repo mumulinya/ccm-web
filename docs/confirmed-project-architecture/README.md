@@ -13,3 +13,7 @@
 - [TestAgent 智能独立验收](./TEST-AGENT.md)：TestAgent 如何自主读码、选择命令和 Playwright 检查，并由确定性证据门禁给出最终验收结论。
 - [开发权限分级审批](./TASK-PERMISSION-APPROVAL.md)：项目子 Agent 如何申请额外权限、群聊主 Agent 如何审批、何时升级用户，以及限时租约如何消费和审计。
 - [飞书全局 Agent 双向会话](./FEISHU-GLOBAL-AGENT.md)：飞书消息如何进入独立全局会话、回复如何返回原飞书会话，以及权限如何在飞书中确认。
+- [项目管理与运行](./PROJECT-MANAGEMENT.md)：稳定项目 ID、可编辑显示名称、Agent 连接与源码运行边界，以及多模块运行配置。
+- [自动开发业务流程](./AUTOMATIC-DEVELOPMENT.md)：任务派发、工作台、全局 Agent和会话入口如何共用模型拆分、精确会话队列、TestAgent返工与任务回放。
+- [MCP 与 Skill 作用域授权](./TOOL-AUTHORIZATION.md)：群聊、项目和全局 Agent如何独立授权、向模型展示并真实调用 MCP/Skill，以及缺失和越权时的失败策略。
+- [全链路模型语义路由](../main-agent-workchain/shared-workchain/model-semantic-routing-alignment-2026-07-23/README.md)：自然语言工作流与 Skill 由模型选择，代码仅承担校验、权限和执行门禁。

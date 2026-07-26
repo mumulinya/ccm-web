@@ -28,6 +28,7 @@ import { acquireIdempotency, completeIdempotency, failIdempotency } from "../../
 import { sanitizeMainAgentRoleLanguage } from "../../agents/user-facing-text";
 import { ingestRequirementSources } from "../requirements/source-ingestion";
 import { buildGroupDirectMemoryAction, commitGroupDirectMemoryAction } from "./group-memory-index";
+import { explicitWorkflowDecision } from "../../agents/workflow-decision";
 
 import {
   GroupLiveRoutesDeps,
@@ -223,20 +224,27 @@ export async function handleGroupLiveRoutesSendPreface(
         const messageMode = String(clarificationContext?.message_mode || clarificationContext?.messageMode || payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
         const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId || clarificationContext?.trace_id || clarificationContext?.traceId, "group");
         const forceProjectTask = groupLiveFlag(payload.force_task ?? payload.forceTask, groupLiveFlag(clarificationContext?.force_task ?? clarificationContext?.forceTask, false));
-        const taskIntent = explicitContinuationTask
-          ? { executable: true, kind: "project_task", confidence: 1, reason: "用户正在补充当前任务所需条件", source: "explicit_task_continuation", workflowDecision: { mode: "execute_direct", continuationKind: explicitContinuationKind, needsPlanning: false, needsEpicDecomposition: false, actionRequired: true, confidence: 1, reason: "用户显式继续现有任务", source: "explicit_user_choice" } }
-          : forceProjectTask
-            ? { executable: true, kind: "project_task", confidence: 1, reason: "用户已明确要求创建并执行项目任务", source: "explicit_force_task", workflowDecision: { mode: "execute_direct", continuationKind: "new_task", needsPlanning: false, needsEpicDecomposition: false, actionRequired: true, confidence: 1, reason: "用户显式要求创建任务", source: "explicit_user_choice" } }
-          : await classifyGroupProjectTaskIntentWithAgent({
+        let taskIntent = await classifyGroupProjectTaskIntentWithAgent({
             group,
             message: effectiveUserMessage,
             uploadedFiles,
             isOrchestrated,
             messageMode,
-            forceProjectTask,
+            forceProjectTask: forceProjectTask || !!explicitContinuationTask,
             sharedFilesContext: uploadedFilesContext,
             groupSessionId,
           });
+        if (explicitContinuationTask && taskIntent?.workflowDecision) {
+          taskIntent = {
+            ...taskIntent,
+            reason: "用户正在补充当前任务所需条件",
+            source: "explicit_task_continuation",
+            workflowDecision: explicitWorkflowDecision("execute_direct", "用户显式继续现有任务", {
+              ...taskIntent.workflowDecision,
+              continuationKind: explicitContinuationKind,
+            }),
+          };
+        }
         const statusFollowupRequest = isOrchestrated
           && !clarificationContext
           && !forceProjectTask

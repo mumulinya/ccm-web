@@ -89,15 +89,15 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
 
 <style scoped>
 .assets-tab-pane { display: flex; flex-direction: column; gap: 16px; }
-.asset-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 16px 18px; background: rgba(255, 255, 255, 0.42); border: 1px solid rgba(0, 0, 0, 0.04); border-radius: 14px; }
+.asset-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 16px 18px; background: var(--surface-subtle); border: 1px solid var(--border-color); border-radius: 14px; }
 .asset-select-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
 .asset-select-wrap label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
-.asset-select-wrap select { width: 240px; padding: 9px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); outline: none; }
+.asset-select-wrap select { width: 240px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); outline: none; }
 .asset-count { padding: 6px 10px; border-radius: 999px; background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); font-size: 12px; font-weight: 700; }
 .asset-readonly-notice { padding: 12px 14px; border-radius: 12px; background: rgba(245, 158, 11, 0.1); color: #b45309; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.asset-card { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 12px; align-items: center; padding: 14px; background: rgba(255, 255, 255, 0.42); border: 1px solid rgba(0, 0, 0, 0.045); border-radius: 14px; min-width: 0; }
-.asset-preview { width: 68px; height: 68px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.7); border-radius: 12px; border: 1px solid rgba(0,0,0,0.04); }
+.asset-card { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 12px; align-items: center; padding: 14px; background: var(--surface); border: 1px solid var(--border-color); border-radius: 14px; min-width: 0; }
+.asset-preview { width: 68px; height: 68px; display: flex; align-items: center; justify-content: center; background: var(--surface-raised); border-radius: 12px; border: 1px solid var(--border-color); }
 .asset-preview img { max-width: 56px; max-height: 56px; object-fit: contain; }
 .asset-preview img.missing { opacity: 0.25; filter: grayscale(1); }
 .asset-info { min-width: 0; }

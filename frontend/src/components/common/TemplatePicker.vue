@@ -62,7 +62,7 @@ const filteredTemplates = computed(() => {
   overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--surface-raised);
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.14);
   backdrop-filter: blur(16px);
 }
@@ -82,7 +82,7 @@ const filteredTemplates = computed(() => {
   outline: none;
   font-size: 12px;
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface-subtle);
 }
 
 .template-list {

@@ -56,7 +56,7 @@ defineProps({
   gap: 3px;
   padding: 7px 8px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.52);
+  background: var(--surface-subtle);
   font-size: 10.5px;
 }
 .conflict-plan-list span {

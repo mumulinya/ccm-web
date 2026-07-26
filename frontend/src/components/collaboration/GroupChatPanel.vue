@@ -8,6 +8,7 @@ import CommandResultCard from '../common/CommandResultCard.vue'
 import EmptyState from '../common/EmptyState.vue'
 import ChatAvatar from '../common/ChatAvatar.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
+import MessageTimestamp from '../common/MessageTimestamp.vue'
 import ConflictPlanMessage from './ConflictPlanMessage.vue'
 import ContextCompactionEvent from './ContextCompactionEvent.vue'
 import ProjectTaskIntakeMessage from './ProjectTaskIntakeMessage.vue'
@@ -42,7 +43,7 @@ const emit = defineEmits(['navigated'])
 const {
   GROUP_VISIBLE_INTERNAL_TEXT_PATTERN, GROUP_INTERNAL_PROTOCOL_FALLBACK, GROUP_STREAM_ERROR_FALLBACK,
   sanitizeGroupVisibleText, buildGroupStreamErrorText, getVisibleGroupMessageContent, handleGroupNavigation,
-  highlightMsgIndex, groups, projects, currentGroup, messages, groupSessions, currentGroupSessionId,
+  highlightMsgIndex, groups, projects, currentGroup, messages, groupSessions, currentGroupSessionId, isGroupSessionDraft,
   groupMemory, mainAgentStatus, groupAgentQa, collaborationProtocol, groupMessagesEl, groupMessagesContentEl,
   isGroupMessagesPinnedToBottom, updateGroupMessageScrollState, scrollToBottom,
   attachGroupMessagesResizeObserver, detachGroupMessagesResizeObserver, navMessages, scrollToMessage,
@@ -85,7 +86,7 @@ const {
   handleKeydown, highlightMentions, updateCreateGroupProjectSelection,
   submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
   isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
-  stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue,
+  stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
   submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, waitingCrossReply, pullNewMessages,
   logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
   stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool,

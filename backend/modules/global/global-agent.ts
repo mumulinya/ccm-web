@@ -12,6 +12,7 @@ import { createGlobalAgentTestAgentRelay } from "./global-agent-test-agent-relay
 import { createGlobalAgentHistoryRuntime } from "./global-agent-history";
 import { createGlobalAgentStatusRuntime } from "./global-agent-status";
 import { generateSessionTitleWithModel, isMeaningfulSessionTitleInput, isSessionTitlePlaceholder } from "../../system/session-title";
+import { publishRuntimeEvent } from "../../system/runtime-events";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -47,10 +48,13 @@ import {
 import { sanitizeMainAgentUserText } from "../collaboration/display";
 import {
   bindFeishuIdentifiersFromValue,
+  bindFeishuGlobalSession,
   bindFeishuTaskContext,
   feishuRuntimeEventPresentation,
+  getFeishuGlobalSessionBindings,
   notifyFeishuTaskStage,
   recordFeishuInbound,
+  resolveBoundFeishuGlobalSessionId,
   resolveFeishuDestination,
 } from "../collaboration/feishu-channel";
 import { listTaskPermissionRequests } from "../collaboration/task-permission-broker";
@@ -189,6 +193,13 @@ const globalAgentHistoryRuntime = createGlobalAgentHistoryRuntime({
   ingestGlobalAgentConversation,
   isMeaningfulSessionTitleInput,
   isSessionTitlePlaceholder,
+  onSessionTitleChanged: (session: any) => {
+    if (String(session?.source || "") !== "feishu") return;
+    publishRuntimeEvent("feishu", "feishu.session_title_changed", {
+      sessionId: String(session?.id || ""),
+      source: "global-session-auto-title",
+    });
+  },
   writeGlobalJsonAtomic,
 })
 
@@ -206,6 +217,14 @@ function loadGlobalAgentHistoryStore() {
 
 function syncGlobalAgentWebHistory(payload: any) {
   return globalAgentHistoryRuntime.syncGlobalAgentWebHistory(payload)
+}
+
+function createGlobalAgentConversationSession(payload: any) {
+  return globalAgentHistoryRuntime.createGlobalAgentConversationSession(payload)
+}
+
+function deleteGlobalAgentConversationSession(sessionId: string, expectedSource = "") {
+  return globalAgentHistoryRuntime.deleteGlobalAgentConversationSession(sessionId, expectedSource)
 }
 
 function getGlobalAgentConversationMessages(sessionId: string) {
@@ -250,7 +269,7 @@ const processedFeishuMessageIds = new Set<string>();
 const GLOBAL_MANAGEMENT_ACTIONS: Record<string, any> = {
   manage_cron: { label: "定时任务管理", operations: ["list", "create", "update", "enable", "disable", "run", "delete"], destructive: ["delete"] },
   manage_group: { label: "群聊与成员管理", operations: ["list", "create", "rename", "add_member", "remove_member", "delete"], destructive: ["delete"] },
-  manage_project: { label: "项目与 Agent 管理", operations: ["list", "create", "update", "start", "stop", "delete"], destructive: ["delete"] },
+  manage_project: { label: "项目与 Agent 管理", operations: ["list", "create", "update", "start", "stop", "restart", "build", "connect_agent", "disconnect_agent", "delete"], destructive: ["start", "stop", "restart", "build", "connect_agent", "disconnect_agent", "delete"] },
   manage_task: { label: "开发任务管理", operations: ["list", "pause", "resume", "continue", "retry", "queue", "delete"], destructive: ["delete"] },
   manage_tool: { label: "MCP 与 Skill 管理", operations: ["list", "create", "delete", "reload", "status"], destructive: ["delete"] },
   system_status: { label: "系统状态检查", operations: ["inspect"], destructive: [] },
@@ -277,6 +296,10 @@ const GLOBAL_MANAGEMENT_REQUIRED_PARAMS: Record<string, Record<string, string[]>
     update: ["project"],
     start: ["project"],
     stop: ["project"],
+    restart: ["project"],
+    build: ["project"],
+    connect_agent: ["project"],
+    disconnect_agent: ["project"],
     delete: ["project"],
   },
   manage_task: {
@@ -755,6 +778,7 @@ const globalAgentFeishuChannel = createGlobalAgentFeishuChannel({
   listTaskPermissionRequests,
   postLocalApi,
   recordFeishuInbound,
+  resolveBoundFeishuGlobalSessionId,
   resolveFeishuGlobalAgentSessionId,
   resumeGlobalAgentRun,
   runAgenticGlobalRequest,
@@ -762,7 +786,7 @@ const globalAgentFeishuChannel = createGlobalAgentFeishuChannel({
   steerGlobalAgentRun,
 })
 
-const { normalizeFeishuEventPayload, verifyFeishuEventToken, extractFeishuMessageText, extractCcConnectHookText, processFeishuGlobalAgentMessage, processFeishuControlledMessage } = globalAgentFeishuChannel
+const { normalizeFeishuEventPayload, verifyFeishuEventToken, extractFeishuMessageText, extractCcConnectHookText, processFeishuGlobalAgentMessage, processFeishuControlledMessage, processFeishuCardAction } = globalAgentFeishuChannel
 type FeishuTurnCommand = { kind: "normal" | "steer" | "queue" | "stop"; message: string }
 export function parseFeishuConversationTurnCommand(value: any): FeishuTurnCommand { return globalAgentFeishuChannel.parseFeishuConversationTurnCommand(value) }
 export function startFeishuConversationTurnRecoveryForServer(baseUrl: string, ctx: CollabCtx) { return globalAgentFeishuChannel.startFeishuConversationTurnRecoveryForServer(baseUrl, ctx) }
@@ -801,10 +825,12 @@ const globalAgentApi = createGlobalAgentApi({
   completeIdempotency,
   controlGlobalMissionSupervisor,
   createAgenticRuntime,
+  createGlobalAgentConversationSession,
   createGlobalDevelopmentMission,
   createRequirementEpicWithChildren,
   createMissionSupervisorRuntime,
   deleteGlobalAgentHook,
+  deleteGlobalAgentConversationSession,
   deleteGlobalAgentPermissionRule,
   ensureTraceId,
   extractCcConnectHookText,
@@ -815,6 +841,7 @@ const globalAgentApi = createGlobalAgentApi({
   getConfigInfo,
   getConfigs,
   getFeishuMessageId,
+  getFeishuGlobalSessionBindings,
   getGlobalAgentBackgroundOutput,
   getGlobalAgentRun,
   getGlobalDevelopmentMission,
@@ -845,6 +872,7 @@ const globalAgentApi = createGlobalAgentApi({
   pauseGlobalAgentRun,
   processedFeishuMessageIds,
   processFeishuControlledMessage,
+  processFeishuCardAction,
   publicGlobalAgentRun,
   publicGlobalAgentRunSummary,
   refreshGlobalDevelopmentMissions,
@@ -872,6 +900,7 @@ const globalAgentApi = createGlobalAgentApi({
   startGlobalMissionSupervisor,
   steerGlobalAgentRun,
   syncGlobalAgentWebHistory,
+  bindFeishuGlobalSession,
   updateGlobalAgentSupervisionState,
   verifyFeishuEventToken,
   waitForIdempotencyResult,

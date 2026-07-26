@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, provide, defineAsyncComponent } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch, provide, defineAsyncComponent } from 'vue'
 import {
   Activity,
   Bot,
@@ -38,10 +38,118 @@ import {
   buildConfiguredTabs,
   loadMenuConfiguration,
 } from './utils/menuConfiguration.js'
+import {
+  setActivePageLoadScope,
+  subscribePageLoadRequests,
+} from './utils/pageLoadTracker.js'
+import { subscribeRuntimeEvents } from './utils/runtimeEventBus.js'
+import { toast } from './utils/toast.js'
 
-const definePageComponent = loader => defineAsyncComponent({
-  loader,
-  loadingComponent: PageLoadingOverlay,
+const appVersion = __CCM_VERSION__
+
+const PAGE_LOAD_MINIMUM_MS = 420
+const PAGE_LOAD_SETTLE_MS = 240
+const PAGE_LOAD_SLOW_MS = 8_000
+const pageLoadStates = reactive({})
+const pagePendingTokens = new Map()
+const pageSettleTimers = new Map()
+const pageSlowTimers = new Map()
+let unsubscribeFeishuAlerts = null
+
+const ensurePageLoadState = pageId => {
+  if (!pageLoadStates[pageId]) {
+    pageLoadStates[pageId] = {
+      loading: false,
+      ready: false,
+      moduleLoaded: false,
+      moduleFailed: false,
+      pendingRequests: 0,
+      startedAt: 0,
+      slow: false,
+    }
+  }
+  return pageLoadStates[pageId]
+}
+
+const clearPageLoadTimer = (timers, pageId) => {
+  const timer = timers.get(pageId)
+  if (timer) window.clearTimeout(timer)
+  timers.delete(pageId)
+}
+
+const beginInitialPageLoad = pageId => {
+  if (!pageId) return
+  const state = ensurePageLoadState(pageId)
+  if (state.ready || state.loading) return
+  state.loading = true
+  state.moduleFailed = false
+  state.startedAt = Date.now()
+  state.slow = false
+  clearPageLoadTimer(pageSlowTimers, pageId)
+  pageSlowTimers.set(pageId, window.setTimeout(() => {
+    if (state.loading) state.slow = true
+  }, PAGE_LOAD_SLOW_MS))
+}
+
+const finishInitialPageLoad = pageId => {
+  const state = ensurePageLoadState(pageId)
+  state.loading = false
+  state.ready = true
+  state.slow = false
+  clearPageLoadTimer(pageSettleTimers, pageId)
+  clearPageLoadTimer(pageSlowTimers, pageId)
+}
+
+const schedulePageLoadReady = pageId => {
+  const state = ensurePageLoadState(pageId)
+  clearPageLoadTimer(pageSettleTimers, pageId)
+  if (!state.loading || !state.moduleLoaded || state.pendingRequests > 0) return
+  const minimumRemaining = Math.max(0, PAGE_LOAD_MINIMUM_MS - (Date.now() - state.startedAt))
+  pageSettleTimers.set(pageId, window.setTimeout(() => {
+    if (state.loading && state.moduleLoaded && state.pendingRequests === 0) finishInitialPageLoad(pageId)
+  }, Math.max(PAGE_LOAD_SETTLE_MS, minimumRemaining)))
+}
+
+const markPageModuleLoaded = pageId => {
+  const state = ensurePageLoadState(pageId)
+  state.moduleLoaded = true
+  schedulePageLoadReady(pageId)
+}
+
+const markPageModuleFailed = pageId => {
+  const state = ensurePageLoadState(pageId)
+  state.loading = false
+  state.moduleFailed = true
+  state.slow = false
+  clearPageLoadTimer(pageSettleTimers, pageId)
+  clearPageLoadTimer(pageSlowTimers, pageId)
+}
+
+const unsubscribePageLoadRequests = subscribePageLoadRequests(event => {
+  const state = ensurePageLoadState(event.pageId)
+  if (state.ready || state.moduleFailed) return
+  if (event.phase === 'start') {
+    beginInitialPageLoad(event.pageId)
+    const tokens = pagePendingTokens.get(event.pageId) || new Set()
+    tokens.add(event.token)
+    pagePendingTokens.set(event.pageId, tokens)
+    state.pendingRequests = tokens.size
+    clearPageLoadTimer(pageSettleTimers, event.pageId)
+    return
+  }
+  const tokens = pagePendingTokens.get(event.pageId)
+  tokens?.delete(event.token)
+  state.pendingRequests = tokens?.size || 0
+  schedulePageLoadReady(event.pageId)
+})
+
+const definePageComponent = (pageId, loader) => defineAsyncComponent({
+  loader: async () => {
+    beginInitialPageLoad(pageId)
+    const module = await loader()
+    markPageModuleLoaded(pageId)
+    return module
+  },
   errorComponent: PageLoadError,
   delay: 0,
   timeout: 30_000,
@@ -50,6 +158,7 @@ const definePageComponent = loader => defineAsyncComponent({
       window.setTimeout(retry, 350)
       return
     }
+    markPageModuleFailed(pageId)
     fail()
   },
 })
@@ -75,26 +184,26 @@ const PAGE_LOADERS = {
   'cleanup-center': () => import('./components/system/cleanup/CleanupCenter.vue'),
   'trace-replay': () => import('./components/system/TraceReplay.vue'),
 }
-const ProjectManager = definePageComponent(PAGE_LOADERS.projects)
-const GroupChat = definePageComponent(PAGE_LOADERS.groups)
-const ToolsConfig = definePageComponent(PAGE_LOADERS.tools)
-const TaskManager = definePageComponent(PAGE_LOADERS.tasks)
-const AutoDevOps = definePageComponent(PAGE_LOADERS.autodev)
-const Terminal = definePageComponent(PAGE_LOADERS.terminal)
-const Settings = definePageComponent(PAGE_LOADERS.settings)
-const CodeChanges = definePageComponent(PAGE_LOADERS.changes)
-const CronJobs = definePageComponent(PAGE_LOADERS.cron)
-const AgentMetrics = definePageComponent(PAGE_LOADERS.metrics)
-const SearchHistory = definePageComponent(PAGE_LOADERS.search)
-const MusicPlayer = definePageComponent(PAGE_LOADERS.music)
+const ProjectManager = definePageComponent('projects', PAGE_LOADERS.projects)
+const GroupChat = definePageComponent('groups', PAGE_LOADERS.groups)
+const ToolsConfig = definePageComponent('tools', PAGE_LOADERS.tools)
+const TaskManager = definePageComponent('tasks', PAGE_LOADERS.tasks)
+const AutoDevOps = definePageComponent('autodev', PAGE_LOADERS.autodev)
+const Terminal = definePageComponent('terminal', PAGE_LOADERS.terminal)
+const Settings = definePageComponent('settings', PAGE_LOADERS.settings)
+const CodeChanges = definePageComponent('changes', PAGE_LOADERS.changes)
+const CronJobs = definePageComponent('cron', PAGE_LOADERS.cron)
+const AgentMetrics = definePageComponent('metrics', PAGE_LOADERS.metrics)
+const SearchHistory = definePageComponent('search', PAGE_LOADERS.search)
+const MusicPlayer = definePageComponent('music', PAGE_LOADERS.music)
 const MusicRemoteHost = defineAsyncComponent(() => import('./components/music/MusicRemoteHost.vue'))
-const MenuManager = definePageComponent(PAGE_LOADERS.menumanager)
-const PetMenu = definePageComponent(PAGE_LOADERS.pets)
-const GlobalAgent = definePageComponent(PAGE_LOADERS['global-agent'])
-const KnowledgeBase = definePageComponent(PAGE_LOADERS.knowledge)
-const MemoryCenter = definePageComponent(PAGE_LOADERS['memory-center'])
-const CleanupCenter = definePageComponent(PAGE_LOADERS['cleanup-center'])
-const TraceReplay = definePageComponent(PAGE_LOADERS['trace-replay'])
+const MenuManager = definePageComponent('menumanager', PAGE_LOADERS.menumanager)
+const PetMenu = definePageComponent('pets', PAGE_LOADERS.pets)
+const GlobalAgent = definePageComponent('global-agent', PAGE_LOADERS['global-agent'])
+const KnowledgeBase = definePageComponent('knowledge', PAGE_LOADERS.knowledge)
+const MemoryCenter = definePageComponent('memory-center', PAGE_LOADERS['memory-center'])
+const CleanupCenter = definePageComponent('cleanup-center', PAGE_LOADERS['cleanup-center'])
+const TraceReplay = definePageComponent('trace-replay', PAGE_LOADERS['trace-replay'])
 
 const currentTab = ref('')
 const musicPlayerActivated = ref(false)
@@ -405,6 +514,11 @@ const preventPageScroll = () => {
   window.scrollTo(0, 0)
 }
 watch(currentTab, () => {
+  if (currentTab.value) {
+    setActivePageLoadScope(currentTab.value)
+    beginInitialPageLoad(currentTab.value)
+    if (currentTab.value === 'dashboard') markPageModuleLoaded('dashboard')
+  }
   if (currentTab.value === 'music') {
     musicPlayerActivated.value = true
     window.addEventListener('scroll', preventPageScroll)
@@ -431,6 +545,10 @@ onMounted(async () => {
   document.documentElement.classList.toggle('low-perf', lowPerf)
   window.addEventListener('storage', handleSettingsStorage)
   window.addEventListener(MENU_CONFIG_EVENT, handleMenuConfigurationEvent)
+  unsubscribeFeishuAlerts = subscribeRuntimeEvents(['system'], event => {
+    if (event?.type !== 'feishu.delivery_exhausted') return
+    toast.error('飞书消息连续发送失败，请到“设置 → 通知与渠道”检查投递记录并重试。')
+  })
 
   await Promise.all([
     fetch('/api/projects').then(res => res.json()).then(data => { projects.value = data.projects || [] }).catch(() => {}),
@@ -445,6 +563,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unsubscribeFeishuAlerts?.()
+  unsubscribeFeishuAlerts = null
+  unsubscribePageLoadRequests()
+  pageSettleTimers.forEach(timer => window.clearTimeout(timer))
+  pageSlowTimers.forEach(timer => window.clearTimeout(timer))
+  pageSettleTimers.clear()
+  pageSlowTimers.clear()
   if (petStatusSource) {
     petStatusSource.close()
     petStatusSource = null
@@ -522,8 +647,14 @@ const startupTab = tabs.value.find(tab => tab.id === startupTabId && !tab.isExte
   || tabs.value.find(tab => tab.id === 'dashboard')
   || tabs.value[0]
 currentTab.value = startupTab?.id || 'dashboard'
+setActivePageLoadScope(currentTab.value)
+beginInitialPageLoad(currentTab.value)
+if (currentTab.value === 'dashboard') markPageModuleLoaded('dashboard')
 
 const currentTabInfo = () => tabs.value.find(t => t.id === currentTab.value)
+const activePageLoadState = computed(() => ensurePageLoadState(currentTab.value || 'dashboard'))
+const currentPageLoadingTitle = computed(() => `正在加载${currentTabInfo()?.label || '页面'}`)
+const reloadCurrentPage = () => window.location.reload()
 const getTabIcon = (tabId) => TAB_ICONS[tabId] || Link
 const getGroupIcon = (groupId) => GROUP_ICONS[groupId] || Menu
 const mobilePrimaryTabs = computed(() => tabs.value.filter(tab => tab.mobilePrimary && !tab.hiddenFromMenu).slice(0, 4))
@@ -635,7 +766,7 @@ const closeTab = (tabId, event) => {
           <span class="brand-mark"><img src="/favicon.svg" alt="" /></span>
           <span class="brand-copy"><strong>CCM</strong><small>Agent Workspace</small></span>
         </button>
-        <span class="brand-version">v1.0.16</span>
+        <span class="brand-version">v{{ appVersion }}</span>
       </div>
       <div class="nav-menu">
         <template v-if="pinnedTabs.length">
@@ -728,8 +859,8 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent :active="currentTab === 'global-agent'" :navigate-to="navigateTo" @navigated="navigateTo = null" @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
         <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig @navigate="applyPetNavigationTarget" /></div>
         <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :active="currentTab === 'pets'" :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
-        <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
-        <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" @resume-project-permission="resumeProjectPermission" /></div>
+        <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane code-changes-pane"><CodeChanges /></div>
+        <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" @navigate="handleWorkbenchNavigate" @resume-project-permission="resumeProjectPermission" /></div>
         <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
         <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
@@ -745,6 +876,14 @@ const closeTab = (tabId, event) => {
         <MusicRemoteHost @switch-tab="switchTab" />
         <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
         <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" :config="menuConfig" @update-config="updateMenuConfiguration" /></div>
+        <PageLoadingOverlay
+          v-if="activePageLoadState.loading"
+          :page-id="currentTab"
+          :title="currentPageLoadingTitle"
+          description="正在读取页面所需数据，请稍候"
+          :slow="activePageLoadState.slow"
+          @retry="reloadCurrentPage"
+        />
       </div>
     </main>
 
@@ -1059,6 +1198,10 @@ const closeTab = (tabId, event) => {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.tab-pane.code-changes-pane {
+  overflow: hidden;
 }
 
 .tab-pane.pet-tab-pane {

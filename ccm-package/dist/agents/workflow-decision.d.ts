@@ -13,6 +13,16 @@ export interface WorkflowDecision {
     impactScope: string[];
     planSteps: string[];
     clarificationQuestions: string[];
+    selectedSkills: string[];
+    intentKind: "conversation" | "question" | "status" | "analysis" | "execution" | "management" | "continuation";
+    requiresCodeChanges: boolean;
+    requiresAgentQa: boolean;
+    requiresIndependentReview: boolean;
+    verificationModes: Array<"commands" | "http" | "browser" | "visual" | "integration" | "release">;
+    memoryPolicy: "use" | "ignore";
+    authorizationDirective: "preserve" | "grant" | "revoke";
+    riskLevel: "low" | "write" | "high";
+    requiresUserConfirmation: boolean;
     source: "model" | "explicit_user_choice";
 }
 export declare const WORKFLOW_DECISION_GUIDANCE: string;

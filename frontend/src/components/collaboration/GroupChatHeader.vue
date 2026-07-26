@@ -147,6 +147,8 @@ function onSelectGroup(id) {
 .btn-danger { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.18); color: #dc2626; }
 
 .action-menu,.collaboration-status{position:relative}.action-menu summary,.collaboration-status summary{list-style:none;cursor:pointer}.action-menu summary::-webkit-details-marker,.collaboration-status summary::-webkit-details-marker{display:none}.action-menu>summary{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--border-color);border-radius:7px;background:var(--surface);color:var(--text-secondary)}.action-menu[open]>summary,.action-menu>summary:hover{background:var(--control-hover);border-color:var(--border-strong);color:var(--text-primary)}.action-menu-popover,.collaboration-status-popover{position:absolute;top:calc(100% + 6px);right:0;z-index:40;min-width:172px;padding:5px;border:1px solid var(--border-color);border-radius:7px;background:var(--surface);box-shadow:var(--shadow-md)}.action-menu-popover button{width:100%;min-height:32px;display:flex;align-items:center;gap:8px;padding:0 9px;border:0;border-radius:5px;background:transparent;color:var(--text-secondary);font:inherit;font-size:11px;text-align:left;cursor:pointer}.action-menu-popover button:hover{background:var(--control-hover);color:var(--text-primary)}.action-menu-popover button.danger{color:var(--accent-red)}.collaboration-status>summary{min-height:28px;display:flex;align-items:center;gap:5px;padding:0 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-muted);font-size:10px}.collaboration-status[open]>summary,.collaboration-status>summary:hover{border-color:var(--border-strong);color:var(--text-secondary)}.collaboration-status-popover{left:0;right:auto;min-width:230px}.status-row{min-height:32px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:0 8px;color:var(--text-secondary);font-size:10px}.status-row+ .status-row{border-top:1px solid var(--border-color)}.status-row strong{color:var(--text-muted);font-size:10px;font-weight:650}
+.action-menu:not([open]) > .action-menu-popover,
+.collaboration-status:not([open]) > .collaboration-status-popover { display: none; }
 
 :global([data-theme="dark"] .toolbar),:global([data-theme="dark"] .content-header){background:var(--surface);border-color:var(--border-color)}
 :global([data-theme="dark"] .content-header){background:var(--panel-muted)}
@@ -160,6 +162,7 @@ function onSelectGroup(id) {
   .content-header{min-height:auto;padding:7px 8px;align-items:flex-start;flex-direction:column;gap:10px}
   .group-title-line{width:100%;gap:6px}
   .collaboration-status{margin-left:auto}
+  .collaboration-status-popover{left:auto;right:0;max-width:calc(100vw - 16px)}
   .header-actions{width:100%;display:flex;flex-wrap:wrap;gap:8px}
   .header-actions .btn{min-height:40px;padding:0 10px}
   .header-actions .group-action-menu>summary{width:40px;height:40px}

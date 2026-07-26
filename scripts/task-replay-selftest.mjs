@@ -9,6 +9,8 @@ import {
 import {
   buildCompleteTaskReplay,
   buildTaskReplayIndex,
+  buildTaskReplayIndexFromRecords,
+  paginateReplayEventsForView,
   runTaskReplayContractSelfTest,
 } from '../ccm-package/dist/modules/collaboration/task-replay.js'
 
@@ -35,13 +37,69 @@ try {
 
   const contract = runTaskReplayContractSelfTest()
   assert.equal(contract.pass, true)
+  const syntheticEvents = Array.from({ length: 8 }, (_, index) => ({
+    id: `event-${index}`,
+    at: `2026-07-13T01:00:0${index}.000Z`,
+    stage: index === 3 ? 'test' : 'execution',
+    category: 'fixture',
+    status: index === 3 ? 'failed' : 'passed',
+    title: index === 3 ? '浏览器验证失败' : `事件 ${index}`,
+    summary: '',
+    actor: { type: index === 3 ? 'test_agent' : 'project_agent', label: index === 3 ? 'TestAgent' : 'web' },
+    task_id: 'task-page',
+    parent_task_id: '',
+    trace_id: 'trace-page',
+    project: 'web',
+    source: 'fixture',
+    evidence_ids: [],
+  }))
+  const tailPage = paginateReplayEventsForView(syntheticEvents, { eventLimit: 3, eventTail: true })
+  assert.deepEqual(tailPage.events.map(item => item.id), ['event-5', 'event-6', 'event-7'])
+  assert.equal(tailPage.eventPage.offset, 5)
+  assert.equal(tailPage.eventPage.has_previous, true)
+  const issuePage = paginateReplayEventsForView(syntheticEvents, { eventLimit: 3, preset: 'issues' })
+  assert.deepEqual(issuePage.events.map(item => item.id), ['event-3'])
+  const incrementalPage = paginateReplayEventsForView(syntheticEvents, { eventLimit: 3, afterEventAt: syntheticEvents[5].at, afterEventId: syntheticEvents[5].id })
+  assert.deepEqual(incrementalPage.events.map(item => item.id), ['event-6', 'event-7'])
+  const syntheticTasks = [
+    { id:'root-a', title:'登录恢复', description:'修复刷新状态', group_id:'group-a', status:'done', created_at:'2026-07-10T01:00:00.000Z', updated_at:'2026-07-13T01:00:00.000Z' },
+    { id:'child-a', parent_task_id:'root-a', title:'前端修复', target_project:'web', group_id:'group-a', status:'done', created_at:'2026-07-10T01:01:00.000Z', updated_at:'2026-07-13T01:00:00.000Z' },
+    { id:'root-b', title:'接口升级', description:'更新 API', group_id:'group-b', target_project:'api', status:'running', created_at:'2026-07-11T01:00:00.000Z', updated_at:'2026-07-14T01:00:00.000Z' },
+  ]
+  const syntheticGroups = [{id:'group-a',name:'产品群'},{id:'group-b',name:'服务群'}]
+  const filteredIndex = buildTaskReplayIndexFromRecords(syntheticTasks, syntheticGroups, { limit:1, page:1, query:'登录', project:'web', groupId:'group-a', status:'done' })
+  assert.equal(filteredIndex.total, 1)
+  assert.equal(filteredIndex.total_all, 2)
+  assert.equal(filteredIndex.tasks[0].group_name, '产品群')
+  assert.deepEqual(filteredIndex.tasks[0].projects, ['web'])
+  assert.equal(filteredIndex.facets.groups.length, 2)
+  const pagedIndex = buildTaskReplayIndexFromRecords(syntheticTasks, syntheticGroups, { limit:1, page:2 })
+  assert.equal(pagedIndex.tasks[0].id, 'root-a')
+  assert.equal(pagedIndex.has_previous, true)
   const index = buildTaskReplayIndex(3)
   assert.equal(index.schema, 'ccm-task-replay-index-v1')
+  assert.equal(index.page, 1)
+  assert.equal(index.page_size, 3)
+  assert.ok(index.facets && Array.isArray(index.facets.projects))
   if (index.tasks.length) {
     const replay = buildCompleteTaskReplay(index.tasks[0].id)
     assert.equal(replay?.schema, 'ccm-complete-task-replay-v1')
     assert.equal(replay?.replay_capabilities?.raw_machine_paths_exposed, false)
     assert.equal(JSON.stringify(replay).includes('C:\\Users\\'), false, 'public replay must redact Windows user paths')
+    const page = buildCompleteTaskReplay(index.tasks[0].id, { eventLimit: 2, eventTail: true, includeSystemEvents: true })
+    assert.equal(page?.replay_capabilities?.event_pagination, true)
+    assert.ok((page?.events?.length || 0) <= 2)
+    assert.equal(page?.event_page?.returned, page?.events?.length)
+    assert.equal(page?.event_page?.total_unfiltered, replay?.summary?.event_count)
+    const cursor = page?.event_page?.last_cursor
+    const incremental = buildCompleteTaskReplay(index.tasks[0].id, { eventLimit: 2, afterEventAt: cursor?.at, afterEventId: cursor?.id, includeSystemEvents: true })
+    assert.equal(incremental?.event_page?.mode, 'incremental')
+    assert.equal(incremental?.events?.length, 0)
+    const firstProject = index.tasks[0].projects?.[0]
+    if (firstProject) {
+      const projectIndex = buildTaskReplayIndex({ limit: 3, project: firstProject })
+      assert.ok(projectIndex.tasks.every(item => item.projects.includes(firstProject)))
+    }
   }
 
   console.log(JSON.stringify({ pass: true, contract, catalogItems: catalog[0].artifacts.length, replayIndexRows: index.tasks.length }, null, 2))

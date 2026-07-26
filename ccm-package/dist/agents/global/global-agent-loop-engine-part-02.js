@@ -49,6 +49,7 @@ const reasoning_loop_1 = require("../reasoning-loop");
 const runtime_1 = require("./runtime");
 const workchain_1 = require("../workchain");
 const delivery_report_1 = require("../delivery-report");
+const workflow_decision_1 = require("../workflow-decision");
 const global_agent_loop_self_tests_1 = require("./global-agent-loop-self-tests");
 const globalAgentRunProjection = __importStar(require("./global-agent-run-projection"));
 const globalAgentRunReplies = __importStar(require("./global-agent-run-replies"));
@@ -96,7 +97,7 @@ async function continueLoop(run, runtime) {
                 const rawDecision = await runtime.callModel(messages, run);
                 if ((0, global_agent_loop_engine_part_01_1.applyPendingGlobalAgentUserSteers)(run, runtime).length)
                     continue;
-                decision = parseGlobalAgentDecision(rawDecision);
+                decision = parseGlobalAgentDecision(rawDecision, run.workflow_decision || run.workflowDecision || null);
             }
             catch (error) {
                 if ((0, global_agent_loop_engine_part_01_1.applyPendingGlobalAgentUserSteers)(run, runtime).length)
@@ -104,7 +105,7 @@ async function continueLoop(run, runtime) {
                 const fallback = runtime.fallbackDecision ? await runtime.fallbackDecision(run, error) : null;
                 if (!fallback)
                     return (0, global_agent_loop_engine_part_01_1.completeRun)(run, runtime, "failed", `我暂时无法形成可靠决策：${error?.message || error}`, error?.message || String(error));
-                decision = normalizeDecision(fallback);
+                decision = normalizeDecision(fallback, run.workflow_decision || run.workflowDecision || null);
             }
             run.phase = decision.state;
             run.workflow_decision = decision.workflowDecision;
@@ -537,6 +538,8 @@ async function startGlobalAgentRun(input, runtime) {
         status: "running",
         phase: "plan",
         explicit_write_authorization: input.explicitWriteAuthorization === true,
+        workflow_decision: input.workflowDecision || null,
+        workflowDecision: input.workflowDecision || null,
         created_at: createdAt,
         updated_at: createdAt,
         started_at: createdAt,
@@ -698,21 +701,32 @@ async function continueGlobalAgentRunWithClarification(id, answer, runtime, opti
     const clarification = String(answer || "").trim();
     if (!clarification)
         throw new Error("澄清内容不能为空");
-    const deniesAction = /(?:不要|不用|先别|暂时别|只分析|仅分析|不执行|不要执行)/.test(clarification);
-    const inheritedAuthorization = run.explicit_write_authorization && !deniesAction;
-    const currentAuthorization = options.explicitWriteAuthorization === true && !deniesAction;
+    const clarificationDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
+        message: clarification,
+        scope: "global",
+        context: {
+            current_goal: run.reasoning_loop.effective_goal || run.original_user_message || run.user_message,
+            waiting_for_clarification: true,
+            inherited_write_authorization: run.explicit_write_authorization === true,
+        },
+    });
+    const revokesAuthorization = clarificationDecision.authorizationDirective === "revoke";
+    const inheritedAuthorization = run.explicit_write_authorization && !revokesAuthorization;
+    const currentAuthorization = options.explicitWriteAuthorization === true && !revokesAuthorization;
     (0, reasoning_loop_1.appendReasoningClarification)(run.reasoning_loop, {
         question: run.clarification_question || run.final_reply || "请补充目标和影响范围",
         answer: clarification,
         authorizationScope: currentAuthorization ? ["本轮澄清消息明确允许的范围"] : inheritedAuthorization ? ["同一澄清链中的原始明确执行范围"] : [],
     });
-    if (deniesAction)
+    if (revokesAuthorization)
         run.reasoning_loop.authorization_scope = [];
     (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标、授权与影响范围已澄清", kind: "intent", status: "passed", evidence: [clarification], reason: "用户已在同一待澄清运行中补充信息" });
     (0, reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, "continue_after_clarification", "合并原始目标与当前澄清，不新开无上下文运行");
     run.history.push({ role: "assistant", content: run.clarification_question || run.final_reply || "请补充信息" }, { role: "user", content: clarification });
     run.history = run.history.slice(-12);
     run.user_message = run.reasoning_loop.effective_goal;
+    run.workflow_decision = clarificationDecision;
+    run.workflowDecision = clarificationDecision;
     run.explicit_write_authorization = currentAuthorization || inheritedAuthorization;
     run.status = "running";
     run.phase = "plan";

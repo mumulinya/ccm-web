@@ -252,6 +252,15 @@ async function stopWorkspace({ quiet = false } = {}) {
     }
     return 0;
   }
+  try {
+    const response = await fetch(`http://127.0.0.1:${state.port}/api/projects/runtime/shutdown`, {
+      method: "POST",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  } catch (error) {
+    if (!quiet) console.warn(style.warning(`WARN     源码运行清理接口不可用，将继续执行服务停止：${error.message}`));
+  }
   try { process.kill(state.pid, "SIGTERM"); } catch {}
   const deadline = Date.now() + 6_000;
   while (processAlive(state.pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
@@ -319,6 +328,13 @@ function executableAvailable(name) {
   } catch { return false; }
 }
 
+function bundledPackageVersion(name) {
+  try {
+    const packageFile = require.resolve(`${name}/package.json`, { paths: [PACKAGE_ROOT] });
+    return String(require(packageFile).version || "");
+  } catch { return ""; }
+}
+
 function persistentPtyProbe() {
   if (process.env.CCM_DISABLE_NODE_PTY === "1") return { ok: false, reason: "disabled_for_compatibility" };
   try {
@@ -333,13 +349,14 @@ function doctorPayload() {
   ensureRuntimeDirs();
   const major = Number(process.versions.node.split(".")[0]);
   const pty = persistentPtyProbe();
+  const bundledCcConnect = bundledPackageVersion("cc-connect");
   const checks = [
     { id: "node", label: `Node.js ${process.version}`, ok: major >= 20, required: true },
     { id: "server", label: "Backend runtime", ok: fs.existsSync(SERVER_FILE), required: true },
     { id: "frontend", label: "Frontend assets", ok: fs.existsSync(PUBLIC_INDEX), required: true },
     { id: "pty", label: pty.ok ? "Persistent PTY" : "Persistent PTY (command fallback active)", ok: pty.ok, required: false, degraded: !pty.ok, reason: pty.reason },
     { id: "data", label: "Data directory writable", ok: (() => { try { fs.accessSync(CCM_DIR, fs.constants.W_OK); return true; } catch { return false; } })(), required: true },
-    { id: "cc-connect", label: "cc-connect CLI", ok: executableAvailable("cc-connect"), required: false },
+    { id: "cc-connect", label: bundledCcConnect ? `cc-connect v${bundledCcConnect} (bundled)` : "cc-connect CLI", ok: !!bundledCcConnect || executableAvailable("cc-connect"), required: false },
     ...["claude", "codex", "cursor", "gemini", "opencode"].map(name => ({ id: name, label: `${name} CLI`, ok: executableAvailable(name), required: false })),
   ];
   return { success: checks.filter(check => check.required).every(check => check.ok), checks, service: readServerState(), dataDirectory: CCM_DIR };

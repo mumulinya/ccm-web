@@ -49,7 +49,7 @@ onMounted(() => {
 }
 
 .toast.info {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--surface-translucent);
   border: 1px solid rgba(59, 130, 246, 0.2);
   color: var(--text-primary);
 }

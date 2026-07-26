@@ -27,8 +27,14 @@
       "build": "backend",
       "tests": [
         "task-dispatch-selftest.mjs",
+        "task-replay-selftest.mjs",
         "task-attachments-production-selftest.mjs",
         "task-permission-broker-selftest.mjs",
+        "group-test-targets-selftest.mjs",
+        "project-main-agent-orchestration-selftest.mjs",
+        "project-main-agent-source-selftest.mjs",
+        "project-main-agent-runtime-diagnostics-selftest.mjs",
+        "unified-auto-development-workflow-selftest.mjs",
         "test-agent-production-hardening-selftest.mjs"
       ]
     },
@@ -36,6 +42,8 @@
       "label": "第三方 Agent 与 MCP",
       "build": "backend",
       "tests": [
+        "unified-model-retry-selftest.mjs",
+        "model-semantic-routing-audit.mjs",
         "internal-mcp-catalog-selftest.mjs",
         "runtime-path-integrity-selftest.mjs",
         "agent-provider-settings-selftest.mjs",
@@ -49,7 +57,16 @@
         "feishu-channel-production-selftest.mjs",
         "feishu-control-bot-reliability-selftest.mjs",
         "feishu-global-agent-roundtrip-selftest.mjs",
-        "terminal-pty-workbench-selftest.mjs"
+        "feishu-conversation-security-selftest.mjs",
+        "global-feishu-session-binding-selftest.mjs",
+        "project-feishu-session-binding-selftest.mjs",
+        "project-folder-selector-selftest.mjs",
+        "feishu-project-main-agent-acp-selftest.mjs",
+        "project-agent-hidden-process-selftest.mjs",
+        "project-runtime-workbench-selftest.mjs",
+        "project-java-toolchain-selftest.mjs",
+        "terminal-pty-workbench-selftest.mjs",
+        "project-path-git-workspace-selftest.mjs"
       ]
     },
     "frontend": {
@@ -57,9 +74,15 @@
       "build": "frontend",
       "tests": [
         "workbench-homepage-selftest.mjs",
+        "workbench-full-width-render-regression.mjs",
         "modal-layout-reliability-selftest.mjs",
         "settings-render-regression.mjs",
-        "project-management-render-regression.mjs"
+        "project-management-render-regression.mjs",
+        "collapsible-session-groups-selftest.mjs",
+        "code-changes-render-regression.mjs",
+        "agent-code-change-visualization-selftest.mjs",
+        "theme-background-contract-selftest.mjs",
+        "global-page-loading-overlay-selftest.mjs"
       ]
     },
     "knowledge": {
@@ -75,9 +98,10 @@
       "label": "音乐与宠物",
       "build": "backend",
       "tests": [
-        "music-production-selftest.mjs",
-        "music-latest-playback-wins-selftest.mjs",
-        "pet-workspace-companion-selftest.mjs"
+          "music-production-selftest.mjs",
+          "music-latest-playback-wins-selftest.mjs",
+          "music-next-recommendation-selftest.mjs",
+          "pet-workspace-companion-selftest.mjs"
       ]
     },
     "release": {
@@ -94,12 +118,21 @@
   },
   "quick": [
     "domain-test-catalog-selftest.mjs",
+    "unified-model-retry-selftest.mjs",
+    "model-semantic-routing-audit.mjs",
     "local-auth-selftest.mjs",
     "session-memory-dynamic-window-selftest.mjs",
     "task-permission-broker-selftest.mjs",
+    "group-test-targets-selftest.mjs",
+    "project-main-agent-orchestration-selftest.mjs",
+    "project-main-agent-source-selftest.mjs",
+    "project-main-agent-runtime-diagnostics-selftest.mjs",
+    "unified-auto-development-workflow-selftest.mjs",
     "internal-mcp-catalog-selftest.mjs",
     "feishu-global-agent-roundtrip-selftest.mjs",
     "runtime-event-bus-selftest.mjs",
+    "theme-background-contract-selftest.mjs",
+    "global-page-loading-overlay-selftest.mjs",
     "workbench-homepage-selftest.mjs",
     "knowledge-production-selftest.mjs",
     "music-latest-playback-wins-selftest.mjs"

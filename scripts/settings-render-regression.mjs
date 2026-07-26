@@ -12,6 +12,25 @@ const executablePath = candidates.find(candidate => fs.existsSync(candidate))
 const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) })
 const report = { pass: false, generatedAt: new Date().toISOString(), baseUrl, checks: [], errors: [], screenshots: [] }
 
+const json = body => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+const mockBaseApi = async page => {
+  await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
+  await page.route('**/api/**', route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'settings-selftest' } }))
+    if (pathname === '/api/projects') return route.fulfill(json({ success: true, projects: [] }))
+    if (pathname === '/api/pets/agents') return route.fulfill(json({ success: true, agents: [] }))
+    if (pathname === '/api/system/settings-status') return route.fulfill(json({ success: true, version: '1.0.24', service: { status: 'online', pid: 1234, uptimeSeconds: 7200, startedAt: '2026-07-23T06:00:00.000Z' }, credentials: { protected: true, backend: 'AES-256-GCM', entries: 2 } }))
+    if (pathname === '/api/feishu/config') return route.fulfill(json({ success: true, enabled: false, control_bot_enabled: false }))
+    if (pathname === '/api/feishu/control-bot/status') return route.fulfill(json({ success: true, running: false, pid: null }))
+    if (pathname === '/api/feishu/health' || pathname === '/api/feishu/health/probe') return route.fulfill(json({ success: true, healthy: false, socket_connected: false }))
+    if (pathname === '/api/orchestrator/config') return route.fulfill(json({ success: true, config: { enabled: true, apiUrl: 'https://api.example.test/v1', model: 'test-model', hasKey: true } }))
+    if (pathname === '/api/rag/embedding-config') return route.fulfill(json({ success: true, config: { enabled: false, provider: 'local', model: 'local' }, chunksCount: 0 }))
+    if (pathname === '/api/runtime/events' || pathname === '/api/status/stream' || pathname === '/api/usability/workbench/stream') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' })
+    return route.fulfill(json({ success: true, config: {}, items: [], data: [] }))
+  })
+}
+
 const openSettings = async page => {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.locator('body').waitFor()
@@ -24,6 +43,7 @@ const openSettings = async page => {
     })
   }
   await page.locator('[data-settings-panel="channels"]').waitFor()
+  await page.locator('[data-page-loading="settings"]').waitFor({ state: 'detached', timeout: 10_000 })
 }
 
 const assertLayout = async (page, name) => {
@@ -37,6 +57,35 @@ const assertLayout = async (page, name) => {
   report.checks.push({ name: `${name} has no overflow and details default closed`, pass: true })
 }
 
+const assertFullWidthSettings = async page => {
+  const metrics = await page.evaluate(() => {
+    const pageElement = document.querySelector('.settings-page')
+    const header = document.querySelector('.settings-page-header')
+    const layout = document.querySelector('.settings-layout')
+    const content = document.querySelector('.settings-content')
+    const pageStyle = getComputedStyle(pageElement)
+    const expectedContentWidth = pageElement.clientWidth - Number.parseFloat(pageStyle.paddingLeft) - Number.parseFloat(pageStyle.paddingRight)
+    const headerRect = header.getBoundingClientRect()
+    const layoutRect = layout.getBoundingClientRect()
+    const contentRect = content.getBoundingClientRect()
+    return {
+      expectedContentWidth,
+      headerWidth: headerRect.width,
+      layoutWidth: layoutRect.width,
+      headerRight: headerRect.right,
+      layoutRight: layoutRect.right,
+      contentRight: contentRect.right,
+      pageRight: pageElement.getBoundingClientRect().right,
+      paddingRight: Number.parseFloat(pageStyle.paddingRight),
+    }
+  })
+  assert.ok(Math.abs(metrics.headerWidth - metrics.expectedContentWidth) <= 1, JSON.stringify(metrics))
+  assert.ok(Math.abs(metrics.layoutWidth - metrics.expectedContentWidth) <= 1, JSON.stringify(metrics))
+  assert.ok(Math.abs(metrics.headerRight - metrics.layoutRight) <= 1, JSON.stringify(metrics))
+  assert.ok(Math.abs(metrics.contentRight - (metrics.pageRight - metrics.paddingRight)) <= 1, JSON.stringify(metrics))
+  report.checks.push({ name: 'desktop settings header and content fill the available page width', pass: true, details: metrics })
+}
+
 const screenshot = async (page, name) => {
   const file = path.join(outputDir, `${name}.png`)
   await page.screenshot({ path: file, fullPage: true })
@@ -44,10 +93,11 @@ const screenshot = async (page, name) => {
 }
 
 const runDesktop = async () => {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  const context = await browser.newContext({ viewport: { width: 1680, height: 1000 } })
   const page = await context.newPage()
   page.on('pageerror', error => report.errors.push(`desktop page: ${error.message}`))
   page.on('console', message => { if (message.type() === 'error') report.errors.push(`desktop console: ${message.text()}`) })
+  await mockBaseApi(page)
   await page.route('**/api/orchestrator/connection-test', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -59,6 +109,7 @@ const runDesktop = async () => {
   }))
   await openSettings(page)
   await assertLayout(page, 'desktop channels')
+  await assertFullWidthSettings(page)
   await screenshot(page, 'desktop-channels')
 
   await page.getByRole('button', { name: /统一大模型/ }).click()
@@ -85,6 +136,7 @@ const runMobile = async () => {
   const page = await context.newPage()
   page.on('pageerror', error => report.errors.push(`mobile page: ${error.message}`))
   page.on('console', message => { if (message.type() === 'error') report.errors.push(`mobile console: ${message.text()}`) })
+  await mockBaseApi(page)
   await openSettings(page)
   await page.getByRole('button', { name: /统一大模型/ }).click()
   await page.locator('[data-settings-panel="models"]').waitFor()

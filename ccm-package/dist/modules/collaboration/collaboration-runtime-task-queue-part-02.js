@@ -487,6 +487,14 @@ function getTaskTargetKey(task) {
     if (task?.queue_scope === "isolated_parallel" && task?.id) {
         return `isolated:${task.target_project || "unknown"}:${task.id}`;
     }
+    if (task?.queue_scope === "conversation_serial") {
+        const projectSessionId = String(task.project_session_id || task.projectSessionId || "").trim();
+        const groupSessionId = String(task.group_session_id || task.groupSessionId || "").trim();
+        if (task.assign_type === "group" && task.group_id && groupSessionId)
+            return `conversation:group:${task.group_id}:${groupSessionId}`;
+        if (task.target_project && projectSessionId)
+            return `conversation:project:${task.target_project}:${projectSessionId}`;
+    }
     if (task.assign_type === "group" && task.group_id) {
         return `group:${task.group_id}`;
     }

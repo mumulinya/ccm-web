@@ -15,9 +15,6 @@ const runtime_1 = require("./runtime");
 function text(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
 }
-function includesAny(value, patterns) {
-    return patterns.some(pattern => pattern.test(value));
-}
 function compact(value, max = 220) {
     const raw = text(value);
     return raw.length > max ? `${raw.slice(0, max)}...` : raw;
@@ -50,114 +47,46 @@ function groupRows(groups = (0, collaboration_1.loadGroups)()) {
         member_count: Array.isArray(group.members) ? group.members.length : 0,
     }));
 }
-function matchProjects(message, projects) {
-    const lower = message.toLowerCase();
-    return projects.filter(project => lower.includes(String(project.name || "").toLowerCase()));
-}
-function matchGroups(message, groups) {
-    const lower = message.toLowerCase();
-    return groups.filter(group => lower.includes(String(group.id || "").toLowerCase()) || lower.includes(String(group.name || "").toLowerCase()));
-}
-function classifyGlobalControlIntent(message, resources = {}) {
-    const input = text(message);
-    const projects = resources.projects || projectRows();
-    const groups = resources.groups || groupRows();
-    const matchedProjects = matchProjects(input, projects);
-    const matchedGroups = matchGroups(input, groups);
-    const wantsHealth = includesAny(input, [/健康|状态|巡检|体检|诊断|检查系统|系统概况/]);
-    const wantsGovernance = includesAny(input, [/权限|授权|hook|拦截|治理|规则|审计|影子模式|高风险/]);
-    const wantsSupervision = includesAny(input, [/监工|监督|全局任务|mission|验收|等待人工|恢复|暂停|取消/]);
-    const wantsDevelopment = includesAny(input, [/实现|修复|修改|新增|开发|重构|优化|测试|排查|上线|部署|提交|审查/]);
-    const wantsManagement = includesAny(input, [/创建|删除|启动|停止|重启|恢复|暂停|定时任务|群聊|项目|工具|mcp|skill|任务队列/]);
-    const questionOnly = includesAny(input, [/怎么|如何|为什么|是什么|介绍|说明|能不能|可不可以|有哪些|有什么|[?？]$/]);
-    let route = "ordinary_question";
-    let confidence = 0.72;
-    let reason = "普通问答或闲聊，不需要执行 CCM 系统动作";
-    let recommended_tool = "";
-    if (!input) {
-        route = "ambiguous";
-        confidence = 0.2;
-        reason = "消息为空，无法判断";
-    }
-    else if (wantsGovernance) {
-        route = "governance";
-        confidence = 0.9;
-        reason = "用户关注全局 Agent 权限、Hook、审计或治理规则";
-        recommended_tool = "runtime_governance";
-    }
-    else if (wantsSupervision) {
-        route = "mission_supervision";
-        confidence = 0.88;
-        reason = "用户关注全局任务监督、验收、恢复或人工介入";
-        recommended_tool = "manage_supervision";
-    }
-    else if (wantsHealth && !wantsDevelopment) {
-        route = "system_health";
-        confidence = 0.9;
-        reason = "用户要求查看或诊断 CCM 系统健康状态";
-        recommended_tool = "inspect_system";
-    }
-    else if (wantsDevelopment && (matchedProjects.length || matchedGroups.length || /全局|全部|所有|跨项目|整个/.test(input))) {
-        route = "development_dispatch";
-        confidence = matchedProjects.length || matchedGroups.length ? 0.92 : 0.78;
-        reason = "用户要求开发落地，应由全局 Agent 调度群聊主 Agent 或项目 Agent";
-        recommended_tool = "orchestrate_development";
-    }
-    else if (wantsManagement && !questionOnly) {
-        route = "system_management";
-        confidence = 0.82;
-        reason = "用户要求管理 CCM 资源或执行系统动作";
-        recommended_tool = "manage_task";
-    }
-    else if (questionOnly && wantsDevelopment) {
-        route = "ordinary_question";
-        confidence = 0.78;
-        reason = "用户在咨询开发问题，未明确授权派发或修改";
-    }
-    else if (wantsDevelopment) {
-        route = "ambiguous";
-        confidence = 0.58;
-        reason = "存在开发意图，但缺少明确目标项目、群聊或范围";
-        recommended_tool = "needs_clarification";
-    }
+function classifyGlobalControlIntent(_message, resources = {}) {
+    const decision = resources.workflowDecision || resources.workflow_decision || null;
+    const needsClarification = Array.isArray(decision?.clarificationQuestions) && decision.clarificationQuestions.length > 0;
+    const route = !decision
+        ? "ambiguous"
+        : needsClarification
+            ? "ambiguous"
+            : decision.intentKind === "status"
+                ? "system_health"
+                : decision.intentKind === "management"
+                    ? "system_management"
+                    : decision.intentKind === "execution"
+                        ? "development_dispatch"
+                        : "ordinary_question";
+    const targets = Array.isArray(decision?.targetRefs) ? decision.targetRefs : [];
     return {
         route,
-        confidence,
-        reason,
-        recommended_tool,
-        matched_projects: matchedProjects.map((item) => item.name),
-        matched_groups: matchedGroups.map((item) => ({ id: item.id, name: item.name })),
+        confidence: Number(decision?.confidence || 0),
+        reason: decision?.reason || "需要统一大模型形成语义决定",
+        recommended_tool: decision?.recommendedTool || "",
+        matched_projects: targets.filter((item) => item.type === "project").map((item) => item.id || item.name),
+        matched_groups: targets.filter((item) => item.type === "group").map((item) => ({ id: item.id, name: item.name || item.id })),
         dry_run: {
-            will_execute: ["development_dispatch", "mission_supervision", "system_management"].includes(route),
-            requires_confirmation: route === "system_management" && /删除|移除|清除|purge|delete/i.test(input),
-            needs_clarification: route === "ambiguous",
-            safe_default: route === "ordinary_question" || route === "system_health" || route === "governance",
+            will_execute: decision?.actionRequired === true,
+            requires_confirmation: decision?.requiresUserConfirmation === true,
+            needs_clarification: needsClarification || !decision,
+            safe_default: decision?.actionRequired !== true,
         },
     };
 }
-function buildGlobalDispatchStrategy(message, resources = {}) {
-    const input = text(message);
-    const projects = resources.projects || projectRows();
-    const groups = resources.groups || groupRows();
-    const matchedProjects = matchProjects(input, projects);
-    const matchedGroups = matchGroups(input, groups);
-    const workspaceWide = /全局|全部|所有|跨项目|整个/.test(input);
-    const targets = [
-        ...matchedGroups.map((group) => ({ type: "group", id: group.id, name: group.name, reason: "命中群聊名称或 ID，由群聊主 Agent 协调成员项目" })),
-        ...matchedProjects.map((project) => ({ type: "project", id: project.name, name: project.name, reason: "命中项目名称，由项目 Agent 直接执行或作为 mission 子目标" })),
-    ];
-    if (!targets.length && workspaceWide) {
-        targets.push(...projects.slice(0, 12).map((project) => ({ type: "project", id: project.name, name: project.name, reason: "用户要求全局/跨项目覆盖" })));
-    }
-    const mode = matchedGroups.length ? "group_main_agent" : targets.length > 1 ? "global_mission" : targets.length === 1 ? "direct_project_or_mission" : "needs_target";
+function buildGlobalDispatchStrategy(_message, resources = {}) {
+    const decision = resources.workflowDecision || resources.workflow_decision || null;
+    const targets = Array.isArray(decision?.targetRefs) ? decision.targetRefs : [];
+    const mode = decision?.mode || "model_required";
     return {
         mode,
-        confidence: targets.length ? 0.88 : 0.45,
+        confidence: Number(decision?.confidence || 0),
         targets,
-        missing: targets.length ? [] : ["目标项目或群聊", "允许影响范围", "验收标准"],
-        instruction: targets.length
-            ? `建议由全局 Agent 创建 mission，并按 ${mode === "group_main_agent" ? "群聊主 Agent" : "项目 Agent"} 路由执行。`
-            : "需要先向用户澄清目标项目/群聊和验收标准。",
+        missing: Array.isArray(decision?.clarificationQuestions) ? decision.clarificationQuestions : ["需要模型语义决定"],
+        instruction: decision?.reason || "控制中心不执行本地语义路由",
     };
 }
 function buildGlobalSystemHealth(resources = {}) {
@@ -275,9 +204,13 @@ function buildGlobalSupervisionDashboard(resources = {}) {
 function buildGlobalControlCenterSnapshot(message = "") {
     const projects = projectRows();
     const groups = groupRows();
-    const resources = { projects, groups };
-    const intent = classifyGlobalControlIntent(message, resources);
-    const dispatch = buildGlobalDispatchStrategy(message, resources);
+    const intent = message ? {
+        route: "model_required",
+        confidence: 0,
+        reason: "请使用 /api/global-agent/control-center/intent-preview 获取统一大模型语义决策",
+        recommended_tool: "",
+    } : null;
+    const dispatch = { mode: "model_required", targets: [], reason: "控制中心快照不执行本地语义推断" };
     return {
         updated_at: new Date().toISOString(),
         intent,
@@ -298,9 +231,19 @@ function runGlobalControlCenterSelfTest() {
         supervisors: [{ id: "s1", mission_id: "m1", status: "waiting_user", phase: "supervising", business_goal: "demo", cycle_count: 1, max_attempts: 3 }],
         missions: [{ id: "m1" }],
     };
-    const intent = classifyGlobalControlIntent("请给研发群修复 demo 登录问题并验证", resources);
+    const workflowDecision = {
+        intentKind: "execution",
+        actionRequired: true,
+        confidence: 0.94,
+        reason: "模型选择研发群与 demo 项目执行开发任务",
+        mode: "group_main_agent",
+        targetRefs: [{ type: "group", id: "g1", name: "研发群" }, { type: "project", id: "demo", name: "demo" }],
+        clarificationQuestions: [],
+        requiresUserConfirmation: false,
+    };
+    const intent = classifyGlobalControlIntent("fixture", { ...resources, workflowDecision });
     const health = buildGlobalSystemHealth(resources);
-    const dispatch = buildGlobalDispatchStrategy("请给研发群修复 demo 登录问题并验证", resources);
+    const dispatch = buildGlobalDispatchStrategy("fixture", { ...resources, workflowDecision });
     const governance = buildGlobalGovernanceSnapshot();
     const checks = {
         developmentRoutesToDispatch: intent.route === "development_dispatch" && intent.recommended_tool === "orchestrate_development",

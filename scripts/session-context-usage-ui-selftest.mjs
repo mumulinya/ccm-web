@@ -16,7 +16,11 @@ const projectTemplate = read('frontend/src/components/projects/ProjectManager.te
 const app = read('frontend/src/App.vue')
 const globalMemory = read('backend/agents/global/memory.ts')
 const projectCompaction = read('backend/modules/projects/project-session-compaction.ts')
+const projectMainAgent = read('backend/modules/projects/project-main-agent.ts')
 const memoryCenterApi = read('backend/modules/knowledge/memory-control-center-api.ts')
+const agentToolsModal = read('frontend/src/components/common/AgentToolsModal.vue')
+const groupToolsModal = read('frontend/src/components/collaboration/GroupToolsModal.vue')
+const projectToolsModal = read('frontend/src/components/projects/ProjectToolsModal.vue')
 const groupChat = read('frontend/src/components/collaboration/useGroupChat.js')
 const groupStream = read('frontend/src/components/collaboration/useGroupChatStream.js')
 const projectManager = read('frontend/src/components/projects/useProjectManager.js')
@@ -64,8 +68,25 @@ const checks = {
   ].every(label => component.includes(label)),
   componentRatiosVisible: /usedPercent/.test(component) && /row\.usedPercent/.test(component),
   segmentedCapacityMeterVisible: /context-meter-segment/.test(component) && /row\.capacityPercent/.test(component),
-  providerRemainderIsTransparent: /Provider observed remainder/.test(component),
+  providerRemainderIsTransparent: /Provider 其余上下文/.test(component) && /历史 Provider 总量（无分项快照）/.test(component),
   explicitZeroBucketsDoNotFallback: /hasPayloadBreakdown \? breakdown\.system \|\| 0/.test(component),
+  exactGroupScopeRebuildsMissingBreakdown: /rebuildCurrentGroupContextAccounting/.test(memoryCenterApi)
+    && /rebuildCurrentPayload:\s*true/.test(memoryCenterApi)
+    && /modelVisiblePayloadAccounting/.test(memoryCenterApi),
+  globalAndProjectRebuildMissingBreakdown: /rebuildCurrentSessionContextAccounting/.test(memoryCenterApi)
+    && /scope === "global_session"/.test(memoryCenterApi)
+    && /scope === "project_session"/.test(memoryCenterApi)
+    && /model_visible_payload_projection/.test(component),
+  projectMainAgentPersistsActualPayload: /projectMainModelCallOptions/.test(projectMainAgent)
+    && /recordProjectSessionProviderUsage/.test(projectMainAgent)
+    && /modelVisiblePayload:\s*payload/.test(projectMainAgent),
+  sharedToolAuthorizationLayout: /class="tool-columns"/.test(agentToolsModal)
+    && /class="tool-column"/.test(agentToolsModal)
+    && /AgentToolsModal/.test(groupToolsModal)
+    && /AgentToolsModal/.test(projectToolsModal),
+  projectConstraintsRemainAvailable: /项目执行约束/.test(projectToolsModal)
+    && /项目验证命令/.test(projectToolsModal)
+    && /update-field/.test(projectToolsModal),
 }
 
 assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify(checks, null, 2))

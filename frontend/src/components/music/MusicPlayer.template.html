@@ -167,7 +167,9 @@
           </div>
 
           <button v-if="nextRecommendTrack" type="button" class="next-track-strip" @click="play(nextRecommendTrack)">
-            <span class="next-track-label">下一首推荐</span>
+            <span class="next-track-label">
+              {{ playMode === 'single' ? '单曲循环' : (playMode === 'random' ? '随机下一首' : '下一首推荐') }}
+            </span>
             <span class="next-track-title">{{ nextRecommendTrack.title }}</span>
             <span class="next-track-artist">{{ nextRecommendTrack.artist || '未知艺术家' }}</span>
             <Play :size="14" fill="currentColor" />

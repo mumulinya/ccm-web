@@ -649,7 +649,7 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
       ? { prompt: "\n[TestAgent 原生复核]\n- 当前请求由 CCM TestAgent 原生 runner 执行，只读取工作单并运行验证，不注入第三方 Agent 工具。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
       : advisoryOnly
       ? { prompt: "\n[Agent 问答权限隔离]\n- 当前请求仅允许提供只读建议，不注入任何额外 MCP 或 Skill。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
-      : buildAgentToolContext(ctx, group, targetName, childTaskText);
+      : buildAgentToolContext(ctx, group, targetName, childTaskText, sourceTask?.selected_skill_names || []);
     let runtimeToolContext = nativeTestAgentDispatch
       ? buildNativeTestAgentRuntimeToolContext(targetName, tWorkDir)
       : prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes, {

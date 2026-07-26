@@ -475,6 +475,9 @@ async function startJob(input, key) {
         stdio: ["ignore", outFd, errFd],
         env: {
             ...process.env,
+            ...Object.fromEntries(Object.entries(input.runtimeEnv || {})
+                .filter(([name]) => /^[A-Z_][A-Z0-9_]*$/.test(name))
+                .map(([name, value]) => [name, String(value)])),
             CCM_TEST_AGENT_ALLOWED_WORK_DIRS: JSON.stringify((input.allowedWorkDirs || []).map(item => path.resolve(item))),
             CCM_TEST_AGENT_RUNNER_ID: id,
         },

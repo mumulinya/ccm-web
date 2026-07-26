@@ -21,8 +21,21 @@ export declare function sendFeishuMessageToTarget(options: {
     title?: string;
     markdown?: string;
     text?: string;
+    replyToMessageId?: string;
+    updateMessageId?: string;
+    replyInThread?: boolean;
+    actions?: Array<{
+        text: string;
+        type?: "primary" | "default" | "danger";
+        value: Record<string, any>;
+    }>;
 }): Promise<any>;
 export declare function probeFeishuControlBotApi(): Promise<any>;
+export declare function buildFeishuReportCard(title: string, markdown: string, actions?: Array<{
+    text: string;
+    type?: "primary" | "default" | "danger";
+    value: Record<string, any>;
+}>): any;
 export declare function sendFeishuReportMessage(options: {
     title: string;
     markdown: string;

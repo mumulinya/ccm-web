@@ -104,7 +104,7 @@ export declare function updateRequirementEpicFromPlan(payload: any): {
     needs_confirmation?: undefined;
     duplicate?: undefined;
 };
-export declare function classifyTaskContinuation(message: string): "new_task" | "supplement" | "revise_goal";
+export declare function classifyTaskContinuation(message: string): string;
 export declare function looksLikeTaskContinuation(message: string): boolean;
 export declare function updateTask(id: string, updates: any): any;
 export declare function removeTaskFromQueues(taskId: string): number;

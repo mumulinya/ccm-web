@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "1.0.16",
+  "version": "1.0.24",
   "description": "CCM 本地多 Agent 协作工作区，支持会话记忆、项目执行、代码协作、TestAgent 与持久终端",
   "main": "dist/server.js",
   "bin": {
@@ -48,7 +48,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
-    "electron": "^35.7.5",
+    "cc-connect": "^1.4.1",
     "pdf-parse": "^1.1.1",
     "playwright": "^1.61.1",
     "zod": "^3.25.76"

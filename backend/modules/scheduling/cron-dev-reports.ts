@@ -119,9 +119,13 @@ const NON_WORK_RE = /^(你好|您好|在吗|谢谢|你是谁|你是什么模型|
 const COMPLETION_RE = /(已完成|完成了|已实现|已修复|修改完成|实现完成|测试通过|验证通过|构建通过|任务完成|filesChanged|CCM_AGENT_RECEIPT)/i;
 
 function isDevelopmentRequest(message: any) {
-  const content = String(message?.content || "").trim();
-  if (!content || message?.role !== "user" || NON_WORK_RE.test(content)) return false;
-  return !!message?.task_id || DEV_INTENT_RE.test(content) || /📋\s*执行任务/.test(content);
+  if (message?.role !== "user") return false;
+  return !!(message?.task_id
+    || message?.taskId
+    || message?.mission_id
+    || message?.workflowDecision?.actionRequired
+    || message?.workflow_decision?.actionRequired
+    || message?.agenticRun?.workflow_decision?.actionRequired);
 }
 
 function readJsonArray(file: string) {

@@ -29,9 +29,20 @@ const replay = {
   evidence:[{id:'shot-1',type:'screenshot',title:'复验通过页面截图',project:'web',status:'available',available:true,size_bytes:48231,sha256:'abc',mime_type:'image/png',preview_kind:'image',run_id:'test-run-2',task_id:'web-task',retained_until:'2026-07-27T01:07:22.000Z',retention_status:'available',url:screenshot},{id:'report-1',type:'report',title:'TestAgent 结构化报告',project:'web',status:'available',available:true,size_bytes:9021,sha256:'def',mime_type:'application/json',preview_kind:'text',run_id:'test-run-2',task_id:'web-task',retained_until:'2026-07-27T01:07:22.000Z',retention_status:'available',url:'data:application/json,%7B%22status%22%3A%22passed%22%7D'},{id:'code-1',type:'code_changes',title:'web 代码改动',task_id:'web-task',project:'web',status:'available',preview_kind:'code_diff',items:['frontend/src/stores/session.js','frontend/src/router/guard.js'],file_count:2,diff_available_count:1,diff_unavailable_count:1,files:[{path:'frontend/src/stores/session.js',project:'web',statusText:'修改',statusColor:'#facc15',additions:2,deletions:1,diff:{available:true,historical:true,additions:2,deletions:1,diff:'--- a/frontend/src/stores/session.js\n+++ b/frontend/src/stores/session.js\n@@ -18,3 +18,4 @@\n const cached = storage.getItem(SESSION_KEY)\n-return cached ? JSON.parse(cached) : null\n+const session = cached ? JSON.parse(cached) : null\n+return session && session.expiresAt > Date.now() ? session : null\n export { restoreSession }'}},{path:'frontend/src/router/guard.js',project:'web',statusText:'修改',statusColor:'#facc15',additions:4,deletions:0,diff:{available:false,historical:true,additions:4,deletions:0,diff:'',reason:'该任务当时只保存了文件与行数统计，无法还原逐行代码内容'}}],retained_until:'任务删除前',url:''},{id:'check-1',type:'verification',title:'项目子 Agent 验证记录',task_id:'web-task',project:'web',status:'available',preview_kind:'list',items:['npm run test:session','npm run build'],retained_until:'任务删除前',url:''}],
   retention:{task_record:{status:'available',policy:'任务删除前保留'},trace:{status:'available',policy:'随可靠性账本保留'},test_agent:{status:'available',policy:'默认保留 14 天，且受容量上限约束',earliest_expiry:'2026-07-27T01:07:22.000Z'}},
 }
-const index = {schema:'ccm-task-replay-index-v1',generated_at:'2026-07-13T01:08:01.000Z',total:1,tasks:[{...replay.tasks[0],child_count:1,replay_url:'/api/tasks/replay?task_id=root-task'}]}
+const index = {schema:'ccm-task-replay-index-v1',generated_at:'2026-07-13T01:08:01.000Z',total:1,total_all:1,page:1,page_size:24,page_count:1,has_previous:false,has_more:false,facets:{projects:[{value:'web',label:'web',count:1}],groups:[{value:'group',label:'产品研发群',count:1}],statuses:[{value:'done',label:'done',count:1}]},tasks:[{...replay.tasks[0],projects:['web'],group_name:'产品研发群',child_count:1,replay_url:'/api/tasks/replay?task_id=root-task'}]}
 
-window.fetch = async (url) => new Response(JSON.stringify(String(url).includes('task_id=') ? {success:true,replay} : {success:true,index}), {status:200,headers:{'Content-Type':'application/json'}})
+let liveEventVisible = false
+const liveEvent = { id:'e13',at:'2026-07-13T01:08:05.000Z',stage:'completion',category:'live_update',status:'passed',title:'任务回放已实时同步',summary:'统一运行事件到达后，页面只拉取并追加当前任务的新记录。',actor:{type:'system',label:'系统'},task_id:'root-task',parent_task_id:'',trace_id:'trace-replay-fixture',project:'',source:'fixture',evidence_ids:[],technical:{} }
+const currentReplay = () => liveEventVisible ? {...replay,events:[...events,liveEvent],summary:{...replay.summary,event_count:events.length+1}} : replay
+window.fetch = async (url) => new Response(JSON.stringify(String(url).includes('task_id=') ? {success:true,replay:currentReplay()} : {success:true,index}), {status:200,headers:{'Content-Type':'application/json'}})
+window.EventSource = class {
+  constructor() { window.__taskReplayEventSource = this; setTimeout(() => this.onopen?.(), 0) }
+  close() {}
+}
+window.__appendTaskReplayLiveEvent = () => {
+  liveEventVisible = true
+  window.__taskReplayEventSource?.onmessage?.({data:JSON.stringify({topic:'task',type:'task.changed',at:new Date().toISOString(),data:{taskId:'root-task'}})})
+}
 localStorage.setItem('trace-replay-target', JSON.stringify({task_id:'root-task',trace_id:'trace-replay-fixture',scope:'global'}))
 document.body.style.margin = '0'
 document.body.style.height = '100vh'

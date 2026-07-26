@@ -23540,14 +23540,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }>, "many">;
         warnings: z.ZodArray<z.ZodObject<{
             severity: z.ZodEnum<["error", "warning"]>;
@@ -23559,14 +23559,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
         valid?: boolean;
@@ -23574,15 +23574,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     }, {
         valid?: boolean;
@@ -23590,15 +23590,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     }>;
     outputValidation: z.ZodOptional<z.ZodObject<{
@@ -23613,14 +23613,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }>, "many">;
         warnings: z.ZodArray<z.ZodObject<{
             severity: z.ZodEnum<["error", "warning"]>;
@@ -23632,14 +23632,14 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }, {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
         valid?: boolean;
@@ -23647,15 +23647,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     }, {
         valid?: boolean;
@@ -23663,15 +23663,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     }>>;
     outcome: z.ZodOptional<z.ZodEnum<["passed", "failed", "blocked", "partial"]>>;
@@ -47331,6 +47331,87 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
+        requiredCheckSummary?: {
+            unknown?: z.objectOutputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectOutputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectOutputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+        } & {
+            [k: string]: unknown;
+        };
+        acceptanceSummary?: {
+            unknown?: z.objectOutputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectOutputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectOutputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            matchStrengthCounts?: {
+                none?: number;
+                fallback?: number;
+                token?: number;
+                direct?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            evidenceSourceCounts?: {
+                none?: number;
+                matched_evidence?: number;
+                single_criterion_report_status?: number;
+            } & {
+                [k: string]: unknown;
+            };
+        } & {
+            [k: string]: unknown;
+        };
         canAccept?: boolean;
         browserEvidenceTemporalIntegrity?: {
             status?: "invalid" | "complete";
@@ -47872,10 +47953,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 goalLinked: z.ZodBoolean;
                 matchScore: z.ZodNumber;
             }, z.ZodTypeAny, "passthrough">[];
+            http?: number;
             browser?: number;
             unlinked?: number;
             waived?: boolean;
-            http?: number;
             waiverReason?: string;
             relevant?: number;
             passedRelevant?: number;
@@ -47894,8 +47975,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            canAccept?: boolean;
             notVerified?: number;
+            canAccept?: boolean;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -47984,90 +48065,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchScore: z.ZodOptional<z.ZodNumber>;
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
-        requiredCheckSummary?: {
-            unknown?: z.objectOutputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectOutputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectOutputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-        } & {
-            [k: string]: unknown;
-        };
-        acceptanceSummary?: {
-            unknown?: z.objectOutputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectOutputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectOutputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            matchStrengthCounts?: {
-                none?: number;
-                fallback?: number;
-                token?: number;
-                direct?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            evidenceSourceCounts?: {
-                none?: number;
-                matched_evidence?: number;
-                single_criterion_report_status?: number;
-            } & {
-                [k: string]: unknown;
-            };
-        } & {
-            [k: string]: unknown;
-        };
         evidenceSummary?: {
-            artifacts?: number;
             commands?: Record<string, number>;
+            artifacts?: number;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;
@@ -48158,15 +48158,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     outputValidation?: {
@@ -48175,15 +48175,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     artifactVerification?: {
@@ -48233,6 +48233,87 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             reportMarkdownPath?: string;
             verdictJsonPath?: string;
             manifestPath?: string;
+        } & {
+            [k: string]: unknown;
+        };
+        requiredCheckSummary?: {
+            unknown?: z.objectInputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectInputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectInputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+        } & {
+            [k: string]: unknown;
+        };
+        acceptanceSummary?: {
+            unknown?: z.objectInputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectInputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectInputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            matchStrengthCounts?: {
+                none?: number;
+                fallback?: number;
+                token?: number;
+                direct?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            evidenceSourceCounts?: {
+                none?: number;
+                matched_evidence?: number;
+                single_criterion_report_status?: number;
+            } & {
+                [k: string]: unknown;
+            };
         } & {
             [k: string]: unknown;
         };
@@ -48777,10 +48858,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 goalLinked: z.ZodBoolean;
                 matchScore: z.ZodNumber;
             }, z.ZodTypeAny, "passthrough">[];
+            http?: number;
             browser?: number;
             unlinked?: number;
             waived?: boolean;
-            http?: number;
             waiverReason?: string;
             relevant?: number;
             passedRelevant?: number;
@@ -48799,8 +48880,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            canAccept?: boolean;
             notVerified?: number;
+            canAccept?: boolean;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -48889,90 +48970,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchScore: z.ZodOptional<z.ZodNumber>;
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
-        requiredCheckSummary?: {
-            unknown?: z.objectInputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectInputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectInputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-        } & {
-            [k: string]: unknown;
-        };
-        acceptanceSummary?: {
-            unknown?: z.objectInputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectInputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectInputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            matchStrengthCounts?: {
-                none?: number;
-                fallback?: number;
-                token?: number;
-                direct?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            evidenceSourceCounts?: {
-                none?: number;
-                matched_evidence?: number;
-                single_criterion_report_status?: number;
-            } & {
-                [k: string]: unknown;
-            };
-        } & {
-            [k: string]: unknown;
-        };
         evidenceSummary?: {
-            artifacts?: number;
             commands?: Record<string, number>;
+            artifacts?: number;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;
@@ -49063,15 +49063,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     outputValidation?: {
@@ -49080,15 +49080,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     artifactVerification?: {
@@ -49141,6 +49141,87 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
+        requiredCheckSummary?: {
+            unknown?: z.objectOutputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectOutputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectOutputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+        } & {
+            [k: string]: unknown;
+        };
+        acceptanceSummary?: {
+            unknown?: z.objectOutputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectOutputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectOutputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            matchStrengthCounts?: {
+                none?: number;
+                fallback?: number;
+                token?: number;
+                direct?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            evidenceSourceCounts?: {
+                none?: number;
+                matched_evidence?: number;
+                single_criterion_report_status?: number;
+            } & {
+                [k: string]: unknown;
+            };
+        } & {
+            [k: string]: unknown;
+        };
         canAccept?: boolean;
         browserEvidenceTemporalIntegrity?: {
             status?: "invalid" | "complete";
@@ -49682,10 +49763,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 goalLinked: z.ZodBoolean;
                 matchScore: z.ZodNumber;
             }, z.ZodTypeAny, "passthrough">[];
+            http?: number;
             browser?: number;
             unlinked?: number;
             waived?: boolean;
-            http?: number;
             waiverReason?: string;
             relevant?: number;
             passedRelevant?: number;
@@ -49704,8 +49785,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            canAccept?: boolean;
             notVerified?: number;
+            canAccept?: boolean;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -49794,90 +49875,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchScore: z.ZodOptional<z.ZodNumber>;
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
-        requiredCheckSummary?: {
-            unknown?: z.objectOutputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectOutputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectOutputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-        } & {
-            [k: string]: unknown;
-        };
-        acceptanceSummary?: {
-            unknown?: z.objectOutputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectOutputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectOutputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            matchStrengthCounts?: {
-                none?: number;
-                fallback?: number;
-                token?: number;
-                direct?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            evidenceSourceCounts?: {
-                none?: number;
-                matched_evidence?: number;
-                single_criterion_report_status?: number;
-            } & {
-                [k: string]: unknown;
-            };
-        } & {
-            [k: string]: unknown;
-        };
         evidenceSummary?: {
-            artifacts?: number;
             commands?: Record<string, number>;
+            artifacts?: number;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;
@@ -49968,15 +49968,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     outputValidation?: {
@@ -49985,15 +49985,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     artifactVerification?: {
@@ -50043,6 +50043,87 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             reportMarkdownPath?: string;
             verdictJsonPath?: string;
             manifestPath?: string;
+        } & {
+            [k: string]: unknown;
+        };
+        requiredCheckSummary?: {
+            unknown?: z.objectInputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectInputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectInputType<{
+                check: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                missingReason: z.ZodOptional<z.ZodString>;
+            }, z.ZodTypeAny, "passthrough">[];
+        } & {
+            [k: string]: unknown;
+        };
+        acceptanceSummary?: {
+            unknown?: z.objectInputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            verified?: z.objectInputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            total?: number;
+            statusCounts?: {
+                unknown?: number;
+                verified?: number;
+                not_verified?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            notVerified?: z.objectInputType<{
+                criterion: z.ZodString;
+                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+                evidence: z.ZodArray<z.ZodString, "many">;
+                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+                matchScore: z.ZodOptional<z.ZodNumber>;
+                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+            }, z.ZodTypeAny, "passthrough">[];
+            matchStrengthCounts?: {
+                none?: number;
+                fallback?: number;
+                token?: number;
+                direct?: number;
+            } & {
+                [k: string]: unknown;
+            };
+            evidenceSourceCounts?: {
+                none?: number;
+                matched_evidence?: number;
+                single_criterion_report_status?: number;
+            } & {
+                [k: string]: unknown;
+            };
         } & {
             [k: string]: unknown;
         };
@@ -50587,10 +50668,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 goalLinked: z.ZodBoolean;
                 matchScore: z.ZodNumber;
             }, z.ZodTypeAny, "passthrough">[];
+            http?: number;
             browser?: number;
             unlinked?: number;
             waived?: boolean;
-            http?: number;
             waiverReason?: string;
             relevant?: number;
             passedRelevant?: number;
@@ -50609,8 +50690,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            canAccept?: boolean;
             notVerified?: number;
+            canAccept?: boolean;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -50699,90 +50780,9 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             matchScore: z.ZodOptional<z.ZodNumber>;
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
-        requiredCheckSummary?: {
-            unknown?: z.objectInputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectInputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectInputType<{
-                check: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                missingReason: z.ZodOptional<z.ZodString>;
-            }, z.ZodTypeAny, "passthrough">[];
-        } & {
-            [k: string]: unknown;
-        };
-        acceptanceSummary?: {
-            unknown?: z.objectInputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            verified?: z.objectInputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            total?: number;
-            statusCounts?: {
-                unknown?: number;
-                verified?: number;
-                not_verified?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            notVerified?: z.objectInputType<{
-                criterion: z.ZodString;
-                status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
-                evidence: z.ZodArray<z.ZodString, "many">;
-                matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
-                matchScore: z.ZodOptional<z.ZodNumber>;
-                evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
-            }, z.ZodTypeAny, "passthrough">[];
-            matchStrengthCounts?: {
-                none?: number;
-                fallback?: number;
-                token?: number;
-                direct?: number;
-            } & {
-                [k: string]: unknown;
-            };
-            evidenceSourceCounts?: {
-                none?: number;
-                matched_evidence?: number;
-                single_criterion_report_status?: number;
-            } & {
-                [k: string]: unknown;
-            };
-        } & {
-            [k: string]: unknown;
-        };
         evidenceSummary?: {
-            artifacts?: number;
             commands?: Record<string, number>;
+            artifacts?: number;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;
@@ -50873,15 +50873,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     outputValidation?: {
@@ -50890,15 +50890,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
             path?: string;
             message?: string;
-            severity?: "warning" | "error";
             code?: string;
+            severity?: "warning" | "error";
         }[];
     };
     artifactVerification?: {

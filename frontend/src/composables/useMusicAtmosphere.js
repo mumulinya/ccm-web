@@ -1,4 +1,5 @@
 import { computed, ref, watch } from 'vue'
+import { selectNextPlaybackTrack } from '../utils/musicTrackHelpers.js'
 
 const RANDOM_MUSIC_KEYWORD = '__random__'
 const STORAGE_KEY_DATE = 'aura_listen_date'
@@ -141,16 +142,11 @@ export const useMusicAtmosphere = ({ currentTrack, playlist, currentIndex, playM
   }
 
   const updatePreselectedTrack = () => {
-    if (!playlist.value.length) {
-      preselectedNextTrack.value = null
-      return
-    }
-    if (currentIndex.value === -1) {
-      preselectedNextTrack.value = playlist.value[0]
-      return
-    }
-    const nextIdx = (currentIndex.value + 1) % playlist.value.length
-    preselectedNextTrack.value = playlist.value[nextIdx]
+    preselectedNextTrack.value = selectNextPlaybackTrack(playlist.value, {
+      currentIndex: currentIndex.value,
+      currentTrack: currentTrack.value,
+      playMode: playMode.value,
+    })
   }
 
   const recordCompanionSecond = (playing) => {
@@ -173,10 +169,9 @@ export const useMusicAtmosphere = ({ currentTrack, playlist, currentIndex, playM
   watch(currentTrack, (newTrack) => {
     updateAiEmotion(newTrack)
     updateAiSongQuote(newTrack)
-    updatePreselectedTrack()
   })
 
-  watch(playMode, updatePreselectedTrack)
+  watch([currentTrack, playlist, currentIndex, playMode], updatePreselectedTrack, { immediate: true })
 
   return {
     companionSeconds,

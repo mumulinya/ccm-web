@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import App from './App.vue'
 import AuthPage from './components/auth/AuthPage.vue'
+import PageLoadingOverlay from './components/common/PageLoadingOverlay.vue'
 
 const loading = ref(true)
 const authenticated = ref(false)
@@ -9,8 +10,22 @@ const registrationEnabled = ref(false)
 const firstInstall = ref(false)
 const loginTheme = ref('command')
 const user = ref(null)
+const authSlow = ref(false)
+let authSlowTimer = null
 const LOGIN_PATH = '/login'
 const RETURN_TO_KEY = 'ccm:auth:return-to'
+
+const applyStoredThemeBeforeAuth = () => {
+  const preset = localStorage.getItem('theme-preset') || 'default'
+  const darkPresets = new Set(['deep-void', 'cyberpunk', 'deep-ocean'])
+  const lightPresets = new Set(['aurora'])
+  const storedTheme = localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'
+  const theme = darkPresets.has(preset) ? 'dark' : (lightPresets.has(preset) ? 'light' : storedTheme)
+  document.documentElement.setAttribute('data-theme', theme)
+  document.documentElement.setAttribute('data-theme-preset', preset)
+}
+
+applyStoredThemeBeforeAuth()
 
 const currentRelativeUrl = () => `${window.location.pathname}${window.location.search}${window.location.hash}`
 const safeReturnUrl = value => {
@@ -51,6 +66,9 @@ const applySession = data => {
 
 const loadSession = async () => {
   loading.value = true
+  authSlow.value = false
+  if (authSlowTimer) window.clearTimeout(authSlowTimer)
+  authSlowTimer = window.setTimeout(() => { authSlow.value = true }, 8_000)
   try {
     const response = await fetch('/api/auth/session', { headers: { Accept: 'application/json' } })
     const data = await response.json()
@@ -61,7 +79,10 @@ const loadSession = async () => {
     applySession(null)
     showLoginRoute()
   } finally {
+    if (authSlowTimer) window.clearTimeout(authSlowTimer)
+    authSlowTimer = null
     loading.value = false
+    authSlow.value = false
   }
 }
 
@@ -90,6 +111,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (authSlowTimer) window.clearTimeout(authSlowTimer)
   window.removeEventListener('ccm-auth-expired', handleExpired)
   window.removeEventListener('ccm-auth-logout', handleExpired)
   window.removeEventListener('popstate', handlePopState)
@@ -97,11 +119,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="loading" class="root-auth-loading" role="status" aria-live="polite">
-    <span class="root-auth-mark">CCM</span>
-    <strong>正在验证登录状态</strong>
-    <i aria-hidden="true"></i>
-  </div>
+  <PageLoadingOverlay
+    v-if="loading"
+    viewport
+    page-id="authentication"
+    title="正在验证登录状态"
+    description="正在确认账户和本地服务状态"
+    :slow="authSlow"
+    @retry="loadSession"
+  />
   <App v-else-if="authenticated" />
   <AuthPage
     v-else
@@ -111,13 +137,3 @@ onUnmounted(() => {
     @authenticated="handleAuthenticated"
   />
 </template>
-
-<style scoped>
-.root-auth-loading { width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: 11px; background: #f4f6f5; color: #17201d; }
-.root-auth-mark { width: 48px; height: 48px; display: grid; place-items: center; border: 1px solid #cbd5d0; background: #fff; color: #0e6b4f; font-size: 13px; font-weight: 900; }
-.root-auth-loading strong { font-size: 13px; letter-spacing: 0; }
-.root-auth-loading i { width: 132px; height: 3px; overflow: hidden; background: #d9e0dc; }
-.root-auth-loading i::after { content: ''; display: block; width: 45%; height: 100%; background: #0e6b4f; animation: auth-loading 1s ease-in-out infinite; }
-@keyframes auth-loading { from { transform: translateX(-110%); } to { transform: translateX(330%); } }
-@media (prefers-reduced-motion: reduce) { .root-auth-loading i::after { animation-duration: 2.2s; } }
-</style>

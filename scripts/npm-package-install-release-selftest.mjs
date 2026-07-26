@@ -30,9 +30,11 @@ const run = (args, options = {}) => {
 try {
   const packed = JSON.parse(run(['pack', './ccm-package', '--ignore-scripts', '--json', '--pack-destination', temporaryRoot]))
   const tarball = path.join(temporaryRoot, packed[0].filename)
+  const installStartedAt = Date.now()
   run(['install', tarball, '--omit=dev', '--no-audit', '--no-fund', '--prefer-offline'], { cwd: installRoot, inherit: true })
+  const installDurationMs = Date.now() - installStartedAt
   run([path.join(root, 'scripts', 'npm-installed-package-selftest.mjs'), installRoot, packageInfo.version], { command: process.execPath, inherit: true })
-  console.log(JSON.stringify({ success: true, version: packageInfo.version, platform: process.platform, node: process.version, paidProviderCalls: 0 }, null, 2))
+  console.log(JSON.stringify({ success: true, version: packageInfo.version, platform: process.platform, node: process.version, installDurationMs, paidProviderCalls: 0 }, null, 2))
 } finally {
   if (process.env.CCM_PRESERVE_RELEASE_INSTALL !== '1') fs.rmSync(temporaryRoot, { recursive: true, force: true })
 }

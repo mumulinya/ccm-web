@@ -22,6 +22,7 @@ import {
 } from "../../core/utils";
 
 import { ingestRequirementSources, requirementToIntakeDraft } from "../requirements/source-ingestion";
+import { appendProjectSessionTaskMessage, ensureProjectAutomationSession } from "../projects/sessions";
 
 import {
   loadCronJobs,
@@ -1259,6 +1260,9 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
     const childGoal = compactFormText(target.task, businessGoal);
     const childTitle = compactMemoryText(`${title} - ${target.name}`, 100);
     const targetGroup = target.type === "group" ? groups.find((item: any) => item.id === target.group_id) : null;
+    const projectSession = target.type === "project"
+      ? ensureProjectAutomationSession(target.project, "", childTitle)
+      : null;
     const missionHandoff = buildGlobalMissionTargetHandoff({
       parent,
       target,
@@ -1283,7 +1287,12 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       }),
       target_project: target.type === "group" ? target.coordinator : target.project,
       group_id: target.type === "group" ? target.group_id : null,
+      project_session_id: projectSession?.sessionId || null,
       assign_type: target.type === "group" ? "group" : "project",
+      orchestration_scope: target.type === "group" ? "group_session" : "project_session",
+      queue_scope: "conversation_serial",
+      request_origin: payload.source || "global-agent",
+      origin_session_id: projectSession?.sessionId || payload.session_id || payload.sessionId || null,
       priority: payload.priority || "normal",
       auto_execute: autoExecute,
       workflow_type: "daily_dev",
@@ -1317,6 +1326,25 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       trace_id: missionTraceId,
       idempotency_key: missionIdempotencyKey ? `${missionIdempotencyKey}:target:${target.type}:${target.group_id || target.project}` : null,
     });
+    if (projectSession?.sessionId) {
+      appendProjectSessionTaskMessage(target.project, projectSession.sessionId, {
+        id: `global-task-intake-${child.id}`,
+        role: "user",
+        content: childGoal,
+        timestamp: child.created_at,
+        task_id: child.id,
+        type: "global_task_dispatch_intake",
+      });
+      appendProjectSessionTaskMessage(target.project, projectSession.sessionId, {
+        id: `global-task-queued-${child.id}`,
+        role: "assistant",
+        agent: "project-main-agent",
+        content: `全局 Agent 已分派任务“${child.title}”。项目主 Agent 将按当前会话队列执行，并在 TestAgent 验收后提交结果。`,
+        timestamp: child.created_at,
+        task_id: child.id,
+        type: "global_task_dispatch_queued",
+      });
+    }
     targetHandoffs.push({ ...missionHandoffSummary, child_task_id: child.id, target_type: target.type, target_name: target.name || target.project || target.group_id || "" });
     recordAgentRuntimeLifecycle({
       scope: target.type === "group" ? "group" : "worker",

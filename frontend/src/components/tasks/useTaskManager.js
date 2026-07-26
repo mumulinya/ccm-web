@@ -5,6 +5,7 @@ import TaskListItem from './TaskListItem.vue'
 import TaskBacklogModal from './TaskBacklogModal.vue'
 import DailyDevTaskModal from './DailyDevTaskModal.vue'
 import TaskDispatchHeader from './TaskDispatchHeader.vue'
+import AutomatedTaskIntakeModal from './AutomatedTaskIntakeModal.vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import { useTaskBacklog } from '../../composables/useTaskBacklog.js'
 import { useTaskExecutionDashboard } from '../../composables/useTaskExecutionDashboard.js'
@@ -35,6 +36,7 @@ export function useTaskManager(props, emit) {
   // 弹窗状态
   const showCreate = ref(false)
   const showDailyDevCreate = ref(false)
+  const showAutomatedIntake = ref(false)
   const showQueue = ref(false)
   const showLogs = ref(false)
   const showReport = ref(false)
@@ -1070,6 +1072,18 @@ export function useTaskManager(props, emit) {
   }
 
   const priorityLabel = { high: '🔴 高', normal: '🟡 中', low: '⚪ 低' }
+  const openTaskReplay = task => emit('navigate', { tab: 'trace-replay', task_id: task.id, trace_id: task.trace_id || '', scope: 'orchestrator' })
+  const changeTaskPriority = async (task, priority) => {
+    try {
+      const result = await tasksApi.update({ id: task.id, priority })
+      toast.success(priority === 'high'
+        ? `任务已插入当前会话队列前部${result.queue_result?.position ? `，位置 ${result.queue_result.position}` : ''}`
+        : '已恢复普通优先级')
+      await refreshTaskWork()
+    } catch (error) {
+      toast.error(error?.message || '调整任务优先级失败')
+    }
+  }
 
   const visibleTasks = computed(() => {
     const query = taskSearch.value.trim().toLowerCase()
@@ -1084,7 +1098,7 @@ export function useTaskManager(props, emit) {
 
   const handleCreateType = (type) => {
     if (type === 'business') {
-      showDailyDevCreate.value = true
+      showAutomatedIntake.value = true
       return
     }
     openCreateTask()
@@ -1137,11 +1151,11 @@ export function useTaskManager(props, emit) {
   })
 
   return {
-    AgentPipeline, TaskListItem, TaskBacklogModal, DailyDevTaskModal, TaskDispatchHeader, tasks,
+    AgentPipeline, TaskListItem, TaskBacklogModal, DailyDevTaskModal, TaskDispatchHeader, AutomatedTaskIntakeModal, tasks,
     permissionRequests, pendingPermissionRequests, standalonePermissionRequests, permissionDecisionBusyId,
     groups, projects, stats, orchestratorDiagnostics, taskExecutions, executionActionBusy,
     showArchivedTasks, archivedTaskCount, selectedTaskIds, editingTaskId, activeTaskView, taskSearch,
-    taskStatusFilter, showCreate, showDailyDevCreate, showQueue, showLogs, showReport,
+    taskStatusFilter, showCreate, showDailyDevCreate, showAutomatedIntake, showQueue, showLogs, showReport,
     showContinue, currentTaskLogs, currentTaskId, currentTaskReport, currentTaskTrace, taskTraceLoading,
     currentContinueTask, continueMessage, executionDashboard, executionDashboardLoading, activeAgentRuns, activeAgentRunsLoading,
     runtimeDebtPreview, runtimeDebtLoading, dashboardFilter, dashboardSummary, dashboardItems, dashboardQueue,
@@ -1168,6 +1182,6 @@ export function useTaskManager(props, emit) {
     visibleTaskTitle, visibleTaskStatusDetail, visibleRequiredVerification, visibleDeliveryBlockers, visibleUserDeliveryReport, loadTaskTrace,
     viewReport, cancelTask, rollbackExecution, mergeExecution, cleanupExecution, openContinueTask,
     continueFromReport, submitContinuationPayload, submitTaskContinuation, autoContinueFromReport, resendTask, priorityLabel,
-    visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission
+    visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission, openTaskReplay, changeTaskPriority
   }
 }

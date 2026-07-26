@@ -262,6 +262,29 @@ export const pickRandomTrack = (tracks = [], options = {}) => {
   return pool[Math.floor(Math.random() * pool.length)] || list[0]
 }
 
+/** Resolve the track that the player will actually use for the next action. */
+export const selectNextPlaybackTrack = (tracks = [], options = {}) => {
+  const list = Array.isArray(tracks) ? tracks.filter(Boolean) : []
+  if (!list.length) return null
+
+  const currentTrack = options.currentTrack || null
+  const rawIndex = Number(options.currentIndex)
+  const currentIndex = Number.isInteger(rawIndex) && rawIndex >= 0 && rawIndex < list.length
+    ? rawIndex
+    : list.findIndex(track => trackPlayIdentity(track) === trackPlayIdentity(currentTrack || {}))
+  const mode = String(options.playMode || 'list')
+
+  if (mode === 'single') return currentTrack || list[currentIndex >= 0 ? currentIndex : 0]
+  if (mode === 'random') {
+    const randomPicker = typeof options.randomPicker === 'function' ? options.randomPicker : pickRandomTrack
+    return randomPicker(list, { excludeTrack: currentTrack || (currentIndex >= 0 ? list[currentIndex] : null) })
+      || currentTrack
+      || list[currentIndex >= 0 ? currentIndex : 0]
+  }
+  if (currentIndex < 0) return list[0]
+  return list[(currentIndex + 1) % list.length]
+}
+
 const CLOUD_RANDOM_QUERY_ROTATIONS = {
   netease: ['热门歌曲', '华语流行', '轻音乐', '经典老歌', '摇滚'],
   cloud: ['热门流行音乐', '华语流行', '轻音乐', '经典老歌', '摇滚精选'],

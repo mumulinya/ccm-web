@@ -66,6 +66,7 @@ export interface RunTestAgentJobInput {
   timeoutMs?: number;
   idempotencyKey?: string;
   allowedWorkDirs?: string[];
+  runtimeEnv?: Record<string, string>;
 }
 
 export interface TestAgentRunnerResult {
@@ -475,6 +476,9 @@ async function startJob(input: RunTestAgentJobInput, key: string): Promise<TestA
     stdio: ["ignore", outFd, errFd],
     env: {
       ...process.env,
+      ...Object.fromEntries(Object.entries(input.runtimeEnv || {})
+        .filter(([name]) => /^[A-Z_][A-Z0-9_]*$/.test(name))
+        .map(([name, value]) => [name, String(value)])),
       CCM_TEST_AGENT_ALLOWED_WORK_DIRS: JSON.stringify((input.allowedWorkDirs || []).map(item => path.resolve(item))),
       CCM_TEST_AGENT_RUNNER_ID: id,
     },

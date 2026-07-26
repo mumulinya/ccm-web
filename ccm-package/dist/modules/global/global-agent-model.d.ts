@@ -1,11 +1,13 @@
 export declare function callLlm(config: any, messages: any[], options?: {
     onUsage?: (usage: any) => void;
+    onDelta?: (delta: string) => void;
 }): Promise<string>;
 export declare function shouldRetryGlobalModelError(error: any): boolean;
 export declare function callGlobalModelWithRetry(config: any, messages: any[], options?: {
     attempts?: number;
     delayMs?: number;
     onUsage?: (usage: any) => void;
+    onDelta?: (delta: string) => void;
     call?: (config: any, messages: any[]) => Promise<string>;
 }): Promise<string>;
 export declare function runGlobalModelRetrySelfTest(): Promise<{

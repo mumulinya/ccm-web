@@ -5,6 +5,26 @@ const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const feishu_1 = require("./feishu");
 const feishu_channel_1 = require("./feishu-channel");
+const feishu_access_1 = require("./feishu-access");
+function readJsonBody(req) {
+    return new Promise((resolve, reject) => {
+        let body = "";
+        req.on("data", chunk => {
+            body += String(chunk || "");
+            if (body.length > 256 * 1024)
+                reject(new Error("请求体过大"));
+        });
+        req.on("end", () => {
+            try {
+                resolve(body ? JSON.parse(body) : {});
+            }
+            catch (error) {
+                reject(error);
+            }
+        });
+        req.on("error", reject);
+    });
+}
 function handleFeishuRoutes(req, res, parsed) {
     const pathname = parsed.pathname;
     if (pathname === "/api/feishu/config" && req.method === "GET") {
@@ -27,6 +47,10 @@ function handleFeishuRoutes(req, res, parsed) {
                 control_bot_ready: !!(config.control_bot_enabled && (config.control_bot_app_id || config.app_id) && (config.control_bot_app_secret || config.app_secret)),
                 control_bot_event_path: "/api/feishu/bot/event",
                 control_bot_public_base_url: config.control_bot_public_base_url || "",
+                control_bot_access_mode: config.control_bot_access_mode === "mapped" ? "mapped" : "open",
+                control_bot_users: (Array.isArray(config.control_bot_users) ? config.control_bot_users : []).map(feishu_access_1.publicFeishuUserMapping),
+                authorized_user: config.authorized_user ? (0, feishu_access_1.publicFeishuUserMapping)({ ...config.authorized_user, role: "admin", enabled: true }) : null,
+                observed_users: (0, feishu_channel_1.getFeishuChannelIdentitySnapshot)().slice(0, 100),
             }
         });
         return true;
@@ -57,6 +81,17 @@ function handleFeishuRoutes(req, res, parsed) {
                     config.control_bot_encrypt_key = String(updates.control_bot_encrypt_key || "").trim();
                 if (updates.control_bot_public_base_url !== undefined)
                     config.control_bot_public_base_url = String(updates.control_bot_public_base_url || "").trim().replace(/\/$/, "");
+                if (updates.control_bot_access_mode !== undefined)
+                    config.control_bot_access_mode = updates.control_bot_access_mode === "mapped" ? "mapped" : "open";
+                if (updates.control_bot_users !== undefined) {
+                    if (!Array.isArray(updates.control_bot_users))
+                        throw new Error("飞书用户映射格式无效");
+                    config.control_bot_users = updates.control_bot_users.slice(0, 200).map(feishu_access_1.publicFeishuUserMapping)
+                        .filter((item) => item.open_id || item.user_id || item.union_id);
+                }
+                if (config.control_bot_access_mode === "mapped" && !config.authorized_user?.open_id && !(config.control_bot_users || []).some((item) => item.enabled !== false)) {
+                    throw new Error("仅允许名单用户时，至少需要配置一名已启用用户");
+                }
                 console.log("[飞书配置] 保存配置:", { channel: "webhook", webhook: config.webhook_url ? "已配置" : "空", control_bot: config.control_bot_enabled ? "启用" : "关闭" });
                 (0, db_1.saveFeishuConfig)(config);
                 (0, utils_1.sendJson)(res, { success: true, message: "飞书配置已保存" });
@@ -200,8 +235,16 @@ function handleFeishuRoutes(req, res, parsed) {
         return true;
     }
     if (pathname === "/api/feishu/channel/outbox/retry" && req.method === "POST") {
-        (0, feishu_channel_1.tickFeishuNotificationOutbox)(new Date()).then((result) => (0, utils_1.sendJson)(res, { success: true, ...result }))
-            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "飞书通知重试失败" }, 500));
+        void readJsonBody(req).then(async (payload) => {
+            const deliveryId = String(payload?.delivery_id || payload?.deliveryId || "").trim();
+            if (deliveryId) {
+                const delivery = await (0, feishu_channel_1.retryFeishuNotificationDelivery)(deliveryId);
+                (0, utils_1.sendJson)(res, { success: delivery?.status === "sent", delivery }, delivery?.status === "sent" ? 200 : 409);
+                return;
+            }
+            const result = await (0, feishu_channel_1.tickFeishuNotificationOutbox)(new Date());
+            (0, utils_1.sendJson)(res, { success: true, ...result });
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "飞书通知重试失败" }, 500));
         return true;
     }
     return false;

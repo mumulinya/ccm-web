@@ -6,10 +6,13 @@ exports.fallbackSessionTitle = fallbackSessionTitle;
 exports.generateSessionTitleWithModel = generateSessionTitleWithModel;
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
-const PLACEHOLDER_TITLES = new Set(["新会话", "默认会话", "全局 Agent 会话", "飞书全局 Agent", "未命名会话"]);
+const PLACEHOLDER_TITLES = new Set(["新会话", "新建飞书会话", "默认会话", "全局 Agent 会话", "飞书全局 Agent", "未命名会话"]);
 function isSessionTitlePlaceholder(title, origin = "") {
-    if (String(origin || "").toLowerCase() === "manual")
+    const normalizedOrigin = String(origin || "").toLowerCase();
+    if (normalizedOrigin === "manual")
         return false;
+    if (normalizedOrigin === "placeholder")
+        return true;
     const value = String(title || "").trim();
     return !value || PLACEHOLDER_TITLES.has(value) || /^会话\s*\d+\s*[\u00b7-]/.test(value);
 }

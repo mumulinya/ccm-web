@@ -38,10 +38,10 @@ const emit = defineEmits(['select-skin'])
 
 <style scoped>
 .skins-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
-.skin-card { display: flex; flex-direction: column; align-items: center; padding: 16px; background: rgba(255, 255, 255, 0.4); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 14px; cursor: pointer; transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1); position: relative; }
+.skin-card { display: flex; flex-direction: column; align-items: center; padding: 16px; background: var(--surface); border: 1px solid var(--border-color); border-radius: 14px; cursor: pointer; transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1); position: relative; }
 .skin-card:hover { border-color: rgba(59, 130, 246, 0.25); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.02); }
 .skin-card.active { border-color: var(--accent-blue); background: rgba(59, 130, 246, 0.05); box-shadow: 0 4px 14px rgba(59, 130, 246, 0.08); }
-.skin-avatar-wrap { width: 56px; height: 56px; background: rgba(255, 255, 255, 0.8); border: 1px solid rgba(0, 0, 0, 0.04); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+.skin-avatar-wrap { width: 56px; height: 56px; background: var(--surface-raised); border: 1px solid var(--border-color); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
 .skin-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
 .skin-indicator { font-size: 9px; color: var(--accent-blue); font-weight: 700; margin-top: 4px; }
 .pixelated { image-rendering: pixelated; }

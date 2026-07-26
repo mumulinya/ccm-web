@@ -66,4 +66,7 @@ const sourceLabel = source => ({ upload: '上传', manual: '手动沉淀', onlin
 .state { min-height: 230px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: var(--text-secondary, #64748b); text-align: center; }.state strong { color: var(--text-primary, #334155); font-size: 12px; }.state p { margin: 0; font-size: 10.5px; }.spinner { width: 17px; height: 17px; border: 2px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) { .document-header { align-items: flex-start; flex-direction: column; padding: 13px; }.filters { width: 100%; flex-wrap: wrap; }.filters input { width: 100%; }.filters select { flex: 1; }.document-row { grid-template-columns: 1fr; }.row-actions { padding-left: 49px; } }
+.file-type { border-color:color-mix(in srgb,var(--accent-blue) 35%,var(--border-color)); background:var(--info-soft); color:var(--accent-blue); }
+.status.failed { background:var(--danger-soft); color:var(--accent-red); }
+.status.partial { background:var(--warning-soft); color:var(--accent-yellow); }
 </style>

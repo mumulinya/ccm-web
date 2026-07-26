@@ -81,6 +81,8 @@ const emit = defineEmits([
   'pipeline',
   'continue',
   'logs',
+  'replay',
+  'priority',
   'resend',
   'edit',
   'delete',
@@ -174,10 +176,12 @@ const emit = defineEmits([
       <template v-if="!showArchived">
         <button v-if="canCancel" class="btn btn-danger btn-sm" @click="emit('cancel', task)">停止任务</button>
         <button v-if="task.status === 'pending' || task.status === 'failed'" class="btn btn-primary btn-sm" @click="emit('queue', task.id)">📥 加入队列</button>
+        <button v-if="task.status === 'pending'" class="btn btn-outline btn-sm" @click="emit('priority', task, task.priority === 'high' ? 'normal' : 'high')">{{ task.priority === 'high' ? '取消插队' : '插队' }}</button>
         <button v-if="task.final_report || task.result || task.receipt || task.review" class="btn btn-outline btn-sm" @click="emit('report', task)">📄 报告</button>
         <button v-if="task.delivery_summary" class="btn btn-outline btn-sm pipeline-btn" @click="emit('pipeline', task)">协作看板</button>
         <button v-if="task.status !== 'done'" class="btn btn-outline btn-sm" @click="emit('continue', task)">补充</button>
         <button class="btn btn-outline btn-sm" @click="emit('logs', task.id)">📋 日志</button>
+        <button class="btn btn-outline btn-sm" @click="emit('replay', task)">任务回放</button>
         <button v-if="task.status !== 'done'" class="btn btn-outline btn-sm" @click="emit('resend', task)">🔄 重派</button>
         <button class="btn btn-outline btn-sm" @click="emit('edit', task)">编辑</button>
         <button class="btn btn-outline btn-sm" @click="emit('delete', task.id)">归档</button>
@@ -472,7 +476,7 @@ const emit = defineEmits([
 }
 
 .status-select {
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--control-bg);
   color: var(--text-primary);
   border: 1px solid rgba(0, 0, 0, 0.08);
   padding: 4px 8px;

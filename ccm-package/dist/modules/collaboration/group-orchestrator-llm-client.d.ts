@@ -1,3 +1,4 @@
+import { ModelCallRetryNotice } from "../../system/model-call-retry";
 export type LlmChatMessage = {
     role: string;
     content: any;
@@ -11,7 +12,7 @@ export type LlmTokenUsage = {
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
 };
-type LlmCallOptions = {
+export type LlmCallOptions = {
     messages: LlmChatMessage[];
     system?: string;
     temperature?: number;
@@ -29,6 +30,13 @@ type LlmCallOptions = {
     promptCacheTracking?: any;
     prompt_cache_tracking?: any;
     onUsage?: (usage: LlmTokenUsage) => void;
+    onDelta?: (delta: string) => void;
+    retry?: boolean;
+    retryAttempts?: number;
+    retryBaseDelayMs?: number;
+    retryTotalTimeoutMs?: number;
+    retryScope?: string;
+    onRetry?: (notice: ModelCallRetryNotice) => void;
 };
 export declare function normalizeLlmTokenUsage(value: any, provider?: "openai" | "anthropic"): LlmTokenUsage;
 export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
@@ -70,11 +78,27 @@ export declare function runLlmTokenUsageSelfTest(): Promise<{
         openAiInputTokensCaptured: boolean;
         openAiOutputTokensCaptured: boolean;
         anthropicContentPreserved: boolean;
-        anthropicInputIncludesCacheTokens: boolean;
+        anthropicDirectInputTokensCaptured: boolean;
+        anthropicCacheTokensCaptured: boolean;
+        anthropicTotalIncludesCacheTokens: boolean;
         anthropicOutputTokensCaptured: boolean;
     };
     openAiUsage: LlmTokenUsage;
     anthropicUsage: LlmTokenUsage;
+}>;
+export declare function runLlmStreamingSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        openAiContent: boolean;
+        openAiDeltas: boolean;
+        openAiIncremental: boolean;
+        openAiUsage: boolean;
+        anthropicContent: boolean;
+        anthropicDeltas: boolean;
+        anthropicIncremental: boolean;
+        anthropicUsage: boolean;
+        interruptedStreamDoesNotRetry: boolean;
+    };
 }>;
 export declare function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest(): Promise<{
     pass: boolean;
@@ -96,4 +120,3 @@ export declare function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetr
         requestPatchChecksum: any;
     };
 }>;
-export {};

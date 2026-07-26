@@ -5,6 +5,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleCollaborationApiTaskLifecycleRoutes = handleCollaborationApiTaskLifecycleRoutes;
 const utils_1 = require("../../core/utils");
 const task_attachments_1 = require("../../system/task-attachments");
+const workflow_decision_1 = require("../../agents/workflow-decision");
 const db_1 = require("../../core/db");
 const logs_1 = require("./logs");
 const work_items_1 = require("../../agents/work-items");
@@ -40,11 +41,27 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                 const validationError = (0, collaboration_1.validateTaskManualStatusUpdate)(current, updates);
                 if (validationError)
                     return (0, utils_1.sendJson)(res, { error: validationError }, 409);
+                const priorityChanged = updates.priority && updates.priority !== current.priority;
                 const task = (0, collaboration_1.updateTask)(id, updates);
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                let queueResult = null;
+                if (priorityChanged && !collaboration_1.runningTaskIds.has(id)) {
+                    const removed = (0, collaboration_1.removeTaskFromQueues)(id);
+                    if (removed > 0) {
+                        queueResult = (0, collaboration_1.enqueueTask)(id, ctx);
+                        (0, logs_1.appendTaskTimelineEvent)(id, {
+                            type: "task_queue_reprioritized",
+                            title: updates.priority === "high" ? "任务已插队" : "任务优先级已调整",
+                            detail: `优先级 ${current.priority || "normal"} -> ${updates.priority}，队列位置 ${queueResult.position || "待定"}`,
+                            status: "ok",
+                            phase: "dispatching",
+                            agent: "user",
+                        });
+                    }
+                }
                 (0, collaboration_1.updateGroupTaskInlineStatus)(task, task.status, task.status_detail || "任务状态已更新");
-                (0, utils_1.sendJson)(res, { success: true, task });
+                (0, utils_1.sendJson)(res, { success: true, task, queue_result: queueResult, queue_status: (0, collaboration_1.getQueueStatus)() });
             }
             catch (e) {
                 (0, task_attachments_1.removeUploadedFiles)(files);
@@ -96,16 +113,31 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
     if (pathname === "/api/tasks/continue" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        req.on("end", async () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
                 const taskId = payload.task_id || payload.id;
                 const message = (0, collaboration_1.compactFormText)(payload.message || payload.followup || payload.note, "");
+                const currentTask = (0, db_1.loadTasks)().find((task) => task.id === taskId);
+                if (!currentTask)
+                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                const requestedKind = String(payload.continuation_kind || payload.continuationKind || "auto");
+                const continuationKind = requestedKind === "auto"
+                    ? (await (0, workflow_decision_1.decideWorkflowWithModel)({
+                        message,
+                        scope: "group",
+                        context: {
+                            current_goal: currentTask.business_goal || currentTask.title || "",
+                            current_status: currentTask.status || "",
+                            task_id: currentTask.id,
+                        },
+                    })).continuationKind
+                    : requestedKind;
                 const result = (0, collaboration_1.continueTaskWithMessage)(taskId, message, ctx, {
                     source: payload.source || "user",
                     auto_execute: payload.auto_execute,
                     autoExecute: payload.autoExecute,
-                    continuationKind: payload.continuation_kind || payload.continuationKind || "auto",
+                    continuationKind,
                     idempotencyKey: payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId,
                 });
                 if (!result.success)

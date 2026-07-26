@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as path from "path";
-import { deleteCredential, isCredentialReference, protectCredential, resolveCredential } from "../../core/credential-store";
+import { deleteCredential, isCredentialReference } from "../../core/credential-store";
+import { getProjectTestAuthProfile, resolveProjectTestAuthProfile } from "../projects/project-test-auth";
 import { getCoordinatorMember } from "./group-orchestrator";
 import { loadGroups, saveGroups } from "./storage";
 
@@ -71,8 +72,8 @@ function normalizeUrl(value: any) {
   return url;
 }
 
-function targetChecksum(target: StoredGroupTestTarget) {
-  return crypto.createHash("sha256").update(JSON.stringify(target)).digest("hex");
+function targetChecksum(target: StoredGroupTestTarget, projectAuthChecksum = "") {
+  return crypto.createHash("sha256").update(JSON.stringify({ target, projectAuthChecksum })).digest("hex");
 }
 
 function publicTarget(target: StoredGroupTestTarget, availableProjects: Set<string>) {
@@ -152,11 +153,20 @@ export function listGroupTestTargets(groupId: string) {
   group.test_targets = targets;
   if (JSON.stringify(targets) !== before) saveGroups(groups);
   const projects = groupProjectNames(group);
+  const projectAuth = Object.fromEntries([...projects].map(project => {
+    try { return [project, getProjectTestAuthProfile(project)]; }
+    catch { return [project, { project, enabled: false, mode: "none" }]; }
+  }));
   return {
     schema: "ccm-group-test-targets-v1",
     groupId,
     projects: [...projects],
-    targets: targets.map(target => publicTarget(target, projects)),
+    projectAuth,
+    targets: targets.map(target => ({
+      ...publicTarget(target, projects),
+      projectAuthConfigured: projectAuth[target.project]?.enabled === true,
+      projectAuthMode: projectAuth[target.project]?.mode || "none",
+    })),
   };
 }
 
@@ -184,33 +194,11 @@ export function saveGroupTestTarget(groupId: string, input: any) {
   const previous = index >= 0 ? stored[index] : null;
   const now = new Date().toISOString();
   const authMode = AUTH_MODES.has(input?.auth?.mode) ? input.auth.mode : "none";
-  const rawFields = (Array.isArray(input?.auth?.fields) ? input.auth.fields : []).slice(0, MAX_AUTH_FIELDS);
-  const previousFields = new Map<string, StoredGroupTestTarget["auth"]["fields"][number]>((previous?.auth.fields || []).map(field => [field.id, field]));
-  const fields = rawFields.map((field: any, fieldIndex: number) => {
-    const id = cleanId(field?.id, "gtaf");
-    const envName = cleanText(field?.envName, 80).toUpperCase();
-    if (!ENV_NAME.test(envName)) throw new Error(`登录字段 ${fieldIndex + 1} 的环境变量名无效`);
-    const old = previousFields.get(id);
-    let valueRef = field?.clearValue === true ? "" : cleanText(old?.valueRef, 300);
-    const value = cleanText(field?.value, 4000);
-    if (value) valueRef = protectCredential(`group-test-target:${groupId}:${requestedId || "new"}`, `${id}:${envName}`, value);
-    return {
-      id,
-      label: cleanText(field?.label, 80) || envName,
-      envName,
-      inputLabel: cleanText(field?.inputLabel, 120),
-      valueRef,
-    };
-  });
-  if (new Set(fields.map(field => field.envName)).size !== fields.length) throw new Error("同一测试目标不能重复配置环境变量名");
-  if (authMode === "credentials" && (!fields.length || fields.some(field => !field.valueRef))) {
-    throw new Error("账号登录模式需要为每个登录字段填写凭据");
+  const projectAuth = getProjectTestAuthProfile(project);
+  if (authMode !== "none" && (!projectAuth.enabled || projectAuth.mode !== authMode)) {
+    throw new Error("请先在项目配置中启用对应的 TestAgent 登录方式");
   }
-  if (authMode === "credentials" && !cleanText(input?.auth?.successText, 200) && !cleanText(input?.auth?.successUrlIncludes, 300)) {
-    throw new Error("账号登录模式需要配置登录成功文本或登录后 URL 特征");
-  }
-  const storageStatePath = cleanText(input?.auth?.storageStatePath, 500);
-  if (authMode === "storage_state" && !storageStatePath) throw new Error("Storage State 模式需要填写状态文件路径");
+  const fields: StoredGroupTestTarget["auth"]["fields"] = [];
   const kind = TARGET_KINDS.has(input?.kind) ? input.kind : "web";
   const target = normalizeStoredTarget({
     id: previous?.id || cleanId("", "gtt"),
@@ -226,12 +214,6 @@ export function saveGroupTestTarget(groupId: string, input: any) {
     notes: input?.notes,
     auth: {
       mode: authMode,
-      loginPath: input?.auth?.loginPath,
-      submitLabel: input?.auth?.submitLabel,
-      successText: input?.auth?.successText,
-      successUrlIncludes: input?.auth?.successUrlIncludes,
-      storageStatePath,
-      existingSessionProvider: input?.auth?.existingSessionProvider,
       fields,
     },
     createdAt: previous?.createdAt || now,
@@ -270,13 +252,27 @@ export function resolveGroupTestTargets(groupId: string, projectNames: string[] 
   }
   return targets
     .filter(target => target.enabled && (!projects.size || projects.has(target.project)) && (!requestedIds.size || requestedIds.has(target.id) || target.required))
-    .map((target): ResolvedGroupTestTarget => ({
-      ...target,
-      checksum: targetChecksum(target),
-      env: target.auth.mode === "credentials"
-        ? Object.fromEntries(target.auth.fields.map(field => [field.envName, resolveCredential(field.valueRef)]))
-        : {},
-    }));
+    .map((target): ResolvedGroupTestTarget => {
+      if (target.auth.mode === "none") return { ...target, checksum: targetChecksum(target), env: {} };
+      const profile = resolveProjectTestAuthProfile(target.project);
+      if (!profile.enabled || profile.mode !== target.auth.mode) throw new Error(`测试目标“${target.name}”引用的项目登录配置不可用`);
+      return {
+        ...target,
+        baseUrl: target.baseUrl || profile.baseUrl,
+        auth: {
+          mode: profile.mode,
+          loginPath: profile.loginPath,
+          submitLabel: profile.submitLabel,
+          successText: profile.successText,
+          successUrlIncludes: profile.successUrlIncludes,
+          storageStatePath: profile.storageStatePath,
+          existingSessionProvider: profile.existingSessionProvider,
+          fields: profile.fields,
+        },
+        checksum: targetChecksum(target, profile.checksum),
+        env: profile.env,
+      } as ResolvedGroupTestTarget;
+    });
 }
 
 export function resolveTargetStorageStatePath(workDir: string, configuredPath: string) {

@@ -702,11 +702,38 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
   if (pathname === "/api/tasks/replay" && req.method === "GET") {
     const taskId = String(parsed.query.id || parsed.query.task_id || parsed.query.taskId || "").trim();
     if (!taskId) {
-      const limit = Math.max(1, Math.min(100, Number(parsed.query.limit || 40)));
-      sendJson(res, { success: true, index: buildTaskReplayIndex(limit) });
+      const requestedLimit = Number(parsed.query.limit || 40);
+      const requestedPage = Number(parsed.query.page || 1);
+      const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 40;
+      sendJson(res, { success: true, index: buildTaskReplayIndex({
+        page: Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1,
+        limit,
+        query: String(parsed.query.q || parsed.query.query || ""),
+        project: String(parsed.query.project || ""),
+        groupId: String(parsed.query.group_id || parsed.query.groupId || ""),
+        status: String(parsed.query.status || ""),
+        dateFrom: String(parsed.query.date_from || parsed.query.dateFrom || ""),
+        dateTo: String(parsed.query.date_to || parsed.query.dateTo || ""),
+      }) });
       return true;
     }
-    const replay = buildCompleteTaskReplay(taskId);
+    const hasEventPage = parsed.query.event_limit != null || parsed.query.eventLimit != null;
+    const requestedEventOffset = Number(parsed.query.event_offset || parsed.query.eventOffset || 0);
+    const requestedEventLimit = Number(parsed.query.event_limit || parsed.query.eventLimit || 160);
+    const replay = buildCompleteTaskReplay(taskId, hasEventPage ? {
+      eventOffset: Number.isFinite(requestedEventOffset) ? Math.max(0, requestedEventOffset) : 0,
+      eventLimit: Number.isFinite(requestedEventLimit) ? Math.max(1, Math.min(500, requestedEventLimit)) : 160,
+      eventTail: ["1", "true", "yes"].includes(String(parsed.query.event_tail || parsed.query.eventTail || "").toLowerCase()),
+      afterEventAt: String(parsed.query.after_event_at || parsed.query.afterEventAt || ""),
+      afterEventId: String(parsed.query.after_event_id || parsed.query.afterEventId || ""),
+      stage: String(parsed.query.stage || ""),
+      status: String(parsed.query.event_status || parsed.query.eventStatus || ""),
+      actor: String(parsed.query.actor || ""),
+      task: String(parsed.query.event_task_id || parsed.query.eventTaskId || ""),
+      query: String(parsed.query.event_query || parsed.query.eventQuery || ""),
+      preset: String(parsed.query.preset || ""),
+      includeSystemEvents: ["1", "true", "yes"].includes(String(parsed.query.include_system_events || parsed.query.includeSystemEvents || "").toLowerCase()),
+    } : {});
     if (!replay) { sendJson(res, { error: "任务不存在" }, 404); return true; }
     sendJson(res, { success: true, replay });
     return true;

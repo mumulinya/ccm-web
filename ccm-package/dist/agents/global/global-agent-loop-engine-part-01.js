@@ -97,9 +97,10 @@ function classifyGlobalAgentUserSteer(message, requestedKind = "auto") {
     const requested = String(requestedKind || "auto").trim().toLowerCase();
     if (requested === "supplement" || requested === "revise_goal")
         return requested;
-    const text = String(message || "").replace(/\s+/g, " ").trim();
-    const revisesGoal = /(?:目标|范围|方案|方向|优先级|验收|交付).{0,12}(?:调整|改为|改成|变更|缩小|扩大|取消|替换)|(?:改为|改成|换成|只做|仅做|不要再|不再|先别|停止当前|忽略之前|重新开始|新任务|换个任务|另外一个任务)/i.test(text);
-    return revisesGoal ? "revise_goal" : "supplement";
+    void message;
+    // 所有正常入口都会先调用统一大模型并传入明确 kind。缺失决策时采用
+    // 不继承旧写授权的保守类型，不能用本地关键词猜测用户是在补充还是改目标。
+    return "revise_goal";
 }
 function buildGlobalAgentEffectiveGoal(run) {
     const applied = normalizeGlobalAgentUserSteers(run.user_steer_history || run.userSteerHistory, "applied", 16);

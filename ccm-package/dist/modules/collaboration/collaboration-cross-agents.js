@@ -153,7 +153,13 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         for (const mention of uniqueMentions) {
             const targetName = (0, collaboration_cross_agents_helpers_1.getMentionTargetName)(mention);
             const targetMember = group.members.find((m) => m.project === targetName);
-            const kind = targetMember ? (/cloud|api|server|backend|service|后端/i.test(targetName) ? "backend" : /app|web|front|frontend|前端/i.test(targetName) ? "frontend" : "other") : "other";
+            const declaredLayer = String(mention?.executionLayer || mention?.execution_layer || mention?.layer
+                || targetMember?.executionLayer || targetMember?.execution_layer || targetMember?.layer || "").trim().toLowerCase();
+            const kind = ["backend", "server", "service", "api"].includes(declaredLayer)
+                ? "backend"
+                : ["frontend", "web", "app", "client"].includes(declaredLayer)
+                    ? "frontend"
+                    : "other";
             if (kind === "backend")
                 backendMentions.push(mention);
             else if (kind === "frontend")

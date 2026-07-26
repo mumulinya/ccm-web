@@ -685,7 +685,7 @@ export function handleCollaborationApi(
 
         const autoAssignGroupId = String(group_id || task.group_id || "");
         const group = autoAssignGroupId ? loadGroups().find(g => g.id === autoAssignGroupId) : null;
-        const toolContext = buildAgentToolContext(ctx, group, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`);
+        const toolContext = buildAgentToolContext(ctx, group, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`, task.selected_skill_names || []);
         let runtimeToolContext = prepareAgentRuntimeTools(autoAssignGroupId, task.target_project, workDir, agentType, toolContext.allowedTools, null, { taskId: task.id, task, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
         if (runtimeToolContext.dispatchBlocked) {
           const blockedReceipt = runtimeToolDispatchBlockedReceipt(task.target_project, runtimeToolContext);

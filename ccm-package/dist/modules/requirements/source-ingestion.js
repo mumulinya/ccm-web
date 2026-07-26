@@ -84,15 +84,7 @@ function normalizeStringList(value, max = 12, itemMax = 500) {
     return unique(rows.map(item => compact(item, itemMax)), max);
 }
 function inferTargetHint(text) {
-    const value = String(text || "");
-    if (/前端|页面|UI|交互|组件|样式/i.test(value))
-        return { target_type: "auto", target_id: "", capabilities: ["frontend", "ui"] };
-    if (/后端|接口|服务|数据库|API/i.test(value))
-        return { target_type: "auto", target_id: "", capabilities: ["backend", "api"] };
-    if (/测试|验收|回归|QA|TestAgent/i.test(value))
-        return { target_type: "auto", target_id: "", capabilities: ["test", "qa"] };
-    if (/文档|说明|README/i.test(value))
-        return { target_type: "auto", target_id: "", capabilities: ["documentation"] };
+    void text;
     return { target_type: "auto", target_id: "", capabilities: ["general-development"] };
 }
 function validateRequirementDecomposition(value, options = {}) {
@@ -583,36 +575,6 @@ function renderSourcesForAgent(sources) {
     });
     return `\n\n[业务需求资料]\n${rows.join("\n\n")}`;
 }
-function fallbackRequirement(userText, sources) {
-    const readableText = sources.filter(item => item.readable).map(item => item.content).join("\n");
-    const combined = `${userText}\n${readableText}`.trim();
-    const firstLine = combined.split(/\r?\n/).map(line => line.replace(/^[-#*\d.、\s]+/, "").trim()).find(Boolean) || "处理提交的业务需求";
-    const areas = [
-        /页面|前端|UI|交互|组件|样式/i.test(combined) ? "前端页面与交互" : "",
-        /接口|后端|服务|数据库|API/i.test(combined) ? "后端接口与数据" : "",
-        /测试|验收|回归|TestAgent/i.test(combined) ? "测试与验收" : "",
-        /流程|审批|业务|运营/i.test(combined) ? "业务流程" : "",
-    ].filter(Boolean);
-    const acceptanceLines = combined.split(/\r?\n/)
-        .map(line => line.replace(/^[-*\d.、\s]+/, "").trim())
-        .filter(line => /验收|必须|应该|需要确保|完成后|通过/.test(line) && line.length >= 6 && line.length <= 220);
-    const failedSources = sources.filter(item => !item.readable);
-    return {
-        schema: exports.REQUIREMENT_EXTRACTION_SCHEMA,
-        title: compact(firstLine, 48),
-        business_goal: compact(userText || firstLine, 800),
-        scope: unique(areas.length ? areas : ["根据已读取资料确定影响范围"], 8),
-        acceptance_criteria: unique(acceptanceLines.length ? acceptanceLines : ["按已读取的需求资料完成主要业务流程", "通过相关项目现有构建或测试", "交付总结列出变更、验证结果与剩余风险"], 8),
-        dependencies: [],
-        risks: unique([
-            failedSources.length ? `${failedSources.length} 个资料未成功读取，需要补充授权或可读版本` : "",
-            sources.some(item => item.truncated) ? "部分资料内容过长已截断，执行时需要按原始路径继续核对" : "",
-        ], 8),
-        clarification_questions: failedSources.map(item => `${item.name} 未能读取，是否可以提供公开链接、授权或导出文件？`).slice(0, 5),
-        source_evidence: sources.filter(item => item.readable).map(item => item.name).slice(0, 12),
-        extraction_method: "deterministic_fallback",
-    };
-}
 async function extractRequirementWithModel(userText, sources, configOverride) {
     const config = configOverride || (0, group_orchestrator_1.loadOrchestratorConfig)();
     if (!config.enabled || !config.apiKey || !config.apiUrl || !config.model)
@@ -643,40 +605,6 @@ async function extractRequirementWithModel(userText, sources, configOverride) {
         source_evidence: unique(value.source_evidence || value.sourceEvidence || sources.filter(item => item.readable).map(item => item.name), 12),
         extraction_method: "model",
     };
-}
-function fallbackRequirementDecomposition(requirement, contentHash) {
-    const scopes = requirement.scope.length ? requirement.scope : [requirement.business_goal || requirement.title];
-    const items = scopes.slice(0, 12).map((scope, index) => {
-        const hint = inferTargetHint(scope);
-        return {
-            item_key: stableItemKey(scope, index),
-            title: compact(scope, 100),
-            business_goal: compact(`完成需求「${requirement.title}」中的范围：${scope}`, 1200),
-            scope: [scope],
-            target_type: hint.target_type,
-            target_id: hint.target_id,
-            acceptance_criteria: requirement.acceptance_criteria,
-            depends_on: [],
-            risks: requirement.risks,
-            suggested_agent_capabilities: hint.capabilities,
-            parallelizable: true,
-            source_evidence: requirement.source_evidence,
-        };
-    });
-    return validateRequirementDecomposition({
-        epic_title: requirement.title,
-        business_goal: requirement.business_goal,
-        global_acceptance_criteria: requirement.acceptance_criteria,
-        items,
-        clarification_questions: requirement.clarification_questions,
-        risks: requirement.risks,
-        source_evidence: requirement.source_evidence,
-        version: 1,
-    }, {
-        contentHash,
-        requirement,
-        extractionMethod: "deterministic_fallback",
-    });
 }
 async function extractRequirementDecompositionWithModel(input) {
     const config = input.configOverride || (0, group_orchestrator_1.loadOrchestratorConfig)();
@@ -750,36 +678,30 @@ ${readable || "（无可读正文）"}`;
         extractionMethod: "model",
     });
 }
-/** 各通道统一的开发意图识别：命中后应设置 decomposeRequirement: true。 */
+/**
+ * 兼容入口只接受上游模型已经给出的结构化决定。
+ * 自然语言是否属于可拆解需求必须由 WorkflowDecision 决定。
+ */
 function shouldDecomposeRequirementIntent(input = {}) {
-    const text = String(input.userText || "").trim();
-    const files = Array.isArray(input.files) ? input.files : [];
-    const explicitUrls = Array.isArray(input.urls) ? input.urls.filter(Boolean) : [];
-    const hasFiles = files.length > 0;
-    const hasUrls = explicitUrls.length > 0 || /https?:\/\/\S+/i.test(text);
-    const hasDevIntent = /(?:开发|实现|改造|拆(?:分|任务)|需求|PRD|功能|Epic|迭代|交付|验收)/i.test(text || (hasFiles || hasUrls ? "需求文档开发" : ""));
-    if (!hasDevIntent)
-        return false;
-    // 有附件/链接，或正文足够承载需求时拆单（与 usability intake 对齐，避免纯闲聊误拆）
-    return hasFiles || hasUrls || text.length >= 24;
+    const decision = input.modelDecision;
+    if (!decision)
+        throw new Error("需求拆解意图缺少模型语义决定");
+    if (typeof decision.decomposeRequirement === "boolean")
+        return decision.decomposeRequirement;
+    return decision.actionRequired === true && decision.intentKind === "execution";
 }
 async function decomposeRequirementToTaskPlan(input) {
     const contentHash = input.contentHash || stableHash({
         requirement: input.requirement,
         sources: (input.sources || []).map(source => ({ name: source.name, status: source.status, content: source.content })),
     });
-    try {
-        return await extractRequirementDecompositionWithModel({
-            requirement: input.requirement,
-            sources: input.sources || [],
-            contentHash,
-            availableTargets: input.availableTargets,
-            configOverride: input.requirementConfig,
-        });
-    }
-    catch {
-        return fallbackRequirementDecomposition(input.requirement, contentHash);
-    }
+    return extractRequirementDecompositionWithModel({
+        requirement: input.requirement,
+        sources: input.sources || [],
+        contentHash,
+        availableTargets: input.availableTargets,
+        configOverride: input.requirementConfig,
+    });
 }
 async function ingestRequirementSources(input = {}) {
     const files = (input.files || []).slice(0, 10);
@@ -810,8 +732,8 @@ async function ingestRequirementSources(input = {}) {
         }
         catch (error) {
             extractionError = compact(error?.message || String(error), 500);
-            requirement = fallbackRequirement(input.userText || "", sources);
-            warnings.push("需求结构化模型暂时不可用，已改用本地规则整理，请在开始前确认计划。");
+            requirement = null;
+            warnings.push("需求结构化模型不可用，未生成本地语义替代结果；请恢复模型后重试。");
         }
     }
     if (input.decomposeRequirement === true && requirement) {
@@ -826,8 +748,8 @@ async function ingestRequirementSources(input = {}) {
         }
         catch (error) {
             decompositionError = compact(error?.message || String(error), 500);
-            decomposition = fallbackRequirementDecomposition(requirement, contentHash);
-            warnings.push("需求拆解模型暂时不可用，已生成本地保守拆解计划，请确认任务边界和依赖。");
+            decomposition = null;
+            warnings.push("需求拆解模型不可用，未创建子任务；请恢复模型后重试。");
         }
     }
     const readableCount = sources.filter(item => item.readable).length;
@@ -871,7 +793,7 @@ async function ingestRequirementSources(input = {}) {
             parsers: unique(sources.map(item => item.parser), 20),
             extraction_method: requirement?.extraction_method || "not_requested",
             extraction_error: extractionError,
-            fallback_used: requirement?.extraction_method === "deterministic_fallback",
+            fallback_used: false,
             decomposition_schema: decomposition?.schema || "",
             decomposition_method: decomposition?.extraction_method || "not_requested",
             decomposition_error: decompositionError,
@@ -894,7 +816,7 @@ function requirementToIntakeDraft(requirement, fallback = {}) {
         risks: requirement?.risks?.length ? requirement.risks : fallback.risks || [],
         clarification_questions: requirement?.clarification_questions || [],
         source_evidence: requirement?.source_evidence || [],
-        extraction_method: requirement?.extraction_method || "deterministic_fallback",
+        extraction_method: requirement?.extraction_method || "not_available",
         generated_at: new Date().toISOString(),
     };
 }

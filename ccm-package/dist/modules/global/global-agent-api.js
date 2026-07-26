@@ -1,12 +1,128 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentApi = createGlobalAgentApi;
 const child_process_1 = require("child_process");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const workflow_decision_1 = require("../../agents/workflow-decision");
 const global_agent_attachments_1 = require("./global-agent-attachments");
+const project_runtime_1 = require("../projects/project-runtime");
+const utils_1 = require("../../core/utils");
+const db_1 = require("../../core/db");
+const tool_manager_1 = require("../../tools/tool-manager");
+const tool_authorization_1 = require("../../tools/tool-authorization");
+const feishu_reaction_feedback_1 = require("../../integrations/feishu-reaction-feedback");
+const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
+function resolveControlBotAcpPlatformContext(acpSessionIdValue) {
+    const acpSessionId = String(acpSessionIdValue || "").trim();
+    if (!acpSessionId || acpSessionId.length > 240 || !fs.existsSync(utils_1.SESSIONS_DIR))
+        throw new Error("全局 ACP 会话 ID 无效");
+    const files = fs.readdirSync(utils_1.SESSIONS_DIR)
+        .filter((file) => /^ccm-control-bot(?:_[^/\\]+)?\.json$/i.test(file))
+        .map((file) => ({ file, mtime: fs.statSync(path.join(utils_1.SESSIONS_DIR, file)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime || a.file.localeCompare(b.file));
+    for (const candidate of files) {
+        try {
+            const store = JSON.parse(fs.readFileSync(path.join(utils_1.SESSIONS_DIR, candidate.file), "utf-8"));
+            const sessionIds = Object.entries(store.sessions || {})
+                .filter(([, session]) => String(session?.agent_session_id || "") === acpSessionId)
+                .map(([sessionId]) => String(sessionId));
+            let platformKeys = Object.entries(store.active_session || {})
+                .filter(([, sessionId]) => sessionIds.includes(String(sessionId)))
+                .map(([platformKey]) => String(platformKey));
+            if (!platformKeys.length) {
+                const activeKeys = Object.keys(store.active_session || {}).filter((key) => /^(?:feishu|lark):/i.test(key));
+                if (activeKeys.length === 1)
+                    platformKeys = activeKeys;
+            }
+            if (platformKeys.length !== 1)
+                continue;
+            const platformSessionKey = platformKeys[0];
+            const parts = platformSessionKey.split(":");
+            const chatId = parts.find((part) => /^oc_/i.test(part)) || "";
+            const openId = parts.find((part) => /^ou_/i.test(part)) || "";
+            const rootIndex = parts.findIndex((part) => part === "root");
+            const threadId = rootIndex >= 0 ? String(parts[rootIndex + 1] || "") : "";
+            if (!chatId && !openId)
+                continue;
+            return {
+                chat_id: chatId,
+                open_id: openId,
+                root_id: threadId,
+                thread_id: threadId,
+                platform_message_id: threadId,
+                platform_session_key: platformSessionKey,
+                acp_session_id: acpSessionId,
+            };
+        }
+        catch { }
+    }
+    throw new Error("无法将全局 ACP 会话精确映射到飞书身份");
+}
 // HTTP transport adapter for the global Agent feature surface.
 function createGlobalAgentApi(deps) {
-    const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, compactGlobalAgentSessionWithModel, completeGlobalAgentSupervision, completeIdempotency, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createMissionSupervisorRuntime, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processedFeishuMessageIds, processFeishuControlledMessage, publicGlobalAgentRun, publicGlobalAgentRunSummary, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps;
+    const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, bindFeishuGlobalSession, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, compactGlobalAgentSessionWithModel, completeGlobalAgentSupervision, completeIdempotency, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalAgentConversationSession, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createMissionSupervisorRuntime, deleteGlobalAgentConversationSession, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuGlobalSessionBindings, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processedFeishuMessageIds, processFeishuCardAction, processFeishuControlledMessage, publicGlobalAgentRun, publicGlobalAgentRunSummary, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps;
+    const readJsonRequest = (req) => new Promise((resolve, reject) => {
+        let body = "";
+        req.on("data", (chunk) => {
+            body += chunk;
+            if (body.length > 1024 * 1024)
+                reject(new Error("请求内容过大"));
+        });
+        req.on("end", () => {
+            try {
+                resolve(body ? JSON.parse(body) : {});
+            }
+            catch {
+                reject(new Error("请求 JSON 格式无效"));
+            }
+        });
+        req.on("error", reject);
+    });
+    const globalFeishuSessionSnapshot = () => {
+        const store = loadGlobalAgentHistoryStore();
+        const bindings = getFeishuGlobalSessionBindings();
+        const sessions = (store.sessions || [])
+            .filter((session) => String(session.source || "web") === "feishu")
+            .map((session) => ({
+            ...session,
+            feishuBindings: bindings.filter((binding) => String(binding.active_session_id || "") === String(session.id || "")),
+        }));
+        return { sessions, bindings };
+    };
     const requirementTargets = () => [
         ...loadGroups().map((group) => ({
             type: "group",
@@ -14,13 +130,13 @@ function createGlobalAgentApi(deps) {
             name: group.name || group.id,
             capabilities: (group.members || []).flatMap((member) => member.skills || member.capabilities || []),
         })),
-        ...getConfigs().map((config) => ({ type: "project", id: config.name, name: config.name })),
+        ...getConfigs().map((config) => ({ type: "project", id: config.name, name: (0, project_runtime_1.projectDisplayName)(config.name) })),
     ];
     function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
         if (pathname === "/api/global-agent/history" && req.method === "POST") {
             let body = "";
             req.on("data", (chunk) => body += chunk);
-            req.on("end", () => {
+            req.on("end", async () => {
                 try {
                     const payload = body ? JSON.parse(body) : {};
                     const store = syncGlobalAgentWebHistory(payload);
@@ -36,6 +152,48 @@ function createGlobalAgentApi(deps) {
         if (pathname === "/api/global-agent/history" && req.method === "GET") {
             const store = loadGlobalAgentHistoryStore();
             sendJson(res, { success: true, ...store });
+            return true;
+        }
+        if (pathname === "/api/global-agent/feishu-sessions" && req.method === "GET") {
+            sendJson(res, { success: true, ...globalFeishuSessionSnapshot() });
+            return true;
+        }
+        if (pathname === "/api/global-agent/feishu-sessions/create" && req.method === "POST") {
+            void readJsonRequest(req).then((payload) => {
+                const session = createGlobalAgentConversationSession({ source: "feishu", name: payload.name });
+                let binding = null;
+                if (String(payload.binding_id || "").trim()) {
+                    binding = bindFeishuGlobalSession({ bindingId: String(payload.binding_id), sessionId: session.id, action: "bind" });
+                }
+                sendJson(res, { success: true, session: { ...session, feishuBindings: binding ? [binding] : [] }, binding });
+            }).catch((error) => sendJson(res, { success: false, error: error?.message || "创建飞书会话失败" }, 400));
+            return true;
+        }
+        if (pathname === "/api/global-agent/feishu-sessions/bind" && req.method === "POST") {
+            void readJsonRequest(req).then((payload) => {
+                const sessionId = String(payload.session_id || "").trim();
+                const action = payload.action === "unbind" ? "unbind" : "bind";
+                if (action === "bind") {
+                    const session = (loadGlobalAgentHistoryStore().sessions || []).find((item) => String(item.id || "") === sessionId);
+                    if (!session || String(session.source || "web") !== "feishu")
+                        throw new Error("只能将飞书目标绑定到飞书会话");
+                }
+                const binding = bindFeishuGlobalSession({ bindingId: String(payload.binding_id || ""), sessionId, action });
+                sendJson(res, { success: true, binding, ...globalFeishuSessionSnapshot() });
+            }).catch((error) => sendJson(res, { success: false, error: error?.message || "更新飞书会话绑定失败" }, 400));
+            return true;
+        }
+        if (pathname === "/api/global-agent/feishu-sessions/delete" && req.method === "POST") {
+            void readJsonRequest(req).then((payload) => {
+                const sessionId = String(payload.session_id || "").trim();
+                const result = deleteGlobalAgentConversationSession(sessionId, "feishu");
+                for (const binding of getFeishuGlobalSessionBindings()) {
+                    if (String(binding.active_session_id || "") === sessionId) {
+                        bindFeishuGlobalSession({ bindingId: binding.id, sessionId, action: "unbind" });
+                    }
+                }
+                sendJson(res, { success: true, ...result, ...globalFeishuSessionSnapshot() });
+            }).catch((error) => sendJson(res, { success: false, error: error?.message || "删除飞书会话失败" }, 400));
             return true;
         }
         if (pathname === "/api/global-agent/memory/compact" && req.method === "POST") {
@@ -113,6 +271,24 @@ function createGlobalAgentApi(deps) {
             let body = "";
             req.on("data", (chunk) => body += chunk);
             req.on("end", async () => {
+                let reactionInput = null;
+                let streamResponse = false;
+                const emitControlStream = (event) => {
+                    if (!streamResponse || res.writableEnded || res.destroyed)
+                        return;
+                    res.write(`data: ${JSON.stringify(event)}\n\n`);
+                };
+                const finishReaction = (status) => {
+                    if (!reactionInput)
+                        return;
+                    try {
+                        (0, feishu_reaction_feedback_1.finishFeishuReactionFeedback)({ ...reactionInput, status });
+                    }
+                    catch (reactionError) {
+                        console.warn(`[飞书状态表情] 全局结束通知失败 reason=${String(reactionError?.message || reactionError).slice(0, 160)}`);
+                    }
+                    reactionInput = null;
+                };
                 try {
                     const isAcp = req.headers["x-ccm-acp"] === "1";
                     const config = loadFeishuConfig();
@@ -124,7 +300,11 @@ function createGlobalAgentApi(deps) {
                             return;
                         }
                     }
-                    const payload = body ? JSON.parse(body) : {};
+                    let payload = body ? JSON.parse(body) : {};
+                    streamResponse = isAcp && payload.stream === true;
+                    if (isAcp) {
+                        payload = { ...payload, ...resolveControlBotAcpPlatformContext(payload.acpSessionId || payload.sessionId) };
+                    }
                     const text = extractCcConnectHookText(payload);
                     if (!text) {
                         sendJson(res, { success: false, error: "未从控制机器人载荷中识别到文本消息" }, 400);
@@ -137,17 +317,61 @@ function createGlobalAgentApi(deps) {
                     if (operation && !operation.acquired) {
                         const settled = operation.inProgress ? await waitForIdempotencyResult("feishu-control-message", operationKey) : operation.record;
                         const replay = settled?.result || {};
-                        sendJson(res, { success: settled?.status === "completed", duplicate: true, message: "重复控制消息已抑制", reply: replay.reply || replay.error || "消息仍在处理中", trace_id: settled?.trace_id || operation.traceId });
+                        const duplicateResult = { success: settled?.status === "completed", duplicate: true, message: "重复控制消息已抑制", reply: replay.reply || replay.error || "消息仍在处理中", trace_id: settled?.trace_id || operation.traceId };
+                        if (streamResponse) {
+                            res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+                            emitControlStream({ type: "result", ...duplicateResult });
+                            emitControlStream({ type: "done" });
+                            res.end();
+                        }
+                        else {
+                            sendJson(res, duplicateResult);
+                        }
                         return;
                     }
-                    const controlled = await processFeishuControlledMessage(getRequestBaseUrl(req), ctx, text, payload, { sendReport: !isAcp, traceId: operation?.traceId });
+                    if (isAcp && /^om_[a-z0-9_-]{8,200}$/i.test(messageId)) {
+                        reactionInput = { scope: "global", messageId };
+                        try {
+                            (0, feishu_reaction_feedback_1.beginFeishuReactionFeedback)(reactionInput);
+                        }
+                        catch (reactionError) {
+                            console.warn(`[飞书状态表情] 全局开始通知失败 reason=${String(reactionError?.message || reactionError).slice(0, 160)}`);
+                            reactionInput = null;
+                        }
+                    }
+                    if (streamResponse) {
+                        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+                        if (typeof res.flushHeaders === "function")
+                            res.flushHeaders();
+                    }
+                    const controlled = await processFeishuControlledMessage(getRequestBaseUrl(req), ctx, text, payload, {
+                        sendReport: !isAcp,
+                        traceId: operation?.traceId,
+                        onDelta: streamResponse ? (delta) => emitControlStream({ type: "chunk", text: delta }) : undefined,
+                    });
                     if (operationKey)
                         completeIdempotency("feishu-control-message", operationKey, controlled);
-                    sendJson(res, { success: true, message: controlled.queued ? "控制机器人消息已排队" : "控制机器人消息已处理", ...controlled, trace_id: operation?.traceId || "" });
+                    const responsePayload = { success: true, message: controlled.queued ? "控制机器人消息已排队" : "控制机器人消息已处理", ...controlled, trace_id: operation?.traceId || "" };
+                    if (streamResponse) {
+                        emitControlStream({ type: "result", ...responsePayload });
+                        emitControlStream({ type: "done" });
+                        res.end();
+                    }
+                    else {
+                        sendJson(res, responsePayload);
+                    }
+                    finishReaction("completed");
                 }
                 catch (error) {
-                    if (!res.headersSent)
+                    finishReaction("failed");
+                    if (streamResponse && res.headersSent) {
+                        emitControlStream({ type: "error", text: error?.message || "控制机器人消息处理失败" });
+                        emitControlStream({ type: "done" });
+                        res.end();
+                    }
+                    else if (!res.headersSent) {
                         sendJson(res, { success: false, error: error?.message || "控制机器人消息处理失败" }, 400);
+                    }
                 }
             });
             return true;
@@ -184,7 +408,7 @@ function createGlobalAgentApi(deps) {
         if (pathname === "/api/feishu/bot/event" && req.method === "POST") {
             let body = "";
             req.on("data", (chunk) => body += chunk);
-            req.on("end", () => {
+            req.on("end", async () => {
                 try {
                     const config = loadFeishuConfig();
                     const rawPayload = body ? JSON.parse(body) : {};
@@ -194,10 +418,25 @@ function createGlobalAgentApi(deps) {
                         sendJson(res, { challenge: payload.challenge });
                         return;
                     }
+                    const eventType = String(payload?.header?.event_type || payload?.type || "");
+                    if (["card.action.trigger", "card.action.trigger_v1"].includes(eventType)) {
+                        if (config.control_bot_enabled !== true) {
+                            sendJson(res, { toast: { type: "error", content: "CCM 飞书任务通道未启用" } });
+                            return;
+                        }
+                        try {
+                            const result = await processFeishuCardAction(getRequestBaseUrl(req), payload);
+                            sendJson(res, { toast: { type: "success", content: result.message || "操作成功" } });
+                        }
+                        catch (error) {
+                            sendJson(res, { toast: { type: "error", content: error?.message || "卡片操作失败" } });
+                        }
+                        return;
+                    }
                     sendJson(res, { code: 0 });
                     if (config.control_bot_enabled !== true)
                         return;
-                    if (payload?.header?.event_type !== "im.message.receive_v1")
+                    if (eventType !== "im.message.receive_v1")
                         return;
                     if (payload?.event?.sender?.sender_type === "app")
                         return;
@@ -397,6 +636,28 @@ function createGlobalAgentApi(deps) {
                     sendJson(res, { success: false, error: error?.message || String(error) }, 400);
                 }
             });
+            return true;
+        }
+        if (pathname === "/api/global-agent/tools" && req.method === "GET") {
+            const authorization = (0, global_agent_tool_authorization_1.getGlobalAgentToolAuthorizationPayload)();
+            const options = (0, tool_authorization_1.buildToolAuthorizationOptions)({
+                mcpTools: (0, db_1.loadMcpTools)(),
+                skills: (0, db_1.loadSkills)(),
+                status: tool_manager_1.toolManager.getToolList(),
+            });
+            sendJson(res, { success: true, ...authorization, options });
+            return true;
+        }
+        if (pathname === "/api/global-agent/tools" && req.method === "POST") {
+            void readJsonRequest(req)
+                .then(payload => (0, global_agent_tool_authorization_1.saveGlobalAgentToolAuthorization)(payload))
+                .then(result => sendJson(res, { success: true, ...result }))
+                .catch((error) => sendJson(res, { success: false, error: error?.message || "保存全局 Agent 工具配置失败" }, 400));
+            return true;
+        }
+        if (pathname === "/api/global-agent/tools/self-test" && req.method === "GET") {
+            const result = (0, global_agent_tool_authorization_1.runGlobalAgentToolAuthorizationSelfTest)();
+            sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
             return true;
         }
         if (pathname === "/api/global-agent/runtime/tools" && req.method === "GET") {

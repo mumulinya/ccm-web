@@ -101,19 +101,48 @@ try {
   assert.equal(pulled.data.success, true)
   assert.equal(fs.readFileSync(path.join(workDir, 'remote.txt'), 'utf8').replace(/\r\n/g, '\n'), 'from remote\n')
 
+  const emptyCommit = await post('/api/git/commit', { project, message: 'must not commit everything', files: [] })
+  assert.equal(emptyCommit.response.status, 400)
+  assert.match(emptyCommit.data.error, /明确选择/)
+
   fs.writeFileSync(path.join(workDir, 'local.txt'), 'from local\n')
-  git(workDir, ['add', 'local.txt'])
-  git(workDir, ['commit', '-m', 'local change'])
+  const committed = await post('/api/git/commit', { project, message: 'local commit', files: ['local.txt'], action: 'commit', verification: 'passed', reviewed: true })
+  assert.equal(committed.data.success, true)
+  assert.equal(committed.data.outcome, 'committed')
+  assert.notEqual(git(workDir, ['rev-parse', 'HEAD']), git(tempHome, ['--git-dir', remoteDir, 'rev-parse', 'refs/heads/main']))
   status = await request(`/api/git/status?project=${encodeURIComponent(project)}`)
   assert.equal(status.data.repository.ahead, 1)
   const pushed = await post('/api/git/remote-operation', { project, operation: 'push', confirmed: true })
   assert.equal(pushed.data.success, true)
   assert.equal(git(workDir, ['rev-parse', 'HEAD']), git(tempHome, ['--git-dir', remoteDir, 'rev-parse', 'refs/heads/main']))
 
+  fs.writeFileSync(path.join(workDir, 'combined.txt'), 'commit and push\n')
+  const combined = await post('/api/git/commit', { project, message: 'combined change', files: ['combined.txt'], action: 'commit_and_push', verification: 'passed', reviewed: true })
+  assert.equal(combined.data.success, true)
+  assert.equal(combined.data.outcome, 'committed_and_pushed')
+  assert.equal(combined.data.commit.success, true)
+  assert.equal(combined.data.push.success, true)
+  assert.equal(git(workDir, ['rev-parse', 'HEAD']), git(tempHome, ['--git-dir', remoteDir, 'rev-parse', 'refs/heads/main']))
+
   fs.appendFileSync(path.join(workDir, 'README.md'), 'dirty\n')
   const blockedPull = await post('/api/git/remote-operation', { project, operation: 'pull', confirmed: true })
   assert.equal(blockedPull.response.status, 409)
   assert.match(blockedPull.data.error, /未提交文件/)
+
+  git(seedDir, ['pull', '--ff-only'])
+  fs.writeFileSync(path.join(seedDir, 'remote-after-local.txt'), 'remote moved\n')
+  git(seedDir, ['add', 'remote-after-local.txt'])
+  git(seedDir, ['commit', '-m', 'remote moved again'])
+  git(seedDir, ['push'])
+  fs.writeFileSync(path.join(workDir, 'partial.txt'), 'local commit survives failed push\n')
+  const partial = await post('/api/git/commit', { project, message: 'partial push case', files: ['partial.txt'], action: 'commit_and_push', verification: 'passed', reviewed: true })
+  assert.equal(partial.data.success, true)
+  assert.equal(partial.data.partialSuccess, true)
+  assert.equal(partial.data.outcome, 'committed_push_failed')
+  assert.equal(partial.data.commit.success, true)
+  assert.equal(partial.data.push.success, false)
+  assert.equal(partial.data.push.errorCode, 'remote_ahead')
+  assert.ok(git(workDir, ['log', '-1', '--pretty=%s']).includes('partial push case'))
 
   console.log(JSON.stringify({
     pass: true,
@@ -124,8 +153,12 @@ try {
       rejectsUnknownAndUnconfirmedOperations: true,
       fetchesRemoteReferences: true,
       pullsFastForwardUpdate: true,
-      pushesLocalCommit: true,
+      rejectsImplicitCommitAll: true,
+      commitsSelectedFilesLocally: true,
+      pushesExistingLocalCommit: true,
+      commitsAndPushesInOneFlow: true,
       blocksPullWithDirtyWorktree: true,
+      preservesCommitWhenCombinedPushFails: true,
     },
   }, null, 2))
 } finally {

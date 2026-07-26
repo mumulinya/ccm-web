@@ -260,9 +260,13 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     const current = tasks.find(t => t.id === taskId);
     if (!current)
         return { success: false, status: 404, error: "任务不存在" };
-    const continuationKind = String(options.continuation_kind || options.continuationKind || "auto") === "auto"
-        ? (0, collaboration_runtime_runtime_tools_part_01_1.classifyTaskContinuation)(message)
-        : String(options.continuation_kind || options.continuationKind);
+    const requestedContinuationKind = String(options.continuation_kind || options.continuationKind || "auto");
+    const machineGeneratedContinuation = options.internal === true
+        || options.internalContinuation === true
+        || /(?:gap_rework|dependency_unlocked|watchdog|autopilot|supervisor|targeted_rework)/i.test(String(options.source || ""));
+    const continuationKind = requestedContinuationKind === "auto"
+        ? machineGeneratedContinuation ? "supplement" : "new_task"
+        : requestedContinuationKind;
     if (continuationKind === "new_task") {
         return { success: false, status: 409, new_task_suggested: true, error: "这条要求看起来是一个独立新任务，请直接在群聊发送，不会混入当前任务。" };
     }

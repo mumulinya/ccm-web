@@ -871,8 +871,13 @@ export function collectProjectPolicyViolations(actualFileChanges: any[] = [], ev
   return violations;
 }
 
-export function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string, taskText = "") {
-  const selectedRoleSkills = selectRoleSkills("project-child-agent", taskText, { forceWork: true, phase: "execution" });
+export function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string, taskText = "", selectedSkillNames: string[] = []) {
+  const selectedRoleSkills = selectRoleSkills("project-child-agent", taskText, {
+    forceWork: true,
+    phase: "execution",
+    selectedSkillNames,
+    modelDecision: { actionRequired: true, selectedSkills: selectedSkillNames },
+  });
   const allowedTools = normalizeToolAuthorization(mergeToolSelections(
     group?.tools || {},
     getProjectToolSelection(projectName),

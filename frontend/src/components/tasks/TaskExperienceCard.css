@@ -126,6 +126,14 @@
 :global([data-theme="dark"] .task-experience-card textarea){ background:var(--surface); border-color:var(--border-color); color:var(--text-primary); }
 :global([data-theme="dark"] .task-experience-card .task-card-phase){ background:var(--accent-soft); color:var(--accent-blue); }
 :global([data-theme="dark"] .task-experience-card .task-card-progress){ background:var(--panel-muted); }
+:global([data-theme="dark"] .task-experience-card :is(.plan-approval-request,.plan-mode-revision,.plan-mode-accepted,.plan-mode-followup,.plan-mode-questions,.plan-mode-steps,.work-item-dependencies,.work-item-next,.work-item-claim-summary,.work-item-unlock-summary,.work-item-verification-reminder,.child-plan-review,.memory-gate-status,.receipt-rework-summary,.test-agent-plan-summary,.test-agent-plan-issues,.completion-readiness,.independent-review-summary,.post-review-spot-check-summary,.task-card-conflicts,.task-card-next,.task-dispatch-launch-summary,.completion-overview,.quality-followup,.delivery-report,.pickup-summary,.user-request-summary,.user-handoff,.task-card-section.blockers)) {
+  background:var(--panel-muted);
+  border-color:var(--border-color);
+}
+:global([data-theme="dark"] .task-experience-card :is(.task-card-pills span,.plan-risk,.plan-approval-request .section-head span,.plan-mode-steps li > span,.section-head span,.recovery-checks span,.agent-progress-evidence span,.receipt-quality span,.runtime-tags code,.qa-badges em,.handoff-evidence span)) {
+  background:var(--accent-soft);
+  color:var(--text-secondary);
+}
 .task-experience-card .task-card-button{ min-height:var(--control-height-sm); border-radius:var(--radius-md); }
 .task-experience-card .plan-mode-accept-feedback textarea,.task-experience-card select,.task-experience-card input{ border-radius:var(--radius-md); min-height:var(--control-height); }
 

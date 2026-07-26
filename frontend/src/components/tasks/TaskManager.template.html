@@ -297,10 +297,12 @@
           @purge="purgeTask"
           @cancel="cancelTask"
           @queue="addToQueue"
+          @priority="changeTaskPriority"
           @report="viewReport"
           @pipeline="viewPipeline"
           @continue="openContinueTask"
           @logs="viewTaskLogs"
+          @replay="openTaskReplay"
           @resend="resendTask"
           @edit="editTask"
           @delete="deleteTask"
@@ -320,6 +322,14 @@
       @update-field="updateDailyDevTaskField"
       @submit="submitDailyDevTask"
       @close="showDailyDevCreate = false"
+    />
+
+    <AutomatedTaskIntakeModal
+      v-if="showAutomatedIntake"
+      :groups="groups"
+      :projects="projects"
+      @created="refreshTaskWork"
+      @close="showAutomatedIntake = false"
     />
 
     <!-- 新建任务弹窗 -->

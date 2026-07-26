@@ -26,11 +26,16 @@ async function runTestAgent(input, options = {}) {
     const agentic = await (0, agentic_planner_1.applyAgenticTestPlanning)(normalized.workOrder, options);
     const planned = (0, command_planner_1.planVerificationCommands)(agentic.workOrder, [...normalized.issues, ...agentic.issues]);
     const { workOrder, issues } = planned;
+    const modelSelectedSkills = Array.isArray(workOrder.metadata?.selectedSkills)
+        ? workOrder.metadata.selectedSkills
+        : Array.isArray(workOrder.metadata?.workflowDecision?.selectedSkills)
+            ? workOrder.metadata.workflowDecision.selectedSkills
+            : [];
     const roleSkills = (0, role_skills_1.selectRoleSkills)("test-agent", [
         workOrder.originalUserGoal,
         ...(workOrder.acceptanceCriteria || []),
         ...(workOrder.requiredChecks || []),
-    ].join("\n"), { forceWork: true, phase: "verification" });
+    ].join("\n"), { forceWork: true, phase: "verification", selectedSkillNames: modelSelectedSkills });
     workOrder.metadata = {
         ...workOrder.metadata,
         roleSkills: {

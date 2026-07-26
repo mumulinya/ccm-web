@@ -6,6 +6,7 @@ import { CCM_DIR } from "../../core/utils";
 import { loadSkills, SKILL_PACKAGES_DIR } from "../../core/db";
 import { isCcmInternalSkillName } from "../../skills/internal-skill-catalog";
 import { buildContextBudget, compactPreserveEdges, estimateTextTokens, getAutoCompactThreshold, microCompactText } from "../../system/context-budget";
+import { runModelCallWithRetry } from "../../system/model-call-retry";
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 import {
   readGroupSessionMemoryExtractionState,
@@ -148,10 +149,7 @@ export function normalizeAnthropicUrl(value: string) {
   return /\/v1\//i.test(base) ? base : `${base}/v1/messages`;
 }
 
-export async function callCompactionModel(config: any, system: string, user: string, maxOutputTokens = GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS) {
-  const mockCall = config?.compactionModelCall || config?.compaction_model_call || config?.modelCall || config?.model_call;
-  if (typeof mockCall === "function") return mockCall({ system, user, maxOutputTokens });
-  if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model) return null;
+async function callCompactionModelOnce(config: any, system: string, user: string, maxOutputTokens: number, attemptTimeoutMs: number) {
   const anthropic = config.format === "anthropic-compatible"
     || config.format === "auto" && String(config.apiUrl).toLowerCase().includes("anthropic")
     || /\/anthropic(?:\/|$)/i.test(String(config.apiUrl));
@@ -160,7 +158,7 @@ export async function callCompactionModel(config: any, system: string, user: str
   const abortFromExternal = () => controller.abort((externalSignal as any)?.reason);
   if (externalSignal?.aborted) abortFromExternal();
   else externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
-  const timeout = setTimeout(() => controller.abort(), Math.max(10_000, Math.min(Number(config.timeoutMs) || 90_000, 120_000)));
+  const timeout = setTimeout(() => controller.abort(), Math.max(1_000, attemptTimeoutMs));
   let activityError: any = null;
   const activitySignal = typeof config.onCompactionActivity === "function" ? config.onCompactionActivity : null;
   const heartbeatMs = Math.max(25, Math.min(Number(config.compactionActivityHeartbeatMs || config.compaction_activity_heartbeat_ms || 30_000), 60_000));
@@ -212,17 +210,31 @@ export async function callCompactionModel(config: any, system: string, user: str
       signal: controller.signal,
       });
     } catch (error) {
-      if (activityError) throw activityError;
-      if (externalSignal?.aborted && (externalSignal as any).reason) throw (externalSignal as any).reason;
+      if (activityError) {
+        const failed: any = new Error(String(activityError?.message || activityError || "压缩活动回调失败"));
+        failed.code = "CCM_MODEL_CALL_ACTIVITY_FAILED";
+        throw failed;
+      }
+      if (externalSignal?.aborted) {
+        const cancelled: any = new Error(String((externalSignal as any).reason?.message || "模型调用已由外部取消"));
+        cancelled.code = "CCM_MODEL_CALL_CANCELLED";
+        throw cancelled;
+      }
       throw error;
     }
     const body = await response.text();
-    if (activityError) throw activityError;
+    if (activityError) {
+      const failed: any = new Error(String(activityError?.message || activityError || "压缩活动回调失败"));
+      failed.code = "CCM_MODEL_CALL_ACTIVITY_FAILED";
+      throw failed;
+    }
     if (!response.ok) throw new Error(`memory compact HTTP ${response.status}: ${body.slice(0, 180)}`);
     const data = JSON.parse(body);
     const content = anthropic
       ? (data?.content || []).map((part: any) => part?.type === "text" ? part.text : "").join("")
       : data?.choices?.[0]?.message?.content || "";
+    const summary = extractJsonObject(content);
+    if (!summary) throw new Error("memory compact model returned invalid JSON");
     if (groupId && groupSessionId.startsWith("gcs_")) {
       const usage = data?.usage || {};
       try {
@@ -243,7 +255,7 @@ export async function callCompactionModel(config: any, system: string, user: str
       } catch {}
     }
     return {
-      summary: extractJsonObject(content),
+      summary,
       usage: data?.usage || null,
       provider: anthropic ? "anthropic" : "openai",
       model: String(data?.model || config.model || ""),
@@ -255,6 +267,30 @@ export async function callCompactionModel(config: any, system: string, user: str
     if (activityInterval) clearInterval(activityInterval);
     externalSignal?.removeEventListener("abort", abortFromExternal);
   }
+}
+
+export async function callCompactionModel(config: any, system: string, user: string, maxOutputTokens = GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS) {
+  const mockCall = config?.compactionModelCall || config?.compaction_model_call || config?.modelCall || config?.model_call;
+  if (typeof mockCall === "function") return mockCall({ system, user, maxOutputTokens });
+  if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model) return null;
+  return runModelCallWithRetry(
+    context => callCompactionModelOnce(config, system, user, maxOutputTokens, context.attemptTimeoutMs),
+    {
+      scope: "session memory compaction model call",
+      baseDelayMs: config.modelRetryBaseDelayMs ?? config.model_retry_base_delay_ms,
+      onRetry: notice => {
+        try {
+          config.onCompactionActivity?.({
+            stage: "model_summary_retry",
+            heartbeat: false,
+            attempt: notice.attempt + 1,
+            maxAttempts: notice.maxAttempts,
+          });
+        } catch {}
+        console.warn(`[模型重试] 会话压缩模型暂时失败，将执行第 ${notice.attempt + 1}/${notice.maxAttempts} 次尝试：${String(notice.error?.message || notice.error || "").slice(0, 240)}`);
+      },
+    },
+  );
 }
 
 export function fitCompactionPromptToTokenBudget(system: string, user: string, maxInputTokens: number) {

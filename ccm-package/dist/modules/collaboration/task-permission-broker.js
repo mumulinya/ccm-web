@@ -457,12 +457,12 @@ async function deliverPendingTaskPermissionNotifications(ctx, dependencies = {})
             let feishuSent = request.notificationFeishuSent === true;
             if (!feishuSent)
                 try {
-                    const approvalHint = request.originType === "global"
-                        ? `可在本飞书会话回复“批准权限 ${request.id}”或“拒绝权限 ${request.id}”，也可回到 CCM 对应会话审批。`
-                        : "请回到 CCM 对应会话或任务派发页审批。";
+                    const approvalHint = `可以直接点击卡片按钮审批；全局 Agent 来源也可以回复“批准权限 ${request.id}”或“拒绝权限 ${request.id}”。`;
                     const markdown = [`**来源**：${originLabel}`, `**项目**：${request.project}`, `**请求操作**：${request.operation}`, `**风险**：${request.risk}`, `**原因**：${request.reason}`, `**申请 ID**：${request.id}`, "", approvalHint].join("\n");
-                    const notifyFeishuTaskStage = dependencies.notifyFeishuTaskStage || require("./feishu-channel").notifyFeishuTaskStage;
-                    const bound = await notifyFeishuTaskStage({ stage: "permission_approval", title, markdown, dedupeKey: `permission:${request.id}`, runId: request.globalRunId, missionId: request.globalMissionId, taskId: request.taskId.startsWith("project-session:") ? "" : request.taskId, sessionId: request.originSessionId });
+                    const channel = require("./feishu-channel");
+                    const notifyFeishuTaskStage = dependencies.notifyFeishuTaskStage || channel.notifyFeishuTaskStage;
+                    const actions = (dependencies.createFeishuPermissionActions || channel.createFeishuPermissionActions)(request);
+                    const bound = await notifyFeishuTaskStage({ stage: "permission_approval", title, markdown, actions, forceNewMessage: true, dedupeKey: `permission:${request.id}`, runId: request.globalRunId, missionId: request.globalMissionId, taskId: request.taskId.startsWith("project-session:") ? "" : request.taskId, sessionId: request.originSessionId });
                     if (bound?.success || bound?.queued)
                         feishuSent = true;
                     else {

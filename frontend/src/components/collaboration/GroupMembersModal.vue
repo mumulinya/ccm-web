@@ -1,13 +1,15 @@
 <script setup>
 import EmptyState from '../common/EmptyState.vue'
 
-defineProps({
+const props = defineProps({
   groupName: { type: String, default: '' },
   members: { type: Array, default: () => [] },
-  availableProjects: { type: Array, default: () => [] }
+  availableProjects: { type: Array, default: () => [] },
+  projects: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['close', 'add-member', 'remove-member'])
+const projectLabel = id => props.projects.find(project => project.name === id)?.display_name || id
 </script>
 
 <template>
@@ -22,7 +24,7 @@ const emit = defineEmits(['close', 'add-member', 'remove-member'])
           <span class="tag coordinator">🎯 协调者（不可移除）</span>
           <template v-for="member in members" :key="member.project">
             <span class="tag removable">
-              {{ member.project }}
+              {{ projectLabel(member.project) }}
               <button @click="emit('remove-member', member.project)">&times;</button>
             </span>
           </template>
@@ -38,7 +40,7 @@ const emit = defineEmits(['close', 'add-member', 'remove-member'])
             class="btn btn-outline btn-sm"
             @click="emit('add-member', project.name, project.agent || 'claudecode')"
           >
-            + {{ project.name }}
+            + {{ project.display_name || project.name }}
           </button>
         </div>
       </div>
@@ -53,7 +55,7 @@ const emit = defineEmits(['close', 'add-member', 'remove-member'])
 
 <style scoped>
 .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.18); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; z-index: 10001; }
-.modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; padding: 28px; min-width: 420px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; position: relative; }
+.modal { background: var(--surface-translucent) !important; backdrop-filter: blur(30px) !important; border: 1px solid var(--border-color) !important; border-radius: 16px !important; padding: 28px; min-width: 420px; box-shadow: var(--shadow-lg) !important; position: relative; }
 .members-modal { min-width: 450px; }
 .modal-close { position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.05); background: rgba(0,0,0,0.02); color: var(--text-secondary); cursor: pointer; }
 .modal h3 { margin: 0 0 18px; font-size: 16px; color: var(--text-primary); }

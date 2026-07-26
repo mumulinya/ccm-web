@@ -18,6 +18,8 @@ const checks = [
   ['定时任务资源', 'resources.cron.slice'],
   ['桌面双栏布局', 'workspace-grid'],
   ['移动端断点', '@media(max-width:760px)'],
+  ['工作台占满内容区', '.workbench{box-sizing:border-box;width:100%'],
+  ['宽屏资源栏按比例扩展', 'minmax(320px,25%)'],
   ['图标组件', '@lucide/vue'],
   ['输入门禁', ':disabled="intakeBusy || (!requirement.trim() && intakeFiles.length === 0)"'],
 ]
@@ -30,6 +32,11 @@ if (missing.length) {
 
 if (source.includes('resources{display:grid')) {
   console.error('Workbench redesign self-test failed: legacy resource grid remains')
+  process.exit(1)
+}
+
+if (source.includes('width:min(1320px,100%)')) {
+  console.error('Workbench redesign self-test failed: legacy 1320px width cap remains')
   process.exit(1)
 }
 

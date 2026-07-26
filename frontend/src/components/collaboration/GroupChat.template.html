@@ -54,8 +54,15 @@
               hint="创建群聊并添加 Agent 成员"
             />
             <div v-else class="messages-flow" :key="`${currentGroup?.id}:${currentGroupSessionId}`">
+              <EmptyState
+                v-if="isGroupSessionDraft"
+                large
+                icon="＋"
+                title="想让群聊主 Agent 做什么？"
+                hint="输入需求、粘贴图片或添加附件。发送第一条消息后，这个会话才会创建并进入列表。"
+              />
               <GroupMainAgentStatusCard
-                v-if="hasMainAgentStatusDetail"
+                v-if="!isGroupSessionDraft && hasMainAgentStatusDetail"
                 :status="mainAgentStatus"
                 :group-agent-qa="groupAgentQa"
                 :latest-decision="latestMainAgentDecision"
@@ -147,7 +154,10 @@
                   @open-pipeline="openPipelineViewer(msg)"
                   @open-file-diff="openFileDiff"
                 />
-                <div class="msg-meta">{{ new Date(msg.timestamp).toLocaleString('zh-CN') }}</div>
+                <MessageTimestamp
+                  class="msg-meta"
+                  :value="msg.timestamp || msg.created_at || msg.createdAt"
+                />
                 </div>
               </template>
               <ContextCompactionEvent
@@ -184,18 +194,18 @@
           <div class="composer-inner">
             <ConversationTurnControls
               :busy="isStreaming"
-              v-model:mode="groupTurnControl.mode.value"
               :turns="groupTurnControl.turns.value"
               :stopping="stoppingGroupTurn"
               @stop="stopGroupCurrentWork()"
               @cancel="groupTurnControl.cancel"
+              @guide="guideGroupQueuedTurn"
               @retry="(turn) => groupTurnControl.retry(turn).then(() => drainGroupTurnQueue())"
             />
             <ChatComposer
               v-model="newMessage"
               input-id="groupChatInput"
               :placeholder="groupComposerPlaceholder"
-              :send-label="isStreaming ? (groupTurnControl.mode.value === 'steer' ? '引导' : '排队') : groupComposerSendLabel"
+              :send-label="isStreaming ? '排队' : groupComposerSendLabel"
               :disabled="false"
               :busy="isStreaming"
               :allow-input-while-busy="true"
@@ -339,6 +349,7 @@
       :group-name="currentGroup?.name"
       :members="getRoutableMembers()"
       :available-projects="getAvailableProjects()"
+      :projects="projects"
       @add-member="addGroupMember"
       @remove-member="removeGroupMember"
       @close="showMembers = false"

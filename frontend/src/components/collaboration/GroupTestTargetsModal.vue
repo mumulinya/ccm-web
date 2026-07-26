@@ -4,8 +4,11 @@ import { Check, KeyRound, MonitorCheck, Plus, Save, Trash2, X } from '@lucide/vu
 
 const props = defineProps({
   groupName: { type: String, default: '' },
+  ownerLabel: { type: String, default: '' },
+  fixedProject: { type: String, default: '' },
   projects: { type: Array, default: () => [] },
   targets: { type: Array, default: () => [] },
+  projectAuth: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
 })
@@ -16,15 +19,33 @@ const kindOptions = [
   ['native_app', '原生应用'], ['other', '其他'],
 ]
 const authOptions = [
-  ['none', '无需登录'], ['credentials', '账号凭据'], ['storage_state', 'Storage State'], ['existing_session', '已有浏览器会话'],
+  ['none', '无需登录'], ['credentials', '使用项目账号密码'], ['storage_state', '使用项目 Storage State'], ['existing_session', '使用项目浏览器会话'],
 ]
 const selectedId = ref('')
 const editing = ref(false)
 const form = reactive({})
+const projectAuthForm = reactive({})
+
+function emptyProjectAuth() {
+  return {
+    enabled: false, mode: 'credentials', baseUrl: '', loginPath: '/login', username: '', password: '',
+    usernameConfigured: false, passwordConfigured: false, usernameLabel: '用户名', passwordLabel: '密码',
+    submitLabel: '登录', successText: '', successUrlIncludes: '', storageStatePath: '', existingSessionProvider: 'auto',
+  }
+}
+
+function assignProjectAuth(profile = null) {
+  const next = profile ? {
+    ...emptyProjectAuth(), ...profile, mode: profile.mode === 'none' ? 'credentials' : (profile.mode || 'credentials'),
+    username: '', password: '',
+  } : emptyProjectAuth()
+  Object.keys(projectAuthForm).forEach(key => delete projectAuthForm[key])
+  Object.assign(projectAuthForm, next)
+}
 
 function emptyForm() {
   return {
-    id: '', project: props.projects[0] || '', name: '', kind: 'web', environment: 'test',
+    id: '', project: props.fixedProject || props.projects[0] || '', name: '', kind: 'web', environment: 'test',
     enabled: true, required: false, baseUrl: '', startupCommand: '', verificationCommandsText: '', notes: '',
     auth: {
       mode: 'none', loginPath: '/login', submitLabel: '登录', successText: '', successUrlIncludes: '',
@@ -58,18 +79,19 @@ function addTarget() {
   assignForm()
 }
 
-function addAuthField() {
-  form.auth.fields.push({
-    id: '', label: '', envName: `TEST_CREDENTIAL_${form.auth.fields.length + 1}`,
-    inputLabel: '', value: '', hasValue: false, clearValue: false,
-  })
-}
-
 function submit() {
+  const authMode = form.auth.mode || 'none'
   emit('save', {
     ...form,
+    project: props.fixedProject || form.project,
     verificationCommands: String(form.verificationCommandsText || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean),
-    auth: { ...form.auth, fields: form.auth.fields.map(field => ({ ...field })) },
+    auth: { mode: authMode, fields: [] },
+    projectAuth: props.fixedProject && authMode !== 'none' ? {
+      ...projectAuthForm,
+      enabled: true,
+      mode: authMode,
+      baseUrl: form.baseUrl || projectAuthForm.baseUrl,
+    } : null,
   })
 }
 
@@ -83,6 +105,11 @@ watch(() => props.targets, targets => {
     editing.value = false
   }
 }, { deep: true })
+
+watch(() => props.projectAuth, profile => assignProjectAuth(profile), { deep: true, immediate: true })
+watch(() => form.auth?.mode, mode => {
+  if (props.fixedProject && mode && mode !== 'none') projectAuthForm.mode = mode
+})
 </script>
 
 <template>
@@ -92,7 +119,7 @@ watch(() => props.targets, targets => {
         <div class="title-mark"><MonitorCheck :size="18" /></div>
         <div>
           <h3>测试目标</h3>
-          <p>{{ groupName }} · 可为每个项目配置任意数量的验证入口</p>
+          <p>{{ ownerLabel || groupName }} · {{ fixedProject ? '当前项目的独立验收入口' : '可为每个项目配置任意数量的验证入口' }}</p>
         </div>
         <button class="icon-button close-button" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="17" /></button>
       </header>
@@ -126,7 +153,7 @@ watch(() => props.targets, targets => {
 
         <form v-if="editing" class="target-editor" @submit.prevent="submit">
           <div class="form-grid two-columns">
-            <label><span>所属项目</span><select v-model="form.project" required><option v-for="project in projects" :key="project" :value="project">{{ project }}</option></select></label>
+            <label v-if="!fixedProject"><span>所属项目</span><select v-model="form.project" required><option v-for="project in projects" :key="project" :value="project">{{ project }}</option></select></label>
             <label><span>目标名称</span><input v-model.trim="form.name" required maxlength="120" placeholder="例如：Web 用户端" /></label>
             <label><span>目标类型</span><select v-model="form.kind"><option v-for="item in kindOptions" :key="item[0]" :value="item[0]">{{ item[1] }}</option></select></label>
             <label><span>运行环境</span><input v-model.trim="form.environment" maxlength="80" placeholder="test / staging / preview" /></label>
@@ -144,39 +171,35 @@ watch(() => props.targets, targets => {
           </div>
 
           <div class="section-heading"><KeyRound :size="15" /><span>登录与认证</span></div>
-          <div class="form-grid two-columns">
+          <div class="form-grid">
             <label><span>认证方式</span><select v-model="form.auth.mode"><option v-for="item in authOptions" :key="item[0]" :value="item[0]">{{ item[1] }}</option></select></label>
-            <label v-if="form.auth.mode === 'credentials'"><span>登录路径</span><input v-model.trim="form.auth.loginPath" placeholder="/login" /></label>
           </div>
 
-          <template v-if="form.auth.mode === 'credentials'">
-            <div class="credential-head">
-              <span>登录字段只在 TestAgent 运行前解密</span>
-              <button type="button" class="secondary-command" @click="addAuthField"><Plus :size="14" />添加字段</button>
+          <template v-if="fixedProject && form.auth.mode === 'credentials'">
+            <div class="form-grid two-columns project-auth-fields">
+              <label><span>登录页面路径</span><input v-model.trim="projectAuthForm.loginPath" placeholder="/login" /><small>填写前端页面路由，不是后端登录接口。</small></label>
+              <label><span>登录按钮名称</span><input v-model.trim="projectAuthForm.submitLabel" placeholder="登录" /></label>
+              <label><span>登录用户名</span><input v-model="projectAuthForm.username" autocomplete="off" :placeholder="projectAuthForm.usernameConfigured ? '已安全保存，留空不修改' : '填写测试账号'" /></label>
+              <label><span>登录密码</span><input v-model="projectAuthForm.password" type="password" autocomplete="new-password" :placeholder="projectAuthForm.passwordConfigured ? '已安全保存，留空不修改' : '填写测试密码'" /></label>
+              <label><span>用户名输入框标签</span><input v-model.trim="projectAuthForm.usernameLabel" placeholder="用户名 / 邮箱" /></label>
+              <label><span>密码输入框标签</span><input v-model.trim="projectAuthForm.passwordLabel" placeholder="密码" /></label>
+              <label><span>登录后 URL 包含</span><input v-model.trim="projectAuthForm.successUrlIncludes" placeholder="/dashboard" /></label>
+              <label><span>登录后页面文本</span><input v-model.trim="projectAuthForm.successText" placeholder="例如：工作台" /></label>
             </div>
-            <div v-for="(field, index) in form.auth.fields" :key="field.id || index" class="credential-row">
-              <input v-model.trim="field.label" aria-label="字段名称" placeholder="账号" />
-              <input v-model.trim="field.envName" aria-label="环境变量" placeholder="TEST_USERNAME" @input="field.envName = field.envName.toUpperCase()" />
-              <input v-model.trim="field.inputLabel" aria-label="页面输入框标签" placeholder="页面标签，如 用户名" />
-              <input v-model="field.value" aria-label="凭据值" type="password" :placeholder="field.hasValue ? '已安全保存，留空不修改' : '填写凭据'" />
-              <button type="button" class="icon-button danger" title="移除字段" aria-label="移除字段" @click="form.auth.fields.splice(index, 1)"><Trash2 :size="15" /></button>
-            </div>
-            <div class="form-grid two-columns">
-              <label><span>提交按钮名称</span><input v-model.trim="form.auth.submitLabel" placeholder="登录" /></label>
-              <label><span>登录后 URL 包含</span><input v-model.trim="form.auth.successUrlIncludes" placeholder="/dashboard" /></label>
-              <label class="full-column"><span>登录后应出现文本</span><input v-model.trim="form.auth.successText" placeholder="例如：工作台" /></label>
-            </div>
+            <p class="field-note project-auth-note">用户名和密码按“{{ fixedProject }}”项目加密保存；项目 TestAgent和引用该项目的群聊 TestAgent共同读取。</p>
           </template>
 
-          <div v-else-if="form.auth.mode === 'storage_state'" class="form-grid">
-            <label><span>Storage State 文件</span><input v-model.trim="form.auth.storageStatePath" placeholder=".ccm/test-auth/user.json" /></label>
-            <p class="field-note">路径必须位于项目目录内，状态内容不会发送给模型。</p>
+          <div v-else-if="fixedProject && form.auth.mode === 'storage_state'" class="form-grid project-auth-fields">
+            <label><span>Storage State 文件</span><input v-model.trim="projectAuthForm.storageStatePath" placeholder=".ccm/test-auth/user.json" /><small>路径必须位于项目目录内。</small></label>
           </div>
 
-          <div v-else-if="form.auth.mode === 'existing_session'" class="form-grid">
-            <label><span>已有会话 Provider</span><select v-model="form.auth.existingSessionProvider"><option value="auto">自动</option><option value="claude-in-chrome">Claude in Chrome</option><option value="chrome-devtools">Chrome DevTools</option></select></label>
-            <p class="field-note warning">当前正式 worker 没有浏览器 MCP 执行器时，该目标会明确阻止，不会伪装成已登录。</p>
+          <div v-else-if="fixedProject && form.auth.mode === 'existing_session'" class="form-grid project-auth-fields">
+            <label><span>已有会话 Provider</span><select v-model="projectAuthForm.existingSessionProvider"><option value="auto">自动</option><option value="claude-in-chrome">Claude in Chrome</option><option value="chrome-devtools">Chrome DevTools</option></select></label>
           </div>
+
+          <p v-else-if="form.auth.mode !== 'none'" class="field-note project-auth-note">
+            登录信息从“{{ form.project }}”项目的测试目标配置读取；当前群聊不单独保存用户名或密码。
+          </p>
 
           <label class="notes-field"><span>测试说明</span><textarea v-model="form.notes" rows="2" maxlength="800" placeholder="补充入口用途、角色或验收重点"></textarea></label>
 

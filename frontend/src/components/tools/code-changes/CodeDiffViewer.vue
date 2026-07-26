@@ -27,12 +27,13 @@ defineExpose({ navigateHunk })
 
 <template>
   <div ref="root" class="diff-viewer" :class="{ compact }">
-    <div v-if="loading" class="diff-empty">正在读取代码差异...</div>
-    <div v-else-if="!file" class="diff-empty">从左侧选择文件查看具体改动</div>
-    <div v-else-if="!raw && !hunks.length" class="diff-empty">{{ reason || '当前区域没有差异' }}</div>
-    <template v-else>
-      <div v-if="reason || truncated" class="diff-notice">{{ reason || '内容较大，当前展示已截断' }}</div>
-      <template v-if="hunks.length && mode === 'unified'">
+    <div class="diff-horizontal">
+      <div v-if="loading" class="diff-empty">正在读取代码差异...</div>
+      <div v-else-if="!file" class="diff-empty">从左侧选择文件查看具体改动</div>
+      <div v-else-if="!raw && !hunks.length" class="diff-empty">{{ reason || '当前区域没有差异' }}</div>
+      <template v-else>
+        <div v-if="reason || truncated" class="diff-notice">{{ reason || '内容较大，当前展示已截断' }}</div>
+        <template v-if="hunks.length && mode === 'unified'">
         <section v-for="(hunk, index) in unified" :key="`${hunk.header}-${index}`" class="diff-hunk">
           <header>
             <code>{{ hunk.header }}</code>
@@ -50,8 +51,8 @@ defineExpose({ navigateHunk })
             <code v-html="html(row.html)"></code>
           </div>
         </section>
-      </template>
-      <template v-else-if="hunks.length && mode === 'split'">
+        </template>
+        <template v-else-if="hunks.length && mode === 'split'">
         <section v-for="(hunk, index) in split" :key="`${hunk.header}-${index}`" class="diff-hunk split-hunk">
           <header><code>{{ hunk.header }}</code></header>
           <div class="split-head"><span>原文件</span><span>修改后</span></div>
@@ -60,16 +61,17 @@ defineExpose({ navigateHunk })
             <div :class="row.right?.type || 'empty'"><span class="line-no">{{ row.right?.line || '' }}</span><span class="sign">{{ row.right ? '+' : '' }}</span><code v-html="row.right ? html(row.right.html) : ''"></code></div>
           </div>
         </section>
+        </template>
+        <div v-else>
+          <div v-for="(row, index) in rawRows" :key="index" class="diff-row" :class="row.type"><span class="line-no"></span><span class="line-no"></span><span class="sign">{{ row.sign }}</span><code v-html="html(row.html)"></code></div>
+        </div>
       </template>
-      <div v-else>
-        <div v-for="(row, index) in rawRows" :key="index" class="diff-row" :class="row.type"><span class="line-no"></span><span class="line-no"></span><span class="sign">{{ row.sign }}</span><code v-html="html(row.html)"></code></div>
-      </div>
-    </template>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.diff-viewer { flex:1; min-height:0; overflow:auto; background:var(--bg-primary,#fff); font:12px/1.55 'JetBrains Mono',Consolas,monospace; scroll-behavior:smooth; }
+.diff-viewer { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; background:var(--bg-primary,#fff); font:12px/1.55 'JetBrains Mono',Consolas,monospace; scroll-behavior:smooth; }.diff-horizontal { width:max-content; min-width:100%; min-height:100%; overflow:visible; }
 .diff-empty { min-height:260px; height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-family:inherit; }
 .diff-notice { position:sticky; top:0; z-index:3; padding:7px 14px; background:#fffbeb; border-bottom:1px solid #fde68a; color:#92400e; font-family:system-ui,sans-serif; font-size:11px; }
 .diff-hunk { scroll-margin-top:8px; }.diff-hunk header { min-height:34px; padding:5px 12px; display:flex; align-items:center; justify-content:space-between; gap:12px; background:color-mix(in srgb,#2563eb 7%,var(--bg-primary,#fff)); border-top:1px solid rgba(37,99,235,.1); color:#1d4ed8; }.diff-hunk header code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -79,5 +81,6 @@ defineExpose({ navigateHunk })
 .split-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); }.split-row>div { min-height:21px; display:grid; grid-template-columns:44px 18px minmax(max-content,1fr); overflow:hidden; }.split-row>div:first-child { border-right:1px solid var(--border-color,rgba(15,23,42,.09)); }.split-row code { padding:1px 10px 1px 4px; white-space:pre; }.split-row .empty { background:rgba(100,116,139,.035); }
 :deep(.word-add){background:rgba(5,150,105,.25);border-radius:2px}:deep(.word-remove){background:rgba(220,38,38,.22);border-radius:2px;text-decoration:line-through}:deep(.hl-keyword){color:#2563eb;font-weight:650}:deep(.hl-string){color:#0f766e}:deep(.hl-number){color:#c2410c}:deep(.diff-match){background:#fde047;color:inherit;padding:0;border-bottom:1px solid #ca8a04}
 [data-theme="dark"] .add { color:#a7f3d0; }[data-theme="dark"] .remove { color:#fecaca; }[data-theme="dark"] .diff-notice { background:#422006;color:#fde68a;border-color:#713f12; }
-@media(max-width:768px){.diff-row{grid-template-columns:34px 34px 14px minmax(max-content,1fr)}.diff-row code{padding-right:8px}.line-no{padding-left:3px;padding-right:3px}.split-hunk{display:none}.hunk-actions button{padding:3px 5px}.diff-hunk header{align-items:flex-start;flex-direction:column}.hunk-actions{align-self:flex-end}}
+@media(max-width:768px){.diff-viewer{min-height:0}.diff-horizontal{min-height:100%}.diff-row{grid-template-columns:34px 34px 14px minmax(max-content,1fr)}.diff-row code{padding-right:8px}.line-no{padding-left:3px;padding-right:3px}.split-hunk{display:none}.hunk-actions button{padding:3px 5px}.diff-hunk header{align-items:flex-start;flex-direction:column}.hunk-actions{align-self:flex-end}}
+.diff-notice { border-color:color-mix(in srgb,var(--accent-yellow) 35%,var(--border-color)); background:var(--warning-soft); color:var(--accent-yellow); }
 </style>

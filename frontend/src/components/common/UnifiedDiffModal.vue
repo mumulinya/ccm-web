@@ -225,7 +225,7 @@ const unifiedLines = computed(() => {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.85) !important;
+  background: var(--surface-translucent) !important;
   border: 1px solid rgba(0, 0, 0, 0.06) !important;
 }
 
@@ -236,7 +236,7 @@ const unifiedLines = computed(() => {
   gap: 16px;
   padding: 20px 24px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface-subtle);
 }
 
 .diff-header h3 {
@@ -330,7 +330,7 @@ const unifiedLines = computed(() => {
   border: 1px solid rgba(0, 0, 0, 0.08);
   font-size: 12px;
   outline: none;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--control-bg);
 }
 
 .diff-search-input:focus {

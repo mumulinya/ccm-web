@@ -269,6 +269,25 @@ class ConversationTurnControlStore {
     cancel(id, reason = "用户取消了这条排队消息") {
         return this.settle({ id, status: "cancelled", error: reason });
     }
+    guide(id) {
+        return this.mutate((store) => {
+            const index = store.turns.findIndex((item) => item.id === id);
+            if (index < 0)
+                throw new Error("队列消息不存在");
+            const turn = store.turns[index];
+            if (turn.status !== "queued")
+                throw new Error("只有等待发送的消息可以引导当前工作");
+            turn.mode = "steer";
+            turn.metadata = { ...turn.metadata, requested_mode: "steer" };
+            turn.updated_at = nowIso();
+            store.turns.splice(index, 1);
+            const firstQueuedIndex = store.turns.findIndex((item) => item.scope === turn.scope
+                && item.conversation_id === turn.conversation_id
+                && item.status === "queued");
+            store.turns.splice(firstQueuedIndex >= 0 ? firstQueuedIndex : Math.min(index, store.turns.length), 0, turn);
+            return turn;
+        });
+    }
     retry(id) {
         return this.mutate((store) => {
             const turn = store.turns.find((item) => item.id === id);
@@ -319,6 +338,7 @@ function handleConversationTurnControlApi(pathname, req, res, parsed) {
         "/api/conversation-turns/claim": (payload) => ({ turn: exports.conversationTurnControl.claim(payload) }),
         "/api/conversation-turns/settle": (payload) => ({ turn: exports.conversationTurnControl.settle(payload) }),
         "/api/conversation-turns/cancel": (payload) => ({ turn: exports.conversationTurnControl.cancel(String(payload?.id || ""), payload?.reason) }),
+        "/api/conversation-turns/guide": (payload) => ({ turn: exports.conversationTurnControl.guide(String(payload?.id || "")) }),
         "/api/conversation-turns/retry": (payload) => ({ turn: exports.conversationTurnControl.retry(String(payload?.id || "")) }),
     };
     const operation = operations[pathname];
@@ -337,18 +357,26 @@ function runConversationTurnControlSelfTest() {
         const store = new ConversationTurnControlStore(file);
         const first = store.enqueue({ scope: "group", conversation_id: "g1:s1", mode: "queue", message: "第一条", request_id: "r1" });
         const duplicate = store.enqueue({ scope: "group", conversation_id: "g1:s1", mode: "queue", message: "不应重复", request_id: "r1" });
-        const second = store.enqueue({ scope: "group", conversation_id: "g1:s1", mode: "queue", message: "第二条", request_id: "r2" });
         const claimed = store.claim({ scope: "group", conversation_id: "g1:s1" });
+        const second = store.enqueue({ scope: "group", conversation_id: "g1:s1", mode: "queue", message: "第二条", request_id: "r2" });
+        const third = store.enqueue({ scope: "group", conversation_id: "g1:s1", mode: "queue", message: "第三条", request_id: "r3" });
+        const guided = store.guide(third.turn.id);
         const recovered = new ConversationTurnControlStore(file).recoverInterrupted();
         const reclaimed = store.claim({ scope: "group", conversation_id: "g1:s1" });
         store.settle({ id: reclaimed?.id, status: "completed", result: { ok: true } });
+        const guidedClaim = store.claim({ scope: "group", conversation_id: "g1:s1" });
+        store.settle({ id: guidedClaim?.id, status: "completed", result: { guided: true } });
         store.cancel(second.turn.id);
         const rows = store.list({ scope: "group", conversation_id: "g1:s1" }).turns;
         const checks = {
-            idempotentEnqueue: duplicate.duplicate && duplicate.turn.id === first.turn.id && rows.length === 2,
+            idempotentEnqueue: duplicate.duplicate && duplicate.turn.id === first.turn.id && rows.length === 3,
             fifoClaim: claimed?.id === first.turn.id && reclaimed?.id === first.turn.id,
+            guidedTurnPromoted: guided.mode === "steer"
+                && guided.metadata.requested_mode === "steer"
+                && guidedClaim?.id === third.turn.id,
             restartRecovery: recovered.recovered === 1 && reclaimed?.recovery_count === 1,
             terminalStates: rows.find((item) => item.id === first.turn.id)?.status === "completed"
+                && rows.find((item) => item.id === third.turn.id)?.status === "completed"
                 && rows.find((item) => item.id === second.turn.id)?.status === "cancelled",
             persistedSchema: (0, atomic_json_file_1.readJsonWithBackup)(file, null)?.schema === "ccm-conversation-turn-control-v1",
         };

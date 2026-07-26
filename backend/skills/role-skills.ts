@@ -10,7 +10,7 @@ import {
 
 export { CCM_ROLE_SKILL_NAMES } from "./internal-skill-catalog";
 
-export type CcmAgentRole = "global-agent" | "group-main-agent" | "project-child-agent" | "test-agent";
+export type CcmAgentRole = "global-agent" | "group-main-agent" | "project-main-agent" | "project-child-agent" | "test-agent";
 export type CcmAgentSkillPhase = "intake" | "planning" | "execution" | "review" | "summary" | "verification" | "release";
 
 type RoleSkillName = CcmInternalSkillName;
@@ -30,6 +30,8 @@ export interface RoleSkillSelectionOptions {
   source?: string;
   maxSkills?: number;
   phase?: CcmAgentSkillPhase;
+  selectedSkillNames?: string[];
+  modelDecision?: { actionRequired?: boolean; selectedSkills?: string[] } | null;
 }
 
 const ROLE_SKILL_CATALOG = CCM_INTERNAL_SKILL_CATALOG;
@@ -160,40 +162,11 @@ function trustedWorkSource(source = "") {
 }
 
 export function isRoleSkillWorkRequest(message = "", options: RoleSkillSelectionOptions = {}) {
-  if (options.forceWork || trustedWorkSource(options.source)) return true;
-  const text = String(message || "").replace(/\s+/g, " ").trim();
-  if (!text) return false;
-  if (/(?:那就|好|可以|行).{0,8}(?:以|把).{0,32}(?:为|设为).{0,6}目标/i.test(text)) return true;
-  if (/(?:那就|请|帮我|给我|开始|继续).{0,12}(?:做|处理)(?:这个|这块|它|上述|前面)/i.test(text)) return true;
-  const action = /修改|实现|创建|新建|修复|运行|执行|派发|部署|删除|更新|升级|完善|重构|接入|对接|安装|生成|开发|提交|测试|验收|检查|排查|继续|完成|改成|改为|make|implement|fix|build|run|deploy|create|update|refactor|test|verify/i;
-  const explicit = /(?:请|帮我|给我|替我|现在|直接|开始|继续|务必|需要你|让你|把|将|以.+为目标)/i;
-  const questionOnly = /^(?:为什么|什么是|怎么理解|如何理解|是否|是不是|能不能|可以吗|会不会|有没有|介绍|解释|说说|how|what|why|can |could |would )/i.test(text)
-    && !explicit.test(text);
-  return action.test(text) && explicit.test(text) && !questionOnly;
-}
-
-function wantsAcceptanceEvidence(text = "") {
-  return /验收|验证|测试|截图|浏览器|页面|接口|API|构建|类型检查|回归|证据|test|verify|browser|playwright|screenshot|build|lint|typecheck/i.test(String(text || ""));
-}
-
-function wantsRequirementIntake(text = "") {
-  return /附件|图片|截图|文档|需求|PRD|接口说明|API 文档|腾讯文档|飞书文档|Word|Excel|PDF|上传|链接|attachment|image|document|specification|requirements?/i.test(String(text || ""));
-}
-
-function wantsDocumentDrivenDelivery(text = "") {
-  return /按.{0,12}(?:文档|需求|PRD|接口|附件)|文档驱动|接口契约|字段表|状态流转|验收标准|PRD|API (?:document|spec)|document[- ]driven/i.test(String(text || ""));
-}
-
-function wantsIncidentDiagnosis(text = "") {
-  return /报错|错误|失败|异常|崩溃|不可用|无法|超时|故障|回归|定位|排查|修复|400|401|403|404|409|500|error|failed|failure|crash|timeout|incident|regression|debug/i.test(String(text || ""));
-}
-
-function wantsFrontendVisualQa(text = "") {
-  return /前端|页面|界面|UI|UX|样式|布局|弹窗|表单|聊天框|文本框|移动端|响应式|浏览器|截图|视觉|frontend|page|dialog|modal|form|responsive|browser|screenshot|visual/i.test(String(text || ""));
-}
-
-function wantsReleaseReadiness(text = "") {
-  return /发布|部署|上线|打包|版本|升级|迁移|灰度|回滚|生产环境|release|deploy|publish|package|version|upgrade|migration|rollout|rollback|production/i.test(String(text || ""));
+  void message;
+  return options.forceWork === true
+    || trustedWorkSource(options.source)
+    || options.modelDecision?.actionRequired === true
+    || (options.selectedSkillNames || options.modelDecision?.selectedSkills || []).length > 0;
 }
 
 export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: RoleSkillSelectionOptions = {}): SelectedRoleSkill[] {
@@ -205,43 +178,42 @@ export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: Rol
   const add = (name: RoleSkillName, kind: "role" | "shared" | "workflow", reason: string) => rows.push({ name, kind, reason });
   if (role === "global-agent") {
     add(CCM_ROLE_SKILL_NAMES.global, "role", "跨群聊任务路由与监督");
-    if (wantsRequirementIntake(taskText)) add(CCM_ROLE_SKILL_NAMES.requirementIntake, "workflow", "消息或附件需要形成可执行需求");
-    if (wantsDocumentDrivenDelivery(taskText)) add(CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "需求包含文档或接口契约");
-    if (wantsIncidentDiagnosis(taskText)) add(CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "任务要求定位或修复故障");
-    if (wantsReleaseReadiness(taskText)) add(CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "任务涉及发布或生产变更");
   }
-  if (role === "group-main-agent") {
-    add(CCM_ROLE_SKILL_NAMES.group, "role", "群聊任务计划、派发与复核");
+  if (role === "group-main-agent" || role === "project-main-agent") {
+    add(CCM_ROLE_SKILL_NAMES.group, "role", role === "project-main-agent" ? "单项目任务计划、派发与复核" : "群聊任务计划、派发与复核");
     if (phase === "review" || phase === "summary") {
       add(CCM_ROLE_SKILL_NAMES.deliveryReviewRework, "workflow", "当前阶段需要复核回执或生成返工");
       add(CCM_ROLE_SKILL_NAMES.receipt, "shared", "读取统一子 Agent 交付回执");
-      if (wantsAcceptanceEvidence(taskText)) add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "复核验收项与实际证据");
+      add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "复核验收项与实际证据");
     } else {
       add(CCM_ROLE_SKILL_NAMES.taskDecomposition, "workflow", "当前阶段需要拆解和路由任务");
-      if (wantsRequirementIntake(taskText)) add(CCM_ROLE_SKILL_NAMES.requirementIntake, "workflow", "消息或附件需要先提炼需求");
-      if (wantsDocumentDrivenDelivery(taskText)) add(CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "工作单需要保留文档条款追踪");
-      if (wantsIncidentDiagnosis(taskText)) add(CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "故障任务需要复现和根因链路");
-      if (wantsReleaseReadiness(taskText)) add(CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "计划涉及发布或迁移边界");
     }
   }
   if (role === "project-child-agent") {
     add(CCM_ROLE_SKILL_NAMES.project, "role", "限定范围内实施与验证");
     add(CCM_ROLE_SKILL_NAMES.projectSourceResearch, "workflow", "修改前确认当前源码和项目规范");
     add(CCM_ROLE_SKILL_NAMES.receipt, "shared", "向主 Agent 返回可复核回执");
-    if (wantsDocumentDrivenDelivery(taskText)) add(CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, "workflow", "按文档条款追踪实现覆盖");
-    if (wantsIncidentDiagnosis(taskText)) add(CCM_ROLE_SKILL_NAMES.incidentDiagnosis, "workflow", "先复现并定位根因再修改");
-    if (wantsFrontendVisualQa(taskText)) add(CCM_ROLE_SKILL_NAMES.frontendVisualQa, "workflow", "前端任务需要真实浏览器与视觉证据");
-    if (wantsAcceptanceEvidence(taskText)) add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "任务要求验证或验收证据");
-    if (wantsReleaseReadiness(taskText)) add(CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "任务涉及发布、升级或迁移");
   }
   if (role === "test-agent") {
     add(CCM_ROLE_SKILL_NAMES.test, "role", "独立验收与保守结论");
     add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "验收项与真实证据绑定");
-    if (wantsFrontendVisualQa(taskText)) add(CCM_ROLE_SKILL_NAMES.frontendVisualQa, "workflow", "用户界面需要浏览器和截图验收");
-    if (wantsReleaseReadiness(taskText)) add(CCM_ROLE_SKILL_NAMES.releaseReadiness, "workflow", "验收包含发布就绪条件");
   }
 
-  const defaultMaxSkills = role === "project-child-agent" ? 6 : 4;
+  const roleRoots = new Set<RoleSkillName>([
+    CCM_ROLE_SKILL_NAMES.global,
+    CCM_ROLE_SKILL_NAMES.group,
+    CCM_ROLE_SKILL_NAMES.project,
+    CCM_ROLE_SKILL_NAMES.test,
+  ]);
+  const modelSelected = options.selectedSkillNames || options.modelDecision?.selectedSkills || [];
+  const definitions = new Map(ROLE_SKILL_CATALOG.map(item => [item.name, item]));
+  for (const rawName of modelSelected) {
+    const name = String(rawName || "").trim() as RoleSkillName;
+    if (!definitions.has(name) || roleRoots.has(name)) continue;
+    add(name, name === CCM_ROLE_SKILL_NAMES.receipt || name === CCM_ROLE_SKILL_NAMES.evidence ? "shared" : "workflow", "统一大模型根据完整任务语义选择");
+  }
+
+  const defaultMaxSkills = role === "project-child-agent" || role === "group-main-agent" || role === "project-main-agent" ? 6 : 4;
   const maxSkills = Math.max(1, Math.min(6, Number(options.maxSkills || defaultMaxSkills)));
   const seen = new Set<string>();
   return rows.filter(row => !seen.has(row.name) && !!seen.add(row.name)).slice(0, maxSkills).map(row => {
@@ -266,13 +238,21 @@ export function buildSelectedSkillUsageDirective(selected: Array<Pick<SelectedRo
   ].join("\n");
 }
 
+export function buildModelSelectableSkillCatalog() {
+  return [
+    "[CCM 可由模型选择的 Skill 目录]",
+    "根据完整任务语义在 workflowDecision.selectedSkills 中选择最多 6 项；不要使用关键词机械匹配。",
+    ...ROLE_SKILL_CATALOG.map(item => `- ${item.name}: ${item.description}`),
+  ].join("\n");
+}
+
 export function buildRoleSkillPrompt(role: CcmAgentRole, taskText = "", options: RoleSkillSelectionOptions = {}) {
   const selected = selectRoleSkills(role, taskText, options).filter(item => item.body);
   if (!selected.length) return { names: [] as string[], prompt: "", selected };
   const sections = selected.map(item => `## Skill:${item.name}\n${item.body}`);
   return {
     names: selected.map(item => item.name),
-    prompt: `[CCM 本轮角色 Skill]\n${sections.join("\n\n")}`.slice(0, 9_000),
+    prompt: `[CCM 本轮角色 Skill]\n${sections.join("\n\n")}`.slice(0, 12_000),
     selected,
   };
 }
@@ -281,14 +261,20 @@ export function runRoleSkillSelectionSelfTest() {
   const installation = ensureRoleSkillsInstalled({ force: true });
   const ordinaryGlobal = selectRoleSkills("global-agent", "你好，介绍一下你自己");
   const ordinaryGroup = selectRoleSkills("group-main-agent", "这个项目是做什么的？");
-  const globalWork = selectRoleSkills("global-agent", "请根据接口文档修复支付 500 错误并完成验收");
-  const groupWork = selectRoleSkills("group-main-agent", "请把支付需求拆分后派发给项目 Agent", { source: "task", phase: "planning" });
-  const groupReview = selectRoleSkills("group-main-agent", "复核子 Agent 的实现和测试证据并安排返工", { forceWork: true, phase: "review" });
+  const globalWork = selectRoleSkills("global-agent", "model-selected", { modelDecision: { actionRequired: true, selectedSkills: [CCM_ROLE_SKILL_NAMES.requirementIntake, CCM_ROLE_SKILL_NAMES.incidentDiagnosis] } });
+  const groupWork = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessRuleModeling] });
+  const groupReview = selectRoleSkills("group-main-agent", "model-selected", { forceWork: true, phase: "review", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] });
   const contextualGroupWork = selectRoleSkills("group-main-agent", "那就以这个为目标");
-  const projectWork = selectRoleSkills("project-child-agent", "根据 PRD 修复退款页面并运行浏览器截图测试", { phase: "execution" });
-  const incidentWork = selectRoleSkills("project-child-agent", "修复 API 500 报错并验证回归", { phase: "execution" });
-  const releaseWork = selectRoleSkills("project-child-agent", "完成版本升级、数据库迁移和生产发布检查", { phase: "release" });
-  const testWork = selectRoleSkills("test-agent", "在浏览器验证退款页面响应式布局并截图", { phase: "verification" });
+  const projectWork = selectRoleSkills("project-child-agent", "model-selected", { phase: "execution", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.documentDrivenDelivery, CCM_ROLE_SKILL_NAMES.frontendVisualQa] });
+  const incidentWork = selectRoleSkills("project-child-agent", "model-selected", { phase: "execution", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.incidentDiagnosis] });
+  const releaseWork = selectRoleSkills("project-child-agent", "model-selected", { phase: "release", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.releaseReadiness] });
+  const testWork = selectRoleSkills("test-agent", "model-selected", { phase: "verification", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.frontendVisualQa] });
+  const businessPlanning = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessRuleModeling] });
+  const contractWork = selectRoleSkills("project-child-agent", "model-selected", { phase: "execution", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.interfaceDataContract, CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] });
+  const businessReview = selectRoleSkills("group-main-agent", "model-selected", { forceWork: true, phase: "review", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] });
+  const businessTest = selectRoleSkills("test-agent", "model-selected", { phase: "verification", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] });
+  const visualOnly = selectRoleSkills("project-child-agent", "model-selected", { phase: "execution", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.frontendVisualQa] });
+  const directProjectBusinessWork = selectRoleSkills("project-child-agent", "model-selected", { source: "project-chat", phase: "execution", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessRuleModeling, CCM_ROLE_SKILL_NAMES.interfaceDataContract, CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] });
   const checks = {
     allPackagesInstalled: ROLE_SKILL_CATALOG.every(item => installation.available.includes(item.name)
       && fs.existsSync(path.join(templateRoot(), item.name, "SKILL.md"))
@@ -305,7 +291,7 @@ export function runRoleSkillSelectionSelfTest() {
       && !groupWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.project),
     groupReviewGetsReviewAndReceipt: groupReview.some(item => item.name === CCM_ROLE_SKILL_NAMES.deliveryReviewRework)
       && groupReview.some(item => item.name === CCM_ROLE_SKILL_NAMES.receipt),
-    contextualExecutionLoadsGroupSkill: contextualGroupWork[0]?.name === CCM_ROLE_SKILL_NAMES.group,
+    contextualExecutionRequiresModelDecision: contextualGroupWork.length === 0,
     projectGetsSourceReceiptAndMatchedWorkflows: projectWork[0]?.name === CCM_ROLE_SKILL_NAMES.project
       && projectWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.projectSourceResearch)
       && projectWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.receipt)
@@ -316,7 +302,20 @@ export function runRoleSkillSelectionSelfTest() {
     testAgentGetsVerifierEvidenceAndVisualQa: testWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.test)
       && testWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.evidence)
       && testWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.frontendVisualQa),
-    selectionBudgetBounded: [globalWork, groupWork, groupReview, projectWork, incidentWork, releaseWork, testWork].every(items => items.length <= 6),
+    businessPlanningGetsRuleModeling: businessPlanning.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessRuleModeling)
+      && businessPlanning.some(item => item.name === CCM_ROLE_SKILL_NAMES.taskDecomposition),
+    interfaceWorkGetsContractAndScenarioAcceptance: contractWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.interfaceDataContract)
+      && contractWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
+    businessReviewGetsScenarioAcceptance: businessReview.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
+    businessTestGetsScenarioAcceptance: businessTest.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
+    visualOnlyAvoidsBusinessSkills: visualOnly.some(item => item.name === CCM_ROLE_SKILL_NAMES.frontendVisualQa)
+      && !visualOnly.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessRuleModeling)
+      && !visualOnly.some(item => item.name === CCM_ROLE_SKILL_NAMES.interfaceDataContract)
+      && !visualOnly.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
+    directProjectGetsAllBusinessWorkflowSkills: directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessRuleModeling)
+      && directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.interfaceDataContract)
+      && directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
+    selectionBudgetBounded: [globalWork, groupWork, groupReview, projectWork, incidentWork, releaseWork, testWork, businessPlanning, contractWork, businessReview, businessTest, visualOnly, directProjectBusinessWork].every(items => items.length <= 6),
     usageDirectiveRequiresApplicationAndReceipt: buildSelectedSkillUsageDirective(projectWork).includes("不是可选目录项")
       && buildSelectedSkillUsageDirective(projectWork).includes("CCM_AGENT_RECEIPT"),
   };
@@ -334,6 +333,12 @@ export function runRoleSkillSelectionSelfTest() {
       incidentWork: incidentWork.map(item => item.name),
       releaseWork: releaseWork.map(item => item.name),
       testWork: testWork.map(item => item.name),
+      businessPlanning: businessPlanning.map(item => item.name),
+      contractWork: contractWork.map(item => item.name),
+      businessReview: businessReview.map(item => item.name),
+      businessTest: businessTest.map(item => item.name),
+      visualOnly: visualOnly.map(item => item.name),
+      directProjectBusinessWork: directProjectBusinessWork.map(item => item.name),
     },
     installation,
   };

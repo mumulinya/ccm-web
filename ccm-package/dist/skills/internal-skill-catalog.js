@@ -18,6 +18,9 @@ exports.CCM_ROLE_SKILL_NAMES = {
     incidentDiagnosis: "ccm-incident-diagnosis",
     frontendVisualQa: "ccm-frontend-visual-qa",
     releaseReadiness: "ccm-release-readiness",
+    businessRuleModeling: "ccm-business-rule-modeling",
+    interfaceDataContract: "ccm-interface-data-contract",
+    businessScenarioAcceptance: "ccm-business-scenario-acceptance",
 };
 exports.CCM_INTERNAL_SKILL_CATALOG = [
     { name: exports.CCM_ROLE_SKILL_NAMES.global, description: "Coordinate explicit CCM work across groups or projects, supervise mission evidence, and return a friendly final summary." },
@@ -34,6 +37,9 @@ exports.CCM_INTERNAL_SKILL_CATALOG = [
     { name: exports.CCM_ROLE_SKILL_NAMES.incidentDiagnosis, description: "Reproduce runtime or build failures, isolate the supported root cause, repair it, and verify recovery." },
     { name: exports.CCM_ROLE_SKILL_NAMES.frontendVisualQa, description: "Verify real frontend behavior, responsive layout, browser state, console failures, and screenshot evidence." },
     { name: exports.CCM_ROLE_SKILL_NAMES.releaseReadiness, description: "Assess build, configuration, compatibility, migration, rollout, rollback, and residual release risk." },
+    { name: exports.CCM_ROLE_SKILL_NAMES.businessRuleModeling, description: "Model source-backed actors, permissions, states, transitions, invariants, exceptions, and acceptance rules for business features." },
+    { name: exports.CCM_ROLE_SKILL_NAMES.interfaceDataContract, description: "Define and verify API, event, schema, persistence, validation, error, migration, and compatibility contracts across modules." },
+    { name: exports.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance, description: "Verify complete business flows, roles, permissions, state changes, retries, persistence, failures, and recovery with reproducible evidence." },
 ];
 const INTERNAL_SKILL_NAMES = new Set(exports.CCM_INTERNAL_SKILL_CATALOG.map(item => item.name.toLowerCase()));
 function isCcmInternalSkillName(name) {

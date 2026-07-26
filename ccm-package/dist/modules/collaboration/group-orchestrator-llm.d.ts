@@ -14,6 +14,7 @@ export declare function buildGroupMainAgentToolContext(input: {
     source?: string;
     groupSessionId?: string;
     group_session_id?: string;
+    workflowDecision?: WorkflowDecision | null;
 }): any;
 export declare function normalizeGroupMainToolRequests(value: any): GroupMainToolRequest[];
 export declare function executeGroupMainAgentToolRequests(input: {
@@ -62,7 +63,8 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
         confidence: any;
     };
 }>;
-export declare function decomposeRequirementWithCodedCoordinator(group: any, requirement: string): any;
+export declare function decomposeRequirementWithModelCoordinator(group: any, requirement: string): Promise<any>;
+export declare const decomposeRequirementWithCodedCoordinator: typeof decomposeRequirementWithModelCoordinator;
 export declare function buildLlmCoordinatorMessages(input: {
     group: any;
     message: string;
@@ -75,6 +77,7 @@ export declare function buildLlmCoordinatorMessages(input: {
     group_session_id?: string;
     mainAgentToolResults?: any[];
     main_agent_tool_results?: any[];
+    workflowDecision?: WorkflowDecision | null;
 }): {
     role: string;
     content: string;
@@ -88,6 +91,7 @@ export declare function buildLlmCoordinatorContextComponents(input: {
     group_session_id?: string;
     mainAgentToolResults?: any[];
     main_agent_tool_results?: any[];
+    workflowDecision?: WorkflowDecision | null;
 }): {
     rules: string;
     skills: string;
@@ -97,7 +101,7 @@ export declare function buildLlmCoordinatorContextComponents(input: {
 };
 export declare function normalizeDocumentFindings(parsed: any): any;
 export declare function enrichTaskWithDocumentFindings(task: string, findings: string[]): string;
-export declare function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair?: boolean): any;
+export declare function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair?: boolean): any[];
 export declare function normalizeLlmAnalysis(parsed: any, fallback: any): any;
 export declare function buildCoordinatorResultFromAnalysis(group: any, message: string, analysis: any, targets: any[], runtime: string, parsed?: any, options?: any): {
     agent: any;
@@ -112,6 +116,12 @@ export declare function buildCoordinatorResultFromAnalysis(group: any, message: 
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {
@@ -145,6 +155,12 @@ export declare function buildCoordinatorResultFromAnalysis(group: any, message: 
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {
@@ -199,6 +215,12 @@ export declare function runLlmGroupOrchestrator(input: {
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {
@@ -245,6 +267,12 @@ export declare function runLlmGroupOrchestrator(input: {
         risk: string;
         nextStep: string;
         confidence: any;
+    } | {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
     };
     runtime: string;
     agentBoundary: {

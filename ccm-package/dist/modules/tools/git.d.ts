@@ -16,6 +16,9 @@ export declare function inspectGitRemoteState(workDir: string, changedFiles?: nu
     canFetch: boolean;
     canPull: boolean;
     canPush: boolean;
+    canCommitAndPush: boolean;
+    pushTarget: string;
+    pullTarget: string;
 };
 export declare function normalizeRepoPath(filePath: any): string;
 export declare function resolveSafeProjectFile(workDir: string, filePath: any): {

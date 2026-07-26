@@ -7,6 +7,7 @@ exports.decideWorkflowWithModel = decideWorkflowWithModel;
 exports.runWorkflowDecisionContractSelfTest = runWorkflowDecisionContractSelfTest;
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
+const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 exports.WORKFLOW_DECISION_GUIDANCE = `
 你必须根据用户完整语义和当前上下文选择工作流，不能按关键词、正则或句子长度机械匹配。
 
@@ -47,6 +48,9 @@ function list(value, max = 12) {
         ? value.map(item => String(item || "").trim()).filter(Boolean).slice(0, max)
         : [];
 }
+const INTERNAL_SKILL_NAMES = new Set(internal_skill_catalog_1.CCM_INTERNAL_SKILL_CATALOG.map(item => item.name));
+const INTENT_KINDS = new Set(["conversation", "question", "status", "analysis", "execution", "management", "continuation"]);
+const VERIFICATION_MODES = new Set(["commands", "http", "browser", "visual", "integration", "release"]);
 function normalizeWorkflowDecision(value, source = "model") {
     const rawMode = String(value?.mode || value?.workflowMode || "").trim();
     if (!MODES.has(rawMode))
@@ -73,6 +77,23 @@ function normalizeWorkflowDecision(value, source = "model") {
         impactScope: list(value?.impactScope || value?.impact_scope),
         planSteps: list(value?.planSteps || value?.plan_steps, 16),
         clarificationQuestions: list(value?.clarificationQuestions || value?.clarification_questions, 6),
+        selectedSkills: list(value?.selectedSkills || value?.selected_skills, 6).filter(name => INTERNAL_SKILL_NAMES.has(name)),
+        intentKind: INTENT_KINDS.has(String(value?.intentKind || value?.intent_kind || ""))
+            ? String(value?.intentKind || value?.intent_kind)
+            : rawMode === "answer" ? "conversation" : rawMode === "project_analysis" ? "analysis" : "execution",
+        requiresCodeChanges: value?.requiresCodeChanges === true || value?.requires_code_changes === true,
+        requiresAgentQa: value?.requiresAgentQa === true || value?.requires_agent_qa === true,
+        requiresIndependentReview: value?.requiresIndependentReview === true || value?.requires_independent_review === true,
+        verificationModes: list(value?.verificationModes || value?.verification_modes, 6)
+            .filter(mode => VERIFICATION_MODES.has(mode)),
+        memoryPolicy: String(value?.memoryPolicy || value?.memory_policy || "use") === "ignore" ? "ignore" : "use",
+        authorizationDirective: ["grant", "revoke"].includes(String(value?.authorizationDirective || value?.authorization_directive || ""))
+            ? String(value?.authorizationDirective || value?.authorization_directive)
+            : "preserve",
+        riskLevel: ["write", "high"].includes(String(value?.riskLevel || value?.risk_level || ""))
+            ? String(value?.riskLevel || value?.risk_level)
+            : "low",
+        requiresUserConfirmation: value?.requiresUserConfirmation === true || value?.requires_user_confirmation === true,
         source,
     };
 }
@@ -96,8 +117,23 @@ async function decideWorkflowWithModel(input) {
             role: "system",
             content: `${exports.WORKFLOW_DECISION_GUIDANCE}
 
+你还必须完成语义能力选择：
+- selectedSkills 只能从给定 Skill 目录选择真正需要的项，最多 6 个；不要按关键词机械匹配。
+- intentKind 表示用户真实交互意图；status 只用于查询现有进度，management 用于管理已有资源。
+- requiresCodeChanges 只有在完成目标确实需要修改源码时才为 true；运行、查询、构建和解释不等于改代码。
+- requiresAgentQa 只有在任务确实需要子 Agent 互相询问或澄清接口时才为 true。
+- requiresIndependentReview 只有在风险、范围或验收要求需要独立复核者时才为 true。
+- verificationModes 根据目标选择 commands/http/browser/visual/integration/release；不需要验证时为空数组。
+- memoryPolicy 只有用户明确要求本轮不使用历史记忆时才为 ignore，否则为 use。
+- authorizationDirective 表示本轮是否明确授予或撤销已有执行授权；没有明确改变时必须为 preserve。
+- riskLevel 根据用户要求的实际操作选择 low/write/high；requiresUserConfirmation 只表示语义上需要确认，最终权限仍由服务端工具门禁决定。
+- 模型无法可靠判断时通过 clarificationQuestions 提问，不得用本地规则补选。
+
+可用 Skill 目录：
+${internal_skill_catalog_1.CCM_INTERNAL_SKILL_CATALOG.map(item => `- ${item.name}: ${item.description}`).join("\n")}
+
 只输出合法 JSON：
-{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[]}`,
+{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false}`,
         },
         {
             role: "user",
@@ -127,7 +163,7 @@ function runWorkflowDecisionContractSelfTest() {
     const cases = [
         normalizeWorkflowDecision({ mode: "answer", reason: "问答", confidence: 0.9 }),
         normalizeWorkflowDecision({ mode: "project_analysis", reason: "只读分析", continuationKind: "supplement" }),
-        normalizeWorkflowDecision({ mode: "execute_direct", reason: "简单执行" }),
+        normalizeWorkflowDecision({ mode: "execute_direct", reason: "简单执行", selectedSkills: ["ccm-interface-data-contract", "unknown"], requiresCodeChanges: true, verificationModes: ["commands", "invalid"] }),
         normalizeWorkflowDecision({ mode: "plan_task", reason: "复杂实现" }),
         normalizeWorkflowDecision({ mode: "decompose_epic", reason: "多目标需求", clarificationQuestions: ["边界？"] }),
     ];
@@ -135,6 +171,9 @@ function runWorkflowDecisionContractSelfTest() {
         success: cases.length === 5
             && cases[0].actionRequired === false
             && cases[2].actionRequired === true
+            && cases[2].selectedSkills.join(",") === "ccm-interface-data-contract"
+            && cases[2].requiresCodeChanges === true
+            && cases[2].verificationModes.join(",") === "commands"
             && cases[3].needsPlanning === true
             && cases[4].needsEpicDecomposition === true,
         cases,

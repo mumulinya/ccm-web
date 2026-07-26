@@ -197,7 +197,7 @@ async function callDefaultFollowupPlanner(input: AgenticTestFollowupInput): Prom
 async function callDefaultPlanner(input: AgenticTestPlanningInput): Promise<AgenticTestPlan> {
   const config = loadOrchestratorConfig();
   if (config.enabled === false || !config.apiUrl || !config.apiKey || !config.model) {
-    throw new Error("统一大模型未配置，TestAgent 使用确定性检查计划");
+    throw new Error("统一大模型未配置，无法生成 TestAgent 语义检查计划");
   }
   const options = {
     system: plannerSystemPrompt(),
@@ -305,18 +305,18 @@ export async function applyAgenticTestPlanning(
           ...workOrder.metadata,
           agenticPlanning: {
             schema: "ccm-test-agent-agentic-planning-v1",
-            status: "degraded",
+            status: "blocked",
             error: cleanText(error?.message || error, 800),
-            fallback: "deterministic_verification_plan",
+            fallback: "none",
             readOnly: true,
             verdictAuthority: "deterministic_evidence_gate",
           },
         },
       },
       issues: [{
-        severity: "warning",
-        code: "agentic_test_planning_degraded",
-        message: `Agentic TestAgent planning degraded to deterministic checks: ${cleanText(error?.message || error, 500)}`,
+        severity: "error",
+        code: "agentic_test_planning_blocked",
+        message: `TestAgent semantic planning failed closed: ${cleanText(error?.message || error, 500)}`,
       }],
     };
   }

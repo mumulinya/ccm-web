@@ -14,7 +14,7 @@ const header = read('frontend/src/components/tasks/TaskDispatchHeader.vue')
 const listItem = read('frontend/src/components/tasks/TaskListItem.vue')
 const dailyDevModal = read('frontend/src/components/tasks/DailyDevTaskModal.vue')
 const renderRegression = read('scripts/task-dispatch-render-regression.mjs')
-const packageJson = read('package.json')
+const legacyAliases = JSON.parse(read('scripts/legacy-test-aliases.json')).aliases || {}
 
 const checks = {
   dedicatedHeaderComponent: manager.includes("TaskDispatchHeader")
@@ -43,7 +43,7 @@ const checks = {
   responsiveWidthGuard: manager.includes('overflow-x: clip')
     && header.includes('@media (max-width: 768px)')
     && renderRegression.includes('assertNoHorizontalOverflow'),
-  realRenderRegressionRegistered: packageJson.includes('test:task-dispatch-render')
+  realRenderRegressionRegistered: legacyAliases['test:task-dispatch-render'] === 'node scripts/task-dispatch-render-regression.mjs'
     && renderRegression.includes('05-task-overview-mobile.png')
     && renderRegression.includes('06-task-list-mobile.png'),
 }

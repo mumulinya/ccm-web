@@ -1221,8 +1221,7 @@ export function shouldShowUserTaskCard(task: any, summary: any = {}, executions:
     || (Array.isArray(summary.receipt_statuses) && summary.receipt_statuses.length > 0)
     || (Array.isArray(executions) && executions.length > 0 && executions.some((item: any) => ["running", "reviewing", "succeeded", "failed"].includes(String(item.state || ""))));
   if (hasWorkEvidence) return true;
-  const intent = classifyGroupProjectTaskIntent(String(task?.business_goal || task?.title || ""));
-  return intent.executable;
+  return false;
 }
 
 export function timelineStatusForUser(item: any) {

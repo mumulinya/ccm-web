@@ -1,11 +1,17 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { AlertCircle, CheckSquare2, FileCode2, Search } from '@lucide/vue'
+import { computed, ref, watch } from 'vue'
+import { AlertCircle, Boxes, CheckSquare2, FileCode2, FolderTree, ListFilter, Search } from '@lucide/vue'
+import CodeChangeTreeNode from './CodeChangeTreeNode.vue'
 
 const props = defineProps({ files: { type: Array, default: () => [] }, selectedPath: { type: String, default: '' }, checkedPaths: { type: Object, required: true } })
 const emit = defineEmits(['select', 'toggle', 'toggle-visible'])
 const query = ref('')
 const filter = ref('all')
+const storedGroupingMode = typeof localStorage === 'undefined' ? '' : localStorage.getItem('ccm-code-change-grouping')
+const groupingMode = ref(['directory', 'module', 'status'].includes(storedGroupingMode) ? storedGroupingMode : 'directory')
+const expandedPaths = ref(new Set())
+let initializedDirectorySignature = ''
+
 const tabs = computed(() => [
   { id: 'all', label: '全部', count: props.files.length },
   { id: 'staged', label: '暂存', count: props.files.filter(file => file.staged).length },
@@ -18,7 +24,7 @@ const visibleFiles = computed(() => {
     filter.value === 'all' || filter.value === 'staged' && file.staged || filter.value === 'working' && file.unstaged || filter.value === 'conflict' && file.conflict
   ))
 })
-const grouped = computed(() => {
+const statusGroups = computed(() => {
   const definitions = [
     ['冲突', file => file.conflict],
     ['同时存在暂存与工作区改动', file => !file.conflict && file.staged && file.unstaged],
@@ -28,43 +34,132 @@ const grouped = computed(() => {
   ]
   return definitions.map(([label, predicate]) => ({ label, files: visibleFiles.value.filter(predicate) })).filter(group => group.files.length)
 })
+const moduleGroups = computed(() => {
+  const groups = new Map()
+  for (const file of visibleFiles.value) {
+    const parts = String(file.path || '').split('/').filter(Boolean)
+    const module = parts.length > 1 ? parts[0] : '项目根目录'
+    if (!groups.has(module)) groups.set(module, [])
+    groups.get(module).push({ ...file, moduleRelativePath: parts.length > 1 ? parts.slice(1).join('/') : parts[0] })
+  }
+  return [...groups.entries()].map(([label, files]) => ({ label, files: files.sort((a, b) => a.path.localeCompare(b.path)) })).sort((a, b) => a.label.localeCompare(b.label))
+})
+
+const buildDirectoryTree = files => {
+  const root = { type: 'directory', name: '', path: '', childrenByName: new Map(), children: [], descendantFiles: [] }
+  for (const file of files) {
+    const parts = String(file.path || '').split('/').filter(Boolean)
+    if (!parts.length) continue
+    let parent = root
+    for (const segment of parts.slice(0, -1)) {
+      const nodePath = parent.path ? `${parent.path}/${segment}` : segment
+      if (!parent.childrenByName.has(segment)) parent.childrenByName.set(segment, { type: 'directory', name: segment, path: nodePath, childrenByName: new Map(), children: [], descendantFiles: [] })
+      parent = parent.childrenByName.get(segment)
+    }
+    parent.children.push({ type: 'file', name: parts.at(-1), path: file.path, file })
+  }
+  const finalize = node => {
+    const directories = [...node.childrenByName.values()].map(finalize).sort((a, b) => a.name.localeCompare(b.name))
+    const files = node.children.sort((a, b) => a.name.localeCompare(b.name))
+    node.children = [...directories, ...files]
+    node.descendantFiles = node.children.flatMap(child => child.type === 'file' ? [child.file] : child.descendantFiles)
+    delete node.childrenByName
+    return node
+  }
+  return finalize(root).children
+}
+const directoryTree = computed(() => buildDirectoryTree(visibleFiles.value))
 const allVisibleChecked = computed(() => visibleFiles.value.length > 0 && visibleFiles.value.every(file => props.checkedPaths.has(file.path)))
+const hasVisibleRows = computed(() => groupingMode.value === 'directory' ? directoryTree.value.length : groupingMode.value === 'module' ? moduleGroups.value.length : statusGroups.value.length)
+
+const toggleExpanded = path => {
+  const next = new Set(expandedPaths.value)
+  next.has(path) ? next.delete(path) : next.add(path)
+  expandedPaths.value = next
+}
+const directoryPaths = files => {
+  const paths = new Set()
+  for (const file of files) {
+    const parts = String(file.path || '').split('/').filter(Boolean)
+    for (let index = 1; index < parts.length; index += 1) paths.add(parts.slice(0, index).join('/'))
+  }
+  return paths
+}
+watch(() => props.files.map(file => file.path).sort().join('|'), signature => {
+  const topSignature = [...new Set(props.files.map(file => String(file.path || '').split('/')[0]).filter(Boolean))].sort().join('|')
+  if (!signature) { expandedPaths.value = new Set(); initializedDirectorySignature = ''; return }
+  if (topSignature === initializedDirectorySignature) return
+  initializedDirectorySignature = topSignature
+  const paths = [...directoryPaths(props.files)]
+  expandedPaths.value = new Set(paths.filter(path => props.files.length <= 100 || path.split('/').length <= 2))
+}, { immediate: true })
+watch(groupingMode, value => {
+  if (typeof localStorage !== 'undefined') localStorage.setItem('ccm-code-change-grouping', value)
+})
 </script>
 
 <template>
   <aside class="change-files" aria-label="变更文件">
-    <div class="files-title"><span><FileCode2 :size="15" />变更文件</span><strong>{{ files.length }}</strong></div>
-    <label class="file-search"><Search :size="14" /><input v-model="query" placeholder="搜索文件路径" /></label>
+    <div class="files-title">
+      <span><FileCode2 :size="15" />变更文件</span>
+      <strong>{{ files.length }}</strong>
+    </div>
+    <label class="file-search"><Search :size="14" /><input v-model="query" placeholder="搜索文件或目录" /></label>
+    <div class="grouping-switch" role="group" aria-label="分组依据">
+      <button type="button" :class="{ active: groupingMode === 'directory' }" title="按目录树分组" @click="groupingMode = 'directory'"><FolderTree :size="13" />目录</button>
+      <button type="button" :class="{ active: groupingMode === 'module' }" title="按首级模块分组" @click="groupingMode = 'module'"><Boxes :size="13" />模块</button>
+      <button type="button" :class="{ active: groupingMode === 'status' }" title="按 Git 状态分组" @click="groupingMode = 'status'"><ListFilter :size="13" />状态</button>
+    </div>
     <div class="file-tabs" role="tablist">
       <button v-for="tab in tabs" :key="tab.id" :class="{ active: filter === tab.id, danger: tab.id === 'conflict' && tab.count }" @click="filter = tab.id">{{ tab.label }} {{ tab.count }}</button>
     </div>
     <button class="select-visible" :disabled="!visibleFiles.length" @click="emit('toggle-visible', visibleFiles)"><CheckSquare2 :size="14" />{{ allVisibleChecked ? '取消当前选择' : '选择当前文件' }}</button>
     <div class="file-scroll">
       <div v-if="!files.length" class="empty-files">没有未提交文件</div>
-      <div v-else-if="!grouped.length" class="empty-files">没有匹配的文件</div>
-      <section v-for="group in grouped" :key="group.label" class="file-group">
-        <h4>{{ group.label }} <span>{{ group.files.length }}</span></h4>
-        <button v-for="file in group.files" :key="file.path" class="file-row" :class="{ active: selectedPath === file.path, conflict: file.conflict }" @click="emit('select', file.path)">
-          <input type="checkbox" :checked="checkedPaths.has(file.path)" :aria-label="`选择 ${file.path}`" @click.stop="emit('toggle', file.path)" />
-          <span class="file-copy">
-            <strong :title="file.path">{{ file.path }}</strong>
-            <small><span :style="{ color: file.statusColor }">{{ file.statusText }}</span><span class="adds">+{{ file.additions || 0 }}</span><span class="deletes">-{{ file.deletions || 0 }}</span><span v-if="file.large">大文件</span><span v-if="file.binary">二进制</span></small>
-          </span>
-          <AlertCircle v-if="file.conflict" :size="15" class="conflict-icon" />
-        </button>
-      </section>
+      <div v-else-if="!hasVisibleRows" class="empty-files">没有匹配的文件</div>
+
+      <div v-else-if="groupingMode === 'directory'" class="directory-tree" role="tree" aria-label="变更目录树">
+        <CodeChangeTreeNode
+          v-for="node in directoryTree"
+          :key="node.path"
+          :node="node"
+          :selected-path="selectedPath"
+          :checked-paths="checkedPaths"
+          :expanded-paths="expandedPaths"
+          :force-expanded="!!query.trim()"
+          @select="emit('select', $event)"
+          @toggle="emit('toggle', $event)"
+          @toggle-directory="emit('toggle-visible', $event)"
+          @toggle-expand="toggleExpanded"
+        />
+      </div>
+
+      <template v-else>
+        <section v-for="group in groupingMode === 'module' ? moduleGroups : statusGroups" :key="group.label" class="file-group">
+          <h4>{{ group.label }} <span>{{ group.files.length }}</span></h4>
+          <button v-for="file in group.files" :key="file.path" class="file-row" :class="{ active: selectedPath === file.path, conflict: file.conflict }" @click="emit('select', file.path)">
+            <input type="checkbox" :checked="checkedPaths.has(file.path)" :aria-label="`选择 ${file.path}`" @click.stop="emit('toggle', file.path)" />
+            <span class="file-copy">
+              <strong :title="file.path">{{ groupingMode === 'module' ? file.moduleRelativePath : file.path }}</strong>
+              <small><span :style="{ color: file.statusColor }">{{ file.statusText }}</span><span class="adds">+{{ file.additions || 0 }}</span><span class="deletes">-{{ file.deletions || 0 }}</span><span v-if="file.large">大文件</span><span v-if="file.binary">二进制</span></small>
+            </span>
+            <AlertCircle v-if="file.conflict" :size="15" class="conflict-icon" />
+          </button>
+        </section>
+      </template>
     </div>
   </aside>
 </template>
 
 <style scoped>
-.change-files { width:320px; flex:0 0 320px; min-height:0; display:flex; flex-direction:column; border-right:1px solid var(--border-color,rgba(15,23,42,.09)); background:color-mix(in srgb,var(--bg-primary,#fff) 96%,#f8fafc); }
+.change-files { width:100%; min-width:0; min-height:0; height:100%; align-self:stretch; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--border-color,rgba(15,23,42,.09)); border-radius:7px; background:color-mix(in srgb,var(--bg-primary,#fff) 96%,#f8fafc); box-shadow:var(--shadow-sm); }
 .files-title { padding:12px 14px 9px; display:flex; align-items:center; justify-content:space-between; }.files-title span { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:650; color:var(--text-primary); }.files-title strong { font-size:11px; color:var(--text-muted); }
-.file-search { margin:0 12px 9px; height:32px; padding:0 9px; display:flex; align-items:center; gap:7px; border:1px solid var(--border-color,rgba(15,23,42,.1)); border-radius:6px; color:var(--text-muted); }.file-search:focus-within { border-color:#3b82f6; }.file-search input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--text-primary); font-size:12px; }
-.file-tabs { display:grid; grid-template-columns:repeat(4,1fr); padding:0 12px 9px; gap:4px; }.file-tabs button { min-width:0; border:0; border-radius:5px; padding:5px 2px; background:transparent; color:var(--text-muted); font-size:10px; cursor:pointer; white-space:nowrap; }.file-tabs button.active { background:rgba(37,99,235,.09); color:#2563eb; }.file-tabs button.danger { color:#b91c1c; }
+.file-search { margin:0 12px 8px; height:32px; padding:0 9px; display:flex; align-items:center; gap:7px; border:1px solid var(--border-color,rgba(15,23,42,.1)); border-radius:6px; color:var(--text-muted); }.file-search:focus-within { border-color:#3b82f6; }.file-search input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--text-primary); font-size:12px; }
+.grouping-switch { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin:0 12px 8px; padding:3px; border:1px solid var(--border-color,rgba(15,23,42,.09)); border-radius:6px; background:var(--bg-secondary,#f8fafc); }.grouping-switch button { min-width:0; height:27px; display:flex; align-items:center; justify-content:center; gap:4px; border:0; border-radius:4px; background:transparent; color:var(--text-muted); font-size:10px; cursor:pointer; }.grouping-switch button.active { background:var(--bg-primary,#fff); color:#2563eb; box-shadow:0 1px 3px rgba(15,23,42,.08); }
+.file-tabs { display:grid; grid-template-columns:repeat(4,1fr); padding:0 12px 8px; gap:4px; }.file-tabs button { min-width:0; border:0; border-radius:5px; padding:5px 2px; background:transparent; color:var(--text-muted); font-size:10px; cursor:pointer; white-space:nowrap; }.file-tabs button.active { background:rgba(37,99,235,.09); color:#2563eb; }.file-tabs button.danger { color:#b91c1c; }
 .select-visible { margin:0 12px 8px; padding:6px 8px; display:flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--border-color,rgba(15,23,42,.09)); border-radius:6px; background:transparent; color:var(--text-secondary); font-size:11px; cursor:pointer; }.select-visible:disabled { opacity:.45; cursor:not-allowed; }
-.file-scroll { flex:1; min-height:0; overflow:auto; }.file-group h4 { margin:0; padding:8px 14px 5px; color:var(--text-muted); font-size:10px; font-weight:650; text-transform:none; }.file-group h4 span { margin-left:4px; font-weight:400; }
+.file-scroll { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }.file-group h4 { margin:0; padding:8px 14px 5px; color:var(--text-muted); font-size:10px; font-weight:650; text-transform:none; }.file-group h4 span { margin-left:4px; font-weight:400; }
 .file-row { width:100%; min-height:47px; padding:7px 12px; display:flex; align-items:center; gap:8px; border:0; border-left:3px solid transparent; background:transparent; color:inherit; text-align:left; cursor:pointer; }.file-row:hover { background:rgba(37,99,235,.045); }.file-row.active { border-left-color:#2563eb; background:rgba(37,99,235,.08); }.file-row.conflict { border-left-color:#dc2626; }
 .file-row input { flex-shrink:0; }.file-copy { min-width:0; flex:1; }.file-copy strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:550; color:var(--text-primary); }.file-copy small { display:flex; align-items:center; gap:7px; margin-top:3px; color:var(--text-muted); font-size:10px; }.adds { color:#047857; }.deletes,.conflict-icon { color:#b91c1c; }.empty-files { padding:38px 16px; text-align:center; color:var(--text-muted); font-size:12px; }
-@media(max-width:768px){.change-files{width:100%;flex:0 0 auto;max-height:320px;border-right:0;border-bottom:1px solid var(--border-color,rgba(15,23,42,.09))}.file-scroll{max-height:170px}.file-tabs button{font-size:9px}}
+@media(max-width:768px){.change-files{width:100%;height:100%;min-height:0}.file-tabs button{font-size:9px}}
 </style>

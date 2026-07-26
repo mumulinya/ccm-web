@@ -4,107 +4,101 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const {
-  RANDOM_MUSIC_KEYWORD,
-  resolveMusicPlaybackRequest,
-  resolveMusicPlaybackRequestFallback,
-} = require('../ccm-package/dist/modules/music/agent.js')
+const { RANDOM_MUSIC_KEYWORD, resolveMusicPlaybackRequest } = require('../ccm-package/dist/modules/music/agent.js')
 const { selectMusicTrack } = require('../ccm-package/dist/modules/music/select-track.js')
-
 const root = path.resolve(import.meta.dirname, '..')
 const source = (file) => fs.readFileSync(path.join(root, file), 'utf8')
-const checks = {}
 
-const exact = resolveMusicPlaybackRequestFallback('播放周杰伦的晴天', '周杰伦 晴天')
-const sad = resolveMusicPlaybackRequestFallback('我心情不好，给我播放一首歌', RANDOM_MUSIC_KEYWORD)
-const happy = resolveMusicPlaybackRequestFallback('今天特别开心，放首歌庆祝一下', RANDOM_MUSIC_KEYWORD)
-const artist = resolveMusicPlaybackRequestFallback('播放周杰伦的歌', '周杰伦')
-const genre = resolveMusicPlaybackRequestFallback('来一首摇滚音乐', '摇滚')
-const random = resolveMusicPlaybackRequestFallback('随便放一首歌', RANDOM_MUSIC_KEYWORD)
-const disabledModel = await resolveMusicPlaybackRequest({ enabled: false }, '适合写代码时听的歌，播放一首', '')
-const strictReject = await selectMusicTrack({
-  keyword: '周杰伦 晴天',
-  candidates: [{ title: '江南', artist: '林俊杰' }],
-  allowModel: false,
-})
-const recommendationAccept = await selectMusicTrack({
-  keyword: '治愈 温柔',
-  originalRequest: '我心情不好，给我播放一首歌',
-  selectionMode: 'recommendation',
-  candidates: [{ title: '温柔的夜', artist: '示例歌手' }],
-  allowModel: false,
-})
-const artistFiltered = await selectMusicTrack({
-  keyword: '周杰伦',
-  selectionMode: 'artist_random',
-  randomize: true,
-  candidates: [{ title: '晴天', artist: '周杰伦' }, { title: '江南', artist: '林俊杰' }],
-  allowModel: false,
-})
-let mockModelCalls = 0
-const mockServer = http.createServer((req, res) => {
-  mockModelCalls += 1
+let modelCalls = 0
+const mockServer = http.createServer(async (req, res) => {
+  modelCalls += 1
+  let body = ''
+  for await (const chunk of req) body += chunk
+  let userText = body
+  try {
+    const payload = JSON.parse(body)
+    const messages = Array.isArray(payload?.messages) ? payload.messages : []
+    userText = String(messages.filter((item) => item?.role === 'user').at(-1)?.content || body)
+  } catch {}
+  let content
+  if (userText.includes('候选列表')) {
+    content = '{"index":1,"reject":false,"reason":"模型结合歌手与安静偏好选择候选"}'
+  } else if (userText.includes('心情不好')) {
+    content = '{"strategy":"mood_recommendation","searchQuery":"治愈 温柔","mood":"难过","reason":"模型识别情绪"}'
+  } else if (userText.includes('特别开心')) {
+    content = '{"strategy":"mood_recommendation","searchQuery":"欢快 庆祝","mood":"开心","reason":"模型识别情绪"}'
+  } else if (userText.includes('周杰伦的晴天')) {
+    content = '{"strategy":"exact_song","searchQuery":"周杰伦 晴天","artist":"周杰伦","reason":"模型识别明确歌曲"}'
+  } else if (userText.includes('周杰伦的歌')) {
+    content = '{"strategy":"artist_random","searchQuery":"周杰伦","artist":"周杰伦","reason":"模型识别歌手范围"}'
+  } else if (userText.includes('摇滚')) {
+    content = '{"strategy":"genre_recommendation","searchQuery":"摇滚","genre":"摇滚","reason":"模型识别曲风"}'
+  } else {
+    content = '{"strategy":"random","searchQuery":"__random__","reason":"模型确认无额外限制"}'
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' })
-  res.end(JSON.stringify({ choices: [{ message: { content: '{"index":1,"reject":false,"reason":"结合用户原话选择第二首歌手作品"}' } }] }))
+  res.end(JSON.stringify({ choices: [{ message: { content } }] }))
 })
+
 await new Promise((resolve) => mockServer.listen(0, '127.0.0.1', resolve))
-const mockPort = mockServer.address().port
-let artistModelSelected
+const port = mockServer.address().port
+const config = { enabled: true, apiKey: 'mock-key', model: 'mock-model', apiUrl: `http://127.0.0.1:${port}`, format: 'openai', timeoutMs: 5000 }
+
+let plans
+let artistSelected
 try {
-  artistModelSelected = await selectMusicTrack({
+  plans = {
+    exact: await resolveMusicPlaybackRequest(config, '播放周杰伦的晴天', '周杰伦 晴天'),
+    sad: await resolveMusicPlaybackRequest(config, '我心情不好，给我播放一首歌', ''),
+    happy: await resolveMusicPlaybackRequest(config, '今天特别开心，放首歌庆祝一下', ''),
+    artist: await resolveMusicPlaybackRequest(config, '播放周杰伦的歌', '周杰伦'),
+    genre: await resolveMusicPlaybackRequest(config, '来一首摇滚音乐', '摇滚'),
+    random: await resolveMusicPlaybackRequest(config, '随便放一首歌', ''),
+  }
+  artistSelected = await selectMusicTrack({
     keyword: '周杰伦',
     originalRequest: '播放周杰伦的歌，想听一首安静一点的',
     selectionMode: 'artist_random',
-    randomize: false,
     candidates: [
+      { title: '周杰伦精选', artist: '未知歌手' },
       { title: '江南', artist: '林俊杰' },
       { title: '晴天', artist: '周杰伦' },
       { title: '安静', artist: '周杰伦' },
     ],
-    modelConfig: {
-      enabled: true,
-      apiKey: 'mock-key',
-      model: 'mock-model',
-      apiUrl: `http://127.0.0.1:${mockPort}`,
-      format: 'openai',
-      timeoutMs: 5000,
-    },
+    modelConfig: config,
   })
 } finally {
   await new Promise((resolve) => mockServer.close(resolve))
 }
 
-checks.exactSongIsStrict = exact.strategy === 'exact_song' && exact.strictMatch && !exact.randomize
-checks.sadMoodOverridesPrematureRandom = sad.strategy === 'mood_recommendation' && sad.searchQuery.includes('治愈')
-checks.happyMoodIsRecommended = happy.strategy === 'mood_recommendation' && happy.searchQuery.includes('欢快')
-checks.artistOnlyIsFilteredRandom = artist.strategy === 'artist_random' && artist.artist === '周杰伦' && artist.randomize
-checks.genreIsRecommendation = genre.strategy === 'genre_recommendation' && genre.genre === '摇滚'
-checks.genericRequestIsRandom = random.strategy === 'random' && random.searchQuery === RANDOM_MUSIC_KEYWORD
-checks.modelUnavailableHasSafeFallback = disabledModel.strategy === 'mood_recommendation' && disabledModel.source === 'fallback'
-checks.strictSelectorStillRejectsWrongSong = strictReject.rejected === true && strictReject.index === -1
-checks.recommendationSelectorDoesNotRequireExactTitle = recommendationAccept.success === true && recommendationAccept.index === 0
-checks.artistSelectorExcludesOtherArtists = artistFiltered.success === true && artistFiltered.index === 0
-checks.artistFilteredCandidatesGoThroughModel = mockModelCalls === 1
-  && artistModelSelected?.success === true
-  && artistModelSelected?.source === 'model-artist-selection'
-  && artistModelSelected?.index === 2
+let disabledRejected = false
+try {
+  await resolveMusicPlaybackRequest({ enabled: false }, '适合写代码时听的歌，播放一首', '')
+} catch (error) {
+  disabledRejected = /统一大模型/.test(String(error?.message || error))
+}
+const selectorWithoutModel = await selectMusicTrack({
+  keyword: '周杰伦 晴天',
+  candidates: [{ title: '晴天', artist: '周杰伦' }],
+  allowModel: false,
+})
 
-const queueSource = source('backend/modules/music/state.ts')
-const apiSource = source('backend/modules/music/music-part-01.ts')
-const globalSource = source('backend/modules/global/global-agent-feishu-actions.ts')
-const remoteSource = source('frontend/src/composables/useMusicRemotePlayback.js')
-const playerSource = source('frontend/src/components/music/useMusicPlayer.js')
-const selectorSource = source('backend/modules/music/select-track.ts')
-
-checks.remoteQueuePersistsFullRequest = queueSource.includes('request_text?: string') && queueSource.includes('command?.request_text')
-checks.globalAgentForwardsFullRequest = globalSource.includes('request_text: requestText')
-checks.apiExposesStructuredResolver = apiSource.includes('/api/music/resolve-play-request') && apiSource.includes('resolveMusicPlaybackRequest')
-checks.clientEffectAndPollerForwardRequest = remoteSource.includes('takenCommand?.request_text') && remoteSource.includes('requestText: command.request_text')
-checks.playerUsesStructuredStrategies = playerSource.includes("playbackPlan.strategy === 'random'") && playerSource.includes("playbackPlan.strategy === 'artist_random'")
-checks.exactAndRecommendationStaySeparate = selectorSource.includes('const strictMatch = selectionMode === "exact"') && selectorSource.includes('model-recommendation')
-checks.artistCandidatesAreActuallyFiltered = selectorSource.includes('candidateEntries = candidateEntries') && selectorSource.includes('候选中没有歌手')
-checks.artistCandidatesReturnToModel = selectorSource.includes('你是歌手作品选曲器') && selectorSource.includes('model-artist-selection') && !selectorSource.includes('source: "random"')
+const checks = {
+  exactSongIsStrict: plans.exact.strategy === 'exact_song' && plans.exact.strictMatch,
+  sadMoodIsModelDecision: plans.sad.strategy === 'mood_recommendation' && plans.sad.searchQuery.includes('治愈'),
+  happyMoodIsModelDecision: plans.happy.strategy === 'mood_recommendation' && plans.happy.searchQuery.includes('欢快'),
+  artistOnlyStillUsesModel: plans.artist.strategy === 'artist_random' && plans.artist.artist === '周杰伦',
+  genreUsesModel: plans.genre.strategy === 'genre_recommendation' && plans.genre.genre === '摇滚',
+  randomIsExplicitModelDecision: plans.random.strategy === 'random' && plans.random.searchQuery === RANDOM_MUSIC_KEYWORD,
+  modelUnavailableFailsClosed: disabledRejected,
+  selectorWithoutModelFailsClosed: selectorWithoutModel.rejected === true && selectorWithoutModel.source === 'reject',
+  artistCandidatesFilteredThenModelSelected: artistSelected?.success === true && artistSelected?.source === 'model-artist-selection' && artistSelected?.index === 3,
+  mockProviderUsedOnly: modelCalls === 7,
+  noLocalSelectionFallback: !source('backend/modules/music/select-track.ts').includes('recommendation-fallback')
+    && !source('backend/modules/music/select-track.ts').includes('改用规则选曲'),
+  noLocalIntentFallback: source('backend/modules/music/agent.ts').includes('本地音乐语义兜底已停用'),
+}
 
 const pass = Object.values(checks).every(Boolean)
-console.log(JSON.stringify({ pass, paidProviderCalls: 0, checks, plans: { exact, sad, happy, artist, genre, random } }, null, 2))
+console.log(JSON.stringify({ pass, paidProviderCalls: 0, modelCalls, checks, plans, artistSelected }, null, 2))
 if (!pass) process.exitCode = 1

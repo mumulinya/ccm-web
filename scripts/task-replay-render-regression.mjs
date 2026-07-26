@@ -43,6 +43,8 @@ try {
   await visible(page.getByText('web 返回代码改动'),'project change')
   await visible(page.getByText('TestAgent 复验通过'),'test verification')
   await visible(page.getByText('全局主 Agent 汇总任务结果'),'final summary')
+  await page.evaluate(() => window.__appendTaskReplayLiveEvent())
+  await visible(page.getByText('任务回放已实时同步'),'SSE incremental replay event')
   await visible(page.locator('.evidence-image-link img'),'browser screenshot evidence')
   if (await page.locator('.event-technical').filter({hasText:'failed_assertion'}).isVisible()) throw new Error('technical details must be folded by default')
   if ((await page.locator('body').innerText()).includes('C:\\Users\\')) throw new Error('local paths leaked')
@@ -79,14 +81,20 @@ try {
   await visible(page.getByText('该任务当时只保存了文件与行数统计，无法还原逐行代码内容'),'historical diff unavailable explanation')
   await page.locator('.drawer-close').click()
 
+  await page.getByRole('button',{name:'返回任务列表'}).click()
+  await visible(page.locator('.replay-index-filters'),'task replay index filters')
+  await visible(page.locator('.task-index-tags').getByText('产品研发群',{exact:true}),'group facet label')
+  await visible(page.locator('.task-index-tags').getByText('web',{exact:true}),'project facet label')
+  await page.screenshot({path:path.join(outputDir,'05-filterable-task-index.png'),fullPage:true})
+
   const mobile = await instance.newPage({viewport:{width:390,height:844},deviceScaleFactor:1})
   await mobile.goto(fixtureUrl,{waitUntil:'networkidle'})
   await visible(mobile.getByRole('heading',{name:'修复登录状态刷新丢失'}),'mobile replay heading')
   const overflow = await mobile.evaluate(()=>document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)
   if (overflow) throw new Error('mobile layout has horizontal overflow')
-  await mobile.screenshot({path:path.join(outputDir,'05-complete-task-timeline-mobile.png'),fullPage:true})
+  await mobile.screenshot({path:path.join(outputDir,'06-complete-task-timeline-mobile.png'),fullPage:true})
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`)
-  const shots=(await fs.readdir(outputDir)).filter(name=>name.endsWith('.png')).sort(); if(shots.length!==5)throw new Error(`expected 5 screenshots, got ${shots.length}`)
+  const shots=(await fs.readdir(outputDir)).filter(name=>name.endsWith('.png')).sort(); if(shots.length!==6)throw new Error(`expected 6 screenshots, got ${shots.length}`)
   console.log(JSON.stringify({pass:true,fixtureUrl,screenshots:shots.map(name=>path.join(outputDir,name))},null,2))
 } catch(error) { console.error(JSON.stringify({pass:false,error:error.message},null,2)); process.exitCode=1 }
 finally { if(instance)await instance.close(); if(vite)await vite.close() }

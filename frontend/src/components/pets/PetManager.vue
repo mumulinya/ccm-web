@@ -90,7 +90,7 @@ onMounted(() => {
   height: 44px;
   border-radius: 50%;
   border: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--surface-translucent);
   backdrop-filter: blur(10px);
   font-size: 20px;
   cursor: pointer;

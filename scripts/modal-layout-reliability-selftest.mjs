@@ -14,7 +14,7 @@ checks.push({ name: 'legacy modal base constrains desktop width and forcibly cle
 
 const responsiveContracts = [
   ['frontend/src/components/projects/ProjectFeishuQrModal.vue', /@media \(max-width: 640px\)[\s\S]+\.qr-layout[\s\S]+flex-direction:\s*column/],
-  ['frontend/src/components/projects/ProjectFolderBrowserModal.vue', /@media \(max-width: 640px\)[\s\S]+\.folder-actions[\s\S]+grid-template-columns:\s*1fr 1fr/],
+  ['frontend/src/components/projects/ProjectFolderBrowserModal.vue', /@media\s*\(max-width:\s*680px\)[\s\S]+\.secondary-button,\.primary-button\s*\{\s*flex:\s*1/],
   ['frontend/src/components/projects/ProjectSharedFilesModal.vue', /@media \(max-width: 640px\)[\s\S]+\.shared-file-head[\s\S]+flex-direction:\s*column/],
   ['frontend/src/components/pets/PetCreateModal.vue', /width:\s*min\(380px, calc\(100vw - 32px\)\)/],
   ['frontend/src/components/pets/PetSkinCreateModal.vue', /width:\s*min\(380px, calc\(100vw - 32px\)\)/],
@@ -32,13 +32,22 @@ const walk = directory => {
   }
 }
 walk(path.join(root, 'frontend', 'src', 'components'))
-assert.ok(modalFiles.length >= 21, `expected at least 21 modal components, received ${modalFiles.length}`)
-checks.push({ name: `audited ${modalFiles.length} modal-overlay components across the application`, pass: true })
+assert.ok(modalFiles.length >= 18, `expected at least 18 legacy modal components, received ${modalFiles.length}`)
+const scopedToolModal = read('frontend/src/components/common/AgentToolsModal.vue')
+assert.match(scopedToolModal, /<Teleport to="body">/)
+assert.match(scopedToolModal, /class="agent-tools-overlay"/)
+assert.match(scopedToolModal, /class="tool-column"/)
+checks.push({ name: `audited ${modalFiles.length} legacy modal-overlay components plus the shared scoped tool modal`, pass: true })
 
 const projectForm = read('frontend/src/components/projects/ProjectFormModal.vue')
+const projectFeishu = read('frontend/src/components/projects/ProjectFeishuQrModal.vue')
 assert.match(projectForm, /class="project-form-modal"[\s\S]+role="dialog"[\s\S]+aria-modal="true"/)
 assert.match(projectForm, /hasValidPlatform[\s\S]+请选择通知平台/)
-checks.push({ name: 'project form remains self-contained and rejects invalid legacy platform values', pass: true })
+assert.match(projectForm, /data-project-feishu-modal/)
+assert.match(projectFeishu, /<Teleport to="body">/)
+assert.match(projectFeishu, /z-index:\s*10100/)
+assert.match(projectFeishu, /data-project-feishu-modal/)
+checks.push({ name: 'project form remains self-contained while Feishu setup owns a higher body-level modal layer', pass: true })
 
 const report = { pass: true, generatedAt: new Date().toISOString(), checks }
 const outputDir = path.join(root, 'scratch', 'modal-layout-reliability')

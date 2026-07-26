@@ -13,7 +13,7 @@ import {
   type ResolvedTestAgentArtifact,
 } from "../../test-agent/artifact-retention";
 import { getTaskLogs, getTaskTimeline } from "./logs";
-import { getGroupMessages } from "./storage";
+import { getGroupMessages, loadGroups } from "./storage";
 import { listTestAgentRunnerRecords } from "./test-agent-runner";
 
 export type TaskReplayStage = "intake" | "planning" | "dispatch" | "execution" | "change" | "test" | "rework" | "review" | "completion" | "system";
@@ -35,6 +35,32 @@ export interface TaskReplayEvent {
   source: string;
   evidence_ids: string[];
   technical?: Record<string, any>;
+}
+
+export interface TaskReplayEventPageOptions {
+  eventOffset?: number;
+  eventLimit?: number;
+  eventTail?: boolean;
+  afterEventAt?: string;
+  afterEventId?: string;
+  stage?: string;
+  status?: string;
+  actor?: string;
+  task?: string;
+  query?: string;
+  preset?: string;
+  includeSystemEvents?: boolean;
+}
+
+export interface TaskReplayIndexOptions {
+  page?: number;
+  limit?: number;
+  query?: string;
+  project?: string;
+  groupId?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 const STAGE_ORDER: TaskReplayStage[] = ["intake", "planning", "dispatch", "execution", "change", "test", "rework", "review", "completion", "system"];
@@ -281,11 +307,18 @@ function messageActor(message: any) {
   return actor("group_agent", "群聊主 Agent");
 }
 
+function taskOwnerActor(task: any) {
+  if (task?.orchestration_scope === "project_session") return actor("project_agent", "项目主 Agent");
+  if (task?.workflow_type === "global_mission" || task?.assign_type === "global") return actor("global_agent", "全局主 Agent");
+  return actor("group_agent", "群聊主 Agent");
+}
+
 function buildTaskEvents(tasks: any[]) {
   const events: TaskReplayEvent[] = [];
   for (const task of tasks) {
     const taskId = String(task.id || "");
-    events.push(event({ id: `task:${taskId}:created`, at: task.created_at, stage: "intake", category: "task", status: "info", title: task.parent_task_id ? "群聊主 Agent 创建项目子任务" : "任务已创建", summary: taskLabel(task), actor: actor(task.parent_task_id ? "group_agent" : "user", task.parent_task_id ? "群聊主 Agent" : "用户"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: task.target_project, source: "task" }));
+    const owner = taskOwnerActor(task);
+    events.push(event({ id: `task:${taskId}:created`, at: task.created_at, stage: "intake", category: "task", status: "info", title: task.parent_task_id ? `${owner.label}创建分派任务` : "任务已创建", summary: taskLabel(task), actor: task.parent_task_id ? owner : actor("user", "用户"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: task.target_project, source: "task", technical: { request_origin: task.request_origin || "", origin_session_id: task.origin_session_id || "", queue_scope: task.queue_scope || "" } }));
     for (const item of getTaskTimeline(task)) {
       events.push(event({ id: `timeline:${taskId}:${item.id || stableId("row", item)}`, at: item.at, category: String(item.type || "timeline"), status: normalizeStatus(item.status), title: item.title || item.type || "任务进展", summary: item.detail || item.message, actor: item.agent ? actor(/test.?agent/i.test(item.agent) ? "test_agent" : "project_agent", item.agent) : actor("group_agent", "群聊主 Agent"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: item.agent || task.target_project, source: "timeline", technical: item.data && typeof item.data === "object" ? { phase: item.phase || "", files: stringList(item.data.files || item.data.files_changed, 30) } : undefined }));
     }
@@ -294,7 +327,7 @@ function buildTaskEvents(tasks: any[]) {
     }
     if (task.updated_at && TERMINAL.has(String(task.status || "").toLowerCase())) {
       const summary = task.final_report || task.delivery_summary?.user_report || task.result || task.status_detail || taskLabel(task);
-      events.push(event({ id: `task:${taskId}:terminal`, at: task.completed_at || task.updated_at, stage: "completion", category: "task_status", status: normalizeStatus(task.status), title: normalizeStatus(task.status) === "passed" ? "任务已完成并形成总结" : `任务${task.status === "cancelled" ? "已取消" : "已结束"}`, summary, actor: actor("group_agent", "群聊主 Agent"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, source: "task" }));
+      events.push(event({ id: `task:${taskId}:terminal`, at: task.completed_at || task.updated_at, stage: "completion", category: "task_status", status: normalizeStatus(task.status), title: normalizeStatus(task.status) === "passed" ? "任务已完成并形成总结" : `任务${task.status === "cancelled" ? "已取消" : "已结束"}`, summary, actor: owner, task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, source: "task" }));
     }
   }
   return events;
@@ -303,14 +336,24 @@ function buildTaskEvents(tasks: any[]) {
 function buildMessageEvents(tasks: any[]) {
   const events: TaskReplayEvent[] = [];
   for (const task of tasks) {
-    if (!task.group_id) continue;
-    const sessionId = String(task.group_session_id || task.groupSessionId || "default");
-    const messages = getGroupMessages(task.group_id, sessionId).filter((message: any) => String(message?.task_id || message?.task?.id || "") === String(task.id));
+    let messages: any[] = [];
+    let source = "group_message";
+    if (task.group_id) {
+      const sessionId = String(task.group_session_id || task.groupSessionId || "default");
+      messages = getGroupMessages(task.group_id, sessionId);
+    } else if (task.project_session_id && task.target_project) {
+      try {
+        const session = require("../projects/sessions").getSessionDetail(task.target_project, task.project_session_id);
+        messages = Array.isArray(session?.history) ? session.history : [];
+        source = "project_message";
+      } catch {}
+    }
+    messages = messages.filter((message: any) => String(message?.task_id || message?.taskExperience?.task_id || message?.task?.id || "") === String(task.id));
     for (const [index, message] of messages.entries()) {
       const content = safeText(message.content || message.summary, 1000);
       if (!content || /CCM_AGENT_RECEIPT/i.test(String(message.content || ""))) continue;
       const who = messageActor(message);
-      events.push(event({ id: `message:${message.id || stableId("msg", { index, content })}`, at: message.timestamp || message.created_at, stage: message.role === "user" ? "intake" : undefined, category: "message", status: normalizeStatus(message.status), title: who.type === "user" ? "用户补充任务要求" : who.type === "project_agent" ? `${who.label} 返回工作结果` : "群聊主 Agent 更新进展", summary: content, actor: who, task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: message.trace_id || task.trace_id, project: message.project || message.agent, source: "group_message" }));
+      events.push(event({ id: `message:${message.id || stableId("msg", { index, content })}`, at: message.timestamp || message.created_at, stage: message.role === "user" ? "intake" : undefined, category: "message", status: normalizeStatus(message.status), title: who.type === "user" ? "用户补充任务要求" : source === "project_message" ? "项目主 Agent 更新进展" : who.type === "project_agent" ? `${who.label} 返回工作结果` : "群聊主 Agent 更新进展", summary: content, actor: source === "project_message" && message.role !== "user" ? actor("project_agent", "项目主 Agent") : who, task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: message.trace_id || task.trace_id, project: message.project || message.agent || task.target_project, source }));
     }
   }
   return events;
@@ -441,18 +484,76 @@ function dedupeAndSort(events: TaskReplayEvent[]) {
   }).sort((a, b) => a.at.localeCompare(b.at) || STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage) || a.id.localeCompare(b.id));
 }
 
-function taskPublicRow(task: any, rootId: string) {
-  return { id: String(task.id || ""), parent_task_id: String(task.parent_task_id || ""), root_task_id: rootId, title: taskLabel(task), goal: safeText(task.business_goal || task.description, 500), project: safeText(task.target_project, 100), group_id: String(task.group_id || ""), trace_id: String(task.trace_id || ""), status: String(task.status || "pending"), created_at: iso(task.created_at), updated_at: iso(task.updated_at), is_root: String(task.id) === rootId };
+export function paginateReplayEventsForView(allEvents: TaskReplayEvent[], options: TaskReplayEventPageOptions = {}) {
+  const eventQuery = String(options.query || "").trim().toLowerCase();
+  const hasEventViewOptions = Object.keys(options).length > 0;
+  const filteredEvents = hasEventViewOptions ? allEvents.filter(item => {
+    const lowLevelSource = ["trace", "journal", "task_log", "execution"].includes(item.source);
+    if (!options.includeSystemEvents && lowLevelSource && !["failed", "blocked", "warning"].includes(item.status)) return false;
+    if (options.stage && options.stage !== "all" && item.stage !== options.stage) return false;
+    if (options.status && options.status !== "all" && item.status !== options.status) return false;
+    if (options.actor && options.actor !== "all" && item.actor?.type !== options.actor) return false;
+    if (options.task && options.task !== "all" && item.task_id !== options.task) return false;
+    const haystack = `${item.title} ${item.summary} ${item.actor?.label} ${item.project} ${item.category}`.toLowerCase();
+    if (eventQuery && !haystack.includes(eventQuery)) return false;
+    if (options.preset === "issues" && !["failed", "blocked", "warning"].includes(item.status)) return false;
+    if (options.preset === "test" && !(item.actor?.type === "test_agent" || item.stage === "test")) return false;
+    if (options.preset === "browser" && !/browser|playwright|screenshot|页面|浏览器/i.test(haystack)) return false;
+    if (options.preset === "changes" && !["change", "execution", "rework"].includes(item.stage)) return false;
+    return true;
+  }) : allEvents;
+  const requestedLimit = Number(options.eventLimit || 0);
+  const paginated = Number.isFinite(requestedLimit) && requestedLimit > 0;
+  const eventLimit = paginated ? Math.max(1, Math.min(500, Math.floor(requestedLimit))) : filteredEvents.length;
+  const afterAt = iso(options.afterEventAt || "");
+  const afterId = String(options.afterEventId || "");
+  const requestedOffset = Number(options.eventOffset || 0);
+  let eventOffset = Number.isFinite(requestedOffset) ? Math.max(0, Math.floor(requestedOffset)) : 0;
+  let mode = "full";
+  if (paginated && afterAt) {
+    const firstNewIndex = filteredEvents.findIndex(item => item.at > afterAt || (item.at === afterAt && item.id > afterId));
+    eventOffset = firstNewIndex < 0 ? filteredEvents.length : firstNewIndex;
+    mode = "incremental";
+  } else if (paginated && options.eventTail) {
+    eventOffset = Math.max(0, filteredEvents.length - eventLimit);
+    mode = "tail";
+  } else if (paginated) {
+    mode = "page";
+  }
+  eventOffset = Math.min(eventOffset, filteredEvents.length);
+  const events = paginated ? filteredEvents.slice(eventOffset, eventOffset + eventLimit) : filteredEvents;
+  const nextOffset = eventOffset + events.length;
+  return {
+    events,
+    eventPage: {
+      mode,
+      offset: eventOffset,
+      limit: eventLimit,
+      returned: events.length,
+      total: filteredEvents.length,
+      total_unfiltered: allEvents.length,
+      has_previous: eventOffset > 0,
+      has_more: nextOffset < filteredEvents.length,
+      previous_offset: Math.max(0, eventOffset - eventLimit),
+      next_offset: nextOffset,
+      first_cursor: events[0] ? { at: events[0].at, id: events[0].id } : null,
+      last_cursor: events.at(-1) ? { at: events.at(-1)!.at, id: events.at(-1)!.id } : null,
+    },
+  };
 }
 
-export function buildCompleteTaskReplay(taskId: string) {
+function taskPublicRow(task: any, rootId: string) {
+  return { id: String(task.id || ""), parent_task_id: String(task.parent_task_id || ""), root_task_id: rootId, title: taskLabel(task), goal: safeText(task.business_goal || task.description, 500), project: safeText(task.target_project, 100), group_id: String(task.group_id || ""), group_session_id: String(task.group_session_id || ""), project_session_id: String(task.project_session_id || ""), request_origin: String(task.request_origin || ""), queue_scope: String(task.queue_scope || ""), trace_id: String(task.trace_id || ""), status: String(task.status || "pending"), created_at: iso(task.created_at), updated_at: iso(task.updated_at), is_root: String(task.id) === rootId };
+}
+
+export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEventPageOptions = {}) {
   const family = taskFamily(String(taskId || ""));
   if (!family) return null;
   const ids = [...family.ids];
   const globalRecords = relatedGlobalRecords(family.ids);
   const artifactRuns = listTestAgentArtifactCatalogForTasks(ids);
   const extraTraceIds = [...globalRecords.runs.map(run => run.trace_id), ...globalRecords.supervisors.map(record => record.trace_id)].filter(Boolean);
-  const events = dedupeAndSort([
+  const allEvents = dedupeAndSort([
     ...buildTaskEvents(family.tasks),
     ...buildMessageEvents(family.tasks),
     ...buildExecutionEvents(family.tasks),
@@ -462,12 +563,13 @@ export function buildCompleteTaskReplay(taskId: string) {
     ...buildTraceEvents(family.tasks, extraTraceIds),
   ]);
   const evidence = taskEvidence(family.tasks, artifactRuns);
-  const issueEvents = events.filter(item => ["failed", "blocked", "warning"].includes(item.status));
+  const issueEvents = allEvents.filter(item => ["failed", "blocked", "warning"].includes(item.status));
   const phases = STAGE_ORDER.map(stage => {
-    const rows = events.filter(item => item.stage === stage);
+    const rows = allEvents.filter(item => item.stage === stage);
     const status: TaskReplayStatus = rows.some(item => item.status === "failed") ? "failed" : rows.some(item => item.status === "blocked") ? "blocked" : rows.some(item => item.status === "warning") ? "warning" : rows.some(item => item.status === "running") ? "running" : rows.length ? "passed" : "info";
     return { id: stage, status, event_count: rows.length, started_at: rows[0]?.at || "", finished_at: rows.at(-1)?.at || "" };
   }).filter(row => row.event_count > 0);
+  const { events, eventPage } = paginateReplayEventsForView(allEvents, options);
   const rootStatus = String(family.root.status || "pending");
   return {
     schema: "ccm-complete-task-replay-v1",
@@ -487,33 +589,109 @@ export function buildCompleteTaskReplay(taskId: string) {
       { id: "project_agent", label: "项目子 Agent", present: family.tasks.some(task => listExecutions({ taskId: task.id }).length > 0) },
       { id: "test_agent", label: "TestAgent", present: artifactRuns.length > 0 || listTestAgentRunnerRecords({ taskIds: ids, limit: 1 }).length > 0 },
     ],
-    summary: { event_count: events.length, issue_count: issueEvents.length, failed_count: issueEvents.filter(item => item.status === "failed").length, task_count: family.tasks.length, evidence_count: evidence.length, test_run_count: artifactRuns.length },
+    summary: { event_count: allEvents.length, issue_count: issueEvents.length, failed_count: issueEvents.filter(item => item.status === "failed").length, task_count: family.tasks.length, evidence_count: evidence.length, test_run_count: artifactRuns.length },
     phases,
     events,
+    event_page: eventPage,
     evidence,
     retention: {
       task_record: { status: "available", policy: "任务删除前保留" },
       trace: { status: "available", policy: "完整任务日志保留到任务删除；快速 Trace 保留最近 1200 条" },
       test_agent: { status: artifactRuns.some(run => run.retention_status === "available") ? "available" : artifactRuns.length ? "expired" : "not_created", policy: "默认保留 14 天，且受 200 次运行和 2GB 上限约束", earliest_expiry: artifactRuns.map(run => run.retained_until).filter(Boolean).sort()[0] || "" },
     },
-    replay_capabilities: { chronological: true, filters: ["stage", "status", "actor", "task", "search"], failure_navigation: true, evidence_preview: true, historical_line_diff: true, raw_machine_paths_exposed: false },
+    replay_capabilities: { chronological: true, filters: ["stage", "status", "actor", "task", "search"], event_pagination: true, incremental_cursor: true, failure_navigation: true, evidence_preview: true, historical_line_diff: true, raw_machine_paths_exposed: false },
   };
 }
 
-export function buildTaskReplayIndex(limit = 40) {
-  const tasks = loadTasks();
+export function buildTaskReplayIndex(input: number | TaskReplayIndexOptions = 40) {
+  return buildTaskReplayIndexFromRecords(loadTasks(), loadGroups(), input);
+}
+
+export function buildTaskReplayIndexFromRecords(tasks: any[], groups: any[], input: number | TaskReplayIndexOptions = 40) {
   const byId = new Map(tasks.map((task: any) => [String(task.id), task]));
-  const roots = tasks.filter((task: any) => !task.parent_task_id || !byId.has(String(task.parent_task_id)))
-    .sort((a: any, b: any) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))
-    .slice(0, Math.max(1, Math.min(100, Number(limit || 40))));
+  const options: TaskReplayIndexOptions = typeof input === "number" ? { limit: input } : (input || {});
+  const requestedIndexLimit = Number(options.limit || 40);
+  const requestedIndexPage = Number(options.page || 1);
+  const limit = Number.isFinite(requestedIndexLimit) ? Math.max(1, Math.min(100, Math.floor(requestedIndexLimit))) : 40;
+  const page = Number.isFinite(requestedIndexPage) ? Math.max(1, Math.floor(requestedIndexPage)) : 1;
+  const query = String(options.query || "").trim().toLowerCase();
+  const projectFilter = String(options.project || "").trim().toLowerCase();
+  const groupFilter = String(options.groupId || "").trim();
+  const statusFilter = String(options.status || "").trim().toLowerCase();
+  const fromMs = Date.parse(String(options.dateFrom || ""));
+  const toMs = Date.parse(String(options.dateTo || ""));
+  const groupById = new Map(groups.map((group: any) => [String(group.id || ""), String(group.name || group.id || "")]));
+  const rootIdFor = (task: any) => {
+    let current = task;
+    const seen = new Set<string>();
+    while (current?.parent_task_id && byId.has(String(current.parent_task_id)) && !seen.has(String(current.parent_task_id))) {
+      seen.add(String(current.id || ""));
+      current = byId.get(String(current.parent_task_id));
+    }
+    return String(current?.id || task?.id || "");
+  };
+  const membersByRoot = new Map<string, any[]>();
+  for (const task of tasks) {
+    const rootId = rootIdFor(task);
+    if (!membersByRoot.has(rootId)) membersByRoot.set(rootId, []);
+    membersByRoot.get(rootId)!.push(task);
+  }
+  const roots = tasks.filter((task: any) => rootIdFor(task) === String(task.id || ""))
+    .sort((a: any, b: any) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+  const rows = roots.map((task: any) => {
+    const members = membersByRoot.get(String(task.id)) || [task];
+    const projects = [...new Set(members.map((item: any) => safeText(item.target_project, 100)).filter(Boolean))].sort();
+    const groupIds = [...new Set(members.map((item: any) => String(item.group_id || "")).filter(Boolean))];
+    const primaryGroupId = String(task.group_id || groupIds[0] || "");
+    const groupName = groupById.get(primaryGroupId) || safeText(task.workflow_meta?.group_name, 100) || primaryGroupId;
+    return {
+      ...taskPublicRow(task, String(task.id)),
+      projects,
+      group_name: groupName,
+      child_count: Math.max(0, members.length - 1),
+      replay_url: `/api/tasks/replay?task_id=${encodeURIComponent(task.id)}`,
+      _group_ids: groupIds,
+    };
+  });
+  const facetCount = (values: string[], matches: (row: any, value: string) => boolean) => [...new Set(values.filter(Boolean))].map(value => ({
+    value,
+    label: value,
+    count: rows.filter((row: any) => matches(row, value)).length,
+  }));
+  const filtered = rows.filter((row: any) => {
+    const updatedMs = Date.parse(row.updated_at || row.created_at || "");
+    if (projectFilter && !row.projects.some((value: string) => value.toLowerCase() === projectFilter)) return false;
+    if (groupFilter && !row._group_ids.includes(groupFilter)) return false;
+    if (statusFilter && String(row.status).toLowerCase() !== statusFilter) return false;
+    if (Number.isFinite(fromMs) && (!Number.isFinite(updatedMs) || updatedMs < fromMs)) return false;
+    if (Number.isFinite(toMs) && (!Number.isFinite(updatedMs) || updatedMs > toMs)) return false;
+    if (query) {
+      const haystack = `${row.title} ${row.goal} ${row.id} ${row.projects.join(" ")} ${row.group_name}`.toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    return true;
+  });
+  const offset = (page - 1) * limit;
+  const projectValues = rows.flatMap((row: any) => row.projects || []);
+  const statusValues = rows.map((row: any) => String(row.status || "")).filter(Boolean);
+  const groupFacets = groups.map((group: any) => ({ value: String(group.id || ""), label: String(group.name || group.id || ""), count: rows.filter((row: any) => row._group_ids.includes(String(group.id || ""))).length })).filter((item: any) => item.value && item.count > 0);
   return {
     schema: "ccm-task-replay-index-v1",
     generated_at: new Date().toISOString(),
-    total: roots.length,
-    tasks: roots.map((task: any) => {
-      const children = tasks.filter((item: any) => String(item.parent_task_id || "") === String(task.id));
-      return { ...taskPublicRow(task, String(task.id)), child_count: children.length, replay_url: `/api/tasks/replay?task_id=${encodeURIComponent(task.id)}` };
-    }),
+    total: filtered.length,
+    total_all: rows.length,
+    page,
+    page_size: limit,
+    page_count: Math.max(1, Math.ceil(filtered.length / limit)),
+    has_previous: page > 1,
+    has_more: offset + limit < filtered.length,
+    filters: { query: options.query || "", project: options.project || "", group_id: options.groupId || "", status: options.status || "", date_from: options.dateFrom || "", date_to: options.dateTo || "" },
+    facets: {
+      projects: facetCount(projectValues, (row, value) => row.projects?.includes(value)).sort((a, b) => a.label.localeCompare(b.label)),
+      groups: groupFacets,
+      statuses: facetCount(statusValues, (row, value) => row.status === value),
+    },
+    tasks: filtered.slice(offset, offset + limit).map(({ _group_ids, ...row }: any) => row),
   };
 }
 

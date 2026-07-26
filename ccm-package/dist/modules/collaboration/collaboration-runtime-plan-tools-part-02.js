@@ -488,8 +488,13 @@ function collectProjectPolicyViolations(actualFileChanges = [], evidenceExclusio
     }
     return violations;
 }
-function buildAgentToolContext(ctx, group, projectName, taskText = "") {
-    const selectedRoleSkills = (0, role_skills_1.selectRoleSkills)("project-child-agent", taskText, { forceWork: true, phase: "execution" });
+function buildAgentToolContext(ctx, group, projectName, taskText = "", selectedSkillNames = []) {
+    const selectedRoleSkills = (0, role_skills_1.selectRoleSkills)("project-child-agent", taskText, {
+        forceWork: true,
+        phase: "execution",
+        selectedSkillNames,
+        modelDecision: { actionRequired: true, selectedSkills: selectedSkillNames },
+    });
     const allowedTools = (0, tool_authorization_1.normalizeToolAuthorization)(mergeToolSelections(group?.tools || {}, getProjectToolSelection(projectName), { skill: selectedRoleSkills.map(skill => skill.name) }));
     const prompt = [
         (0, role_skills_1.buildSelectedSkillUsageDirective)(selectedRoleSkills),

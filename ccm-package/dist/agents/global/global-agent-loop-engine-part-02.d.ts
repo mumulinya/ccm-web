@@ -1,3 +1,4 @@
+import { type WorkflowDecision } from "../workflow-decision";
 import type { GlobalAgentLoopRuntime, GlobalAgentRun } from "./loop";
 export declare function startGlobalAgentRun(input: {
     message: string;
@@ -5,6 +6,7 @@ export declare function startGlobalAgentRun(input: {
     sessionId?: string;
     source?: string;
     explicitWriteAuthorization?: boolean;
+    workflowDecision?: WorkflowDecision | null;
     traceId?: string;
     maxSteps?: number;
     timeoutMs?: number;

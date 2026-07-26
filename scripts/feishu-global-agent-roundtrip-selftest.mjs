@@ -64,6 +64,7 @@ const channel = createGlobalAgentFeishuChannel({
   postLocalApi: async (baseUrl, pathname, body) => { decisions.push({ baseUrl, pathname, body }); return { success: true } },
   recordFeishuInbound: () => ({ chat_id: 'oc_roundtrip', open_id: 'ou_roundtrip', receive_id: 'oc_roundtrip', receive_id_type: 'chat_id', platform_session_key: 'feishu:oc_roundtrip:ou_roundtrip' }),
   resolveFeishuGlobalAgentSessionId: value => value?.ccm_session || 'global-feishu-session',
+  resolveFeishuUserAccess: () => ({ allowed: true, role: 'admin', canOperate: true, canApprove: true, open_id: 'ou_roundtrip' }),
   resumeGlobalAgentRun: async () => ({}),
   runAgenticGlobalRequest: async () => { throw new Error('permission command must not start a new Agent run') },
   sendFeishuReportMessage: async input => { fallbackDeliveries.push(input); return { success: true } },

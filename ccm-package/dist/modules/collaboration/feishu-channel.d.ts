@@ -1,10 +1,21 @@
 type FeishuDestination = {
     chat_id: string;
     open_id: string;
+    user_id: string;
     receive_id: string;
     receive_id_type: "chat_id" | "open_id";
     platform_session_key: string;
+    message_id: string;
+    root_message_id: string;
+    thread_id: string;
 };
+type FeishuChannelAlertHandler = (payload: {
+    role: string;
+    text: string;
+    source: string;
+    deliveryId: string;
+}) => void;
+export declare function setFeishuChannelAlertHandler(handler: FeishuChannelAlertHandler | null): void;
 export declare function resolveFeishuDestination(payload?: any, sessionId?: string): FeishuDestination | null;
 export declare function bindFeishuTaskContext(input: {
     sessionId?: string;
@@ -21,13 +32,28 @@ export declare function bindFeishuTaskContext(input: {
     task_ids: string[];
     chat_id: string;
     open_id: string;
+    user_id: any;
     receive_id: string;
     receive_id_type: "chat_id" | "open_id";
     platform_session_key: string;
+    latest_message_id: any;
+    root_message_id: any;
+    thread_id: any;
+    active_card_key: any;
+    active_session_id: any;
     source: any;
     created_at: any;
     updated_at: string;
 };
+export declare function resolveBoundFeishuGlobalSessionId(payload?: any, fallbackSessionId?: string): string;
+export declare function getFeishuGlobalSessionBindings(): any;
+export declare function bindFeishuGlobalSession(input: {
+    bindingId: string;
+    sessionId?: string;
+    action?: "bind" | "unbind";
+}): any;
+export declare function getFeishuBindingByMessageId(messageId: string): any;
+export declare function getFeishuChannelIdentitySnapshot(): any;
 export declare function bindFeishuIdentifiersFromValue(sessionId: string, value: any, destination?: FeishuDestination | null): {
     id: any;
     session_ids: string[];
@@ -36,14 +62,29 @@ export declare function bindFeishuIdentifiersFromValue(sessionId: string, value:
     task_ids: string[];
     chat_id: string;
     open_id: string;
+    user_id: any;
     receive_id: string;
     receive_id_type: "chat_id" | "open_id";
     platform_session_key: string;
+    latest_message_id: any;
+    root_message_id: any;
+    thread_id: any;
+    active_card_key: any;
+    active_session_id: any;
     source: any;
     created_at: any;
     updated_at: string;
 };
 export declare function hasFeishuTaskBinding(input: any): boolean;
+export declare function createFeishuPermissionActions(request: any): ({
+    text: string;
+    type: "primary";
+    value: any;
+} | {
+    text: string;
+    type: "danger";
+    value: any;
+})[];
 export declare function notifyFeishuTaskStage(input: {
     stage: string;
     title: string;
@@ -53,6 +94,13 @@ export declare function notifyFeishuTaskStage(input: {
     missionId?: string;
     taskId?: string;
     sessionId?: string;
+    cardKey?: string;
+    actions?: Array<{
+        text: string;
+        type?: "primary" | "default" | "danger";
+        value: Record<string, any>;
+    }>;
+    forceNewMessage?: boolean;
 }): Promise<{
     success: boolean;
     queued: boolean;
@@ -72,6 +120,7 @@ export declare function notifyFeishuTaskStage(input: {
     reason?: undefined;
     duplicate?: undefined;
 }>;
+export declare function retryFeishuNotificationDelivery(deliveryId: string): Promise<any>;
 export declare function tickFeishuNotificationOutbox(now?: Date): Promise<{
     due: any;
     sent: number;
@@ -98,6 +147,12 @@ export declare function recordFeishuReportDelivery(input: {
 export declare function getFeishuChannelDeliverySnapshot(limit?: number): {
     deliveries: any;
     reports: any;
+    identities: any;
+    summary: {
+        pending: any;
+        exhausted: any;
+        sent: any;
+    };
 };
 export declare function recordFeishuInbound(input: {
     payload?: any;

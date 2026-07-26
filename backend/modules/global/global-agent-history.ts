@@ -1,16 +1,20 @@
 import fs from "fs";
+import crypto from "crypto";
 import { sanitizeGlobalHistoryAttachments } from "./global-agent-attachments";
 
 // Persistent Web/Feishu conversation history and session routing.
 export function createGlobalAgentHistoryRuntime(deps: any) {
   const { GLOBAL_AGENT_HISTORY_FILE, GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_AGENT_SESSION_LIMIT, buildGlobalVisibleReplyContent, ingestGlobalAgentConversation, writeGlobalJsonAtomic } = deps
+  const onSessionTitleChanged = typeof deps.onSessionTitleChanged === "function"
+    ? deps.onSessionTitleChanged
+    : () => {};
   const generateSessionTitle = typeof deps.generateSessionTitle === "function"
     ? deps.generateSessionTitle
     : async () => ({ title: "", source: "skipped" });
   const isSessionTitlePlaceholder = typeof deps.isSessionTitlePlaceholder === "function"
     ? deps.isSessionTitlePlaceholder
     : (title: any, origin: any = "") => String(origin || "").toLowerCase() !== "manual"
-      && ["", "新会话", "默认会话", "全局 Agent 会话", "飞书全局 Agent"].includes(String(title || "").trim());
+      && ["", "新会话", "新建飞书会话", "默认会话", "全局 Agent 会话", "飞书全局 Agent"].includes(String(title || "").trim());
   const isMeaningfulSessionTitleInput = typeof deps.isMeaningfulSessionTitleInput === "function"
     ? deps.isMeaningfulSessionTitleInput
     : (value: any) => /\p{L}/u.test(String(value || ""));
@@ -254,6 +258,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       current.titleGeneratedAt = new Date().toISOString();
       current.updatedAt = current.titleGeneratedAt;
       saveGlobalAgentHistoryStore(latestStore);
+      onSessionTitleChanged(current);
       return { renamed: true, session: current, generated };
     })().finally(() => globalSessionTitleJobs.delete(sessionId));
     globalSessionTitleJobs.set(sessionId, job);
@@ -305,7 +310,8 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
   }
   
   function syncGlobalAgentWebHistory(payload: any) {
-    const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+    const sessions = (Array.isArray(payload.sessions) ? payload.sessions : [])
+      .filter((session: any) => String(session?.source || "web").toLowerCase() === "web");
     const store = loadGlobalAgentHistoryStore();
     for (const session of sessions) {
       const id = String(session.id || "").trim();
@@ -316,7 +322,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
         console.warn(`[全局记忆] Web 会话写入失败 (${id})：${error?.message || error}`);
       }
     }
-    const reconciled = reconcileGlobalAgentWebHistory(store, payload);
+    const reconciled = reconcileGlobalAgentWebHistory(store, { ...payload, sessions });
     saveGlobalAgentHistoryStore(reconciled);
     for (const session of reconciled.sessions || []) {
       if (String(session.source || "") !== "web") continue;
@@ -325,6 +331,51 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       });
     }
     return reconciled;
+  }
+
+  function createGlobalAgentConversationSession(input: any = {}) {
+    const source = String(input.source || "web").toLowerCase() === "feishu" ? "feishu" : "web";
+    const now = new Date().toISOString();
+    const id = source === "feishu"
+      ? `feishu:manual:${crypto.randomBytes(10).toString("hex")}`
+      : `session_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const name = String(input.name || (source === "feishu" ? "新建飞书会话" : "新会话")).trim().slice(0, 80)
+      || (source === "feishu" ? "新建飞书会话" : "新会话");
+    const welcome = String(input.welcome || (source === "feishu"
+      ? "飞书会话已创建。绑定飞书目标后，该目标的新消息和回复会在此会话中连续保存。"
+      : "全局 Agent 会话已创建。"));
+    const session = {
+      id,
+      name,
+      titleOrigin: isSessionTitlePlaceholder(name) ? "placeholder" : "manual",
+      source,
+      createdAt: now,
+      updatedAt: now,
+      messages: [{ role: "assistant", content: welcome, timestamp: now, source }],
+    };
+    const store = loadGlobalAgentHistoryStore();
+    store.sessions = [session, ...(store.sessions || [])];
+    if (source === "web") store.current_session_id = id;
+    saveGlobalAgentHistoryStore(store);
+    return session;
+  }
+
+  function deleteGlobalAgentConversationSession(sessionId: string, expectedSource = "") {
+    const id = String(sessionId || "").trim();
+    if (!id) throw new Error("缺少全局会话 ID");
+    const source = String(expectedSource || "").trim().toLowerCase();
+    const store = loadGlobalAgentHistoryStore();
+    const session = (store.sessions || []).find((item: any) => String(item.id || "") === id);
+    if (!session) return { deleted: false, session: null };
+    if (source && String(session.source || "web").toLowerCase() !== source) {
+      throw new Error("会话来源与删除请求不匹配");
+    }
+    store.sessions = (store.sessions || []).filter((item: any) => String(item.id || "") !== id);
+    if (String(store.current_session_id || "") === id) {
+      store.current_session_id = (store.sessions || []).find((item: any) => String(item.source || "web") === "web")?.id || "";
+    }
+    saveGlobalAgentHistoryStore(store);
+    return { deleted: true, session };
   }
   
   function getBaseGlobalAgentMessages(store: any) {
@@ -339,6 +390,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     const store = loadGlobalAgentHistoryStore();
     const existing = (store.sessions || []).find((item: any) => item.id === sessionId);
     if (existing) return normalizeGlobalAgentMessages(existing.messages || []);
+    if (String(sessionId || "").startsWith("feishu:")) return [];
     return getBaseGlobalAgentMessages(store);
   }
   
@@ -349,11 +401,11 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     if (!session) {
       session = {
         id: sessionId,
-        name: source === "feishu" ? "飞书全局 Agent" : "全局 Agent 会话",
+        name: source === "feishu" ? "新建飞书会话" : "全局 Agent 会话",
         titleOrigin: "placeholder",
         source,
         createdAt: new Date().toISOString(),
-        messages: getBaseGlobalAgentMessages(store),
+        messages: source === "feishu" ? [] : getBaseGlobalAgentMessages(store),
       };
       sessions.unshift(session);
     }
@@ -375,22 +427,19 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
   }
   
   function buildFeishuConversationId(payload: any) {
-    const raw = payload?.session_id || payload?.sessionId || payload?.sessionKey || payload?.conversation_id || payload?.conversationId || payload?.message?.session_id || payload?.data?.session_id || "default";
+    const message = payload?.event?.message || payload?.message || {};
+    const sender = payload?.event?.sender?.sender_id || payload?.sender || {};
+    const chatId = String(message.chat_id || payload?.chat_id || payload?.chatId || "").trim();
+    const openId = String(sender.open_id || payload?.open_id || payload?.openId || "").trim();
+    const nativeSession = payload?.session_id || payload?.sessionId || payload?.sessionKey || payload?.conversation_id || payload?.conversationId || message.session_id || payload?.data?.session_id || "default";
+    const raw = chatId ? `${chatId}:${openId || "chat"}` : nativeSession;
     return "feishu:" + String(raw || "default").replace(/[^a-zA-Z0-9:_@.-]/g, "_").slice(0, 120);
   }
   
   function resolveFeishuGlobalAgentSessionId(payload: any, store = loadGlobalAgentHistoryStore()) {
     const explicitConversationId = String(payload?.ccm_conversation_id || payload?.ccmConversationId || "").trim();
-    if (explicitConversationId) return explicitConversationId;
-    const sessions = Array.isArray(store.sessions) ? store.sessions : [];
-    const webSessions = sessions.filter((session: any) => session.source === "web" && session.id);
-    const currentSessionId = String(store.current_session_id || "").trim();
-    const current = webSessions.find((session: any) => String(session.id) === currentSessionId);
-    if (current) return String(current.id);
-    const recent = webSessions
-      .slice()
-      .sort((a: any, b: any) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")))[0];
-    return recent ? String(recent.id) : buildFeishuConversationId(payload);
+    if (explicitConversationId && explicitConversationId.startsWith("feishu:")) return explicitConversationId;
+    return buildFeishuConversationId(payload);
   }
   
   function runFeishuGlobalAgentSessionRoutingSelfTest() {
@@ -401,11 +450,11 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     const reconciled = reconcileGlobalAgentWebHistory(staleStore, { sessions: [currentWeb, recentWeb], currentSessionId: recentWeb.id });
     const checks = {
       removesDeletedWebSession: !reconciled.sessions.some((session: any) => session.id === oldWeb.id),
-      usesValidCurrentSession: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, reconciled) === recentWeb.id,
-      fallsBackToMostRecentWebSession: resolveFeishuGlobalAgentSessionId(
+      isolatesAcpSessionFromWebHistory: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, reconciled) === "feishu:acp-bound",
+      ignoresRecentWebSessionFallback: resolveFeishuGlobalAgentSessionId(
         { sessionId: "acp-bound" },
         { ...reconciled, current_session_id: "missing" }
-      ) === recentWeb.id,
+      ) === "feishu:acp-bound",
       onlyUsesAcpSessionWithoutWebHistory: resolveFeishuGlobalAgentSessionId(
         { sessionId: "acp-bound" },
         { current_session_id: "", sessions: [] }
@@ -419,6 +468,8 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     mergeGlobalAgentMessages,
     loadGlobalAgentHistoryStore,
     syncGlobalAgentWebHistory,
+    createGlobalAgentConversationSession,
+    deleteGlobalAgentConversationSession,
     getGlobalAgentConversationMessages,
     appendGlobalAgentConversationMessage,
     scheduleGlobalSessionAutoTitle,

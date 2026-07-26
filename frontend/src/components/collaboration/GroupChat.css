@@ -694,6 +694,7 @@
 }
 
 .group-chat .message {
+  flex: 0 0 auto;
   align-self: flex-start;
   width: fit-content;
   min-width: 0;

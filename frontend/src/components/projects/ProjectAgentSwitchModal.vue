@@ -48,7 +48,7 @@ const emit = defineEmits(['close', 'switch-agent'])
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.25s;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface-subtle);
 }
 .agent-option:hover {
   border-color: rgba(59, 130, 246, 0.2);

@@ -7,10 +7,17 @@ import { UPLOAD_DIR } from "../../core/utils";
 import { downloadFeishuMessageResource } from "../collaboration/feishu";
 import { ingestRequirementSources, type RequirementIngestionResult } from "../requirements/source-ingestion";
 import { decideWorkflowWithModel } from "../../agents/workflow-decision";
+import { projectDisplayName } from "../projects/project-runtime";
+import { resolveFeishuUserAccess, verifyFeishuCardAction } from "../collaboration/feishu-access";
+import { getFeishuBindingByMessageId } from "../collaboration/feishu-channel";
 
 // Feishu event decoding, message lifecycle, turn control, and restart recovery.
 export function createGlobalAgentFeishuChannel(deps: any) {
   const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, listTaskPermissionRequests, loadGroups, notifyFeishuTaskStage, postLocalApi, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps
+  const resolveUserAccess = deps.resolveFeishuUserAccess || resolveFeishuUserAccess;
+  const resolveBoundFeishuGlobalSessionId = typeof deps.resolveBoundFeishuGlobalSessionId === "function"
+    ? deps.resolveBoundFeishuGlobalSessionId
+    : (_payload: any, fallbackSessionId = "") => String(fallbackSessionId || "");
 
   async function sendFeishuConversationReply(input: { conversationId: string; title: string; markdown: string; traceId?: string; stage?: string; dedupeSuffix?: string }) {
     const bound = await notifyFeishuTaskStage({
@@ -23,6 +30,64 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     if (bound?.success || bound?.queued) return { ...bound, channel: "bound_conversation" };
     const fallback = await sendFeishuReportMessage({ title: input.title, markdown: input.markdown });
     return { ...fallback, channel: "configured_fallback", reason: bound?.reason || "bound_delivery_unavailable" };
+  }
+
+  function cardActionValue(payload: any) {
+    return payload?.action?.value || payload?.event?.action?.value || payload?.event?.action || {};
+  }
+
+  function cardActionMessageId(payload: any) {
+    return String(
+      payload?.context?.open_message_id
+        || payload?.event?.context?.open_message_id
+        || payload?.event?.message?.message_id
+        || payload?.message_id
+        || "",
+    ).trim();
+  }
+
+  async function processFeishuCardAction(baseUrl: string, payload: any) {
+    const value = cardActionValue(payload);
+    if (String(value?.ccm_action || "") !== "permission_decision") throw new Error("不支持的飞书卡片操作");
+    if (!verifyFeishuCardAction(value)) throw new Error("飞书审批卡片签名无效");
+    if (!value.expires_at || Date.parse(String(value.expires_at)) <= Date.now()) throw new Error("飞书审批卡片已经过期");
+    const access = resolveUserAccess(payload);
+    if (!access.allowed) throw new Error(access.reason);
+    if (!access.canApprove) throw new Error("当前飞书用户没有审批权限");
+    const messageId = cardActionMessageId(payload);
+    const binding = getFeishuBindingByMessageId(messageId);
+    if (!binding || binding.id !== String(value.binding_id || "")) throw new Error("审批卡片与原飞书会话不匹配");
+    const requestId = String(value.request_id || "");
+    const request = listTaskPermissionRequests({ state: "awaiting_user" }).find((item: any) => item.id === requestId);
+    if (!request) throw new Error("权限申请已经处理、失效或不存在");
+    const belongsToBinding = binding.session_ids?.includes(request.originSessionId)
+      || binding.task_ids?.includes(request.taskId)
+      || binding.run_ids?.includes(request.globalRunId)
+      || binding.mission_ids?.includes(request.globalMissionId);
+    if (!belongsToBinding) throw new Error("权限申请不属于这张飞书会话卡片");
+    const decision = value.decision === "approve" ? "approve" : "reject";
+    await postLocalApi(baseUrl, "/api/tasks/permission-requests/decide", {
+      request_id: requestId,
+      decision,
+      reason: `飞书管理员 ${access.name || access.open_id || access.user_id} 通过交互卡片${decision === "approve" ? "批准" : "拒绝"}`,
+      maxUses: 1,
+      expiresInMinutes: 15,
+    });
+    const markdown = decision === "approve"
+      ? `已批准 ${request.project} 的 ${request.operation} 权限一次，有效期 15 分钟；原任务会自动继续。`
+      : `已拒绝 ${request.project} 的 ${request.operation} 权限申请。`;
+    await notifyFeishuTaskStage({
+      stage: "permission_result",
+      title: "权限审批结果",
+      markdown,
+      sessionId: request.originSessionId,
+      runId: request.globalRunId,
+      missionId: request.globalMissionId,
+      taskId: String(request.taskId || "").startsWith("project-session:") ? "" : request.taskId,
+      forceNewMessage: true,
+      dedupeKey: `permission-result:${requestId}:${decision}`,
+    });
+    return { success: true, decision, request_id: requestId, message: markdown };
   }
 
   function decryptFeishuEvent(encrypted: string, encryptKey: string): any {
@@ -75,7 +140,7 @@ export function createGlobalAgentFeishuChannel(deps: any) {
         name: group.name || group.id,
         capabilities: (group.members || []).flatMap((member: any) => member.skills || member.capabilities || []),
       })) : []),
-      ...(typeof getConfigs === "function" ? getConfigs().map((config: any) => ({ type: "project", id: config.name, name: config.name })) : []),
+      ...(typeof getConfigs === "function" ? getConfigs().map((config: any) => ({ type: "project", id: config.name, name: projectDisplayName(config.name) })) : []),
     ];
   }
 
@@ -146,10 +211,11 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     return "";
   }
 
-  async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, text: string, payload: any, options: { sendReport?: boolean; traceId?: string; inboundRecorded?: boolean; destination?: any; conversationId?: string } = {}) {
+  async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, text: string, payload: any, options: { sendReport?: boolean; traceId?: string; inboundRecorded?: boolean; destination?: any; conversationId?: string; onDelta?: (delta: string) => void } = {}) {
     const sendReport = options.sendReport !== false;
     const traceId = ensureTraceId(options.traceId, "feishu");
-    const conversationId = options.conversationId || resolveFeishuGlobalAgentSessionId(payload);
+    const inferredConversationId = resolveFeishuGlobalAgentSessionId(payload);
+    const conversationId = options.conversationId || resolveBoundFeishuGlobalSessionId(payload, inferredConversationId);
     const destination = options.destination || (options.inboundRecorded ? null : recordFeishuInbound({ payload, sessionId: conversationId, messageId: getFeishuMessageId(payload) }));
     bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot" });
     const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
@@ -171,6 +237,12 @@ export function createGlobalAgentFeishuChannel(deps: any) {
       }
       const permissionMatch = text.match(/^(批准权限|同意权限|拒绝权限|取消权限)\s+(perm_[a-f0-9]{24})[。！!\s]*$/i);
       if (permissionMatch) {
+        const access = resolveUserAccess({ ...payload, open_id: destination?.open_id, user_id: destination?.user_id });
+        if (!access.canApprove) {
+          const markdown = access.allowed ? "当前飞书用户没有审批权限。" : access.reason;
+          if (sendReport) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 权限审批", markdown, traceId, dedupeSuffix: "permission-forbidden" });
+          return markdown;
+        }
         const requestId = String(permissionMatch[2] || "");
         const request = listTaskPermissionRequests({ originType: "global", originSessionId: conversationId, state: "awaiting_user" })
           .find((item: any) => item.id === requestId);
@@ -213,11 +285,18 @@ export function createGlobalAgentFeishuChannel(deps: any) {
       } else {
         const onFeishuRuntimeEvent = (event: any) => {
           bindFeishuIdentifiersFromValue(conversationId, event, destination);
+          if (event?.type === "text" && event?.text) {
+            options.onDelta?.(String(event.text));
+          }
           const presentation = feishuRuntimeEventPresentation(event);
           if (!presentation) return;
           void notifyFeishuTaskStage({
             ...presentation,
             sessionId: conversationId,
+            cardKey: traceId,
+            runId: event?.run_id || event?.runId || event?.global_run_id || event?.globalRunId || "",
+            missionId: event?.mission_id || event?.missionId || "",
+            taskId: event?.task_id || event?.taskId || "",
             dedupeKey: `runtime:${traceId}:${event?.type || "event"}:${event?.tool || event?.name || ""}:${event?.task_id || event?.taskId || ""}`,
           });
         };
@@ -319,13 +398,38 @@ export function createGlobalAgentFeishuChannel(deps: any) {
   }
   
   async function processFeishuControlledMessage(baseUrl: string, ctx: CollabCtx, text: string, payload: any, options: any = {}) {
-    const conversationId = resolveFeishuGlobalAgentSessionId(payload);
+    const inferredConversationId = resolveFeishuGlobalAgentSessionId(payload);
+    const conversationId = resolveBoundFeishuGlobalSessionId(payload, inferredConversationId);
     const messageId = getFeishuMessageId(payload);
     const destination = recordFeishuInbound({ payload, sessionId: conversationId, messageId });
     bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot" });
     const command = parseFeishuConversationTurnCommand(text);
+    const access = resolveUserAccess({ ...payload, open_id: destination?.open_id, user_id: destination?.user_id });
+    if (!access.allowed) {
+      const reply = `${access.reason}。请让 CCM 管理员在“设置 → 通知与渠道 → 任务会话”中添加你的飞书身份。`;
+      if (options.sendReport !== false) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 访问受限", markdown: reply, traceId: options.traceId, dedupeSuffix: `access-denied:${messageId || access.open_id || access.user_id}` });
+      return { reply, denied: true, report_sent: options.sendReport !== false };
+    }
+    if (["stop", "steer", "queue"].includes(command.kind) && !access.canOperate) {
+      const reply = "当前飞书用户只有查看权限，不能控制或排队开发任务。";
+      if (options.sendReport !== false) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 访问受限", markdown: reply, traceId: options.traceId, dedupeSuffix: `operation-denied:${messageId}` });
+      return { reply, denied: true, report_sent: options.sendReport !== false };
+    }
     const activeRun = listGlobalAgentRuns({ sessionId: conversationId, limit: 20 })
       .find((run: any) => ["running", "supervising", "paused"].includes(String(run?.status || ""))) || null;
+    if (!access.canOperate && activeRun && command.kind === "normal") {
+      const reply = "当前飞书用户只有查看权限，不能向正在执行的任务追加或排队新要求。";
+      if (options.sendReport !== false) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 访问受限", markdown: reply, traceId: options.traceId, dedupeSuffix: `queue-denied:${messageId}` });
+      return { reply, denied: true, report_sent: options.sendReport !== false };
+    }
+    if (!access.canOperate && !activeRun && command.kind === "normal") {
+      const workflow = await decideWorkflowWithModel({ message: command.message, scope: "global", context: { channel: "feishu", access_role: access.role } });
+      if (workflow.actionRequired || workflow.intentKind === "management") {
+        const reply = "当前飞书用户只有查看权限，可以询问和查看状态，但不能创建、修改或管理任务。";
+        if (options.sendReport !== false) await sendFeishuConversationReply({ conversationId, title: "全局 Agent 访问受限", markdown: reply, traceId: options.traceId, dedupeSuffix: `workflow-denied:${messageId}` });
+        return { reply, denied: true, report_sent: options.sendReport !== false };
+      }
+    }
   
     if (command.kind === "stop") {
       if (activeRun?.id) cancelGlobalAgentRun(activeRun.id);
@@ -411,6 +515,6 @@ export function createGlobalAgentFeishuChannel(deps: any) {
   return {
     normalizeFeishuEventPayload, verifyFeishuEventToken, extractFeishuMessageText, extractCcConnectHookText,
     processFeishuGlobalAgentMessage, parseFeishuConversationTurnCommand, startFeishuConversationTurnRecoveryForServer,
-    stopFeishuConversationTurnRecoveryForServer, processFeishuControlledMessage, runFeishuConversationTurnCommandSelfTest,
+    stopFeishuConversationTurnRecoveryForServer, processFeishuControlledMessage, processFeishuCardAction, runFeishuConversationTurnCommandSelfTest,
   }
 }

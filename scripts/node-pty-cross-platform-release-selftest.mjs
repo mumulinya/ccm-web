@@ -10,7 +10,7 @@ const ptyPackageFile = require.resolve('node-pty/package.json')
 const ptyRoot = path.dirname(ptyPackageFile)
 const ptyPackage = JSON.parse(fs.readFileSync(ptyPackageFile, 'utf8'))
 
-assert.equal(distributionPackage.version, '1.0.16')
+assert.equal(distributionPackage.version, '1.0.24')
 assert.equal(distributionPackage.dependencies?.['node-pty'], undefined)
 assert.equal(distributionPackage.optionalDependencies['node-pty'], '1.2.0-beta.14')
 assert.equal(ptyPackage.version, '1.2.0-beta.14')

@@ -1,15 +1,11 @@
-type IntentRoute = "system_health" | "development_dispatch" | "mission_supervision" | "governance" | "system_management" | "ordinary_question" | "ambiguous";
 type Severity = "ok" | "warn" | "error";
-export declare function classifyGlobalControlIntent(message: string, resources?: any): {
-    route: IntentRoute;
+export declare function classifyGlobalControlIntent(_message: string, resources?: any): {
+    route: "ambiguous" | "system_health" | "development_dispatch" | "system_management" | "ordinary_question";
     confidence: number;
-    reason: string;
-    recommended_tool: string;
-    matched_projects: any[];
-    matched_groups: {
-        id: any;
-        name: any;
-    }[];
+    reason: any;
+    recommended_tool: any;
+    matched_projects: any;
+    matched_groups: any;
     dry_run: {
         will_execute: boolean;
         requires_confirmation: boolean;
@@ -17,17 +13,12 @@ export declare function classifyGlobalControlIntent(message: string, resources?:
         safe_default: boolean;
     };
 };
-export declare function buildGlobalDispatchStrategy(message: string, resources?: any): {
-    mode: string;
+export declare function buildGlobalDispatchStrategy(_message: string, resources?: any): {
+    mode: any;
     confidence: number;
-    targets: {
-        type: string;
-        id: any;
-        name: any;
-        reason: string;
-    }[];
-    missing: string[];
-    instruction: string;
+    targets: any;
+    missing: any;
+    instruction: any;
 };
 export declare function buildGlobalSystemHealth(resources?: any): {
     severity: Severity;
@@ -73,33 +64,15 @@ export declare function buildGlobalSupervisionDashboard(resources?: any): {
 export declare function buildGlobalControlCenterSnapshot(message?: string): {
     updated_at: string;
     intent: {
-        route: IntentRoute;
+        route: string;
         confidence: number;
         reason: string;
         recommended_tool: string;
-        matched_projects: any[];
-        matched_groups: {
-            id: any;
-            name: any;
-        }[];
-        dry_run: {
-            will_execute: boolean;
-            requires_confirmation: boolean;
-            needs_clarification: boolean;
-            safe_default: boolean;
-        };
     };
     dispatch: {
         mode: string;
-        confidence: number;
-        targets: {
-            type: string;
-            id: any;
-            name: any;
-            reason: string;
-        }[];
-        missing: string[];
-        instruction: string;
+        targets: any[];
+        reason: string;
     };
     health: {
         severity: Severity;
@@ -148,19 +121,16 @@ export declare function runGlobalControlCenterSelfTest(): {
     checks: {
         developmentRoutesToDispatch: boolean;
         healthFindsWarningsAndErrors: boolean;
-        dispatchFindsGroupAndProject: boolean;
+        dispatchFindsGroupAndProject: any;
         governanceHasTools: boolean;
     };
     intent: {
-        route: IntentRoute;
+        route: "ambiguous" | "system_health" | "development_dispatch" | "system_management" | "ordinary_question";
         confidence: number;
-        reason: string;
-        recommended_tool: string;
-        matched_projects: any[];
-        matched_groups: {
-            id: any;
-            name: any;
-        }[];
+        reason: any;
+        recommended_tool: any;
+        matched_projects: any;
+        matched_groups: any;
         dry_run: {
             will_execute: boolean;
             requires_confirmation: boolean;
@@ -191,16 +161,11 @@ export declare function runGlobalControlCenterSelfTest(): {
         };
     };
     dispatch: {
-        mode: string;
+        mode: any;
         confidence: number;
-        targets: {
-            type: string;
-            id: any;
-            name: any;
-            reason: string;
-        }[];
-        missing: string[];
-        instruction: string;
+        targets: any;
+        missing: any;
+        instruction: any;
     };
 };
 export {};

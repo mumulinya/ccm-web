@@ -112,7 +112,7 @@ export declare function getProjectAgentCapabilityProfile(projectName: string, wo
     work_dir: string;
 };
 export declare function collectProjectPolicyViolations(actualFileChanges?: any[], evidenceExclusions?: any[]): any[];
-export declare function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string, taskText?: string): {
+export declare function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string, taskText?: string, selectedSkillNames?: string[]): {
     prompt: string;
     allowedTools: Required<Pick<import("../../tools/tool-manager").ToolScope, "mcp" | "skill">>;
     toolAudit: any;

@@ -339,7 +339,13 @@ export function createAgentRunnerSupport(deps: any) {
   
   
   function buildProjectToolContext(projectName: string, workDir = "", agentType = "claudecode", options: any = {}) {
-    const toolAuth = buildToolAuthorizationPayload(getProjectToolSelection(projectName));
+    const configuredTools = normalizeToolSelection(getProjectToolSelection(projectName));
+    const selectedRoleSkills = Array.isArray(options.selectedRoleSkills) ? options.selectedRoleSkills : [];
+    const roleSkillNames = selectedRoleSkills.map((item: any) => String(item?.name || item || "").trim()).filter(Boolean);
+    const toolAuth = buildToolAuthorizationPayload({
+      mcp: configuredTools.mcp,
+      skill: Array.from(new Set([...configuredTools.skill, ...roleSkillNames])),
+    });
     const allowedTools = toolAuth.tools;
     const audit = syncRuntimeTools(workDir, agentType, allowedTools, {
       authorizationReadiness: toolAuth.authorization_readiness,
@@ -365,7 +371,10 @@ export function createAgentRunnerSupport(deps: any) {
       "- awaiting_user、rejected、expired 或 consumed 均表示不得执行；应报告阻塞并等待主 Agent 或用户。",
       "- 发布、生产部署、强推、密钥读取、系统提权、项目外路径和破坏性数据库操作不能由子 Agent 自行决定，也不能绕开 CCM 工具直接执行。",
     ].join("\n") : "";
-    const prompt = toolManager.buildToolPrompt(allowedTools) + buildRuntimeToolSyncPrompt(audit) + knowledgePrompt + permissionPrompt;
+    const prompt = [
+      String(options.roleSkillPrompt || "").trim(),
+      toolManager.buildToolPrompt(allowedTools) + buildRuntimeToolSyncPrompt(audit) + knowledgePrompt + permissionPrompt,
+    ].filter(Boolean).join("\n\n");
     const mcpStatuses = Array.isArray(audit.mcp_statuses) ? audit.mcp_statuses : [];
     const nativeMcpCount = mcpStatuses.length ? mcpStatuses.filter((item: any) => item.state === "synced").length : audit.synced.mcp.length;
     const proxyMcpCount = mcpStatuses.filter((item: any) => item.state === "proxy_only").length;
@@ -386,7 +395,15 @@ export function createAgentRunnerSupport(deps: any) {
       workEvent.kind = "error";
       workEvent.text = `${projectName} 工具授权派发已阻断：${audit.dispatch_gate.reason}`;
     }
-    return { prompt, allowedTools, audit, workEvent, dispatchGate: audit.dispatch_gate, runtimeToolSnapshot: runtimeToolSnapshotFromAudit(audit, allowedTools) };
+    return {
+      prompt,
+      allowedTools,
+      audit,
+      workEvent,
+      dispatchGate: audit.dispatch_gate,
+      runtimeToolSnapshot: runtimeToolSnapshotFromAudit(audit, allowedTools),
+      selectedRoleSkills: selectedRoleSkills.map((item: any) => ({ name: item.name, kind: item.kind, reason: item.reason })),
+    };
   }
   
   function sendRuntimeToolDispatchBlocked(res: any, toolContext: any) {

@@ -171,7 +171,8 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
     const history = Array.isArray(data.history) ? data.history.filter((message) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
     const visibleMessages = history.slice(state.lastCompactedIndex + 1);
     const currentRequest = pendingProjectRequest(visibleMessages, input.currentRequest || input.current_request);
-    const payload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+    const suppliedPayload = input.modelVisiblePayload || input.model_visible_payload || null;
+    const payload = suppliedPayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? suppliedPayload : (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
         scope: "project",
         sessionId: `${safeProject}:${safeSessionId}`,
         system: input.fixedContext || input.fixed_context || null,
@@ -191,6 +192,7 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
         payloadChecksum: input.payloadChecksum || input.payload_checksum || payload.payloadChecksum,
         fixedContextChecksum: input.fixedContextChecksum || input.fixed_context_checksum || payload.fixedContextChecksum,
         estimatedFixedTokens: input.estimatedFixedTokens || input.estimated_fixed_tokens || (0, session_compaction_core_1.modelVisibleFixedTokens)(payload),
+        estimatedContextTokens: input.estimatedContextTokens || input.estimated_context_tokens || payload.totalTokens,
         estimatedPayloadTokens: input.estimatedPayloadTokens || input.estimated_payload_tokens || payload.totalTokens,
     });
     const measurementUsage = usage || state.latestProviderUsage;

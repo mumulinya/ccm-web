@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { BookOpen, Bot, Gauge, MoreHorizontal, RefreshCw } from '@lucide/vue'
+import { BookOpen, Bot, Gauge, MoreHorizontal, RefreshCw, Wrench } from '@lucide/vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import ConversationTurnControls from '../common/ConversationTurnControls.vue'
@@ -10,7 +10,9 @@ import SlashCommandMenu from '../common/SlashCommandMenu.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
+import GlobalAgentFeishuBindingModal from './GlobalAgentFeishuBindingModal.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
+import AgentToolsModal from '../common/AgentToolsModal.vue'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useGlobalAgentAttachments } from '../../composables/useGlobalAgentAttachments.js'
 import { useGlobalAgentControlCenter } from '../../composables/useGlobalAgentControlCenter.js'
@@ -27,6 +29,7 @@ import { createSlashCommandClientActions } from '../../composables/useSlashComma
 import { notifySessionContextUsage, useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 import { getDeliveryReport } from '../../utils/agentDisplay.js'
+import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import {
   classifyGlobalAgentRunPresentation,
   PRESENTATION_REPLY,
@@ -67,21 +70,29 @@ const {
   sessions,
   currentSessionId,
   currentSession,
+  isCurrentSessionDraft,
   messages,
   loadHistory,
   saveHistory,
   syncHistoryFromServer,
   createNewSession,
+  materializeCurrentSession,
+  insertServerSession,
+  replaceFeishuSessions,
   selectSession,
   deleteSession,
   clearAllSessions,
 } = useGlobalAgentSessions({
   defaultWelcome: DEFAULT_WELCOME,
   confirmDelete: (sessionName) => confirmDialog(`确定要删除会话「${sessionName}」吗？`),
-  confirmClear: () => confirm('确定清空所有的全局助手会话吗？此操作无法撤销。'),
+  beforeDelete: (session) => session?.source === 'feishu' ? deleteFeishuSessionOnServer(session.id) : true,
+  confirmClear: () => confirm('确定清空所有网页会话吗？飞书会话和飞书绑定不会被删除。'),
   onCreated: () => {
-    toast.success('新建会话成功')
     scrollToBottom()
+  },
+  onDraftCreated: () => {
+    syncGlobalSidebarForViewport()
+    nextTick(() => document.getElementById('globalChatInput')?.focus())
   },
   onSelected: () => {
     syncGlobalSidebarForViewport()
@@ -90,15 +101,162 @@ const {
     setTimeout(() => scrollToBottom({ force: true }), 60)
     setTimeout(() => scrollToBottom({ force: true }), 200)
   },
-  onDeleted: () => {
+  onDeleted: (deleted) => {
     toast.success('会话已删除')
     scrollToBottom()
   },
   onCleared: () => {
-    toast.success('所有会话历史已清空！')
+    toast.success('网页会话历史已清空')
     scrollToBottom()
   },
 })
+
+const feishuBindings = ref([])
+const bindingSession = ref(null)
+const feishuBindingOpen = ref(false)
+const feishuBindingBusy = ref(false)
+let unsubscribeFeishuSessionEvents = null
+
+const globalToolsOpen = ref(false)
+const globalToolsBusy = ref(false)
+const globalTools = ref({ mcp: [], skill: [] })
+const globalToolOptions = ref({ mcp: [], skill: [] })
+const globalToolReadiness = ref(null)
+const globalToolPreflight = ref(null)
+const globalToolCount = computed(() => (globalTools.value.mcp?.length || 0) + (globalTools.value.skill?.length || 0))
+
+const normalizeGlobalTools = (tools = {}) => ({
+  mcp: Array.from(new Set((Array.isArray(tools.mcp) ? tools.mcp : []).map(item => String(item || '').trim()).filter(Boolean))),
+  skill: Array.from(new Set((Array.isArray(tools.skill) ? tools.skill : []).map(item => String(item || '').trim()).filter(Boolean))),
+})
+
+async function loadGlobalTools(open = true) {
+  try {
+    const response = await fetch('/api/global-agent/tools', { cache: 'no-store' })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '读取全局 Agent 工具配置失败')
+    globalTools.value = normalizeGlobalTools(data.tools)
+    globalToolOptions.value = { mcp: data.options?.mcp || [], skill: data.options?.skill || [] }
+    globalToolReadiness.value = data.authorization_readiness || null
+    globalToolPreflight.value = data.connection_preflight || null
+    if (open) globalToolsOpen.value = true
+  } catch (error) {
+    if (open) toast.error(error?.message || '读取全局 Agent 工具配置失败')
+  }
+}
+
+function toggleGlobalTool(type, name) {
+  const normalized = normalizeGlobalTools(globalTools.value)
+  const list = type === 'mcp' ? normalized.mcp : normalized.skill
+  const selected = list.includes(name)
+  let next = selected ? list.filter(item => item !== name) : [...list, name]
+  if (type === 'mcp' && !name.includes('/')) next = next.filter(item => item === name || !item.startsWith(`${name}/`))
+  globalTools.value = { ...normalized, [type]: next }
+}
+
+async function saveGlobalTools() {
+  if (globalToolsBusy.value) return
+  globalToolsBusy.value = true
+  try {
+    const response = await fetch('/api/global-agent/tools', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tools: normalizeGlobalTools(globalTools.value), actor: 'global-agent-web' }),
+    })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '保存全局 Agent 工具配置失败')
+    globalTools.value = normalizeGlobalTools(data.tools)
+    globalToolReadiness.value = data.authorization_readiness || null
+    globalToolPreflight.value = data.connection_preflight || null
+    globalToolsOpen.value = false
+    if (data.authorization_readiness?.dispatchReady === false) toast.warning('配置已保存，但有工具当前不可用')
+    else toast.success('全局 Agent 工具配置已保存')
+  } catch (error) {
+    toast.error(error?.message || '保存全局 Agent 工具配置失败')
+  } finally {
+    globalToolsBusy.value = false
+  }
+}
+
+async function loadFeishuSessionState() {
+  try {
+    const response = await fetch('/api/global-agent/feishu-sessions', { cache: 'no-store' })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '读取飞书会话失败')
+    feishuBindings.value = Array.isArray(data.bindings) ? data.bindings : []
+    const incoming = replaceFeishuSessions(data.sessions || [])
+    if (bindingSession.value) {
+      bindingSession.value = incoming.find(session => session.id === bindingSession.value.id) || null
+      if (!bindingSession.value) feishuBindingOpen.value = false
+    }
+    return true
+  } catch (error) {
+    console.warn('[全局助手] 飞书会话加载失败：', error)
+    return false
+  }
+}
+
+async function createFeishuSession() {
+  try {
+    const response = await fetch('/api/global-agent/feishu-sessions/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '创建飞书会话失败')
+    const session = insertServerSession(data.session, true, false)
+    await loadFeishuSessionState()
+    bindingSession.value = sessions.value.find(item => item.id === session?.id) || session
+    feishuBindingOpen.value = true
+    toast.success('飞书会话已创建，请选择要绑定的飞书目标')
+    syncGlobalSidebarForViewport()
+  } catch (error) {
+    toast.error(error?.message || '创建飞书会话失败')
+  }
+}
+
+function openFeishuBinding(session) {
+  bindingSession.value = session
+  feishuBindingOpen.value = true
+}
+
+async function updateFeishuBinding(bindingId, action) {
+  if (!bindingSession.value?.id || !bindingId) return
+  feishuBindingBusy.value = true
+  try {
+    const response = await fetch('/api/global-agent/feishu-sessions/bind', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ binding_id: bindingId, session_id: bindingSession.value.id, action }),
+    })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '更新飞书绑定失败')
+    await loadFeishuSessionState()
+    toast.success(action === 'unbind' ? '飞书目标已解除绑定' : '飞书目标已绑定到当前会话')
+  } catch (error) {
+    toast.error(error?.message || '更新飞书绑定失败')
+  } finally {
+    feishuBindingBusy.value = false
+  }
+}
+
+async function deleteFeishuSessionOnServer(sessionId) {
+  try {
+    const response = await fetch('/api/global-agent/feishu-sessions/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '删除飞书会话失败')
+    return true
+  } catch (error) {
+    toast.error(error?.message || '服务端飞书会话删除失败，请刷新后重试')
+    await loadFeishuSessionState()
+    return false
+  }
+}
 
 const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGlobalMessageContent(message, '回复已整理，技术细节已放入技术详情。') })
 
@@ -270,9 +428,7 @@ const globalInputPlaceholder = computed(() => {
       ? '补充要求或调整当前任务...'
       : '对全局助手说点什么…（输入 / 打开命令中心）'
   }
-  return globalTurnControl.mode.value === 'queue'
-    ? '输入下一条消息，当前回复结束后会自动发送...'
-    : '补充要求或调整当前目标...'
+  return '输入下一条消息，当前回复结束后会自动发送...'
 })
 
 const globalSendButtonLabel = computed(() => {
@@ -280,7 +436,7 @@ const globalSendButtonLabel = computed(() => {
   if (pendingGlobalMissionInput.value) return '提交并继续'
   if (pendingGlobalClarificationInput.value) return '提交补充'
   if (globalTurnBusy.value && !activeGlobalExecutionConfirmed.value) return '回复中'
-  if (globalTurnBusy.value) return globalTurnControl.mode.value === 'queue' ? '排队' : '补充要求'
+  if (globalTurnBusy.value) return '排队'
   return isSupervisionContinuationInput.value ? '更新任务' : '发送'
 })
 
@@ -302,17 +458,19 @@ const runGlobalClientCommand = createSlashCommandClientActions({
   exportFilename: () => `ccm-global-${currentSessionId.value || 'context'}`,
   newSession: async () => {
     const session = createNewSession()
-    return { success: true, summary: '已新建全局 Agent 会话。', metrics: { 会话: session.name, 会话ID: session.id } }
+    return { success: true, summary: '已打开空白会话，发送第一条消息后才会创建。', metrics: { 会话: session.name, 状态: '未创建' } }
   },
   compactSession: async (payload = {}) => {
     if (!currentSession.value || !currentSessionId.value) throw new Error('当前没有可压缩的全局 Agent 会话')
-    const syncResponse = await fetch('/api/global-agent/history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessions: sessions.value, currentSessionId: currentSessionId.value }),
-    })
-    const syncData = await syncResponse.json()
-    if (!syncResponse.ok || syncData.success === false) throw new Error(syncData.error || '同步当前全局 Agent 会话失败')
+    if (currentSession.value.source !== 'feishu') {
+      const syncResponse = await fetch('/api/global-agent/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions: sessions.value.filter(session => session.source !== 'feishu'), currentSessionId: currentSessionId.value }),
+      })
+      const syncData = await syncResponse.json()
+      if (!syncResponse.ok || syncData.success === false) throw new Error(syncData.error || '同步当前全局 Agent 会话失败')
+    }
     const sessionId = currentSessionId.value
     const scopeId = `session:${sessionId}`
     notifySessionContextUsage('global_session', scopeId, { active: true, reason: 'manual_compact' })
@@ -640,6 +798,7 @@ const {
   sendGlobalRunSteer,
   stopGlobalCurrentWork,
   drainGlobalTurnQueue,
+  guideGlobalQueuedTurn,
   beginGlobalMissionInput,
   sendMessage,
 } = useGlobalAgentMessaging({
@@ -651,11 +810,12 @@ const {
   pendingGlobalMissionInput, selectedFiles,
   chatInputElement, postJson: (url, body) => postJson(url, body), visibleGlobalText, isSending,
   pendingGlobalClarificationInput, createNewSession, pendingGlobalRequestRetry, globalRequestRetrySignature,
+  materializeCurrentSession,
   ensureGlobalStreamMessage, sanitizeGlobalVisibleStreamText, GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN,
   GLOBAL_RESULT_VISIBLE_FALLBACK, trackGlobalMission, emit,
 })
 
-const globalContextScopeId = computed(() => currentSessionId.value ? `session:${currentSessionId.value}` : '')
+const globalContextScopeId = computed(() => currentSessionId.value && !isCurrentSessionDraft.value ? `session:${currentSessionId.value}` : '')
 const {
   usage: globalContextUsage,
   loading: globalContextLoading,
@@ -680,7 +840,7 @@ const {
     originType: 'global',
     originSessionId: currentSessionId.value || '',
   })),
-  active: computed(() => props.active !== false && !!currentSessionId.value),
+  active: computed(() => props.active !== false && !!currentSessionId.value && !isCurrentSessionDraft.value),
 })
 
 const processBridgeRequest = async (request) => {
@@ -789,6 +949,15 @@ onMounted(() => {
   window.addEventListener('resize', syncGlobalSidebarForViewport)
   syncGlobalSidebarForViewport()
   loadHistory()
+  void loadFeishuSessionState()
+  void loadGlobalTools(false)
+  unsubscribeFeishuSessionEvents = subscribeRuntimeEvents(['feishu'], event => {
+    if (event?.type === 'feishu.session_binding_changed'
+      || event?.type === 'feishu.session_title_changed'
+      || event?.type === 'feishu.inbound') {
+      void loadFeishuSessionState()
+    }
+  })
   loadQualitySnapshot()
   syncGlobalHistoryFromServer()
   for (const session of sessions.value) {
@@ -855,6 +1024,8 @@ onUnmounted(() => {
   stopGlobalBackgroundPolls()
   stopAllMissionTracking()
   detachGlobalResizeObserver()
+  unsubscribeFeishuSessionEvents?.()
+  unsubscribeFeishuSessionEvents = null
 })
 
 const renderMarkdown = (text) => {
@@ -945,11 +1116,35 @@ const handleGitCommitCardSubmit = async (msg) => {
       :current-session-id="currentSessionId"
       :open="isSidebarOpen"
       @new-session="createNewSession"
+      @new-feishu-session="createFeishuSession"
+      @bind-session="openFeishuBinding"
       @toggle="isSidebarOpen = !isSidebarOpen"
       @expand="isSidebarOpen = true"
       @select-session="selectSession"
       @delete-session="deleteSession"
       @clear-all="clearAllSessions"
+    />
+    <GlobalAgentFeishuBindingModal
+      :open="feishuBindingOpen"
+      :session="bindingSession"
+      :bindings="feishuBindings"
+      :busy="feishuBindingBusy"
+      @close="feishuBindingOpen = false"
+      @bind="updateFeishuBinding($event, 'bind')"
+      @unbind="updateFeishuBinding($event, 'unbind')"
+    />
+    <AgentToolsModal
+      :open="globalToolsOpen"
+      title="全局 Agent 工具配置"
+      description="授权全局 Agent 可按用户语义选择并调用的 MCP 与 Skill。"
+      :all-tools="globalToolOptions"
+      :selected-tools="globalTools"
+      :readiness="globalToolReadiness"
+      :preflight="globalToolPreflight"
+      :busy="globalToolsBusy"
+      @toggle-tool="toggleGlobalTool"
+      @save="saveGlobalTools"
+      @close="globalToolsOpen = false"
     />
     
     <!-- 右侧聊天区 -->
@@ -971,6 +1166,7 @@ const handleGitCommitCardSubmit = async (msg) => {
             :scope-key="currentSessionId"
             :active="props.active && !!currentSessionId"
           />
+          <button class="btn btn-outline global-tool-button" title="配置全局 Agent 的 MCP 与 Skill" @click="loadGlobalTools(true)"><Wrench :size="14" /><span>工具</span><small>{{ globalToolCount }}</small></button>
           <span :class="['quality-mode', qualitySnapshot?.policy?.shadowMode ? 'shadow' : 'live']">{{ qualitySnapshot?.policy?.shadowMode ? '影子模式' : '真实执行' }}</span>
           <button class="btn btn-outline" @click="saveCurrentGlobalSessionKnowledge"><BookOpen :size="14" />保存知识</button>
           <details class="global-header-menu">
@@ -1122,6 +1318,7 @@ const handleGitCommitCardSubmit = async (msg) => {
       <GlobalAgentMessageList
         :messages="messages"
         :current-session-id="currentSessionId"
+        :draft="isCurrentSessionDraft"
         :search-highlight-msg-index="searchHighlightMsgIndex"
         :executing-action="executingAction"
         :is-sending="isSending"
@@ -1178,12 +1375,12 @@ const handleGitCommitCardSubmit = async (msg) => {
 
         <ConversationTurnControls
           :busy="globalTurnBusy"
-          v-model:mode="globalTurnControl.mode.value"
           :turns="globalTurnControl.turns.value"
           :stopping="stoppingGlobalTurn"
           compact
           @stop="stopGlobalCurrentWork"
           @cancel="globalTurnControl.cancel"
+          @guide="guideGlobalQueuedTurn"
           @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
         />
                 <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
@@ -1208,6 +1405,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           </button>
           <input 
             type="text" 
+            id="globalChatInput"
             ref="chatInputElement"
             v-model="chatInput" 
             :placeholder="globalInputPlaceholder"

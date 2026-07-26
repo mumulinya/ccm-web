@@ -684,7 +684,8 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
     const visibleMessages = anchorIndex >= 0 ? unsummarized.slice(0, anchorIndex) : unsummarized;
     const currentRequest = dedupeGlobalPendingRequest(visibleMessages, input.currentRequest || input.current_request);
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
-    const payload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+    const suppliedPayload = input.modelVisiblePayload || input.model_visible_payload || null;
+    const payload = suppliedPayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? suppliedPayload : (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
         scope: "global",
         sessionId: exactSessionId,
         system: globalFixedContext(memory, config, { fixedContext: input.fixedContext || input.fixed_context }),
@@ -704,6 +705,7 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
         payloadChecksum: input.payloadChecksum || input.payload_checksum || payload.payloadChecksum,
         fixedContextChecksum: input.fixedContextChecksum || input.fixed_context_checksum || payload.fixedContextChecksum,
         estimatedFixedTokens: input.estimatedFixedTokens || input.estimated_fixed_tokens || (0, session_compaction_core_1.modelVisibleFixedTokens)(payload),
+        estimatedContextTokens: input.estimatedContextTokens || input.estimated_context_tokens || payload.totalTokens,
         estimatedPayloadTokens: input.estimatedPayloadTokens || input.estimated_payload_tokens || payload.totalTokens,
     });
     const measurementUsage = usage || state.latestProviderUsage;

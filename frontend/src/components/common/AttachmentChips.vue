@@ -77,7 +77,7 @@ const formatFileSize = (size) => {
   padding: 5px 10px;
   border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--surface-translucent);
   color: var(--text-primary);
   font-size: 12px;
 }

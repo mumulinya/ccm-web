@@ -219,8 +219,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     });
                     const requestedAutoExecute = flagEnabled(payload.auto_execute ?? payload.autoExecute, true);
                     const autoExecute = requestedAutoExecute && planModePreflight.requires_confirmation !== true;
-                    const inferredAgentQa = /(?:必须|需要|要求).{0,24}(?:Agent[- ]?to[- ]?Agent|Agent\s*QA|ask_agent|子\s*Agent.{0,8}(?:询问|问答)|向.{0,16}Agent.{0,8}(?:提问|询问))/i.test(effectiveUserMessage);
-                    const requiresAgentQa = flagEnabled(payload.requires_agent_qa ?? payload.requiresAgentQa, inferredAgentQa);
+                    const requiresAgentQa = flagEnabled(payload.requires_agent_qa ?? payload.requiresAgentQa, taskIntent?.workflowDecision?.requiresAgentQa === true);
                     const globalDirectDispatch = payload.global_direct_dispatch || payload.globalDirectDispatch || (payload.global_handoff || payload.globalHandoff ? {
                         schema: "ccm-global-direct-dispatch-v1",
                         source: payload.source || "global-agent-direct-dispatch",
@@ -247,13 +246,18 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         group_id,
                         group_session_id: groupSessionId || undefined,
                         assign_type: "group",
+                        orchestration_scope: "group_session",
+                        queue_scope: "conversation_serial",
+                        request_origin: globalDirectDispatch ? "global-agent" : "group-session",
+                        origin_session_id: groupSessionId || undefined,
                         priority: payload.priority || "normal",
                         auto_execute: autoExecute,
                         workflow_type: requirementEpicPlan ? "requirement_epic" : "daily_dev",
-                        requires_code_changes: flagEnabled(payload.requires_code_changes ?? payload.requiresCodeChanges, true),
-                        requires_verification: flagEnabled(payload.requires_verification ?? payload.requiresVerification, true),
-                        requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, false),
+                        requires_code_changes: flagEnabled(payload.requires_code_changes ?? payload.requiresCodeChanges, taskIntent?.workflowDecision?.requiresCodeChanges === true),
+                        requires_verification: flagEnabled(payload.requires_verification ?? payload.requiresVerification, Array.isArray(taskIntent?.workflowDecision?.verificationModes) && taskIntent.workflowDecision.verificationModes.length > 0),
+                        requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, taskIntent?.workflowDecision?.requiresIndependentReview === true),
                         requires_agent_qa: requiresAgentQa,
+                        workflow_decision: taskIntent?.workflowDecision || null,
                         business_goal: businessGoal,
                         acceptance_criteria: acceptanceCriteria,
                         source_documents: sourceDocuments,
@@ -535,6 +539,15 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         source: "user",
                         groupSessionId,
                         sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
+                        onDelta: delta => {
+                            if (!delta)
+                                return;
+                            writeSse(res, {
+                                type: "chunk",
+                                agent: coordinator.project,
+                                text: delta,
+                            });
+                        },
                     });
                     try {
                         const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
@@ -739,7 +752,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
                 const members = (0, group_orchestrator_1.getRoutableMembers)(group);
                 const memberList = members.map((m) => `${m.project}(${m.agent})`).join(", ");
-                const tasks = (0, group_orchestrator_1.decomposeRequirementWithCodedCoordinator)(group, requirement);
+                const tasks = await (0, group_orchestrator_1.decomposeRequirementWithModelCoordinator)(group, requirement);
                 const output = JSON.stringify({ coordinator: coordinator.project, members: memberList, tasks }, null, 2);
                 const createdTasks = tasks.map(t => createTask({
                     title: t.title,

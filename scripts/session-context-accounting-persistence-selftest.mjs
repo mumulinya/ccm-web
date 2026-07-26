@@ -30,6 +30,30 @@ if (process.argv.includes("--child")) {
   assert.ok(globalSession.compaction.modelVisiblePayload.tokenBreakdown.mcpTools > 0);
   assert.ok(globalSession.compaction.modelVisiblePayload.tokenBreakdown.recentMessages > 0);
 
+  const core = await import("../ccm-package/dist/system/session-compaction-core.js");
+  const feishuSessionId = "feishu:manual:context-accounting";
+  globalMemory.ingestGlobalAgentConversation({
+    sessionId: feishuSessionId,
+    source: "feishu-control-bot",
+    compact: false,
+    messages: [{ id: "fs-u1", role: "user", content: "show MCP and Skill context usage" }],
+  });
+  const suppliedPayload = core.buildModelVisiblePayloadSnapshot({
+    scope: "global",
+    sessionId: feishuSessionId,
+    system: { rules: ["exact Feishu session"], skills: ["ccm-global-agent"] },
+    tools: [{ name: "mcp__ccm__read_session_context" }],
+    recentMessages: [{ role: "user", content: "show MCP and Skill context usage" }],
+  });
+  globalMemory.recordGlobalAgentSessionProviderUsage(feishuSessionId, {
+    modelVisiblePayload: suppliedPayload,
+    fixedContext: "must not replace the supplied provider payload",
+  });
+  const feishuSession = globalMemory.loadGlobalAgentMemory().sessions.find(item => item.sessionId === feishuSessionId);
+  assert.equal(feishuSession.compaction.modelVisiblePayload.payloadChecksum, suppliedPayload.payloadChecksum);
+  assert.ok(feishuSession.compaction.modelVisiblePayload.tokenBreakdown.skills > 0);
+  assert.ok(feishuSession.compaction.modelVisiblePayload.tokenBreakdown.mcpTools > 0);
+
   const ccmDir = path.join(os.homedir(), ".cc-connect");
   const projectDir = path.join(ccmDir, "web-sessions", "accounting-project");
   fs.mkdirSync(projectDir, { recursive: true });
@@ -65,7 +89,12 @@ try {
   assert.equal(child.status, 0, child.stderr || child.stdout);
   const result = JSON.parse(String(child.stdout || "").trim().split(/\r?\n/).at(-1));
   assert.equal(result.pass, true);
-  console.log(JSON.stringify({ pass: true, scopes: ["global", "project"], providerUsageReturned: false }, null, 2));
+  const runtimeSource = fs.readFileSync(new URL("../backend/modules/global/global-agent-agentic-runtime.ts", import.meta.url), "utf8");
+  assert.match(runtimeSource, /latest_model_visible_payload/);
+  assert.match(runtimeSource, /modelVisiblePayload:\s*\(run as any\)\.latest_model_visible_payload/);
+  assert.match(runtimeSource, /contextComponents:[\s\S]{0,500}skills:[\s\S]{0,500}mcpTools:/);
+  assert.match(runtimeSource, /}\n\s*try \{\n\s*recordGlobalAgentSessionProviderUsage\(sessionId/);
+  console.log(JSON.stringify({ pass: true, scopes: ["global", "global_feishu", "project"], providerUsageReturned: false, exactProviderPayloadPersisted: true }, null, 2));
 } finally {
   fs.rmSync(tempHome, { recursive: true, force: true });
 }

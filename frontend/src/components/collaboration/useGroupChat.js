@@ -131,6 +131,7 @@ export function useGroupChat(props, emit) {
   const messages = ref([])
   const groupSessions = ref([])
   const currentGroupSessionId = ref('')
+  const isGroupSessionDraft = ref(false)
   const groupMemory = ref(null)
   const mainAgentStatus = ref(null)
   const groupAgentQa = ref([])
@@ -166,7 +167,7 @@ export function useGroupChat(props, emit) {
     newSession: async () => {
       if (!currentGroup.value) throw new Error('请先选择群聊')
       await createGroupSession()
-      return { success: true, summary: '已新建独立群聊会话。', metrics: { 群聊: currentGroup.value.name, 会话: currentGroupSessionId.value } }
+      return { success: true, summary: '已打开空白群聊会话，发送第一条消息后才会创建。', metrics: { 群聊: currentGroup.value.name, 状态: '未创建' } }
     },
     compactSession: async (payload = {}) => {
       if (!currentGroup.value || !currentGroupSessionId.value) throw new Error('请先选择群聊会话')
@@ -503,6 +504,7 @@ export function useGroupChat(props, emit) {
     messages,
     currentGroup,
     currentGroupSessionId,
+    isGroupSessionDraft,
     groupSessions,
     mainAgentStatus,
     groupAgentQa,
@@ -568,12 +570,14 @@ export function useGroupChat(props, emit) {
     groupTurnControl,
     stopGroupCurrentWork,
     drainGroupTurnQueue,
+    guideGroupQueuedTurn,
     submitGroupMessageWhileBusy,
     sendMessage,
   } = useGroupChatStream({
     messages,
     currentGroup,
     currentGroupSessionId,
+    ensureGroupSession: (...args) => materializeGroupSessionDraft(...args),
     mainAgentStatus,
     groupAgentQa,
     lastGroupMsgCount,
@@ -631,6 +635,7 @@ export function useGroupChat(props, emit) {
     currentGroup.value = groups.value.find(g => g.id === id)
     if (changedGroup) {
       currentGroupSessionId.value = ''
+      isGroupSessionDraft.value = false
       groupSessions.value = []
     }
     isGroupMessagesPinnedToBottom.value = true
@@ -648,6 +653,7 @@ export function useGroupChat(props, emit) {
   // 加载消息
   const loadMessages = async (limit = 100) => {
     if (!currentGroup.value) return
+    if (isGroupSessionDraft.value) return false
     const data = await groupsApi.messages(currentGroup.value.id, limit, currentGroupSessionId.value)
     groupSessions.value = data.sessions || groupSessions.value
     currentGroupSessionId.value = data.sessionId || currentGroupSessionId.value || groupSessions.value[0]?.id || ''
@@ -696,24 +702,49 @@ export function useGroupChat(props, emit) {
   const selectGroupSession = async sessionId => {
     if (!currentGroup.value || !sessionId || sessionId === currentGroupSessionId.value) return
     await groupsApi.selectSession(currentGroup.value.id, sessionId)
+    isGroupSessionDraft.value = false
     currentGroupSessionId.value = sessionId
     messages.value = []
     await loadMessages()
+    startGroupPolling()
+  }
+
+  let groupDraftCreation = null
+
+  const materializeGroupSessionDraft = async () => {
+    if (currentGroupSessionId.value) return currentGroupSessionId.value
+    if (!isGroupSessionDraft.value || !currentGroup.value) return ''
+    if (groupDraftCreation) return groupDraftCreation
+    const groupId = currentGroup.value.id
+    groupDraftCreation = (async () => {
+      const data = await groupsApi.createSession(groupId)
+      if (groupId !== currentGroup.value?.id) throw new Error('群聊已切换，请在当前群聊重新发送')
+      groupSessions.value = data.sessions || []
+      currentGroupSessionId.value = data.session?.id || data.activeSessionId || ''
+      if (!currentGroupSessionId.value) throw new Error('服务端没有返回新会话 ID')
+      isGroupSessionDraft.value = false
+      startGroupPolling()
+      return currentGroupSessionId.value
+    })()
+    try {
+      return await groupDraftCreation
+    } finally {
+      groupDraftCreation = null
+    }
   }
 
   const createGroupSession = async () => {
     if (!currentGroup.value) return
-    try {
-      const data = await groupsApi.createSession(currentGroup.value.id)
-      groupSessions.value = data.sessions || []
-      currentGroupSessionId.value = data.session?.id || data.activeSessionId || ''
-      messages.value = []
-      groupMemory.value = null
-      await loadMessages()
-      toast.success('已新建独立群聊会话')
-    } catch (error) {
-      toast.error(error.message || '新建会话失败')
-    }
+    if (isStreaming.value) await stopGroupCurrentWork({ preserveTask: true })
+    stopGroupPolling()
+    currentGroupSessionId.value = ''
+    isGroupSessionDraft.value = true
+    messages.value = []
+    groupMemory.value = null
+    mainAgentStatus.value = null
+    groupAgentQa.value = []
+    await nextTick()
+    focusGroupInput()
   }
 
   const renameGroupSession = async (sessionId = currentGroupSessionId.value) => {
@@ -874,7 +905,7 @@ export function useGroupChat(props, emit) {
     GROUP_VISIBLE_INTERNAL_TEXT_PATTERN, GROUP_INTERNAL_PROTOCOL_FALLBACK, GROUP_STREAM_ERROR_FALLBACK,
     sanitizeGroupVisibleText, buildGroupStreamErrorText, getVisibleGroupMessageContent,
     handleGroupNavigation, highlightMsgIndex, groups, projects, currentGroup, messages, groupSessions,
-    currentGroupSessionId, groupMemory, mainAgentStatus, groupAgentQa, collaborationProtocol,
+    currentGroupSessionId, isGroupSessionDraft, groupMemory, mainAgentStatus, groupAgentQa, collaborationProtocol,
     groupMessagesEl, groupMessagesContentEl, isGroupMessagesPinnedToBottom, updateGroupMessageScrollState,
     scrollToBottom, attachGroupMessagesResizeObserver, detachGroupMessagesResizeObserver, navMessages,
     scrollToMessage, newMessage, slashNavigate, runGroupClientCommand, pendingDirectMemoryCommand, slash,
@@ -916,7 +947,7 @@ export function useGroupChat(props, emit) {
     handleKeydown, highlightMentions, updateCreateGroupProjectSelection,
     submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
     isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
-    stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue,
+    stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
     submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, waitingCrossReply, pullNewMessages,
     logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
     stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool,

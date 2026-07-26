@@ -123,14 +123,23 @@ function contextComponentKey(key) {
 }
 function structuredContextHints(value) {
     const result = {};
-    if (!value || typeof value !== "object" || Array.isArray(value))
-        return result;
-    for (const [key, entry] of Object.entries(value)) {
-        const component = contextComponentKey(key);
-        if (!component)
-            continue;
-        result[component] = (result[component] || 0) + valueTokens({ [key]: entry });
-    }
+    const visit = (current) => {
+        if (!current || typeof current !== "object")
+            return;
+        if (Array.isArray(current)) {
+            for (const item of current)
+                visit(item);
+            return;
+        }
+        for (const [key, entry] of Object.entries(current)) {
+            const component = contextComponentKey(key);
+            if (component)
+                result[component] = (result[component] || 0) + valueTokens({ [key]: entry });
+            else
+                visit(entry);
+        }
+    };
+    visit(value);
     return result;
 }
 function toolContextHints(value) {
@@ -179,7 +188,11 @@ function buildModelVisiblePayloadSnapshot(input) {
     const toolPartition = partitionTokens(rawToolTokens, { mcpTools: toolMcpTokens, subagentDefinitions: toolSubagentTokens });
     const rawRecentMessageTokens = recentMessages.reduce((sum, message) => sum + valueTokens(messageContent(message)), 0);
     const recentPartition = partitionTokens(rawRecentMessageTokens, {
+        rules: explicit.messageRules === undefined ? 0 : valueTokens(explicit.messageRules),
+        skills: explicit.messageSkills === undefined ? 0 : valueTokens(explicit.messageSkills),
+        mcpTools: explicit.messageMcpTools === undefined ? 0 : valueTokens(explicit.messageMcpTools),
         mcpResults: explicit.mcpResults === undefined ? 0 : valueTokens(explicit.mcpResults),
+        subagentDefinitions: explicit.messageSubagentDefinitions === undefined ? 0 : valueTokens(explicit.messageSubagentDefinitions),
     });
     const systemPartition = partitionTokens(rawSystemTokens, {
         rules: explicit.rules === undefined ? structuredHints.rules || 0 : valueTokens(explicit.rules),
@@ -190,11 +203,11 @@ function buildModelVisiblePayloadSnapshot(input) {
     const tokenBreakdown = {
         system: systemPartition.remaining,
         tools: toolPartition.remaining,
-        rules: Number(systemPartition.allocated.rules || 0),
-        skills: Number(systemPartition.allocated.skills || 0),
-        mcpTools: Number(systemPartition.allocated.mcpTools || 0) + Number(toolPartition.allocated.mcpTools || 0),
+        rules: Number(systemPartition.allocated.rules || 0) + Number(recentPartition.allocated.rules || 0),
+        skills: Number(systemPartition.allocated.skills || 0) + Number(recentPartition.allocated.skills || 0),
+        mcpTools: Number(systemPartition.allocated.mcpTools || 0) + Number(toolPartition.allocated.mcpTools || 0) + Number(recentPartition.allocated.mcpTools || 0),
         mcpResults: Number(recentPartition.allocated.mcpResults || 0),
-        subagentDefinitions: Number(systemPartition.allocated.subagentDefinitions || 0) + Number(toolPartition.allocated.subagentDefinitions || 0),
+        subagentDefinitions: Number(systemPartition.allocated.subagentDefinitions || 0) + Number(toolPartition.allocated.subagentDefinitions || 0) + Number(recentPartition.allocated.subagentDefinitions || 0),
         summary: valueTokens(input.activeSummary),
         recentMessages: recentPartition.remaining,
         currentRequest: valueTokens(input.currentRequest),

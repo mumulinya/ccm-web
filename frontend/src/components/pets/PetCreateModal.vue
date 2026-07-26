@@ -96,7 +96,7 @@ const emit = defineEmits(['close', 'submit', 'update:label', 'update:type'])
   padding: 8px 12px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--control-bg);
   font-size: 13.5px;
   outline: none;
   color: var(--text-primary, #0f172a);
@@ -106,7 +106,7 @@ const emit = defineEmits(['close', 'submit', 'update:label', 'update:type'])
 }
 .form-input:focus {
   border-color: var(--accent-blue, #3b82f6);
-  background: #fff;
+  background: var(--surface-raised);
 }
 .modal-footer-btns {
   display: flex;

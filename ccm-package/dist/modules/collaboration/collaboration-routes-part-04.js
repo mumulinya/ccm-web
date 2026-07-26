@@ -169,7 +169,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 (0, collaboration_1.updateTask)(task_id, { status: "in_progress" });
                 const autoAssignGroupId = String(group_id || task.group_id || "");
                 const group = autoAssignGroupId ? (0, storage_1.loadGroups)().find(g => g.id === autoAssignGroupId) : null;
-                const toolContext = (0, collaboration_1.buildAgentToolContext)(ctx, group, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`);
+                const toolContext = (0, collaboration_1.buildAgentToolContext)(ctx, group, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`, task.selected_skill_names || []);
                 let runtimeToolContext = (0, collaboration_1.prepareAgentRuntimeTools)(autoAssignGroupId, task.target_project, workDir, agentType, toolContext.allowedTools, null, { taskId: task.id, task, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness });
                 if (runtimeToolContext.dispatchBlocked) {
                     const blockedReceipt = (0, collaboration_1.runtimeToolDispatchBlockedReceipt)(task.target_project, runtimeToolContext);

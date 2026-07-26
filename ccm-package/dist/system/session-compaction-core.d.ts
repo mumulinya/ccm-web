@@ -83,6 +83,10 @@ type ContextComponentHints = {
     mcpTools?: any;
     mcpResults?: any;
     subagentDefinitions?: any;
+    messageRules?: any;
+    messageSkills?: any;
+    messageMcpTools?: any;
+    messageSubagentDefinitions?: any;
 };
 export declare function buildModelVisiblePayloadSnapshot(input: {
     scope: SessionCompactionScope;

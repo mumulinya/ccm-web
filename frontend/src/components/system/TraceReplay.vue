@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import TaskReplayEvidence from '../replay/TaskReplayEvidence.vue'
 import TaskReplayTimeline from '../replay/TaskReplayTimeline.vue'
+import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const loading = ref(false)
@@ -24,12 +25,23 @@ const focusedEvidenceId = ref('')
 const issuePosition = ref(-1)
 const includeSystemEvents = ref(false)
 const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', files: [] })
+const indexPage = ref(1)
+const indexFilters = reactive({ project: '', groupId: '', status: '', range: 'all' })
+const loadingOlder = ref(false)
+const liveRefreshing = ref(false)
+const lastLiveUpdateAt = ref('')
+const EVENT_PAGE_SIZE = 120
+const INDEX_PAGE_SIZE = 24
+let unsubscribeRuntimeEvents = null
+let indexReloadTimer = null
+let eventReloadTimer = null
+let liveRefreshTimer = null
+let fallbackTimer = null
 
 const taskRows = computed(() => index.value?.tasks || [])
-const visibleTaskRows = computed(() => {
-  const needle = listSearch.value.trim().toLowerCase()
-  return needle ? taskRows.value.filter(item => `${item.title} ${item.goal} ${item.id}`.toLowerCase().includes(needle)) : taskRows.value
-})
+const visibleTaskRows = computed(() => taskRows.value)
+const indexFacets = computed(() => index.value?.facets || { projects: [], groups: [], statuses: [] })
+const eventPage = computed(() => replay.value?.event_page || { offset: 0, returned: allEvents.value.length, total: allEvents.value.length, has_previous: false, has_more: false })
 const allEvents = computed(() => replay.value?.events || [])
 const issueEvents = computed(() => allEvents.value.filter(item => ['failed', 'blocked', 'warning'].includes(item.status)))
 const visibleEvents = computed(() => {
@@ -59,6 +71,8 @@ const durationLabel = computed(() => {
   if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
   return `${Math.floor(seconds / 3600)} 小时 ${Math.floor((seconds % 3600) / 60)} 分`
 })
+const isReplayRunning = computed(() => !!replay.value && replay.value.completed !== true)
+const loadedEventLabel = computed(() => `${allEvents.value.length} / ${eventPage.value.total ?? replay.value?.summary?.event_count ?? allEvents.value.length}`)
 const statusLabel = (value) => ({ pending: '待执行', in_progress: '执行中', running: '执行中', done: '已完成', completed: '已完成', failed: '失败', blocked: '受阻', cancelled: '已取消', passed: '通过', warning: '注意', info: '记录' }[value] || value || '未知')
 const stageLabel = (value) => ({ intake: '需求', planning: '计划', dispatch: '派发', execution: '执行', change: '改动', test: '测试', rework: '返工', review: '验收', completion: '交付', system: '系统' }[value] || value)
 const dateLabel = (value) => {
@@ -67,11 +81,23 @@ const dateLabel = (value) => {
 }
 const retentionLabel = (key) => ({ task_record: '任务记录', trace: '完整执行记录', test_agent: 'TestAgent 证据' }[key] || key)
 
-const loadIndex = async () => {
+const indexDateRange = () => {
+  const days = Number(indexFilters.range || 0)
+  if (!days) return {}
+  return { date_from: new Date(Date.now() - days * 86400000).toISOString() }
+}
+const loadIndex = async ({ resetPage = false } = {}) => {
+  if (resetPage) indexPage.value = 1
   loading.value = true
   error.value = ''
   try {
-    const response = await fetch('/api/tasks/replay?limit=100')
+    const params = new URLSearchParams({ limit: String(INDEX_PAGE_SIZE), page: String(indexPage.value) })
+    if (listSearch.value.trim()) params.set('q', listSearch.value.trim())
+    if (indexFilters.project) params.set('project', indexFilters.project)
+    if (indexFilters.groupId) params.set('group_id', indexFilters.groupId)
+    if (indexFilters.status) params.set('status', indexFilters.status)
+    for (const [key, value] of Object.entries(indexDateRange())) params.set(key, value)
+    const response = await fetch(`/api/tasks/replay?${params}`)
     const data = await response.json()
     if (!response.ok || data.success === false) throw new Error(data.error || '任务记录读取失败')
     index.value = data.index
@@ -80,6 +106,38 @@ const loadIndex = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const appendEventFilters = (params) => {
+  if (stageFilter.value !== 'all') params.set('stage', stageFilter.value)
+  if (statusFilter.value !== 'all') params.set('event_status', statusFilter.value)
+  if (actorFilter.value !== 'all') params.set('actor', actorFilter.value)
+  if (taskFilter.value !== 'all') params.set('event_task_id', taskFilter.value)
+  if (preset.value !== 'all') params.set('preset', preset.value)
+  if (search.value.trim()) params.set('event_query', search.value.trim())
+  if (includeSystemEvents.value) params.set('include_system_events', '1')
+  return params
+}
+
+const replayRequestParams = (id, extra = {}) => {
+  const params = new URLSearchParams({ task_id: id, event_limit: String(extra.limit || EVENT_PAGE_SIZE) })
+  if (extra.tail) params.set('event_tail', '1')
+  if (Number.isFinite(extra.offset)) params.set('event_offset', String(extra.offset))
+  if (extra.after?.at) {
+    params.set('after_event_at', extra.after.at)
+    params.set('after_event_id', extra.after.id || '')
+  }
+  return appendEventFilters(params)
+}
+
+const mergeEvents = (...groups) => {
+  const rows = new Map()
+  for (const item of groups.flat()) if (item?.id) rows.set(item.id, item)
+  return [...rows.values()].sort((a, b) => String(a.at).localeCompare(String(b.at)) || String(a.id).localeCompare(String(b.id)))
+}
+
+const applyReplayPayload = (nextReplay, events, page = nextReplay?.event_page) => {
+  replay.value = { ...nextReplay, events, event_page: page }
 }
 
 const syntheticLegacyReplay = (payload) => {
@@ -125,17 +183,91 @@ const loadReplay = async (id = taskId.value) => {
       await loadIndex()
       return
     }
-    const response = await fetch(`/api/tasks/replay?task_id=${encodeURIComponent(selected)}`)
+    const response = await fetch(`/api/tasks/replay?${replayRequestParams(selected, { tail: true })}`)
     const data = await response.json()
     if (!response.ok || data.success === false) throw new Error(data.error || '任务回放读取失败')
     taskId.value = selected
     replay.value = data.replay
+    lastLiveUpdateAt.value = new Date().toISOString()
     traceId.value = data.replay?.tasks?.find(item => item.id === selected)?.trace_id || data.replay?.tasks?.[0]?.trace_id || traceId.value
     stageFilter.value = 'all'; statusFilter.value = 'all'; actorFilter.value = 'all'; taskFilter.value = 'all'; preset.value = 'all'; search.value = ''; includeSystemEvents.value = false
   } catch (e) {
     error.value = e.message || '任务回放读取失败'
   } finally {
     loading.value = false
+  }
+}
+
+const loadOlderEvents = async () => {
+  if (!replay.value || !eventPage.value.has_previous || loadingOlder.value) return
+  loadingOlder.value = true
+  error.value = ''
+  try {
+    const previousOffset = Math.max(0, Number(eventPage.value.previous_offset || 0))
+    const limit = Math.max(1, Number(eventPage.value.offset || 0) - previousOffset)
+    const response = await fetch(`/api/tasks/replay?${replayRequestParams(taskId.value, { offset: previousOffset, limit })}`)
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '更早记录读取失败')
+    const events = mergeEvents(data.replay?.events || [], allEvents.value)
+    applyReplayPayload(data.replay, events, {
+      ...data.replay.event_page,
+      returned: events.length,
+      has_more: false,
+      next_offset: Number(data.replay.event_page?.offset || 0) + events.length,
+      last_cursor: events.at(-1) ? { at: events.at(-1).at, id: events.at(-1).id } : null,
+    })
+  } catch (e) {
+    error.value = e.message || '更早记录读取失败'
+  } finally {
+    loadingOlder.value = false
+  }
+}
+
+const reloadEventWindow = async () => {
+  if (!replay.value || !taskId.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    const response = await fetch(`/api/tasks/replay?${replayRequestParams(taskId.value, { tail: true })}`)
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '任务记录筛选失败')
+    replay.value = data.replay
+    issuePosition.value = -1
+  } catch (e) {
+    error.value = e.message || '任务记录筛选失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+const refreshLiveReplay = async () => {
+  if (!replay.value || !taskId.value || liveRefreshing.value) return
+  liveRefreshing.value = true
+  let morePending = false
+  try {
+    const cursor = eventPage.value.last_cursor || (allEvents.value.at(-1) ? { at: allEvents.value.at(-1).at, id: allEvents.value.at(-1).id } : null)
+    const params = replayRequestParams(taskId.value, cursor ? { after: cursor, limit: 200 } : { tail: true })
+    const response = await fetch(`/api/tasks/replay?${params}`)
+    const data = await response.json()
+    if (!response.ok || data.success === false || !data.replay) return
+    const events = mergeEvents(allEvents.value, data.replay.events || [])
+    const firstOffset = Number(eventPage.value.offset || 0)
+    applyReplayPayload(data.replay, events, {
+      ...data.replay.event_page,
+      mode: 'live',
+      offset: firstOffset,
+      returned: events.length,
+      has_previous: firstOffset > 0,
+      previous_offset: Math.max(0, firstOffset - EVENT_PAGE_SIZE),
+      last_cursor: events.at(-1) ? { at: events.at(-1).at, id: events.at(-1).id } : data.replay.event_page?.last_cursor,
+    })
+    morePending = data.replay.event_page?.has_more === true
+    lastLiveUpdateAt.value = new Date().toISOString()
+  } catch {
+    // The 60-second fallback and the next runtime event will retry.
+  } finally {
+    liveRefreshing.value = false
+    if (morePending) scheduleLiveRefresh(40)
   }
 }
 
@@ -162,6 +294,33 @@ const openCodeChanges = (item) => {
     files: Array.isArray(item?.files) ? item.files : [],
   }
 }
+const changeIndexPage = async (direction) => {
+  const next = indexPage.value + direction
+  if (next < 1 || next > Number(index.value?.page_count || 1)) return
+  indexPage.value = next
+  await loadIndex()
+}
+const clearIndexFilters = () => {
+  listSearch.value = ''
+  indexFilters.project = ''
+  indexFilters.groupId = ''
+  indexFilters.status = ''
+  indexFilters.range = 'all'
+}
+const scheduleIndexReload = () => {
+  if (replay.value) return
+  window.clearTimeout(indexReloadTimer)
+  indexReloadTimer = window.setTimeout(() => loadIndex({ resetPage: true }), 280)
+}
+const scheduleEventReload = () => {
+  if (!replay.value) return
+  window.clearTimeout(eventReloadTimer)
+  eventReloadTimer = window.setTimeout(reloadEventWindow, 240)
+}
+const scheduleLiveRefresh = (delay = 180) => {
+  window.clearTimeout(liveRefreshTimer)
+  liveRefreshTimer = window.setTimeout(refreshLiveReplay, delay)
+}
 
 const applyReplayTarget = (target = {}) => {
   if (!target) return false
@@ -185,11 +344,33 @@ onMounted(async () => {
   if (props.navigateTo?.tab === 'trace-replay') applyReplayTarget(props.navigateTo)
   readStoredReplayTarget()
   window.addEventListener('trace-replay-target', handleReplayTarget)
+  unsubscribeRuntimeEvents = subscribeRuntimeEvents(['task', 'agent'], event => {
+    const changedTaskId = String(event?.data?.taskId || event?.data?.task_id || '')
+    const familyIds = new Set((replay.value?.tasks || []).map(item => String(item.id)))
+    if (!replay.value) {
+      scheduleIndexReload()
+      return
+    }
+    if (!changedTaskId || familyIds.has(changedTaskId)) scheduleLiveRefresh()
+  })
+  fallbackTimer = window.setInterval(() => {
+    if (replay.value) refreshLiveReplay()
+    else loadIndex()
+  }, 60000)
   await loadIndex()
   if (taskId.value || traceId.value) await loadReplay()
 })
-onUnmounted(() => window.removeEventListener('trace-replay-target', handleReplayTarget))
+onUnmounted(() => {
+  window.removeEventListener('trace-replay-target', handleReplayTarget)
+  unsubscribeRuntimeEvents?.()
+  window.clearInterval(fallbackTimer)
+  window.clearTimeout(indexReloadTimer)
+  window.clearTimeout(eventReloadTimer)
+  window.clearTimeout(liveRefreshTimer)
+})
 watch(() => props.navigateTo, (target) => { if (target?.tab === 'trace-replay' && applyReplayTarget(target)) loadReplay() })
+watch([listSearch, () => indexFilters.project, () => indexFilters.groupId, () => indexFilters.status, () => indexFilters.range], scheduleIndexReload)
+watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, includeSystemEvents], scheduleEventReload)
 </script>
 
 <template>
@@ -209,17 +390,29 @@ watch(() => props.navigateTo, (target) => { if (target?.tab === 'trace-replay' &
 
     <template v-if="!replay">
       <div class="replay-index-head">
-        <div><strong>最近任务</strong><span>{{ taskRows.length }} 条可回放记录</span></div>
-        <input v-model="listSearch" placeholder="搜索标题、目标或任务 ID" />
+        <div><strong>任务记录</strong><span>找到 {{ index?.total || 0 }} 条，全部 {{ index?.total_all || 0 }} 条</span></div>
+        <button v-if="listSearch || indexFilters.project || indexFilters.groupId || indexFilters.status || indexFilters.range !== 'all'" type="button" class="clear-filters" @click="clearIndexFilters">清除筛选</button>
+      </div>
+      <div class="replay-index-filters">
+        <label class="index-search"><span>搜索</span><input v-model="listSearch" placeholder="标题、目标或任务 ID" /></label>
+        <label><span>项目</span><select v-model="indexFilters.project"><option value="">全部项目</option><option v-for="item in indexFacets.projects" :key="item.value" :value="item.value">{{ item.label }} · {{ item.count }}</option></select></label>
+        <label><span>群聊</span><select v-model="indexFilters.groupId"><option value="">全部群聊</option><option v-for="item in indexFacets.groups" :key="item.value" :value="item.value">{{ item.label }} · {{ item.count }}</option></select></label>
+        <label><span>状态</span><select v-model="indexFilters.status"><option value="">全部状态</option><option v-for="item in indexFacets.statuses" :key="item.value" :value="item.value">{{ statusLabel(item.label) }} · {{ item.count }}</option></select></label>
+        <label><span>时间</span><select v-model="indexFilters.range"><option value="all">全部时间</option><option value="7">最近 7 天</option><option value="30">最近 30 天</option><option value="90">最近 90 天</option></select></label>
       </div>
       <div v-if="loading && !taskRows.length" class="replay-loading">正在整理任务记录…</div>
       <div v-else class="replay-index-list">
         <button v-for="item in visibleTaskRows" :key="item.id" type="button" class="replay-index-row" @click="loadReplay(item.id)">
           <span :class="['task-state-dot', item.status]"></span>
-          <span class="task-index-copy"><strong>{{ item.title }}</strong><small>{{ item.goal || `任务 ${item.id}` }}</small></span>
+          <span class="task-index-copy"><strong>{{ item.title }}</strong><small>{{ item.goal || `任务 ${item.id}` }}</small><span class="task-index-tags"><em v-if="item.group_name">{{ item.group_name }}</em><em v-for="project in item.projects || []" :key="project">{{ project }}</em></span></span>
           <span class="task-index-meta"><em>{{ statusLabel(item.status) }}</em><small>{{ item.child_count }} 个子任务 · {{ dateLabel(item.updated_at) }}</small></span>
         </button>
         <div v-if="!visibleTaskRows.length" class="replay-loading">没有匹配的任务</div>
+      </div>
+      <div v-if="(index?.page_count || 1) > 1" class="index-pagination">
+        <button type="button" :disabled="!index?.has_previous || loading" @click="changeIndexPage(-1)">上一页</button>
+        <span>第 {{ index?.page || 1 }} / {{ index?.page_count || 1 }} 页</span>
+        <button type="button" :disabled="!index?.has_more || loading" @click="changeIndexPage(1)">下一页</button>
       </div>
     </template>
 
@@ -228,7 +421,7 @@ watch(() => props.navigateTo, (target) => { if (target?.tab === 'trace-replay' &
         <div class="overview-heading">
           <button type="button" class="back-button" @click="showIndex">返回任务列表</button>
           <div><span>完整任务链</span><h1>{{ replay.title }}</h1><p>{{ replay.goal }}</p></div>
-          <span :class="['overview-status', replay.status]">{{ statusLabel(replay.status) }}</span>
+          <div class="overview-state"><span :class="['overview-status', replay.status]">{{ statusLabel(replay.status) }}</span><span :class="['live-state', { active: isReplayRunning }]">{{ liveRefreshing ? '正在同步' : isReplayRunning ? '实时更新' : '记录已完成' }}</span></div>
         </div>
         <div v-if="replay.legacy" class="legacy-notice">这条旧记录没有完整任务关联，因此只能显示系统仍保留的诊断事件。</div>
         <dl class="overview-metrics">
@@ -273,7 +466,8 @@ watch(() => props.navigateTo, (target) => { if (target?.tab === 'trace-replay' &
 
       <div class="replay-workspace">
         <main>
-          <div class="timeline-head"><strong>执行时间线</strong><span>显示 {{ visibleEvents.length }} / {{ allEvents.length }} 条</span></div>
+          <div class="timeline-head"><strong>执行时间线</strong><span>已加载 {{ loadedEventLabel }} 条<span v-if="lastLiveUpdateAt"> · 更新于 {{ dateLabel(lastLiveUpdateAt) }}</span></span></div>
+          <button v-if="eventPage.has_previous" type="button" class="load-older" :disabled="loadingOlder" @click="loadOlderEvents">{{ loadingOlder ? '正在读取…' : `加载更早记录（前面还有 ${eventPage.offset} 条）` }}</button>
           <TaskReplayTimeline :events="visibleEvents" :focused-event-id="focusedEventId" @open-evidence="openEvidence" />
         </main>
         <TaskReplayEvidence :evidence="replay.evidence || []" :focused-evidence-id="focusedEvidenceId" @open-code-changes="openCodeChanges" />
@@ -300,13 +494,22 @@ watch(() => props.navigateTo, (target) => { if (target?.tab === 'trace-replay' &
 .replay-toolbar { display:flex; justify-content:space-between; align-items:end; gap:16px; padding-bottom:14px; border-bottom:1px solid var(--border-color); }.toolbar-title strong { display:block; font-size:18px; }.toolbar-title span { display:block; margin-top:3px; color:var(--text-muted); font-size:12px; }.toolbar-lookup { display:flex; align-items:center; gap:6px; }.toolbar-lookup>span { color:var(--text-muted); font-size:11px; }.toolbar-lookup input,.replay-index-head input,.event-search,.replay-controls select { height:34px; min-width:0; border:1px solid var(--border-color); border-radius:6px; padding:0 9px; background:var(--surface); color:var(--text-primary); font-size:12px; }.toolbar-lookup input { width:170px; }.toolbar-lookup button,.back-button { height:34px; padding:0 12px; border:1px solid var(--accent-blue); border-radius:6px; background:var(--accent-blue); color:#fff; font-size:12px; font-weight:750; cursor:pointer; }.toolbar-lookup button:disabled { opacity:.6; }
 .replay-error,.legacy-notice { margin-top:12px; padding:10px 12px; border:1px solid #fecaca; border-radius:8px; background:#fef2f2; color:#991b1b; font-size:12px; }.legacy-notice { margin:12px 0 0; border-color:#fde68a; background:#fffbeb; color:#92400e; }
 .replay-index-head { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:18px 0 10px; }.replay-index-head>div strong { display:block; font-size:14px; }.replay-index-head>div span { display:block; margin-top:2px; color:var(--text-muted); font-size:11px; }.replay-index-head input { width:min(330px,45vw); }.replay-index-list { border-top:1px solid var(--border-color); }.replay-index-row { display:grid; width:100%; grid-template-columns:10px minmax(0,1fr) auto; gap:12px; align-items:center; padding:13px 4px; border:0; border-bottom:1px solid var(--border-color); background:transparent; color:inherit; text-align:left; cursor:pointer; }.replay-index-row:hover { background:var(--bg-secondary); }.task-state-dot { width:8px; height:8px; border-radius:50%; background:#94a3b8; }.task-state-dot.done,.task-state-dot.completed { background:#16a34a; }.task-state-dot.in_progress,.task-state-dot.running { background:#2563eb; }.task-state-dot.failed,.task-state-dot.blocked { background:#dc2626; }.task-index-copy { min-width:0; }.task-index-copy strong,.task-index-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.task-index-copy strong { font-size:13px; }.task-index-copy small { margin-top:3px; color:var(--text-muted); font-size:11px; }.task-index-meta { text-align:right; }.task-index-meta em,.task-index-meta small { display:block; }.task-index-meta em { color:var(--text-secondary); font-size:11px; font-style:normal; font-weight:750; }.task-index-meta small { margin-top:3px; color:var(--text-muted); font-size:10px; }.replay-loading { padding:50px 12px; color:var(--text-muted); text-align:center; font-size:13px; }
+.clear-filters { height:30px; padding:0 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }
+.replay-index-filters { display:grid; grid-template-columns:minmax(210px,1.7fr) repeat(4,minmax(120px,1fr)); gap:8px; padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--surface); }.replay-index-filters label { display:grid; min-width:0; gap:4px; }.replay-index-filters label>span { color:var(--text-muted); font-size:10px; font-weight:700; }.replay-index-filters input,.replay-index-filters select { width:100%; height:34px; min-width:0; border:1px solid var(--border-color); border-radius:6px; padding:0 9px; background:var(--bg-primary); color:var(--text-primary); font-size:11px; }.task-index-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }.task-index-tags em { padding:2px 5px; border-radius:4px; background:var(--bg-secondary); color:var(--text-muted); font-size:9px; font-style:normal; }.index-pagination { display:flex; justify-content:center; align-items:center; gap:10px; padding:14px 0 2px; }.index-pagination button { height:30px; padding:0 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }.index-pagination button:disabled { opacity:.45; cursor:default; }.index-pagination span { color:var(--text-muted); font-size:10px; }
 .replay-overview { padding:16px 0 12px; }.overview-heading { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:14px; }.back-button { height:30px; border-color:var(--border-color); background:transparent; color:var(--text-secondary); }.overview-heading>div>span { color:var(--text-muted); font-size:11px; font-weight:750; }.overview-heading h1 { margin:2px 0 0; font-size:20px; line-height:1.35; overflow-wrap:anywhere; }.overview-heading p { max-width:850px; margin:5px 0 0; color:var(--text-secondary); font-size:12px; line-height:1.55; white-space:pre-wrap; }.overview-status { padding:4px 8px; border-radius:5px; background:var(--bg-secondary); color:var(--text-secondary); font-size:11px; font-weight:800; }.overview-status.done,.overview-status.completed { background:#dcfce7; color:#166534; }.overview-status.failed,.overview-status.blocked { background:#fee2e2; color:#991b1b; }.overview-metrics { display:grid; grid-template-columns:repeat(6,minmax(90px,1fr)); margin:15px 0 0; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; background:var(--surface); }.overview-metrics>div { padding:10px 12px; border-right:1px solid var(--border-color); }.overview-metrics>div:last-child { border-right:0; }.overview-metrics>div.attention { background:#fffbeb; }.overview-metrics dt { color:var(--text-muted); font-size:10px; }.overview-metrics dd { margin:4px 0 0; font-size:16px; font-weight:800; }
+.overview-state { display:grid; justify-items:end; gap:6px; }.overview-state .overview-status { display:inline-flex; margin:0; }.overview-state .live-state { display:flex; align-items:center; gap:5px; color:var(--text-muted); font-size:10px; font-weight:700; }.overview-state .live-state::before { content:''; width:6px; height:6px; border-radius:50%; background:#94a3b8; }.overview-state .live-state.active::before { background:#16a34a; box-shadow:0 0 0 3px rgba(22,163,74,.12); }
 .phase-strip { display:flex; overflow:auto; border-block:1px solid var(--border-color); background:var(--surface); }.phase-strip button { display:grid; flex:1 0 82px; grid-template-columns:8px minmax(0,1fr) auto; gap:6px; align-items:center; min-height:42px; padding:0 9px; border:0; border-right:1px solid var(--border-color); background:transparent; color:var(--text-secondary); cursor:pointer; }.phase-strip button.active { background:var(--accent-soft); color:var(--accent-blue); }.phase-strip button>span { width:7px; height:7px; border-radius:50%; background:#94a3b8; }.phase-strip button.passed>span { background:#16a34a; }.phase-strip button.running>span { background:#2563eb; }.phase-strip button.warning>span,.phase-strip button.blocked>span { background:#d97706; }.phase-strip button.failed>span { background:#dc2626; }.phase-strip strong { font-size:11px; }.phase-strip small { color:var(--text-muted); font-size:9px; }
 .replay-controls { display:flex; flex-wrap:wrap; align-items:center; gap:7px; padding:12px 0; }.preset-control { display:flex; border:1px solid var(--border-color); border-radius:6px; overflow:hidden; }.preset-control button { height:32px; padding:0 9px; border:0; border-right:1px solid var(--border-color); background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }.preset-control button:last-child { border-right:0; }.preset-control button.active { background:var(--accent-blue); color:#fff; }.event-search { flex:1; min-width:160px; }.replay-controls select { max-width:150px; }.issue-nav { display:flex; align-items:center; gap:5px; margin-left:auto; }.issue-nav button { height:30px; padding:0 8px; border:1px solid var(--border-color); border-radius:5px; background:var(--surface); color:var(--text-secondary); font-size:10px; cursor:pointer; }.issue-nav button:disabled { opacity:.45; }.issue-nav span { min-width:44px; color:var(--text-muted); font-size:10px; text-align:center; }
 .system-event-toggle { display:flex; align-items:center; gap:5px; height:32px; padding:0 8px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); font-size:10px; font-weight:700; cursor:pointer; }.system-event-toggle input { width:14px; height:14px; margin:0; accent-color:var(--accent-blue); }
 .task-family-strip { display:flex; gap:7px; overflow:auto; padding:0 0 12px; }.task-family-strip button { display:grid; grid-template-columns:auto minmax(110px,1fr) auto; align-items:center; gap:7px; flex:0 0 auto; max-width:300px; height:34px; padding:0 8px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); cursor:pointer; }.task-family-strip button.active { border-color:var(--accent-blue); background:var(--accent-soft); }.task-family-strip span { color:var(--text-muted); font-size:9px; }.task-family-strip strong { overflow:hidden; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }.task-family-strip em { color:var(--text-muted); font-size:9px; font-style:normal; }
 .replay-workspace { display:grid; grid-template-columns:minmax(0,1fr) minmax(250px,320px); gap:14px; align-items:start; }.replay-workspace>main { min-width:0; }.timeline-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; padding-left:122px; }.timeline-head strong { font-size:13px; }.timeline-head span { color:var(--text-muted); font-size:10px; }
+.load-older { display:block; width:calc(100% - 122px); height:32px; margin:0 0 8px 122px; border:1px dashed var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }.load-older:hover { border-color:var(--accent-blue); color:var(--accent-blue); }.load-older:disabled { opacity:.55; cursor:default; }
 .retention-details { margin-top:16px; border-top:1px solid var(--border-color); padding-top:10px; }.retention-details summary { color:var(--text-muted); font-size:11px; font-weight:700; cursor:pointer; }.retention-details>div { padding:9px 0; color:var(--text-secondary); font-size:11px; line-height:1.55; }.retention-details p { margin:0 0 7px; }.retention-details dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:4px 10px; margin:0; }.retention-details dt { color:var(--text-muted); }.retention-details dd { margin:0; }.retention-details span { color:var(--text-muted); }
-@media (max-width:1100px) { .replay-toolbar { align-items:start; }.toolbar-lookup { flex-wrap:wrap; justify-content:end; }.overview-metrics { grid-template-columns:repeat(3,1fr); }.overview-metrics>div:nth-child(3) { border-right:0; }.overview-metrics>div:nth-child(-n+3) { border-bottom:1px solid var(--border-color); }.replay-workspace { grid-template-columns:1fr; }.timeline-head { padding-left:0; } }
-@media (max-width:720px) { .task-replay-page { padding:12px; }.replay-toolbar { display:grid; }.toolbar-lookup { display:grid; grid-template-columns:minmax(0,1fr) auto; }.toolbar-lookup input { width:100%; }.overview-heading { grid-template-columns:1fr auto; }.overview-heading .back-button { grid-column:1/-1; justify-self:start; }.overview-metrics { grid-template-columns:repeat(2,1fr); }.overview-metrics>div { border-bottom:1px solid var(--border-color); }.overview-metrics>div:nth-child(2n) { border-right:0; }.overview-metrics>div:nth-last-child(-n+2) { border-bottom:0; }.replay-index-head { display:grid; }.replay-index-head input { width:100%; }.replay-index-row { grid-template-columns:10px minmax(0,1fr); }.task-index-meta { grid-column:2; display:flex; justify-content:space-between; text-align:left; }.preset-control { width:100%; overflow:auto; }.preset-control button { flex:1 0 auto; }.event-search { flex-basis:100%; }.issue-nav { margin-left:0; }.retention-details dl { grid-template-columns:1fr; } }
+@media (max-width:1100px) { .replay-toolbar { align-items:start; }.toolbar-lookup { flex-wrap:wrap; justify-content:end; }.replay-index-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }.index-search { grid-column:1/-1; }.overview-metrics { grid-template-columns:repeat(3,1fr); }.overview-metrics>div:nth-child(3) { border-right:0; }.overview-metrics>div:nth-child(-n+3) { border-bottom:1px solid var(--border-color); }.replay-workspace { grid-template-columns:1fr; }.timeline-head { padding-left:0; }.load-older { width:100%; margin-left:0; } }
+@media (max-width:720px) { .task-replay-page { padding:12px; }.replay-toolbar { display:grid; }.toolbar-lookup { display:grid; grid-template-columns:minmax(0,1fr) auto; }.toolbar-lookup input { width:100%; }.overview-heading { grid-template-columns:1fr auto; }.overview-heading .back-button { grid-column:1/-1; justify-self:start; }.overview-metrics { grid-template-columns:repeat(2,1fr); }.overview-metrics>div { border-bottom:1px solid var(--border-color); }.overview-metrics>div:nth-child(2n) { border-right:0; }.overview-metrics>div:nth-last-child(-n+2) { border-bottom:0; }.replay-index-head { display:flex; }.replay-index-filters { grid-template-columns:1fr; }.index-search { grid-column:auto; }.replay-index-row { grid-template-columns:10px minmax(0,1fr); }.task-index-meta { grid-column:2; display:flex; justify-content:space-between; text-align:left; }.preset-control { width:100%; overflow:auto; }.preset-control button { flex:1 0 auto; }.event-search { flex-basis:100%; }.issue-nav { margin-left:0; }.retention-details dl { grid-template-columns:1fr; }.timeline-head { align-items:start; gap:8px; }.timeline-head>span { max-width:65%; text-align:right; } }
+.replay-error { border-color:color-mix(in srgb,var(--accent-red) 35%,var(--border-color)); background:var(--danger-soft); color:var(--accent-red); }
+.legacy-notice { border-color:color-mix(in srgb,var(--accent-yellow) 35%,var(--border-color)); background:var(--warning-soft); color:var(--accent-yellow); }
+.overview-status.done,.overview-status.completed { background:var(--success-soft); color:var(--accent-green); }
+.overview-status.failed,.overview-status.blocked { background:var(--danger-soft); color:var(--accent-red); }
+.overview-metrics>div.attention { background:var(--warning-soft); }
 </style>

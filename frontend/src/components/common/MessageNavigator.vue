@@ -242,7 +242,7 @@ onUnmounted(() => {
   padding: 12px 14px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--surface-raised);
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
   color: #111827;
   pointer-events: none;

@@ -52,11 +52,13 @@ function runCoordinatorReworkProtocolSelfTest() {
     });
     const independentRoute = (0, collaboration_1.buildCoordinatorReworkRoutingDecision)({
         project: "reviewer",
+        requiresFreshVerifier: true,
         message: "请让非原实现者做独立复核，只读检查 OrderDetail.vue 的验收覆盖和风险。",
         reason: "复杂变更需要独立验证",
     });
     const wrongDirectionRoute = (0, collaboration_1.buildCoordinatorReworkRoutingDecision)({
         project: "backend-service",
+        goalRevision: true,
         message: "用户改成保持 session，不要继续 JWT refactor；请停止旧方向，改为修复 src/auth/validate.ts:42 空指针。",
         reason: "用户调整目标，旧方案不再适用",
     }, {
@@ -78,7 +80,7 @@ function runCoordinatorReworkProtocolSelfTest() {
         members: [
             { project: "coordinator", role: "coordinator" },
             { project: "web-app", role: "frontend" },
-            { project: "test-agent", role: "测试 agent", description: "负责只读复核、测试和验收检查" },
+            { project: "test-agent", role: "verifier", description: "负责只读复核、测试和验收检查" },
         ],
     };
     const verifierSelection = (0, collaboration_1.selectCoordinatorIndependentVerifier)(verifierGroup, "web-app");
@@ -97,6 +99,7 @@ function runCoordinatorReworkProtocolSelfTest() {
     const independentFollowUp = (0, collaboration_1.buildCoordinatorReworkFollowUp)({
         project: "web-app",
         targetName: "web-app",
+        requiresFreshVerifier: true,
         message: "请让非原实现者做独立复核，只读检查 OrderDetail.vue 的验收覆盖和风险。",
         reason: "复杂变更需要独立验证",
         summary: "复核订单详情变更",
@@ -561,6 +564,8 @@ function runCoordinatorReworkProtocolSelfTest() {
             group_id: "independent-review-gate-group",
             assign_type: "group",
             workflow_type: "daily_dev",
+            requires_code_changes: true,
+            requires_independent_review: true,
             title: "完善订单详情接口与页面",
             business_goal: "订单详情改动需要真实验证和独立复核",
             file_changes: {
@@ -837,6 +842,7 @@ function runCoordinatorReworkProtocolSelfTest() {
     const blockedIndependentFollowUp = (0, collaboration_1.buildCoordinatorReworkFollowUp)({
         project: "web-app",
         targetName: "web-app",
+        requiresFreshVerifier: true,
         message: "请让非原实现者做独立复核，只读检查 OrderDetail.vue 的验收覆盖和风险。",
         reason: "复杂变更需要独立验证",
     }, {

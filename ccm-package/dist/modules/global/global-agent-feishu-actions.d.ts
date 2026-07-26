@@ -15,13 +15,13 @@ export declare function createGlobalAgentFeishuActions(deps: any): {
     } | {
         success: boolean;
         message: string;
-        keyword: any;
+        keyword: string;
         mode: string;
         command: any;
         client_effect: {
             type: string;
             params: {
-                keyword: any;
+                keyword: string;
                 request_text: string;
                 mode: string;
                 command_id: any;
@@ -41,7 +41,7 @@ export declare function createGlobalAgentFeishuActions(deps: any): {
             };
         };
     }>;
-    fillCronParams: (params: any, originalText: string, groups?: any[], projects?: string[]) => any;
+    fillCronParams: (params: any, _originalText: string, _groups?: any[], _projects?: string[]) => any;
     executeFeishuManagementAction: (baseUrl: string, action: any, originalText?: string) => Promise<string>;
     executeFeishuAction: (baseUrl: string, action: any, originalText?: string, traceId?: string, options?: {
         globalRunId?: string;

@@ -28,6 +28,13 @@ export const projectsApi = {
   lifecycleAudit: (limit = 100) => api(`/api/projects/lifecycle-audit?limit=${encodeURIComponent(limit)}`),
   start: (project, agent) => api('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, agent }) }),
   stop: (project) => api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }) }),
+  agentConnection: (project, action, agent) => api('/api/projects/agent-connection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, action, agent }) }),
+  runtime: (project) => api(`/api/projects/runtime?project=${encodeURIComponent(project)}`),
+  runtimeRescan: (project) => api('/api/projects/runtime/rescan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }) }),
+  runtimeSave: (project, data) => api('/api/projects/runtime/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, ...data }) }),
+  runtimeToolchainTest: (project, toolchain) => api('/api/projects/runtime/toolchain-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, toolchain }) }),
+  runtimeAction: (project, profileId, action) => api('/api/projects/runtime/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, profile_id: profileId, action }) }),
+  runtimeLogs: (project, profileId, kind = 'run', lines = 300) => api(`/api/projects/runtime/logs?project=${encodeURIComponent(project)}&profile_id=${encodeURIComponent(profileId)}&kind=${encodeURIComponent(kind)}&lines=${encodeURIComponent(lines)}`),
 };
 
 // 会话相关 API
@@ -35,6 +42,8 @@ export const sessionsApi = {
   list: (project) => api(`/api/projects/${encodeURIComponent(project)}/sessions`),
   detail: (project, sessionId) => api(`/api/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(sessionId)}`),
   create: (data) => api('/api/sessions/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  feishuTargets: (project) => api(`/api/sessions/feishu-targets?project=${encodeURIComponent(project)}`),
+  bindFeishu: (data) => api('/api/sessions/feishu-bind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   compact: (data) => api('/api/sessions/compact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   delete: (data) => api('/api/sessions/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   rename: (data) => api('/api/sessions/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
@@ -78,6 +87,7 @@ export const conversationTurnsApi = {
   claim: (data) => api('/api/conversation-turns/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   settle: (data) => api('/api/conversation-turns/settle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   cancel: (id, reason = '') => api('/api/conversation-turns/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, reason }) }),
+  guide: (id) => api('/api/conversation-turns/guide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
   retry: (id) => api('/api/conversation-turns/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
 };
 

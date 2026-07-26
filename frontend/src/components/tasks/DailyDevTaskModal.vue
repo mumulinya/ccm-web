@@ -126,7 +126,7 @@ const handlePaste = (task, event) => {
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--control-bg);
   color: var(--text-primary);
   font-size: 13px;
   resize: vertical;

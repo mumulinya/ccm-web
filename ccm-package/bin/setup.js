@@ -13,6 +13,22 @@ const PID_DIR = path.join(CCM_DIR, "pids");
 const LOG_DIR = path.join(CCM_DIR, "logs");
 const PACKAGE_DIR = path.resolve(__dirname, "..");
 const MCP_DIR = path.join(PACKAGE_DIR, "mcp-feishu");
+const MIN_CC_CONNECT_VERSION = "1.4.1";
+
+function parseVersion(value) {
+  const match = String(value || "").match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function versionAtLeast(actual, minimum) {
+  const left = parseVersion(actual);
+  const right = parseVersion(minimum);
+  if (!left || !right) return false;
+  for (let index = 0; index < 3; index++) {
+    if (left[index] !== right[index]) return left[index] > right[index];
+  }
+  return true;
+}
 
 console.log("\n╔══════════════════════════════════════╗");
 console.log("║     ccm 安装程序                      ║");
@@ -31,16 +47,31 @@ console.log("[1/6] 创建目录结构...");
 
 // 2. 检查 cc-connect
 console.log("\n[2/6] 检查 cc-connect...");
+let bundledCcConnectVersion = "";
 try {
-  const version = execSync("cc-connect --version", { encoding: "utf-8" }).trim();
-  console.log(`  ✓ ${version}`);
-} catch {
-  console.log("  ✗ 未安装，正在安装...");
+  const packageFile = require.resolve("cc-connect/package.json", { paths: [PACKAGE_DIR] });
+  bundledCcConnectVersion = String(require(packageFile).version || "");
+} catch {}
+if (versionAtLeast(bundledCcConnectVersion, MIN_CC_CONNECT_VERSION)) {
+  console.log(`  ✓ 包内 cc-connect v${bundledCcConnectVersion}`);
+} else {
   try {
-    execSync("npm install -g cc-connect", { stdio: "inherit" });
-    console.log("  ✓ 安装成功");
+    const version = execSync("cc-connect --version", { encoding: "utf-8" }).trim();
+    if (!versionAtLeast(version, MIN_CC_CONNECT_VERSION)) {
+      console.log(`  ! ${version} 版本过旧，正在升级到 ${MIN_CC_CONNECT_VERSION}+...`);
+      execSync(`npm install -g cc-connect@^${MIN_CC_CONNECT_VERSION}`, { stdio: "inherit" });
+      console.log("  ✓ cc-connect 已升级");
+    } else {
+      console.log(`  ✓ ${version}`);
+    }
   } catch {
-    console.log("  ✗ 安装失败，请手动运行: npm install -g cc-connect");
+    console.log("  ✗ 未安装，正在安装...");
+    try {
+      execSync(`npm install -g cc-connect@^${MIN_CC_CONNECT_VERSION}`, { stdio: "inherit" });
+      console.log("  ✓ 安装成功");
+    } catch {
+      console.log("  ✗ 安装失败，请手动运行: npm install -g cc-connect@^1.4.1");
+    }
   }
 }
 

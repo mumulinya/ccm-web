@@ -338,31 +338,12 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
                 }
                 const emotionLabels = ["惬意", "治愈", "温柔", "怀念", "放空", "舒缓", "思念", "平静", "动感", "感动"];
                 const cfg = (0, group_orchestrator_1.loadOrchestratorConfig)();
-                if (cfg.enabled && cfg.apiKey && cfg.model) {
-                    try {
-                        const matched = await (0, llm_client_1.classifySongEmotion)(cfg, String(title), String(artist || "未知"), emotionLabels);
-                        if (matched)
-                            return (0, utils_1.sendJson)(res, { success: true, emotion: matched });
-                    }
-                    catch (error) {
-                        console.warn("[MusicEmotion] model fallback:", error?.message);
-                    }
-                }
-                const t = String(title).toLowerCase();
-                let fallback = "惬意";
-                if (t.includes("晚安") || t.includes("夜"))
-                    fallback = "舒缓";
-                else if (t.includes("思念") || t.includes("想你"))
-                    fallback = "思念";
-                else if (t.includes("再见") || t.includes("离别"))
-                    fallback = "怀念";
-                else if (t.includes("治愈") || t.includes("温暖"))
-                    fallback = "治愈";
-                else if (t.includes("快乐") || t.includes("开心"))
-                    fallback = "动感";
-                else
-                    fallback = emotionLabels[Math.floor(Math.random() * emotionLabels.length)];
-                (0, utils_1.sendJson)(res, { success: true, emotion: fallback });
+                if (!cfg.enabled || !cfg.apiKey || !cfg.model)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "统一大模型尚未配置，无法识别歌曲情绪" }, 503);
+                const matched = await (0, llm_client_1.classifySongEmotion)(cfg, String(title), String(artist || "未知"), emotionLabels);
+                if (!matched)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "统一大模型没有返回有效歌曲情绪" }, 503);
+                (0, utils_1.sendJson)(res, { success: true, emotion: matched });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);
@@ -379,12 +360,10 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
                 const cfg = (0, state_1.loadMusicAgentConfig)();
                 const memoryContext = await (0, memory_1.prepareMusicAgentTurn)(message, chatMode);
                 let action;
-                try {
-                    action = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
-                }
-                catch {
-                    const intent = (0, agent_1.extractMusicIntent)(message);
-                    action = (0, agent_1.normalizeMusicAgentAction)({ action: intent.type === "play" ? "play_music" : intent.type === "search" ? "search_music" : intent.type === "convert" ? "convert_music" : "none", keyword: intent.keyword }, message, chatMode, "simple-fallback");
+                action = await (0, agent_1.classifyMusicAgentAction)(cfg, message, chatMode, (memoryContext.messages || []).slice(0, -1));
+                if (action.error) {
+                    (0, utils_1.sendJson)(res, { success: false, error: `音乐意图识别失败：${action.error}`, action }, 503);
+                    return;
                 }
                 const intentType = action.type === "play_music" ? "play"
                     : action.type === "search_music" ? "search"

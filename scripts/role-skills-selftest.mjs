@@ -13,6 +13,14 @@ fs.mkdirSync(reportRoot, { recursive: true });
 fs.rmSync(scratchRoot, { recursive: true, force: true });
 fs.mkdirSync(scratchRoot, { recursive: true });
 
+function readTypeScriptSources(root) {
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap(entry => {
+    const target = path.join(root, entry.name);
+    if (entry.isDirectory()) return [readTypeScriptSources(target)];
+    return entry.name.endsWith(".ts") ? [fs.readFileSync(target, "utf-8")] : [];
+  }).join("\n");
+}
+
 const roleSkills = require("../ccm-package/dist/skills/role-skills.js");
 const db = require("../ccm-package/dist/core/db.js");
 const runtimeTools = require("../ccm-package/dist/tools/runtime-tool-sync.js");
@@ -56,6 +64,14 @@ const runtimeScenarios = [
       roleSkills.CCM_ROLE_SKILL_NAMES.evidence,
     ],
   },
+  {
+    id: "business-contract",
+    task: "实现订单退款 API、角色权限、状态流转和重复提交保护，并验证完整业务流程",
+    expected: [
+      roleSkills.CCM_ROLE_SKILL_NAMES.interfaceDataContract,
+      roleSkills.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance,
+    ],
+  },
 ];
 const requiredProjectRuntimeSkills = [
   roleSkills.CCM_ROLE_SKILL_NAMES.project,
@@ -66,13 +82,15 @@ const requiredProjectRuntimeSkills = [
   roleSkills.CCM_ROLE_SKILL_NAMES.evidence,
   roleSkills.CCM_ROLE_SKILL_NAMES.incidentDiagnosis,
   roleSkills.CCM_ROLE_SKILL_NAMES.releaseReadiness,
+  roleSkills.CCM_ROLE_SKILL_NAMES.interfaceDataContract,
+  roleSkills.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance,
 ];
 const runtimeResults = {};
 for (const runtime of ["claudecode", "cursor", "codex"]) {
   const union = new Set();
   runtimeResults[runtime] = { scenarios: {} };
   for (const scenario of runtimeScenarios) {
-    const selection = roleSkills.selectRoleSkills("project-child-agent", scenario.task, { forceWork: true, phase: "execution" });
+    const selection = roleSkills.selectRoleSkills("project-child-agent", scenario.task, { forceWork: true, phase: "execution", selectedSkillNames: scenario.expected });
     const allowedTools = { mcp: [], skill: selection.map(item => item.name) };
     for (const expected of scenario.expected) {
       assert.ok(allowedTools.skill.includes(expected), `${runtime}/${scenario.id} selector missed ${expected}`);
@@ -168,6 +186,7 @@ const visualTestAgentReport = await runTestAgent({
   originalUserGoal: "在真实浏览器验证设置页面响应式布局并截图",
   acceptanceCriteria: ["桌面和移动端页面没有遮挡，并保留截图证据"],
   requiredChecks: ["commands"],
+  metadata: { selectedSkills: [roleSkills.CCM_ROLE_SKILL_NAMES.frontendVisualQa] },
   projects: [{
     name: "ccm-role-skill-visual-probe",
     workDir: repoRoot,
@@ -188,28 +207,38 @@ assert.ok(visualTestSkills.includes(roleSkills.CCM_ROLE_SKILL_NAMES.frontendVisu
 assert.equal(visualTestAgentReport.metadata?.roleSkills?.applied, true);
 
 const nativePromptChecks = {
-  global: roleSkills.buildRoleSkillPrompt("global-agent", "请根据接口文档修复支付 500 错误", { forceWork: true, phase: "planning" }),
-  groupPlanning: roleSkills.buildRoleSkillPrompt("group-main-agent", "请根据 PRD 拆分页面实现任务", { forceWork: true, phase: "planning" }),
+  global: roleSkills.buildRoleSkillPrompt("global-agent", "fixture", { forceWork: true, phase: "planning", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.incidentDiagnosis] }),
+  groupPlanning: roleSkills.buildRoleSkillPrompt("group-main-agent", "fixture", { forceWork: true, phase: "planning", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.taskDecomposition] }),
   groupReview: roleSkills.buildRoleSkillPrompt("group-main-agent", "复核实现和测试证据并安排返工", { forceWork: true, phase: "review" }),
-  testVisual: roleSkills.buildRoleSkillPrompt("test-agent", "浏览器验证响应式页面并截图", { forceWork: true, phase: "verification" }),
+  testVisual: roleSkills.buildRoleSkillPrompt("test-agent", "fixture", { forceWork: true, phase: "verification", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.frontendVisualQa] }),
+  groupBusinessPlanning: roleSkills.buildRoleSkillPrompt("group-main-agent", "fixture", { forceWork: true, phase: "planning", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.businessRuleModeling, roleSkills.CCM_ROLE_SKILL_NAMES.interfaceDataContract] }),
+  testBusinessFlow: roleSkills.buildRoleSkillPrompt("test-agent", "fixture", { forceWork: true, phase: "verification", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] }),
 };
 assert.match(nativePromptChecks.global.prompt, /Skill:ccm-global-mission-lead/);
 assert.match(nativePromptChecks.global.prompt, /Skill:ccm-incident-diagnosis/);
 assert.match(nativePromptChecks.groupPlanning.prompt, /Skill:ccm-task-decomposition/);
 assert.match(nativePromptChecks.groupReview.prompt, /Skill:ccm-delivery-review-rework/);
 assert.match(nativePromptChecks.testVisual.prompt, /Skill:ccm-frontend-visual-qa/);
+assert.match(nativePromptChecks.groupBusinessPlanning.prompt, /Skill:ccm-business-rule-modeling/);
+assert.match(nativePromptChecks.groupBusinessPlanning.prompt, /Skill:ccm-interface-data-contract/);
+assert.match(nativePromptChecks.testBusinessFlow.prompt, /Skill:ccm-business-scenario-acceptance/);
 
-const groupSource = fs.readFileSync(path.join(repoRoot, "backend", "modules", "collaboration", "group-orchestrator.ts"), "utf-8");
-const projectSource = fs.readFileSync(path.join(repoRoot, "backend", "modules", "collaboration", "collaboration.ts"), "utf-8");
+const globalSource = readTypeScriptSources(path.join(repoRoot, "backend", "agents", "global"));
+const collaborationSource = readTypeScriptSources(path.join(repoRoot, "backend", "modules", "collaboration"));
+const serverSource = fs.readFileSync(path.join(repoRoot, "backend", "server.ts"), "utf-8");
+const runnerSupportSource = fs.readFileSync(path.join(repoRoot, "backend", "server-agent-runner-support.ts"), "utf-8");
 const testAgentSource = fs.readFileSync(path.join(repoRoot, "backend", "test-agent", "agent.ts"), "utf-8");
 const testAgentProfileSource = fs.readFileSync(path.join(repoRoot, "backend", "test-agent", "agent-profile.ts"), "utf-8");
 const sourceChecks = {
-  globalPromptUsesDynamicRoleSkill: /buildRoleSkillPrompt\([\s\S]*?"global-agent"/.test(fs.readFileSync(path.join(repoRoot, "backend", "agents", "global", "loop.ts"), "utf-8")),
-  groupPromptUsesDynamicRoleSkill: /buildRoleSkillPrompt\("group-main-agent"/.test(groupSource),
-  projectRuntimeMergesRoleSkills: /selectRoleSkills\("project-child-agent"[\s\S]*?selectedRoleSkills\.map/.test(projectSource),
-  projectRuntimeRequiresSkillApplication: /buildSelectedSkillUsageDirective\(selectedRoleSkills\)/.test(projectSource),
-  projectExecutionPromptsReceiveSkillDirective: (projectSource.match(/toolContext\.prompt/g) || []).length >= 4,
-  projectExecutionRecordsInvokedSkills: /attachInvokedSkillsToReceipt\([\s\S]*?invoked_skills/.test(projectSource),
+  globalPromptUsesDynamicRoleSkill: /buildRoleSkillPrompt\([\s\S]*?"global-agent"/.test(globalSource),
+  groupPromptUsesDynamicRoleSkill: /buildRoleSkillPrompt\("group-main-agent"/.test(collaborationSource),
+  projectRuntimeMergesRoleSkills: /selectRoleSkills\("project-child-agent"[\s\S]*?selectedRoleSkills\.map/.test(collaborationSource),
+  projectRuntimeRequiresSkillApplication: /buildSelectedSkillUsageDirective\(selectedRoleSkills\)/.test(collaborationSource),
+  projectExecutionPromptsReceiveSkillDirective: (collaborationSource.match(/toolContext\.prompt/g) || []).length >= 4,
+  projectExecutionRecordsInvokedSkills: /attachInvokedSkillsToReceipt\([\s\S]*?invoked_skills/.test(collaborationSource),
+  directProjectChatSelectsRoleSkills: /selectRoleSkills\("project-child-agent",\s*finalMessage/.test(serverSource),
+  directProjectToolContextMergesRoleSkills: /configuredTools\.skill,\s*\.\.\.roleSkillNames/.test(runnerSupportSource)
+    && /roleSkillPrompt/.test(runnerSupportSource),
   testWorkOrderRecordsRoleSkills: /roleSkills:\s*\{[\s\S]*?role:\s*"test-agent"/.test(testAgentSource),
   testWorkOrderMarksNativeApplication: /appliedBy:\s*"ccm-native-test-agent-engine"/.test(testAgentSource),
   duplicateBrowserManualRemoved: !testAgentProfileSource.includes("Use genuinely concurrent HTTP requests"),

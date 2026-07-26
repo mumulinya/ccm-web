@@ -13,6 +13,9 @@ export declare const CCM_ROLE_SKILL_NAMES: {
     readonly incidentDiagnosis: "ccm-incident-diagnosis";
     readonly frontendVisualQa: "ccm-frontend-visual-qa";
     readonly releaseReadiness: "ccm-release-readiness";
+    readonly businessRuleModeling: "ccm-business-rule-modeling";
+    readonly interfaceDataContract: "ccm-interface-data-contract";
+    readonly businessScenarioAcceptance: "ccm-business-scenario-acceptance";
 };
 export type CcmInternalSkillName = typeof CCM_ROLE_SKILL_NAMES[keyof typeof CCM_ROLE_SKILL_NAMES];
 export declare const CCM_INTERNAL_SKILL_CATALOG: ReadonlyArray<{

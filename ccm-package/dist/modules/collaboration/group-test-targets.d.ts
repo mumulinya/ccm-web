@@ -39,6 +39,13 @@ export declare function listGroupTestTargets(groupId: string): {
     schema: string;
     groupId: string;
     projects: string[];
+    projectAuth: {
+        [k: string]: {
+            project: string;
+            enabled: boolean;
+            mode: string;
+        };
+    };
     targets: any;
 };
 export declare function publicGroupWithoutTestTargetSecrets(group: any): any;

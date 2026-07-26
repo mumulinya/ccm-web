@@ -348,7 +348,7 @@ const failedGateText = computed(() => {
 .main-agent-technical-detail>summary{cursor:pointer;font-size:10px;font-weight:800;user-select:none}
 .main-agent-technical-detail[open]{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
 .main-agent-technical-detail[open]>summary{grid-column:1/-1;margin-bottom:2px}
-.main-agent-status-item { min-width: 0; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(148, 163, 184, 0.16); }
+.main-agent-status-item { min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-subtle); border: 1px solid var(--border-color); }
 .main-agent-status-item.latest-decision { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; border-color: rgba(59, 130, 246, 0.22); background: linear-gradient(135deg, rgba(255,255,255,.72), rgba(239,246,255,.58)); }
 .main-agent-status-item.latest-decision .item-label,
 .main-agent-status-item.latest-decision .item-value,
@@ -357,7 +357,7 @@ const failedGateText = computed(() => {
 .decision-plan-preview { color: var(--accent-blue) !important; font-weight: 800; }
 .main-agent-status-item.latest-decision.active { border-color: rgba(124, 58, 237, 0.28); background: linear-gradient(135deg, rgba(250,245,255,.82), rgba(239,246,255,.64)); }
 .main-agent-status-item.latest-decision.analysis { border-color: rgba(14, 165, 233, 0.25); background: linear-gradient(135deg, rgba(240,249,255,.82), rgba(224,242,254,.58)); }
-.main-agent-status-item.latest-decision.idle { border-color: rgba(148, 163, 184, 0.18); background: rgba(255, 255, 255, 0.56); }
+.main-agent-status-item.latest-decision.idle { border-color: var(--border-color); background: var(--surface-subtle); }
 .main-agent-status-item.current-todo { grid-column:1/-1; position:relative; padding-right:92px; border-color:rgba(37,99,235,.22); background:rgba(239,246,255,.72); }
 .main-agent-status-item.current-todo.done { border-color:rgba(34,197,94,.22); background:rgba(240,253,244,.74); }
 .main-agent-status-item.current-todo.warning { border-color:rgba(245,158,11,.26); background:rgba(255,251,235,.78); }

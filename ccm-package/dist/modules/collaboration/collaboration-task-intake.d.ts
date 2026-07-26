@@ -36,12 +36,7 @@ export declare function buildDispatchLaunchSummary(input: {
 };
 export declare function buildRevisedPlanModeDraft(planMode?: any, feedback?: string): any;
 export declare function buildAcceptedPlanModeDraft(planMode?: any, feedback?: string, acceptedAt?: string): any;
-export declare function classifyGroupProjectTaskIntent(message: string, uploadedFiles?: any[]): {
-    executable: boolean;
-    analysisEligible: boolean;
-    kind: string;
-    reason: string;
-};
+export declare function classifyGroupProjectTaskIntent(message: string, uploadedFiles?: any[]): void;
 export declare function normalizeGroupAgentGatewayTaskIntent(fallback: any, coordinatorResult: any, messageMode?: string): any;
 export declare function classifyGroupProjectTaskIntentWithAgent(input: {
     group: any;
@@ -66,7 +61,7 @@ export declare function shouldCreatePersistentGroupTask(input: {
     forceProjectTask?: boolean;
 }): boolean;
 export declare function classifyPlanModeRisk(message: string, group: any, taskIntent?: any, attachmentCount?: number): {
-    level: string;
+    level: any;
     requiresConfirmation: boolean;
     reasons: string[];
     signals: {
@@ -122,7 +117,7 @@ export declare function buildGroupPlanModePreflight(input: {
     risk: {
         model_reason: string;
         workflow_mode: import("../../agents/workflow-decision").WorkflowDecisionMode;
-        level: string;
+        level: any;
         requiresConfirmation: boolean;
         reasons: string[];
         signals: {

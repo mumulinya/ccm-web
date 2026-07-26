@@ -6,7 +6,7 @@ export declare function pickBestCandidateByScore(keyword: string, candidates?: a
 };
 /**
  * Pick the best track for a keyword from candidates.
- * Prefers model judgment; falls back to score matching when the model fails.
+ * Semantic selection is model-only; lexical scoring only validates an exact-song result.
  */
 export declare function selectMusicTrack(input?: {
     keyword?: string;

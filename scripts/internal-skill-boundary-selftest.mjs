@@ -24,7 +24,15 @@ const marketplace = require("../ccm-package/dist/modules/tools/marketplace.js");
 
 assert.ok(path.resolve(db.SKILL_PACKAGES_DIR).startsWith(path.resolve(isolatedHome)), "self-test did not isolate the external Skill directory");
 const names = Object.values(catalog.CCM_ROLE_SKILL_NAMES);
-assert.equal(names.length, 14);
+const expectedInternalSkillCount = catalog.CCM_INTERNAL_SKILL_CATALOG.length;
+assert.equal(names.length, expectedInternalSkillCount);
+for (const required of [
+  "ccm-business-rule-modeling",
+  "ccm-interface-data-contract",
+  "ccm-business-scenario-acceptance",
+]) {
+  assert.ok(names.includes(required), `missing business workflow Skill ${required}`);
+}
 
 const firstName = names[0];
 const legacyCopy = path.join(db.SKILL_PACKAGES_DIR, firstName);
@@ -32,12 +40,12 @@ fs.mkdirSync(legacyCopy, { recursive: true });
 fs.writeFileSync(path.join(legacyCopy, "SKILL.md"), "legacy copy", "utf-8");
 
 const installation = roleSkills.ensureRoleSkillsInstalled({ force: true });
-assert.equal(installation.available.length, 14);
+assert.equal(installation.available.length, expectedInternalSkillCount);
 assert.equal(fs.existsSync(legacyCopy), false, "legacy internal copy remained in the external package directory");
 
 const records = db.loadSkills();
 const internalRecords = records.filter(item => item.origin === "internal");
-assert.equal(internalRecords.length, 14);
+assert.equal(internalRecords.length, expectedInternalSkillCount);
 for (const record of internalRecords) {
   assert.equal(record.immutable, true);
   assert.equal(record.deletable, false);
@@ -133,7 +141,10 @@ db.deleteSkill(externalName);
 assert.equal(db.loadSkills().some(item => item.name === externalName), false);
 assert.equal(fs.existsSync(externalPackage), false);
 
-const uiSource = fs.readFileSync(path.join(repoRoot, "frontend", "src", "components", "tools", "ToolsConfig.vue"), "utf-8");
+const uiSource = [
+  fs.readFileSync(path.join(repoRoot, "frontend", "src", "components", "tools", "ToolsConfigPanel.vue"), "utf-8"),
+  fs.readFileSync(path.join(repoRoot, "frontend", "src", "components", "tools", "ToolsConfig.template.html"), "utf-8"),
+].join("\n");
 assert.match(uiSource, /v-for="tool in internalSkills"/);
 assert.match(uiSource, /随项目和 npm 包发布，系统自动维护，不能停用、编辑或删除/);
 assert.match(uiSource, /openCatalogSkillManual\(tool\)/);

@@ -122,6 +122,7 @@ const SAFE_PARENT_ENV_KEYS = new Set([
   "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA", "NUMBER_OF_PROCESSORS",
   "PROCESSOR_ARCHITECTURE", "OS", "SHELL", "LANG", "LC_ALL", "TERM", "CI",
   "USER", "USERNAME", "NODE_ENV",
+  "JAVA_HOME", "JDK_HOME", "MAVEN_HOME", "M2_HOME", "GRADLE_HOME",
 ]);
 
 export function splitVerificationCommand(command: string) {
@@ -168,7 +169,7 @@ export function verificationCommandInvocation(command: string) {
   if (parsed.error || !parsed.tokens.length) return { executable: "", args: [] as string[], requiresShell: false, error: parsed.error || "empty command" };
   const executable = parsed.tokens[0];
   const requiresShell = process.platform === "win32"
-    && ["npm", "pnpm", "yarn", "bun", "npx", "mvnw", "gradlew"].includes(normalizedExecutable(executable));
+    && ["npm", "pnpm", "yarn", "bun", "npx", "mvn", "mvnw", "gradle", "gradlew"].includes(normalizedExecutable(executable));
   return { executable, args: parsed.tokens.slice(1), requiresShell, error: "" };
 }
 

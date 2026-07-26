@@ -49,6 +49,7 @@ exports.summarizeWithModel = summarizeWithModel;
 exports.buildRelevantHistoricalGroupContext = buildRelevantHistoricalGroupContext;
 const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("../../system/context-budget");
+const model_call_retry_1 = require("../../system/model-call-retry");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const group_compaction_receipts_1 = require("./group-compaction-receipts");
 const group_compaction_projections_1 = require("./group-compaction-projections");
@@ -132,12 +133,7 @@ function normalizeAnthropicUrl(value) {
         return `${base}/messages`;
     return /\/v1\//i.test(base) ? base : `${base}/v1/messages`;
 }
-async function callCompactionModel(config, system, user, maxOutputTokens = group_compaction_receipts_1.GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS) {
-    const mockCall = config?.compactionModelCall || config?.compaction_model_call || config?.modelCall || config?.model_call;
-    if (typeof mockCall === "function")
-        return mockCall({ system, user, maxOutputTokens });
-    if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model)
-        return null;
+async function callCompactionModelOnce(config, system, user, maxOutputTokens, attemptTimeoutMs) {
     const anthropic = config.format === "anthropic-compatible"
         || config.format === "auto" && String(config.apiUrl).toLowerCase().includes("anthropic")
         || /\/anthropic(?:\/|$)/i.test(String(config.apiUrl));
@@ -148,7 +144,7 @@ async function callCompactionModel(config, system, user, maxOutputTokens = group
         abortFromExternal();
     else
         externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
-    const timeout = setTimeout(() => controller.abort(), Math.max(10_000, Math.min(Number(config.timeoutMs) || 90_000, 120_000)));
+    const timeout = setTimeout(() => controller.abort(), Math.max(1_000, attemptTimeoutMs));
     let activityError = null;
     const activitySignal = typeof config.onCompactionActivity === "function" ? config.onCompactionActivity : null;
     const heartbeatMs = Math.max(25, Math.min(Number(config.compactionActivityHeartbeatMs || config.compaction_activity_heartbeat_ms || 30_000), 60_000));
@@ -207,21 +203,33 @@ async function callCompactionModel(config, system, user, maxOutputTokens = group
             });
         }
         catch (error) {
-            if (activityError)
-                throw activityError;
-            if (externalSignal?.aborted && externalSignal.reason)
-                throw externalSignal.reason;
+            if (activityError) {
+                const failed = new Error(String(activityError?.message || activityError || "压缩活动回调失败"));
+                failed.code = "CCM_MODEL_CALL_ACTIVITY_FAILED";
+                throw failed;
+            }
+            if (externalSignal?.aborted) {
+                const cancelled = new Error(String(externalSignal.reason?.message || "模型调用已由外部取消"));
+                cancelled.code = "CCM_MODEL_CALL_CANCELLED";
+                throw cancelled;
+            }
             throw error;
         }
         const body = await response.text();
-        if (activityError)
-            throw activityError;
+        if (activityError) {
+            const failed = new Error(String(activityError?.message || activityError || "压缩活动回调失败"));
+            failed.code = "CCM_MODEL_CALL_ACTIVITY_FAILED";
+            throw failed;
+        }
         if (!response.ok)
             throw new Error(`memory compact HTTP ${response.status}: ${body.slice(0, 180)}`);
         const data = JSON.parse(body);
         const content = anthropic
             ? (data?.content || []).map((part) => part?.type === "text" ? part.text : "").join("")
             : data?.choices?.[0]?.message?.content || "";
+        const summary = extractJsonObject(content);
+        if (!summary)
+            throw new Error("memory compact model returned invalid JSON");
         if (groupId && groupSessionId.startsWith("gcs_")) {
             const usage = data?.usage || {};
             try {
@@ -243,7 +251,7 @@ async function callCompactionModel(config, system, user, maxOutputTokens = group
             catch { }
         }
         return {
-            summary: extractJsonObject(content),
+            summary,
             usage: data?.usage || null,
             provider: anthropic ? "anthropic" : "openai",
             model: String(data?.model || config.model || ""),
@@ -257,6 +265,29 @@ async function callCompactionModel(config, system, user, maxOutputTokens = group
             clearInterval(activityInterval);
         externalSignal?.removeEventListener("abort", abortFromExternal);
     }
+}
+async function callCompactionModel(config, system, user, maxOutputTokens = group_compaction_receipts_1.GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS) {
+    const mockCall = config?.compactionModelCall || config?.compaction_model_call || config?.modelCall || config?.model_call;
+    if (typeof mockCall === "function")
+        return mockCall({ system, user, maxOutputTokens });
+    if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model)
+        return null;
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callCompactionModelOnce(config, system, user, maxOutputTokens, context.attemptTimeoutMs), {
+        scope: "session memory compaction model call",
+        baseDelayMs: config.modelRetryBaseDelayMs ?? config.model_retry_base_delay_ms,
+        onRetry: notice => {
+            try {
+                config.onCompactionActivity?.({
+                    stage: "model_summary_retry",
+                    heartbeat: false,
+                    attempt: notice.attempt + 1,
+                    maxAttempts: notice.maxAttempts,
+                });
+            }
+            catch { }
+            console.warn(`[模型重试] 会话压缩模型暂时失败，将执行第 ${notice.attempt + 1}/${notice.maxAttempts} 次尝试：${String(notice.error?.message || notice.error || "").slice(0, 240)}`);
+        },
+    });
 }
 function fitCompactionPromptToTokenBudget(system, user, maxInputTokens) {
     const initialTokens = (0, context_budget_1.estimateTextTokens)(system) + (0, context_budget_1.estimateTextTokens)(user);

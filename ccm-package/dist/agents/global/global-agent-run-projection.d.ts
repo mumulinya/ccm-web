@@ -59,8 +59,8 @@ export declare function projectGlobalAgentReasoningForModel(reasoning: AgentReas
     }[];
     updated_at: string;
 };
-export declare function parseGlobalAgentDecision(raw: string | GlobalAgentDecision): GlobalAgentDecision;
-export declare function normalizeDecision(value: any): GlobalAgentDecision;
+export declare function parseGlobalAgentDecision(raw: string | GlobalAgentDecision, fallbackWorkflowDecision?: any): GlobalAgentDecision;
+export declare function normalizeDecision(value: any, fallbackWorkflowDecision?: any): GlobalAgentDecision;
 export declare function buildToolPrompt(): string;
 export declare function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime, options?: {
     sessionContinuationOverride?: any;

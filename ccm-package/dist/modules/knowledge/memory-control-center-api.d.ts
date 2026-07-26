@@ -23,9 +23,10 @@ export declare function resolveMemoryCenterTokenState(scope: MemoryScope, scopeI
     tokenPressure: number;
     tokenUpdatedAt: any;
     sampledAutoCompactThreshold: number;
+    fallbackTokenMeasurement: any;
 };
 export declare function healthAlerts(scope: MemoryScope, scopeId: string, memory: any): any[];
-export declare function memorySummary(scope: MemoryScope, scopeId: string, memory: any, label: string): {
+export declare function memorySummary(scope: MemoryScope, scopeId: string, memory: any, label: string, options?: any): {
     scope: MemoryScope;
     id: string;
     label: string;

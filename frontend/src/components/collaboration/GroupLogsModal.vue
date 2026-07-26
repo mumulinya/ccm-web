@@ -61,17 +61,17 @@ const filteredLogs = computed(() => (
 
 <style scoped>
 .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.18); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; z-index: 10001; }
-.modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; padding: 28px; min-width: 420px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; position: relative; }
+.modal { background: var(--surface-translucent) !important; backdrop-filter: blur(30px) !important; border: 1px solid var(--border-color) !important; border-radius: 16px !important; padding: 28px; min-width: 420px; box-shadow: var(--shadow-lg) !important; position: relative; }
 .modal-close { position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.05); background: rgba(0,0,0,0.02); color: var(--text-secondary); cursor: pointer; }
 .modal-logs-styled { min-width: 650px; max-height: 85vh; display: flex; flex-direction: column; }
 .modal-title-gradient { margin: 0 0 16px; font-size: 16px; color: var(--text-primary); }
 .modal-toolbar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .spacer { flex: 1; }
-.custom-select-logs { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(255,255,255,0.8); color: var(--text-primary); }
+.custom-select-logs { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); }
 .total-badge { font-size: 11px; color: var(--text-muted); padding: 4px 8px; border-radius: 999px; background: rgba(15, 23, 42, 0.05); }
 .group-logs-content { flex: 1; overflow-y: auto; min-height: 220px; max-height: 52vh; padding-right: 4px; }
 .logs-inner { display: flex; flex-direction: column; gap: 10px; width: 100%; }
-.log-entry-card { padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255,255,255,0.48); }
+.log-entry-card { padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--surface-subtle); }
 .log-entry-card:hover { border-color: rgba(59, 130, 246, 0.18); }
 .log-entry-card.success { border-color: rgba(34,197,94,0.18); }
 .log-entry-card.error { border-color: rgba(239,68,68,0.18); }

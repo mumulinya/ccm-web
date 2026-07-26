@@ -7,19 +7,28 @@ import {
 const SESSIONS_STORAGE_KEY = 'cc_global_assistant_sessions_v2'
 const CURRENT_ID_STORAGE_KEY = 'cc_global_assistant_current_id_v2'
 const SESSION_MESSAGE_LIMIT = 120
-const isPlaceholderSessionTitle = (name, origin = '') => String(origin || '').toLowerCase() !== 'manual'
-  && (!String(name || '').trim() || ['新会话', '默认会话', '全局 Agent 会话', '飞书全局 Agent', '未命名会话'].includes(String(name || '').trim()) || /^会话\s*\d+\s*[·-]/.test(String(name || '').trim()))
+const isPlaceholderSessionTitle = (name, origin = '') => {
+  const normalizedOrigin = String(origin || '').toLowerCase()
+  if (normalizedOrigin === 'manual') return false
+  if (normalizedOrigin === 'placeholder') return true
+  return !String(name || '').trim()
+    || ['新会话', '新建飞书会话', '默认会话', '全局 Agent 会话', '飞书全局 Agent', '未命名会话'].includes(String(name || '').trim())
+    || /^会话\s*\d+\s*[·-]/.test(String(name || '').trim())
+}
 
 const createWelcomeMessage = (welcome) => ({
   ...(welcome || {}),
   timestamp: new Date().toISOString(),
 })
 
-const createSession = (name, welcome) => ({
+const createSession = (name, welcome, { draft = false, draftKind = '' } = {}) => ({
   id: 'session_' + Date.now(),
   name,
   titleOrigin: 'placeholder',
-  messages: [createWelcomeMessage(welcome)],
+  source: 'web',
+  draft,
+  draftKind: draft ? draftKind : '',
+  messages: draft ? [] : [createWelcomeMessage(welcome)],
   createdAt: new Date().toISOString(),
 })
 
@@ -119,10 +128,15 @@ const serializeGlobalMessageForPersistence = (message) => ({
 })
 
 const serializeGlobalSessionsForPersistence = (sessions = []) => (
-  (Array.isArray(sessions) ? sessions : []).map(session => ({
-    ...session,
-    messages: (Array.isArray(session?.messages) ? session.messages : []).map(serializeGlobalMessageForPersistence),
-  }))
+  (Array.isArray(sessions) ? sessions : [])
+    .filter(session => !session?.draft)
+    .map(session => {
+      const { draft: _draft, draftKind: _draftKind, ...persistentSession } = session
+      return {
+        ...persistentSession,
+        messages: (Array.isArray(session?.messages) ? session.messages : []).map(serializeGlobalMessageForPersistence),
+      }
+    })
 )
 
 const messageSignature = (message) => {
@@ -237,6 +251,7 @@ const normalizeSession = (session) => {
     ...session,
     id,
     name: session.name || '全局 Agent 会话',
+    source: String(session.source || (id.startsWith('feishu:') ? 'feishu' : 'web')).toLowerCase() === 'feishu' ? 'feishu' : 'web',
     messages,
     createdAt: session.createdAt || session.created_at || new Date().toISOString(),
     updatedAt: sessionUpdatedAt(session) || new Date().toISOString(),
@@ -280,20 +295,25 @@ export function useGlobalAgentSessions(options = {}) {
   const currentSession = computed(() => {
     return sessions.value.find(s => s.id === currentSessionId.value) || null
   })
+  const isCurrentSessionDraft = computed(() => currentSession.value?.draft === true)
 
   const messages = computed(() => {
     return currentSession.value ? currentSession.value.messages : []
   })
 
   const resetToDefaultSession = () => {
-    const defaultSession = createSession('默认会话', options.defaultWelcome)
+    const defaultSession = createSession('新会话', options.defaultWelcome, { draft: true, draftKind: 'bootstrap' })
     sessions.value = [defaultSession]
     currentSessionId.value = defaultSession.id
   }
 
   const persistLocalHistory = (persistentSessions = serializeGlobalSessionsForPersistence(sessions.value)) => {
     localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(persistentSessions))
-    localStorage.setItem(CURRENT_ID_STORAGE_KEY, currentSessionId.value)
+    if (persistentSessions.some(session => session.id === currentSessionId.value)) {
+      localStorage.setItem(CURRENT_ID_STORAGE_KEY, currentSessionId.value)
+    } else {
+      localStorage.removeItem(CURRENT_ID_STORAGE_KEY)
+    }
   }
 
   const loadHistory = () => {
@@ -322,10 +342,14 @@ export function useGlobalAgentSessions(options = {}) {
     try {
       const persistentSessions = serializeGlobalSessionsForPersistence(sessions.value)
       persistLocalHistory(persistentSessions)
+      const webSessions = persistentSessions.filter(session => session.source !== 'feishu')
+      const currentWebSessionId = webSessions.some(session => session.id === currentSessionId.value)
+        ? currentSessionId.value
+        : ''
       fetch('/api/global-agent/history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessions: persistentSessions, currentSessionId: currentSessionId.value })
+        body: JSON.stringify({ sessions: webSessions, currentSessionId: currentWebSessionId })
       }).catch(() => {})
     } catch {}
   }
@@ -344,7 +368,10 @@ export function useGlobalAgentSessions(options = {}) {
       if (
         sessions.value.length === 1
         && !incomingIds.has(sessions.value[0].id)
-        && isDisposableDefaultSession(sessions.value[0], options.defaultWelcome)
+        && (
+          sessions.value[0]?.draftKind === 'bootstrap'
+          || isDisposableDefaultSession(sessions.value[0], options.defaultWelcome)
+        )
       ) {
         sessions.value = []
         currentSessionId.value = ''
@@ -363,6 +390,15 @@ export function useGlobalAgentSessions(options = {}) {
         const merged = mergeHistoryMessages(existing.messages || [], serverSession.messages || [])
         if (messagesChanged(existing.messages || [], merged)) changed = true
         existing.messages = merged
+        if (existing.source !== serverSession.source) {
+          existing.source = serverSession.source
+          changed = true
+        }
+        if (Object.prototype.hasOwnProperty.call(serverSession, 'feishuBindings')
+          && messageSignature(existing.feishuBindings || []) !== messageSignature(serverSession.feishuBindings || [])) {
+          existing.feishuBindings = serverSession.feishuBindings || []
+          changed = true
+        }
         if (isPlaceholderSessionTitle(existing.name, existing.titleOrigin) && !isPlaceholderSessionTitle(serverSession.name, serverSession.titleOrigin)) {
           existing.name = serverSession.name
           existing.titleOrigin = serverSession.titleOrigin || 'model'
@@ -396,15 +432,51 @@ export function useGlobalAgentSessions(options = {}) {
   }
 
   const createNewSession = () => {
-    const newSession = createSession('新会话', options.defaultWelcome)
+    const newSession = createSession('新会话', options.defaultWelcome, { draft: true, draftKind: 'user' })
+    sessions.value = sessions.value.filter(session => !session.draft)
     sessions.value.unshift(newSession)
     currentSessionId.value = newSession.id
-    saveHistory()
-    options.onCreated?.(newSession)
+    options.onDraftCreated?.(newSession)
     return newSession
   }
 
+  const materializeCurrentSession = () => {
+    const session = currentSession.value
+    if (!session) return null
+    if (!session.draft) return session
+    session.draft = false
+    session.draftKind = ''
+    session.updatedAt = new Date().toISOString()
+    options.onCreated?.(session)
+    return session
+  }
+
+  const insertServerSession = (rawSession, select = true, notify = true) => {
+    const session = normalizeSession(rawSession)
+    if (!session) return null
+    const index = sessions.value.findIndex(item => item.id === session.id)
+    if (index >= 0) sessions.value.splice(index, 1, session)
+    else sessions.value.unshift(session)
+    if (select) currentSessionId.value = session.id
+    persistLocalHistory()
+    if (notify) options.onCreated?.(session)
+    return session
+  }
+
+  const replaceFeishuSessions = (rawSessions = []) => {
+    const incoming = (Array.isArray(rawSessions) ? rawSessions : []).map(normalizeSession).filter(Boolean)
+    const webSessions = sessions.value.filter(session => session.source !== 'feishu')
+    sessions.value = [...webSessions, ...incoming]
+      .sort((a, b) => String(sessionUpdatedAt(b)).localeCompare(String(sessionUpdatedAt(a))))
+    if (!sessions.value.some(session => session.id === currentSessionId.value)) {
+      currentSessionId.value = sessions.value[0]?.id || ''
+    }
+    persistLocalHistory()
+    return incoming
+  }
+
   const selectSession = (id) => {
+    sessions.value = sessions.value.filter(session => !session.draft)
     currentSessionId.value = id
     saveHistory()
     options.onSelected?.(id)
@@ -420,6 +492,7 @@ export function useGlobalAgentSessions(options = {}) {
       ? await options.confirmDelete(sessionName)
       : true
     if (!confirmed) return null
+    if (options.beforeDelete && await options.beforeDelete(targetSession) === false) return null
 
     const idx = sessions.value.findIndex(s => s.id === id)
     if (idx === -1) return null
@@ -441,7 +514,10 @@ export function useGlobalAgentSessions(options = {}) {
       : true
     if (!confirmed) return false
 
-    resetToDefaultSession()
+    const feishuSessions = sessions.value.filter(session => session.source === 'feishu')
+    const defaultSession = createSession('新会话', options.defaultWelcome, { draft: true, draftKind: 'user' })
+    sessions.value = [defaultSession, ...feishuSessions]
+    currentSessionId.value = defaultSession.id
     saveHistory()
     options.onCleared?.()
     return true
@@ -451,11 +527,15 @@ export function useGlobalAgentSessions(options = {}) {
     sessions,
     currentSessionId,
     currentSession,
+    isCurrentSessionDraft,
     messages,
     loadHistory,
     saveHistory,
     syncHistoryFromServer,
     createNewSession,
+    materializeCurrentSession,
+    insertServerSession,
+    replaceFeishuSessions,
     selectSession,
     deleteSession,
     clearAllSessions,

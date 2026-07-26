@@ -134,6 +134,7 @@ function buildTestAgentWorkOrderFromHandoff(input) {
         autoDiscoverVerificationCommands: true,
         collectBrowserArtifacts: true,
         requireAdversarialProbe: true,
+        agenticPlanning: true,
         ...(input.options || {}),
     };
     const inferredRequiredChecks = inferRequiredChecks(projects, options);

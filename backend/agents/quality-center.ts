@@ -85,21 +85,15 @@ export function setAgentQualityPolicy(input: Partial<AgentQualityPolicy> & { act
 
 function fallbackIntent(message: string): AgentDecisionIntent {
   const text = String(message || "").trim();
-  const deniesAction = /(?:不要|不用|先别|暂时别|只|仅|不|禁止).{0,12}(?:执行|操作|修改|创建|派发|启动|删除|提交)/.test(text);
-  const question = /[?？]|(?:怎么|如何|为什么|是什么|原理|介绍|讲讲|说明|建议|觉得|能否|能不能|可不可以|是否|会不会|有哪些|有什么)/.test(text);
-  const highRisk = /(?:删除|移除|清空|覆盖|强制|重置|提交|合并|发布|部署到生产)/.test(text);
-  const directive = /(?:请|帮我|麻烦|给我|需要你|我要你|直接|立即|马上|开始|继续).{0,40}(?:实现|新增|修改|修复|重构|优化|运行|执行|测试|创建|派发|启动|停止|删除|提交|合并)/.test(text)
-    || /^(?:实现|新增|修改|修复|重构|优化|运行|执行|测试|创建|派发|启动|停止|删除|提交|合并)/.test(text);
-  const category: AgentIntentCategory = deniesAction ? (question ? "question" : "analysis") : directive ? (highRisk ? "high_risk" : "execution") : question ? "question" : text ? "conversation" : "ambiguous";
   return {
-    category,
+    category: "ambiguous",
     goal: text.slice(0, 500),
-    action_required: category === "execution" || category === "high_risk",
+    action_required: false,
     target_refs: [],
     impact_scope: [],
-    confidence: directive || question || deniesAction ? 0.86 : 0.58,
-    authorization_basis: directive && !deniesAction ? "current_message" : "none",
-    reason: "模型未提供结构化语义时的服务端安全兜底；不用于直接派发",
+    confidence: 0,
+    authorization_basis: "none",
+    reason: "模型未提供结构化语义，质量门禁按不明确处理",
   };
 }
 
@@ -151,11 +145,10 @@ export function evaluateAgentDecision(input: {
   const risk = input.risk || "read";
   const toolName = String(input.toolName || input.decision?.tool?.name || "");
   const targets = targetValues(toolName, input.args || input.decision?.tool?.arguments || {});
-  const wholeWorkspace = /(?:整个|全部|所有)(?:项目|工作区|代码库)|全局开发任务/.test(input.message);
-  const grounded = !targets.requiresTarget || (targets.values.length > 0 && (wholeWorkspace || targets.values.every(value =>
+  const grounded = !targets.requiresTarget || (targets.values.length > 0 && targets.values.every(value =>
     isGrounded(value, input.message, input.priorSteps || [])
     || intent.target_refs.some(ref => ref.toLowerCase() === value.toLowerCase())
-  )));
+  ));
   const consultationWrite = ["conversation", "question", "analysis"].includes(intent.category) && risk !== "read";
   const actionMismatch = risk !== "read" && intent.action_required !== true;
   const lowConfidence = risk !== "read" && intent.confidence < policy.minWriteConfidence;
@@ -317,7 +310,7 @@ export function buildAgentQualitySnapshot(input: { tasks?: any[]; sessions?: any
 }
 
 export function runAgentQualityCenterSelfTest() {
-  const clarifiedAnalysis = normalizeAgentDecisionIntent(null, "帮我优化一下\n澄清：只分析 demo 的性能方向，不执行、不修改代码");
+  const clarifiedAnalysis = normalizeAgentDecisionIntent({ category: "analysis", action_required: false, confidence: 0.95, authorization_basis: "none", reason: "模型判定只读分析" }, "帮我优化一下\n澄清：只分析 demo 的性能方向，不执行、不修改代码");
   const consultation = evaluateAgentDecision({
     message: "知识库还可以怎么优化？",
     decision: { intent: { category: "question", action_required: false, confidence: 0.94, reason: "咨询" } },

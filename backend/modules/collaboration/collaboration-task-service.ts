@@ -476,13 +476,13 @@ export function createTask(task: any) {
     : null;
   const taskGroupSessionId = String(taskGroupSession?.id || "");
   const semanticGoal = compactFormText(task.business_goal || task.businessGoal || task.description || task.title, "").toLowerCase().replace(/\s+/g, " ");
-  const semanticTarget = [taskGroupId, taskGroupSessionId, task.target_project || task.targetProject || "", task.workflow_type || task.workflowType || "general"].join("|").toLowerCase();
+  const semanticTarget = [taskGroupId, taskGroupSessionId, task.project_session_id || task.projectSessionId || "", task.orchestration_scope || task.orchestrationScope || "", task.target_project || task.targetProject || "", task.workflow_type || task.workflowType || "general"].join("|").toLowerCase();
   if (semanticGoal && task.allow_duplicate !== true && task.allowDuplicate !== true) {
     const duplicate = [...tasks].reverse().find((item: any) => {
       if (item.archived || item.deleted_at || ["done", "cancelled", "archived", "failed"].includes(String(item.status || ""))) return false;
       if (Date.now() - Date.parse(item.created_at || "") > 5 * 60 * 1000) return false;
       const itemGoal = compactFormText(item.business_goal || item.description || item.title, "").toLowerCase().replace(/\s+/g, " ");
-      const itemTarget = [item.group_id || "", item.group_session_id || item.groupSessionId || "", item.target_project || "", item.workflow_type || "general"].join("|").toLowerCase();
+      const itemTarget = [item.group_id || "", item.group_session_id || item.groupSessionId || "", item.project_session_id || item.projectSessionId || "", item.orchestration_scope || item.orchestrationScope || "", item.target_project || "", item.workflow_type || "general"].join("|").toLowerCase();
       return itemGoal === semanticGoal && itemTarget === semanticTarget;
     });
     if (duplicate) return { ...duplicate, deduplicated: true, duplicate_reason: "5 分钟内已存在相同目标与执行范围的活动任务" };
@@ -529,7 +529,15 @@ export function createTask(task: any) {
     requires_verification: task.requires_verification ?? task.requiresVerification ?? (task.workflow_type === "daily_dev" || task.workflowType === "daily_dev"),
     requires_independent_review: task.requires_independent_review ?? task.requiresIndependentReview ?? false,
     requires_agent_qa: task.requires_agent_qa ?? task.requiresAgentQa ?? false,
+    workflow_decision: task.workflow_decision || task.workflowDecision || task.intake_draft?.workflow_decision || task.intakeDraft?.workflowDecision || null,
     workflow_meta: task.workflow_meta || task.workflowMeta || null,
+    orchestration_scope: task.orchestration_scope || task.orchestrationScope || "",
+    project_session_id: task.project_session_id || task.projectSessionId || null,
+    project_main_run_id: task.project_main_run_id || task.projectMainRunId || null,
+    request_origin: task.request_origin || task.requestOrigin || task.workflow_meta?.intake?.source || "task-dispatch",
+    origin_session_id: task.origin_session_id || task.originSessionId || taskGroupSessionId || task.project_session_id || task.projectSessionId || null,
+    parent_work_item_id: task.parent_work_item_id || task.parentWorkItemId || null,
+    acceptance_state: task.acceptance_state || task.acceptanceState || "pending",
     parent_task_id: task.parent_task_id || task.parentTaskId || null,
     global_mission_id: task.global_mission_id || task.globalMissionId || null,
     mission_target: task.mission_target || task.missionTarget || null,
@@ -579,8 +587,11 @@ function resolveRequirementEpicTarget(item: any, input: any, groups: any[], conf
       : defaultProject ? configs.find((config: any) => config.name === defaultProject) : null;
   if (requestedType === "project" && requestedId && !directProject) throw new Error(`子任务 ${item.item_key} 指定的项目不存在：${requestedId}`);
   if (directProject) {
-    const containingGroup = groups.find((group: any) => group.id === defaultGroupId)
-      || groups.find((group: any) => (group.members || []).some((member: any) => String(member?.project || "") === directProject.name));
+    const exactProjectSession = String(input.project_session_id || input.projectSessionId || "").trim();
+    const containingGroup = exactProjectSession && !defaultGroupId
+      ? null
+      : groups.find((group: any) => group.id === defaultGroupId)
+        || groups.find((group: any) => (group.members || []).some((member: any) => String(member?.project || "") === directProject.name));
     return {
       assign_type: containingGroup ? "group" : "project",
       group_id: containingGroup?.id || null,
@@ -657,6 +668,10 @@ function buildRequirementEpicTaskRecord(input: any, id: string, traceId: string,
     requires_independent_review: input.requires_independent_review ?? input.requiresIndependentReview ?? false,
     requires_agent_qa: input.requires_agent_qa ?? input.requiresAgentQa ?? false,
     workflow_meta: input.workflow_meta || input.workflowMeta || null,
+    orchestration_scope: input.orchestration_scope || input.orchestrationScope || "",
+    project_session_id: input.project_session_id || input.projectSessionId || null,
+    request_origin: input.request_origin || input.requestOrigin || input.workflow_meta?.intake?.source || "task-dispatch",
+    origin_session_id: input.origin_session_id || input.originSessionId || input.group_session_id || input.groupSessionId || input.project_session_id || input.projectSessionId || null,
     parent_task_id: input.parent_task_id || input.parentTaskId || null,
     global_mission_id: input.global_mission_id || input.globalMissionId || null,
     requirement_epic_id: input.requirement_epic_id || input.requirementEpicId || null,
@@ -742,6 +757,11 @@ export function createRequirementEpicWithChildren(payload: any) {
   })));
   const shared = {
     priority: payload.priority || "normal",
+    queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
+    orchestration_scope: payload.orchestration_scope || payload.orchestrationScope || (payload.group_id || payload.groupId ? "group_session" : "project_session"),
+    project_session_id: payload.project_session_id || payload.projectSessionId || null,
+    request_origin: payload.request_origin || payload.requestOrigin || payload.source || channel,
+    origin_session_id: payload.origin_session_id || payload.originSessionId || payload.group_session_id || payload.groupSessionId || payload.project_session_id || payload.projectSessionId || null,
     source_documents: payload.source_documents || payload.sourceDocuments || "",
     source_attachments: payload.source_attachments || payload.sourceAttachments || [],
     requirement_extraction: requirement,
@@ -802,6 +822,8 @@ export function createRequirementEpicWithChildren(payload: any) {
       target_project: target.target_project,
       group_id: target.group_id,
       group_session_id: payload.group_session_id || payload.groupSessionId || null,
+      project_session_id: payload.project_session_id || payload.projectSessionId || null,
+      queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
       assign_type: target.assign_type,
       workflow_type: "daily_dev",
       status: "pending",
@@ -1068,14 +1090,13 @@ export function updateRequirementEpicFromPlan(payload: any) {
 }
 
 export function classifyTaskContinuation(message: string) {
-  const text = String(message || "").trim();
-  if (/(?:这是|作为|创建|开始).{0,10}(?:新任务|另一个任务)|与当前任务无关|另外一个项目/i.test(text)) return "new_task";
-  if (/(?:目标|需求|方案).{0,12}(?:改成|调整为|替换为)|不要.{0,30}(?:改为|改成)|以.+为准/i.test(text)) return "revise_goal";
-  return "supplement";
+  void message;
+  return "new_task";
 }
 
 export function looksLikeTaskContinuation(message: string) {
-  return /^(?:再|还要|还需要|另外补充|补充|继续|接着|顺便|刚才|上面|这个任务|把它)|(?:改成|调整为|再加|再补|继续修改|基于刚才)/i.test(String(message || "").trim());
+  void message;
+  return false;
 }
 
 export function updateTask(id: string, updates: any) {

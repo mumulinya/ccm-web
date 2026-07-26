@@ -393,6 +393,9 @@ function buildAssignment(member, task, reason = "", dependsOn = "", options = {}
         || options.pressure_provenance_provider_dispatch_override
         || null;
     const taskText = String(task || "").trim();
+    const selectedSkillNames = Array.isArray(options.analysis?.workflowDecision?.selectedSkills)
+        ? options.analysis.workflowDecision.selectedSkills.map((name) => String(name || "").trim()).filter(Boolean).slice(0, 6)
+        : [];
     const taskFingerprint = (0, group_orchestrator_prompts_1.compactText)(taskText, 240).toLowerCase().replace(/[`*_#>\[\]{}()（）【】]+/g, " ").replace(/[，。；、,.;:：\-—\s]+/g, " ").trim().slice(0, 220);
     const dispatchKey = [groupId || "conversation", "coordinator", project || "unknown", taskFingerprint].filter(Boolean).join("|");
     const baseAssignment = {
@@ -414,6 +417,8 @@ function buildAssignment(member, task, reason = "", dependsOn = "", options = {}
         providerDispatchOverride: providerDispatchOverride,
         permissionPlan: options.permissionPlan || options.permission_plan || null,
         permission_plan: options.permissionPlan || options.permission_plan || null,
+        selected_skill_names: selectedSkillNames,
+        semantic_decision_source: selectedSkillNames.length ? "model" : "none",
     };
     const briefMatch = groupId ? (0, group_orchestrator_coded_part_05_1.findReplayRepairDispatchBriefForAssignment)(groupId, baseAssignment) : null;
     const replayRepairDispatchBriefs = briefMatch?.brief ? [{

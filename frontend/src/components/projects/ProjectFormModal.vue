@@ -18,7 +18,7 @@ const updateField = (field, event) => {
 const setField = (field, value) => emit('update-field', { field, value })
 
 const title = computed(() => props.mode === 'create' ? '新建项目' : '编辑项目')
-const projectName = computed(() => props.project?.name || props.form.name || '未命名项目')
+const projectName = computed(() => props.form.display_name || props.project?.display_name || props.project?.name || props.form.name || '未命名项目')
 const hasValidPlatform = computed(() => props.platforms.some(item => item.value === props.form.platform))
 const hasValidAgent = computed(() => props.agentOptions.some(item => item.type === props.form.agent))
 const githubSource = computed(() => props.mode === 'create' && props.form.source_type === 'github')
@@ -28,10 +28,11 @@ const canSubmit = computed(() => {
   const hasRepository = !githubSource.value || String(props.form.repository_url || '').trim().length > 0
   return props.mode === 'create'
     ? hasDirectory && hasRepository && hasValidAgent.value && hasValidPlatform.value && String(props.form.name || '').trim().length > 0
-    : hasDirectory && hasValidAgent.value && hasValidPlatform.value
+    : hasDirectory && hasValidAgent.value && hasValidPlatform.value && String(props.form.display_name || '').trim().length > 0
 })
 
 const handleKeydown = event => {
+  if (document.querySelector('[data-project-feishu-modal]')) return
   if (event.key === 'Escape') emit('close')
 }
 
@@ -61,8 +62,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         </div>
 
         <label v-if="mode === 'create'" class="project-field">
-          <span>项目名称</span>
+          <span>项目 ID</span>
           <input :value="form.name" autocomplete="off" placeholder="例如 my-app" @input="updateField('name', $event)">
+          <small>内部稳定标识，创建后不会随显示名称变化。</small>
+        </label>
+
+        <label class="project-field">
+          <span>项目显示名称</span>
+          <input :value="form.display_name" autocomplete="off" :placeholder="mode === 'create' ? '留空时使用项目 ID' : '用户在项目列表中看到的名称'" maxlength="80" @input="updateField('display_name', $event)">
+        </label>
+
+        <label v-if="mode === 'edit'" class="project-field project-id-readonly">
+          <span>内部项目 ID</span>
+          <input :value="form.name" readonly aria-readonly="true">
+          <small>会话、记忆、任务和飞书绑定继续使用此 ID。</small>
         </label>
 
         <div v-if="githubSource" class="project-github-create-fields">

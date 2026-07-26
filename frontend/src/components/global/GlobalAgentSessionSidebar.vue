@@ -1,7 +1,8 @@
 <script setup>
-import { MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Trash2, X } from '@lucide/vue'
+import { computed, ref, watch } from 'vue'
+import { ChevronRight, Link2, MessageSquare, Monitor, PanelLeftClose, PanelLeftOpen, Plus, Send, Trash2, X } from '@lucide/vue'
 
-defineProps({
+const props = defineProps({
   sessions: {
     type: Array,
     default: () => []
@@ -18,12 +19,42 @@ defineProps({
 
 const emit = defineEmits([
   'new-session',
+  'new-feishu-session',
+  'bind-session',
   'toggle',
   'expand',
   'select-session',
   'delete-session',
   'clear-all'
 ])
+
+const sourceOf = (session) => String(session?.source || (String(session?.id || '').startsWith('feishu:') ? 'feishu' : 'web')) === 'feishu' ? 'feishu' : 'web'
+const webSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'web' && session?.draft !== true))
+const feishuSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'feishu'))
+const groupStorageKey = 'ccm:global-session-groups:v1'
+const readGroupState = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(groupStorageKey) || '{}')
+    return { web: saved.web === true, feishu: saved.feishu === true }
+  } catch {
+    return { web: false, feishu: false }
+  }
+}
+const expandedGroups = ref(readGroupState())
+const toggleGroup = (source) => {
+  expandedGroups.value = { ...expandedGroups.value, [source]: !expandedGroups.value[source] }
+}
+watch(expandedGroups, value => {
+  try { localStorage.setItem(groupStorageKey, JSON.stringify(value)) } catch {}
+}, { deep: true })
+const activeBindings = (session) => Array.isArray(session?.feishuBindings) ? session.feishuBindings : []
+const bindingText = (session) => {
+  const bindings = activeBindings(session)
+  if (!bindings.length) return '未绑定飞书目标'
+  const first = bindings[0]
+  const label = String(first.label || first.chat_id || first.open_id || '飞书目标')
+  return bindings.length > 1 ? `${label} 等 ${bindings.length} 个目标` : label
+}
 </script>
 
 <template>
@@ -31,37 +62,82 @@ const emit = defineEmits([
     <div class="sidebar-header">
       <button class="new-chat-btn" @click="emit('new-session')">
         <Plus :size="16" />
-        <span>新建会话</span>
+        <span>新建网页会话</span>
       </button>
-      <button class="toggle-sidebar-btn" aria-label="折叠会话栏" @click="emit('toggle')" title="折叠会话栏">
+      <button class="header-icon-btn feishu-create-btn" aria-label="新建飞书会话" title="新建飞书会话" @click="emit('new-feishu-session')">
+        <Send :size="16" />
+      </button>
+      <button class="header-icon-btn" aria-label="折叠会话栏" @click="emit('toggle')" title="折叠会话栏">
         <PanelLeftClose :size="16" />
       </button>
     </div>
 
     <div class="session-list">
-      <div
-        v-for="session in sessions"
-        :key="session.id"
-        class="session-item"
-        :class="{ active: currentSessionId === session.id }"
-        @click="emit('select-session', session.id)"
-      >
-        <MessageSquare class="session-icon" :size="15" />
-        <span class="session-name" :title="session.name">{{ session.name }}</span>
-        <button
-          class="delete-session-btn"
-          title="删除会话"
-          @click.stop="emit('delete-session', session.id)"
-        >
-          <X :size="14" />
+      <section class="session-group">
+        <button class="session-group-heading" type="button" :aria-expanded="expandedGroups.web" @click="toggleGroup('web')">
+          <span><ChevronRight class="group-chevron" :class="{ expanded: expandedGroups.web }" :size="14" /><Monitor :size="13" />网页会话</span>
+          <strong>{{ webSessions.length }}</strong>
         </button>
-      </div>
+        <div v-show="expandedGroups.web" class="session-group-content">
+          <button
+            v-for="session in webSessions"
+            :key="session.id"
+            class="session-item"
+            :class="{ active: currentSessionId === session.id }"
+            @click="emit('select-session', session.id)"
+          >
+            <MessageSquare class="session-icon" :size="15" />
+            <span class="session-copy">
+              <span class="session-name" :title="session.name">{{ session.name }}</span>
+              <span class="session-meta">仅网页</span>
+            </span>
+            <span class="session-actions">
+              <span class="source-mark web" title="网页会话"><Monitor :size="12" /></span>
+              <span class="delete-session-btn" title="删除网页会话" @click.stop="emit('delete-session', session.id)"><X :size="14" /></span>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <section class="session-group feishu-group">
+        <button class="session-group-heading" type="button" :aria-expanded="expandedGroups.feishu" @click="toggleGroup('feishu')">
+          <span><ChevronRight class="group-chevron" :class="{ expanded: expandedGroups.feishu }" :size="14" /><Send :size="13" />飞书会话</span>
+          <strong>{{ feishuSessions.length }}</strong>
+        </button>
+        <div v-show="expandedGroups.feishu" class="session-group-content">
+          <button
+            v-for="session in feishuSessions"
+            :key="session.id"
+            class="session-item feishu-session"
+            :class="{ active: currentSessionId === session.id, bound: activeBindings(session).length }"
+            @click="emit('select-session', session.id)"
+          >
+            <Send class="session-icon" :size="15" />
+            <span class="session-copy">
+              <span class="session-name" :title="session.name">{{ session.name }}</span>
+              <span class="session-meta" :class="{ bound: activeBindings(session).length }" :title="bindingText(session)">
+                {{ bindingText(session) }}
+              </span>
+            </span>
+            <span class="session-actions">
+              <span class="bind-session-btn" :title="activeBindings(session).length ? '管理飞书绑定' : '绑定飞书目标'" @click.stop="emit('bind-session', session)">
+                <Link2 :size="14" />
+              </span>
+              <span class="delete-session-btn" title="删除飞书会话" @click.stop="emit('delete-session', session.id)"><X :size="14" /></span>
+            </span>
+          </button>
+          <button v-if="!feishuSessions.length" class="empty-feishu" @click="emit('new-feishu-session')">
+            <Send :size="15" />
+            <span>新建并绑定飞书会话</span>
+          </button>
+        </div>
+      </section>
     </div>
 
     <div class="sidebar-footer">
       <button class="clear-all-btn" @click="emit('clear-all')">
         <Trash2 :size="14" />
-        <span>清空所有会话</span>
+        <span>清空网页会话</span>
       </button>
     </div>
   </aside>
@@ -78,7 +154,7 @@ const emit = defineEmits([
 
 <style scoped>
 .assistant-sidebar {
-  width: 224px;
+  width: 258px;
   border-right: 1px solid var(--border-color);
   background: var(--panel-muted);
   display: flex;
@@ -95,7 +171,7 @@ const emit = defineEmits([
 
 .assistant-sidebar.collapsed {
   width: 0;
-  transform: translateX(-224px);
+  transform: translateX(-258px);
   overflow: hidden;
   border-right: none;
 }
@@ -131,7 +207,7 @@ const emit = defineEmits([
   background: color-mix(in srgb, var(--accent-blue) 86%, #000);
 }
 
-.toggle-sidebar-btn {
+.header-icon-btn {
   background: transparent;
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
@@ -145,10 +221,14 @@ const emit = defineEmits([
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.toggle-sidebar-btn:hover {
+.header-icon-btn:hover {
   background: var(--control-hover);
   border-color: var(--border-strong);
   color: var(--text-primary);
+}
+
+.feishu-create-btn {
+  color: #00a870;
 }
 
 .expand-sidebar-btn {
@@ -186,22 +266,92 @@ const emit = defineEmits([
   padding: 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 16px;
   scrollbar-width: thin;
+}
+
+.session-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.session-group-heading {
+  width: 100%;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.session-group-heading:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+
+.session-group-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-group-heading strong {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.group-chevron {
+  flex: 0 0 auto;
+  transition: transform 0.16s ease;
+}
+
+.group-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.session-group-content {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.feishu-group {
+  padding-top: 4px;
+  border-top: 1px solid var(--border-color);
 }
 
 .session-item {
   display: flex;
   align-items: center;
-  min-height: 38px;
+  width: 100%;
+  min-height: 48px;
   gap: 9px;
-  padding: 8px 10px;
+  padding: 7px 8px;
   border-radius: 6px;
   cursor: pointer;
   color: var(--text-secondary);
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   position: relative;
   border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.session-item.bound:not(.active) {
+  border-color: color-mix(in srgb, #00a870 20%, transparent);
 }
 
 .session-item:hover {
@@ -231,36 +381,92 @@ const emit = defineEmits([
   opacity: 0.85;
 }
 
-.session-name {
+.session-copy {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.session-name {
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 18px;
 }
 
-.delete-session-btn {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: transparent;
-  border: none;
+.session-meta {
   color: var(--text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s, color 0.2s;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta.bound {
+  color: #00a870;
+}
+
+.session-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.source-mark,
+.bind-session-btn,
+.delete-session-btn {
   width: 26px;
   height: 26px;
   display: grid;
   place-items: center;
-  padding: 0;
   border-radius: 5px;
+}
+
+.source-mark {
+  color: var(--text-muted);
+}
+
+.bind-session-btn {
+  color: #00a870;
+  cursor: pointer;
+}
+
+.bind-session-btn:hover {
+  background: color-mix(in srgb, #00a870 12%, transparent);
+}
+
+.delete-session-btn {
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
 }
 
 .session-item:hover .delete-session-btn {
   opacity: 1;
+}
+
+.empty-feishu {
+  min-height: 42px;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.empty-feishu:hover {
+  color: #00a870;
+  border-color: color-mix(in srgb, #00a870 55%, var(--border-color));
+  background: color-mix(in srgb, #00a870 7%, transparent);
 }
 
 .delete-session-btn:hover {

@@ -83,6 +83,7 @@ import {
 } from "../../agents/runtime-kernel";
 import {
   appendGroupMessage,
+  createGroupChatSession,
   getActiveGroupChatSessionId,
   getGroupChatSessionMessagesFile,
   getGroupMessages,
@@ -559,7 +560,8 @@ export function runGroupMemorySourceChangeReloadSelfTest() {
 
 export function runGroupMemoryDispatchFreshnessGateSelfTest() {
   const groupId = `group-memory-dispatch-freshness-gate-selftest-${process.pid}-${Date.now().toString(36)}`;
-  const messageFile = getGroupMessagesFileHint(groupId);
+  const groupSession = createGroupChatSession(groupId, "记忆派发新鲜度自测");
+  const messageFile = getGroupChatSessionMessagesFile(groupId, groupSession.id);
   const memoryFile = getGroupMemoryFile(groupId);
   const typedDir = getGroupTypedMemoryDir(groupId);
   const reloadFile = getGroupMemoryReloadLedgerFile(groupId);
@@ -567,7 +569,7 @@ export function runGroupMemoryDispatchFreshnessGateSelfTest() {
     saveGroupMessages(groupId, [
       { id: "gate-1", role: "user", target: "coordinator", content: "必须保留 DISPATCH_FRESHNESS_GATE_SENTINEL，子 Agent 派发前要证明记忆新鲜。" },
       { id: "gate-2", role: "assistant", agent: "api", content: "api 继续 src/gate.ts，验证 npm run check。" },
-    ]);
+    ], groupSession.id);
     saveGroupMemory(groupId, {
       goal: "dispatch freshness gate 自测",
       persistentRequirements: [{ messageId: "gate-1", text: "必须保留 DISPATCH_FRESHNESS_GATE_SENTINEL。" }],
@@ -576,8 +578,9 @@ export function runGroupMemoryDispatchFreshnessGateSelfTest() {
     const bundle = buildAgentMemoryContextBundle(groupId, "api", "继续 DISPATCH_FRESHNESS_GATE_SENTINEL src/gate.ts", {
       includeGlobalClaudeMemory: false,
       minKeepTokens: 1,
+      groupSessionId: groupSession.id,
     });
-    const ignored = buildAgentMemoryContextBundle(groupId, "api", "本轮请忽略记忆，只处理当前任务");
+    const ignored = buildAgentMemoryContextBundle(groupId, "api", "本轮请忽略记忆，只处理当前任务", { ignoreMemory: true, groupSessionId: groupSession.id });
     const gate = bundle.dispatch_freshness_gate || {};
     const ignoredGate = ignored.dispatch_freshness_gate || {};
     const rendered = String(bundle.rendered_text || "");
@@ -610,6 +613,7 @@ export function runGroupMemoryDispatchFreshnessGateSelfTest() {
       try { fs.unlinkSync(file); } catch {}
     }
     try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(path.dirname(messageFile), { recursive: true, force: true }); } catch {}
   }
 }
 

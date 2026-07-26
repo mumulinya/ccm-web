@@ -80,17 +80,17 @@ const usesStatefulPreview = pet => builtinStatefulTypes.has(pet?.id)
 </template>
 
 <style scoped>
-.glass-panel { background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(0,0,0,0.05); }
+.glass-panel { background: var(--surface); border: 1px solid var(--border-color); }
 .flex-1 { flex: 1; }
 .pet-card-section { display: flex; flex-direction: column; padding: 20px; border-radius: 16px; overflow: hidden; }
 .section-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .section-title { font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.5px; }
 .section-actions { display: flex; gap: 8px; }
 .pet-list-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
-.pet-list-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: rgba(255, 255, 255, 0.45); border: 1px solid rgba(0, 0, 0, 0.04); border-radius: 12px; cursor: pointer; transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1); }
+.pet-list-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface-subtle); border: 1px solid var(--border-color); border-radius: 12px; cursor: pointer; transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1); }
 .pet-list-item:hover { background: rgba(59, 130, 246, 0.03); border-color: rgba(59, 130, 246, 0.1); transform: translateX(2px); }
 .pet-list-item.active { background: rgba(59, 130, 246, 0.06); border-color: rgba(59, 130, 246, 0.15); box-shadow: inset 3px 0 0 var(--accent-blue); }
-.pet-preview-wrap { width: 48px; height: 48px; background: rgba(255, 255, 255, 0.8); border: 1px solid rgba(0, 0, 0, 0.03); border-radius: 10px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.02); }
+.pet-preview-wrap { width: 48px; height: 48px; background: var(--surface-raised); border: 1px solid var(--border-color); border-radius: 10px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm); }
 .pet-text-info { flex: 1; min-width: 0; }
 .agent-label-name { font-size: 14.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pet-type-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
@@ -105,7 +105,7 @@ const usesStatefulPreview = pet => builtinStatefulTypes.has(pet?.id)
 .pet-live-status.happy span { background: rgba(34, 197, 94, 0.12); color: #16a34a; }
 .pet-live-status.error span { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
 .pet-live-status.waiting span, .pet-live-status.notification span, .pet-live-status.attention span { background: rgba(245, 158, 11, 0.14); color: #d97706; }
-.state-toggle-btn { padding: 5px 12px; font-size: 12.5px; font-weight: 600; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.06); background: rgba(255, 255, 255, 0.6); color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
+.state-toggle-btn { padding: 5px 12px; font-size: 12.5px; font-weight: 600; border-radius: 8px; border: 1px solid var(--border-color); background: var(--surface-raised); color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
 .state-toggle-btn.enabled { background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); border-color: rgba(59, 130, 246, 0.2); }
 .state-toggle-btn:hover { filter: brightness(0.96); }
 .empty-state-text { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px 20px; color: var(--text-muted); text-align: center; }

@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { getAssignmentIdentity, getAssignmentStatusLabel } from './groupChatHelpers.js'
 
-export function useGroupChatMessaging({ messages, currentGroup, currentGroupSessionId, groupSessions, mainAgentStatus, groupAgentQa, scrollToBottom }) {
+export function useGroupChatMessaging({ messages, currentGroup, currentGroupSessionId, isGroupSessionDraft, groupSessions, mainAgentStatus, groupAgentQa, scrollToBottom }) {
   const groupMessageKeyMap = new WeakMap()
   let groupMessageKeySeq = 0
   const getGroupMessageKey = (msg) => {
@@ -146,7 +146,7 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
   // 主动拉取新消息（带去重）
   let pullInFlight = false
   const pullNewMessages = async () => {
-    if (!currentGroup.value || pullInFlight) return
+    if (!currentGroup.value || isGroupSessionDraft?.value || pullInFlight) return
     pullInFlight = true
     try {
       const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100&session_id=${encodeURIComponent(currentGroupSessionId.value)}`)

@@ -634,7 +634,7 @@ onUnmounted(() => {
   align-items: center; 
   justify-content: space-between; 
   padding: 12px 24px; 
-  background: rgba(255, 255, 255, 0.45); 
+  background: var(--surface);
   backdrop-filter: blur(20px); 
   border-bottom: 1px solid rgba(0, 0, 0, 0.05); 
 }
@@ -658,7 +658,7 @@ onUnmounted(() => {
   gap: 16px; 
 }
 .stat-card { 
-  background: rgba(255, 255, 255, 0.45); 
+  background: var(--surface);
   backdrop-filter: blur(25px); 
   border: 1px solid rgba(0, 0, 0, 0.04); 
   border-radius: 14px; 
@@ -707,7 +707,7 @@ onUnmounted(() => {
 
 /* 环形进度盘卡片 */
 .progress-ring-card {
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--surface);
   backdrop-filter: blur(25px);
   border: 1px solid rgba(0, 0, 0, 0.04);
   border-radius: 14px;
@@ -773,7 +773,7 @@ onUnmounted(() => {
   margin-bottom: 24px;
 }
 .card { 
-  background: rgba(255, 255, 255, 0.45); 
+  background: var(--surface);
   backdrop-filter: blur(25px); 
   border: 1px solid rgba(0, 0, 0, 0.04); 
   border-radius: 14px; 
@@ -806,7 +806,7 @@ onUnmounted(() => {
   gap: 12px;
 }
 .agent-card {
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface-subtle);
   border: 1px solid rgba(0, 0, 0, 0.04);
   border-radius: 12px;
   padding: 14px;
@@ -816,7 +816,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 .agent-card.running {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface-raised);
   border-color: rgba(34, 197, 94, 0.25);
   animation: agent-running-glow 2s infinite ease-in-out;
 }
@@ -948,7 +948,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface-subtle);
   border: 1px solid rgba(0,0,0,0.03);
   border-radius: 10px;
   transition: all 0.2s;
@@ -1065,7 +1065,7 @@ onUnmounted(() => {
 
 /* 任务卡片 */
 .kanban-card {
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--surface-raised);
   border: 1px solid rgba(0, 0, 0, 0.04);
   border-radius: 10px;
   padding: 12px 14px;
@@ -1186,7 +1186,7 @@ onUnmounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--surface-raised);
   border: 2px solid rgba(0,0,0,0.05);
   display: flex;
   align-items: center;
@@ -1205,7 +1205,7 @@ onUnmounted(() => {
 }
 .timeline-panel {
   flex: 1;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--surface-subtle);
   border: 1px solid rgba(0,0,0,0.03);
   border-radius: 10px;
   padding: 10px 14px;
@@ -1245,7 +1245,7 @@ onUnmounted(() => {
   padding: 12px;
   border-radius: 10px;
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--control-bg);
   color: var(--text-primary);
   font-size: 13px;
   resize: vertical;
@@ -1327,7 +1327,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--surface-translucent);
   backdrop-filter: blur(4px);
   display: flex;
   flex-direction: column;
@@ -1389,5 +1389,32 @@ onUnmounted(() => {
 }
 .btn-pause {
   padding: 2px 4px;
+}
+/* Theme contract: dashboard surfaces follow the active workspace palette. */
+.dashboard-header,
+.stat-card,
+.progress-ring-card,
+.card,
+.agent-card,
+.agent-card.running,
+.quick-action,
+.kanban-card,
+.timeline-content,
+.dashboard-search,
+.modal {
+  border-color: var(--border-color);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.dashboard-content,
+.kanban-column,
+.timeline-panel {
+  background: var(--bg-primary);
+}
+
+.dashboard-overlay,
+.modal-overlay {
+  background: var(--overlay-scrim);
 }
 </style>

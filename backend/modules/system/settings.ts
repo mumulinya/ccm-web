@@ -5,6 +5,7 @@ import { credentialStoreStatus } from "../../core/credential-store";
 import { sendJson } from "../../core/utils";
 import {
   getAgentProviderStatuses,
+  getAgentProviderLoginSession,
   getAgentProviderModels,
   loadAgentProviderSettings,
   logoutAgentProvider,
@@ -12,6 +13,8 @@ import {
   saveAgentProviderSettings,
   startAgentProviderInstall,
   startAgentProviderLogin,
+  submitAgentProviderLoginCode,
+  testAgentProvider,
 } from "./agent-provider-settings";
 import { publicDevelopmentAgentCatalog } from "../../agents/catalog";
 
@@ -70,11 +73,18 @@ export function handleSystemSettingsApi(pathname: string, req: IncomingMessage, 
 
   const modelsMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/models$/);
   if (modelsMatch && req.method === "GET") {
-    try {
-      sendJson(res, { success: true, ...getAgentProviderModels(modelsMatch[1]) });
-    } catch (error: any) {
-      sendJson(res, { success: false, error: error?.message || "读取 Agent 模型失败" }, 400);
-    }
+    getAgentProviderModels(modelsMatch[1])
+      .then(result => sendJson(res, { success: true, ...result }))
+      .catch((error: any) => sendJson(res, { success: false, error: error?.message || "读取 Agent 模型失败" }, 400));
+    return true;
+  }
+
+  const testMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/test$/);
+  if (testMatch && req.method === "POST") {
+    readJsonBody(req, 16 * 1024)
+      .then(payload => testAgentProvider(testMatch[1], payload?.model))
+      .then(result => sendJson(res, { success: true, test: result }))
+      .catch((error: any) => sendJson(res, { success: false, error: error?.message || "Agent 可用性测试失败" }, 400));
     return true;
   }
 
@@ -83,6 +93,27 @@ export function handleSystemSettingsApi(pathname: string, req: IncomingMessage, 
       const config = saveAgentProviderSettings(payload);
       sendJson(res, { success: true, config: publicAgentProviderSettings(config), statuses: getAgentProviderStatuses(true) });
     }).catch((error: any) => sendJson(res, { success: false, error: error?.message || "保存开发 Agent 配置失败" }, 400));
+    return true;
+  }
+
+  const loginSessionMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode)\/login\/(auth_[a-f0-9]+)$/);
+  if (loginSessionMatch && req.method === "GET") {
+    try {
+      sendJson(res, { success: true, ...getAgentProviderLoginSession(loginSessionMatch[1], loginSessionMatch[2]) });
+    } catch (error: any) {
+      sendJson(res, { success: false, error: error?.message || "读取网页登录状态失败" }, 404);
+    }
+    return true;
+  }
+
+  const loginCodeMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode)\/login\/(auth_[a-f0-9]+)\/code$/);
+  if (loginCodeMatch && req.method === "POST") {
+    readJsonBody(req).then(payload => {
+      sendJson(res, {
+        success: true,
+        ...submitAgentProviderLoginCode(loginCodeMatch[1], loginCodeMatch[2], payload?.code),
+      });
+    }).catch((error: any) => sendJson(res, { success: false, error: error?.message || "提交授权码失败" }, 400));
     return true;
   }
 

@@ -526,6 +526,12 @@ export const projectExecutionTaskCard = (message = {}, project = '') => {
   const risks = uniq(task.risks || (failed ? [compact(message.content || events.find(item => item.kind === 'error')?.text, 180)] : []))
   const projectChangeSummary = task.change_summary || task.changeSummary || buildChangeSummary({ files: asArray(message.fileChanges?.files), agents: [{ agent: project }] })
   const projectPlanMode = task.plan_mode || task.planMode || message.plan_mode || message.planMode || null
+  const projectWorkItems = asArray(task.work_items || task.workItems)
+  const acceptanceState = String(task.acceptance_state || task.acceptanceState || '')
+  const testAgent = task.test_agent || task.testAgent || null
+  const projectMainActive = ['planning', 'main_agent_accepting'].includes(acceptanceState) || ['planning', 'reviewing'].includes(presentation.phase)
+  const testAgentActive = acceptanceState === 'test_agent_running'
+  const workerActive = ['executing', 'reworking'].includes(acceptanceState) || presentation.phase === 'executing'
   const projectPlanAlignment = buildPlanAlignment({ provided: task.plan_alignment || task.planAlignment, planMode: projectPlanMode, files: asArray(message.fileChanges?.files), verification, phase: presentation.phase, report: task })
   const projectDeliveryAccepted = hasStrongDeliveryAcceptance({ report: task, verificationRows: verification })
   const acceptanceRisks = done && !failed && !projectDeliveryAccepted ? ['缺少验证或验收证据'] : []
@@ -536,18 +542,30 @@ export const projectExecutionTaskCard = (message = {}, project = '') => {
   return {
     version: 1,
     task_id: taskId,
+    project_main_run_id: task.project_main_run_id || task.projectMainRunId || message.projectRun?.id || '',
+    orchestration_scope: task.orchestration_scope || task.orchestrationScope || '',
     title: task.title || compact(message.requestText || `处理 ${project} 项目`, 90),
     goal: task.goal || compact(message.requestText || '', 240),
     phase: presentation.phase,
     phase_label: presentation.label,
     status: task.status || (failed ? 'failed' : done ? 'done' : 'in_progress'),
     progress: presentation.progress,
-    active_agents: presentation.phase === 'executing' ? [`项目执行成员 · ${project} 正在处理`] : [],
-    agents: [{ name: `项目执行成员 · ${project}`, status: failed ? 'failed' : done ? 'done' : 'running', summary: failed ? '执行遇到问题' : done ? '已回传结果' : '正在处理项目文件' }],
+    active_agents: [
+      ...(projectMainActive ? ['项目主 Agent 正在协调和验收'] : []),
+      ...(workerActive ? [`项目开发 Agent · ${project} 正在处理`] : []),
+      ...(testAgentActive ? ['TestAgent 正在独立验收'] : []),
+    ],
+    agents: [
+      { name: '项目主 Agent', status: failed ? 'failed' : presentation.phase === 'completed' ? 'done' : projectMainActive ? 'running' : 'waiting', summary: presentation.phase === 'completed' ? '已完成最终验收' : projectMainActive ? '正在规划、协调或复盘' : '负责当前项目任务' },
+      { name: `项目开发 Agent · ${project}`, status: failed ? 'failed' : workerActive ? 'running' : projectWorkItems.length && projectWorkItems.every(item => ['completed', 'awaiting_review'].includes(String(item.status))) ? 'done' : 'waiting', summary: workerActive ? '正在修改和验证项目文件' : `${projectWorkItems.length || 1} 个项目内工作项` },
+      { name: 'TestAgent', status: testAgentActive ? 'running' : testAgent?.canAccept === true ? 'done' : testAgent ? 'failed' : 'waiting', summary: testAgent?.canAccept === true ? '独立验收通过' : testAgentActive ? '正在读取源码与真实证据' : testAgent ? '发现需要返工的验收缺口' : '等待开发结果' },
+    ],
     change_summary: projectChangeSummary,
     changeSummary: projectChangeSummary,
     plan_mode: projectPlanMode,
     planMode: projectPlanMode,
+    work_items: projectWorkItems,
+    workItems: projectWorkItems,
     plan_alignment: projectPlanAlignment,
     planAlignment: projectPlanAlignment,
     user_handoff: projectUserHandoff,
@@ -557,6 +575,7 @@ export const projectExecutionTaskCard = (message = {}, project = '') => {
     next_action: nextAction,
     delivery: { headline: task.headline || (done ? projectDeliveryAccepted ? '项目执行成员已提交可验收结果。' : '项目执行成员已提交结果，仍需补齐验证或验收。' : ''), files, changes: asArray(message.fileChanges?.files), verification, risks: uniq([...risks, ...acceptanceRisks]), acceptance_passed: projectDeliveryAccepted && !failed },
     actions: [
+      ...asArray(task.actions),
       ...taskActions(presentation.phase, { viewChanges: files.length > 0, continue: !!taskId, cancel: !!taskId, retry: !!taskId, rollback: !!task.rollback_available, saveKnowledge: !message.streaming }),
       ...(!message.streaming && taskId ? [
         { id: 'archive', kind: 'archive', label: '删除记录', tone: 'outline' },

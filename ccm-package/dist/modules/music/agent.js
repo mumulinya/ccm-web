@@ -16,77 +16,26 @@ const netease_1 = require("./netease");
 const library_1 = require("./library");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 exports.RANDOM_MUSIC_KEYWORD = "__random__";
-const MOOD_PLAYBACK_RULES = [
-    { pattern: /心情不好|不开心|难过|伤心|低落|失落|失恋|想哭|emo|郁闷|烦躁/i, mood: "低落", query: "治愈 温柔 放松" },
-    { pattern: /心情很好|开心|高兴|快乐|兴奋|庆祝|元气满满/i, mood: "开心", query: "欢快 快乐 元气" },
-    { pattern: /焦虑|紧张|压力|疲惫|很累|累了|放松|静一静/i, mood: "舒缓", query: "舒缓 放松 轻音乐" },
-    { pattern: /睡觉|睡眠|失眠|助眠|晚安/i, mood: "助眠", query: "助眠 安静 轻音乐" },
-    { pattern: /学习|写作业|看书|专注|工作|写代码|编程/i, mood: "专注", query: "专注 学习 轻音乐" },
-    { pattern: /运动|健身|跑步|开车|提神/i, mood: "动感", query: "动感 节奏 提神" },
-    { pattern: /浪漫|约会|表白|恋爱/i, mood: "浪漫", query: "浪漫 温柔 情歌" },
-];
-const MUSIC_GENRES = ["摇滚", "民谣", "古典", "爵士", "电子", "说唱", "嘻哈", "国风", "流行", "蓝调", "钢琴", "纯音乐", "轻音乐", "粤语", "日语", "英语", "华语"];
-function cleanPlaybackSubject(value) {
-    return String(value || "")
-        .replace(/[，。！？、]/g, " ")
-        .replace(/^(?:请|麻烦)?(?:你)?(?:帮我|给我)?\s*/g, "")
-        .replace(/^(?:随机|随便|任意)?\s*(?:播放|放一首?|放|来一首?|来点|听一首?|听|我想听|我要听|想听)\s*/g, "")
-        .replace(/(?:给我)?(?:播放|放一首?|来一首?|听一首?)\s*$/g, "")
-        .replace(/\s*(?:吧|呗|呀|啊|可以吗|行吗)$/g, "")
-        .trim();
-}
 function resolveMusicPlaybackRequestFallback(requestText, keyword = "") {
-    const originalRequest = String(requestText || keyword || "").trim();
-    const rawKeyword = String(keyword || "").trim();
-    const generic = rawKeyword === exports.RANDOM_MUSIC_KEYWORD
-        || /^(?:播放|放|听|来)(?:一首|点)?(?:音乐|歌曲|歌)?(?:吧|呗)?$/i.test(originalRequest)
-        || /随机|随便|任意/.test(originalRequest);
-    const base = {
-        schema: "ccm-music-playback-plan-v1",
-        originalRequest,
-        artist: "",
-        mood: "",
-        genre: "",
-        source: "fallback",
-    };
-    const moodRule = MOOD_PLAYBACK_RULES.find((item) => item.pattern.test(originalRequest));
-    if (moodRule) {
-        return { ...base, strategy: "mood_recommendation", searchQuery: moodRule.query, mood: moodRule.mood, randomize: true, strictMatch: false, reason: `根据${moodRule.mood}情绪推荐` };
-    }
-    const genre = MUSIC_GENRES.find((item) => originalRequest.includes(item)) || "";
-    if (genre && /(?:来|放|播放|听|想听|推荐)/.test(originalRequest)) {
-        return { ...base, strategy: "genre_recommendation", searchQuery: genre, genre, randomize: true, strictMatch: false, reason: `按${genre}风格选曲` };
-    }
-    if (generic) {
-        return { ...base, strategy: "random", searchQuery: exports.RANDOM_MUSIC_KEYWORD, randomize: true, strictMatch: false, reason: "用户没有限定歌曲，随机播放" };
-    }
-    const artistOnlySource = cleanPlaybackSubject(originalRequest || rawKeyword);
-    const artistMatch = artistOnlySource.match(/^(.+?)(?:的歌|的音乐|歌曲|音乐)$/)
-        || originalRequest.match(/(?:播放|放|听|来一首|我想听|我要听)\s*([^，。！？]+?)(?:的歌|的音乐)(?:吧|呗|呀|啊)?$/);
-    if (artistMatch?.[1]) {
-        const artist = cleanPlaybackSubject(artistMatch[1]).replace(/(?:一首|一些|几首)$/g, "").trim();
-        if (artist) {
-            return { ...base, strategy: "artist_random", searchQuery: artist, artist, randomize: true, strictMatch: false, reason: `按歌手${artist}随机选曲` };
-        }
-    }
-    const searchQuery = cleanPlaybackSubject(rawKeyword && rawKeyword !== exports.RANDOM_MUSIC_KEYWORD ? rawKeyword : originalRequest);
-    if (!searchQuery) {
-        return { ...base, strategy: "random", searchQuery: exports.RANDOM_MUSIC_KEYWORD, randomize: true, strictMatch: false, reason: "没有可用的点歌限定，随机播放" };
-    }
-    return { ...base, strategy: "exact_song", searchQuery, randomize: false, strictMatch: true, reason: "按明确歌名或歌手与歌名严格点歌" };
+    void requestText;
+    void keyword;
+    throw new Error("本地音乐语义兜底已停用；必须使用 resolveMusicPlaybackRequest 的模型决策");
 }
 function normalizeMusicPlaybackPlan(value, requestText, keyword = "", source = "model") {
-    const fallback = resolveMusicPlaybackRequestFallback(requestText, keyword);
     const allowed = new Set(["exact_song", "artist_random", "mood_recommendation", "genre_recommendation", "random"]);
-    const strategy = allowed.has(value?.strategy) ? value.strategy : fallback.strategy;
-    const artist = String(value?.artist || (strategy === "artist_random" ? fallback.artist : "")).trim().slice(0, 100);
-    const mood = String(value?.mood || (strategy === "mood_recommendation" ? fallback.mood : "")).trim().slice(0, 100);
-    const genre = String(value?.genre || (strategy === "genre_recommendation" ? fallback.genre : "")).trim().slice(0, 100);
+    if (!allowed.has(value?.strategy))
+        throw new Error("模型返回了无效音乐播放策略");
+    const strategy = value.strategy;
+    const artist = String(value?.artist || "").trim().slice(0, 100);
+    const mood = String(value?.mood || "").trim().slice(0, 100);
+    const genre = String(value?.genre || "").trim().slice(0, 100);
     let searchQuery = String(value?.searchQuery || value?.search_query || "").trim().slice(0, 160);
     if (strategy === "random")
         searchQuery = exports.RANDOM_MUSIC_KEYWORD;
     if (!searchQuery)
-        searchQuery = artist || genre || fallback.searchQuery;
+        searchQuery = artist || genre;
+    if (!searchQuery)
+        throw new Error("模型没有返回可执行的音乐搜索条件");
     return {
         schema: "ccm-music-playback-plan-v1",
         strategy,
@@ -98,13 +47,12 @@ function normalizeMusicPlaybackPlan(value, requestText, keyword = "", source = "
         randomize: strategy !== "exact_song",
         strictMatch: strategy === "exact_song",
         source,
-        reason: String(value?.reason || fallback.reason).trim().slice(0, 300),
+        reason: String(value?.reason || "统一大模型已选择音乐播放策略").trim().slice(0, 300),
     };
 }
 async function resolveMusicPlaybackRequest(cfg, requestText, keyword = "") {
-    const fallback = resolveMusicPlaybackRequestFallback(requestText, keyword);
     if (!cfg?.enabled || !cfg?.apiKey || !cfg?.model)
-        return fallback;
+        throw new Error("统一大模型尚未配置，不能可靠选择音乐播放策略");
     const system = `你是 CCM 音乐播放意图规划器。把用户请求转换成选歌策略，只输出 JSON，不要 Markdown。
 策略只能是：
 - exact_song：明确指定了歌曲名，必须严格匹配。
@@ -139,38 +87,18 @@ async function resolveMusicPlaybackRequest(cfg, requestText, keyword = "") {
         return normalizeMusicPlaybackPlan(parsed, requestText, keyword, "model");
     }
     catch (error) {
-        return { ...fallback, reason: `${fallback.reason}；模型识别不可用：${error?.message || error}`.slice(0, 300) };
+        throw new Error(`统一大模型无法选择音乐播放策略：${error?.message || error}`);
     }
 }
 function extractMusicIntent(msg) {
-    const lower = msg.toLowerCase();
-    const playMatch = msg.match(/(?:播放|放一首?|听一首?|来一首?|来点|来些|我想听|我要听|想听)(.*)/);
-    if (playMatch)
-        return { type: "play", keyword: normalizeMusicActionKeyword(playMatch[1].trim(), true) };
-    const searchMatch = msg.match(/(?:搜索|找|查找|有没有)(.+)/);
-    if (searchMatch)
-        return { type: "search", keyword: searchMatch[1].trim() };
-    if (/(?:转换|转码|下载|转成|转为)/.test(lower)) {
-        const bvid = String(msg || "").match(/BV[\w]+/i)?.[0] || "";
-        const songId = String(msg || "").match(/(?:song\?id=|id[=：:\s#]|网易云\s*[#]?)(\d{5,})/i)?.[1] ||
-            String(msg || "").match(/\b(\d{6,})\b/)?.[1] ||
-            "";
-        return { type: "convert", keyword: bvid || songId || "" };
-    }
-    if (/[?？]|(?:怎么|如何|为什么|是什么|是啥|说明|介绍)/.test(msg))
-        return { type: "help", keyword: "" };
-    const cleaned = msg.replace(/[，。！？、]/g, " ").replace(/我想听|帮我找|推荐|一些|一点|的歌|的音乐|吧|呗|听听/g, "").trim();
-    if (cleaned.length >= 2)
-        return { type: "search", keyword: cleaned };
-    return { type: "help", keyword: "" };
+    void msg;
+    throw new Error("本地音乐意图识别已停用；必须调用 classifyMusicAgentAction");
 }
 function normalizeMusicActionKeyword(keyword, randomIfGeneric = false) {
+    void randomIfGeneric;
     const cleaned = String(keyword || "")
         .replace(/[，。！？、]/g, " ")
-        .replace(/^(一下|下|首|点|些|一个|一首)\s*/g, "")
         .trim();
-    if (randomIfGeneric && (!cleaned || /^(随机|随便|任意|音乐|歌曲|歌|听歌)$/i.test(cleaned)))
-        return exports.RANDOM_MUSIC_KEYWORD;
     return cleaned;
 }
 function extractJsonObject(text) {
@@ -196,7 +124,6 @@ function extractJsonObject(text) {
 }
 function normalizeMusicAgentAction(value, message, mode, source = "agent") {
     const rawType = String(value?.action || value?.type || value?.intent || "").trim().toLowerCase();
-    const fallback = extractMusicIntent(message);
     const type = ["play_music", "play"].includes(rawType)
         ? "play_music"
         : ["search_music", "search"].includes(rawType)
@@ -205,31 +132,23 @@ function normalizeMusicAgentAction(value, message, mode, source = "agent") {
                 ? "convert_music"
                 : rawType === "none" || rawType === "help" || rawType === "chat"
                     ? "none"
-                    : fallback.type === "play"
-                        ? "play_music"
-                        : fallback.type === "search"
-                            ? "search_music"
-                            : fallback.type === "convert"
-                                ? "convert_music"
-                                : "none";
-    const rawKeyword = String(value?.keyword || value?.query || value?.song || (type === "play_music" || type === "search_music" || type === "convert_music" ? fallback.keyword : "") || "").trim();
-    const convertFromMessage = type === "convert_music"
-        ? (String(message || "").match(/BV[\w]+/i)?.[0]
-            || String(message || "").match(/(?:song\?id=|id[=：:\s#]|网易云\s*[#]?)(\d{5,})/i)?.[1]
-            || String(message || "").match(/\b(\d{6,})\b/)?.[1]
-            || "")
-        : "";
+                    : "none";
+    const rawKeyword = String(value?.keyword || value?.query || value?.song || "").trim();
+    void message;
+    if (["play_music", "search_music", "convert_music"].includes(type) && !rawKeyword) {
+        throw new Error("模型没有返回音乐动作所需的 keyword");
+    }
     return {
         type,
         keyword: type === "play_music"
             ? normalizeMusicActionKeyword(rawKeyword, true)
             : type === "convert_music"
-                ? String(rawKeyword || convertFromMessage || "").trim()
+                ? String(rawKeyword || "").trim()
                 : normalizeMusicActionKeyword(rawKeyword, false),
         mode: mode || "cloud",
         source,
-        confidence: Math.max(0, Math.min(1, Number(value?.confidence ?? (source === "agent" ? 0.75 : 0.45)) || 0)),
-        reason: String(value?.reason || (source === "agent" ? "音乐 Agent 结构化决策" : "模型动作识别失败，使用后端兜底")).slice(0, 500),
+        confidence: Math.max(0, Math.min(1, Number(value?.confidence ?? (source === "agent" ? 0.75 : 0)) || 0)),
+        reason: String(value?.reason || (source === "agent" ? "音乐 Agent 结构化决策" : "未获得模型语义决策")).slice(0, 500),
     };
 }
 function shouldUseAnthropicMusicApi(config) {
@@ -362,8 +281,15 @@ async function classifyMusicAgentAction(cfg, message, mode, history = []) {
         return normalizeMusicAgentAction(parsed, message, mode, "agent");
     }
     catch (error) {
-        const fallback = normalizeMusicAgentAction({}, message, mode, "fallback");
-        return { ...fallback, error: error?.message || String(error) };
+        return {
+            type: "none",
+            keyword: "",
+            mode: mode || "cloud",
+            source: "model_unavailable",
+            confidence: 0,
+            reason: "统一大模型无法可靠识别音乐动作",
+            error: error?.message || String(error),
+        };
     }
 }
 function getMusicHelpText(chatMode) {
@@ -600,9 +526,9 @@ async function callAnthropicNative(cfg, system, messages, tools, res) {
 function runMusicAgentIntentSelfTest() {
     const { runMusicRemoteCommandQueueSelfTest } = require("./state");
     const playSpecific = normalizeMusicAgentAction({ action: "play_music", keyword: "周杰伦 晴天", confidence: 0.93 }, "我想听周杰伦的晴天", "cloud", "agent");
-    const playRandom = normalizeMusicAgentAction({}, "播放音乐", "cloud", "fallback");
+    const playRandom = normalizeMusicAgentAction({ action: "play_music", keyword: exports.RANDOM_MUSIC_KEYWORD, confidence: 0.9 }, "播放音乐", "cloud", "agent");
     const searchOnly = normalizeMusicAgentAction({ action: "search_music", keyword: "轻音乐", confidence: 0.9 }, "搜索轻音乐", "cloud", "agent");
-    const questionOnly = normalizeMusicAgentAction({}, "歌词怎么显示？", "cloud", "fallback");
+    const questionOnly = normalizeMusicAgentAction({ action: "none", confidence: 0.9 }, "歌词怎么显示？", "cloud", "agent");
     const normalizedHistory = normalizeMusicAgentMessages([
         { role: "agent", content: "欢迎使用音乐助手" },
         { role: "operator", content: "播放晴天" },
@@ -613,11 +539,11 @@ function runMusicAgentIntentSelfTest() {
         { role: "agent", content: [{ type: "output_text", text: "找到一些结果" }] },
     ], "继续推荐");
     const queueSelfTest = runMusicRemoteCommandQueueSelfTest();
-    const exactPlan = resolveMusicPlaybackRequestFallback("播放周杰伦的晴天", "周杰伦 晴天");
-    const sadPlan = resolveMusicPlaybackRequestFallback("我心情不好，给我播放一首歌", exports.RANDOM_MUSIC_KEYWORD);
-    const happyPlan = resolveMusicPlaybackRequestFallback("我今天心情很好，放首歌吧", exports.RANDOM_MUSIC_KEYWORD);
-    const artistPlan = resolveMusicPlaybackRequestFallback("播放周杰伦的歌", "周杰伦");
-    const genrePlan = resolveMusicPlaybackRequestFallback("来一首摇滚音乐", "摇滚");
+    const exactPlan = normalizeMusicPlaybackPlan({ strategy: "exact_song", searchQuery: "周杰伦 晴天", reason: "模型识别明确歌曲" }, "播放周杰伦的晴天", "周杰伦 晴天", "model");
+    const sadPlan = normalizeMusicPlaybackPlan({ strategy: "mood_recommendation", searchQuery: "治愈 温柔", mood: "难过", reason: "模型识别情绪" }, "我心情不好，给我播放一首歌", exports.RANDOM_MUSIC_KEYWORD, "model");
+    const happyPlan = normalizeMusicPlaybackPlan({ strategy: "mood_recommendation", searchQuery: "欢快 庆祝", mood: "开心", reason: "模型识别情绪" }, "我今天心情很好，放首歌吧", exports.RANDOM_MUSIC_KEYWORD, "model");
+    const artistPlan = normalizeMusicPlaybackPlan({ strategy: "artist_random", searchQuery: "周杰伦", artist: "周杰伦", reason: "模型识别歌手" }, "播放周杰伦的歌", "周杰伦", "model");
+    const genrePlan = normalizeMusicPlaybackPlan({ strategy: "genre_recommendation", searchQuery: "摇滚", genre: "摇滚", reason: "模型识别曲风" }, "来一首摇滚音乐", "摇滚", "model");
     const playMusicSpec = (() => {
         try {
             const { GLOBAL_AGENT_TOOL_SPECS } = require("../../agents/global/loop");
@@ -630,7 +556,7 @@ function runMusicAgentIntentSelfTest() {
     const checks = {
         agentPlayAction: playSpecific.type === "play_music" && playSpecific.keyword === "周杰伦 晴天" && playSpecific.source === "agent",
         genericPlayBecomesRandom: playRandom.type === "play_music" && playRandom.keyword === exports.RANDOM_MUSIC_KEYWORD,
-        fallbackPlayRequiresNoAutoplay: playRandom.source === "fallback",
+        modelPlayRequiresNoLocalFallback: playRandom.source === "agent",
         searchDoesNotAutoplay: searchOnly.type === "search_music" && searchOnly.keyword === "轻音乐",
         questionDoesNotAutoplay: questionOnly.type !== "play_music",
         emptyPendingMessageRemoved: normalizedHistory.every(item => item.content.trim().length > 0),
