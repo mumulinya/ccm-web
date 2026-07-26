@@ -1,11 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { CCM_DIR, createUnifiedDiff, readWorkingFileText, sendJson } from "../../core/utils";
 import { getConfigs, getConfigInfo, loadTasks } from "../../core/db";
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const LARGE_FILE_BYTES = 1024 * 1024;
+const REMOTE_GIT_TIMEOUT_MS = 30_000;
+const REMOTE_GIT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 type FileStats = { additions: number; deletions: number; binary: boolean };
 
@@ -41,9 +43,110 @@ function safeGitError(error: any) {
     .slice(0, 2_000);
 }
 
+function gitCommandError(message: string, stdout = "", stderr = "", gitErrorCode = "") {
+  const error: any = new Error(message);
+  error.stdout = stdout;
+  error.stderr = stderr;
+  if (gitErrorCode) error.gitErrorCode = gitErrorCode;
+  return error;
+}
+
+function killProcessTree(child: any) {
+  const pid = Number(child?.pid || 0);
+  if (!pid) return;
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
+        timeout: 5_000,
+      });
+    } catch {
+      try { child.kill(); } catch {}
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    try { child.kill("SIGTERM"); } catch {}
+  }
+}
+
+function runGitRemote(workDir: string, args: string[], timeout = REMOTE_GIT_TIMEOUT_MS) {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn("git", ["-c", "credential.interactive=never", ...args], {
+      cwd: workDir,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GCM_INTERACTIVE: "Never",
+        GCM_MODAL_PROMPT: "false",
+        GIT_ASKPASS: "",
+        SSH_ASKPASS: "",
+        GIT_HTTP_LOW_SPEED_LIMIT: "1",
+        GIT_HTTP_LOW_SPEED_TIME: "20",
+        GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ConnectionAttempts=1",
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let timedOut = false;
+    let outputExceeded = false;
+    const append = (target: "stdout" | "stderr", chunk: any) => {
+      const text = String(chunk || "");
+      outputBytes += Buffer.byteLength(text, "utf-8");
+      if (outputBytes > REMOTE_GIT_MAX_OUTPUT_BYTES) {
+        outputExceeded = true;
+        killProcessTree(child);
+        return;
+      }
+      if (target === "stdout") stdout += text;
+      else stderr += text;
+    };
+    child.stdout?.on("data", chunk => append("stdout", chunk));
+    child.stderr?.on("data", chunk => append("stderr", chunk));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killProcessTree(child);
+    }, timeout);
+    child.once("error", error => {
+      clearTimeout(timer);
+      reject(gitCommandError(error.message || "无法启动 Git 远端操作", stdout, stderr));
+    });
+    child.once("close", code => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(gitCommandError(`Git 远端连接在 ${Math.ceil(timeout / 1_000)} 秒内没有完成`, stdout, stderr, "remote_timeout"));
+        return;
+      }
+      if (outputExceeded) {
+        reject(gitCommandError("Git 远端输出超过安全限制", stdout, stderr, "remote_output_exceeded"));
+        return;
+      }
+      if (code !== 0) {
+        reject(gitCommandError(`Git 远端操作失败（退出码 ${code ?? "unknown"}）`, stdout, stderr));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
 function gitFailureDetails(error: any, operation: string) {
   const raw = safeGitError(error);
   const lower = raw.toLowerCase();
+  if (error?.gitErrorCode === "remote_timeout") {
+    return { error: "Git 远端连接超时，操作已停止", errorCode: "remote_timeout", suggestion: "检查服务器网络、代理和远端站点连通性后重试", raw };
+  }
+  if (error?.gitErrorCode === "remote_ahead") {
+    return { error: "远端分支包含本地没有的提交，当前推送已被阻止", errorCode: "remote_ahead", suggestion: "先拉取代码并处理差异，再重新推送", raw };
+  }
   if (/authentication failed|could not read username|terminal prompts disabled|permission denied \(publickey\)|http basic: access denied|403 forbidden|error:\s*403/.test(lower)) {
     return { error: "Git 远端认证失败，请先在服务器配置 Git 凭据或 SSH Key", errorCode: "authentication_required", suggestion: "完成 git credential 或 SSH 登录后重新执行推送", raw };
   }
@@ -82,10 +185,14 @@ export function inspectGitRemoteState(workDir: string, changedFiles = -1) {
   const remoteUrl = remoteResult.ok ? sanitizeRemoteUrl(remoteResult.output) : "";
   const upstreamResult = tryGit(workDir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
   const upstream = upstreamResult.ok ? upstreamResult.output : "";
+  const remoteTrackingRef = !upstream && branch && remoteUrl && tryGit(workDir, ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`]).ok
+    ? `origin/${branch}`
+    : "";
+  const comparisonRef = upstream || remoteTrackingRef;
   let ahead = 0;
   let behind = 0;
-  if (upstream) {
-    const counts = tryGit(workDir, ["rev-list", "--left-right", "--count", `HEAD...${upstream}`]);
+  if (comparisonRef) {
+    const counts = tryGit(workDir, ["rev-list", "--left-right", "--count", `HEAD...${comparisonRef}`]);
     const match = counts.output.match(/^(\d+)\s+(\d+)$/);
     if (counts.ok && match) {
       ahead = Number(match[1]);
@@ -94,7 +201,7 @@ export function inspectGitRemoteState(workDir: string, changedFiles = -1) {
   }
   const changed = changedFiles >= 0
     ? changedFiles
-    : String(tryGit(workDir, ["status", "--porcelain=v1", "--untracked-files=normal"]).output || "").split(/\r?\n/).filter(Boolean).length;
+    : parseGitStatus(String(tryGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]).output || "")).length;
   const detached = !branch;
   return {
     remoteUrl,
@@ -102,21 +209,23 @@ export function inspectGitRemoteState(workDir: string, changedFiles = -1) {
     branch: branch || "detached HEAD",
     detached,
     upstream,
+    comparisonRef,
     ahead,
     behind,
     dirty: changed > 0,
     changedFiles: changed,
     canFetch: !!remoteUrl,
     canPull: !!remoteUrl && !detached && changed === 0,
-    canPush: !!remoteUrl && !detached,
+    canPush: !!remoteUrl && !detached && behind === 0 && (!upstream || ahead > 0),
     canCommitAndPush: !!remoteUrl && !detached,
+    pushState: !remoteUrl ? "remote_missing" : detached ? "detached" : behind > 0 ? "remote_ahead" : !upstream ? "first_push" : ahead > 0 ? "ready" : "up_to_date",
     pushTarget: upstream || (remoteUrl && branch ? `origin/${branch}` : ""),
     pullTarget: upstream || (remoteUrl && branch ? `origin/${branch}` : ""),
   };
 }
 
-function performGitRemoteOperation(workDir: string, operation: string) {
-  const before = inspectGitRemoteState(workDir);
+async function performGitRemoteOperation(workDir: string, operation: string) {
+  let before = inspectGitRemoteState(workDir);
   if (!before.remoteUrl) throw new Error("当前项目没有配置 origin 远端仓库");
   if (operation !== "fetch" && before.detached) throw new Error("当前处于 detached HEAD，不能更新或推送分支");
   if (operation === "pull" && before.dirty) throw new Error(`工作区有 ${before.changedFiles} 个未提交文件，请先提交或处理后再更新本地代码`);
@@ -126,20 +235,36 @@ function performGitRemoteOperation(workDir: string, operation: string) {
   else if (operation === "pull") args = before.upstream
     ? ["pull", "--ff-only"]
     : ["pull", "--ff-only", "origin", before.branch];
-  else if (operation === "push") args = before.upstream
-    ? ["push"]
-    : ["push", "--set-upstream", "origin", before.branch];
+  else if (operation === "push") {
+    await runGitRemote(workDir, ["fetch", "--prune", "origin"]);
+    before = inspectGitRemoteState(workDir);
+    if (before.behind > 0) {
+      throw gitCommandError("remote branch contains commits that are not available locally", "", "", "remote_ahead");
+    }
+    if (before.upstream && before.ahead === 0) {
+      return {
+        operation,
+        output: "",
+        noop: true,
+        outcome: "up_to_date",
+        repository: before,
+      };
+    }
+    args = before.upstream ? ["push"] : ["push", "--set-upstream", "origin", before.branch];
+  }
   else throw new Error("不支持的 Git 远端操作");
 
-  const output = String(runGit(workDir, args, { timeout: 90_000 }) || "").trim();
+  const output = await runGitRemote(workDir, args);
   return {
     operation,
     output: output.slice(-4_000),
+    noop: false,
     repository: inspectGitRemoteState(workDir),
   };
 }
 
 function commitSelectedChanges(workDir: string, message: string, requested: string[], allFiles: boolean) {
+  let commitPaths: string[] = [];
   if (requested.length) {
     const preview = commitPreview(workDir, requested);
     if (preview.blocked) {
@@ -147,15 +272,24 @@ function commitSelectedChanges(workDir: string, message: string, requested: stri
       error.preview = preview;
       throw error;
     }
-    runGit(workDir, ["add", "-A", "--", ...requested]);
-    runGit(workDir, ["commit", "--only", "-m", message, "--", ...requested]);
+    const stagingPaths = Array.from(new Set([
+      ...requested,
+      ...preview.files.map((file: any) => normalizeRepoPath(file.originalPath)).filter(Boolean),
+    ]));
+    runGit(workDir, ["add", "-A", "--", ...stagingPaths]);
+    commitPaths = String(runGit(workDir, ["diff", "--cached", "--name-only", "-z", "--", ...stagingPaths]) || "").split("\0").filter(Boolean);
+    if (!commitPaths.length) {
+      return { hash: "", files: [], noop: true };
+    }
+    runGit(workDir, ["commit", "--only", "-m", message, "--", ...commitPaths]);
   } else if (allFiles) {
     runGit(workDir, ["add", "-A"]);
     runGit(workDir, ["commit", "-m", message]);
+    commitPaths = String(runGit(workDir, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "HEAD"]) || "").split("\0").filter(Boolean);
   } else {
     throw new Error("请明确选择本次要提交的文件");
   }
-  return runGit(workDir, ["rev-parse", "--short", "HEAD"]).trim();
+  return { hash: runGit(workDir, ["rev-parse", "--short", "HEAD"]).trim(), files: commitPaths, noop: false };
 }
 
 function readJson(file: string, fallback: any) {
@@ -190,7 +324,7 @@ function projectWorkDir(project: string) {
 }
 
 export function normalizeRepoPath(filePath: any) {
-  return String(filePath || "").trim().replace(/\\/g, "/");
+  return String(filePath ?? "").replace(/\\/g, "/");
 }
 
 export function resolveSafeProjectFile(workDir: string, filePath: any) {
@@ -204,25 +338,80 @@ export function resolveSafeProjectFile(workDir: string, filePath: any) {
   return { normalized, absolute };
 }
 
+function expandedRenamePath(rawPath: string) {
+  const value = rawPath.trim();
+  const braceMatch = value.match(/^(.*)\{([^{}]*) => ([^{}]*)\}(.*)$/);
+  if (braceMatch) return `${braceMatch[1]}${braceMatch[3]}${braceMatch[4]}`;
+  const arrow = value.lastIndexOf(" => ");
+  if (arrow >= 0) return value.slice(arrow + 4).trim();
+  return value;
+}
+
 function currentRenamePath(rawPath: string) {
   const value = rawPath.trim();
   const arrow = value.lastIndexOf(" -> ");
-  return arrow >= 0 ? value.slice(arrow + 4).trim() : value;
+  return arrow >= 0 ? value.slice(arrow + 4).trim() : expandedRenamePath(value);
 }
 
 function statusPresentation(indexStatus: string, worktreeStatus: string) {
   const combined = `${indexStatus}${worktreeStatus}`;
   if (combined === "??") return { statusText: "未跟踪", statusColor: "#0f766e" };
   if (/U|AA|DD/.test(combined)) return { statusText: "冲突", statusColor: "#dc2626" };
-  if (combined.includes("R")) return { statusText: "重命名", statusColor: "#7c3aed" };
-  if (combined.includes("D")) return { statusText: "已删除", statusColor: "#dc2626" };
-  if (combined.includes("A")) return { statusText: "新增", statusColor: "#059669" };
-  if (combined.includes("C")) return { statusText: "已复制", statusColor: "#7c3aed" };
-  return { statusText: "已修改", statusColor: "#2563eb" };
+  const label = (status: string) => {
+    if (status === "M") return "修改";
+    if (status === "A") return "新增";
+    if (status === "D") return "删除";
+    if (status === "R") return "重命名";
+    if (status === "C") return "复制";
+    if (status === "T") return "类型变化";
+    return "变更";
+  };
+  const color = combined.includes("D")
+    ? "#dc2626"
+    : combined.includes("A") ? "#059669"
+      : /R|C/.test(combined) ? "#7c3aed" : "#2563eb";
+  if (indexStatus !== " " && worktreeStatus !== " ") {
+    return { statusText: `已暂存${label(indexStatus)}，工作区又${label(worktreeStatus)}`, statusColor: color };
+  }
+  if (indexStatus !== " ") return { statusText: `已暂存${label(indexStatus)}`, statusColor: color };
+  if (worktreeStatus !== " ") return { statusText: `工作区已${label(worktreeStatus)}`, statusColor: color };
+  return { statusText: "文件已变化", statusColor: "#2563eb" };
 }
 
 export function parseGitStatus(output: string) {
-  return String(output || "").split("\n").filter(Boolean).map(line => {
+  const raw = String(output || "");
+  if (raw.includes("\0")) {
+    const records = raw.split("\0");
+    const files: any[] = [];
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (!record) continue;
+      const statusCode = record.slice(0, 2).padEnd(2, " ");
+      const indexStatus = statusCode[0] || " ";
+      const worktreeStatus = statusCode[1] || " ";
+      const filePath = record.slice(3);
+      const renamed = /R|C/.test(statusCode);
+      const originalPath = renamed ? String(records[index + 1] || "") : "";
+      if (renamed) index += 1;
+      const untracked = statusCode === "??";
+      const conflict = /U/.test(statusCode) || ["AA", "DD"].includes(statusCode);
+      files.push({
+        path: filePath,
+        originalPath,
+        status: statusCode.trim() || statusCode,
+        statusCode,
+        indexStatus,
+        worktreeStatus,
+        staged: !untracked && indexStatus !== " " && indexStatus !== "?",
+        unstaged: untracked || worktreeStatus !== " ",
+        untracked,
+        conflict,
+        ...statusPresentation(indexStatus, worktreeStatus),
+      });
+    }
+    return files;
+  }
+  return raw.split(/\r?\n/).filter(Boolean).map(line => {
     const statusCode = line.slice(0, 2).padEnd(2, " ");
     const originalPath = line.slice(3).trim();
     const filePath = currentRenamePath(originalPath);
@@ -248,9 +437,34 @@ export function parseGitStatus(output: string) {
 
 export function parseNumstat(output: string) {
   const result = new Map<string, FileStats>();
-  String(output || "").split("\n").filter(Boolean).forEach(line => {
+  const raw = String(output || "");
+  if (raw.includes("\0")) {
+    const records = raw.split("\0");
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (!record) continue;
+      const match = record.match(/^(-|\d+)\t(-|\d+)\t([\s\S]*)$/);
+      if (!match) continue;
+      let filePath = match[3];
+      if (!filePath) {
+        index += 1;
+        const originalPath = String(records[index] || "");
+        index += 1;
+        filePath = String(records[index] || originalPath);
+      }
+      if (!filePath) continue;
+      const binary = match[1] === "-" || match[2] === "-";
+      result.set(normalizeRepoPath(filePath), {
+        additions: binary ? 0 : Number(match[1] || 0),
+        deletions: binary ? 0 : Number(match[2] || 0),
+        binary,
+      });
+    }
+    return result;
+  }
+  raw.split(/\r?\n/).filter(Boolean).forEach(line => {
     const [addRaw, deleteRaw, ...pathParts] = line.split("\t");
-    const filePath = pathParts.join("\t").trim();
+    const filePath = expandedRenamePath(pathParts.join("\t"));
     if (!filePath) return;
     const binary = addRaw === "-" || deleteRaw === "-";
     result.set(normalizeRepoPath(filePath), {
@@ -444,7 +658,7 @@ function fileStatus(workDir: string, filePath: string) {
 }
 
 function commitPreview(workDir: string, requestedFiles: any[]) {
-  const allFiles = parseGitStatus(runGit(workDir, ["-c", "core.quotepath=false", "status", "--porcelain"]));
+  const allFiles = parseGitStatus(runGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]));
   const files = Array.from(new Set((requestedFiles || []).map(normalizeRepoPath).filter(Boolean)));
   files.forEach(file => resolveSafeProjectFile(workDir, file));
   const selected = allFiles.filter(file => files.includes(normalizeRepoPath(file.path)));
@@ -473,9 +687,9 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
     const { workDir } = resolved;
     try {
       runGit(workDir, ["rev-parse", "--is-inside-work-tree"]);
-      const files = parseGitStatus(runGit(workDir, ["-c", "core.quotepath=false", "status", "--porcelain"]));
-      const stagedStats = parseNumstat(runGit(workDir, ["-c", "core.quotepath=false", "diff", "--staged", "--numstat"]));
-      const workingStats = parseNumstat(runGit(workDir, ["-c", "core.quotepath=false", "diff", "--numstat"]));
+      const files = parseGitStatus(runGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]));
+      const stagedStats = parseNumstat(runGit(workDir, ["diff", "--staged", "--numstat", "-z"]));
+      const workingStats = parseNumstat(runGit(workDir, ["diff", "--numstat", "-z"]));
       const enriched = files.map(file => {
         const safe = resolveSafeProjectFile(workDir, file.path);
         const staged = stagedStats.get(normalizeRepoPath(file.path)) || { additions: 0, deletions: 0, binary: false };
@@ -507,7 +721,7 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
   }
 
   if (pathname === "/api/git/remote-operation" && req.method === "POST") {
-    readBody(req, res, body => {
+    readBody(req, res, async body => {
       const project = String(body.project || "").trim();
       const operation = String(body.operation || "").trim().toLowerCase();
       const resolved = projectWorkDir(project);
@@ -520,8 +734,10 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
       }
       try {
         runGit(resolved.workDir, ["rev-parse", "--is-inside-work-tree"]);
-        const result = performGitRemoteOperation(resolved.workDir, operation);
-        const message = operation === "fetch"
+        const result = await performGitRemoteOperation(resolved.workDir, operation);
+        const message = result.noop
+          ? "当前分支已与远端同步，没有待推送提交"
+          : operation === "fetch"
           ? "远端引用已拉取"
           : operation === "pull" ? "本地分支已更新" : "本地提交已推送";
         sendJson(res, { success: true, message, ...result });
@@ -593,7 +809,7 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
   }
 
   if (pathname === "/api/git/commit" && req.method === "POST") {
-    readBody(req, res, body => {
+    readBody(req, res, async body => {
       const project = String(body.project || "");
       const message = String(body.message || "").trim();
       const action = String(body.action || "commit").trim().toLowerCase();
@@ -611,14 +827,30 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
           if (!preflight.remoteUrl) return sendJson(res, { success: false, error: "当前项目没有配置 origin 远端仓库", errorCode: "remote_missing" }, 409);
           if (preflight.detached) return sendJson(res, { success: false, error: "当前处于 detached HEAD，不能提交并推送", errorCode: "detached_head" }, 409);
         }
-        const hash = commitSelectedChanges(resolved.workDir, message, requested, allFiles);
-        const base = { hash, committedFiles: requested, committedAllFiles: allFiles, verification: body.verification || "not_recorded" };
+        const committed = commitSelectedChanges(resolved.workDir, message, requested, allFiles);
+        if (committed.noop) {
+          sendJson(res, {
+            success: true,
+            action,
+            outcome: "no_changes",
+            message: "所选文件同步后没有可提交内容，变更状态已刷新",
+            commit: { success: false, noop: true, hash: "" },
+            push: null,
+            hash: "",
+            committedFiles: [],
+            committedAllFiles: allFiles,
+            verification: body.verification || "not_recorded",
+          });
+          return;
+        }
+        const hash = committed.hash;
+        const base = { hash, committedFiles: committed.files, committedAllFiles: allFiles, verification: body.verification || "not_recorded" };
         if (action === "commit") {
           sendJson(res, { success: true, action, outcome: "committed", message: "代码已提交到本地仓库", commit: { success: true, hash }, push: null, ...base });
           return;
         }
         try {
-          const pushed = performGitRemoteOperation(resolved.workDir, "push");
+          const pushed = await performGitRemoteOperation(resolved.workDir, "push");
           sendJson(res, { success: true, action, outcome: "committed_and_pushed", message: "代码已提交并推送到远端", commit: { success: true, hash }, push: { success: true, ...pushed }, ...base });
         } catch (pushError: any) {
           const failure = gitFailureDetails(pushError, "push");
