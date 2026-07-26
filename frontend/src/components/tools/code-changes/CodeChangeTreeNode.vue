@@ -12,8 +12,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['select', 'toggle', 'toggle-directory', 'toggle-expand'])
 const descendantFiles = computed(() => props.node.descendantFiles || [])
-const checkedCount = computed(() => descendantFiles.value.filter(file => props.checkedPaths.has(file.path)).length)
-const allChecked = computed(() => descendantFiles.value.length > 0 && checkedCount.value === descendantFiles.value.length)
+const selectableDescendants = computed(() => descendantFiles.value.filter(file => !file.indexResidual))
+const checkedCount = computed(() => selectableDescendants.value.filter(file => props.checkedPaths.has(file.path)).length)
+const allChecked = computed(() => selectableDescendants.value.length > 0 && checkedCount.value === selectableDescendants.value.length)
 const partlyChecked = computed(() => checkedCount.value > 0 && !allChecked.value)
 const expanded = computed(() => props.forceExpanded || props.expandedPaths.has(props.node.path))
 </script>
@@ -28,8 +29,9 @@ const expanded = computed(() => props.forceExpanded || props.expandedPaths.has(p
         type="checkbox"
         :checked="allChecked"
         :indeterminate="partlyChecked"
+        :disabled="!selectableDescendants.length"
         :aria-label="`选择目录 ${node.path}`"
-        @change="emit('toggle-directory', descendantFiles)"
+        @change="emit('toggle-directory', selectableDescendants)"
       />
       <button type="button" class="tree-directory-name" :title="node.path" @click="emit('toggle-expand', node.path)">
         <FolderOpen v-if="expanded" :size="15" />
@@ -65,7 +67,7 @@ const expanded = computed(() => props.forceExpanded || props.expandedPaths.has(p
     @click="emit('select', node.file.path)"
   >
     <span class="tree-file-spacer"></span>
-    <input type="checkbox" :checked="checkedPaths.has(node.file.path)" :aria-label="`选择 ${node.file.path}`" @click.stop="emit('toggle', node.file.path)" />
+    <input type="checkbox" :checked="checkedPaths.has(node.file.path)" :disabled="node.file.indexResidual" :aria-label="`选择 ${node.file.path}`" @click.stop="emit('toggle', node.file.path)" />
     <FileCode2 :size="14" class="tree-file-icon" />
     <span class="tree-file-copy">
       <strong :title="node.file.path">{{ node.name }}</strong>

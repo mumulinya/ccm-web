@@ -597,6 +597,10 @@ function buildChangeContext(project: string, workDir: string, changedPaths: stri
 
 export function buildGitStatusSummary(files: any[]) {
   const summary = files.reduce((acc, file) => {
+    if (file.indexResidual) {
+      acc.indexResidual += 1;
+      return acc;
+    }
     acc.total += 1;
     if (file.staged) acc.staged += 1;
     if (file.unstaged) acc.unstaged += 1;
@@ -609,13 +613,34 @@ export function buildGitStatusSummary(files: any[]) {
     const moduleName = normalizeRepoPath(file.path).split("/")[0] || "根目录";
     if (!acc.modules.includes(moduleName)) acc.modules.push(moduleName);
     return acc;
-  }, { total: 0, staged: 0, unstaged: 0, untracked: 0, conflicts: 0, binary: 0, largeFiles: 0, additions: 0, deletions: 0, modules: [] as string[] });
+  }, { total: 0, staged: 0, unstaged: 0, untracked: 0, conflicts: 0, binary: 0, largeFiles: 0, indexResidual: 0, additions: 0, deletions: 0, modules: [] as string[] });
   const warnings: string[] = [];
   if (summary.conflicts) warnings.push(`${summary.conflicts} 个冲突文件会阻止提交`);
+  if (summary.indexResidual) warnings.push(`${summary.indexResidual} 个暂存区索引残留已单独归类`);
   if (summary.untracked) warnings.push(`${summary.untracked} 个未跟踪文件需要确认`);
   if (summary.largeFiles) warnings.push(`${summary.largeFiles} 个大文件需要检查`);
   if (summary.binary) warnings.push(`${summary.binary} 个二进制文件无法逐行预览`);
   return { ...summary, modules: summary.modules.slice(0, 8), riskLevel: summary.conflicts ? "high" : warnings.length ? "medium" : "low", warnings };
+}
+
+function isIndexResidual(file: any) {
+  return file?.indexStatus === "A" && file?.worktreeStatus === "D";
+}
+
+function cleanupIndexResiduals(workDir: string, requestedFiles: any[]) {
+  const current = parseGitStatus(runGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]))
+    .filter(isIndexResidual);
+  const available = new Map(current.map(file => [normalizeRepoPath(file.path), file]));
+  const requested = Array.from(new Set((requestedFiles || []).map(normalizeRepoPath).filter(Boolean))) as string[];
+  if (!requested.length) throw new Error("没有选择要清理的索引残留");
+  const invalid = requested.filter(file => !available.has(file));
+  if (invalid.length) throw new Error(`文件状态已变化，请刷新后重试：${invalid.slice(0, 3).join("、")}`);
+  requested.forEach(file => resolveSafeProjectFile(workDir, file));
+  runGit(workDir, ["rm", "--cached", "--ignore-unmatch", "-f", "--", ...requested]);
+  const remaining = parseGitStatus(runGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]))
+    .filter(isIndexResidual)
+    .map(file => file.path);
+  return { cleaned: requested, remaining };
 }
 
 function parseDiffHunks(diff: string) {
@@ -690,33 +715,73 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
       const files = parseGitStatus(runGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]));
       const stagedStats = parseNumstat(runGit(workDir, ["diff", "--staged", "--numstat", "-z"]));
       const workingStats = parseNumstat(runGit(workDir, ["diff", "--numstat", "-z"]));
+      const hasHead = tryGit(workDir, ["rev-parse", "--verify", "HEAD"]).ok;
+      const effectiveStats = hasHead
+        ? parseNumstat(runGit(workDir, ["diff", "HEAD", "--numstat", "-z"]))
+        : new Map<string, FileStats>();
       const enriched = files.map(file => {
         const safe = resolveSafeProjectFile(workDir, file.path);
         const staged = stagedStats.get(normalizeRepoPath(file.path)) || { additions: 0, deletions: 0, binary: false };
         const working = file.untracked ? untrackedStats(workDir, file.path) : (workingStats.get(normalizeRepoPath(file.path)) || { additions: 0, deletions: 0, binary: false });
+        const indexResidual = isIndexResidual(file);
+        const effective = file.untracked
+          ? working
+          : (effectiveStats.get(normalizeRepoPath(file.path)) || (indexResidual ? { additions: 0, deletions: 0, binary: false } : {
+            additions: staged.additions + working.additions,
+            deletions: staged.deletions + working.deletions,
+            binary: staged.binary || working.binary,
+          }));
         let size = 0;
         try { size = fs.existsSync(safe.absolute) ? fs.statSync(safe.absolute).size : 0; } catch {}
         return {
           ...file,
+          indexResidual,
+          effective: !indexResidual,
           stagedAdditions: staged.additions,
           stagedDeletions: staged.deletions,
           workingAdditions: working.additions,
           workingDeletions: working.deletions,
-          additions: staged.additions + working.additions,
-          deletions: staged.deletions + working.deletions,
-          binary: staged.binary || working.binary,
+          additions: effective.additions,
+          deletions: effective.deletions,
+          binary: effective.binary,
           size,
           large: size > LARGE_FILE_BYTES,
         };
       });
       const branch = runGit(workDir, ["branch", "--show-current"]).trim() || "detached HEAD";
       const summary = buildGitStatusSummary(enriched);
-      const context = buildChangeContext(project, workDir, enriched.map(file => file.path));
-      const repository = inspectGitRemoteState(workDir, enriched.length);
-      sendJson(res, { success: true, branch, files: enriched, total: enriched.length, summary, context, repository });
+      const context = buildChangeContext(project, workDir, enriched.filter(file => !file.indexResidual).map(file => file.path));
+      const repository = {
+        ...inspectGitRemoteState(workDir, enriched.length),
+        changedFiles: summary.total,
+        indexResidualFiles: summary.indexResidual,
+      };
+      sendJson(res, { success: true, branch, files: enriched, total: summary.total, rawTotal: enriched.length, summary, context, repository });
     } catch (error: any) {
       sendJson(res, { success: false, error: "无法读取 Git 工作区: " + (error.stderr || error.message) });
     }
+    return true;
+  }
+
+  if (pathname === "/api/git/index-residuals/cleanup" && req.method === "POST") {
+    readBody(req, res, body => {
+      const project = String(body.project || "").trim();
+      const resolved = projectWorkDir(project);
+      if (!project || !Array.isArray(body.files)) return sendJson(res, { success: false, error: "缺少项目或文件列表" }, 400);
+      if (body.confirmed !== true) return sendJson(res, { success: false, error: "清理索引残留需要用户明确确认", confirmationRequired: true }, 409);
+      if ("error" in resolved) return sendJson(res, { success: false, error: resolved.error }, resolved.status);
+      try {
+        const result = cleanupIndexResiduals(resolved.workDir, body.files);
+        sendJson(res, {
+          success: true,
+          message: `已清理 ${result.cleaned.length} 个暂存区索引残留，本地有效文件未被删除`,
+          cleanedFiles: result.cleaned,
+          remaining: result.remaining.length,
+        });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: "清理索引残留失败: " + safeGitError(error) }, 409);
+      }
+    });
     return true;
   }
 

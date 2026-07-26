@@ -45,7 +45,8 @@ try {
   git(seedDir, ['config', 'user.email', 'selftest@ccm.local'])
   git(seedDir, ['config', 'user.name', 'CCM Selftest'])
   fs.writeFileSync(path.join(seedDir, 'README.md'), '# office project\n')
-  git(seedDir, ['add', 'README.md'])
+  fs.writeFileSync(path.join(seedDir, 'rename-source.txt'), 'rename fixture\n')
+  git(seedDir, ['add', 'README.md', 'rename-source.txt'])
   git(seedDir, ['commit', '-m', 'initial'])
   git(seedDir, ['remote', 'add', 'origin', remoteDir])
   git(seedDir, ['push', '-u', 'origin', 'main'])
@@ -80,7 +81,59 @@ try {
   assert.equal(status.data.repository.branch, 'main')
   assert.equal(status.data.repository.canFetch, true)
   assert.equal(status.data.repository.canPull, true)
-  assert.equal(status.data.repository.canPush, true)
+  assert.equal(status.data.repository.canPush, false)
+  assert.equal(status.data.repository.pushState, 'up_to_date')
+
+  const noOpPush = await post('/api/git/remote-operation', { project, operation: 'push', confirmed: true })
+  assert.equal(noOpPush.data.success, true)
+  assert.equal(noOpPush.data.noop, true)
+  assert.equal(noOpPush.data.outcome, 'up_to_date')
+
+  fs.mkdirSync(path.join(workDir, 'docs'), { recursive: true })
+  git(workDir, ['mv', 'rename-source.txt', 'docs/中文 文件.txt'])
+  fs.appendFileSync(path.join(workDir, 'README.md'), 'staged version\n')
+  git(workDir, ['add', 'README.md'])
+  fs.appendFileSync(path.join(workDir, 'README.md'), 'working version\n')
+  fs.writeFileSync(path.join(workDir, 'staged-then-deleted.txt'), 'temporary\n')
+  git(workDir, ['add', 'staged-then-deleted.txt'])
+  fs.rmSync(path.join(workDir, 'staged-then-deleted.txt'))
+  const detailedStatus = await request(`/api/git/status?project=${encodeURIComponent(project)}`)
+  const renamed = detailedStatus.data.files.find(file => file.path === 'docs/中文 文件.txt')
+  const doubleModified = detailedStatus.data.files.find(file => file.path === 'README.md')
+  const stagedThenDeleted = detailedStatus.data.files.find(file => file.path === 'staged-then-deleted.txt')
+  assert.equal(renamed.originalPath, 'rename-source.txt')
+  assert.equal(renamed.statusText, '已暂存重命名')
+  assert.equal(doubleModified.statusCode, 'MM')
+  assert.equal(doubleModified.statusText, '已暂存修改，工作区又修改')
+  assert.equal(stagedThenDeleted.statusCode, 'AD')
+  assert.equal(stagedThenDeleted.statusText, '已暂存新增，工作区又删除')
+  assert.equal(stagedThenDeleted.indexResidual, true)
+  assert.equal(detailedStatus.data.summary.indexResidual, 1)
+  assert.equal(detailedStatus.data.summary.total, 2)
+  assert.equal(detailedStatus.data.total, 2)
+  assert.equal(detailedStatus.data.rawTotal, 3)
+  assert.equal(detailedStatus.data.repository.changedFiles, 2)
+  assert.equal(detailedStatus.data.repository.indexResidualFiles, 1)
+  const unconfirmedResidualCleanup = await post('/api/git/index-residuals/cleanup', { project, files: ['staged-then-deleted.txt'] })
+  assert.equal(unconfirmedResidualCleanup.response.status, 409)
+  const cleanedResidual = await post('/api/git/index-residuals/cleanup', { project, files: ['staged-then-deleted.txt'], confirmed: true })
+  assert.equal(cleanedResidual.data.success, true)
+  assert.deepEqual(cleanedResidual.data.cleanedFiles, ['staged-then-deleted.txt'])
+  assert.equal(fs.existsSync(path.join(workDir, 'staged-then-deleted.txt')), false)
+  const statusAfterResidualCleanup = await request(`/api/git/status?project=${encodeURIComponent(project)}`)
+  assert.equal(statusAfterResidualCleanup.data.summary.indexResidual, 0)
+  assert.equal(statusAfterResidualCleanup.data.files.some(file => file.path === 'staged-then-deleted.txt'), false)
+  fs.writeFileSync(path.join(workDir, 'staged-then-deleted.txt'), 'temporary\n')
+  git(workDir, ['add', 'staged-then-deleted.txt'])
+  fs.rmSync(path.join(workDir, 'staged-then-deleted.txt'))
+  const noNetCommit = await post('/api/git/commit', { project, message: 'must become a no-op', files: ['staged-then-deleted.txt'], action: 'commit', verification: 'passed', reviewed: true })
+  assert.equal(noNetCommit.data.success, true)
+  assert.equal(noNetCommit.data.outcome, 'no_changes')
+  assert.equal(noNetCommit.data.commit.noop, true)
+  git(workDir, ['add', '-A'])
+  git(workDir, ['commit', '-m', 'status parsing fixtures'])
+  git(workDir, ['push'])
+  git(seedDir, ['pull', '--ff-only'])
 
   const invalidOperation = await post('/api/git/remote-operation', { project, operation: 'force-push', confirmed: true })
   assert.equal(invalidOperation.response.status, 400)
@@ -150,6 +203,10 @@ try {
       createsFolderInsideCurrentDirectory: true,
       rejectsDuplicateTraversalAndReservedNames: true,
       reportsRealRemoteBranchState: true,
+      reportsDetailedDualStateAndRenameFiles: true,
+      separatesAndCleansIndexResiduals: true,
+      resolvesSelectedFilesWithoutNetChanges: true,
+      skipsNoopPushes: true,
       rejectsUnknownAndUnconfirmedOperations: true,
       fetchesRemoteReferences: true,
       pullsFastForwardUpdate: true,

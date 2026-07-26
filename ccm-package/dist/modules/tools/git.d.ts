@@ -9,6 +9,7 @@ export declare function inspectGitRemoteState(workDir: string, changedFiles?: nu
     branch: string;
     detached: boolean;
     upstream: string;
+    comparisonRef: string;
     ahead: number;
     behind: number;
     dirty: boolean;
@@ -17,6 +18,7 @@ export declare function inspectGitRemoteState(workDir: string, changedFiles?: nu
     canPull: boolean;
     canPush: boolean;
     canCommitAndPush: boolean;
+    pushState: string;
     pushTarget: string;
     pullTarget: string;
 };
@@ -25,20 +27,7 @@ export declare function resolveSafeProjectFile(workDir: string, filePath: any): 
     normalized: string;
     absolute: string;
 };
-export declare function parseGitStatus(output: string): {
-    statusText: string;
-    statusColor: string;
-    path: string;
-    originalPath: string;
-    status: string;
-    statusCode: string;
-    indexStatus: string;
-    worktreeStatus: string;
-    staged: boolean;
-    unstaged: boolean;
-    untracked: boolean;
-    conflict: boolean;
-}[];
+export declare function parseGitStatus(output: string): any[];
 export declare function parseNumstat(output: string): Map<string, FileStats>;
 export declare function buildGitStatusSummary(files: any[]): any;
 export declare function validatePatchPaths(patchText: string): string[];

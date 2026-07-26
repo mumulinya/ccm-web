@@ -78,12 +78,27 @@ const checks = {
   workspaceHasIdeaStyleGitActions: ['获取远端', '拉取代码', '推送代码'].every(label => workspace.includes(label))
     && commitPanel.includes("action: 'commit'") && commitPanel.includes("action: 'commit_and_push'")
     && commitPanel.includes('提交并推送'),
+  workspaceKeepsFileAreaAndDiffInSync: workspace.includes(':filter="fileFilter"')
+    && workspace.includes('@filter-change')
+    && workspace.includes('selectFileFromList')
+    && fileListComponent.includes("emit('filter-change', id)"),
+  workspaceSeparatesIndexResiduals: gitModule.includes('indexResidual')
+    && gitModule.includes('/api/git/index-residuals/cleanup')
+    && workspace.includes('cleanupIndexResiduals')
+    && summaryComponent.includes('索引残留')
+    && fileListComponent.includes("id: 'residual'"),
   workspaceHasDiffUtilities: workspace.includes('downloadPatch') && workspace.includes('navigateHunk') && workspace.includes('compactDiff') && workspace.includes("diffMode = 'split'"),
   backendHasWriteGuards: gitModule.includes('resolveSafeProjectFile') && gitModule.includes('validatePatchPaths') && gitModule.includes('"--check"') && gitModule.includes('"--only"'),
   backendSeparatesCommitPushOutcomes: gitModule.includes('committed_and_pushed')
     && gitModule.includes('committed_push_failed')
+    && gitModule.includes('outcome: "no_changes"')
     && gitModule.includes('请明确选择本次要提交的文件')
     && gitModule.includes('authentication_required'),
+  backendBoundsRemoteGitAndKillsProcessTree: gitModule.includes('REMOTE_GIT_TIMEOUT_MS')
+    && gitModule.includes('GCM_INTERACTIVE: "Never"')
+    && gitModule.includes('taskkill')
+    && gitModule.includes('"/T"')
+    && gitModule.includes('remote_timeout'),
   backendHasProvenanceContext: gitModule.includes('buildChangeContext') && gitModule.includes('test-agent-runs') && gitModule.includes('project_recent'),
 }
 
@@ -93,6 +108,21 @@ checks.statusParserKeepsStagedWorkingAndConflictState = parsedStatus.length === 
   && parsedStatus[1].untracked === true && parsedStatus[2].conflict === true
 const numstat = gitExports.parseNumstat('12\t3\tfrontend/src/App.vue\n-\t-\tpublic/logo.png')
 checks.numstatParserKeepsTextAndBinaryStats = numstat.get('frontend/src/App.vue').additions === 12 && numstat.get('public/logo.png').binary === true
+const nulStatus = gitExports.parseGitStatus('R  docs/中文 文件.txt\0rename-source.txt\0MM README.md\0AD temp.txt\0')
+checks.nulStatusParserKeepsRenameAndDualState = nulStatus.length === 3
+  && nulStatus[0].path === 'docs/中文 文件.txt' && nulStatus[0].originalPath === 'rename-source.txt'
+  && nulStatus[1].statusText === '已暂存修改，工作区又修改'
+  && nulStatus[2].statusText === '已暂存新增，工作区又删除'
+const residualSummary = gitExports.buildGitStatusSummary([
+  { path: 'src/app.ts', staged: false, unstaged: true, untracked: false, conflict: false, additions: 2, deletions: 1 },
+  { path: 'dist/stale.js', staged: true, unstaged: true, indexResidual: true, additions: 0, deletions: 0 },
+])
+checks.summaryExcludesIndexResidualsFromEffectiveChanges = residualSummary.total === 1
+  && residualSummary.unstaged === 1
+  && residualSummary.indexResidual === 1
+const nulNumstat = gitExports.parseNumstat('1\t2\t\0rename-source.txt\0docs/中文 文件.txt\0')
+checks.nulNumstatParserUsesRenameDestination = nulNumstat.get('docs/中文 文件.txt')?.additions === 1
+  && nulNumstat.get('docs/中文 文件.txt')?.deletions === 2
 checks.pathGuardRejectsTraversal = (() => { try { gitExports.resolveSafeProjectFile(root, '../secret.txt'); return false } catch { return true } })()
 checks.patchGuardRejectsTraversal = (() => { try { gitExports.validatePatchPaths('--- a/../secret.txt\n+++ b/../secret.txt\n@@ -1 +1 @@\n-a\n+b'); return false } catch { return true } })()
 const sampleHunks = [{ header: '@@ -1,2 +1,2 @@', oldStart: 1, newStart: 1, changes: [{ type: 'remove', content: 'const value = 1' }, { type: 'add', content: 'const value = 2' }, { type: 'context', content: 'return value' }] }]

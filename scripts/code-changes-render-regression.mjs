@@ -16,6 +16,7 @@ const files = [
   { path: 'frontend/src/components/tools/CodeChanges.vue', status: 'M', statusCode: ' M', statusText: '已修改', statusColor: '#2563eb', staged: false, unstaged: true, untracked: false, conflict: false, additions: 86, deletions: 31, workingAdditions: 86, workingDeletions: 31 },
   { path: 'backend/modules/tools/git.ts', status: 'MM', statusCode: 'MM', statusText: '已修改', statusColor: '#2563eb', staged: true, unstaged: true, untracked: false, conflict: false, additions: 48, deletions: 12, stagedAdditions: 21, stagedDeletions: 4, workingAdditions: 27, workingDeletions: 8 },
   { path: 'docs/code-changes.md', status: '??', statusCode: '??', statusText: '未跟踪', statusColor: '#0f766e', staged: false, unstaged: true, untracked: true, conflict: false, additions: 44, deletions: 0, workingAdditions: 44, workingDeletions: 0 },
+  { path: 'ccm-package/public/assets/stale-build.js', status: 'AD', statusCode: 'AD', statusText: '已暂存新增，工作区又删除', statusColor: '#dc2626', staged: true, unstaged: true, untracked: false, conflict: false, indexResidual: true, effective: false, additions: 0, deletions: 0, stagedAdditions: 12, stagedDeletions: 0, workingAdditions: 0, workingDeletions: 12 },
   ...Array.from({ length: 36 }, (_, index) => ({
     path: `modules/service-${String(index + 1).padStart(2, '0')}/src/feature-${index + 1}.ts`,
     status: 'M', statusCode: ' M', statusText: '已修改', statusColor: '#2563eb',
@@ -23,6 +24,7 @@ const files = [
     additions: index + 2, deletions: index % 4, workingAdditions: index + 2, workingDeletions: index % 4,
   })),
 ]
+const effectiveFileCount = files.filter(file => !file.indexResidual).length
 const raw = `diff --git a/frontend/src/components/tools/CodeChanges.vue b/frontend/src/components/tools/CodeChanges.vue\nindex 123..456 100644\n--- a/frontend/src/components/tools/CodeChanges.vue\n+++ b/frontend/src/components/tools/CodeChanges.vue\n@@ -10,3 +10,4 @@\n const files = ref([])\n-const message = ref('提交')\n+const message = ref('检查并提交')\n+const preview = ref(null)\n const branch = ref('main')`
 const hunks = [{ header: '@@ -10,83 +10,84 @@', oldStart: 10, oldLines: 83, newStart: 10, newLines: 84, context: '', changes: [{ type: 'context', content: 'const files = ref([])' }, { type: 'remove', content: "const message = ref('提交')" }, { type: 'add', content: "const message = ref('检查并提交')" }, { type: 'add', content: 'const preview = ref(null)' }, ...Array.from({ length: 80 }, (_, index) => ({ type: 'context', content: `const retainedLine${index + 1} = '用于验证独立 Diff 滚动区域'` })), { type: 'context', content: "const branch = ref('main')" }] }]
 
@@ -30,22 +32,26 @@ const json = body => ({ status: 200, contentType: 'application/json', body: JSON
 const prepare = async page => {
   page.on('pageerror', error => report.errors.push(`page: ${error.message}`))
   page.on('console', message => { if (message.type() === 'error') report.errors.push(`console: ${message.text()}`) })
+  page.on('response', response => {
+    if (response.status() >= 400) report.errors.push(`http ${response.status()}: ${response.url()}`)
+  })
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
   await page.route('**/api/auth/session', route => route.fulfill(json({ success: true, authenticated: true, user: { username: 'selftest' } })))
   await page.route('**/api/pets/agents', route => route.fulfill(json({ success: true, agents: [] })))
   await page.route('**/api/status/stream**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
+  await page.route('**/api/runtime/events**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
   await page.route('**/api/usability/workbench/stream**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
   await page.route('**/api/usability/workbench', route => route.fulfill(json({ success: true, snapshot: {} })))
   await page.route('**/api/music/remote-command', route => route.fulfill(json({ success: true, commands: [] })))
   await page.route('**/api/projects', route => route.fulfill(json({ projects: [{ name: 'coordinator', running: true }] })))
-  await page.route('**/api/git/status*', route => route.fulfill(json({ success: true, branch: 'feature/code-workbench', files, summary: { total: files.length, additions: 178, deletions: 43, staged: 1, unstaged: files.length, untracked: 1, conflicts: 0, modules: ['frontend', 'backend', 'docs', 'modules'], riskLevel: 'medium', warnings: ['1 个未跟踪文件需要确认'] }, repository: { remoteUrl: 'https://github.com/example/ccm.git', remoteName: 'origin', branch: 'feature/code-workbench', upstream: 'origin/feature/code-workbench', pushTarget: 'origin/feature/code-workbench', ahead: 2, behind: 1, dirty: true, changedFiles: files.length, canFetch: true, canPull: false, canPush: true, canCommitAndPush: true }, context: { attribution: 'exact', tasks: [{ taskId: 'task-code-workbench', title: '完善代码变更工作台', status: 'in_progress', agent: 'codex', traceId: 'trace-code-workbench', exactFiles: files.map(file => file.path), association: 'exact', verification: ['npm run build:frontend'] }], latestTestAgent: { status: 'passed', recommendation: 'accept', summary: '浏览器与接口检查通过', browserChecks: 4 } } })))
+  await page.route('**/api/git/status*', route => route.fulfill(json({ success: true, branch: 'feature/code-workbench', files, summary: { total: effectiveFileCount, additions: 178, deletions: 43, staged: 1, unstaged: effectiveFileCount, untracked: 1, indexResidual: 1, conflicts: 0, modules: ['frontend', 'backend', 'docs', 'modules'], riskLevel: 'medium', warnings: ['1 个索引残留已单独归类'] }, repository: { remoteUrl: 'https://github.com/example/ccm.git', remoteName: 'origin', branch: 'feature/code-workbench', upstream: 'origin/feature/code-workbench', pushTarget: 'origin/feature/code-workbench', ahead: 2, behind: 1, dirty: true, changedFiles: effectiveFileCount, indexResidualFiles: 1, canFetch: true, canPull: false, canPush: true, canCommitAndPush: true }, context: { attribution: 'exact', tasks: [{ taskId: 'task-code-workbench', title: '完善代码变更工作台', status: 'in_progress', agent: 'codex', traceId: 'trace-code-workbench', exactFiles: files.filter(file => !file.indexResidual).map(file => file.path), association: 'exact', verification: ['npm run build:frontend'] }], latestTestAgent: { status: 'passed', recommendation: 'accept', summary: '浏览器与接口检查通过', browserChecks: 4 } } })))
   await page.route('**/api/git/remote-operation', async route => route.fulfill(json({ success: true, message: '远端引用已拉取', operation: 'fetch' })))
   await page.route('**/api/git/diff*', route => route.fulfill(json({ success: true, raw, hunks, additions: 2, deletions: 1 })))
   await page.route('**/api/git/commit-preview', route => route.fulfill(json({ success: true, preview: { files: [files[0], files[1]], outsideStaged: ['README.md'], conflicts: [], blocked: false, warnings: ['暂存区还有 1 个未选文件，本次不会提交'] } })))
   await page.route('**/api/git/log*', route => route.fulfill(json({ success: true, commits: [{ hash: 'abcdef123', shortHash: 'abcdef1', author: 'CCM', timestamp: '2026-07-14T08:00:00.000Z', message: 'feat: 完善代码变更工作台' }] })))
   await page.goto(`${baseUrl}/?tab=changes`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.locator('.code-changes-workbench').waitFor({ timeout: 20_000 })
-  await page.getByText(`${files.length} 个文件等待处理`, { exact: true }).waitFor()
+  await page.getByText(`${effectiveFileCount} 个文件等待处理`, { exact: true }).waitFor()
   await page.locator('[data-page-loading="changes"]').waitFor({ state: 'detached', timeout: 10_000 })
 }
 const noOverflow = async (page, label) => {
@@ -157,6 +163,12 @@ try {
   assert.equal(await desktop.locator('.repository-state').getByText('本地领先', { exact: false }).isVisible(), true)
   assert.equal(await desktop.getByRole('button', { name: '拉取代码' }).isDisabled(), true)
   await desktop.getByRole('button', { name: '获取远端' }).click()
+  assert.equal(await desktop.getByText('1 个索引残留', { exact: true }).isVisible(), true)
+  await desktop.locator('.index-residual-notice').getByRole('button', { name: '查看' }).click()
+  assert.equal(await desktop.getByRole('button', { name: '索引 1' }).getAttribute('class').then(value => value.includes('active')), true)
+  assert.equal(await desktop.getByRole('checkbox', { name: '选择 ccm-package/public/assets/stale-build.js' }).isDisabled(), true)
+  await desktop.getByRole('button', { name: `全部 ${effectiveFileCount}` }).click()
+  report.checks.push({ name: 'IDEA-style effective changes stay separate from staged index residuals', pass: true })
   report.checks.push({ name: 'desktop renders repository sync controls, branch state, task attribution and TestAgent verification', pass: true })
   await capture(desktop, 'desktop-change-overview')
 
@@ -195,7 +207,7 @@ try {
   assert.equal(mobilePaneContract.fileOverflow, 'auto')
   assert.equal(mobilePaneContract.diffOverflow, 'auto')
   assert.ok(Math.abs(mobilePaneContract.fileHeight - mobilePaneContract.diffHeight) <= 1, JSON.stringify(mobilePaneContract))
-  assert.equal(await mobile.getByText(`${files.length} 个文件等待处理`, { exact: true }).isVisible(), true)
+  assert.equal(await mobile.getByText(`${effectiveFileCount} 个文件等待处理`, { exact: true }).isVisible(), true)
   assert.equal(await mobile.locator('.file-scroll').isVisible(), true)
   assert.equal(await mobile.locator('.grouping-switch').getByRole('button', { name: '目录' }).isVisible(), true)
   assert.equal(await mobile.getByTitle('左右对比').isVisible(), false)

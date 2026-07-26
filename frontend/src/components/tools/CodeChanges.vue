@@ -24,9 +24,11 @@ const changeContext = ref({ tasks: [], latestTestAgent: null, attribution: 'none
 const selectedFile = ref('')
 const selectedFiles = ref(new Set())
 const showStaged = ref(false)
+const fileFilter = ref('all')
 const statusLoading = ref(false)
 const statusError = ref('')
 const remoteBusy = ref('')
+const residualCleanupBusy = ref(false)
 
 const diffRaw = ref('')
 const diffHunks = ref([])
@@ -55,6 +57,15 @@ const selectedAreaStats = computed(() => {
   return showStaged.value
     ? { additions: file.stagedAdditions || 0, deletions: file.stagedDeletions || 0 }
     : { additions: file.workingAdditions || 0, deletions: file.workingDeletions || 0 }
+})
+const indexResidualFiles = computed(() => files.value.filter(file => file.indexResidual))
+
+const filesForFilter = filter => files.value.filter(file => {
+  if (filter === 'staged') return file.staged && !file.indexResidual
+  if (filter === 'working') return file.unstaged && !file.indexResidual
+  if (filter === 'residual') return file.indexResidual
+  if (filter === 'conflict') return file.conflict
+  return !file.indexResidual
 })
 
 const fetchJson = async (url, options) => {
@@ -123,10 +134,25 @@ const loadGitStatus = async ({ preserveSelection = false } = {}) => {
     summary.value = data.summary || {}
     repository.value = data.repository || {}
     changeContext.value = data.context || { tasks: [], latestTestAgent: null, attribution: 'none' }
-    selectedFiles.value = new Set([...selectedFiles.value].filter(file => files.value.some(item => item.path === file)))
-    const nextFile = files.value.some(file => file.path === previousFile) ? previousFile : files.value[0]?.path || ''
+    selectedFiles.value = new Set([...selectedFiles.value].filter(file => files.value.some(item => item.path === file && !item.indexResidual)))
+    let areaFiles = filesForFilter(fileFilter.value)
+    if (!areaFiles.length) {
+      const alternateFilter = fileFilter.value === 'staged' ? 'working' : 'all'
+      const alternateFiles = filesForFilter(alternateFilter)
+      if (alternateFiles.length) {
+        fileFilter.value = alternateFilter
+        showStaged.value = false
+        areaFiles = alternateFiles
+      }
+    }
+    const nextFile = areaFiles.some(file => file.path === previousFile) ? previousFile : areaFiles[0]?.path || ''
     selectedFile.value = nextFile
-    if (nextFile) await loadDiff(nextFile)
+    if (nextFile) {
+      const file = files.value.find(item => item.path === nextFile)
+      if (file?.indexResidual || file?.staged && !file.unstaged) showStaged.value = true
+      else if (file?.unstaged && !file.staged) showStaged.value = false
+      await loadDiff(nextFile)
+    }
     else resetDiff()
   } catch (error) {
     files.value = []
@@ -146,6 +172,7 @@ const loadGitStatus = async ({ preserveSelection = false } = {}) => {
 const changeProject = () => {
   selectedFiles.value = new Set()
   showStaged.value = false
+  fileFilter.value = 'all'
   loadGitStatus()
 }
 
@@ -155,6 +182,8 @@ const remoteOperationTitle = operation => {
   if (repository.value?.detached && operation !== 'fetch') return 'detached HEAD 不能更新或推送分支'
   if (operation === 'fetch') return '获取 origin 的最新分支和引用，不修改本地文件'
   if (operation === 'pull') return '拉取远端提交并使用 fast-forward only 更新当前分支'
+  if (repository.value?.behind) return '远端包含本地没有的提交，请先拉取代码'
+  if (repository.value?.pushState === 'up_to_date') return '当前没有待推送的本地提交'
   return repository.value?.upstream ? '推送当前分支中已经提交的代码' : '首次推送当前分支并设置 upstream'
 }
 
@@ -185,22 +214,74 @@ const runRemoteOperation = async operation => {
 }
 
 const toggleSelectedFile = filePath => {
+  if (files.value.find(file => file.path === filePath)?.indexResidual) {
+    toast.info('索引残留不进入普通提交，请使用“清理索引残留”')
+    return
+  }
   const next = new Set(selectedFiles.value)
   next.has(filePath) ? next.delete(filePath) : next.add(filePath)
   selectedFiles.value = next
 }
 
 const toggleVisibleFiles = visibleFiles => {
+  const selectableFiles = visibleFiles.filter(file => !file.indexResidual)
+  if (!selectableFiles.length) return toast.info('索引残留不进入普通提交，请使用“清理索引残留”')
   const next = new Set(selectedFiles.value)
-  const allSelected = visibleFiles.every(file => next.has(file.path))
-  visibleFiles.forEach(file => allSelected ? next.delete(file.path) : next.add(file.path))
+  const allSelected = selectableFiles.every(file => next.has(file.path))
+  selectableFiles.forEach(file => allSelected ? next.delete(file.path) : next.add(file.path))
   selectedFiles.value = next
 }
 
 const selectArea = staged => {
-  if (showStaged.value === staged) return
+  const targetFilter = staged ? 'staged' : 'working'
+  if (showStaged.value === staged && fileFilter.value === targetFilter && selectedFileInfo.value?.[staged ? 'staged' : 'unstaged']) return
   showStaged.value = staged
-  if (selectedFile.value) loadDiff(selectedFile.value)
+  fileFilter.value = targetFilter
+  const areaFiles = filesForFilter(fileFilter.value)
+  const nextFile = areaFiles.some(file => file.path === selectedFile.value) ? selectedFile.value : areaFiles[0]?.path || ''
+  selectedFile.value = nextFile
+  if (nextFile) loadDiff(nextFile)
+  else resetDiff()
+}
+
+const selectFileFromList = filePath => {
+  const file = files.value.find(item => item.path === filePath)
+  if (file?.indexResidual || file?.staged && !file.unstaged) showStaged.value = true
+  else if (file?.unstaged && !file.staged) showStaged.value = false
+  loadDiff(filePath)
+}
+
+const changeFileFilter = filter => {
+  fileFilter.value = filter
+  if (filter === 'staged' || filter === 'residual') showStaged.value = true
+  else if (filter === 'working') showStaged.value = false
+  const nextFile = filesForFilter(filter)[0]?.path || ''
+  selectedFile.value = nextFile
+  if (nextFile) selectFileFromList(nextFile)
+  else resetDiff()
+}
+
+const cleanupIndexResiduals = async () => {
+  const residuals = indexResidualFiles.value
+  if (!residuals.length || residualCleanupBusy.value) return
+  const approved = await confirmDialog(`将清理 ${residuals.length} 个暂存区索引残留。这只会取消这些已不存在文件的暂存记录，不会删除当前本地有效文件。是否继续？`)
+  if (!approved) return
+  residualCleanupBusy.value = true
+  try {
+    const data = await fetchJson('/api/git/index-residuals/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: selectedProject.value, files: residuals.map(file => file.path), confirmed: true }),
+    })
+    toast.success(data.message || '索引残留已清理')
+    fileFilter.value = 'all'
+    showStaged.value = false
+    await loadGitStatus()
+  } catch (error) {
+    toast.error(error.message || '索引残留清理失败')
+  } finally {
+    residualCleanupBusy.value = false
+  }
 }
 
 const copyText = async (value, message) => {
@@ -292,6 +373,8 @@ const commitChanges = async ({ verification, action = 'commit' }) => {
     if (data.partialSuccess) {
       const suggestion = data.push?.suggestion ? `；${data.push.suggestion}` : ''
       toast.warning(`${data.message}：${data.push?.error || '远端推送失败'}${suggestion}`)
+    } else if (data.outcome === 'no_changes') {
+      toast.info(data.message || '所选文件没有可提交内容')
     } else {
       toast.success(data.message || `提交成功 ${data.hash || ''}`.trim())
     }
@@ -352,7 +435,9 @@ onMounted(loadProjects)
       <div class="repository-state" aria-label="分支同步状态">
         <span :class="{ active: repository.behind }">远端领先 <strong>{{ repository.behind || 0 }}</strong></span>
         <span :class="{ active: repository.ahead }">本地领先 <strong>{{ repository.ahead || 0 }}</strong></span>
-        <span :class="{ warning: repository.dirty }">{{ repository.dirty ? `${repository.changedFiles || 0} 个未提交文件` : '工作区干净' }}</span>
+        <span :class="{ warning: repository.dirty }">
+          {{ repository.dirty ? `${repository.changedFiles || 0} 个变更${repository.indexResidualFiles ? ` · ${repository.indexResidualFiles} 个索引残留` : ''}` : '工作区干净' }}
+        </span>
       </div>
       <div class="repository-actions">
         <button :title="remoteOperationTitle('fetch')" :disabled="remoteBusy || !repository.canFetch" @click="runRemoteOperation('fetch')">
@@ -367,11 +452,20 @@ onMounted(loadProjects)
       </div>
     </section>
 
-    <CodeChangeSummary :summary="summary" :context="changeContext" :branch="branch" :loading="statusLoading" @open-replay="openReplay" />
+    <CodeChangeSummary
+      :summary="summary"
+      :context="changeContext"
+      :branch="branch"
+      :loading="statusLoading"
+      :residual-cleanup-busy="residualCleanupBusy"
+      @open-replay="openReplay"
+      @view-residuals="changeFileFilter('residual')"
+      @cleanup-residuals="cleanupIndexResiduals"
+    />
     <div v-if="statusError" class="status-error"><ShieldAlert :size="16" />{{ statusError }}</div>
 
     <div class="changes-layout">
-      <CodeChangeFileList :files="files" :selected-path="selectedFile" :checked-paths="selectedFiles" @select="loadDiff" @toggle="toggleSelectedFile" @toggle-visible="toggleVisibleFiles" />
+      <CodeChangeFileList :files="files" :selected-path="selectedFile" :checked-paths="selectedFiles" :filter="fileFilter" @select="selectFileFromList" @filter-change="changeFileFilter" @toggle="toggleSelectedFile" @toggle-visible="toggleVisibleFiles" />
       <section class="diff-pane">
         <header class="diff-toolbar">
           <div class="file-title"><FileDiff :size="15" /><strong :title="selectedFile">{{ selectedFile || '选择文件查看差异' }}</strong><span v-if="selectedFile" class="line-stats"><b>+{{ selectedAreaStats.additions }}</b><i>-{{ selectedAreaStats.deletions }}</i></span></div>
