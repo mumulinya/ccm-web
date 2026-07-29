@@ -21,14 +21,14 @@ export declare function runTestAgentPlaywrightAuthenticationSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -36,6 +36,8 @@ export declare function runTestAgentPlaywrightAuthenticationSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -46,9 +48,8 @@ export declare function runTestAgentPlaywrightAuthenticationSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -70,14 +71,14 @@ export declare function runTestAgentPlaywrightAuthenticationSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -85,6 +86,8 @@ export declare function runTestAgentPlaywrightAuthenticationSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -95,9 +98,8 @@ export declare function runTestAgentPlaywrightAuthenticationSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     validation: import("..").TestAgentWorkOrderContractValidation;
@@ -120,14 +122,14 @@ export declare function runTestAgentPlaywrightMultiSessionAuthenticationSelfTest
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -135,6 +137,8 @@ export declare function runTestAgentPlaywrightMultiSessionAuthenticationSelfTest
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -145,9 +149,8 @@ export declare function runTestAgentPlaywrightMultiSessionAuthenticationSelfTest
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -166,14 +169,14 @@ export declare function runTestAgentPlaywrightMultiSessionAuthenticationSelfTest
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -181,6 +184,8 @@ export declare function runTestAgentPlaywrightMultiSessionAuthenticationSelfTest
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -191,9 +196,8 @@ export declare function runTestAgentPlaywrightMultiSessionAuthenticationSelfTest
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     validation: import("..").TestAgentWorkOrderContractValidation;

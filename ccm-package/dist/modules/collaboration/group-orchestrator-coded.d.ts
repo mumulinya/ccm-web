@@ -15,7 +15,7 @@ export declare function buildGroupRagContext(group: any, input: {
     sharedFilesContext?: string;
 }): {
     context: string;
-    citations: string[];
+    citations: any[];
     scoped: boolean;
 };
 export declare function withGroupRagContext<T extends {

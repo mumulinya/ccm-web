@@ -124,7 +124,7 @@ export declare function explainIndependentReviewTriggerDecision(task: any, actua
 };
 export declare function taskChangeNeedsIndependentReview(task: any, actualFileChanges?: any[]): boolean;
 export declare function formatIndependentReviewGateUserDetail(gate?: any): string;
-export declare function independentReviewVerdictState(value: any): "failed" | "passed" | "unknown" | "needs_user" | "needs_recheck" | "needs_environment";
+export declare function independentReviewVerdictState(value: any): "failed" | "unknown" | "passed" | "needs_user" | "needs_recheck" | "needs_environment";
 export declare function parseIndependentReviewLine(value: any): any;
 export declare function collectIndependentReviewEvidence(receipts?: any[], agentQa?: any[]): any[];
 export declare function buildIndependentReviewGate(task: any, actualFileChanges?: any[], receipts?: any[], agentQa?: any[]): any;

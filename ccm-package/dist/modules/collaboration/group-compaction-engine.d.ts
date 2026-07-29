@@ -8,6 +8,15 @@ export declare function buildCompactionTimeline(messages: any[]): {
 export declare function extractJsonObject(text: string): any;
 export declare function normalizeOpenAiUrl(value: string): string;
 export declare function normalizeAnthropicUrl(value: string): string;
+export declare function normalizeGeminiCompactUrl(value: string, model: string): string;
+export declare function callCompactionModelOnce(config: any, system: string, user: string, maxOutputTokens: number, attemptTimeoutMs: number): Promise<{
+    summary: any;
+    usage: any;
+    provider: string;
+    model: string;
+    responseId: string;
+    stopReason: string;
+}>;
 export declare function callCompactionModel(config: any, system: string, user: string, maxOutputTokens?: number): Promise<any>;
 export declare function fitCompactionPromptToTokenBudget(system: string, user: string, maxInputTokens: number): {
     user: string;
@@ -435,17 +444,8 @@ export declare function compactGroupConversationMemory(input: {
         safe_render_chars: number;
         payload_checksum: any;
         model_visible_payload: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
-        shared_gate: {
-            schema: string;
-            status: string;
-            providerCallAllowed: boolean;
-            afterTokens: number;
-            threshold: number;
-            remainingTokens: number;
-            payloadChecksum: string;
-            fixedContextChecksum: string;
-            tokenBreakdown: Record<string, number>;
-        };
+        shared_gate: any;
+        formal_recompaction: any;
     };
     partialCompacted?: undefined;
     partialCompact?: undefined;

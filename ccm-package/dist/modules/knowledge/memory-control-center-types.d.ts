@@ -32,7 +32,14 @@ export declare function now(): string;
 export declare function compactMemoryCenterText(value: any, maxLength?: number): string;
 export declare function ensureDir(): void;
 export declare function readJson(file: string, fallback: any): any;
+/**
+ * 控制中心的共享状态文件（overrides/quality 等）与记忆域其余部分保持一致：
+ * 走 core/atomic-json-file 的落盘实现（fsync + .bak 备份 + Windows 重命名重试）。
+ * 注意：本函数只保证「写」原子，读改写序列必须由调用方用 withMemoryCenterFileLock 包住。
+ */
 export declare function writeJsonAtomic(file: string, value: any): void;
+/** 读改写临界区：避免并发的 pin/edit/deprecate 互相覆盖。 */
+export declare function withMemoryCenterFileLock<T>(file: string, operation: () => T): T;
 export declare function hash(value: any, length?: number): string;
 export declare function canonicalFleetValue(value: any): any;
 export declare function cleanId(value: any): string;

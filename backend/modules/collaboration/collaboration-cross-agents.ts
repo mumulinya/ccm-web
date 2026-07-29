@@ -38,6 +38,9 @@ import {
 import {
   runNativeTestAgentDispatchBranch,
 } from "./collaboration-cross-agents-part-02-part-02-native-test";
+import {
+  isTaskCancellationRequested,
+} from "../../agents/execution-kernel";
 
 // ===== merged from collaboration-cross-agents.ts =====
 
@@ -179,7 +182,29 @@ export async function processCrossAgents(
   const getBlockingDependencyFn = (mention: any) => getBlockingDependency(mention, uniqueMentions, dependencyStates);
   const skipMentionDueToDependencyFn = (mention: any, dependency: any) => skipMentionDueToDependency(mention, dependency, { groupId, planMessageId, taskId, streamRes, formatCollectedAgentOutput, updateTaskWorkItemFromReceipt, emitAssignmentStatus, addTaskLog, updateGroupMemory, appendGroupMessage, writeSse });
   const crossEnv: CrossAgentEnv = { deps, groupId, group, sourceProject, output, configs, ctx, streamRes, depth, seenMentions, executionOrder, planMessageId, taskId, sourceTask, completedOutputsByAgent, processCrossAgents };
-  const executeMentionJob = (mention: any) => executeMentionJobImpl(mention, crossEnv);
+  // 取消守卫：requestTaskCancellation 只能杀死"当前"子 Agent 进程；
+  // 串行/依赖派发循环若不在迭代边界检查取消标记，会在被杀进程返回后继续派发剩余成员。
+  // 包在 executeMentionJob 上让三个派发分支（依赖拓扑、串行分层、并行）统一止血。
+  let cancellationNoticed = false;
+  const executeMentionJob = async (mention: any): Promise<string[]> => {
+    if (taskId && isTaskCancellationRequested(taskId)) {
+      const targetName = getMentionTargetName(mention) || "";
+      if (!cancellationNoticed) {
+        cancellationNoticed = true;
+        addTaskLog(taskId, "warning", `任务已被取消，停止派发剩余子 Agent（首个跳过：${targetName}）`);
+        appendTaskTimelineEvent(taskId, {
+          type: "dispatch_cancelled",
+          title: "取消后停止派发",
+          detail: "用户已取消任务，剩余子 Agent 不再派发",
+          status: "warn",
+          phase: "dispatching",
+          agent: sourceProject,
+        });
+      }
+      return [`【${targetName}】\n- 状态：cancelled\n- 摘要: 任务已被用户取消，本子 Agent 未派发`];
+    }
+    return executeMentionJobImpl(mention, crossEnv);
+  };
   const hasExplicitDependencies = uniqueMentions.some((mention: any) => typeof mention !== "string" && String(mention.dependsOn || "").trim());
 
   if (hasExplicitDependencies) {
@@ -2516,7 +2541,7 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
           appendTaskTimelineEvent(taskId, { type: "permission_drift", title: `${targetName} 权限漂移已自动恢复`, detail, status: "warn", phase: "reworking", agent: targetName, data: { runtime: activeRuntime, session_id: activeTaskSession?.id || "", native_session_id: targetNativeSessionId || "" } });
           if (laneExecutionId) transitionExecution(laneExecutionId, "spawning", detail, { name: "permission.drift", status: "warning", failureClass: "permission", data: { runtime: activeRuntime } });
         }
-        const failedAttempt = !targetSessionSucceeded || checkTaskFailure(attemptOutput);
+        const failedAttempt = !targetSessionSucceeded;
         const effectiveFailedAttempt = failedAttempt || permissionDrift;
         if (activeInvocationEdge) {
           activeInvocationEdge = completeTaskAgentInvocationEdge(activeInvocationEdge, {

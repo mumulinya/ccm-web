@@ -1,9 +1,11 @@
 <script setup>
 import { FileImage, FileText, Paperclip, Upload, X } from '@lucide/vue'
+import OnlineDocumentReferences from './OnlineDocumentReferences.vue'
 
 const props = defineProps({
   files: { type: Array, default: () => [] },
   existing: { type: Array, default: () => [] },
+  text: { type: String, default: '' },
 })
 const emit = defineEmits(['update:files', 'remove-existing'])
 
@@ -50,8 +52,8 @@ defineExpose({ appendFiles })
       </div>
       <button type="button" class="task-attachment-button" @click="$refs.fileInput.click()"><Upload :size="14" />选择文件</button>
     </div>
-    <div v-if="existing.length || files.length" class="task-attachment-list">
-      <article v-for="item in existing" :key="`existing-${item.id}`" class="task-attachment-row">
+    <div v-if="existing.some(item => !item.url) || files.length" class="task-attachment-list">
+      <article v-for="item in existing.filter(item => !item.url)" :key="`existing-${item.id}`" class="task-attachment-row">
         <FileImage v-if="item.type === 'image'" :size="16" />
         <FileText v-else :size="16" />
         <span><strong>{{ item.name }}</strong><small>{{ formatSize(item.size) }} · {{ item.readable ? '已解析' : item.status === 'failed' ? '解析失败，执行时按原文件核验' : '已保存' }}</small></span>
@@ -64,7 +66,8 @@ defineExpose({ appendFiles })
         <button type="button" title="移除附件" aria-label="移除附件" @click="removeFile(index)"><X :size="14" /></button>
       </article>
     </div>
-    <small class="task-attachment-limit">最多 10 个，单文件 25 MB，总计 60 MB；支持图片、PDF、Office、文本和代码文件。</small>
+    <OnlineDocumentReferences :text="text" :sources="existing" pending-label="保存时读取" />
+    <small class="task-attachment-limit">最多 10 项，单文件 25 MB，总计 60 MB；支持图片、PDF、Office、文本、代码文件和在线文档链接。</small>
   </section>
 </template>
 

@@ -18,6 +18,7 @@ import {
   testAgentProvider,
 } from "./agent-provider-settings";
 import { publicDevelopmentAgentCatalog } from "../../agents/catalog";
+import { loadTestAgentSettings, saveTestAgentSettings } from "./test-agent-settings";
 
 const startedAt = new Date().toISOString();
 
@@ -54,6 +55,18 @@ export function handleSystemSettingsApi(pathname: string, req: IncomingMessage, 
         entries: credentials.entries,
       },
     });
+    return true;
+  }
+
+  if (pathname === "/api/system/test-agent" && req.method === "GET") {
+    sendJson(res, { success: true, settings: loadTestAgentSettings() });
+    return true;
+  }
+
+  if (pathname === "/api/system/test-agent" && req.method === "POST") {
+    readJsonBody(req)
+      .then(payload => sendJson(res, { success: true, settings: saveTestAgentSettings(payload) }))
+      .catch((error: any) => sendJson(res, { success: false, error: error?.message || "保存 TestAgent 设置失败" }, 400));
     return true;
   }
 

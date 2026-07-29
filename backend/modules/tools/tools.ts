@@ -24,6 +24,7 @@ import {
 } from "../../core/utils";
 import {
   loadMetrics,
+  queryMetricEvents,
   saveMetrics,
   loadProjectConfigs,
   loadMcpTools,
@@ -72,6 +73,7 @@ import {
   buildInternalMcpCatalog,
   isInternalMcpName,
 } from "../../tools/internal-mcp-registry";
+import { loadGlobalAgentToolAuthorization } from "../global/global-agent-tool-authorization";
 
 // ===== merged from tools-part-01-part-01.ts =====
 
@@ -1534,6 +1536,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         ? loadLatestRuntimeToolReadiness(240, { businessOnly: true })
         : [];
       const inventory = buildToolAuthorizationInventory({
+        globalAuthorization: loadGlobalAgentToolAuthorization(),
         projects: loadProjectConfigs(),
         groups: loadGroups(),
         runtimeReadiness,
@@ -1853,6 +1856,24 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   }
 
   // === 性能监控指标 ===
+  if (pathname === "/api/metrics/events" && req.method === "GET") {
+    const metrics = loadMetrics();
+    const scopeType = String(parsed.query.scope_type || parsed.query.scopeType || "");
+    const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "");
+    const result = queryMetricEvents(metrics, {
+      scopeType,
+      scopeId,
+      days: parsed.query.days,
+      status: parsed.query.status,
+      page: parsed.query.page,
+      pageSize: parsed.query.page_size || parsed.query.pageSize,
+      fromDate: parsed.query.from,
+      toDate: parsed.query.to,
+    });
+    sendJson(res, { success: true, ...result });
+    return true;
+  }
+
   if (pathname === "/api/metrics" && req.method === "GET") {
     const metrics = loadMetrics();
     const groups = loadGroups().map((group: any) => {

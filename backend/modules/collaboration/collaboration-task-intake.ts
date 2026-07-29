@@ -70,6 +70,7 @@ import { buildMainAgentDisplayStream, sanitizeMainAgentUserText } from "./displa
 import {
   buildProjectCodeReadOnlySnapshot as buildProjectCodeReadOnlySnapshotBase,
   buildGroupProjectAnalysisContext as buildGroupProjectAnalysisContextBase,
+  buildModelDrivenGroupPlanningSourceContext,
 } from "./project-analysis";
 
 import {
@@ -773,7 +774,7 @@ export function classifyPlanModeRisk(message: string, group: any, taskIntent: an
 }
 
 export function buildPlanModeClarificationQuestions(message: string, risk: any = {}, selectedProjects: string[] = []) {
-  const text = String(message || "");
+  void message;
   const signals = risk?.signals || {};
   const questions: any[] = [];
   const add = (id: string, question: string, reason: string, examples: string[] = []) => {
@@ -812,23 +813,15 @@ export function buildPlanModeClarificationQuestions(message: string, risk: any =
       ["不允许删除，只标记废弃", "允许删除测试数据", "需要先备份"],
     );
   }
-  if (/支付|权限|登录|订单|生产|线上|部署/i.test(text)) {
-    add(
-      "acceptance_focus",
-      "你最关心的验收结果是什么？",
-      "关键业务流程需要明确成功标准，避免只改代码但没覆盖真实目标。",
-      ["登录刷新后保持状态", "支付退款完整闭环", "订单状态可回滚"],
-    );
-  }
   return questions.slice(0, 5);
 }
 
-export function buildGroupPlanModePreflight(input: { group: any; message: string; ctx: CollabCtx; configs?: any[]; taskIntent?: any; attachmentCount?: number; coordinatorProject?: string }) {
+export async function buildGroupPlanModePreflight(input: { group: any; message: string; ctx: CollabCtx; configs?: any[]; taskIntent?: any; attachmentCount?: number; coordinatorProject?: string }) {
   const group = normalizeGroupOrchestrator(input.group);
   const configs = input.configs || getConfigs();
   const message = String(input.message || "");
   const risk = classifyPlanModeRisk(message, group, input.taskIntent, input.attachmentCount || 0);
-  const workflowDecision: WorkflowDecision | null = input.taskIntent?.workflowDecision || null;
+  let workflowDecision: WorkflowDecision | null = input.taskIntent?.workflowDecision || null;
   if (!workflowDecision) throw new Error("缺少群聊主 Agent 的 workflowDecision，不能生成执行前计划");
   const members = getRoutableMembers(group);
   const coordinatorProject = input.coordinatorProject || getCoordinatorMember(group).project;
@@ -842,11 +835,23 @@ export function buildGroupPlanModePreflight(input: { group: any; message: string
   const areas = [...(workflowDecision.impactScope || [])];
   if (!areas.length) areas.push("由主 Agent 只读探索后收敛影响范围");
   let readOnlyContext = "";
-  try {
-    readOnlyContext = compactMemoryText(buildGroupProjectAnalysisContext(group, message, input.ctx, configs), 2600);
-  } catch (error: any) {
-    readOnlyContext = `只读探索失败：${compactMemoryText(error?.message || error, 240)}`;
-  }
+  const planningSource = await buildModelDrivenGroupPlanningSourceContext(group, message, configs, {
+    targetProjects: selectedProjects,
+    maxRounds: 3,
+  });
+  readOnlyContext = planningSource.rendered;
+  const sourceModelPlan = planningSource.modelPlanning;
+  workflowDecision = {
+    ...workflowDecision,
+    reason: sourceModelPlan.reason || workflowDecision.reason,
+    planSteps: sourceModelPlan.planSteps.length ? sourceModelPlan.planSteps : workflowDecision.planSteps,
+    impactScope: sourceModelPlan.impactScope.length ? sourceModelPlan.impactScope : workflowDecision.impactScope,
+    clarificationQuestions: Array.from(new Set([
+      ...workflowDecision.clarificationQuestions,
+      ...sourceModelPlan.clarificationQuestions,
+      ...(!planningSource.ready ? planningSource.issues : []),
+    ])).slice(0, 6),
+  };
   const acceptance = [
     "必须有主 Agent 计划、派发证据和子 Agent 结构化结果说明",
     "涉及代码时必须有系统实际捕获的文件变更",
@@ -874,6 +879,7 @@ export function buildGroupPlanModePreflight(input: { group: any; message: string
   const requiresConfirmation = workflowDecision.needsPlanning
     || workflowDecision.mode === "decompose_epic"
     || risk.requiresConfirmation
+    || planningSource.ready !== true
     || clarificationQuestions.length > 0;
   const modelPlanSteps = (workflowDecision.planSteps || []).map((label, index) => ({
     id: `model_plan_${index + 1}`,
@@ -928,8 +934,19 @@ export function buildGroupPlanModePreflight(input: { group: any; message: string
     read_only_exploration: {
       summary: readOnlyContext,
       projects: selectedProjects,
-      knowledge_used: readOnlyContext.includes("本地知识库召回"),
-      code_snapshot_used: readOnlyContext.includes("只读代码快照"),
+      knowledge_used: false,
+      code_snapshot_used: !!planningSource?.projects.some(project => project.files.length > 0),
+      source_snapshot_checksum: planningSource?.checksum || "",
+      model_planning_receipt: planningSource?.modelPlanning || null,
+      source_evidence: (planningSource?.projects || []).map(project => ({
+        project: project.project,
+        status: project.status,
+        manifest_checksum: project.manifestChecksum,
+        selected_paths: project.selectedPaths,
+        issue: project.issue,
+      })),
+      source_ready: planningSource?.ready === true,
+      source_issues: planningSource?.issues || [],
     },
     steps,
     impact_scope: {

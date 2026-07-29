@@ -1,10 +1,45 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.hasStrongGlobalMissionChildAcceptanceEvidence = hasStrongGlobalMissionChildAcceptanceEvidence;
 exports.getGlobalMissionChildDeliveryEvidence = getGlobalMissionChildDeliveryEvidence;
 exports.globalMissionChildGatePassed = globalMissionChildGatePassed;
 exports.refreshGlobalMissionParentInTaskList = refreshGlobalMissionParentInTaskList;
 exports.runGlobalMissionStrongAcceptanceSelfTest = runGlobalMissionStrongAcceptanceSelfTest;
+const crypto = __importStar(require("crypto"));
+const mission_evidence_contract_1 = require("./mission-evidence-contract");
 function flattenMissionEvidenceRows(...values) {
     const rows = [];
     const visit = (value) => {
@@ -78,47 +113,35 @@ function missionRowEvidenceCount(row) {
     return uniqueMissionEvidenceStrings(row.evidence, row.verification, row.checks, row.files, row.files_changed, row.filesChanged, row.artifacts).length;
 }
 function isPositiveMissionAcceptanceText(value) {
-    const text = String(value || "").trim();
-    if (!text)
+    if (!value || typeof value !== "object")
         return false;
-    if (/未通过|失败|待补|待处理|缺口|证据不足|无法确认|无法验证|failed|failure|partial|incomplete|missing|blocked/i.test(text))
-        return false;
-    return /已通过|通过|可以接受|已覆盖|已执行|已复核|已验证|passed|pass|success|ok/i.test(text);
+    return ["passed", "approved", "accepted", "success", "succeeded", "ok"].includes(String(value.verdict || value.status || "").toLowerCase());
 }
 function isBareMissionAcceptanceMarker(value) {
-    return /^(最终验收|主\s*Agent\s*验收|验收结论)\s*[：:]?\s*(已通过|通过)$/i.test(String(value || "").trim());
+    return !value || typeof value !== "object" || missionRowEvidenceCount(value) === 0;
 }
 function isSuggestedOnlyMissionVerification(value) {
-    const text = String(value || "").trim();
-    if (!text)
-        return true;
-    return /建议|可运行|可以运行|待运行|未运行|未执行|未验证|没有运行|无法运行|未提供|todo|not\s+run|not\s+executed|suggest/i.test(text);
+    return !value || typeof value !== "object" || String(value.status || "").toLowerCase() === "suggested";
 }
 function isFailedMissionVerification(value) {
-    const text = String(value || "").trim();
-    if (!text)
+    if (!value || typeof value !== "object")
         return false;
-    const normalized = text
-        .replace(/\b0\s+(?:failed|failures?|errors?)\b/gi, "")
-        .replace(/\b(?:no|zero)\s+(?:failed|failures?|errors?)\b/gi, "")
-        .replace(/(?:零|0)\s*(?:个|项|条)?\s*(?:失败|错误)/g, "")
-        .replace(/(?:无失败|没有失败|全部通过|全数通过)/g, "");
-    return /失败|未通过|报错|错误|超时|中断|无法执行|无法自动执行|无法运行|被.*拦截|拦截|阻塞|审批|failed|failure|error|timeout|denied|blocked|not\s+allowed|requires\s+approval|permission/i.test(normalized);
+    return ["failed", "rejected", "blocked", "timed_out", "timeout", "error"].includes(String(value.status || value.verdict || "").toLowerCase());
 }
 function isStrongMissionVerificationText(value) {
-    const text = missionEvidenceText(value).trim();
-    if (!text || isSuggestedOnlyMissionVerification(text) || isFailedMissionVerification(text))
+    if (!value || typeof value !== "object" || isSuggestedOnlyMissionVerification(value) || isFailedMissionVerification(value))
         return false;
-    return /已实际执行|已执行|外部 Runner|验证来源|命令|npm|pnpm|yarn|test|check|lint|build|playwright|pytest|exit\s*0|passed|success|ok/i.test(text);
+    const status = String(value.status || value.verdict || "").toLowerCase();
+    const exitCode = value.exit_code ?? value.exitCode;
+    return ["passed", "success", "succeeded", "completed", "ok"].includes(status)
+        && (exitCode === undefined || Number(exitCode) === 0);
 }
 function isStrongPositiveMissionReviewRow(row) {
     if (!row || typeof row !== "object")
-        return isPositiveMissionAcceptanceText(row) && !isBareMissionAcceptanceMarker(row);
+        return false;
     const verdict = String(row.verdict || row.status || "").toLowerCase();
-    const passed = /pass|passed|approved|accepted|success|ok|通过|已通过/.test(verdict)
-        && !/fail|failed|rejected|partial|incomplete|blocked|未通过|失败|待补/.test(verdict);
-    const text = missionEvidenceText(row);
-    return passed && (missionRowEvidenceCount(row) > 0 || (isPositiveMissionAcceptanceText(text) && !isBareMissionAcceptanceMarker(text)));
+    const passed = ["pass", "passed", "approved", "accepted", "success", "succeeded", "ok"].includes(verdict);
+    return passed && missionRowEvidenceCount(row) > 0;
 }
 function getMissionDeliverySummary(task) {
     return task?.delivery_summary || task?.deliverySummary || {};
@@ -137,23 +160,10 @@ function hasSubstantiveMissionGateChecks(summary) {
     const gate = summary?.acceptance_gate || summary?.acceptanceGate || {};
     const gateChecks = Array.isArray(gate?.checks) ? gate.checks : (Array.isArray(gate?.items) ? gate.items : []);
     const failedCount = Number(gate?.failed_count || gate?.failedCount || gateChecks.filter((item) => item?.ok === false || item?.pass === false).length || 0);
-    const substantiveGateIds = new Set([
-        "actual_changes",
-        "actual_diff",
-        "verification",
-        "required_verification",
-        "verification_source",
-        "independent_review",
-        "final_review",
-        "worker_receipt",
-        "receipt_quality",
-        "work_items",
-        "team_shutdown",
-    ]);
     return gateChecks.length > 0
         && failedCount === 0
         && gateChecks.every((item) => item?.ok !== false && item?.pass !== false)
-        && gateChecks.some((item) => substantiveGateIds.has(String(item?.id || "")) && (item?.detail || item?.label || item?.title));
+        && gateChecks.some((item) => mission_evidence_contract_1.SUBSTANTIVE_GATE_CHECK_IDS.has(String(item?.id || "")) && (item?.detail || item?.label || item?.title));
 }
 function missionActualFileChangeCount(task) {
     const summary = getMissionDeliverySummary(task);
@@ -167,21 +177,24 @@ function missionActualFileChangeCount(task) {
 function missionStrongVerificationRows(task) {
     const summary = getMissionDeliverySummary(task);
     const report = getMissionDeliveryReport(task, summary);
-    return flattenMissionEvidenceRows(summary?.verification_executed, summary?.external_runner_verification, summary?.verification_results, summary?.verification, report?.verification, report?.verification_evidence?.executed, report?.verificationEvidence?.executed, report?.verification_evidence?.items, report?.verificationEvidence?.items, task?.verification, task?.verification_results).filter(isStrongMissionVerificationText);
+    return flattenMissionEvidenceRows(summary?.verification_executed, summary?.external_runner_verification, summary?.verification_results, summary?.verification, report?.verification, report?.verification_evidence?.executed, report?.verificationEvidence?.executed, report?.verification_evidence?.items, report?.verificationEvidence?.items, task?.verification, task?.verification_results).filter(Boolean);
 }
 function missionFailedVerificationRows(task) {
     const summary = getMissionDeliverySummary(task);
-    return flattenMissionEvidenceRows(summary?.verification_failed, summary?.verificationFailed)
-        .filter((item) => isFailedMissionVerification(missionEvidenceText(item)));
+    return flattenMissionEvidenceRows(summary?.verification_failed, summary?.verificationFailed).filter(Boolean);
 }
 function hasStrongGlobalMissionChildAcceptanceEvidence(task, deps, executionsInput = null) {
+    // 契约优先：有结构化证据契约时只按契约判定，禁止回退到文本正则。
+    const contract = (0, mission_evidence_contract_1.readMissionEvidenceContract)(task);
+    if (contract)
+        return (0, mission_evidence_contract_1.missionEvidenceContractStrong)(contract);
     const summary = getMissionDeliverySummary(task);
     const report = getMissionDeliveryReport(task, summary);
     if (!missionAcceptanceGatePassed(summary, report))
         return false;
     if (hasSubstantiveMissionGateChecks(summary))
         return true;
-    if (missionStrongVerificationRows(task).length > 0)
+    if (missionStrongVerificationRows(task).length > 0 && missionFailedVerificationRows(task).length === 0)
         return true;
     if (summary?.verification_source_gate_passed === true && Number(summary?.external_runner_verification_count || 0) > 0)
         return true;
@@ -191,10 +204,7 @@ function hasStrongGlobalMissionChildAcceptanceEvidence(task, deps, executionsInp
     if (reviewRows.some(isStrongPositiveMissionReviewRow))
         return true;
     const acceptanceRows = flattenMissionEvidenceRows(summary?.acceptance, summary?.acceptance_evidence, summary?.acceptanceEvidence, report?.acceptance, report?.acceptance_evidence, report?.acceptanceEvidence);
-    if (acceptanceRows.some((row) => {
-        const text = missionEvidenceText(row);
-        return isPositiveMissionAcceptanceText(text) && !isBareMissionAcceptanceMarker(text);
-    }))
+    if (acceptanceRows.some((row) => isPositiveMissionAcceptanceText(row) && !isBareMissionAcceptanceMarker(row)))
         return true;
     const executions = executionsInput || (task?.id ? deps.listExecutions({ taskId: task.id }) : []);
     const executionGreen = executions.some((item) => item?.green?.pass === true && ["project", "workspace", "merge_ready"].includes(String(item?.green?.level || "")));
@@ -203,14 +213,16 @@ function hasStrongGlobalMissionChildAcceptanceEvidence(task, deps, executionsInp
 function classifyGlobalMissionChildAcceptanceEvidence(task, deps, executions) {
     const summary = getMissionDeliverySummary(task);
     const report = getMissionDeliveryReport(task, summary);
+    const contract = (0, mission_evidence_contract_1.readMissionEvidenceContract)(task);
     const strong = hasStrongGlobalMissionChildAcceptanceEvidence(task, deps, executions);
-    const gatePassed = missionAcceptanceGatePassed(summary, report);
+    const gatePassed = contract ? contract.acceptance_gate_passed : missionAcceptanceGatePassed(summary, report);
     const status = strong ? "strong" : gatePassed ? "weak" : "missing";
     return {
         strong_acceptance_passed: strong,
         acceptance_evidence_status: status,
+        acceptance_evidence_source: contract ? "structured_contract" : strong ? "structured_runtime" : "legacy_unverified",
         acceptance_evidence_detail: strong
-            ? "已有真实验证或复核证据"
+            ? (contract ? "结构化证据契约已确认真实验证或复核证据" : "已有真实验证或复核证据（旧文本证据判定）")
             : gatePassed
                 ? "验收结论缺少真实验证或复核证据"
                 : "等待交付验收证据",
@@ -245,13 +257,21 @@ function getGlobalMissionChildDeliveryEvidence(task, deps) {
 function globalMissionChildGatePassedFromEvidence(task, deps, evidence) {
     if (!task || task.status !== "done")
         return false;
-    const summary = getMissionDeliverySummary(task);
     if (!evidence.merge_passed)
         return false;
     if (evidence.strong_acceptance_passed !== true)
         return false;
     const requiresCode = deps.taskRequiresCodeChanges(task);
     const requiresVerification = deps.taskRequiresVerification(task);
+    // 契约优先：结构化契约存在时全程按契约字段判定。
+    const contract = (0, mission_evidence_contract_1.readMissionEvidenceContract)(task);
+    if (contract) {
+        return (0, mission_evidence_contract_1.missionEvidenceContractGatePassed)(contract, {
+            requiresCodeChanges: requiresCode,
+            requiresVerification,
+        });
+    }
+    const summary = getMissionDeliverySummary(task);
     const actualChanges = missionActualFileChangeCount(task);
     const executedVerification = missionStrongVerificationRows(task).length;
     const failedVerification = missionFailedVerificationRows(task).length;
@@ -264,6 +284,10 @@ function globalMissionChildGatePassedFromEvidence(task, deps, evidence) {
     if (summary.independent_review_required === true && summary.independent_review_gate_passed !== true)
         return false;
     return true;
+}
+function missionVerificationEvidenceCount(task) {
+    const contract = (0, mission_evidence_contract_1.readMissionEvidenceContract)(task);
+    return contract ? contract.verification_executed_count : missionStrongVerificationRows(task).length;
 }
 function globalMissionChildGatePassed(task, deps) {
     const evidence = getGlobalMissionChildDeliveryEvidence(task, deps);
@@ -299,7 +323,7 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
                     project: item?.project || item?.target_project || child.target_project || child.mission_target?.name || "",
                 }))
                 : [],
-            verification_count: missionStrongVerificationRows(child).length,
+            verification_count: missionVerificationEvidenceCount(child),
             receipt_status: child.receipt?.status || "",
             blockers: [
                 ...(Array.isArray(child.delivery_summary?.blockers) ? child.delivery_summary.blockers : []),
@@ -320,16 +344,92 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
         .filter((item) => item?.path);
     const controlMode = parent.supervisor_control?.mode || "automatic";
     const cancelled = parent.status === "cancelled";
+    if (parent.workflow_type === "requirement_epic" && allPassed && parent.epic_review?.status !== "approved") {
+        const workflowDecision = parent.workflow_decision || parent.intake_draft?.workflow_decision || parent.workflow_meta?.intake?.task_intent?.workflowDecision || {};
+        const riskLevel = String(workflowDecision.riskLevel || workflowDecision.risk_level || parent.intake_draft?.risk?.level || "write").toLowerCase();
+        const verificationModes = Array.isArray(workflowDecision.verificationModes || workflowDecision.verification_modes)
+            ? (workflowDecision.verificationModes || workflowDecision.verification_modes).map((item) => String(item).toLowerCase())
+            : [];
+        const childIds = new Set(children.map((child) => String(child.id || "")));
+        const pendingPermissions = typeof deps.listPermissionRequests === "function"
+            ? deps.listPermissionRequests({}).filter((request) => childIds.has(String(request.taskId || request.task_id || "")) && String(request.state || "") === "awaiting_user")
+            : [];
+        const sourceEvidenceReady = children.every((child) => !deps.taskRequiresCodeChanges(child)
+            || child.planning_source_evidence?.ready === true
+            || child.intake_draft?.read_only_exploration?.source_ready === true
+            || child.workflow_meta?.plan_mode?.read_only_exploration?.source_ready === true);
+        const hasOpenGaps = rows.some((row) => Array.isArray(row.blockers) && row.blockers.length > 0);
+        const autoAcceptanceBlockers = [
+            riskLevel !== "low" ? `风险等级为 ${riskLevel || "unknown"}` : "",
+            verificationModes.includes("release") ? "包含发布验证" : "",
+            workflowDecision.requiresUserConfirmation === true || workflowDecision.requires_user_confirmation === true ? "模型要求用户确认" : "",
+            parent.require_final_approval === true || parent.requireFinalApproval === true ? "用户要求最终人工批准" : "",
+            pendingPermissions.length ? `仍有 ${pendingPermissions.length} 项权限待用户处理` : "",
+            !sourceEvidenceReady ? "源码规划证据未完整核验" : "",
+            hasOpenGaps ? "交付证据仍有阻塞项" : "",
+        ].filter(Boolean);
+        const autoAccepted = autoAcceptanceBlockers.length === 0;
+        const evidenceChecksum = crypto.createHash("sha256").update(JSON.stringify({
+            parent_id: parent.id,
+            content_hash: parent.requirement_content_hash || "",
+            rows: rows.map((row) => ({ task_id: row.task_id, gate_passed: row.gate_passed, verification_count: row.verification_count, actual_file_change_count: row.actual_file_change_count })),
+        })).digest("hex");
+        const decisionBase = {
+            schema: "ccm-epic-acceptance-decision-v1",
+            task_id: parent.id,
+            mode: "risk_based_auto_acceptance",
+            status: autoAccepted ? "approved" : "user_approval_required",
+            actor: autoAccepted ? "group-main-agent" : "system-risk-gate",
+            risk_level: riskLevel,
+            gate_passed: allPassed,
+            source_evidence_ready: sourceEvidenceReady,
+            pending_permission_count: pendingPermissions.length,
+            blockers: autoAcceptanceBlockers,
+            evidence_checksum: evidenceChecksum,
+            decided_at: now,
+        };
+        parent.acceptance_decision = {
+            ...decisionBase,
+            checksum: crypto.createHash("sha256").update(JSON.stringify(decisionBase)).digest("hex"),
+        };
+        const acceptanceEvent = {
+            id: `tl_epic_acceptance_${parent.acceptance_decision.checksum}`,
+            at: now,
+            type: autoAccepted ? "epic_auto_accepted" : "epic_user_approval_required",
+            title: autoAccepted ? "主 Agent 已自动完成最终验收" : "最终交付等待用户批准",
+            detail: autoAccepted ? "低风险任务的源码、权限和交付证据门禁全部通过" : autoAcceptanceBlockers.join("；"),
+            status: autoAccepted ? "ok" : "warn",
+            phase: autoAccepted ? "completion" : "needs_user",
+            agent: autoAccepted ? "group-main-agent" : "system-risk-gate",
+            data: { acceptance_decision: parent.acceptance_decision },
+        };
+        const existingTimeline = Array.isArray(parent.workflow_timeline) ? parent.workflow_timeline : [];
+        if (!existingTimeline.some((event) => event.id === acceptanceEvent.id))
+            parent.workflow_timeline = [...existingTimeline, acceptanceEvent].slice(-160);
+        if (autoAccepted) {
+            parent.epic_review = {
+                status: "approved",
+                approved_at: now,
+                reviewer: "group-main-agent",
+                approval_mode: "automatic_low_risk",
+                comment: "低风险任务的全部工作项、源码证据和验收门禁均已通过，系统自动完成最终验收",
+                evidence_matrix: rows,
+            };
+        }
+    }
     const requirementEpicApproved = parent.workflow_type === "requirement_epic"
         && parent.epic_review?.status === "approved"
-        && parent.status === "done";
+        && allPassed;
+    const automaticEpicApproval = parent.epic_review?.approval_mode === "automatic_low_risk";
     parent.status = requirementEpicApproved
         ? "done"
         : allPassed
             ? (parent.workflow_type === "requirement_epic" ? "awaiting_change_review" : "done")
             : cancelled ? "cancelled" : "in_progress";
     parent.status_detail = requirementEpicApproved
-        ? (parent.status_detail || "用户已审阅整批变更并批准需求 Epic 交付")
+        ? (automaticEpicApproval
+            ? "低风险任务的源码证据和全部验收门禁已通过，主 Agent 已自动完成最终验收"
+            : (parent.status_detail || "用户已审阅整批变更并批准需求 Epic 交付"))
         : allPassed
             ? (parent.workflow_type === "requirement_epic"
                 ? "所有子任务已通过交付验收，等待审阅整批变更并完成 Epic 集成验收"
@@ -360,7 +460,7 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
     parent.delivery_summary = {
         ...(parent.delivery_summary || {}),
         headline: requirementEpicApproved
-            ? "需求 Epic 已通过整批变更审阅并完成交付"
+            ? (automaticEpicApproval ? "需求 Epic 已由主 Agent 按低风险策略自动验收并完成交付" : "需求 Epic 已通过整批变更审阅并完成交付")
             : allPassed
                 ? (parent.workflow_type === "requirement_epic" ? "需求 Epic 的子任务已全部通过，等待整批变更审阅" : "全局开发任务已完成并通过全部交付验收")
                 : (parent.workflow_type === "requirement_epic" ? "需求 Epic 仍在执行或验收中" : "全局开发任务仍在执行或验收中"),
@@ -384,8 +484,21 @@ function refreshGlobalMissionParentInTaskList(tasks, parentId, deps) {
         generated_at: now,
     };
     parent.updated_at = now;
-    if (requirementEpicApproved || (allPassed && parent.workflow_type !== "requirement_epic"))
+    if (requirementEpicApproved || (allPassed && parent.workflow_type !== "requirement_epic")) {
         parent.completed_at = parent.completed_at || now;
+        parent.acceptance_state = "accepted";
+        const terminalBase = {
+            schema: "ccm-task-terminal-state-receipt-v1",
+            task_id: parent.id,
+            status: "done",
+            acceptance_state: "accepted",
+            settled_at: parent.completed_at,
+            actor: parent.acceptance_decision?.actor || "main-agent",
+            reason: parent.status_detail || "任务已通过最终验收",
+            evidence_checksum: parent.acceptance_decision?.evidence_checksum || "",
+        };
+        parent.terminal_state_receipt = { ...terminalBase, checksum: crypto.createHash("sha256").update(JSON.stringify(terminalBase)).digest("hex") };
+    }
     else if (parent.workflow_type === "requirement_epic" && allPassed)
         delete parent.completed_at;
     else if (!cancelled)
@@ -459,7 +572,49 @@ function runGlobalMissionStrongAcceptanceSelfTest() {
     ], "epic-strong", deps);
     const weakRow = refreshedWeak?.mission_summary?.children?.[0] || {};
     const strongRow = refreshedStrong?.mission_summary?.children?.[0] || {};
+    // 契约路径：结构化契约存在时只按契约判定，文本正则不再参与。
+    const contractStrongChild = {
+        id: "contract-strong-child",
+        status: "done",
+        requires_code_changes: true,
+        requires_verification: true,
+        delivery_summary: {
+            evidence_contract: (0, mission_evidence_contract_1.buildMissionEvidenceContract)({
+                acceptance_gate_passed: true,
+                acceptance_gate: { pass: true, checks: [{ id: "verification_source", ok: true, label: "外部 Runner 验证" }] },
+                actual_file_change_count: 1,
+                verification_executed: ["外部 Runner npm test exit 0"],
+                verification_failed: [],
+                external_runner_verification_count: 1,
+                verification_source_gate_passed: true,
+            }),
+            // 故意不写任何可被正则命中的文本字段：契约在场时不需要它们。
+        },
+    };
+    const contractMisleadingChild = {
+        id: "contract-misleading-child",
+        status: "done",
+        requires_code_changes: true,
+        requires_verification: true,
+        delivery_summary: {
+            evidence_contract: (0, mission_evidence_contract_1.buildMissionEvidenceContract)({
+                acceptance_gate_passed: true,
+                acceptance_gate: { pass: true, checks: [] },
+                verification_executed: [],
+            }),
+            // 正则诱饵：旧文本路径会因这些字段误放行，契约路径必须拒绝。
+            verification_executed: ["npm test passed by external runner (exit 0)"],
+            acceptance: ["外部 Runner 已验证 npm test 通过，可以接受本次交付"],
+            acceptance_gate_passed: true,
+        },
+    };
+    const contractModuleSelfTest = (0, mission_evidence_contract_1.runMissionEvidenceContractSelfTest)();
+    const freshnessModuleSelfTest = require("./review-freshness").runReviewFreshnessSelfTest();
     const checks = {
+        missionEvidenceContractModulePasses: contractModuleSelfTest.pass === true,
+        reviewFreshnessModulePasses: freshnessModuleSelfTest.pass === true,
+        contractStrongChildPassesWithoutText: globalMissionChildGatePassed(contractStrongChild, deps) === true,
+        contractOverridesMisleadingText: globalMissionChildGatePassed(contractMisleadingChild, deps) === false,
         globalMissionWeakAcceptanceGateRejected: globalMissionChildGatePassed(weakChild, deps) === false,
         globalMissionWeakAcceptanceMarkedWeak: weakRow.strong_acceptance_passed === false && weakRow.acceptance_evidence_status === "weak",
         globalMissionWeakAcceptanceParentStaysInProgress: refreshedWeak?.status === "in_progress" && refreshedWeak?.mission_summary?.all_passed === false,

@@ -70,6 +70,7 @@ const marketplace_1 = require("./marketplace");
 const tool_catalog_management_1 = require("../../tools/tool-catalog-management");
 const internal_skill_catalog_1 = require("../../skills/internal-skill-catalog");
 const internal_mcp_registry_1 = require("../../tools/internal-mcp-registry");
+const global_agent_tool_authorization_1 = require("../global/global-agent-tool-authorization");
 // ===== merged from tools-part-01-part-01.ts =====
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
@@ -1477,6 +1478,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 ? loadLatestRuntimeToolReadiness(240, { businessOnly: true })
                 : [];
             const inventory = (0, tool_authorization_1.buildToolAuthorizationInventory)({
+                globalAuthorization: (0, global_agent_tool_authorization_1.loadGlobalAgentToolAuthorization)(),
                 projects: (0, db_1.loadProjectConfigs)(),
                 groups: (0, storage_1.loadGroups)(),
                 runtimeReadiness,
@@ -1796,6 +1798,23 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         return true;
     }
     // === 性能监控指标 ===
+    if (pathname === "/api/metrics/events" && req.method === "GET") {
+        const metrics = (0, db_1.loadMetrics)();
+        const scopeType = String(parsed.query.scope_type || parsed.query.scopeType || "");
+        const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "");
+        const result = (0, db_1.queryMetricEvents)(metrics, {
+            scopeType,
+            scopeId,
+            days: parsed.query.days,
+            status: parsed.query.status,
+            page: parsed.query.page,
+            pageSize: parsed.query.page_size || parsed.query.pageSize,
+            fromDate: parsed.query.from,
+            toDate: parsed.query.to,
+        });
+        (0, utils_1.sendJson)(res, { success: true, ...result });
+        return true;
+    }
     if (pathname === "/api/metrics" && req.method === "GET") {
         const metrics = (0, db_1.loadMetrics)();
         const groups = (0, storage_1.loadGroups)().map((group) => {

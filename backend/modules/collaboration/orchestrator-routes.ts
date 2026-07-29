@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { UrlWithParsedQuery } from "url";
 import { sendJson } from "../../core/utils";
+import { resolveLocalAuthSession } from "../system/local-auth";
 import { loadGroups } from "./storage";
 import {
   loadOrchestratorConfig,
@@ -13,6 +14,22 @@ import {
   runDailyDevAutopilotOnce,
 } from "./daily-dev-backlog";
 import { recordModelCapabilityEvidence } from "./model-capability-cache";
+import { probeProviderCacheCapability } from "../../system/provider-cache-capability-probe";
+import {
+  readProviderCacheCapabilityState,
+  revokeProviderCacheCapabilityEvidence,
+} from "../../system/provider-cache-capability-registry";
+import {
+  readContextEngineV2Status,
+  readProviderNeutralContextCacheRuntimeStatus,
+  runProviderNeutralContextCacheMaintenance,
+} from "../../system/provider-neutral-context-cache";
+import { readContextEngineTrends } from "../../system/context-engine-observability";
+import {
+  drillContextEngineRecoveryPoint,
+  listContextEngineRecoveryPoints,
+  restoreContextEngineRecoveryPoint,
+} from "../../system/context-engine-recovery";
 
 type OrchestratorRouteDeps = {
   buildCoordinatorSharedFilesContext: (ctx: any, group: any) => string;
@@ -45,8 +62,46 @@ export function handleOrchestratorRoutes(
 ): boolean {
   const pathname = parsed.pathname;
 
+  const requireAdmin = () => {
+    const auth = resolveLocalAuthSession(req);
+    if (!auth) {
+      sendJson(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
+      return null;
+    }
+    if (auth.user.role !== "admin") {
+      sendJson(res, { success: false, error: "仅管理员可以修改 Provider 缓存能力证据", code: "ADMIN_REQUIRED" }, 403);
+      return null;
+    }
+    return auth;
+  };
+
   if (pathname === "/api/orchestrator/config" && req.method === "GET") {
     sendJson(res, { success: true, config: publicOrchestratorConfig(loadOrchestratorConfig()) });
+    return true;
+  }
+
+  if (pathname === "/api/orchestrator/credential/reveal" && req.method === "POST") {
+    try {
+      const auth = resolveLocalAuthSession(req);
+      if (!auth) {
+        sendJson(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
+        return true;
+      }
+      if (auth.user.role !== "admin") {
+        sendJson(res, { success: false, error: "仅管理员可以查看 API Key", code: "ADMIN_REQUIRED" }, 403);
+        return true;
+      }
+      const apiKey = String(loadOrchestratorConfig().apiKey || "");
+      res.setHeader("Cache-Control", "private, no-store, max-age=0");
+      res.setHeader("Pragma", "no-cache");
+      if (!apiKey) {
+        sendJson(res, { success: false, error: "尚未保存统一大模型 API Key" }, 404);
+        return true;
+      }
+      sendJson(res, { success: true, apiKey });
+    } catch (error: any) {
+      sendJson(res, { success: false, error: error?.message || "读取 API Key 失败" }, 500);
+    }
     return true;
   }
 
@@ -86,6 +141,118 @@ export function handleOrchestratorRoutes(
       sendJson(res, result, result.success ? 200 : 422);
     }).catch((error: any) => {
       sendJson(res, { success: false, message: error?.message || "模型连接测试失败" }, 500);
+    });
+    return true;
+  }
+
+  if (pathname === "/api/orchestrator/cache-capability" && req.method === "GET") {
+    const config = loadOrchestratorConfig();
+    sendJson(res, { success: true, capability: readProviderCacheCapabilityState(config) });
+    return true;
+  }
+
+  if (pathname === "/api/orchestrator/cache-capability/probe" && req.method === "POST") {
+    if (!requireAdmin()) return true;
+    void probeProviderCacheCapability(loadOrchestratorConfig()).then(result => {
+      sendJson(res, result, result.connection.success ? 200 : 422);
+    }).catch((error: any) => {
+      sendJson(res, { success: false, error: error?.message || "缓存能力探测失败" }, 500);
+    });
+    return true;
+  }
+
+  if (pathname === "/api/orchestrator/cache-capability/revoke" && req.method === "POST") {
+    if (!requireAdmin()) return true;
+    try {
+      sendJson(res, revokeProviderCacheCapabilityEvidence(loadOrchestratorConfig()));
+    } catch (error: any) {
+      sendJson(res, { success: false, error: error?.message || "清除缓存能力证据失败" }, 500);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/context-engine/status" && req.method === "GET") {
+    const scope = String(parsed.query.scope || "").trim().toLowerCase();
+    const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "").trim();
+    const sessionId = String(parsed.query.session_id || parsed.query.sessionId || "").trim();
+    if (!['global', 'group', 'project', 'music', 'other'].includes(scope) || !sessionId) {
+      sendJson(res, { success: false, error: "必须提供有效 scope 和精确 session_id" }, 400);
+      return true;
+    }
+    let recoveryPoints: any[] = [];
+    try { recoveryPoints = listContextEngineRecoveryPoints({ scope, scopeId: scopeId || sessionId, sessionId }); } catch {}
+    sendJson(res, {
+      success: true,
+      status: {
+        ...readContextEngineV2Status({ scope: scope as any, scopeId, sessionId }, loadOrchestratorConfig()),
+        trends: readContextEngineTrends({ scope, scopeId, sessionId, limit: 100 }),
+        recovery: { count: recoveryPoints.length, latest: recoveryPoints[0] || null, contentStored: false },
+      },
+    });
+    return true;
+  }
+
+  if (pathname === "/api/context-engine/trends" && req.method === "GET") {
+    sendJson(res, { success: true, trends: readContextEngineTrends({
+      scope: String(parsed.query.scope || ""),
+      scopeId: String(parsed.query.scope_id || parsed.query.scopeId || ""),
+      sessionId: String(parsed.query.session_id || parsed.query.sessionId || ""),
+      since: String(parsed.query.since || ""),
+      limit: Number(parsed.query.limit || 100),
+    }) });
+    return true;
+  }
+
+  if (pathname === "/api/context-engine/cache/runtime" && req.method === "GET") {
+    sendJson(res, { success: true, runtime: readProviderNeutralContextCacheRuntimeStatus() });
+    return true;
+  }
+
+  if (pathname === "/api/context-engine/cache/maintenance" && req.method === "POST") {
+    if (!requireAdmin()) return true;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        sendJson(res, { success: true, result: runProviderNeutralContextCacheMaintenance({
+          dryRun: payload.dry_run === true || payload.dryRun === true,
+          stateRetentionDays: Number(payload.state_retention_days || payload.stateRetentionDays || 30),
+          archiveRetentionDays: Number(payload.archive_retention_days || payload.archiveRetentionDays || 90),
+        }) });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error?.message || "上下文缓存清理失败" }, 500);
+      }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/context-engine/recovery" && req.method === "GET") {
+    try {
+      sendJson(res, { success: true, recoveryPoints: listContextEngineRecoveryPoints({
+        scope: String(parsed.query.scope || ""),
+        scopeId: String(parsed.query.scope_id || parsed.query.scopeId || ""),
+        sessionId: String(parsed.query.session_id || parsed.query.sessionId || ""),
+      }) });
+    } catch (error: any) {
+      sendJson(res, { success: false, error: error?.message || "读取恢复点失败" }, 400);
+    }
+    return true;
+  }
+
+  if (["/api/context-engine/recovery/drill", "/api/context-engine/recovery/restore"].includes(String(pathname)) && req.method === "POST") {
+    const restore = pathname.endsWith("/restore");
+    if (restore && !requireAdmin()) return true;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const result = restore ? restoreContextEngineRecoveryPoint(payload) : drillContextEngineRecoveryPoint(payload);
+        sendJson(res, { success: true, result });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: error?.message || (restore ? "恢复失败" : "恢复演练失败") }, 400);
+      }
     });
     return true;
   }

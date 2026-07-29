@@ -21,6 +21,14 @@ export declare function defaultOrchestratorConfig(): {
     memoryContextPreset: string;
     modelContextWindow: number;
     modelAutoCompactTokenLimit: number;
+    providerContextCacheMode: string;
+    providerPromptCacheRetention: string;
+    providerNativeCacheEnabled: boolean;
+    providerNativeCacheFamily: string;
+    providerNativeCacheFamilyManual: boolean;
+    anthropicCacheReferenceEnabled: boolean;
+    inferenceBackendKind: string;
+    metricsPath: string;
     timeBasedMicrocompactEnabled: boolean;
     timeBasedThinkingClearEnabled: boolean;
     timeBasedMicrocompactGapMinutes: number;
@@ -40,6 +48,13 @@ export declare function defaultOrchestratorConfig(): {
     groupSessionArtifactHotExecutions: number;
     groupSessionArtifactMaxHotMb: number;
     groupSessionArtifactMaxAgeDays: number;
+    summaryReviewerEnabled: boolean;
+    summaryReviewerFormat: string;
+    summaryReviewerApiUrl: string;
+    summaryReviewerApiKey: string;
+    summaryReviewerModel: string;
+    summaryReviewerSampleRate: number;
+    summaryReviewerTimeoutMs: number;
 };
 export declare function loadOrchestratorConfig(): any;
 export declare function saveOrchestratorConfig(updates: any): any;
@@ -51,6 +66,41 @@ export declare function testUnifiedModelConnection(): Promise<{
     provider: string;
     model: any;
     message: string;
+    contextCacheAdapter: {
+        schema: string;
+        version: number;
+        active: {
+            schema: string;
+            version: number;
+            family: import("../../system/provider-context-cache-adapters").ProviderCacheFamily;
+            adapter: import("../../system/provider-context-cache-adapters").ProviderCacheAdapterKind;
+            providerNative: boolean;
+            providerManagedKvCache: boolean;
+            requestLayerOwned: boolean;
+            capabilitySource: string;
+            capabilityStatus: string;
+            capabilityEvidenceId: any;
+            capabilityEvidenceExpiresAt: any;
+            capabilityReason: any;
+            requestedMode: string;
+            supportsPromptCacheKey: boolean;
+            supportsPromptCacheRetention: boolean;
+            supportsImplicitCache: boolean;
+            supportsContextManagement: boolean;
+            supportsCacheReferenceEdits: boolean;
+            customCompatibleEndpoint: boolean;
+            safeToSendProviderFields: boolean;
+            forcedWithoutEvidence: boolean;
+            unsupportedEvidenceBlocksForce: boolean;
+        };
+        adapters: {
+            family: string;
+            mode: string;
+            fields: string[];
+            guarded: boolean;
+        }[];
+        falseNativeClaimsForbidden: boolean;
+    };
     consumers: {
         ready: boolean;
         id: string;

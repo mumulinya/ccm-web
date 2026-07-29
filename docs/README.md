@@ -8,6 +8,7 @@
 | --- | --- |
 | [当前状态](./CURRENT.md) | 当前可依赖的产品能力、边界和运行入口 |
 | [确认项目结构](./confirmed-project-architecture/README.md) | 已确认的全局、群聊、项目、记忆、权限和集成业务流程 |
+| [已确认业务流程实现](./confirmed-business-processes/README.md) | 已进入生产代码并通过回归的端到端业务流程、状态、门禁和实现证据 |
 | [测试指南](./TESTING.md) | 领域测试、快速回归、历史测试命令和报告位置 |
 | [历史归档索引](./archive/README.md) | 阶段记录的逻辑归档说明，不移动或删除原始证据 |
 

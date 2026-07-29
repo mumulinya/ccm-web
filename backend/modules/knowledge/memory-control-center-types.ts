@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "../../system/context-budget";
 import { CCM_DIR, GROUP_MESSAGES_DIR } from "../../core/utils";
-import { withFileLock, writeJsonAtomic as writeJsonAtomicDurable } from "../../core/atomic-json-file";
+import { readJsonWithBackup, withFileLock, writeJsonAtomic as writeJsonAtomicDurable } from "../../core/atomic-json-file";
 import { loadProjectConfigs, loadTasks, saveTasks } from "../../core/db";
 import {
   inspectGroupSessionMemoryExtractionLease,
@@ -124,15 +124,24 @@ export function ensureDir() {
 
 
 export function readJson(file: string, fallback: any) {
-  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return fallback; }
+  return readJsonWithBackup(file, fallback);
 }
 
 
+/**
+ * 控制中心的共享状态文件（overrides/quality 等）与记忆域其余部分保持一致：
+ * 走 core/atomic-json-file 的落盘实现（fsync + .bak 备份 + Windows 重命名重试）。
+ * 注意：本函数只保证「写」原子，读改写序列必须由调用方用 withMemoryCenterFileLock 包住。
+ */
 export function writeJsonAtomic(file: string, value: any) {
+  writeJsonAtomicDurable(file, value);
+}
+
+
+/** 读改写临界区：避免并发的 pin/edit/deprecate 互相覆盖。 */
+export function withMemoryCenterFileLock<T>(file: string, operation: () => T): T {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-  fs.renameSync(temp, file);
+  return withFileLock(file, operation, { timeoutMs: 10_000 });
 }
 
 

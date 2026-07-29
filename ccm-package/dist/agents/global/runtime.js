@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.registerGlobalAgentExecutionEventSink = registerGlobalAgentExecutionEventSink;
 exports.buildGlobalAgentToolDefinitions = buildGlobalAgentToolDefinitions;
 exports.loadGlobalAgentPermissionRules = loadGlobalAgentPermissionRules;
 exports.saveGlobalAgentPermissionRule = saveGlobalAgentPermissionRule;
@@ -60,6 +61,10 @@ const HOOKS_FILE = path.join(RUNTIME_DIR, "hooks.json");
 const RUNS_FILE = path.join(RUNTIME_DIR, "runs.json");
 const MAX_RUN_STATES = 160;
 const MAX_OUTPUT_ITEMS = 120;
+let globalExecutionEventSink = null;
+function registerGlobalAgentExecutionEventSink(sink) {
+    globalExecutionEventSink = sink;
+}
 function now() {
     return new Date().toISOString();
 }
@@ -363,6 +368,14 @@ function markGlobalAgentToolTodo(run, tool, status, text = "") {
     return state.todos;
 }
 function recordGlobalAgentRuntimeOutput(run, event) {
+    if (["tool_started", "tool_completed", "tool_failed", "clarification_required"].includes(String(event?.type || ""))) {
+        try {
+            globalExecutionEventSink?.(run, event);
+        }
+        catch (error) {
+            console.warn(`[全局执行账本] 工具事件写入失败 (${run.session_id || ""})：${error?.message || error}`);
+        }
+    }
     const state = getRunState(run);
     state.output.push({ at: now(), ...compact(event, 3000) });
     state.output = state.output.slice(-MAX_OUTPUT_ITEMS);

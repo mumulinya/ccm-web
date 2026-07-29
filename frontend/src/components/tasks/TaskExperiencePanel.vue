@@ -23,6 +23,10 @@ const uniq = (items) => [...new Set(asList(items).map(item => String(item || '')
 const displayValue = (value, fallback = '任务状态已整理。', max = 420) => sanitizeUserFacingPlanStructure(value, { fallback, max })
 const planCopy = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanText(value, fallback, max)
 const card = computed(() => displayValue(props.card))
+const selfVerificationMode = computed(() => props.card.acceptance_mode === 'main_agent_self_verification'
+  || props.card.acceptanceMode === 'main_agent_self_verification'
+  || props.card.test_agent_enabled === false
+  || props.card.testAgentEnabled === false)
 const requirementEpic = computed(() => props.card.requirement_epic || props.card.requirementEpic || null)
 const requirementEpicItems = computed(() => {
   const epic = requirementEpic.value
@@ -154,7 +158,7 @@ const dispatchLaunchSummary = computed(() => displayValue(
     || props.card.dispatch_launch_summary
     || props.card.dispatchLaunchSummary
     || null,
-  '派发信息已整理，技术细节已放入技术详情。',
+  '派发信息已整理，内部数据已放入排障信息。',
   260
 ))
 const dispatchLaunchRows = computed(() => Array.isArray(dispatchLaunchSummary.value?.rows)
@@ -179,7 +183,7 @@ const workItemVerificationReminder = computed(() => {
     schema: 'ccm-main-agent-work-item-verification-reminder-v1',
     status: 'needs_verification_work_item',
     title: '执行队列还缺验收',
-    headline: '工作项都完成了，但还没有看到专门的验证/验收工作项或验证证据。',
+    headline: '执行步骤都完成了，但还没有看到专门的验收步骤或验证证据。',
     next_action: '我会补齐验收或说明无法验证的原因，再给出最终交付总结。',
   } : null)
   const policy = reminder?.display_policy || reminder?.displayPolicy || {}
@@ -200,13 +204,13 @@ const workItemClaimSummary = computed(() => {
   const raw = props.card.work_item_claim_summary || props.card.workItemClaimSummary || null
   const policy = raw?.display_policy || raw?.displayPolicy || {}
   if (!raw || policy.user_visible === false) return null
-  return displayValue(raw, '工作项派发状态已整理。', 280)
+  return displayValue(raw, '执行步骤派发状态已整理。', 280)
 })
 const workItemUnlockSummary = computed(() => {
   const raw = props.card.work_item_unlock_summary || props.card.workItemUnlockSummary || null
   const policy = raw?.display_policy || raw?.displayPolicy || {}
   if (!raw || policy.user_visible === false) return null
-  return displayValue(raw, '工作项解锁状态已整理。', 300)
+  return displayValue(raw, '执行步骤解锁状态已整理。', 300)
 })
 const hasPlanModeCopy = computed(() => !!(props.card.plan_mode || props.card.planMode))
 const visibleTaskGoal = computed(() => hasPlanModeCopy.value && card.value.goal ? planCopy(card.value.goal, '任务目标已整理。', 420) : card.value.goal)
@@ -303,7 +307,7 @@ const changeSummary = computed(() => {
     additions: changeFiles.value.reduce((sum, file) => sum + Number(file.additions || file.diff?.additions || 0), 0),
     deletions: changeFiles.value.reduce((sum, file) => sum + Number(file.deletions || file.diff?.deletions || 0), 0),
     files: changeFiles.value,
-    next_action: '可以点开查看具体文件 diff；原始执行记录仍在技术详情里。',
+    next_action: '可以点开查看具体文件差异；原始执行记录仍在排障信息里。',
   }
 })
 const topChangeFiles = computed(() => changeFiles.value.slice(0, 8))
@@ -341,7 +345,7 @@ const completionOverview = computed(() => {
     acceptance: acceptance.slice(0, 4),
     risks: risks.length ? risks.slice(0, 4) : sectionItems('risks', failed ? '未完成原因' : cancelled ? '停止原因' : '风险与待确认').slice(0, 4),
     next_action: asList(report.next_action || report.nextAction || props.card.next_action)[0] || '',
-    technical_hint: report.technical_hint || report.pickup_summary?.technical_hint || '底层执行记录和排障信息默认收在技术详情里。',
+    technical_hint: report.technical_hint || report.pickup_summary?.technical_hint || '底层执行记录默认收在排障信息里。',
   }
 })
 const completionOverviewMetrics = computed(() => Array.isArray(completionOverview.value?.metrics) ? completionOverview.value.metrics.filter(item => item?.label).slice(0, 5) : [])
@@ -350,13 +354,15 @@ const completionOverviewVerification = computed(() => asList(completionOverview.
 const completionOverviewAcceptance = computed(() => asList(completionOverview.value?.acceptance).slice(0, 4))
 const completionOverviewRisks = computed(() => asList(completionOverview.value?.risks).slice(0, 4))
 const testAgentExecutionPlanSource = computed(() => (
-  props.card.test_agent_execution_plan
+  selfVerificationMode.value ? null : (
+    props.card.test_agent_execution_plan
     || props.card.testAgentExecutionPlan
     || props.card.technical?.test_agent_execution_plan
     || props.card.technical?.testAgentExecutionPlan
     || displayStream.value?.test_agent_execution_plan
     || displayStream.value?.testAgentExecutionPlan
     || null
+  )
 ))
 const testAgentExecutionPlanSummary = computed(() => displayValue(
   normalizeTestAgentExecutionPlanSummary(
@@ -368,11 +374,11 @@ const testAgentExecutionPlanSummary = computed(() => displayValue(
       || null,
     props.card.test_agent_execution_plan_detail || props.card.testAgentExecutionPlanDetail || ''
   ),
-  'TestAgent 复核计划已整理。'
+  'TestAgent（独立验收）计划已整理。'
 ))
 const testAgentExecutionPlanRows = computed(() => asList(testAgentExecutionPlanSummary.value?.rows).slice(0, 6))
 const testAgentExecutionPlanIssues = computed(() => asList(testAgentExecutionPlanSummary.value?.issues).slice(0, 4))
-const visibleReviewText = (value, fallback = '复核证据已整理，技术细节已放入技术详情。') => {
+const visibleReviewText = (value, fallback = '验收材料已整理，内部数据已放入排障信息。') => {
   const raw = typeof value === 'object'
     ? value?.label || value?.summary || value?.detail || value?.message || value?.reason || value?.verdict || value?.status || ''
     : value
@@ -389,6 +395,26 @@ const deliveryIndependentReviewSectionItems = computed(() => {
   return asList(section?.items)
 })
 const independentReviewSummary = computed(() => {
+  if (selfVerificationMode.value) {
+    const review = props.card.main_agent_self_verification || props.card.mainAgentSelfVerification || null
+    if (!review) return null
+    const passed = review.canAccept === true || review.passed === true
+    return {
+      schema: 'ccm-main-agent-self-verification-summary-v1',
+      title: '主 Agent自验',
+      status: passed ? 'passed' : 'needs_rework',
+      status_label: passed ? '已通过' : '未通过',
+      headline: passed ? '主 Agent已核对交付证据；本次没有运行独立TestAgent。' : '主 Agent自验尚未通过，不能进入最终交付。',
+      rows: uniq([
+        ...asList(review.evidence),
+        ...asList(review.verification),
+        ...asList(review.problems),
+        ...asList(review.blockers),
+      ].map(item => visibleReviewText(item)).filter(Boolean)).slice(0, 7),
+      next_action: passed ? '继续完成最终验收。' : '先补齐自验发现的缺口，再重新核对。',
+      display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+    }
+  }
   const provided = props.card.independent_review_summary || props.card.independentReviewSummary || deliveryReport.value?.independent_review_summary || deliveryReport.value?.independentReviewSummary || null
   if (provided) return displayValue(provided, '独立复核结论已整理。')
   // Prefer structured backend gate only — do not infer status from Chinese keyword heuristics.
@@ -429,7 +455,7 @@ const independentReviewSummary = computed(() => {
     status,
     status_label: ({ passed: '已通过', needs_rework: '需返工', needs_recheck: '需复验', needs_environment: '补条件', needs_user: '等你确认', recorded: '已记录' })[status],
     headline: status === 'passed'
-      ? 'TestAgent/独立复核已检查交付证据，我可以继续做最终验收。'
+      ? 'TestAgent（独立验收）已检查交付证据，我可以继续做最终验收。'
       : status === 'needs_rework'
         ? '独立复核发现未通过项，我会先安排返工，再重新验收。'
         : status === 'needs_recheck'
@@ -445,9 +471,9 @@ const independentReviewSummary = computed(() => {
       : status === 'needs_rework'
         ? '先处理复核指出的缺口，再重新执行验收。'
         : status === 'needs_recheck'
-          ? '补齐复核证据后重新运行 TestAgent。'
+          ? '补齐验收材料后重新运行 TestAgent（独立验收）。'
         : status === 'needs_environment'
-          ? '先补齐环境、登录或运行条件，再继续 TestAgent 复核。'
+          ? '先补齐环境、登录或运行条件，再继续 TestAgent（独立验收）。'
         : status === 'needs_user'
           ? '等待你确认复核标记的问题。'
           : '继续等待完整复核证据或最终总结。',
@@ -509,12 +535,12 @@ const postReviewSpotCheckSummary = computed(() => {
     status,
     status_label: normalized.status_label || ({ passed: '已通过', needs_recheck: '需复验', needs_user: '待确认', recorded: '已记录' })[status],
     headline: visibleReviewText(normalized.headline, status === 'passed'
-      ? '我已抽查关键验证，结果与 TestAgent 结论一致。'
+      ? selfVerificationMode.value ? '我已完成关键验证自验。' : '我已抽查关键验证，结果与 TestAgent（独立验收）结论一致。'
       : '我的完成前抽查还没有通过。'),
     rows,
     next_action: visibleReviewText(normalized.next_action || normalized.nextAction, status === 'passed'
       ? '继续完成最终验收。'
-      : '重新运行 TestAgent 并再次抽查关键验证。'),
+      : selfVerificationMode.value ? '补齐证据后重新执行主 Agent自验。' : '重新运行 TestAgent（独立验收）并再次抽查关键验证。'),
   }
 })
 const postReviewSpotCheckRows = computed(() => asList(postReviewSpotCheckSummary.value?.rows).slice(0, 5))
@@ -690,7 +716,7 @@ const planApprovalRequest = computed(() => {
       pendingSteps.length ? `确认后继续：${pendingSteps.join('；')}` : '确认后我会进入执行链路。',
       permissionBoundaries.length ? `执行边界：${permissionBoundaries.join('；')}` : '执行边界会按计划和当前授权范围控制。',
       '执行过程中会跟踪执行成员结果、文件改动和验证证据。',
-      '最终总结前会逐项核对验收标准；技术记录默认放在技术详情里。',
+      '最终总结前会逐项核对验收标准；内部记录默认放在排障信息里。',
     ],
     feedback_hint: hasPlanConfirmAction.value
       ? '你可以在下方补充要求；确认时会一起带入执行计划。'
@@ -760,15 +786,15 @@ const completionReadinessSummary = computed(() => {
     status: unresolved.length ? 'blocked' : 'ready',
     status_label: unresolved.length ? '尚未收尾' : '可以总结',
     headline: unresolved.length
-      ? `还有 ${unresolved.length} 个工作项未完成，我不会提前宣布完成。`
+      ? `还有 ${unresolved.length} 个执行步骤未完成，我不会提前宣布完成。`
       : '执行队列已经收尾，可以进入最终验收与总结。',
     rows: unresolved.slice(0, 8).map(item => ({
       target: item.target || item.owner || '执行成员',
-      subject: item.subject || item.description || '未完成工作项',
+      subject: item.subject || item.description || '未完成执行步骤',
       status: item.status || 'pending',
       status_label: workItemStatusLabel(item.status),
     })),
-    next_action: unresolved.length ? '先完成或处理这些工作项；全部收敛后再做最终总结。' : '继续核对验收证据并整理最终总结。',
+    next_action: unresolved.length ? '先完成或处理这些执行步骤；全部收敛后再做最终总结。' : '继续核对验收证据并整理最终总结。',
   }, '完成前收尾状态已整理。', 320)
 })
 const completionReadinessRows = computed(() => asList(completionReadinessSummary.value?.rows).slice(0, 8))

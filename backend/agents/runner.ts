@@ -24,8 +24,11 @@ import {
   getRuntimeToolCatalogRevision,
   probeRuntimeToolReadiness,
 } from "../tools/runtime-tool-sync";
-import { loadProjectConfigs } from "../core/db";
+import { loadProjectConfigs, loadTasks } from "../core/db";
 import { loadGroups } from "../modules/collaboration/storage";
+import { selectRoleSkills } from "../skills/role-skills";
+import { isCcmInternalSkillName } from "../skills/internal-skill-catalog";
+import { verifyInternalMcpEvidenceSignature } from "../integrations/internal-mcp-runtime";
 import {
   classifyExecutionFailure,
   isSafeVerificationCommand,
@@ -221,6 +224,7 @@ function normalizeRuntimeToolSnapshot(request: any) {
   const requestRuntime = normalizeAgentRuntimeId(request?.agentType || request?.agent_type || "claudecode");
   return {
     ...raw,
+    schema: String(raw.schema || ""),
     runtime: normalizeAgentRuntimeId(rawRuntime || requestRuntime),
     runtimeSource: rawRuntime ? "snapshot" : "request",
     snapshotId: String(raw.snapshotId || raw.snapshot_id || request?.runtimeToolSnapshotId || request?.runtime_tool_snapshot_id || ""),
@@ -228,6 +232,12 @@ function normalizeRuntimeToolSnapshot(request: any) {
     mcpConfigPath: String(raw.mcpConfigPath || raw.mcp_config_path || request?.mcpConfigPath || request?.mcp_config_path || ""),
     allowedTools,
     requested: normalizeToolSelection(raw.requested || allowedTools),
+    configuredTools: normalizeToolSelection(raw.configuredTools || raw.configured_tools || allowedTools),
+    executionRoleSkills: Array.from(new Set((raw.executionRoleSkills || raw.execution_role_skills || []).map((item: any) => String(item || "").trim()).filter(Boolean))).sort(),
+    enforceExecutionRoleSkills: raw.enforceExecutionRoleSkills === true || raw.enforce_execution_role_skills === true,
+    effectiveTools: normalizeToolSelection(raw.effectiveTools || raw.effective_tools || allowedTools),
+    scopeIdentity: raw.scopeIdentity || raw.scope_identity || null,
+    authorizationSignature: String(raw.authorizationSignature || raw.authorization_signature || ""),
     permission_rules: Array.isArray(raw.permission_rules) ? raw.permission_rules : (Array.isArray(raw.permissionRules) ? raw.permissionRules : []),
     authorization_readiness: raw.authorization_readiness || raw.authorizationReadiness || request?.authorization_readiness || request?.authorizationReadiness || null,
     dispatch_gate: dispatchGate,
@@ -280,7 +290,7 @@ function readCurrentToolScope(request: any) {
   };
 }
 
-function validateRunnerToolScope(request: any, requestedTools: any, options: any = {}) {
+function validateRunnerToolScope(request: any, requestedTools: any, options: any = {}): any {
   if (options.skipScopeValidation === true) return { ok: true, skipped: true };
   const current = typeof options.loadCurrentToolScope === "function"
     ? options.loadCurrentToolScope(request)
@@ -296,6 +306,81 @@ function validateRunnerToolScope(request: any, requestedTools: any, options: any
     };
   }
   return { ok: true, current: normalizeToolSelection(current.tools), scope: current.scope || null };
+}
+
+function expectedTaskExecutionRoleSkills(task: any) {
+  if (!task) return [];
+  const selected = [
+    ...(Array.isArray(task?.selected_skill_names) ? task.selected_skill_names : []),
+    ...(Array.isArray(task?.selectedSkillNames) ? task.selectedSkillNames : []),
+  ].map((item: any) => String(item || "").trim()).filter(isCcmInternalSkillName);
+  const taskText = [task?.title, task?.description, task?.business_goal, task?.acceptance_criteria].filter(Boolean).join("\n");
+  return selectRoleSkills("project-child-agent", taskText, {
+    forceWork: true,
+    phase: "execution",
+    selectedSkillNames: selected,
+    modelDecision: { actionRequired: true, selectedSkills: selected },
+  }).map(item => item.name).sort();
+}
+
+function validateRuntimeToolSnapshotV2(request: any, snapshot: any, currentScope: any, options: any = {}): any {
+  if (snapshot.schema !== "ccm-runtime-tool-authorization-snapshot-v2") return { ok: true, legacy: true };
+  const identity = snapshot.scopeIdentity || {};
+  const core = {
+    schema: "ccm-runtime-tool-authorization-snapshot-v2",
+    snapshotId: String(snapshot.snapshotId || ""),
+    catalogRevision: String(snapshot.catalogRevision || ""),
+    configuredTools: normalizeToolSelection(snapshot.configuredTools || {}),
+    executionRoleSkills: [...snapshot.executionRoleSkills].sort(),
+    enforceExecutionRoleSkills: snapshot.enforceExecutionRoleSkills === true,
+    effectiveTools: normalizeToolSelection(snapshot.effectiveTools || snapshot.allowedTools || {}),
+    scopeIdentity: identity,
+  };
+  if (!snapshot.authorizationSignature || !verifyInternalMcpEvidenceSignature(core, snapshot.authorizationSignature)) {
+    return { ok: false, reason: "运行时MCP/Skill授权快照签名无效" };
+  }
+  const requestProject = String(request?.projectName || "").trim();
+  const requestGroup = groupIdFromRequest(request);
+  const requestTaskId = String(request?.taskId || request?.task_id || "").trim();
+  const requestRuntime = normalizeAgentRuntimeId(request?.agentType || request?.agent_type || "claudecode");
+  const requestSession = String(request?.groupSessionId || request?.group_session_id || request?.projectSessionId || request?.project_session_id || "").trim();
+  const requestTaskAgentSessionId = String(request?.taskAgentSessionId || request?.task_agent_session_id || request?.agentSession?.id || "").trim();
+  const requestGeneration = Number(request?.nativeGeneration || request?.native_generation || request?.agentSession?.nativeGeneration || request?.agentSession?.native_generation || 0);
+  if (String(identity.projectName || "") !== requestProject
+    || String(identity.groupId || "") !== requestGroup
+    || String(identity.taskId || "") !== requestTaskId
+    || String(identity.taskAgentSessionId || "") !== requestTaskAgentSessionId
+    || Number(identity.nativeGeneration || 0) !== requestGeneration
+    || normalizeAgentRuntimeId(identity.runtime || "claudecode") !== requestRuntime
+    || (requestSession && String(identity.exactSessionId || "") !== requestSession)) {
+    return { ok: false, reason: "运行时MCP/Skill授权快照与当前项目、群聊、任务、会话或运行时不匹配" };
+  }
+  if (!sameToolSelection(core.configuredTools, currentScope?.tools || {})) {
+    return { ok: false, reason: "当前项目/群聊MCP/Skill配置已变化，拒绝使用旧授权快照" };
+  }
+  const task = requestTaskId
+    ? typeof options.loadTask === "function"
+      ? options.loadTask(requestTaskId)
+      : loadTasks().find((item: any) => String(item?.id || "") === requestTaskId)
+    : null;
+  if (requestTaskId && !task) return { ok: false, reason: "运行时授权绑定的任务不存在" };
+  if (task) {
+    const taskProject = String(task?.target_project || task?.project || "");
+    const taskGroup = String(task?.group_id || "");
+    const taskSession = String(task?.group_session_id || task?.project_session_id || "");
+    if (taskProject && taskProject !== requestProject) return { ok: false, reason: "任务与运行时授权项目不匹配" };
+    if (taskGroup !== requestGroup) return { ok: false, reason: "任务与运行时授权群聊不匹配" };
+    if (taskSession && String(identity.exactSessionId || "") !== taskSession) return { ok: false, reason: "任务与运行时授权精确会话不匹配" };
+  }
+  const expectedRoleSkills = snapshot.enforceExecutionRoleSkills ? expectedTaskExecutionRoleSkills(task) : [];
+  if (JSON.stringify(expectedRoleSkills) !== JSON.stringify([...snapshot.executionRoleSkills].sort())) {
+    return { ok: false, reason: "任务内部角色Skill与持久任务决策不一致" };
+  }
+  const effective = mergeToolSelections(core.configuredTools, { skill: expectedRoleSkills });
+  if (!sameToolSelection(effective, core.effectiveTools) || !sameToolSelection(effective, snapshot.allowedTools)) {
+    return { ok: false, reason: "运行时MCP/Skill最终授权并集不一致" };
+  }
+  return { ok: true, legacy: false, current: normalizeToolSelection(currentScope?.tools || {}), expectedRoleSkills, effective };
 }
 
 export function validateExternalRunnerRuntimeToolGate(request: any, options: any = {}) {
@@ -404,7 +489,19 @@ export function validateExternalRunnerRuntimeToolGate(request: any, options: any
     };
   }
 
-  const scopeCheck = validateRunnerToolScope(request, requestedTools, options);
+  const currentScope = options.skipScopeValidation === true
+    ? { ok: true, skipped: true, tools: snapshot.configuredTools }
+    : typeof options.loadCurrentToolScope === "function"
+      ? options.loadCurrentToolScope(request)
+      : readCurrentToolScope(request);
+  const v2Check: any = currentScope?.ok
+    ? validateRuntimeToolSnapshotV2(request, snapshot, currentScope, options)
+    : { ok: false, reason: currentScope?.reason || "无法读取当前MCP/Skill授权范围" };
+  const scopeCheck: any = v2Check.ok && v2Check.legacy
+    ? validateRunnerToolScope(request, requestedTools, options)
+    : v2Check.ok
+      ? { ok: true, current: normalizeToolSelection(currentScope.tools || {}), scope: currentScope.scope || null, v2: v2Check }
+      : v2Check;
   if (!scopeCheck.ok) {
     const reason = scopeCheck.reason || "当前 MCP/Skill 授权范围复验失败";
     return {

@@ -1,37 +1,88 @@
 import * as path from "path";
-import * as readline from "readline";
+import { normalizeAgentRuntimeId } from "../agents/runtime";
+import { getTaskById } from "../core/db";
+import { listTaskAgentSessions } from "../tasks/agent-sessions";
+import { loadGroups } from "../modules/collaboration/storage";
 import {
   GroupCoordinationContext,
   listGroupCoordinationRequests,
   submitGroupCoordinationRequest,
 } from "../modules/collaboration/group-coordination-store";
+import {
+  assertInternalMcpRole,
+  buildInternalMcpServerConfig,
+  InternalMcpTaskContext,
+  runInternalMcpServer,
+} from "./internal-mcp-runtime";
 
 export const GROUP_COORDINATION_MCP_SERVER_NAME = "ccm__group_coordinator";
 
-function decodeContext(value: string): GroupCoordinationContext {
-  try {
-    const parsed = JSON.parse(Buffer.from(String(value || ""), "base64url").toString("utf-8"));
-    if (parsed?.schema !== "ccm-group-coordination-context-v1" || parsed?.role !== "child_agent") throw new Error("invalid role");
-    if (!parsed.groupId || !parsed.taskId || !parsed.sourceProject) throw new Error("missing binding");
-    return parsed;
-  } catch {
-    throw new Error("内部协调 MCP 缺少有效的任务会话绑定");
-  }
+const TERMINAL_TASK_STATUSES = new Set(["completed", "done", "failed", "cancelled", "archived"]);
+
+function coordinationContext(context: InternalMcpTaskContext): GroupCoordinationContext {
+  return {
+    groupId: String(context.groupId || ""),
+    taskId: String(context.taskId || ""),
+    groupSessionId: String(context.groupSessionId || ""),
+    sourceProject: String(context.project || ""),
+    sourceAgentType: String(context.agentType || ""),
+    sourceTaskAgentSessionId: String(context.taskAgentSessionId || ""),
+    sourceNativeSessionId: String(context.nativeSessionId || ""),
+    sourceWorkDir: String(context.workDir || ""),
+  };
 }
 
 export function buildGroupCoordinationMcpServerConfig(context: GroupCoordinationContext) {
-  const boundContext = {
-    ...context,
-    schema: "ccm-group-coordination-context-v1" as const,
-    role: "child_agent" as const,
-  };
-  return {
-    command: process.execPath,
-    args: [path.join(__dirname, "group-coordination-mcp.js")],
-    env: {
-      CCM_GROUP_COORDINATION_CONTEXT: Buffer.from(JSON.stringify(boundContext), "utf-8").toString("base64url"),
-    },
-  };
+  if (!context.groupId || !context.taskId || !context.groupSessionId || !context.sourceProject || !context.sourceTaskAgentSessionId || !context.sourceWorkDir) {
+    throw new Error("内部协调 MCP 缺少精确群聊、任务、项目或子 Agent 会话绑定");
+  }
+  return buildInternalMcpServerConfig(path.join(__dirname, "group-coordination-mcp.js"), {
+    bindingKind: "task",
+    taskId: context.taskId,
+    groupId: context.groupId,
+    groupSessionId: context.groupSessionId,
+    project: context.sourceProject,
+    projectSessionId: "",
+    role: "project-child-agent",
+    agentType: context.sourceAgentType || "",
+    taskAgentSessionId: context.sourceTaskAgentSessionId,
+    nativeSessionId: context.sourceNativeSessionId || "",
+    workDir: context.sourceWorkDir,
+    baseWorkDir: context.sourceWorkDir,
+    projects: [],
+  });
+}
+
+export function validateGroupCoordinationMcpBinding(context: InternalMcpTaskContext) {
+  assertInternalMcpRole(context, ["project-child-agent"], "群聊跨 Agent 协作");
+  if (context.bindingKind !== "task") throw new Error("协作 MCP 只接受正式任务绑定");
+  if (!context.groupId || !context.groupSessionId || !context.taskId || !context.project || !context.taskAgentSessionId) {
+    throw new Error("协作 MCP 缺少精确群聊会话或子 Agent 会话绑定");
+  }
+
+  const task = getTaskById(context.taskId);
+  if (!task) throw new Error("协作 MCP 绑定的任务不存在或已被清理");
+  if (TERMINAL_TASK_STATUSES.has(String(task.status || "").toLowerCase())) {
+    throw new Error(`任务已结束，不能继续提交协作请求：${task.status}`);
+  }
+  if (String(task.group_id || task.groupId || "") !== context.groupId) throw new Error("协作 MCP 的群聊绑定与当前任务不一致");
+  if (String(task.group_session_id || task.groupSessionId || "") !== context.groupSessionId) throw new Error("协作 MCP 的精确群聊会话已失效");
+  if (String(task.target_project || task.targetProject || "") !== context.project) throw new Error("协作 MCP 的项目绑定与当前任务不一致");
+
+  const group = loadGroups().find((item: any) => String(item?.id || "") === context.groupId);
+  if (!group) throw new Error("协作 MCP 绑定的群聊不存在或已被删除");
+  const isMember = (Array.isArray(group.members) ? group.members : [])
+    .some((member: any) => String(member?.project || "") === context.project);
+  if (!isMember) throw new Error("当前项目已不属于该群聊，协作请求被拒绝");
+
+  const session = listTaskAgentSessions({ taskId: context.taskId, groupId: context.groupId, project: context.project })
+    .find(item => item.id === context.taskAgentSessionId);
+  if (!session || session.status !== "open") throw new Error("协作 MCP 绑定的子 Agent 会话不存在或已关闭");
+  if (context.agentType && session.agentType !== normalizeAgentRuntimeId(context.agentType)) throw new Error("协作 MCP 的 Agent 运行时绑定已变化");
+  if (context.nativeSessionId && session.nativeSessionId && session.nativeSessionId !== context.nativeSessionId) {
+    throw new Error("协作 MCP 的原生 Agent 会话绑定已变化，请重新加载运行时工具");
+  }
+  return { task, group, session };
 }
 
 const tools = [
@@ -102,7 +153,9 @@ function textResult(value: any, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(value) }], isError };
 }
 
-function callTool(context: GroupCoordinationContext, name: string, args: any) {
+function callTool(internalContext: InternalMcpTaskContext, name: string, args: any) {
+  validateGroupCoordinationMcpBinding(internalContext);
+  const context = coordinationContext(internalContext);
   if (name === "get_coordination_status") {
     const requests = listGroupCoordinationRequests(context).map(row => ({ id: row.id, kind: row.kind, status: row.status, summary: row.summary, updated_at: row.updated_at }));
     return textResult({ success: true, requests });
@@ -141,35 +194,12 @@ function callTool(context: GroupCoordinationContext, name: string, args: any) {
 }
 
 export function runGroupCoordinationMcpServer() {
-  let context: GroupCoordinationContext;
-  try {
-    context = decodeContext(process.env.CCM_GROUP_COORDINATION_CONTEXT || "");
-  } catch (error: any) {
-    process.stderr.write(`${error?.message || error}\n`);
-    process.exitCode = 2;
-    return;
-  }
-  const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const reply = (id: any, result?: any, error?: any) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...(error ? { error } : { result }) })}\n`);
-  input.on("line", line => {
-    let message: any;
-    try { message = JSON.parse(line); } catch { return; }
-    if (message.id === undefined) return;
-    try {
-      if (message.method === "initialize") {
-        reply(message.id, { protocolVersion: "2024-11-05", capabilities: { tools: { listChanged: false } }, serverInfo: { name: GROUP_COORDINATION_MCP_SERVER_NAME, version: "1.0.0" } });
-      } else if (message.method === "tools/list") {
-        reply(message.id, { tools });
-      } else if (message.method === "tools/call") {
-        reply(message.id, callTool(context, String(message.params?.name || ""), message.params?.arguments || {}));
-      } else {
-        reply(message.id, undefined, { code: -32601, message: `Method not found: ${message.method}` });
-      }
-    } catch (error: any) {
-      reply(message.id, undefined, { code: -32000, message: error?.message || String(error) });
-    }
+  runInternalMcpServer({
+    name: GROUP_COORDINATION_MCP_SERVER_NAME,
+    version: "2.0.0",
+    tools: tools.map(tool => ({ ...tool, roles: ["project-child-agent"] })),
+    callTool,
   });
 }
 
 if (require.main === module) runGroupCoordinationMcpServer();
-

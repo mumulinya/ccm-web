@@ -70,23 +70,22 @@ function createGlobalAgentStatusRuntime(deps) {
         return [row.summary, row.detail, row.reason, row.message, row.label, row.title, row.verdict, row.status].filter(Boolean).join(" ");
     }
     function isPositiveGlobalAcceptanceText(value) {
-        const text = String(value || "").trim();
-        if (!text)
-            return false;
-        if (/未通过|失败|待补|待处理|缺口|证据不足|无法确认|无法验证|failed|failure|partial|incomplete|missing|blocked/i.test(text))
-            return false;
-        return /已通过|通过|可以接受|已覆盖|已执行|已复核|已验证|passed|pass|success|ok/i.test(text);
+        const status = typeof value === "object" && value
+            ? String(value.status || value.verdict || value.result || "").trim().toLowerCase()
+            : String(value || "").trim().toLowerCase();
+        return ["passed", "pass", "approved", "accepted", "success", "ok", "done", "completed"].includes(status);
     }
     function isBareGlobalAcceptanceMarker(value) {
         return /^(最终验收|主\s*Agent\s*验收|验收结论)\s*[：:]?\s*(已通过|通过)$/i.test(String(value || "").trim());
     }
     function isStrongGlobalVerificationText(value) {
-        const text = String(value || "").trim();
-        if (!text)
+        if (!value || typeof value !== "object" || Array.isArray(value))
             return false;
-        if (/建议|可运行|可以运行|待运行|未运行|未执行|未验证|没有运行|无法运行|未提供|失败|未通过|报错|错误|failed|failure|error|not\s+run|not\s+executed|suggest/i.test(text))
-            return false;
-        return /已实际执行|已执行|外部 Runner|验证来源|命令|npm|pnpm|yarn|test|check|lint|build|playwright|pytest|exit\s*0|passed|success|ok/i.test(text);
+        const status = String(value.status || value.result || "").trim().toLowerCase();
+        const passed = value.pass === true || value.ok === true || ["passed", "success", "ok", "done", "completed"].includes(status);
+        const executed = value.executed === true || value.actual_execution === true || value.actualExecution === true;
+        const evidence = value.command || value.check_id || value.checkId || value.evidence_id || value.evidenceId || value.source;
+        return passed && executed && !!evidence;
     }
     function globalTaskHasStrongAcceptanceEvidence(task = {}) {
         const summary = task?.delivery_summary || task?.deliverySummary || {};
@@ -471,8 +470,9 @@ function createGlobalAgentStatusRuntime(deps) {
         if (!items.length)
             return null;
         const stateText = items.map(item => [item?.status, item?.result, item?.recommendation, item?.reason].filter(Boolean).join(" ")).join(" ");
-        const needsUser = /blocked|unknown|need_human|needs_human|manual|人工|确认|待确认|阻塞/i.test(stateText);
-        const needsRework = !needsUser || /failed|fail|not_verified|rework|未通过|失败|返工/i.test(stateText);
+        const statuses = items.map(item => String(item?.status || item?.result || item?.recommendation || "").trim().toLowerCase());
+        const needsUser = statuses.some(status => ["blocked", "unknown", "need_human", "needs_human", "manual", "needs_user"].includes(status));
+        const needsRework = statuses.some(status => ["failed", "fail", "not_verified", "rework", "needs_rework", "changes_requested", "rejected"].includes(status));
         const status = needsRework ? "needs_rework" : "needs_user";
         const failureLines = globalUniqueStrings(items.map(summarizeGlobalTestAgentFailureItem).filter(Boolean)).slice(0, 3);
         const diagnosticLines = globalUniqueStrings(items.map(summarizeGlobalTestAgentDiagnosticItem).filter(Boolean)).slice(0, 2);
@@ -520,20 +520,12 @@ function createGlobalAgentStatusRuntime(deps) {
         return buildGlobalStatusIndependentReviewSummaryFromTestAgentFailure(source, delivery, report, workchain, displayStream);
     }
     function globalIndependentReviewStatusKind(summary = {}) {
-        const text = [
-            summary.status,
-            summary.verdict,
-            summary.recommendation,
-            summary.status_label,
-            summary.statusLabel,
-            summary.headline,
-            ...(Array.isArray(summary.rows) ? summary.rows : []),
-        ].filter(Boolean).join(" ");
-        if (/needs[_-]?rework|rework|changes_requested|failed|fail|reject|not_verified|需返工|返工|未通过|缺口|未覆盖/i.test(text))
+        const status = String(summary.status || summary.verdict || summary.recommendation || "").trim().toLowerCase();
+        if (["needs_rework", "rework", "changes_requested", "failed", "fail", "rejected", "not_verified"].includes(status))
             return "needs_rework";
-        if (/needs[_-]?user|waiting[_-]?user|unknown|manual|人工确认|等你确认|待确认|需要你确认|需要用户/i.test(text))
+        if (["needs_user", "waiting_user", "unknown", "manual", "blocked"].includes(status))
             return "needs_user";
-        if (/passed|pass|accept|approved|已通过|通过|可以继续/i.test(text))
+        if (["passed", "pass", "accepted", "approved", "success"].includes(status))
             return "passed";
         return "recorded";
     }
@@ -577,18 +569,10 @@ function createGlobalAgentStatusRuntime(deps) {
         return [item.summary, item.detail, item.message, item.label, item.title, item.status].filter(Boolean).join(" ");
     }
     function globalStatusTestAgentPlanStatusKind(summary = {}, plan = null) {
-        const text = [
-            summary.status,
-            summary.verdict,
-            summary.status_label,
-            summary.statusLabel,
-            summary.headline,
-            ...(Array.isArray(summary.rows) ? summary.rows.map(globalStatusTestAgentPlanRowText) : []),
-            ...(Array.isArray(summary.issues) ? summary.issues.map(globalStatusTestAgentPlanRowText) : []),
-        ].filter(Boolean).join(" ");
-        if (plan?.valid === false || /blocked|invalid|error|failed|fail|需修复|预检未通过|缺少|阻塞/i.test(text))
+        const status = String(summary.status || summary.verdict || "").trim().toLowerCase();
+        if (plan?.valid === false || ["blocked", "invalid", "error", "failed", "fail"].includes(status))
             return "blocked";
-        if (plan?.valid === true || /ready|valid|可执行|已生成|启动|真实复核/i.test(text))
+        if (plan?.valid === true || ["ready", "valid", "planned"].includes(status))
             return "ready";
         return "recorded";
     }

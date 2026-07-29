@@ -46,6 +46,8 @@ Object.defineProperty(exports, "queryKnowledgeBase", { enumerable: true, get: fu
 Object.defineProperty(exports, "queryKnowledgeBaseScoped", { enumerable: true, get: function () { return knowledge_index_1.queryKnowledgeBaseScoped; } });
 Object.defineProperty(exports, "rebuildKnowledgeIndex", { enumerable: true, get: function () { return knowledge_index_1.rebuildKnowledgeIndex; } });
 const knowledge_watcher_1 = require("./knowledge-watcher");
+const knowledge_embedding_1 = require("./knowledge-embedding");
+const knowledge_index_lease_1 = require("./knowledge-index-lease");
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 function readLimitedBuffer(req, limit = MAX_JSON_BODY_BYTES) {
     return new Promise((resolve, reject) => {
@@ -132,6 +134,9 @@ function debugChunk(item, fullText = false) {
         score: item.score,
         keywordScore: item.keywordScore,
         vectorScore: item.vectorScore,
+        lexicalScore: item.keywordScore,
+        semanticScore: item.semanticScore || item.vectorScore || 0,
+        retrievalMode: item.retrievalMode || item.embeddingMode || "lexical",
         coverage: item.coverage,
         source: meta.source,
     };
@@ -140,9 +145,14 @@ function retrievalSummary(search, citations = []) {
     return {
         mode: "hybrid",
         embedding: search.embeddingMode,
-        fallback: search.embeddingMode === "hashing" || search.embeddingMode.includes("fallback"),
+        fallback: search.embeddingMode === "lexical" || search.embeddingMode.includes("fallback"),
         error: search.embeddingError || "",
-        rerank: "keyword+vector+coverage",
+        fallbackReason: search.fallbackReason || "",
+        indexGeneration: search.indexGeneration || "",
+        staleServed: search.staleServed === true,
+        scopeChecksum: search.scopeChecksum || "",
+        candidateCounts: search.candidateCounts || {},
+        rerank: "independent-lexical+semantic+coverage",
         citations,
     };
 }
@@ -248,9 +258,10 @@ async function handleKnowledgeChat(payload, res) {
     const debugChunks = search.results.map(item => debugChunk(item, true));
     const citations = debugChunks.map(chunk => chunk.citation);
     if (!debugChunks.length) {
+        const indexBuilding = search.fallbackReason === "index_building";
         return (0, utils_1.sendJson)(res, {
             success: true,
-            reply: "知识库中暂时没有找到与这个问题相关的资料。可以换一种问法，或先导入对应文档。",
+            reply: indexBuilding ? "知识索引正在准备中，请稍后再试；系统不会把尚未完成的索引当成没有资料。" : "知识库中暂时没有找到与这个问题相关的资料。可以换一种问法，或先导入对应文档。",
             debugChunks: [],
             citations: [],
             retrieval: retrievalSummary(search),
@@ -297,11 +308,13 @@ function handleRagApi(pathname, req, res, parsed) {
             embedding,
             watchPaths: knowledge_watcher_1.knowledgeDirectoryWatcher.listPaths(),
             retrieval: {
-                semanticEnabled: embedding.enabled && embedding.hasKey && !!embedding.model,
-                mode: embedding.enabled && embedding.hasKey ? `hybrid:${embedding.model}` : "hybrid:hashing",
+                semanticEnabled: (0, knowledge_index_1.getKnowledgeIndexStatus)().semanticReady > 0,
+                mode: embedding.mode,
                 localFallbackEnabled: true,
-                localFallbackDescription: "未配置 Embedding 或远程调用失败时，自动使用本地关键词、中文切词与 hashing 向量混合检索",
+                localFallbackDescription: "外部Embedding不可用时优先使用本地多语言语义模型；模型未就绪时明确降级为词面检索",
             },
+            localModel: (0, knowledge_embedding_1.getLocalKnowledgeModelStatus)(),
+            buildLease: (0, knowledge_index_lease_1.inspectKnowledgeIndexLease)(),
         });
     }
     if (pathname === "/api/rag/embedding-config" && req.method === "GET") {
@@ -314,6 +327,37 @@ function handleRagApi(pathname, req, res, parsed) {
             (0, utils_1.sendJson)(res, { success: status.state === "ready", config: (0, knowledge_files_1.publicRagEmbeddingConfig)(config), chunksCount: status.chunks, status });
         }).catch(error => (0, utils_1.sendJson)(res, { error: error.message }, 400));
         return true;
+    }
+    if (pathname === "/api/rag/local-model/prepare" && req.method === "POST") {
+        void (0, knowledge_embedding_1.prepareLocalKnowledgeModel)(true).then(localModel => {
+            if (localModel.state === "ready")
+                void (0, knowledge_index_1.rebuildKnowledgeIndex)("local-model-prepare");
+        }).catch(error => console.warn(`[RAG] 本地模型准备失败：${error?.message || error}`));
+        return (0, utils_1.sendJson)(res, { success: true, accepted: true, localModel: (0, knowledge_embedding_1.getLocalKnowledgeModelStatus)(), status: (0, knowledge_index_1.getKnowledgeIndexStatus)() }, 202);
+    }
+    if (pathname === "/api/rag/local-model" && req.method === "DELETE") {
+        void (0, knowledge_embedding_1.removeLocalKnowledgeModel)().then(async (localModel) => {
+            const current = (0, knowledge_files_1.loadRagEmbeddingConfig)();
+            if (current.mode === "local" || (current.mode === "auto" && !current.apiKey))
+                (0, knowledge_files_1.saveRagEmbeddingConfig)({ mode: "lexical" });
+            const status = await (0, knowledge_index_1.rebuildKnowledgeIndex)("local-model-delete");
+            (0, utils_1.sendJson)(res, { success: true, localModel, status });
+        }).catch(error => (0, utils_1.sendJson)(res, { error: error.message }, 500));
+        return true;
+    }
+    if (pathname === "/api/rag/repair-vectors" && req.method === "POST") {
+        void (0, knowledge_index_1.rebuildKnowledgeIndex)("repair-missing-vectors").then(status => {
+            (0, utils_1.sendJson)(res, { success: status.state === "ready", status }, status.state === "ready" ? 200 : 500);
+        });
+        return true;
+    }
+    if (pathname === "/api/rag/index-cache" && req.method === "DELETE") {
+        try {
+            return (0, utils_1.sendJson)(res, { success: true, cleanup: (0, knowledge_index_1.pruneKnowledgeIndexGenerations)(), status: (0, knowledge_index_1.getKnowledgeIndexStatus)() });
+        }
+        catch (error) {
+            return (0, utils_1.sendJson)(res, { error: error.message }, 500);
+        }
     }
     if (pathname === "/api/rag/capture" && req.method === "POST") {
         void readJsonBody(req).then(async (payload) => {
@@ -470,7 +514,7 @@ function handleRagApi(pathname, req, res, parsed) {
             return (0, utils_1.sendJson)(res, { success: true, paths: knowledge_watcher_1.knowledgeDirectoryWatcher.listPaths() });
         if (req.method === "POST") {
             void readJsonBody(req).then(payload => {
-                const paths = knowledge_watcher_1.knowledgeDirectoryWatcher.addPath(payload.path);
+                const paths = knowledge_watcher_1.knowledgeDirectoryWatcher.addPath(payload);
                 (0, utils_1.sendJson)(res, { success: true, paths, message: "目录已开始监控，首次同步正在后台进行" });
             }).catch(error => (0, utils_1.sendJson)(res, { error: error.message }, 400));
             return true;

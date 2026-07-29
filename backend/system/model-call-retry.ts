@@ -107,7 +107,16 @@ export async function runModelCallWithRetry<T>(
       return await withTimeout(call({ attempt, maxAttempts, attemptTimeoutMs, elapsedMs }), attemptTimeoutMs + 250, scope);
     } catch (error: any) {
       lastError = error;
-      if (!shouldRetry(error)) throw error;
+      if (!shouldRetry(error)) {
+        if (error && typeof error === "object") {
+          error.attempts = Number(error.attempts) || attempt;
+          error.maxAttempts = Number(error.maxAttempts) || maxAttempts;
+          error.elapsedMs = Number(error.elapsedMs) || (Date.now() - startedAt);
+          error.attemptTimeoutMs = Number(error.attemptTimeoutMs) || configuredAttemptTimeoutMs;
+          error.totalTimeoutMs = Number(error.totalTimeoutMs) || totalTimeoutMs;
+        }
+        throw error;
+      }
       if (attempt >= maxAttempts) break;
       const delayMs = Math.min(baseDelayMs * 2 ** (attempt - 1), Math.max(0, totalTimeoutMs - (Date.now() - startedAt)));
       options.onRetry?.({ attempt, maxAttempts, attemptTimeoutMs, elapsedMs: Date.now() - startedAt, delayMs, error });
@@ -116,7 +125,15 @@ export async function runModelCallWithRetry<T>(
   }
 
   const elapsedMs = Date.now() - startedAt;
-  throw new Error(`${scope}失败：已完成 ${completedAttempts} 次尝试，总耗时 ${elapsedMs}ms；最后错误：${compactError(lastError)}`);
+  const exhaustedError: any = new Error(`${scope}失败：已完成 ${completedAttempts} 次尝试，总耗时 ${elapsedMs}ms；最后错误：${compactError(lastError)}`);
+  exhaustedError.code = "CCM_MODEL_RETRY_EXHAUSTED";
+  exhaustedError.attempts = completedAttempts;
+  exhaustedError.maxAttempts = maxAttempts;
+  exhaustedError.elapsedMs = elapsedMs;
+  exhaustedError.attemptTimeoutMs = configuredAttemptTimeoutMs;
+  exhaustedError.totalTimeoutMs = totalTimeoutMs;
+  exhaustedError.lastErrorCode = String(lastError?.code || "");
+  throw exhaustedError;
 }
 
 export async function runModelCallRetrySelfTest() {

@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.knowledgeDirectoryWatcher = exports.KnowledgeDirectoryWatcher = void 0;
+exports.normalizeKnowledgeWatchConfig = normalizeKnowledgeWatchConfig;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
@@ -46,6 +47,17 @@ function normalizeWatchPath(value) {
         throw new Error("监控路径不存在或不是文件夹");
     }
     return resolved;
+}
+function normalizeKnowledgeWatchConfig(value, defaults = {}) {
+    const legacy = typeof value === "string";
+    const root = normalizeWatchPath(legacy ? value : value?.path);
+    const scope = (0, knowledge_files_1.normalizeKnowledgeScope)(legacy
+        ? { type: "global", id: "" }
+        : value?.scope || { type: value?.scopeType || defaults.scopeType || "global", id: value?.scopeId || defaults.scopeId || "" });
+    const visibility = legacy
+        ? "shared"
+        : (value?.visibility || defaults.visibility) === "shared" ? "shared" : "restricted";
+    return { path: root, scope, visibility, legacyShared: legacy || value?.legacyShared === true };
 }
 function walkSupportedFiles(root, limit = 1000) {
     const files = [];
@@ -84,7 +96,7 @@ class KnowledgeDirectoryWatcher {
                 this.watchPath(watchPath, true);
             }
             catch (error) {
-                console.warn(`[RAG Watcher] 无法恢复监控 ${watchPath}: ${error?.message || error}`);
+                console.warn(`[RAG Watcher] 无法恢复监控 ${typeof watchPath === "string" ? watchPath : watchPath?.path}: ${error?.message || error}`);
             }
         }
         console.log(`[RAG Watcher] 已恢复 ${this.watchers.size} 个监控目录`);
@@ -102,10 +114,18 @@ class KnowledgeDirectoryWatcher {
         this.timers.clear();
     }
     listPaths() {
-        return (0, db_1.loadRagWatchPaths)();
+        return (0, db_1.loadRagWatchPaths)().flatMap(item => {
+            try {
+                return [normalizeKnowledgeWatchConfig(item)];
+            }
+            catch {
+                return [];
+            }
+        });
     }
-    async syncDirectory(dirPath) {
-        const root = normalizeWatchPath(dirPath);
+    async syncDirectory(input) {
+        const config = normalizeKnowledgeWatchConfig(input);
+        const root = config.path;
         const files = walkSupportedFiles(root);
         let synced = 0;
         let skipped = 0;
@@ -120,9 +140,10 @@ class KnowledgeDirectoryWatcher {
                 const targetName = (0, knowledge_files_1.watchedKnowledgeFilename)(root, relativePath);
                 (0, knowledge_files_1.storeKnowledgeBuffer)(path.basename(sourcePath), fs.readFileSync(sourcePath), {
                     targetName,
-                    scope: { type: "global", id: "" },
+                    scope: config.scope,
+                    visibility: config.visibility,
                     tags: ["watched-directory"],
-                    source: { type: "watched_directory", root, path: sourcePath, relative_path: relativePath, sync_status: "active" },
+                    source: { type: "watched_directory", root, path: sourcePath, relative_path: relativePath, sync_status: "active", legacy_shared_scope: config.legacyShared },
                 });
                 synced += 1;
             }
@@ -133,8 +154,9 @@ class KnowledgeDirectoryWatcher {
         await (0, knowledge_index_1.rebuildKnowledgeIndex)("watch-directory-sync");
         return { files: files.length, synced, skipped };
     }
-    watchPath(dirPath, restore = false) {
-        const root = normalizeWatchPath(dirPath);
+    watchPath(input, restore = false) {
+        const config = normalizeKnowledgeWatchConfig(input);
+        const root = config.path;
         const key = root.toLowerCase();
         if (this.watchers.has(key))
             return root;
@@ -148,15 +170,16 @@ class KnowledgeDirectoryWatcher {
                 clearTimeout(previous);
             this.timers.set(timerKey, setTimeout(() => {
                 this.timers.delete(timerKey);
-                void this.syncFile(root, relativePath);
+                void this.syncFile(config, relativePath);
             }, 900));
         });
         this.watchers.set(key, watcher);
         if (!restore)
-            void this.syncDirectory(root);
+            void this.syncDirectory(config);
         return root;
     }
-    async syncFile(root, relativePath) {
+    async syncFile(config, relativePath) {
+        const root = config.path;
         const sourcePath = path.resolve(root, relativePath);
         const relative = path.relative(root, sourcePath);
         if (relative.startsWith("..") || path.isAbsolute(relative))
@@ -169,9 +192,10 @@ class KnowledgeDirectoryWatcher {
                     throw new Error("文件超过 25 MB，已跳过同步");
                 (0, knowledge_files_1.storeKnowledgeBuffer)(path.basename(sourcePath), fs.readFileSync(sourcePath), {
                     targetName,
-                    scope: { type: "global", id: "" },
+                    scope: config.scope,
+                    visibility: config.visibility,
                     tags: ["watched-directory"],
-                    source: { type: "watched_directory", root, path: sourcePath, relative_path: relativePath, sync_status: "active" },
+                    source: { type: "watched_directory", root, path: sourcePath, relative_path: relativePath, sync_status: "active", legacy_shared_scope: config.legacyShared },
                 });
             }
             else {
@@ -186,15 +210,16 @@ class KnowledgeDirectoryWatcher {
             console.error(`[RAG Watcher] 同步 ${relativePath} 失败: ${error?.message || error}`);
         }
     }
-    addPath(dirPath) {
-        const root = normalizeWatchPath(dirPath);
+    addPath(input) {
+        const config = normalizeKnowledgeWatchConfig(input, { visibility: "restricted" });
+        const root = config.path;
         const paths = (0, db_1.loadRagWatchPaths)();
-        if (!paths.some(item => samePath(item, root))) {
-            paths.push(root);
+        if (!paths.some(item => samePath(typeof item === "string" ? item : item?.path, root))) {
+            paths.push(config);
             (0, db_1.saveRagWatchPaths)(paths);
         }
-        this.watchPath(root);
-        return (0, db_1.loadRagWatchPaths)();
+        this.watchPath(config);
+        return this.listPaths();
     }
     removePath(dirPath) {
         const root = path.resolve(String(dirPath || "").trim());
@@ -207,8 +232,8 @@ class KnowledgeDirectoryWatcher {
             catch { }
             this.watchers.delete(key);
         }
-        (0, db_1.saveRagWatchPaths)((0, db_1.loadRagWatchPaths)().filter(item => !samePath(item, root)));
-        return (0, db_1.loadRagWatchPaths)();
+        (0, db_1.saveRagWatchPaths)((0, db_1.loadRagWatchPaths)().filter(item => !samePath(typeof item === "string" ? item : item?.path, root)));
+        return this.listPaths();
     }
 }
 exports.KnowledgeDirectoryWatcher = KnowledgeDirectoryWatcher;

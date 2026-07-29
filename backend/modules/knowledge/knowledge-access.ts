@@ -7,6 +7,7 @@ import {
   loadKnowledgeMetadata,
   type KnowledgeDocumentMetadata,
 } from "./knowledge-files";
+import { estimateModelTextTokens } from "../../system/model-token-preflight";
 
 export type AgentKnowledgeRole = "global-agent" | "group-main-agent" | "project-agent" | "project-child-agent" | "test-agent";
 
@@ -23,6 +24,7 @@ export type AgentKnowledgeSearchOptions = {
   filename?: string;
   maxChunkChars?: number;
   maxContextChars?: number;
+  maxContextTokens?: number;
 };
 
 let indexReady: Promise<any> | null = null;
@@ -83,11 +85,11 @@ export async function searchAgentKnowledge(
   options: AgentKnowledgeSearchOptions = {},
 ) {
   const normalizedQuery = String(query || "").trim().slice(0, 8000);
-  if (!normalizedQuery) return { results: [], citations: [], context: "", embeddingMode: "hashing", embeddingError: "", fallback: true };
+  if (!normalizedQuery) return { results: [], citations: [], context: "", embeddingMode: "lexical", embeddingError: "", fallback: true };
   await ensureKnowledgeIndex();
   const metadata = loadKnowledgeMetadata();
   const filenames = Object.keys(metadata).filter(filename => isKnowledgeDocumentAllowed(metadata[filename], context));
-  if (!filenames.length) return { results: [], citations: [], context: "", embeddingMode: "hashing", embeddingError: "", fallback: true };
+  if (!filenames.length) return { results: [], citations: [], context: "", embeddingMode: "lexical", embeddingError: "", fallback: true };
 
   const limit = Math.max(1, Math.min(12, Number(options.limit || 6)));
   const search = await searchKnowledgeBase(normalizedQuery, {
@@ -96,21 +98,26 @@ export async function searchAgentKnowledge(
     filenames,
   });
   const maxChunkChars = Math.max(500, Math.min(8000, Number(options.maxChunkChars || 4000)));
-  const maxContextChars = Math.max(2000, Math.min(40000, Number(options.maxContextChars || 16000)));
-  let usedChars = 0;
+  const maxContextTokens = Math.max(500, Math.min(20000, Number(options.maxContextTokens || Math.ceil(Number(options.maxContextChars || 16000) / 4))));
+  let usedTokens = 0;
   const results = search.results.flatMap(item => {
     const source = metadata[item.chunk.filename];
     if (!isKnowledgeDocumentAllowed(source, context)) return [];
-    const remaining = maxContextChars - usedChars;
-    if (remaining < 200) return [];
-    const text = String(item.chunk.text || "").slice(0, Math.min(maxChunkChars, remaining));
-    usedChars += text.length;
+    const text = String(item.chunk.text || "");
+    if (!text || text.length > maxChunkChars) return [];
+    const tokenCount = estimateModelTextTokens(`${item.chunk.filename}\n${item.chunk.heading || ""}\n${text}`).safetyAdjustedTokens;
+    if (usedTokens + tokenCount > maxContextTokens) return [];
+    usedTokens += tokenCount;
     return [{
       citation: String(item.chunk.id || ""),
       filename: item.chunk.filename,
       heading: item.chunk.heading || "",
       text,
       score: Number(item.score.toFixed(4)),
+      lexicalScore: Number(Number(item.keywordScore || 0).toFixed(4)),
+      semanticScore: Number(Number(item.semanticScore || item.vectorScore || 0).toFixed(4)),
+      retrievalMode: item.retrievalMode || item.embeddingMode || "lexical",
+      tokenCount,
       scope: source?.scope || item.chunk.scope,
       visibility: source?.visibility || "shared",
       source: source?.source || { type: "manual" },
@@ -122,6 +129,11 @@ export async function searchAgentKnowledge(
     context: formatKnowledgeContext(results, search.embeddingMode),
     embeddingMode: search.embeddingMode,
     embeddingError: search.embeddingError,
-    fallback: search.embeddingMode === "hashing" || search.embeddingMode.includes("fallback"),
+    fallback: search.embeddingMode === "lexical" || search.embeddingMode.includes("fallback"),
+    fallbackReason: search.fallbackReason || "",
+    indexGeneration: search.indexGeneration || "",
+    staleServed: search.staleServed === true,
+    scopeChecksum: search.scopeChecksum || "",
+    tokenBudget: { used: usedTokens, max: maxContextTokens },
   };
 }

@@ -63,8 +63,8 @@ const group_memory_index_1 = require("./group-memory-index");
 const agent_qa_service_1 = require("./agent-qa-service");
 const task_delivery_report_1 = require("./task-delivery-report");
 const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
-const agent_receipts_1 = require("./agent-receipts");
 const agent_notifications_1 = require("./agent-notifications");
+const mission_evidence_contract_1 = require("./mission-evidence-contract");
 const logs_1 = require("./logs");
 const storage_1 = require("./storage");
 const execution_kernel_1 = require("../../agents/execution-kernel");
@@ -450,7 +450,7 @@ function scoreChildAgentReceipt(task, receipt = {}, context = {}) {
         { id: "verification", label: "列出已执行验证", ok: !(0, collaboration_1.taskRequiresVerification)(task) || (Array.isArray(receipt.verification || receipt.tests) && (receipt.verification || receipt.tests).length > 0) },
         { id: "not_handoff_only", label: "完成执行而非仅建议", ok: handoffQuality.pass, detail: handoffQuality.reason },
         { id: "contract_changes", label: "结构化契约变化", ok: !contractLikely || contractChanges.length > 0 },
-        { id: "no_open_blockers", label: "无开放阻塞", ok: !(Array.isArray(receipt.blockers) && receipt.blockers.length) && !(Array.isArray(receipt.needs) && receipt.needs.some((item) => !(0, collaboration_1.isAdvisoryNeed)(item, task))) },
+        { id: "no_open_blockers", label: "无开放阻塞", ok: !(Array.isArray(receipt.blockers) && receipt.blockers.length) && !(Array.isArray(receipt.needs) && receipt.needs.length) },
         { id: "memory_declared", label: "声明记忆使用", ok: Array.isArray(receipt.memoryUsed || receipt.memory_used) || Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) },
         { id: "task_agent_memory_snapshot", label: "匹配本轮记忆快照", ok: !taskAgentMemorySnapshot.required || taskAgentMemorySnapshot.pass, detail: taskAgentMemorySnapshot.required ? `snapshot=${taskAgentMemorySnapshot.matched_snapshot_ids.join(",") || "missing"} session=${taskAgentMemorySnapshot.receipt_task_agent_session_id || "missing"}` : "not_required" },
         { id: "memory_gate", label: "引用记忆派发 gate", ok: !effectiveMemoryGate.required || effectiveMemoryGate.pass, detail: effectiveMemoryGate.required ? `gate=${effectiveMemoryGate.gate_ids.join(",") || "unknown"}` : "not_required" },
@@ -495,7 +495,11 @@ function buildIndependentReviewGate(task, actualFileChanges = [], receipts = [],
     const decision = explainIndependentReviewTriggerDecision(task, actualFileChanges);
     const highRiskFiles = decision.highRiskFiles || (actualFileChanges || []).filter(collaboration_1.changeLooksHighRiskForIndependentReview);
     const required = decision.required === true;
-    const evidence = (0, collaboration_1.collectIndependentReviewEvidence)(receipts, agentQa);
+    const { buildReviewChangeFingerprint, applyReviewFreshnessToEvidence } = require("./review-freshness");
+    // 复核结论必须与当前变更集对得上：过期的"通过"会被降级为 needs_recheck，阻断验收并要求重新复验。
+    const currentChangeFingerprint = buildReviewChangeFingerprint(actualFileChanges);
+    const freshnessApplied = applyReviewFreshnessToEvidence((0, collaboration_1.collectIndependentReviewEvidence)(receipts, agentQa), currentChangeFingerprint);
+    const evidence = freshnessApplied.rows;
     const failedEvidence = evidence.filter((item) => item.status === "failed");
     const passedEvidence = evidence.filter((item) => item.status === "passed");
     const recheckEvidence = evidence.filter((item) => item.status === "needs_recheck");
@@ -519,8 +523,12 @@ function buildIndependentReviewGate(task, actualFileChanges = [], receipts = [],
                                 ? "passed"
                                 : "missing",
         reason: required
-            ? (decision.triggerReasons.join("；") || "复杂代码变更需要另一个 Agent 复核")
+            ? (freshnessApplied.staleCount > 0
+                ? `上一次复核通过后代码又发生变更，${freshnessApplied.staleCount} 条复核结论已过期，需要基于最新改动重新复验`
+                : (decision.triggerReasons.join("；") || "复杂代码变更需要另一个 Agent 复核"))
             : (decision.skipReasons.join("；") || "本次变更不强制独立复核"),
+        stale_evidence_count: freshnessApplied.staleCount,
+        reviewed_change_fingerprint: currentChangeFingerprint,
         decision_detail: decision.decisionDetail,
         decisionDetail: decision.decisionDetail,
         trigger_reasons: decision.triggerReasons,
@@ -664,7 +672,11 @@ function buildDeliverySummary(task, execution, finalStatus) {
     const verification = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.verification));
     const verificationGate = (0, collaboration_1.getVerificationEvidenceGate)(receipts);
     const requiredVerificationCoverage = (0, collaboration_1.getRequiredVerificationCoverage)(receipts);
-    const externalRunnerVerification = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => (receipt.verification || []).filter((item) => /passed by external runner\s*\(exit 0\)/i.test(String(item)))));
+    const externalRunnerVerification = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => (Array.isArray(receipt.verificationResults || receipt.verification_results) ? (receipt.verificationResults || receipt.verification_results) : [])
+        .filter((item) => String(item?.status || "").toLowerCase() === "passed"
+        && ["ccm_runner", "ccm_runner_verification", "external_runner"].includes(String(item?.source || "").toLowerCase())
+        && (item.exitCode == null || Number(item.exitCode) === 0))
+        .map((item) => item.command || item.name)));
     const projectAgentProfiles = agents
         .map((agent) => (0, collaboration_1.getProjectAgentCapabilityProfile)(agent))
         .filter((profile) => profile.configured);
@@ -675,13 +687,12 @@ function buildDeliverySummary(task, execution, finalStatus) {
         blockers.push(...projectPolicyViolations.map((item) => item.message));
     const needs = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.needs));
     const executionDetail = String(execution?.detail || "").trim();
-    const executionDetailConfirmsCompletion = /(?:主\s*Agent|协调(?:者|Agent)|任务|最终)?\s*(?:复盘|验收|检查)?\s*(?:判定|确认)?\s*(?:已)?完成|(?:复盘|验收).{0,12}(?:通过|完成)/i.test(executionDetail);
-    if (finalStatus !== "done" && executionDetail && !executionDetailConfirmsCompletion && !needs.length && !blockers.length) {
+    if (finalStatus !== "done" && executionDetail && !needs.length && !blockers.length) {
         needs.push(executionDetail);
     }
     const actions = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.actions));
-    const advisoryNeeds = needs.filter((item) => (0, collaboration_1.isAdvisoryNeed)(item, task));
-    const blockingNeeds = needs.filter((item) => !advisoryNeeds.includes(item));
+    const advisoryNeeds = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.advisoryNeeds || receipt.advisory_needs || []));
+    const blockingNeeds = needs;
     const receiptStatuses = receipts.map((receipt) => ({
         agent: receipt.agent,
         status: receipt.status,
@@ -1227,26 +1238,26 @@ function buildDeliverySummary(task, execution, finalStatus) {
     summary.runtime_kernel = (0, collaboration_1.buildRuntimeKernelSnapshot)(task, summary);
     summary.acceptance_gate = buildAcceptanceGate(task, execution, summary, finalStatus);
     summary.acceptance_gate_passed = summary.acceptance_gate.pass;
+    summary.evidence_contract = (0, mission_evidence_contract_1.buildMissionEvidenceContract)(summary);
     summary.reasoning_loop = (0, reasoning_loop_1.buildTaskReasoningState)(task, summary);
     summary.plan_version = summary.reasoning_loop.plan_version;
     summary.reasoning_deviation_count = summary.reasoning_loop.deviations.length;
     summary.reasoning_open_assertions = summary.reasoning_loop.assertions.filter((item) => item.status !== "passed").length;
     summary.timeline_count = Array.isArray(summary.timeline) ? summary.timeline.length : 0;
     summary.delivery_report = (0, task_delivery_report_1.buildTaskDeliveryReport)(task, summary, finalStatus, execution?.report || execution?.result || execution?.detail || "");
-    summary.user_report = summary.delivery_report.markdown || (0, task_delivery_report_1.buildUserDeliveryReport)(task, summary, finalStatus, execution?.report || execution?.result || execution?.detail || "");
+    summary.user_report = summary.delivery_report.user_text || summary.delivery_report.markdown || (0, task_delivery_report_1.buildUserDeliveryReport)(task, summary, finalStatus, execution?.report || execution?.result || execution?.detail || "");
     return summary;
 }
 // ===== merged from collaboration-acceptance-part-02.ts =====
 // Extracted functional module. The original entry remains a compatibility facade.
 function getTaskExecutionFromReceipt(response, receipt, details = {}) {
     if (!receipt) {
-        if ((0, agent_receipts_1.checkTaskFailure)(response)) {
-            return (0, collaboration_1.buildTaskExecutionResult)("failed", response, { ...details, detail: details.detail || "Agent 输出包含失败标记" });
-        }
-        if ((0, agent_receipts_1.checkTaskCompletion)(response)) {
-            return (0, collaboration_1.buildTaskExecutionResult)("done", response, { ...details, detail: details.detail || "兼容旧 Agent：检测到完成标记但缺少结构化结果说明" });
-        }
-        return (0, collaboration_1.buildTaskExecutionResult)("waiting", response, { ...details, detail: details.detail || "缺少结构化结果说明，无法可靠验收" });
+        return (0, collaboration_1.buildTaskExecutionResult)("waiting", response, {
+            ...details,
+            detail: details.detail || "缺少结构化结果说明，无法可靠验收",
+            legacy_unverified: true,
+            missing_receipt: true,
+        });
     }
     if (receipt.status === "done") {
         return (0, collaboration_1.buildTaskExecutionResult)("done", response, { ...details, receipt, detail: receipt.summary || details.detail || "子 Agent 结果说明确认完成" });
@@ -1576,7 +1587,7 @@ function canCompleteDailyDevFromDeliverySummary(task, execution, summary) {
         ...(Array.isArray(summary.blockers) ? summary.blockers : []),
         ...(Array.isArray(summary.blocking_needs)
             ? summary.blocking_needs
-            : (Array.isArray(summary.needs) ? summary.needs.filter((item) => !(0, collaboration_1.isAdvisoryNeed)(item, task)) : [])),
+            : (Array.isArray(summary.needs) ? summary.needs : [])),
         ...(Array.isArray(summary.verification_failed) ? summary.verification_failed : []),
         ...(Array.isArray(summary.verification_suggested) ? summary.verification_suggested : []),
     ].filter(Boolean);

@@ -17,6 +17,7 @@ import {
 } from "./project-session-agent-binding";
 import { cancelProjectMainTasksForSession } from "./project-main-agent";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
 
 export const WEB_SESSIONS_DIR = path.join(CCM_DIR, "web-sessions");
 
@@ -24,7 +25,7 @@ export function getProjectSessionDir(projectName: string): string {
   return resolveContainedPath(WEB_SESSIONS_DIR, validateProjectName(projectName));
 }
 
-function getSessionFilePath(projectName: string, sessionId: string) {
+export function getSessionFilePath(projectName: string, sessionId: string) {
   return resolveContainedPath(getProjectSessionDir(projectName), `${validateSessionId(sessionId)}.json`);
 }
 
@@ -189,6 +190,10 @@ export function syncFromCcToFilesystem(projectName: string) {
       const filePath = getSessionFilePath(projectName, validateSessionId(sid));
       // 只更新有变化的
       const existing = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, "utf-8")) : null;
+      if (Array.isArray(existing?.execution_history)) {
+        (sessionData as any).execution_history_version = Number(existing.execution_history_version || 1);
+        (sessionData as any).execution_history = existing.execution_history;
+      }
       const historyChanged = JSON.stringify(existing?.history || []) !== JSON.stringify(sessionData.history || []);
       const bindingsChanged = JSON.stringify(existing?.feishu_platform_keys || []) !== JSON.stringify(sessionData.feishu_platform_keys || []);
       if (!existing
@@ -221,7 +226,8 @@ export function syncToFilesystemToCc(projectName: string) {
     for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".json"))) {
       const sid = f.replace(".json", "");
       const sessionData = JSON.parse(fs.readFileSync(resolveContainedPath(dir, f), "utf-8"));
-      ccData.sessions[sid] = sessionData;
+      const { execution_history, executionHistory, execution_history_version, ...sharedSessionData } = sessionData;
+      ccData.sessions[sid] = sharedSessionData;
     }
     // 更新 counter
     const maxNum = Math.max(0, ...Object.keys(ccData.sessions).map(s => parseInt(s.replace("s", "")) || 0));
@@ -273,8 +279,9 @@ export function getSessionDetail(projectName: string, sessionId: string) {
   if (fs.existsSync(filePath)) {
     try {
       const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      const { execution_history, executionHistory, execution_history_version, ...publicData } = data;
       return {
-        ...data,
+        ...publicData,
         source: projectSessionSource(sessionId, data, targets),
         feishu_bindings: targets.filter((target: any) => target.active_session_id === sessionId),
         agent_binding: getProjectSessionAgentBinding(projectName, sessionId),
@@ -309,6 +316,8 @@ function normalizeWebSessionMessage(message: any) {
   };
   for (const key of [
     "requestText",
+    "messageMode",
+    "message_mode",
     "task_id",
     "run_id",
     "taskExperience",
@@ -318,6 +327,7 @@ function normalizeWebSessionMessage(message: any) {
     "agenticRun",
     "managementReceipt",
     "provider_usage",
+    "source",
     "type",
   ]) {
     if (Object.prototype.hasOwnProperty.call(input, key)) safe[key] = input[key];
@@ -451,6 +461,46 @@ export function appendProjectSessionTaskMessage(projectName: string, sessionId: 
     });
   }
   return normalized;
+}
+
+export function upsertProjectSessionTaskMessage(projectName: string, sessionId: string, message: any) {
+  const safeProject = requireActiveProject(projectName).project;
+  const safeSessionId = validateSessionId(sessionId);
+  const filePath = getSessionFilePath(safeProject, safeSessionId);
+  if (!fs.existsSync(filePath)) throw new Error("项目会话不存在");
+  const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  const normalized = normalizeWebSessionMessage(message);
+  const taskId = String(normalized.task_id || normalized.taskExperience?.task_id || "").trim();
+  data.history = Array.isArray(data.history) ? data.history : [];
+  const existingIndex = data.history.findIndex((item: any) => {
+    if (String(item?.id || "") === normalized.id) return true;
+    if (!taskId) return false;
+    return item?.role === "assistant"
+      && String(item?.task_id || item?.taskExperience?.task_id || "") === taskId;
+  });
+  if (existingIndex >= 0) {
+    const existing = data.history[existingIndex] || {};
+    data.history[existingIndex] = {
+      ...existing,
+      ...normalized,
+      id: String(existing.id || normalized.id),
+      timestamp: existing.timestamp || normalized.timestamp,
+    };
+  } else {
+    data.history.push(normalized);
+  }
+  data.updated_at = new Date().toISOString();
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  syncToFilesystemToCc(safeProject);
+  publishRuntimeEvent("project", "project.session_messages_changed", {
+    project: safeProject,
+    sessionId: safeSessionId,
+    taskId,
+    messageId: existingIndex >= 0 ? String(data.history[existingIndex]?.id || normalized.id) : normalized.id,
+    status: String(normalized.taskExperience?.status || normalized.taskExperience?.phase || "changed").slice(0, 40),
+    source: "project-main-agent-session-projection",
+  });
+  return existingIndex >= 0 ? data.history[existingIndex] : normalized;
 }
 
 export function scheduleProjectSessionAutoTitle(project: string, sessionId: string, options: {
@@ -612,11 +662,19 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         const before = Array.isArray(data.history) ? data.history.length : 0;
+        const removedIds = new Set((Array.isArray(data.history) ? data.history : [])
+          .filter((message: any, index: number) => messageMatchesDeleteSelector(message, payload, index))
+          .map((message: any) => String(message?.id || message?.message_id || ""))
+          .filter(Boolean));
         data.history = (Array.isArray(data.history) ? data.history : []).filter((message: any, index: number) => !messageMatchesDeleteSelector(message, payload, index));
         const deleted = before - data.history.length;
         if (deleted > 0) cancelProjectMainTasksForSession(project, sessionId, "项目会话消息被删除，取消未完成的项目主 Agent 任务");
         const rotation = deleted > 0 ? rotateProjectSessionAgentBinding(project, sessionId, "项目会话消息删除，压缩边界失效") : null;
-        if (deleted > 0) delete data.compaction;
+        if (deleted > 0) {
+          delete data.compaction;
+          data.execution_history = (Array.isArray(data.execution_history) ? data.execution_history : [])
+            .filter((event: any) => !removedIds.has(String(event?.anchorMessageId || event?.anchor_message_id || "")));
+        }
         data.updated_at = new Date().toISOString();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         syncToFilesystemToCc(project);
@@ -643,6 +701,7 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const before = Array.isArray(data.history) ? data.history.length : 0;
         cancelProjectMainTasksForSession(project, sessionId, "项目会话消息被替换，取消未完成的项目主 Agent 任务");
         data.history = payload.messages.map(normalizeWebSessionMessage);
+        data.execution_history = [];
         const rotation = rotateProjectSessionAgentBinding(project, sessionId, "项目会话消息替换，压缩边界失效");
         delete data.compaction;
         data.updated_at = new Date().toISOString();
@@ -670,6 +729,7 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         cancelProjectMainTasksForSession(project, sessionId, "用户清空项目会话，取消未完成的项目主 Agent 任务");
         const rotation = rotateProjectSessionAgentBinding(project, sessionId, "用户清空项目会话");
         data.history = [];
+        data.execution_history = [];
         delete data.compaction;
         data.updated_at = new Date().toISOString();
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
@@ -711,6 +771,14 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
         const bindingCleanup = purgeProjectSessionAgentBinding(project, sessionId);
         const runCleanup = purgeProjectChatRunsForSession(project, sessionId);
         fs.unlinkSync(filePath);
+        let contextCacheCleanup: any = null;
+        try {
+          contextCacheCleanup = invalidateProviderNeutralContextCacheState({
+            scope: "project",
+            scopeId: project,
+            sessionId,
+          }, "project_session_deleted");
+        } catch {}
         const ccFile = findCcSessionFile(project);
         if (ccFile) {
           try {
@@ -726,7 +794,12 @@ export function handleSessionsApi(pathname: string, req: any, res: any, parsed: 
             fs.writeFileSync(ccFile, JSON.stringify(data, null, 2));
           } catch {}
         }
-        sendJson(res, { success: true, removed_agent_sessions: bindingCleanup.removed.length, removed_project_runs: runCleanup.removed.length });
+        sendJson(res, {
+          success: true,
+          removed_agent_sessions: bindingCleanup.removed.length,
+          removed_project_runs: runCleanup.removed.length,
+          context_cache_invalidated: contextCacheCleanup?.success === true,
+        });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

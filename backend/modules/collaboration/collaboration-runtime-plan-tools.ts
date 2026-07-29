@@ -1844,11 +1844,17 @@ export function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: s
     selectedSkillNames,
     modelDecision: { actionRequired: true, selectedSkills: selectedSkillNames },
   });
-  const allowedTools = normalizeToolAuthorization(mergeToolSelections(
+  const configuredTools = normalizeToolAuthorization(mergeToolSelections(
     group?.tools || {},
     getProjectToolSelection(projectName),
-    { skill: selectedRoleSkills.map(skill => skill.name) },
   ));
+  const executionRoleSkills = selectedRoleSkills.map(skill => skill.name);
+  const allowedTools = {
+    ...normalizeToolAuthorization(mergeToolSelections(configuredTools, { skill: executionRoleSkills })),
+    configuredTools,
+    executionRoleSkills,
+    enforceExecutionRoleSkills: true,
+  };
   const prompt = [
     buildSelectedSkillUsageDirective(selectedRoleSkills),
     ctx.toolManager.buildToolPrompt(allowedTools),
@@ -1860,6 +1866,8 @@ export function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: s
     allowedTools,
     toolAudit,
     authorizationReadiness,
+    configuredTools,
+    executionRoleSkills,
     selectedRoleSkills: selectedRoleSkills.map(skill => ({ name: skill.name, kind: skill.kind, reason: skill.reason })),
   };
 }

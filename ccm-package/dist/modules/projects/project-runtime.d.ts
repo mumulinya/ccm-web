@@ -125,6 +125,17 @@ export declare function stopProjectRuntime(project: string, profileId?: unknown)
     state: RuntimeProcessState;
     alreadyStopped?: undefined;
 };
+export declare function stopAllProjectRuntimes(project: string): {
+    success: boolean;
+    project: string;
+    stoppedProcesses: number;
+    stoppedBuilds: number;
+    failures: {
+        profileId: string;
+        kind: "run" | "build";
+        error: string;
+    }[];
+};
 export declare function restartProjectRuntime(project: string, profileId?: unknown): {
     success: boolean;
     profile: any;
@@ -137,8 +148,8 @@ export declare function buildProjectRuntime(project: string, profileId?: unknown
 };
 export declare function getProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, lines?: number): {
     project: string;
-    profileId: any;
-    kind: string;
+    profileId: string;
+    kind: "run" | "build";
     logs: string;
 };
 export declare function subscribeProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, listener: (event: RuntimeLogEvent) => void): () => void;

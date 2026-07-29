@@ -18,7 +18,8 @@ const modelOptions = ref({ codex: [], cursor: [], gemini: [], opencode: [], clau
 const modelMetadata = ref({ codex: {}, cursor: {}, gemini: {}, opencode: {}, claudecode: {} })
 const modelLoading = ref({ codex: false, cursor: false, gemini: false, opencode: false, claudecode: false })
 const customModelMode = ref({ codex: false, cursor: false, gemini: false, opencode: false, claudecode: false })
-let installPollTimer = 0
+const installPollTimers = new Map()
+const installCompletionReceipts = new Set()
 const loginPollTimers = new Map()
 const loginPopups = new Map()
 const openedAuthUrls = new Map()
@@ -46,7 +47,7 @@ const config = ref({
 const providers = computed(() => providerCatalog.value.filter(item => item.id !== 'claudecode'))
 
 const stateLabel = status => {
-  if (status?.install?.status === 'running') return '安装中'
+  if (status?.install?.status === 'running') return status?.install?.operation === 'update' ? '更新中' : '安装中'
   if (!status?.installed) return '未安装'
   if (status.authState === 'logged_in') return '已登录'
   if (status.authState === 'configured') return '已配置'
@@ -210,7 +211,7 @@ const loadProviderModels = async provider => {
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '读取模型失败')
     modelOptions.value[provider] = data.models || []
-    modelMetadata.value[provider] = { source: data.source || 'unavailable', error: data.error || '', allowsCustom: data.allowsCustom !== false }
+    modelMetadata.value[provider] = { source: data.source || 'unavailable', error: data.error || '', detail: data.detail || '', allowsCustom: data.allowsCustom !== false }
     syncCustomModelMode(provider)
   } catch (error) {
     modelOptions.value[provider] = []
@@ -258,25 +259,51 @@ const load = async (force = false, quiet = false) => {
   }
 }
 
-const pollInstallStatus = () => {
-  if (installPollTimer) window.clearInterval(installPollTimer)
-  installPollTimer = window.setInterval(async () => {
+const stopInstallPolling = provider => {
+  const timer = installPollTimers.get(provider)
+  if (timer) window.clearTimeout(timer)
+  installPollTimers.delete(provider)
+}
+
+const installReceiptKey = (provider, install = {}) => [
+  provider,
+  install.operation || '',
+  install.startedAt || '',
+  install.completedAt || '',
+  install.status || ''
+].join(':')
+
+const pollInstallStatus = provider => {
+  stopInstallPolling(provider)
+  const run = async () => {
     try {
       const response = await fetch('/api/system/agent-providers/status')
       const data = await response.json()
-      if (!response.ok || !data.success) return
+      if (!response.ok || !data.success) throw new Error(data.error || '读取安装状态失败')
       statuses.value = data.statuses || statuses.value
-      const running = Object.values(statuses.value).some(status => status?.install?.status === 'running')
-      if (!running) {
-        window.clearInterval(installPollTimer)
-        installPollTimer = 0
-        const failed = Object.entries(statuses.value).find(([, status]) => status?.install?.status === 'failed')
-        if (failed) toast.error(`${providers.value.find(item => item.id === failed[0])?.label || failed[0]} 安装失败`)
-        else toast.success('Agent 安装完成，可以继续登录或配置模型')
-        await load(false, true)
+      const status = statuses.value[provider]
+      const install = status?.install || {}
+      if (install.status === 'running') {
+        installPollTimers.set(provider, window.setTimeout(run, 1800))
+        return
       }
-    } catch {}
-  }, 1800)
+      stopInstallPolling(provider)
+      if (['succeeded', 'failed'].includes(install.status)) {
+        const receipt = installReceiptKey(provider, install)
+        if (!installCompletionReceipts.has(receipt)) {
+          installCompletionReceipts.add(receipt)
+          const label = providerLabel(provider)
+          const actionLabel = install.operation === 'update' ? '更新' : '安装'
+          if (install.status === 'failed') toast.error(`${label} ${actionLabel}失败`)
+          else toast.success(`${label} ${actionLabel}完成`)
+        }
+      }
+      await load(false, true)
+    } catch {
+      installPollTimers.set(provider, window.setTimeout(run, 2400))
+    }
+  }
+  installPollTimers.set(provider, window.setTimeout(run, 350))
 }
 
 const save = async () => {
@@ -353,8 +380,8 @@ const install = async provider => {
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '无法启动安装')
     statuses.value = { ...statuses.value, [provider]: { ...statuses.value[provider], install: data.install } }
-    toast.success('安装任务已启动，可以留在当前页面查看进度')
-    pollInstallStatus()
+    toast.success(statuses.value[provider]?.installed ? '更新任务已启动，可以留在当前页面查看进度' : '安装任务已启动，可以留在当前页面查看进度')
+    pollInstallStatus(provider)
   } catch (error) {
     toast.error(error?.message || '无法启动安装')
   } finally {
@@ -455,13 +482,15 @@ const clearClaudeKey = async () => {
 
 onMounted(async () => {
   await load()
-  if (Object.values(statuses.value).some(status => status?.install?.status === 'running')) pollInstallStatus()
+  for (const [provider, status] of Object.entries(statuses.value)) {
+    if (status?.install?.status === 'running') pollInstallStatus(provider)
+  }
   // 首屏用缓存秒开后，静默做一次强制复检：外部终端里的 CLI 登录/登出
   // 不会触发服务端缓存失效，这里主动等一轮真实探测纠正过期状态
   void load(true, true)
 })
 onBeforeUnmount(() => {
-  if (installPollTimer) window.clearInterval(installPollTimer)
+  for (const provider of installPollTimers.keys()) stopInstallPolling(provider)
   for (const provider of loginPollTimers.keys()) stopLoginPolling(provider)
 })
 </script>
@@ -507,7 +536,7 @@ onBeforeUnmount(() => {
               </span>
               <span v-if="statuses[provider.id]?.detail" class="agent-provider-auth-detail">{{ statuses[provider.id].detail }}</span>
               <span v-if="statuses[provider.id]?.install?.status === 'failed'" class="provider-install-error">
-                {{ statuses[provider.id]?.install?.error || statuses[provider.id]?.install?.output || '安装失败，请检查 npm、网络或系统权限。' }}
+                {{ statuses[provider.id]?.install?.error || statuses[provider.id]?.install?.output || `${statuses[provider.id]?.install?.operation === 'update' ? '更新' : '安装'}失败，请检查网络、系统权限和命令路径。` }}
               </span>
             </div>
           </div>
@@ -530,8 +559,8 @@ onBeforeUnmount(() => {
               class="settings-input provider-custom-model"
               :placeholder="modelLoading[provider.id] ? '正在读取可用模型...' : '输入模型 ID，留空使用自动模式'"
             >
-            <span v-if="hasModelCatalog(provider.id)" class="settings-field-hint model-catalog-ok">当前账号返回 {{ modelOptions[provider.id].filter(model => model.id).length }} 个可用模型，修改后应用于后续任务。</span>
-            <span v-else class="settings-field-hint">{{ modelMetadata[provider.id]?.error || '当前 Agent 无法枚举模型，可留空使用自动模式或手动填写模型 ID。' }}</span>
+            <span v-if="hasModelCatalog(provider.id)" class="settings-field-hint model-catalog-ok">{{ modelMetadata[provider.id]?.detail || `当前账号返回 ${modelOptions[provider.id].filter(model => model.id).length} 个可用模型，修改后应用于后续任务。` }}</span>
+            <span v-else class="settings-field-hint">{{ modelLoading[provider.id] ? '正在读取当前账号与本机 CLI 的模型目录...' : (modelMetadata[provider.id]?.error || '当前 Agent 无法枚举模型，可留空使用自动模式或手动填写模型 ID。') }}</span>
           </div>
           <div class="agent-provider-controls">
             <label class="settings-switch" :aria-label="`启用 ${provider.label}`">

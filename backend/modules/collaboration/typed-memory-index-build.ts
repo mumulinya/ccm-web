@@ -1243,9 +1243,10 @@ export function syncGroupTypedMemoryFromGroupMemory(groupId: string, memory: any
   const requirements = Array.isArray(memory?.persistentRequirements) ? memory.persistentRequirements : [];
   const facts = Array.isArray(memory?.factAnchors) ? memory.factAnchors : [];
   const decisions = Array.isArray(memory?.decisions) ? memory.decisions : [];
-  const blocked = Array.isArray(memory?.blocked) ? memory.blocked : [];
-  const workerLedger = Array.isArray(memory?.workerLedger) ? memory.workerLedger : [];
-  const reinject = memory?.compaction?.postCompactReinject || memory?.compactBoundary?.post_compact_restore?.reinjectionPlan || {};
+  const confirmedFeedback = [
+    ...(Array.isArray(memory?.feedback) ? memory.feedback : []),
+    ...(Array.isArray(memory?.confirmedCorrections) ? memory.confirmedCorrections : []),
+  ];
 
   const writes: any[] = [];
   const userBody = [
@@ -1281,32 +1282,28 @@ export function syncGroupTypedMemoryFromGroupMemory(groupId: string, memory: any
   }));
 
   const feedbackBody = [
-    "# Feedback And Failure Memory",
-    listLines("Blocked Or Failed Work", blocked, (item: any) => `${item.project || item.agent || "agent"}: ${item.reason || item.summary || item.text || ""}`, 16),
-    listLines("Worker Ledger Warnings", workerLedger.filter((item: any) => !/done|success|completed/i.test(String(item.status || item.receiptStatus || ""))), (item: any) => `${item.project || item.agent || "agent"} [${item.status || item.receiptStatus || "unknown"}]: ${item.summary || ""}`, 16),
+    "# Confirmed Feedback And Corrections",
+    listLines("Reusable Corrections", confirmedFeedback, (item: any) => `${item.text || item.content || item.correction || item}`, 24),
   ].filter(Boolean).join("\n\n");
-  if (blocked.length || feedbackBody.includes("- ")) writes.push(upsertGroupTypedMemoryDocument(groupId, {
+  if (confirmedFeedback.length) writes.push(upsertGroupTypedMemoryDocument(groupId, {
     type: "feedback",
-    slug: "feedback-failures",
-    name: "Feedback and failure memory",
-    description: "Corrections, blockers, failed receipts, and patterns the agents should not repeat.",
+    slug: "confirmed-feedback",
+    name: "Confirmed feedback and corrections",
+    description: "Accepted reusable corrections and lessons. Raw failures and temporary worker status stay in task replay.",
     source: "auto:group-memory-json",
     updatedAt,
     body: feedbackBody,
   }));
 
   const referenceBody = [
-    "# Reference Artifacts",
+    "# Stable Reference Anchors",
     listLines("Fact Anchors", facts, (item: any) => `#${item.messageId || item.id || ""} [${item.type || "fact"}] ${item.text || item}`, 24),
-    listLines("Files To Reinject", reinject.files || [], (item: any) => `${item.value || item}${item.sourceMessageId ? ` (#${item.sourceMessageId})` : ""}`, 12),
-    listLines("Skills Or Tools To Reinject", reinject.skills || [], (item: any) => `${item.value || item}${item.sourceMessageId ? ` (#${item.sourceMessageId})` : ""}`, 12),
-    listLines("Verification To Reinject", reinject.verification || [], (item: any) => `${item.value || item}${item.sourceMessageId ? ` (#${item.sourceMessageId})` : ""}`, 12),
   ].filter(Boolean).join("\n\n");
-  if (facts.length || reinject?.hasCandidates) writes.push(upsertGroupTypedMemoryDocument(groupId, {
+  if (facts.length) writes.push(upsertGroupTypedMemoryDocument(groupId, {
     type: "reference",
     slug: "reference-artifacts",
-    name: "Reference artifacts and restored context",
-    description: "Facts, files, skills, verification, and artifact pointers useful for future recall.",
+    name: "Stable reference anchors",
+    description: "Non-derivable references and stable evidence anchors. Skills, MCP definitions, files and temporary verification remain dynamic session context.",
     source: "auto:group-memory-json",
     updatedAt,
     body: referenceBody,

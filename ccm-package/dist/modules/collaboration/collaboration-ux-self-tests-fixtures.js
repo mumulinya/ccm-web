@@ -485,6 +485,8 @@ function buildUxSelfTestChecks(ctx = {}) {
         reportHidesProtocol: !/CCM_AGENT_RECEIPT|Trace|session|scratchpad|门禁|派发证据/i.test(report),
         groupReportFormatsObjects: groupReport.includes("frontend/app.js") && !groupReport.includes("[object Object]"),
         acknowledgementHasCleanPunctuation: !acknowledgement.includes("。。"),
+        acknowledgementIsUserOriented: ["目标：增加负责人筛选", "负责范围：collab-web", "TestAgent（独立验收）", "后续只更新同一张任务卡"].every(label => acknowledgement.includes(label))
+            && !/CCM_AGENT_RECEIPT|trace_id|session_id|llm-error/i.test(acknowledgement),
         dispatchLaunchSummaryVisible: dispatchLaunchSummary?.schema === "ccm-main-agent-dispatch-launch-summary-v1"
             && dispatchLaunchSummary?.rows?.[0]?.agent === "collab-web"
             && dispatchLaunchSummary?.headline?.includes("1 个执行成员")

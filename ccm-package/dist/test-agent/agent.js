@@ -83,12 +83,18 @@ async function runTestAgent(input, options = {}) {
         })),
     });
     const executionWorkOrder = withRuntimeEnvironments(workOrder);
+    const semanticPlanningBlocked = String(workOrder.metadata?.agenticPlanning?.status || "") === "blocked";
     let commandResults = [];
     let devServers = [];
     let httpResults = [];
     let browserResults = [];
     let browserProviderPreflight = [];
     try {
+        if (semanticPlanningBlocked) {
+            const blocked = new Error("TestAgent 语义规划未通过，已阻止执行验收命令和浏览器检查");
+            blocked.code = "CCM_TEST_AGENT_SEMANTIC_PLANNING_BLOCKED";
+            throw blocked;
+        }
         browserProviderPreflight = await (0, registry_1.collectBrowserProviderPreflight)(executionWorkOrder, runtimeOptions);
         workOrder.metadata = {
             ...workOrder.metadata,
@@ -102,15 +108,51 @@ async function runTestAgent(input, options = {}) {
         workOrder.metadata = { ...workOrder.metadata, agenticFollowup: followup.metadata };
         if (followup.issue)
             issues.push(followup.issue);
-        if (followup.workOrder)
-            commandResults.push(...await (0, command_runner_1.runVerificationCommands)(withRuntimeEnvironments(followup.workOrder)));
+        if (followup.workOrder) {
+            const followupWorkOrder = withRuntimeEnvironments(followup.workOrder);
+            commandResults.push(...await (0, command_runner_1.runVerificationCommands)(followupWorkOrder));
+            if ((0, shared_1.wantsBrowser)(followupWorkOrder)) {
+                const followupBrowserResults = await (0, browser_verifier_1.runBrowserVerification)(followupWorkOrder, {
+                    ...runtimeOptions,
+                    // Follow-up checks are focused diagnostics. They must not mutate the
+                    // frozen primary browser execution plan or its lifecycle coverage.
+                    browserResourceLifecycle: undefined,
+                });
+                const diagnosticResults = followupBrowserResults.map(result => {
+                    const { execution: _execution, ...diagnostic } = result;
+                    return {
+                        ...diagnostic,
+                        context: {
+                            ...(diagnostic.context || {}),
+                            agenticFollowup: true,
+                        },
+                    };
+                });
+                browserResults.push(...diagnosticResults);
+                workOrder.metadata = {
+                    ...workOrder.metadata,
+                    agenticFollowup: {
+                        ...(workOrder.metadata?.agenticFollowup || {}),
+                        browserResults: diagnosticResults.map(result => ({
+                            project: result.project,
+                            name: result.name,
+                            status: result.status,
+                            provider: result.provider,
+                            screenshots: result.screenshots || [],
+                        })),
+                    },
+                };
+            }
+        }
         workOrder.metadata = {
             ...workOrder.metadata,
             browserAuthenticationSummary: (0, authentication_summary_1.buildBrowserAuthenticationSummary)(browserResults),
         };
     }
     catch (error) {
-        issues.push({ severity: "error", code: "test_agent_runtime_error", message: error.message || String(error) });
+        if (error?.code !== "CCM_TEST_AGENT_SEMANTIC_PLANNING_BLOCKED") {
+            issues.push({ severity: "error", code: "test_agent_runtime_error", message: error.message || String(error) });
+        }
     }
     finally {
         for (const server of devServers) {

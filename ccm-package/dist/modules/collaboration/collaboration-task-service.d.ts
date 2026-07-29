@@ -1,5 +1,17 @@
 import { type RequirementDecompositionPlan } from "../requirements/source-ingestion";
 import { CollabCtx } from "./collaboration";
+export interface TaskIntakeIdentityV2 {
+    schema: "ccm-task-intake-identity-v2";
+    source_channel: string;
+    target_scope: "group_session" | "project_session" | "global";
+    target_id: string;
+    exact_session_id: string;
+    client_message_id: string;
+    content_checksum: string;
+    workflow_type: string;
+    checksum: string;
+}
+export declare function buildTaskIntakeIdentityV2(task: any): TaskIntakeIdentityV2 | null;
 export declare function createTask(task: any): any;
 export declare function createRequirementEpicWithChildren(payload: any): {
     success: boolean;
@@ -106,7 +118,22 @@ export declare function updateRequirementEpicFromPlan(payload: any): {
 };
 export declare function classifyTaskContinuation(message: string): string;
 export declare function looksLikeTaskContinuation(message: string): boolean;
+export declare function hasStructuredTaskAcceptanceEvidence(task: any, updates?: any): boolean;
+export declare function validateTaskTerminalTransition(task: any, updates?: any): string;
+export declare function buildTaskTerminalDecisionV2(task: any, updates?: any): {
+    checksum: string;
+    schema: string;
+    task_id: string;
+    status: string;
+    acceptance_state: string;
+    actor: string;
+    gate_passed: boolean;
+    evidence_checksum: string;
+    reason: string;
+    decided_at: string;
+};
 export declare function updateTask(id: string, updates: any): any;
+export declare function normalizeTaskTerminalStateView(task: any): any;
 export declare function removeTaskFromQueues(taskId: string): number;
 export declare function canCompleteDailyDevFromDeliverySummary(task: any, execution: any, summary: any): any;
 export declare function reconcileTaskCollaborationState(task: any, previous?: any): any;
@@ -125,6 +152,20 @@ export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, a
     success: boolean;
     status: number;
     error: string;
+    reason?: undefined;
+    retry_after?: undefined;
+    remaining_ms?: undefined;
+    task?: undefined;
+    queued?: undefined;
+    queue_result?: undefined;
+    queue_status?: undefined;
+} | {
+    success: boolean;
+    status: number;
+    error: any;
+    reason: string;
+    retry_after: any;
+    remaining_ms: any;
     task?: undefined;
     queued?: undefined;
     queue_result?: undefined;
@@ -142,8 +183,25 @@ export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, a
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
     status?: undefined;
     error?: undefined;
+    reason?: undefined;
+    retry_after?: undefined;
+    remaining_ms?: undefined;
 };
 export declare function purgeArchivedTask(id: string): any;

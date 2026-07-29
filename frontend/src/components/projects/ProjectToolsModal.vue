@@ -40,6 +40,16 @@ const updateField = (field, event) => emit('update-field', { field, value: event
   >
     <template #details>
       <section class="project-constraints">
+        <div class="agent-delivery-state">
+          <div :class="{ ready: authorizationReadiness?.dispatchReady !== false }">
+            <strong>项目主 Agent</strong>
+            <span>{{ authorizationReadiness?.dispatchReady !== false ? '可调用已授权 Skill 与只读 MCP' : '工具断开或授权缺失' }}</span>
+          </div>
+          <div :class="{ ready: authorizationReadiness?.dispatchReady !== false }">
+            <strong>项目子 Agent</strong>
+            <span>{{ authorizationReadiness?.dispatchReady !== false ? '派发时按运行时原生注册或受控代理' : '授权门禁将阻止派发' }}</span>
+          </div>
+        </div>
         <div class="constraint-heading">
           <ShieldCheck :size="17" />
           <span><strong>项目执行约束</strong><small>随任务派发给开发 Agent，并参与主 Agent 验收</small></span>
@@ -93,11 +103,12 @@ const updateField = (field, event) => emit('update-field', { field, value: event
 
 <style scoped>
 .project-constraints{display:grid;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color)}
+.agent-delivery-state{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.agent-delivery-state>div{display:grid;gap:3px;padding:9px 10px;border:1px solid color-mix(in srgb,#d97706 25%,var(--border-color));border-radius:7px;background:color-mix(in srgb,#d97706 6%,var(--surface));color:#d97706}.agent-delivery-state>div.ready{border-color:color-mix(in srgb,#16a34a 25%,var(--border-color));background:color-mix(in srgb,#16a34a 6%,var(--surface));color:#16a34a}.agent-delivery-state strong{font-size:11px}.agent-delivery-state span{color:var(--text-muted);font-size:9.5px;line-height:1.4}
 .constraint-heading,.verification-title{display:flex;align-items:center;gap:8px;color:var(--accent-blue)}
 .constraint-heading span,.verification-title span{display:grid;gap:2px}.constraint-heading strong,.verification-title strong{color:var(--text-primary);font-size:12px}.constraint-heading small,.verification-title small{color:var(--text-muted);font-size:9.5px}
 .constraint-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.constraint-grid label{display:grid;gap:5px}.constraint-grid .wide{grid-column:1/-1}.constraint-grid label>span{color:var(--text-secondary);font-size:10.5px;font-weight:700}
 textarea{width:100%;resize:vertical;box-sizing:border-box;border:1px solid var(--border-color);border-radius:7px;padding:9px 10px;background:var(--control-bg);color:var(--text-primary);font:inherit;font-size:11px;line-height:1.5}textarea:focus{outline:2px solid color-mix(in srgb,var(--accent-blue) 18%,transparent);border-color:var(--accent-blue)}.mono{font-family:var(--font-mono,monospace)}
 .verification-panel{display:grid;gap:8px;padding:11px;border:1px solid var(--border-color);border-radius:7px;background:var(--surface-raised)}
 .inferred-commands{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.inferred-commands>div{display:flex;align-items:center;gap:6px;margin-right:auto;color:var(--text-secondary);font-size:10px}.inferred-commands button{border:1px solid var(--border-color);border-radius:6px;padding:5px 8px;background:var(--control-bg);color:var(--text-secondary);font-size:10px;cursor:pointer}.inferred-commands code{padding:4px 6px;border-radius:5px;background:var(--panel-muted);color:var(--text-secondary);font-size:9.5px}
-@media(max-width:720px){.constraint-grid{grid-template-columns:1fr}.constraint-grid .wide{grid-column:auto}}
+@media(max-width:720px){.agent-delivery-state,.constraint-grid{grid-template-columns:1fr}.constraint-grid .wide{grid-column:auto}}
 </style>

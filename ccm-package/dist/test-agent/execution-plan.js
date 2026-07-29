@@ -54,7 +54,7 @@ function expectedArtifactTypes(workOrder, browserChecks) {
         types.add("browser_network_log");
     }
     if (detailEligibleBrowserChecks.some(check => check.screenshot)
-        || (detailEligibleBrowserChecks.length && (0, utils_1.hasRequiredCheck)(workOrder.requiredChecks, /screenshot/i))) {
+        || (detailEligibleBrowserChecks.length && (0, utils_1.requiredCheckEnabled)(workOrder.requiredChecks, "screenshots"))) {
         types.add("screenshot");
     }
     const hasArtifactEligibleBrowserCheck = detailEligibleBrowserChecks.some(check => !check.authenticationConfigured);
@@ -76,7 +76,7 @@ function devServerNeeded(workOrder, project) {
         && browserChecks.every(check => Boolean((0, existing_session_1.browserExistingSessionConfig)(check)))) {
         return false;
     }
-    if ((0, utils_1.hasRequiredCheck)(workOrder.requiredChecks, /browser|e2e|screenshot|console|http|api/i))
+    if ((0, utils_1.requiredCheckEnabled)(workOrder.requiredChecks, "browser_e2e", "screenshots", "console_errors", "http", "api"))
         return true;
     return !!project.targetUrl || !!project.startupUrl || !!project.browserChecks.length || !!project.httpChecks.length || !!project.adversarialHttpChecks.length;
 }
@@ -236,7 +236,7 @@ function buildTestAgentExecutionPlan(input, overrides = {}, validation) {
         };
     });
     const adversarialProbeRequired = workOrder.options.requireAdversarialProbe
-        || workOrder.requiredChecks.some(check => /adversarial|boundary|orphan|idempot|concurr|race/i.test(String(check || "")));
+        || (0, utils_1.requiredCheckEnabled)(workOrder.requiredChecks, "adversarial");
     const adversarialProbeCount = projects.reduce((sum, project) => sum
         + project.httpChecks.filter(check => check.adversarial).length
         + project.browserChecks.filter(check => check.adversarial).length, 0);

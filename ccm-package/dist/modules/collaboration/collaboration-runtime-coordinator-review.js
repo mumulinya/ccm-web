@@ -73,10 +73,14 @@ exports.buildGroupMainAgentInternalLoop = buildGroupMainAgentInternalLoop;
 exports.mainAgentPlanStepStatus = mainAgentPlanStepStatus;
 exports.buildUserVisiblePlanStep = buildUserVisiblePlanStep;
 exports.buildMainAgentPlanVerificationReminder = buildMainAgentPlanVerificationReminder;
+const rework_policy_1 = require("./rework-policy");
 const fs = __importStar(require("fs"));
+const utils_1 = require("../../core/utils");
+const unified_task_scheduler_1 = require("../../system/unified-task-scheduler");
 const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("./group-orchestrator");
 const display_1 = require("./display");
+const project_analysis_1 = require("./project-analysis");
 const memory_1 = require("./memory");
 const memory_context_consumption_receipt_1 = require("../../integrations/memory-context-consumption-receipt");
 const agent_receipts_1 = require("./agent-receipts");
@@ -96,6 +100,7 @@ const collaboration_runtime_status_helpers_1 = require("./collaboration-runtime-
 const collaboration_runtime_daily_dev_1 = require("./collaboration-runtime-daily-dev");
 const collaboration_runtime_cross_agent_runtime_1 = require("./collaboration-runtime-cross-agent-runtime");
 const collaboration_runtime_test_agent_handoff_1 = require("./collaboration-runtime-test-agent-handoff");
+const test_agent_settings_1 = require("../system/test-agent-settings");
 const collaboration_runtime_plan_tools_1 = require("./collaboration-runtime-plan-tools");
 const collaboration_runtime_runtime_tools_1 = require("./collaboration-runtime-runtime-tools");
 // ===== merged from collaboration-runtime-coordinator-review-part-01.ts =====
@@ -110,11 +115,93 @@ async function runCoordinatorReviewLoop(input) {
     const maxReviewRounds = collaboration_runtime_test_agent_handoff_1.COORDINATOR_REVIEW_MAX_ROUNDS;
     if (allOutputs.length === 0)
         return null;
+    if (!(0, test_agent_settings_1.isTestAgentEnabled)()) {
+        if (input.taskId) {
+            (0, collaboration_runtime_runtime_tools_1.updateTask)(input.taskId, {
+                test_agent_enabled: false,
+                acceptance_mode: "main_agent_self_verification",
+                acceptance_state: "main_agent_self_verifying",
+                status_detail: "TestAgent 已关闭，群聊主 Agent 正在执行一次自验",
+            });
+            (0, logs_1.appendTaskTimelineEvent)(input.taskId, {
+                type: "group_main_self_verification_started",
+                title: "群聊主 Agent 开始自验",
+                detail: "TestAgent 已关闭，本轮不产生独立验收结论",
+                status: "active",
+                phase: "reviewing",
+                agent: coordinator.project,
+            });
+        }
+        let review = await (0, group_orchestrator_1.runLlmCoordinatorReview)(input.group, input.userMessage, input.coordinatorOutput, allOutputs, { allowFollowUps: false, round: 1, maxRounds: 1, taskId: input.taskId || "", executionId: input.taskId || "", groupSessionId: input.groupSessionId || "" });
+        if (!review)
+            review = (0, collaboration_runtime_daily_dev_1.buildCodedCoordinatorReview)(input.group, allOutputs, { allowFollowUps: false, round: 1, maxRounds: 1 });
+        review = {
+            ...(review || {}),
+            mode: "main_agent_self_verification",
+            followUps: [],
+            follow_ups: [],
+            status: String(review?.status || "") === "complete" ? "complete" : "needs_user",
+        };
+        const content = [
+            "主 Agent 自验结果（TestAgent 已关闭）：",
+            String(review?.content || review?.summary || "已核对子 Agent 结果和现有验证证据。"),
+            "本结论不是独立 TestAgent 验收。",
+        ].join("\n\n");
+        review.content = content;
+        await (0, collaboration_runtime_cross_agent_runtime_1.appendCoordinatorMessage)(input.groupId, coordinator.project, content, input.streamRes, "selfverify", {
+            runtime: "main-agent-self-verification",
+            workflow: (0, collaboration_runtime_task_queue_1.buildWorkflowMeta)(review.status === "complete" ? "complete" : "needs_user", "主 Agent 单轮自验"),
+        });
+        if (input.taskId) {
+            (0, collaboration_runtime_runtime_tools_1.updateTask)(input.taskId, {
+                main_agent_self_verification: review,
+                acceptance_state: review.status === "complete" ? "main_agent_self_verified" : "main_agent_self_verification_failed",
+            });
+            (0, logs_1.appendTaskTimelineEvent)(input.taskId, {
+                type: "group_main_self_verification_finished",
+                title: review.status === "complete" ? "群聊主 Agent 自验通过" : "群聊主 Agent 自验未通过",
+                detail: String(review?.summary || review?.content || ""),
+                status: review.status === "complete" ? "ok" : "warn",
+                phase: "reviewing",
+                agent: coordinator.project,
+                data: { review },
+            });
+        }
+        (0, memory_1.updateGroupMemory)(input.groupId, {
+            currentPhase: review.status === "complete" ? "complete" : "needs_user",
+            decision: review.status === "complete" ? "主 Agent 单轮自验通过" : "主 Agent 单轮自验需要用户处理",
+            reason: (0, memory_1.compactMemoryText)(review.content, 300),
+            nextAction: review.status === "complete" ? "进入最终交付" : "等待用户确认或补充证据",
+        });
+        input.crossOutputs.splice(0, input.crossOutputs.length, ...allOutputs);
+        return review;
+    }
+    if (input.taskId)
+        (0, collaboration_runtime_runtime_tools_1.updateTask)(input.taskId, { test_agent_enabled: true, acceptance_mode: "test_agent" });
     let lastReview = null;
     for (let round = 1; round <= maxReviewRounds; round++) {
+        // 用户取消后不再烧验收轮次：不再调用 LLM 复盘、不再派发返工。终态由取消路由负责写入。
+        if (input.taskId && (0, execution_kernel_1.isTaskCancellationRequested)(input.taskId)) {
+            (0, logs_1.addTaskLog)(input.taskId, "warning", `任务已被取消，主 Agent 验收循环在第 ${round} 轮前停止`);
+            (0, logs_1.appendTaskTimelineEvent)(input.taskId, {
+                type: "review_loop_cancelled",
+                title: "取消后停止验收循环",
+                detail: `用户已取消任务，第 ${round}/${maxReviewRounds} 轮验收不再执行`,
+                status: "warn",
+                phase: "reviewing",
+                agent: coordinator.project,
+            });
+            return lastReview;
+        }
         const allowFollowUps = round < maxReviewRounds;
-        const scheduledBudget = (0, collaboration_runtime_test_agent_handoff_1.applyTestAgentRecheckBudget)(pendingTestAgentRechecks.splice(0, pendingTestAgentRechecks.length), testAgentRecheckCountsBySubject);
+        const pendingRechecksForRound = pendingTestAgentRechecks.splice(0, pendingTestAgentRechecks.length);
+        // 末轮不再派发任何 follow-up，因此这里不能消耗复验预算（否则预算被永远用不上的复验吃掉），
+        // 未执行的复验必须原样保留下来，走下面的"未执行复验"路径显式暴露给用户，禁止静默丢弃。
+        const scheduledBudget = allowFollowUps
+            ? (0, collaboration_runtime_test_agent_handoff_1.applyTestAgentRecheckBudget)(pendingRechecksForRound, testAgentRecheckCountsBySubject)
+            : { kept: [], blocked: [], counts: testAgentRecheckCountsBySubject };
         const scheduledTestAgentRechecks = scheduledBudget.kept;
+        const skippedTestAgentRechecks = allowFollowUps ? [] : pendingRechecksForRound;
         if (scheduledBudget.blocked.length && input.streamRes) {
             (0, collaboration_runtime_daily_dev_1.writeSse)(input.streamRes, {
                 type: "status",
@@ -211,14 +298,45 @@ async function runCoordinatorReviewLoop(input) {
                 }
             }
         }
-        const gateReasons = [...gateFollowUps, ...failedIndependentReviewFollowUps, ...postReviewSpotCheckFollowUps, ...independentReviewGateFollowUps]
-            .map((item) => String(item.reason || "").trim())
-            .filter(Boolean);
+        // 末轮未执行的 TestAgent 复验必须转成显式门禁原因：这些复验是"返工已完成、等待独立复验"的凭据，
+        // 丢掉它们而不留痕会让主 Agent 看起来完成了验收，实际上最后一次改动从未被独立复核过。
+        const skippedRecheckReasons = skippedTestAgentRechecks.map((item) => {
+            const subject = (0, collaboration_runtime_test_agent_handoff_1.getTestAgentRecheckSubjectKey)(item) || "test-agent";
+            return `已达验收轮次上限（${maxReviewRounds} 轮），${subject} 返工后的 TestAgent 复验未执行，需人工确认后再验收`;
+        });
+        if (skippedRecheckReasons.length) {
+            review.skipped_test_agent_rechecks = skippedTestAgentRechecks.map((item) => ({
+                subject: (0, collaboration_runtime_test_agent_handoff_1.getTestAgentRecheckSubjectKey)(item) || "test-agent",
+                reason: item?.reason || "",
+                rework_kind: item?.rework_kind || "",
+            }));
+        }
+        const gateReasons = [
+            ...[...gateFollowUps, ...failedIndependentReviewFollowUps, ...postReviewSpotCheckFollowUps, ...independentReviewGateFollowUps]
+                .map((item) => String(item.reason || "").trim()),
+            ...skippedRecheckReasons,
+            ...(scheduledBudget.blocked || []).map((item) => String(item?.reason || "").trim()),
+        ].filter(Boolean);
         if (blockedVerifierFollowUps.length && dispatchableReworkFollowUps.length === 0) {
             review.status = "needs_user";
         }
         if (!allowFollowUps && gateReasons.length) {
             review.status = "needs_user";
+            // 与项目直派路径统一：返工轮次耗尽写入同一个结构化终态标记。
+            if (input.taskId) {
+                (0, collaboration_runtime_runtime_tools_1.updateTask)(input.taskId, (0, rework_policy_1.buildReworkExhaustedUpdate)(gateReasons.join("；"), { path: "group_review" }));
+            }
+        }
+        if (skippedRecheckReasons.length && input.taskId) {
+            (0, logs_1.appendTaskTimelineEvent)(input.taskId, {
+                type: "test_agent_recheck_skipped",
+                title: "TestAgent 复验未执行",
+                detail: skippedRecheckReasons.join("；"),
+                status: "warn",
+                phase: "reviewing",
+                agent: coordinator.project,
+                data: { round, max_rounds: maxReviewRounds, skipped: review.skipped_test_agent_rechecks },
+            });
         }
         let reviewContent = gateReasons.length
             ? `${review.content}\n\n系统验收门禁：${gateReasons.join("；")}${allowFollowUps ? "" : "\n已达到自动返工上限，需要用户确认是否继续派发或人工介入。"}`
@@ -367,6 +485,7 @@ async function executeTask(task, ctx) {
         buildChildAgentWorktreeNotice: worktree_1.buildChildAgentWorktreeNotice,
         buildCoordinatorSharedFilesContext: collaboration_runtime_plan_tools_1.buildCoordinatorSharedFilesContext,
         buildGroupContextPacket: memory_1.buildGroupContextPacket,
+        buildGroupMainPlanningSourceContext: project_analysis_1.buildModelDrivenGroupPlanningSourceContext,
         buildProjectVerificationHints: collaboration_runtime_runtime_tools_1.buildProjectVerificationHints,
         buildQueuedGroupTaskMessage: collaboration_runtime_task_queue_1.buildQueuedGroupTaskMessage,
         buildTaskProviderSwitchRequests: collaboration_runtime_task_queue_1.buildTaskProviderSwitchRequests,
@@ -511,7 +630,7 @@ function finalizeTaskKernel(task, execution, deliverySummary, state, message) {
     return rootGreen;
 }
 // 队列处理
-async function processTargetQueue(targetKey, ctx) {
+async function processTargetQueue(targetKey, ctx, testHooks = {}) {
     if (collaboration_runtime_task_queue_1.runningTasks.has(targetKey)) {
         console.log(`[任务队列] [${targetKey}] 正在执行任务，等待中...`);
         return;
@@ -521,406 +640,505 @@ async function processTargetQueue(targetKey, ctx) {
         return;
     collaboration_runtime_task_queue_1.runningTasks.set(targetKey, true);
     console.log(`[任务队列] [${targetKey}] 开始处理队列，剩余任务: ${queue.length}`);
-    while (queue.length > 0) {
-        const taskId = queue.shift();
-        if (!taskId)
-            continue;
-        const tasks = (0, db_1.loadTasks)();
-        const task = tasks.find(t => t.id === taskId);
-        if (!task || task.status === "done" || task.status === "cancelled" || task.status === "archived" || task.archived || task.deleted_at) {
-            (0, logs_1.addTaskLog)(taskId, "info", `跳过任务（不存在或已完成）`);
-            continue;
-        }
-        if ((0, collaboration_runtime_task_queue_1.isTaskPaused)(task)) {
-            (0, logs_1.addTaskLog)(taskId, "info", `任务已暂停，跳过本次队列执行`);
-            continue;
-        }
-        const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
-        const leaseResult = (0, reliability_ledger_1.acquireTaskLease)(taskId, traceId, 45_000);
-        if (!leaseResult.acquired) {
-            (0, logs_1.addTaskLog)(taskId, "warning", `任务已有存活 Worker 租约，本实例跳过重复执行（owner=${leaseResult.lease?.owner_id || "unknown"}）`);
-            (0, reliability_ledger_1.appendTraceEvent)(traceId, { type: "task.duplicate_execution_suppressed", status: "warning", task_id: taskId, group_id: task.group_id || "", message: "检测到有效执行租约，阻止重复执行" });
-            continue;
-        }
-        let leaseHeartbeat = null;
-        let enqueueFollowupAfterRound = false;
-        const executionFollowupRevision = Number(task.followup_revision || 0);
-        (0, logs_1.addTaskLog)(taskId, "info", `开始执行任务: ${task.title}`);
-        try {
-            collaboration_runtime_task_queue_1.runningTaskIds.add(taskId);
-            leaseHeartbeat = setInterval(() => (0, reliability_ledger_1.renewTaskLease)(taskId, 45_000), 10_000);
-            ensureTaskKernelExecution(task);
-            (0, execution_kernel_1.transitionExecution)(taskId, "spawning", "任务队列正在启动开发执行内核");
-            const reasoningLoop = (0, collaboration_runtime_task_queue_1.buildTaskPreflightReasoning)(task, "主 Agent 执行前重新核对目标、当前状态和验收条件", Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery);
-            const startedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "in_progress", trace_id: traceId, started_at: new Date().toISOString(), reasoning_loop: reasoningLoop, execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count } }) || task;
-            (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "reasoning_preflight", title: "我已复核目标与验收", detail: `计划版本 v${reasoningLoop.plan_version} · 待证明 ${reasoningLoop.assertions.filter(item => item.status !== "passed").length} 项`, status: "ok", phase: "planning", data: { plan_version: reasoningLoop.plan_version, fact_hash: reasoningLoop.fact_snapshots[reasoningLoop.fact_snapshots.length - 1]?.hash || "", recovery: Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery } });
-            (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(startedTask, "in_progress", "我已开始协调执行");
-            (0, logs_1.addTaskLog)(taskId, "info", `任务状态更新为: 进行中`);
-            (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(startedTask, "in_progress", "任务已进入执行阶段");
-            await ctx.onTaskStatusChange?.(startedTask, "in_progress");
-            (0, logs_1.addTaskLog)(taskId, "info", `调用 Agent 执行任务...`);
-            const execution = await executeTask(startedTask, ctx);
-            const result = execution.result || execution.report || "";
-            const latestWithFollowups = (0, db_1.loadTasks)().find((item) => item.id === taskId) || startedTask;
-            const resumeAfterGoalRevisionInterruption = (0, execution_kernel_1.isTaskCancellationRequested)(taskId)
-                && (0, collaboration_runtime_task_queue_1.shouldResumeAfterGoalRevisionInterruption)(latestWithFollowups, executionFollowupRevision);
-            if ((0, execution_kernel_1.isTaskCancellationRequested)(taskId) && !resumeAfterGoalRevisionInterruption) {
-                const cancelledTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "cancelled", result: "任务已取消", status_detail: "任务已由用户取消", cancelled_at: new Date().toISOString() }) || { ...task, status: "cancelled" };
-                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(cancelledTask, "cancelled", "任务已由用户取消");
-                finalizeTaskKernel(task, execution, null, "cancelled", "任务已由用户取消");
-                (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "任务已取消，关闭任务级原生会话");
-                (0, logs_1.addTaskLog)(taskId, "warning", "任务执行进程已终止，状态更新为已取消");
-                await ctx.onTaskStatusChange?.(cancelledTask, "cancelled", "任务已由用户取消");
+    try {
+        while (queue.length > 0) {
+            const taskId = queue.shift();
+            if (!taskId)
+                continue;
+            queue.forEach((queuedId, index) => (0, collaboration_runtime_runtime_tools_1.updateTask)(queuedId, { queue_position: index + 1, queue_state: "queued" }));
+            const tasks = (0, db_1.loadTasks)();
+            const task = tasks.find(t => t.id === taskId);
+            if (!task || task.status === "done" || task.status === "cancelled" || task.status === "archived" || task.archived || task.deleted_at) {
+                (0, logs_1.addTaskLog)(taskId, "info", `跳过任务（不存在或已完成）`);
                 continue;
             }
-            if (Number(latestWithFollowups.followup_revision || 0) > executionFollowupRevision) {
-                const pending = Array.isArray(latestWithFollowups.pending_followups) ? latestWithFollowups.pending_followups : [];
-                const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(latestWithFollowups, execution, "waiting");
-                const hasGoalRevision = pending.some((item) => item?.kind === "revise_goal" || item?.continuation?.replan_required === true);
-                const acceptedAt = new Date().toISOString();
-                const latestCollaborationState = latestWithFollowups.collaboration_state || {};
-                const lastContinuation = latestCollaborationState.last_continuation
-                    ? { ...latestCollaborationState.last_continuation, status: "accepted", resumed_at: acceptedAt }
-                    : latestCollaborationState.last_continuation;
-                const resumedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+            if ((0, collaboration_runtime_task_queue_1.isTaskPaused)(task)) {
+                (0, logs_1.addTaskLog)(taskId, "info", `任务已暂停，跳过本次队列执行`);
+                continue;
+            }
+            const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
+            let leaseResult;
+            try {
+                leaseResult = (testHooks.acquireTaskLease || reliability_ledger_1.acquireTaskLease)(taskId, traceId, 45_000);
+            }
+            catch (error) {
+                const recoveryAttempts = Number(task.queue_runtime_recovery_attempts || 0) + 1;
+                const detail = `任务租约获取失败：${String(error?.message || error).slice(0, 300)}`;
+                if (recoveryAttempts >= 3) {
+                    const blockedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "blocked",
+                        acceptance_state: "blocked",
+                        auto_execute: false,
+                        is_paused: true,
+                        paused: true,
+                        status_detail: `${detail}；已停止自动重试，请检查任务存储后继续`,
+                        queue_runtime_recovery_attempts: recoveryAttempts,
+                        queue_runtime_last_error_at: new Date().toISOString(),
+                        collaboration_state: { ...(task.collaboration_state || {}), phase: "needs_user", needs_user: true, updated_at: new Date().toISOString() },
+                    }) || task;
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "queue_recovery_exhausted", title: "队列恢复已停止", detail: blockedTask.status_detail, status: "fail", phase: "needs_user", data: { target_key: targetKey, attempts: recoveryAttempts } });
+                    (0, logs_1.addTaskLog)(taskId, "error", blockedTask.status_detail);
+                    await ctx.onTaskStatusChange?.(blockedTask, "blocked", blockedTask.status_detail);
+                    continue;
+                }
+                (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
                     status: "pending",
-                    result: result.substring(0, 500),
-                    final_report: execution.report || result,
-                    receipt: execution.receipt || null,
-                    review: execution.review || null,
-                    file_changes: execution.fileChanges || null,
-                    delivery_summary: deliverySummary,
-                    reasoning_loop: deliverySummary.reasoning_loop,
-                    consumed_followup_revision: Number(latestWithFollowups.followup_revision || 0),
-                    pending_followups: pending.map((item) => ({ ...item, status: "accepted", accepted_at: acceptedAt })),
-                    status_detail: resumeAfterGoalRevisionInterruption
-                        ? (0, collaboration_runtime_task_queue_1.buildGoalRevisionInterruptedStatus)(pending)
-                        : hasGoalRevision
-                            ? `已接收目标调整，当前轮已结束；我会重新核对计划并继续`
-                            : `已接收 ${Math.max(1, pending.filter((item) => item.status !== "accepted").length)} 条追加要求，继续使用当前任务上下文`,
-                    plan_revision_required: latestWithFollowups.plan_revision_required || hasGoalRevision || undefined,
-                    collaboration_state: {
-                        ...latestCollaborationState,
-                        phase: "reworking",
-                        needs_user: false,
-                        last_continuation: lastContinuation,
-                        continuation_resumed_at: acceptedAt,
-                        goal_revision_interruption: resumeAfterGoalRevisionInterruption
-                            ? { ...(latestCollaborationState.goal_revision_interruption || {}), resolved_at: acceptedAt, resumed: true }
-                            : latestCollaborationState.goal_revision_interruption || null,
-                    },
-                }) || latestWithFollowups;
-                if (resumeAfterGoalRevisionInterruption)
-                    (0, execution_kernel_1.clearTaskCancellation)(taskId);
-                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(resumedTask, "pending", resumedTask.status_detail);
-                finalizeTaskKernel(task, execution, deliverySummary, "reviewing", resumeAfterGoalRevisionInterruption ? "当前轮次已停止，正在按新目标重核计划" : "当前轮次已完成，正在承接用户追加要求");
-                (0, logs_1.addTaskLog)(taskId, "info", resumeAfterGoalRevisionInterruption ? "当前执行轮次已停止，目标调整将在同一任务上下文中重新规划" : "当前执行轮次结束，用户追加要求将在同一任务上下文中继续");
-                enqueueFollowupAfterRound = true;
-                continue;
-            }
-            (0, logs_1.addTaskLog)(taskId, "response", `Agent 响应:\n${result.substring(0, 1000)}`);
-            if (task.workflow_type === "agent_coordination_dependency") {
-                const coordinationRequest = (0, collaboration_runtime_cross_agent_runtime_1.getCoordinationRequestForTask)(task);
-                const coordinationReceipt = execution.receipt || null;
-                const coordinationKernel = (0, execution_kernel_1.loadExecution)(task.id);
-                const coordinationAcceptance = coordinationRequest
-                    ? (0, collaboration_runtime_cross_agent_runtime_1.evaluateCoordinationTaskEvidence)(task, coordinationRequest, coordinationReceipt, coordinationKernel)
-                    : (0, collaboration_runtime_cross_agent_runtime_1.buildRejectedCoordinationAcceptance)(task, {}, coordinationReceipt, "找不到协调请求记录");
-                const workspaceFiles = coordinationAcceptance.workspace_files || [];
-                const green = (0, execution_kernel_1.evaluateGreenContract)({
-                    receipt: coordinationReceipt,
-                    fileChanges: workspaceFiles,
-                    requiresChanges: (0, collaboration_runtime_status_helpers_1.taskRequiresCodeChanges)(task),
-                    requiresVerification: task.requires_verification !== false,
-                    workspacePassed: coordinationAcceptance.accepted,
-                    branchFresh: true,
-                    reviewPassed: coordinationAcceptance.accepted,
-                    requiredLevel: coordinationKernel?.workspace?.mode === "worktree" ? "merge_ready" : "project",
+                    status_detail: `${detail}；队列将在短暂等待后自动重试`,
+                    queue_runtime_recovery_attempts: recoveryAttempts,
+                    queue_runtime_last_error_at: new Date().toISOString(),
                 });
-                const completedAt = new Date().toISOString();
-                (0, execution_kernel_1.transitionExecution)(task.id, coordinationAcceptance.accepted ? "succeeded" : "failed", coordinationAcceptance.reason, {
-                    green,
-                    receipt: coordinationReceipt,
-                    fileChanges: { files: workspaceFiles },
-                    runnerVerification: { status: coordinationAcceptance.accepted ? "passed" : "failed", verification: coordinationAcceptance.verification || [] },
-                    outputPreview: result,
-                    data: { coordination_acceptance: coordinationAcceptance },
-                });
-                const settledTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(task.id, {
-                    status: coordinationAcceptance.accepted ? "done" : "failed",
-                    result: result.substring(0, 500),
-                    final_report: execution.report || result,
-                    status_detail: coordinationAcceptance.reason,
-                    receipt: coordinationReceipt,
-                    file_changes: { files: workspaceFiles },
-                    coordination_acceptance: coordinationAcceptance,
-                    completed_at: coordinationAcceptance.accepted ? completedAt : undefined,
-                    failed_at: coordinationAcceptance.accepted ? undefined : completedAt,
-                    execution_kernel: { execution_id: task.id, state: coordinationAcceptance.accepted ? "succeeded" : "failed", green, updated_at: completedAt },
-                }) || task;
-                (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, coordinationAcceptance.accepted ? "协作工作项已交付，等待主 Agent 合并" : "协作工作项未通过证据门禁");
-                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
-                (0, logs_1.addTaskLog)(task.id, coordinationAcceptance.accepted ? "success" : "warning", coordinationAcceptance.reason);
-                await ctx.onTaskStatusChange?.(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
+                queue.unshift(taskId);
+                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "queue_recovery_scheduled", title: "队列准备自动恢复", detail, status: "warn", phase: "queued", data: { target_key: targetKey, attempts: recoveryAttempts } });
+                (0, logs_1.addTaskLog)(taskId, "warning", `${detail}；已保留队首位置`);
+                throw error;
+            }
+            if (!leaseResult.acquired) {
+                (0, logs_1.addTaskLog)(taskId, "warning", `任务已有存活 Worker 租约，本实例跳过重复执行（owner=${leaseResult.lease?.owner_id || "unknown"}）`);
+                (0, reliability_ledger_1.appendTraceEvent)(traceId, { type: "task.duplicate_execution_suppressed", status: "warning", task_id: taskId, group_id: task.group_id || "", message: "检测到有效执行租约，阻止重复执行" });
                 continue;
             }
-            if (execution.status === "blocked") {
-                const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "failed");
-                const detail = execution.detail || "独立验收三轮后仍未通过，等待用户处理";
-                const blockedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
-                    status: "blocked",
-                    result: result.substring(0, 500),
-                    final_report: execution.report || result,
-                    status_detail: detail,
-                    receipt: execution.receipt || null,
-                    review: execution.review || execution.testAgent || null,
-                    file_changes: execution.fileChanges || null,
-                    delivery_summary: deliverySummary,
-                    reasoning_loop: deliverySummary.reasoning_loop,
-                    acceptance_state: "blocked",
-                }) || { ...task, status: "blocked", result: result.substring(0, 500) };
-                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
-                finalizeTaskKernel(task, execution, deliverySummary, "failed", detail);
-                (0, logs_1.addTaskLog)(taskId, "warning", `任务已阻塞：${detail}`);
-                (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
-                await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
-                (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
-                continue;
-            }
-            if (execution.status === "failed") {
-                const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "failed");
-                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: "fail", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
-                const failedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
-                    status: "failed",
-                    result: result.substring(0, 500),
-                    final_report: execution.report || result,
-                    status_detail: execution.detail || "Agent 回执失败",
-                    receipt: execution.receipt || null,
-                    review: execution.review || null,
-                    file_changes: execution.fileChanges || null,
-                    delivery_summary: deliverySummary,
-                    reasoning_loop: deliverySummary.reasoning_loop,
-                }) || { ...task, status: "failed", result: result.substring(0, 500) };
-                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(failedTask, "failed", execution.detail || "Agent 回执失败");
-                finalizeTaskKernel(task, execution, deliverySummary, "failed", execution.detail || "Agent 回执失败");
-                (0, logs_1.addTaskLog)(taskId, "error", `❌ 任务执行失败：${execution.detail || "Agent 回执失败"}`);
-                (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(failedTask, "blocked", execution.detail || result.substring(0, 500));
-                await ctx.onTaskStatusChange?.(failedTask, "failed", result.substring(0, 500));
-                (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(failedTask, "failed", execution.detail || result.substring(0, 500));
-                await (0, collaboration_runtime_task_queue_1.sendTaskFailureNotification)(failedTask, execution.detail || result.substring(0, 500));
-                continue;
-            }
-            if ((0, agent_receipts_1.checkTaskFailure)(result)) {
-                throw new Error(result.substring(0, 500));
-            }
-            const isCompleted = execution.status === "done";
-            if (isCompleted) {
-                const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "waiting");
-                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: deliverySummary.acceptance_gate_passed ? "验收通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
-                if (!deliverySummary.acceptance_gate_passed) {
-                    const detail = `验收检查未通过：${deliverySummary.acceptance_gate?.failed_count || 1} 项缺口，任务保持进行中`;
-                    const waitingTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "in_progress", result: result.substring(0, 500), final_report: execution.report || result, status_detail: detail, receipt: execution.receipt || null, review: execution.review || null, file_changes: execution.fileChanges || null, delivery_summary: deliverySummary, reasoning_loop: deliverySummary.reasoning_loop }) || task;
-                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, "in_progress", detail);
-                    finalizeTaskKernel(task, execution, deliverySummary, "reviewing", detail);
-                    (0, logs_1.addTaskLog)(taskId, "warning", detail);
-                    await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
+            let leaseHeartbeat = null;
+            let enqueueFollowupAfterRound = false;
+            const executionFollowupRevision = Number(task.followup_revision || 0);
+            (0, logs_1.addTaskLog)(taskId, "info", `开始执行任务: ${task.title}`);
+            try {
+                collaboration_runtime_task_queue_1.runningTaskIds.add(taskId);
+                leaseHeartbeat = setInterval(() => (0, reliability_ledger_1.renewTaskLease)(taskId, 45_000), 10_000);
+                ensureTaskKernelExecution(task);
+                (0, execution_kernel_1.transitionExecution)(taskId, "spawning", "任务队列正在启动开发执行内核");
+                const reasoningLoop = (0, collaboration_runtime_task_queue_1.buildTaskPreflightReasoning)(task, "主 Agent 执行前重新核对目标、当前状态和验收条件", Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery);
+                const startedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "in_progress", trace_id: traceId, started_at: new Date().toISOString(), queue_position: 0, queue_state: "running", reasoning_loop: reasoningLoop, execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count } }) || task;
+                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "reasoning_preflight", title: "我已复核目标与验收", detail: `计划版本 v${reasoningLoop.plan_version} · 待证明 ${reasoningLoop.assertions.filter(item => item.status !== "passed").length} 项`, status: "ok", phase: "planning", data: { plan_version: reasoningLoop.plan_version, fact_hash: reasoningLoop.fact_snapshots[reasoningLoop.fact_snapshots.length - 1]?.hash || "", recovery: Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery } });
+                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(startedTask, "in_progress", "我已开始协调执行");
+                (0, logs_1.addTaskLog)(taskId, "info", `任务状态更新为: 进行中`);
+                (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(startedTask, "in_progress", "任务已进入执行阶段");
+                await ctx.onTaskStatusChange?.(startedTask, "in_progress");
+                (0, logs_1.addTaskLog)(taskId, "info", `调用 Agent 执行任务...`);
+                const executeCurrentTask = () => (testHooks.executeTask || executeTask)(startedTask, ctx);
+                const execution = (0, collaboration_runtime_status_helpers_1.taskRequiresCodeChanges)(startedTask)
+                    ? await (0, unified_task_scheduler_1.withUnifiedWorkspaceMutationLane)((0, unified_task_scheduler_1.canonicalWorkspaceMutationLane)((0, utils_1.getWorkDirForProject)(startedTask.target_project), `workspace:project:${startedTask.target_project || "unknown"}`), executeCurrentTask)
+                    : await executeCurrentTask();
+                const result = execution.result || execution.report || "";
+                const latestWithFollowups = (0, db_1.loadTasks)().find((item) => item.id === taskId) || startedTask;
+                const resumeAfterGoalRevisionInterruption = (0, execution_kernel_1.isTaskCancellationRequested)(taskId)
+                    && (0, collaboration_runtime_task_queue_1.shouldResumeAfterGoalRevisionInterruption)(latestWithFollowups, executionFollowupRevision);
+                if ((0, execution_kernel_1.isTaskCancellationRequested)(taskId) && !resumeAfterGoalRevisionInterruption) {
+                    const cancelledTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "cancelled", result: "任务已取消", status_detail: "任务已由用户取消", cancelled_at: new Date().toISOString() }) || { ...task, status: "cancelled" };
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(cancelledTask, "cancelled", "任务已由用户取消");
+                    finalizeTaskKernel(task, execution, null, "cancelled", "任务已由用户取消");
+                    (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "任务已取消，关闭任务级原生会话");
+                    (0, logs_1.addTaskLog)(taskId, "warning", "任务执行进程已终止，状态更新为已取消");
+                    await ctx.onTaskStatusChange?.(cancelledTask, "cancelled", "任务已由用户取消");
                     continue;
                 }
-                const closedSessions = (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
-                const finalizedExecution = { ...execution, team_shutdown: { completed: true, closed_session_ids: closedSessions.map((item) => item.id) } };
-                const finalizedDeliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, finalizedExecution, "done");
-                if (!finalizedDeliverySummary.acceptance_gate_passed) {
-                    const detail = `最终收尾门禁未通过：${finalizedDeliverySummary.acceptance_gate?.failed_checks?.map((item) => item.label).join("、") || "团队仍未完全收尾"}`;
-                    const waitingTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "in_progress", result: result.substring(0, 500), final_report: execution.report || result, status_detail: detail, receipt: execution.receipt || null, review: execution.review || null, file_changes: execution.fileChanges || null, delivery_summary: finalizedDeliverySummary, reasoning_loop: finalizedDeliverySummary.reasoning_loop }) || task;
-                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, "in_progress", detail);
-                    finalizeTaskKernel(task, finalizedExecution, finalizedDeliverySummary, "reviewing", detail);
-                    (0, logs_1.addTaskLog)(taskId, "warning", detail);
-                    await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
+                if (Number(latestWithFollowups.followup_revision || 0) > executionFollowupRevision) {
+                    const pending = Array.isArray(latestWithFollowups.pending_followups) ? latestWithFollowups.pending_followups : [];
+                    const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(latestWithFollowups, execution, "waiting");
+                    const hasGoalRevision = pending.some((item) => item?.kind === "revise_goal" || item?.continuation?.replan_required === true);
+                    const acceptedAt = new Date().toISOString();
+                    const latestCollaborationState = latestWithFollowups.collaboration_state || {};
+                    const lastContinuation = latestCollaborationState.last_continuation
+                        ? { ...latestCollaborationState.last_continuation, status: "accepted", resumed_at: acceptedAt }
+                        : latestCollaborationState.last_continuation;
+                    const resumedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "pending",
+                        result: result.substring(0, 500),
+                        final_report: execution.report || result,
+                        receipt: execution.receipt || null,
+                        review: execution.review || null,
+                        file_changes: execution.fileChanges || null,
+                        delivery_summary: deliverySummary,
+                        reasoning_loop: deliverySummary.reasoning_loop,
+                        consumed_followup_revision: Number(latestWithFollowups.followup_revision || 0),
+                        pending_followups: pending.map((item) => ({ ...item, status: "accepted", accepted_at: acceptedAt })),
+                        status_detail: resumeAfterGoalRevisionInterruption
+                            ? (0, collaboration_runtime_task_queue_1.buildGoalRevisionInterruptedStatus)(pending)
+                            : hasGoalRevision
+                                ? `已接收目标调整，当前轮已结束；我会重新核对计划并继续`
+                                : `已接收 ${Math.max(1, pending.filter((item) => item.status !== "accepted").length)} 条追加要求，继续使用当前任务上下文`,
+                        plan_revision_required: latestWithFollowups.plan_revision_required || hasGoalRevision || undefined,
+                        collaboration_state: {
+                            ...latestCollaborationState,
+                            phase: "reworking",
+                            needs_user: false,
+                            last_continuation: lastContinuation,
+                            continuation_resumed_at: acceptedAt,
+                            goal_revision_interruption: resumeAfterGoalRevisionInterruption
+                                ? { ...(latestCollaborationState.goal_revision_interruption || {}), resolved_at: acceptedAt, resumed: true }
+                                : latestCollaborationState.goal_revision_interruption || null,
+                        },
+                    }) || latestWithFollowups;
+                    if (resumeAfterGoalRevisionInterruption)
+                        (0, execution_kernel_1.clearTaskCancellation)(taskId);
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(resumedTask, "pending", resumedTask.status_detail);
+                    finalizeTaskKernel(task, execution, deliverySummary, "reviewing", resumeAfterGoalRevisionInterruption ? "当前轮次已停止，正在按新目标重核计划" : "当前轮次已完成，正在承接用户追加要求");
+                    (0, logs_1.addTaskLog)(taskId, "info", resumeAfterGoalRevisionInterruption ? "当前执行轮次已停止，目标调整将在同一任务上下文中重新规划" : "当前执行轮次结束，用户追加要求将在同一任务上下文中继续");
+                    enqueueFollowupAfterRound = true;
                     continue;
                 }
-                const completedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
-                    status: "done",
-                    result: result.substring(0, 500),
-                    final_report: execution.report || result,
-                    status_detail: execution.detail || "验收通过",
-                    receipt: execution.receipt || null,
-                    review: execution.review || null,
-                    file_changes: execution.fileChanges || null,
-                    delivery_summary: finalizedDeliverySummary,
-                    reasoning_loop: finalizedDeliverySummary.reasoning_loop,
-                    execution_readiness: null,
-                    daily_dev_execution_readiness: null,
-                    completed_at: new Date().toISOString()
-                }) || { ...task, status: "done", result: result.substring(0, 500) };
-                const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedDeliverySummary });
-                if (projectMemoryResult.committed)
-                    (0, logs_1.addTaskLog)(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
-                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(completedTask, "done", execution.detail || "验收通过");
-                finalizeTaskKernel(task, execution, finalizedDeliverySummary, "succeeded", execution.detail || "验收通过");
-                (0, logs_1.addTaskLog)(taskId, "success", `✅ 任务完成：${execution.detail || "验收通过"}`);
-                (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(completedTask, "done", execution.detail || result.substring(0, 500));
-                await ctx.onTaskStatusChange?.(completedTask, "done", result.substring(0, 500));
-                (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(completedTask, "done", execution.detail || result.substring(0, 500));
-                await (0, collaboration_runtime_task_queue_1.sendTaskCompletionNotification)(completedTask, result);
-            }
-            else {
-                const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "waiting");
-                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: deliverySummary.acceptance_gate_passed ? "验收通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过，任务继续推进`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
-                if ((0, collaboration_runtime_runtime_tools_1.canCompleteDailyDevFromDeliverySummary)(task, execution, deliverySummary)) {
-                    const promotedExecution = {
-                        ...execution,
-                        status: "done",
-                        detail: "daily_dev 验收证据齐全，系统自动完成",
-                    };
-                    const promotedSummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, promotedExecution, "waiting");
-                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: promotedSummary.acceptance_gate_passed ? "验收通过并自动完成" : `${promotedSummary.acceptance_gate?.failed_count || 0} 项未通过`, status: promotedSummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: promotedSummary.acceptance_gate || {} });
-                    const closedSessions = (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
-                    const finalizedPromotedExecution = { ...promotedExecution, team_shutdown: { completed: true, closed_session_ids: closedSessions.map((item) => item.id) } };
-                    const finalizedPromotedSummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, finalizedPromotedExecution, "done");
-                    if (!finalizedPromotedSummary.acceptance_gate_passed) {
-                        const detail = `最终收尾门禁未通过：${finalizedPromotedSummary.acceptance_gate?.failed_checks?.map((item) => item.label).join("、") || "团队仍未完全收尾"}`;
-                        const waitingTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "in_progress", result: result.substring(0, 500), final_report: execution.report || result, status_detail: detail, receipt: execution.receipt || null, review: execution.review || null, file_changes: execution.fileChanges || null, delivery_summary: finalizedPromotedSummary, reasoning_loop: finalizedPromotedSummary.reasoning_loop }) || task;
-                        (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, "in_progress", detail);
-                        finalizeTaskKernel(task, finalizedPromotedExecution, finalizedPromotedSummary, "reviewing", detail);
+                (0, logs_1.addTaskLog)(taskId, "response", `Agent 响应:\n${result.substring(0, 1000)}`);
+                if (task.workflow_type === "agent_coordination_dependency") {
+                    const coordinationRequest = (0, collaboration_runtime_cross_agent_runtime_1.getCoordinationRequestForTask)(task);
+                    const coordinationReceipt = execution.receipt || null;
+                    const coordinationKernel = (0, execution_kernel_1.loadExecution)(task.id);
+                    const coordinationAcceptance = coordinationRequest
+                        ? (0, collaboration_runtime_cross_agent_runtime_1.evaluateCoordinationTaskEvidence)(task, coordinationRequest, coordinationReceipt, coordinationKernel)
+                        : (0, collaboration_runtime_cross_agent_runtime_1.buildRejectedCoordinationAcceptance)(task, {}, coordinationReceipt, "找不到协调请求记录");
+                    const workspaceFiles = coordinationAcceptance.workspace_files || [];
+                    const green = (0, execution_kernel_1.evaluateGreenContract)({
+                        receipt: coordinationReceipt,
+                        fileChanges: workspaceFiles,
+                        requiresChanges: (0, collaboration_runtime_status_helpers_1.taskRequiresCodeChanges)(task),
+                        requiresVerification: task.requires_verification !== false,
+                        workspacePassed: coordinationAcceptance.accepted,
+                        branchFresh: true,
+                        reviewPassed: coordinationAcceptance.accepted,
+                        requiredLevel: coordinationKernel?.workspace?.mode === "worktree" ? "merge_ready" : "project",
+                    });
+                    const completedAt = new Date().toISOString();
+                    (0, execution_kernel_1.transitionExecution)(task.id, coordinationAcceptance.accepted ? "succeeded" : "failed", coordinationAcceptance.reason, {
+                        green,
+                        receipt: coordinationReceipt,
+                        fileChanges: { files: workspaceFiles },
+                        runnerVerification: { status: coordinationAcceptance.accepted ? "passed" : "failed", verification: coordinationAcceptance.verification || [] },
+                        outputPreview: result,
+                        data: { coordination_acceptance: coordinationAcceptance },
+                    });
+                    const settledTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(task.id, {
+                        status: coordinationAcceptance.accepted ? "done" : "failed",
+                        result: result.substring(0, 500),
+                        final_report: execution.report || result,
+                        status_detail: coordinationAcceptance.reason,
+                        receipt: coordinationReceipt,
+                        file_changes: { files: workspaceFiles },
+                        coordination_acceptance: coordinationAcceptance,
+                        completed_at: coordinationAcceptance.accepted ? completedAt : undefined,
+                        failed_at: coordinationAcceptance.accepted ? undefined : completedAt,
+                        execution_kernel: { execution_id: task.id, state: coordinationAcceptance.accepted ? "succeeded" : "failed", green, updated_at: completedAt },
+                    }) || task;
+                    (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, coordinationAcceptance.accepted ? "协作工作项已交付，等待主 Agent 合并" : "协作工作项未通过证据门禁");
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
+                    (0, logs_1.addTaskLog)(task.id, coordinationAcceptance.accepted ? "success" : "warning", coordinationAcceptance.reason);
+                    await ctx.onTaskStatusChange?.(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
+                    continue;
+                }
+                if (execution.status === "blocked") {
+                    const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "failed");
+                    const detail = execution.detail || "独立验收三轮后仍未通过，等待用户处理";
+                    const blockedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "blocked",
+                        result: result.substring(0, 500),
+                        final_report: execution.report || result,
+                        status_detail: detail,
+                        receipt: execution.receipt || null,
+                        review: execution.review || execution.testAgent || null,
+                        file_changes: execution.fileChanges || null,
+                        delivery_summary: deliverySummary,
+                        reasoning_loop: deliverySummary.reasoning_loop,
+                        acceptance_state: "blocked",
+                    }) || { ...task, status: "blocked", result: result.substring(0, 500) };
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
+                    finalizeTaskKernel(task, execution, deliverySummary, "failed", detail);
+                    (0, logs_1.addTaskLog)(taskId, "warning", `任务已阻塞：${detail}`);
+                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
+                    await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+                    (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
+                    continue;
+                }
+                if (execution.status === "failed") {
+                    const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "failed");
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: "fail", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
+                    const failedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "failed",
+                        result: result.substring(0, 500),
+                        final_report: execution.report || result,
+                        status_detail: execution.detail || "Agent 回执失败",
+                        receipt: execution.receipt || null,
+                        review: execution.review || null,
+                        file_changes: execution.fileChanges || null,
+                        delivery_summary: deliverySummary,
+                        reasoning_loop: deliverySummary.reasoning_loop,
+                    }) || { ...task, status: "failed", result: result.substring(0, 500) };
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(failedTask, "failed", execution.detail || "Agent 回执失败");
+                    finalizeTaskKernel(task, execution, deliverySummary, "failed", execution.detail || "Agent 回执失败");
+                    (0, logs_1.addTaskLog)(taskId, "error", `❌ 任务执行失败：${execution.detail || "Agent 回执失败"}`);
+                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(failedTask, "blocked", execution.detail || result.substring(0, 500));
+                    await ctx.onTaskStatusChange?.(failedTask, "failed", result.substring(0, 500));
+                    (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(failedTask, "failed", execution.detail || result.substring(0, 500));
+                    await (0, collaboration_runtime_task_queue_1.sendTaskFailureNotification)(failedTask, execution.detail || result.substring(0, 500));
+                    continue;
+                }
+                const isCompleted = execution.status === "done";
+                if (isCompleted) {
+                    const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "waiting");
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: deliverySummary.acceptance_gate_passed ? "验收通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
+                    if (!deliverySummary.acceptance_gate_passed) {
+                        const detail = `验收检查未通过：${deliverySummary.acceptance_gate?.failed_count || 1} 项缺口；自动返工已收口，等待用户检查后继续`;
+                        const blockedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                            status: "blocked",
+                            acceptance_state: "blocked",
+                            auto_execute: false,
+                            is_paused: true,
+                            paused: true,
+                            result: result.substring(0, 500),
+                            final_report: execution.report || result,
+                            status_detail: detail,
+                            receipt: execution.receipt || null,
+                            review: execution.review || null,
+                            file_changes: execution.fileChanges || null,
+                            delivery_summary: deliverySummary,
+                            reasoning_loop: deliverySummary.reasoning_loop,
+                            ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
+                        }) || task;
+                        (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
+                        finalizeTaskKernel(task, execution, deliverySummary, "failed", detail);
                         (0, logs_1.addTaskLog)(taskId, "warning", detail);
-                        await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
+                        (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
+                        await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+                        (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
+                        continue;
+                    }
+                    const closedSessions = (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
+                    const finalizedExecution = { ...execution, team_shutdown: { completed: true, closed_session_ids: closedSessions.map((item) => item.id) } };
+                    const finalizedDeliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, finalizedExecution, "done");
+                    if (!finalizedDeliverySummary.acceptance_gate_passed) {
+                        const detail = `最终收尾门禁未通过：${finalizedDeliverySummary.acceptance_gate?.failed_checks?.map((item) => item.label).join("、") || "团队仍未完全收尾"}`;
+                        const blockedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                            status: "blocked",
+                            acceptance_state: "blocked",
+                            auto_execute: false,
+                            is_paused: true,
+                            paused: true,
+                            result: result.substring(0, 500),
+                            final_report: execution.report || result,
+                            status_detail: detail,
+                            receipt: execution.receipt || null,
+                            review: execution.review || null,
+                            file_changes: execution.fileChanges || null,
+                            delivery_summary: finalizedDeliverySummary,
+                            reasoning_loop: finalizedDeliverySummary.reasoning_loop,
+                            ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
+                        }) || task;
+                        (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
+                        finalizeTaskKernel(task, finalizedExecution, finalizedDeliverySummary, "failed", detail);
+                        (0, logs_1.addTaskLog)(taskId, "warning", detail);
+                        (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
+                        await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+                        (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
                         continue;
                     }
                     const completedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
                         status: "done",
                         result: result.substring(0, 500),
                         final_report: execution.report || result,
-                        status_detail: promotedExecution.detail,
+                        status_detail: execution.detail || "验收通过",
                         receipt: execution.receipt || null,
                         review: execution.review || null,
                         file_changes: execution.fileChanges || null,
-                        delivery_summary: finalizedPromotedSummary,
-                        reasoning_loop: finalizedPromotedSummary.reasoning_loop,
+                        delivery_summary: finalizedDeliverySummary,
+                        reasoning_loop: finalizedDeliverySummary.reasoning_loop,
                         execution_readiness: null,
                         daily_dev_execution_readiness: null,
                         completed_at: new Date().toISOString()
                     }) || { ...task, status: "done", result: result.substring(0, 500) };
-                    const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedPromotedSummary });
+                    const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedDeliverySummary });
                     if (projectMemoryResult.committed)
                         (0, logs_1.addTaskLog)(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
-                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(completedTask, "done", promotedExecution.detail);
-                    finalizeTaskKernel(task, promotedExecution, finalizedPromotedSummary, "succeeded", promotedExecution.detail);
-                    (0, logs_1.addTaskLog)(taskId, "success", `✅ 任务完成：${promotedExecution.detail}`);
-                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(completedTask, "done", promotedExecution.detail);
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(completedTask, "done", execution.detail || "验收通过");
+                    finalizeTaskKernel(task, execution, finalizedDeliverySummary, "succeeded", execution.detail || "验收通过");
+                    (0, logs_1.addTaskLog)(taskId, "success", `✅ 任务完成：${execution.detail || "验收通过"}`);
+                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(completedTask, "done", execution.detail || result.substring(0, 500));
                     await ctx.onTaskStatusChange?.(completedTask, "done", result.substring(0, 500));
-                    (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(completedTask, "done", promotedExecution.detail);
+                    (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(completedTask, "done", execution.detail || result.substring(0, 500));
                     await (0, collaboration_runtime_task_queue_1.sendTaskCompletionNotification)(completedTask, result);
                 }
                 else {
-                    const shouldRequeue = execution.requeue === true;
-                    const waitingTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
-                        status: shouldRequeue ? "pending" : "in_progress",
-                        result: result.substring(0, 500),
-                        final_report: execution.report || result,
-                        status_detail: execution.detail || "等待补充信息或返工",
-                        receipt: execution.receipt || null,
-                        review: execution.review || null,
-                        file_changes: execution.fileChanges || null,
-                        delivery_summary: deliverySummary,
-                        reasoning_loop: deliverySummary.reasoning_loop,
-                    }) || { ...task, status: "in_progress", result: result.substring(0, 500) };
-                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, shouldRequeue ? "pending" : "in_progress", execution.detail || "等待补充信息或返工");
-                    finalizeTaskKernel(task, execution, deliverySummary, "reviewing", execution.detail || "等待补充信息或返工");
-                    (0, logs_1.addTaskLog)(taskId, "warning", `任务仍需继续：${execution.detail || "验收未完成"}`);
-                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(waitingTask, shouldRequeue ? "queued" : "blocked", execution.detail || result.substring(0, 500));
-                    await ctx.onTaskStatusChange?.(waitingTask, "waiting", result.substring(0, 500));
-                    (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(waitingTask, "waiting", execution.detail || result.substring(0, 500));
-                    if (shouldRequeue)
-                        enqueueFollowupAfterRound = true;
+                    const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "waiting");
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: deliverySummary.acceptance_gate_passed ? "验收通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过，任务继续推进`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
+                    if ((0, collaboration_runtime_runtime_tools_1.canCompleteDailyDevFromDeliverySummary)(task, execution, deliverySummary)) {
+                        const promotedExecution = {
+                            ...execution,
+                            status: "done",
+                            detail: "daily_dev 验收证据齐全，系统自动完成",
+                        };
+                        const promotedSummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, promotedExecution, "waiting");
+                        (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: promotedSummary.acceptance_gate_passed ? "验收通过并自动完成" : `${promotedSummary.acceptance_gate?.failed_count || 0} 项未通过`, status: promotedSummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: promotedSummary.acceptance_gate || {} });
+                        const closedSessions = (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
+                        const finalizedPromotedExecution = { ...promotedExecution, team_shutdown: { completed: true, closed_session_ids: closedSessions.map((item) => item.id) } };
+                        const finalizedPromotedSummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, finalizedPromotedExecution, "done");
+                        if (!finalizedPromotedSummary.acceptance_gate_passed) {
+                            const detail = `最终收尾门禁未通过：${finalizedPromotedSummary.acceptance_gate?.failed_checks?.map((item) => item.label).join("、") || "团队仍未完全收尾"}`;
+                            const blockedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                                status: "blocked",
+                                acceptance_state: "blocked",
+                                auto_execute: false,
+                                is_paused: true,
+                                paused: true,
+                                result: result.substring(0, 500),
+                                final_report: execution.report || result,
+                                status_detail: detail,
+                                receipt: execution.receipt || null,
+                                review: execution.review || null,
+                                file_changes: execution.fileChanges || null,
+                                delivery_summary: finalizedPromotedSummary,
+                                reasoning_loop: finalizedPromotedSummary.reasoning_loop,
+                                ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
+                            }) || task;
+                            (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
+                            finalizeTaskKernel(task, finalizedPromotedExecution, finalizedPromotedSummary, "failed", detail);
+                            (0, logs_1.addTaskLog)(taskId, "warning", detail);
+                            (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
+                            await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+                            (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(blockedTask, "waiting", detail);
+                            continue;
+                        }
+                        const completedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                            status: "done",
+                            result: result.substring(0, 500),
+                            final_report: execution.report || result,
+                            status_detail: promotedExecution.detail,
+                            receipt: execution.receipt || null,
+                            review: execution.review || null,
+                            file_changes: execution.fileChanges || null,
+                            delivery_summary: finalizedPromotedSummary,
+                            reasoning_loop: finalizedPromotedSummary.reasoning_loop,
+                            execution_readiness: null,
+                            daily_dev_execution_readiness: null,
+                            completed_at: new Date().toISOString()
+                        }) || { ...task, status: "done", result: result.substring(0, 500) };
+                        const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedPromotedSummary });
+                        if (projectMemoryResult.committed)
+                            (0, logs_1.addTaskLog)(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
+                        (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(completedTask, "done", promotedExecution.detail);
+                        finalizeTaskKernel(task, promotedExecution, finalizedPromotedSummary, "succeeded", promotedExecution.detail);
+                        (0, logs_1.addTaskLog)(taskId, "success", `✅ 任务完成：${promotedExecution.detail}`);
+                        (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(completedTask, "done", promotedExecution.detail);
+                        await ctx.onTaskStatusChange?.(completedTask, "done", result.substring(0, 500));
+                        (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(completedTask, "done", promotedExecution.detail);
+                        await (0, collaboration_runtime_task_queue_1.sendTaskCompletionNotification)(completedTask, result);
+                    }
+                    else {
+                        const shouldRequeue = execution.requeue === true;
+                        const waitingTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                            status: shouldRequeue ? "pending" : "blocked",
+                            acceptance_state: shouldRequeue ? (task.acceptance_state || "pending") : "blocked",
+                            auto_execute: shouldRequeue ? task.auto_execute !== false : false,
+                            is_paused: shouldRequeue ? false : true,
+                            paused: shouldRequeue ? false : true,
+                            result: result.substring(0, 500),
+                            final_report: execution.report || result,
+                            status_detail: execution.detail || "等待补充信息或返工",
+                            receipt: execution.receipt || null,
+                            review: execution.review || null,
+                            file_changes: execution.fileChanges || null,
+                            delivery_summary: deliverySummary,
+                            reasoning_loop: deliverySummary.reasoning_loop,
+                            collaboration_state: shouldRequeue
+                                ? { ...(task.collaboration_state || {}), phase: "reworking", needs_user: false, updated_at: new Date().toISOString() }
+                                : { ...(task.collaboration_state || {}), phase: "needs_user", needs_user: true, updated_at: new Date().toISOString() },
+                        }) || { ...task, status: shouldRequeue ? "pending" : "blocked", result: result.substring(0, 500) };
+                        (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, shouldRequeue ? "pending" : "failed", execution.detail || "等待补充信息或返工");
+                        finalizeTaskKernel(task, execution, deliverySummary, shouldRequeue ? "reviewing" : "failed", execution.detail || "等待补充信息或返工");
+                        (0, logs_1.addTaskLog)(taskId, "warning", `任务仍需继续：${execution.detail || "验收未完成"}`);
+                        (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(waitingTask, shouldRequeue ? "queued" : "blocked", execution.detail || result.substring(0, 500));
+                        await ctx.onTaskStatusChange?.(waitingTask, "waiting", result.substring(0, 500));
+                        (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(waitingTask, "waiting", execution.detail || result.substring(0, 500));
+                        if (!shouldRequeue)
+                            (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "queue_task_blocked", title: "任务已暂停并释放队列", detail: execution.detail || "等待用户补充信息后继续", status: "warn", phase: "needs_user", data: { target_key: targetKey, queue_released: true } });
+                        if (shouldRequeue)
+                            enqueueFollowupAfterRound = true;
+                    }
                 }
             }
-        }
-        catch (error) {
-            console.error(`[任务队列] [${targetKey}] 任务执行失败: ${task.title}`, error.message);
-            const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
-            const cancelled = failure.failureClass === "cancelled" || (0, execution_kernel_1.isTaskCancellationRequested)(taskId);
-            const latestWithFollowups = (0, db_1.loadTasks)().find((item) => item.id === taskId) || task;
-            if (cancelled && (0, collaboration_runtime_task_queue_1.shouldResumeAfterGoalRevisionInterruption)(latestWithFollowups, executionFollowupRevision)) {
-                const pending = Array.isArray(latestWithFollowups.pending_followups) ? latestWithFollowups.pending_followups : [];
-                const acceptedAt = new Date().toISOString();
-                const interruptedExecution = (0, collaboration_runtime_status_helpers_1.buildTaskExecutionResult)("waiting", "当前执行轮已按目标调整停止，等待重新核对计划", { detail: "目标调整触发当前执行轮停止" });
-                const interruptedDeliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(latestWithFollowups, interruptedExecution, "waiting");
-                const latestCollaborationState = latestWithFollowups.collaboration_state || {};
-                const lastContinuation = latestCollaborationState.last_continuation
-                    ? { ...latestCollaborationState.last_continuation, status: "accepted", resumed_at: acceptedAt }
-                    : latestCollaborationState.last_continuation;
-                const resumedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
-                    status: "pending",
-                    result: "当前执行轮已停止，等待主 Agent 重新核对计划",
-                    final_report: "",
-                    delivery_summary: interruptedDeliverySummary,
-                    reasoning_loop: interruptedDeliverySummary.reasoning_loop,
-                    consumed_followup_revision: Number(latestWithFollowups.followup_revision || 0),
-                    pending_followups: pending.map((item) => ({ ...item, status: "accepted", accepted_at: acceptedAt })),
-                    status_detail: (0, collaboration_runtime_task_queue_1.buildGoalRevisionInterruptedStatus)(pending),
-                    plan_revision_required: true,
-                    collaboration_state: {
-                        ...latestCollaborationState,
-                        phase: "reworking",
-                        needs_user: false,
-                        last_continuation: lastContinuation,
-                        continuation_resumed_at: acceptedAt,
-                        goal_revision_interruption: { ...(latestCollaborationState.goal_revision_interruption || {}), resolved_at: acceptedAt, resumed: true },
-                    },
-                }) || latestWithFollowups;
-                (0, execution_kernel_1.clearTaskCancellation)(taskId);
-                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(resumedTask, "pending", resumedTask.status_detail);
-                finalizeTaskKernel(task, interruptedExecution, interruptedDeliverySummary, "reviewing", "当前轮次已停止，正在按新目标重核计划");
-                (0, logs_1.addTaskLog)(taskId, "warning", "目标调整已停止当前执行轮，任务保持同一上下文并重新入队");
-                (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(resumedTask, "in_progress", resumedTask.status_detail);
-                await ctx.onTaskStatusChange?.(resumedTask, "waiting", resumedTask.status_detail);
-                enqueueFollowupAfterRound = true;
-                continue;
-            }
-            const failedExecution = (0, collaboration_runtime_status_helpers_1.buildTaskExecutionResult)("failed", `执行失败: ${error.message}`, { detail: String(error.message || "执行失败") });
-            const failedDeliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, failedExecution, "failed");
-            const failedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
-                status: cancelled ? "cancelled" : "failed",
-                result: cancelled ? "任务已取消" : `执行失败: ${error.message}`,
-                status_detail: String(error.message || "执行失败").slice(0, 500),
-                failure_class: failure.failureClass,
-                delivery_summary: failedDeliverySummary,
-                reasoning_loop: failedDeliverySummary.reasoning_loop,
-            }) || { ...task, status: cancelled ? "cancelled" : "failed", result: cancelled ? "任务已取消" : `执行失败: ${error.message}` };
-            (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(failedTask, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : String(error.message || "执行失败"));
-            finalizeTaskKernel(task, failedExecution, failedTask.delivery_summary, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : error.message);
-            if (cancelled) {
-                (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "任务已取消，关闭任务级原生会话");
-                (0, execution_kernel_1.clearTaskCancellation)(taskId);
-            }
-            (0, logs_1.addTaskLog)(taskId, cancelled ? "warning" : "error", cancelled ? "任务已取消，运行中的 Agent 进程已终止" : `❌ 任务执行失败: ${error.message}`);
-            (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(failedTask, "blocked", error.message);
-            await ctx.onTaskStatusChange?.(failedTask, cancelled ? "cancelled" : "failed", String(error.message || ""));
-            (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(failedTask, cancelled ? "waiting" : "failed", cancelled ? "任务已取消" : error.message);
-            if (!cancelled)
-                await (0, collaboration_runtime_task_queue_1.sendTaskFailureNotification)(failedTask, error.message);
-        }
-        finally {
-            if (leaseHeartbeat)
-                clearInterval(leaseHeartbeat);
-            collaboration_runtime_task_queue_1.runningTaskIds.delete(taskId);
-            const finalTask = (0, db_1.loadTasks)().find((item) => item.id === taskId);
-            if (finalTask?.workflow_type === "agent_coordination_dependency") {
-                try {
-                    await (0, collaboration_runtime_cross_agent_runtime_1.settleGroupCoordinationDependency)(finalTask, ctx);
+            catch (error) {
+                console.error(`[任务队列] [${targetKey}] 任务执行失败: ${task.title}`, error.message);
+                const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
+                const cancelled = failure.failureClass === "cancelled" || (0, execution_kernel_1.isTaskCancellationRequested)(taskId);
+                const latestWithFollowups = (0, db_1.loadTasks)().find((item) => item.id === taskId) || task;
+                if (cancelled && (0, collaboration_runtime_task_queue_1.shouldResumeAfterGoalRevisionInterruption)(latestWithFollowups, executionFollowupRevision)) {
+                    const pending = Array.isArray(latestWithFollowups.pending_followups) ? latestWithFollowups.pending_followups : [];
+                    const acceptedAt = new Date().toISOString();
+                    const interruptedExecution = (0, collaboration_runtime_status_helpers_1.buildTaskExecutionResult)("waiting", "当前执行轮已按目标调整停止，等待重新核对计划", { detail: "目标调整触发当前执行轮停止" });
+                    const interruptedDeliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(latestWithFollowups, interruptedExecution, "waiting");
+                    const latestCollaborationState = latestWithFollowups.collaboration_state || {};
+                    const lastContinuation = latestCollaborationState.last_continuation
+                        ? { ...latestCollaborationState.last_continuation, status: "accepted", resumed_at: acceptedAt }
+                        : latestCollaborationState.last_continuation;
+                    const resumedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "pending",
+                        result: "当前执行轮已停止，等待主 Agent 重新核对计划",
+                        final_report: "",
+                        delivery_summary: interruptedDeliverySummary,
+                        reasoning_loop: interruptedDeliverySummary.reasoning_loop,
+                        consumed_followup_revision: Number(latestWithFollowups.followup_revision || 0),
+                        pending_followups: pending.map((item) => ({ ...item, status: "accepted", accepted_at: acceptedAt })),
+                        status_detail: (0, collaboration_runtime_task_queue_1.buildGoalRevisionInterruptedStatus)(pending),
+                        plan_revision_required: true,
+                        collaboration_state: {
+                            ...latestCollaborationState,
+                            phase: "reworking",
+                            needs_user: false,
+                            last_continuation: lastContinuation,
+                            continuation_resumed_at: acceptedAt,
+                            goal_revision_interruption: { ...(latestCollaborationState.goal_revision_interruption || {}), resolved_at: acceptedAt, resumed: true },
+                        },
+                    }) || latestWithFollowups;
+                    (0, execution_kernel_1.clearTaskCancellation)(taskId);
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(resumedTask, "pending", resumedTask.status_detail);
+                    finalizeTaskKernel(task, interruptedExecution, interruptedDeliverySummary, "reviewing", "当前轮次已停止，正在按新目标重核计划");
+                    (0, logs_1.addTaskLog)(taskId, "warning", "目标调整已停止当前执行轮，任务保持同一上下文并重新入队");
+                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(resumedTask, "in_progress", resumedTask.status_detail);
+                    await ctx.onTaskStatusChange?.(resumedTask, "waiting", resumedTask.status_detail);
+                    enqueueFollowupAfterRound = true;
+                    continue;
                 }
-                catch (error) {
-                    (0, logs_1.addTaskLog)(taskId, "error", `协作工作项收口失败：${error?.message || error}`);
+                const failedExecution = (0, collaboration_runtime_status_helpers_1.buildTaskExecutionResult)("failed", `执行失败: ${error.message}`, { detail: String(error.message || "执行失败") });
+                const failedDeliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, failedExecution, "failed");
+                const failedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                    status: cancelled ? "cancelled" : "failed",
+                    result: cancelled ? "任务已取消" : `执行失败: ${error.message}`,
+                    status_detail: String(error.message || "执行失败").slice(0, 500),
+                    failure_class: failure.failureClass,
+                    delivery_summary: failedDeliverySummary,
+                    reasoning_loop: failedDeliverySummary.reasoning_loop,
+                }) || { ...task, status: cancelled ? "cancelled" : "failed", result: cancelled ? "任务已取消" : `执行失败: ${error.message}` };
+                (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(failedTask, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : String(error.message || "执行失败"));
+                finalizeTaskKernel(task, failedExecution, failedTask.delivery_summary, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : error.message);
+                if (cancelled) {
+                    (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "任务已取消，关闭任务级原生会话");
+                    (0, execution_kernel_1.clearTaskCancellation)(taskId);
                 }
+                (0, logs_1.addTaskLog)(taskId, cancelled ? "warning" : "error", cancelled ? "任务已取消，运行中的 Agent 进程已终止" : `❌ 任务执行失败: ${error.message}`);
+                (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(failedTask, "blocked", error.message);
+                await ctx.onTaskStatusChange?.(failedTask, cancelled ? "cancelled" : "failed", String(error.message || ""));
+                (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(failedTask, cancelled ? "waiting" : "failed", cancelled ? "任务已取消" : error.message);
+                if (!cancelled)
+                    await (0, collaboration_runtime_task_queue_1.sendTaskFailureNotification)(failedTask, error.message);
             }
-            (0, reliability_ledger_1.releaseTaskLease)(taskId, finalTask?.status || "unknown");
-            if (enqueueFollowupAfterRound && finalTask && finalTask.status !== "cancelled")
-                enqueueTask(taskId, ctx);
+            finally {
+                if (leaseHeartbeat)
+                    clearInterval(leaseHeartbeat);
+                collaboration_runtime_task_queue_1.runningTaskIds.delete(taskId);
+                const finalTask = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+                if (finalTask?.workflow_type === "agent_coordination_dependency") {
+                    try {
+                        await (0, collaboration_runtime_cross_agent_runtime_1.settleGroupCoordinationDependency)(finalTask, ctx);
+                    }
+                    catch (error) {
+                        (0, logs_1.addTaskLog)(taskId, "error", `协作工作项收口失败：${error?.message || error}`);
+                    }
+                }
+                (0, reliability_ledger_1.releaseTaskLease)(taskId, finalTask?.status || "unknown");
+                if (enqueueFollowupAfterRound && finalTask && finalTask.status !== "cancelled")
+                    enqueueTask(taskId, ctx);
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
-        await new Promise(resolve => setTimeout(resolve, 500));
     }
-    collaboration_runtime_task_queue_1.runningTasks.delete(targetKey);
-    console.log(`[任务队列] [${targetKey}] 队列处理完成`);
+    finally {
+        collaboration_runtime_task_queue_1.runningTasks.delete(targetKey);
+        console.log(`[任务队列] [${targetKey}] 队列处理完成`);
+    }
 }
 function enqueueTask(taskId, ctx) {
     return require("./collaboration-task-runtime").enqueueTask(taskId, ctx);
@@ -957,6 +1175,7 @@ function getQueueStatus(taskSnapshot) {
         };
     }
     const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : (0, db_1.loadTasks)();
+    const unifiedScheduler = (0, unified_task_scheduler_1.getUnifiedTaskSchedulerStatus)();
     return {
         total_queued: totalQueued,
         running_targets: collaboration_runtime_task_queue_1.runningTasks.size,
@@ -964,7 +1183,11 @@ function getQueueStatus(taskSnapshot) {
         pending_tasks: tasks.filter(t => t.status === "pending").length,
         in_progress_tasks: tasks.filter(t => t.status === "in_progress").length,
         failed_tasks: tasks.filter(t => t.status === "failed").length,
-        running_task_ids: Array.from(collaboration_runtime_task_queue_1.runningTaskIds)
+        running_task_ids: Array.from(collaboration_runtime_task_queue_1.runningTaskIds),
+        unified_scheduler: unifiedScheduler,
+        unified_queued: unifiedScheduler.queued,
+        unified_running_lanes: unifiedScheduler.running_lanes.length,
+        workspace_mutation_lanes: unifiedScheduler.workspace_lanes,
     };
 }
 function getTaskTargetKeyFromTask(task) {

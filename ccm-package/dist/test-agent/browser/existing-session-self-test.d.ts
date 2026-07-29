@@ -50,14 +50,14 @@ export declare function runTestAgentMixedBrowserProviderRoutingSelfTest(): Promi
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -65,6 +65,8 @@ export declare function runTestAgentMixedBrowserProviderRoutingSelfTest(): Promi
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -75,9 +77,8 @@ export declare function runTestAgentMixedBrowserProviderRoutingSelfTest(): Promi
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -94,14 +95,14 @@ export declare function runTestAgentMixedBrowserProviderRoutingSelfTest(): Promi
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -109,6 +110,8 @@ export declare function runTestAgentMixedBrowserProviderRoutingSelfTest(): Promi
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -119,9 +122,8 @@ export declare function runTestAgentMixedBrowserProviderRoutingSelfTest(): Promi
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     report: import("..").TestAgentReport;

@@ -493,6 +493,93 @@ export function listDailyDevBacklogs(groupId = "") {
     });
 }
 
+export function listRequirementBacklogCollections(groupId = "") {
+  const tasks = loadTasks();
+  const groups = loadGroups();
+  const groupNames = new Map(groups.map((group: any) => [String(group.id || ""), group.name || group.id]));
+  const projectNames = new Map(getConfigs().map((config: any) => [
+    String(config.name || ""),
+    config.display_name || config.displayName || config.name,
+  ]));
+  const byId = new Map(tasks.map((task: any) => [String(task.id || ""), task]));
+  const parents = tasks.filter((task: any) => task.workflow_type === "requirement_epic" && !task.parent_task_id);
+
+  return parents
+    .map((parent: any) => {
+      const declaredIds = Array.isArray(parent.child_task_ids) ? parent.child_task_ids.map(String) : [];
+      const children = declaredIds.length
+        ? declaredIds.map((id: string) => byId.get(id)).filter(Boolean)
+        : tasks.filter((task: any) => String(task.parent_task_id || "") === String(parent.id || ""));
+      const relevantToGroup = !groupId
+        || String(parent.group_id || "") === groupId
+        || children.some((child: any) => String(child.group_id || "") === groupId);
+      if (!relevantToGroup) return null;
+
+      const counts = children.reduce((acc: any, child: any) => {
+        const status = String(child.status || "pending");
+        acc[status] = Number(acc[status] || 0) + 1;
+        return acc;
+      }, {});
+      const total = children.length;
+      const done = Number(counts.done || 0);
+      const failed = Number(counts.failed || 0);
+      const running = Number(counts.in_progress || 0);
+      const blocked = children.filter((child: any) => {
+        const phase = String(child.execution_phase || child.acceptance_state || "");
+        return phase === "blocked" || child.status === "blocked" || child.needs_user_intervention === true;
+      }).length;
+      const waiting = Math.max(0, total - done - failed - running);
+      let state = "planned";
+      if (parent.intake_state === "awaiting_confirmation") state = "awaiting_confirmation";
+      else if (parent.status === "done" || (total > 0 && done === total)) state = "done";
+      else if (failed > 0) state = "failed";
+      else if (blocked > 0) state = "blocked";
+      else if (running > 0 || parent.status === "in_progress") state = "running";
+      else if (total > 0) state = "queued";
+
+      const targetLabels = Array.from(new Set(children.map((child: any) => {
+        if (child.assign_type === "group" && child.group_id) return groupNames.get(String(child.group_id)) || child.group_id;
+        const projectId = String(child.target_project || "");
+        return projectNames.get(projectId) || projectId;
+      }).filter(Boolean)));
+      const plan = parent.decomposition_plan || parent.requirement_decomposition || null;
+      const sourceCount = Number(parent.source_ingestion?.source_count
+        || parent.source_ingestion?.sources?.length
+        || parent.source_attachments?.length
+        || 0);
+      return {
+        id: parent.id,
+        trace_id: parent.trace_id || "",
+        title: parent.title || plan?.epic_title || "文档需求集合",
+        business_goal: parent.business_goal || parent.description || plan?.business_goal || "",
+        state,
+        state_label: ({
+          awaiting_confirmation: "待确认",
+          planned: "已规划",
+          queued: "等待执行",
+          running: "执行中",
+          blocked: "需要处理",
+          failed: "执行失败",
+          done: "已完成",
+        } as any)[state] || state,
+        priority: parent.priority || "normal",
+        intake_state: parent.intake_state || "",
+        group_id: parent.group_id || "",
+        group_name: groupNames.get(String(parent.group_id || "")) || "",
+        target_labels: targetLabels,
+        child_task_ids: children.map((child: any) => child.id),
+        progress: { total, done, running, failed, blocked, waiting },
+        source_count: sourceCount,
+        content_hash: parent.requirement_content_hash || plan?.content_hash || "",
+        version: Number(parent.requirement_version || plan?.version || 1),
+        updated_at: parent.updated_at || parent.created_at || "",
+        created_at: parent.created_at || "",
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || ""));
+}
+
 function dailyDevGroupCanDispatch(groupId: string) {
   try {
     const group = loadGroups().find(g => g.id === groupId);

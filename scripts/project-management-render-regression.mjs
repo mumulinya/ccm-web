@@ -81,6 +81,7 @@ const prepare = async (page, options = {}) => {
   await page.route('**/api/tools/chain-verification?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, rows: [] }) }))
   await page.route('**/api/projects/runtime?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(runtimeFixture) }))
   await page.route('**/api/projects/runtime/logs?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, logs: 'VITE ready on http://localhost:5173' }) }))
+  await page.route('**/api/projects/runtime/log-stream?**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: sseEvent({ type: 'snapshot', content: 'VITE ready on http://localhost:5173' }) }))
   await page.route('**/api/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: [
     { type: 'codex', name: 'Codex CLI', enabled: true, ready: true },
     { type: 'gemini', name: 'Gemini CLI', enabled: true, ready: false },
@@ -132,7 +133,7 @@ const prepare = async (page, options = {}) => {
   await page.route('**/api/sessions/message', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) }))
   await page.route('**/api/send-stream', async route => {
     sendRequestCount += 1
-    const isTask = sendRequestCount === 2
+    const isTask = /修改登录页并运行测试/.test(String(route.request().postData() || '')) || sendRequestCount === 2
     const body = isTask
       ? [
           sseEvent({ type: 'presentation', message_mode: 'task', show_task_card: true }),
@@ -232,6 +233,33 @@ try {
   await capture(desktop, 'desktop-project-runtime-config')
   await desktop.locator('.runtime-config-modal').getByTitle('关闭').click()
 
+  await desktop.locator('.runtime-bar').getByTitle('查看运行日志').click()
+  await desktop.locator('.run-console').waitFor({ state: 'visible' })
+  await desktop.waitForFunction(() => !document.querySelector('.run-console .console-placeholder'))
+  assert.match(await desktop.locator('.run-console .console-title').innerText(), /Web 前端/)
+  await desktop.locator('.runtime-bar select').selectOption('runtime_api')
+  await desktop.getByText('API 服务 · 运行日志', { exact: false }).waitFor()
+  assert.equal(await desktop.locator('.run-console .console-placeholder').count(), 0)
+  report.checks.push({ name: 'runtime console renders snapshot logs and follows the exact selected profile', pass: true })
+  const consoleSearch = desktop.locator('.console-search input')
+  await consoleSearch.focus()
+  const consoleSearchStyle = await consoleSearch.evaluate(node => {
+    const inputStyle = getComputedStyle(node)
+    const shellStyle = getComputedStyle(node.parentElement)
+    return {
+      inputBackground: inputStyle.backgroundColor,
+      inputShadow: inputStyle.boxShadow,
+      shellBackground: shellStyle.backgroundColor,
+      shellBorder: shellStyle.borderColor,
+    }
+  })
+  assert.match(consoleSearchStyle.inputBackground, /rgba?\(0,\s*0,\s*0,\s*0\)|transparent/)
+  assert.doesNotMatch(consoleSearchStyle.shellBackground, /rgb\(255,\s*255,\s*255\)/)
+  assert.doesNotMatch(consoleSearchStyle.shellBorder, /rgb\(37,\s*99,\s*235\)/)
+  report.checks.push({ name: 'focused log search stays inside the dark console theme without the global white input treatment', pass: true })
+  await capture(desktop, 'desktop-project-runtime-console')
+  await desktop.locator('.run-console').getByTitle('关闭运行控制台').click()
+
   await desktop.getByTitle('更多项目操作').click()
   await desktop.getByRole('button', { name: '编辑项目', exact: true }).click()
   await desktop.locator('.project-form-modal').waitFor()
@@ -316,7 +344,7 @@ try {
   await desktop.locator('#projectChatInput').fill('你是什么模型')
   await desktop.locator('.project-manager .send-button').click()
   await desktop.getByText('我是当前项目配置的 Codex Agent', { exact: false }).waitFor()
-  assert.equal(await desktop.locator('.task-experience-card').count(), 0)
+  assert.equal(await desktop.locator('.task-summary').count(), 0)
   assert.equal((await desktop.locator('.messages').innerText()).includes('项目执行任务'), false)
   assert.equal((await desktop.locator('.messages').innerText()).includes('正在修改 trace_id=hidden'), false)
   report.checks.push({ name: 'ordinary project question renders only the friendly answer without task card or internal work details', pass: true })
@@ -326,9 +354,9 @@ try {
   await desktop.waitForFunction(() => document.querySelector('.project-manager .send-button')?.textContent?.trim() === '发送')
   await desktop.locator('#projectChatInput').fill('修改登录页并运行测试')
   await desktop.locator('.project-manager .send-button').click()
-  await desktop.locator('.task-experience-card').waitFor()
-  assert.equal(await desktop.locator('.task-experience-card').count(), 1)
-  assert.equal((await desktop.locator('.messages').innerText()).includes('项目执行任务'), true)
+  await desktop.locator('.task-summary').waitFor()
+  assert.equal(await desktop.locator('.task-summary').count(), 1)
+  assert.equal((await desktop.locator('.messages').innerText()).includes('修改登录页并运行测试'), true)
   report.checks.push({ name: 'explicit implementation request keeps the project task card and delivery progress', pass: true })
   await capture(desktop, 'desktop-explicit-task')
 

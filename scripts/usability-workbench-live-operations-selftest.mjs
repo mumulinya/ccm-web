@@ -18,7 +18,7 @@ const checks = [
   ['完成状态兼容', backend, '["done", "completed", "succeeded"]'],
   ['项目操作能力', backend, 'actions: running ? ["open", "stop"] : ["open", "start"]'],
   ['定时任务操作能力', backend, 'actions: ["open", "toggle"]'],
-  ['浏览器实时连接', live, "new EventSource('/api/usability/workbench/stream')"],
+  ['浏览器复用统一实时连接', live, "subscribeRuntimeEvents(['task', 'permission', 'agent', 'feishu', 'project', 'group', 'cron', 'system']"],
   ['本地快照缓存', live, 'localStorage.setItem(CACHE_KEY'],
   ['过期数据门禁', live, 'STALE_AFTER_MS'],
   ['断线恢复', live, 'scheduleRecovery()'],

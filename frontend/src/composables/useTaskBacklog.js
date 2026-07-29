@@ -24,7 +24,9 @@ export function useTaskBacklog(options = {}) {
 
   const showBacklog = ref(false)
   const dailyDevBacklogs = ref([])
+  const requirementCollections = ref([])
   const backlogCounts = ref({})
+  const requirementCollectionCounts = ref({})
   const backlogBulkDispatchLoading = ref(false)
   const backlogBulkDispatchResult = ref(null)
   const backlogImportLoading = ref(false)
@@ -49,7 +51,9 @@ export function useTaskBacklog(options = {}) {
     const data = await res.json()
     if (!data.success) throw new Error(data.error || '加载需求池失败')
     dailyDevBacklogs.value = data.items || []
+    requirementCollections.value = data.collections || []
     backlogCounts.value = data.counts || {}
+    requirementCollectionCounts.value = data.collection_counts || {}
   }
 
   const openBacklog = async () => {
@@ -167,7 +171,9 @@ export function useTaskBacklog(options = {}) {
   return {
     showBacklog,
     dailyDevBacklogs,
+    requirementCollections,
     backlogCounts,
+    requirementCollectionCounts,
     backlogBulkDispatchLoading,
     backlogBulkDispatchResult,
     backlogImportLoading,

@@ -105,6 +105,8 @@ export interface TestAgentProjectTarget {
     adversarial_browser_probe_templates?: BrowserProbeTemplateSpec[];
     browserChecks?: BrowserCheckSpec[];
     browser_checks?: BrowserCheckSpec[];
+    browserScenarios?: string[];
+    browser_scenarios?: string[];
     agentSummary?: string;
     agent_summary?: string;
     risks?: string[];

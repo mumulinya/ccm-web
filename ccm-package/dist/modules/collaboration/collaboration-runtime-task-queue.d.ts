@@ -11,6 +11,7 @@ export declare const TASK_WATCHDOG_INTERVAL_MS: number;
 export declare const TASK_WATCHDOG_STALE_MS: number;
 export declare const TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS: number;
 export declare const TASK_WATCHDOG_GAP_REWORK_MAX = 3;
+export declare const TASK_WATCHDOG_RECOVERY_MAX = 3;
 export declare const AGENT_RECOVERY_PROBE_INTERVAL_MS: number;
 export declare const AGENT_RECOVERY_PROBE_TIMEOUT_MS: number;
 export declare const AGENT_PROBE_SUCCESS_FRESH_MS: number;
@@ -202,7 +203,7 @@ export declare function buildGroupPlanModePreflight(input: {
     taskIntent?: any;
     attachmentCount?: number;
     coordinatorProject?: string;
-}): any;
+}): Promise<any>;
 export declare function buildGroupProjectAnalysisContext(group: any, message: string, ctx: CollabCtx, configs?: any[]): string;
 export declare function buildProjectCodeReadOnlySnapshot(project: string, workDir: string, message: string): any;
 export declare function runCollaborationUxSelfTest(): any;

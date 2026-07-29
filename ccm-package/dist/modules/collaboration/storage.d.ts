@@ -47,6 +47,7 @@ export declare function deleteGroupChatSession(groupId: string, sessionId: strin
         deleted: string[];
         deletedCount: number;
     };
+    providerContextCache: any;
     activeTaskCount: number;
     forced: boolean;
     replacement: any;
@@ -149,6 +150,7 @@ export declare function pruneArchivedGroupChatSessions(groupId: string, options?
                 deleted: string[];
                 deletedCount: number;
             };
+            providerContextCache: any;
             activeTaskCount: number;
             forced: boolean;
             replacement: any;

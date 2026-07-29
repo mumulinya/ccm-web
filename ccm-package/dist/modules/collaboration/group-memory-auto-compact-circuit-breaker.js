@@ -38,12 +38,15 @@ exports.getGroupMemoryAutoCompactCircuitBreakerFile = getGroupMemoryAutoCompactC
 exports.verifyGroupMemoryAutoCompactCircuitBreaker = verifyGroupMemoryAutoCompactCircuitBreaker;
 exports.readGroupMemoryAutoCompactCircuitBreaker = readGroupMemoryAutoCompactCircuitBreaker;
 exports.recordGroupMemoryAutoCompactCircuitBreakerOutcome = recordGroupMemoryAutoCompactCircuitBreakerOutcome;
+exports.readGroupMemoryAutoCompactCircuitAdmission = readGroupMemoryAutoCompactCircuitAdmission;
+exports.resetGroupMemoryAutoCompactCircuitBreaker = resetGroupMemoryAutoCompactCircuitBreaker;
 exports.deleteGroupMemoryAutoCompactCircuitBreaker = deleteGroupMemoryAutoCompactCircuitBreaker;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const utils_1 = require("../../core/utils");
+const group_memory_auto_compact_circuit_policy_1 = require("./group-memory-auto-compact-circuit-policy");
 exports.GROUP_MEMORY_AUTO_COMPACT_CIRCUIT_BREAKER_SCHEMA = "ccm-group-memory-auto-compact-circuit-breaker-v1";
 exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES = 3;
 exports.GROUP_MEMORY_AUTO_COMPACT_CIRCUIT_BREAKER_DIR = path.join(utils_1.CCM_DIR, "group-memory-auto-compact-circuit-breakers");
@@ -85,6 +88,8 @@ function emptyLedger(groupId, groupSessionId, file) {
         state: "closed",
         consecutive_failures: 0,
         max_consecutive_failures: exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES,
+        failure_mode: "",
+        open_count: 0,
         revision: 0,
         opened_at: "",
         last_failure_at: "",
@@ -114,6 +119,15 @@ function verifyGroupMemoryAutoCompactCircuitBreaker(ledger, expected = {}) {
         issues.push("auto_compact_circuit_failure_count_invalid");
     if ((failures >= exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES) !== (ledger?.state === "open"))
         issues.push("auto_compact_circuit_state_count_mismatch");
+    // failure_mode / open_count 为增量字段：历史台账没有这两项也必须判定为合法。
+    if (ledger?.failure_mode !== undefined && ledger.failure_mode !== "" && !["transient", "structural", "cancelled"].includes(String(ledger.failure_mode))) {
+        issues.push("auto_compact_circuit_failure_mode_invalid");
+    }
+    if (ledger?.open_count !== undefined) {
+        const openCount = Number(ledger.open_count);
+        if (!Number.isInteger(openCount) || openCount < 0)
+            issues.push("auto_compact_circuit_open_count_invalid");
+    }
     if (expected.groupId && String(ledger?.group_id || "") !== String(expected.groupId))
         issues.push("auto_compact_circuit_group_mismatch");
     if (expected.groupSessionId && String(ledger?.group_session_id || "") !== String(expected.groupSessionId))
@@ -195,27 +209,45 @@ function recordGroupMemoryAutoCompactCircuitBreakerOutcome(input = {}) {
         throw new Error("auto compact circuit breaker requires groupId + gcs_* identity");
     if (!attemptId)
         throw new Error("auto compact circuit breaker requires attemptId");
-    if (!["failure", "success"].includes(outcome))
-        throw new Error("auto compact circuit breaker outcome must be failure or success");
+    // clean_run = 本轮压缩流程正常跑完但低于阈值被跳过：同样是流水线健康的证据，必须能闭合熔断。
+    if (!["failure", "success", "clean_run"].includes(outcome))
+        throw new Error("auto compact circuit breaker outcome must be failure, success or clean_run");
+    const healthy = outcome === "success" || outcome === "clean_run";
+    const classification = healthy
+        ? { failureMode: "transient", errorClass: "", countsTowardCircuit: false }
+        : (0, group_memory_auto_compact_circuit_policy_1.classifyAutoCompactFailure)(input.error || input.errorClass || input.error_class || input.reason);
+    const failureMode = String(input.failureMode || input.failure_mode || "")
+        || classification.failureMode;
     const file = getGroupMemoryAutoCompactCircuitBreakerFile(groupId, groupSessionId);
     return (0, atomic_json_file_1.withFileLock)(file, () => {
         const current = readGroupMemoryAutoCompactCircuitBreaker(groupId, groupSessionId);
         const now = String(input.at || input.recordedAt || input.recorded_at || new Date().toISOString());
         if (current.last_attempt_id === attemptId)
             return { ...current, idempotent: true, recorded: false };
-        if (current.state === "fail_closed" && outcome !== "success")
+        if (current.state === "fail_closed" && !healthy)
             return { ...current, idempotent: false, recorded: false };
         const previousFailures = current.state === "fail_closed" ? exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES : Number(current.consecutive_failures || 0);
-        const consecutiveFailures = outcome === "success"
+        // 用户主动取消不是流水线故障，不计入熔断。
+        const counted = !healthy && classification.countsTowardCircuit;
+        const consecutiveFailures = healthy
             ? 0
-            : Math.min(exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES, previousFailures + 1);
+            : counted
+                ? Math.min(exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES, previousFailures + 1)
+                : previousFailures;
         const state = consecutiveFailures >= exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES ? "open" : "closed";
+        const previousState = String(current.state || "closed");
+        const openCount = state === "open"
+            ? Number(current.open_count || 0) + (previousState === "open" ? 0 : 1)
+            : Number(current.open_count || 0);
+        const effectiveFailureMode = healthy ? "" : failureMode;
         const eventCore = {
             attempt_id: attemptId,
             outcome,
-            reason: String(input.reason || (outcome === "success" ? "compact_succeeded" : "compact_failed")).replace(/[^a-zA-Z0-9._:-]+/g, "_").slice(0, 120),
-            error_class: String(input.errorClass || input.error_class || "").replace(/[^a-zA-Z0-9._:-]+/g, "_").slice(0, 100),
+            reason: String(input.reason || (healthy ? `compact_${outcome}` : "compact_failed")).replace(/[^a-zA-Z0-9._:-]+/g, "_").slice(0, 120),
+            error_class: String(input.errorClass || input.error_class || classification.errorClass || "").replace(/[^a-zA-Z0-9._:-]+/g, "_").slice(0, 100),
             error_fingerprint: input.error ? checksum(String(input.error), 24) : "",
+            failure_mode: effectiveFailureMode,
+            counted,
             consecutive_failures: consecutiveFailures,
             state,
             recorded_at: now,
@@ -230,10 +262,13 @@ function recordGroupMemoryAutoCompactCircuitBreakerOutcome(input = {}) {
             state,
             consecutive_failures: consecutiveFailures,
             max_consecutive_failures: exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES,
+            failure_mode: effectiveFailureMode,
+            open_count: openCount,
             revision: Number(current.revision || 0) + 1,
-            opened_at: state === "open" ? String(current.opened_at || now) : "",
-            last_failure_at: outcome === "failure" ? now : String(current.last_failure_at || ""),
-            last_success_at: outcome === "success" ? now : String(current.last_success_at || ""),
+            // 重新打开时刷新 opened_at，否则退避窗口会锚在很久以前的第一次打开上。
+            opened_at: state === "open" ? String(previousState === "open" ? current.opened_at || now : now) : "",
+            last_failure_at: counted ? now : String(current.last_failure_at || ""),
+            last_success_at: healthy ? now : String(current.last_success_at || ""),
             last_attempt_id: attemptId,
             recent_events: [...(Array.isArray(current.recent_events) ? current.recent_events : []), event].slice(-80),
             updated_at: now,
@@ -241,6 +276,64 @@ function recordGroupMemoryAutoCompactCircuitBreakerOutcome(input = {}) {
         const saved = { ...payload, ledger_checksum: ledgerChecksum(payload) };
         (0, atomic_json_file_1.writeJsonAtomic)(file, saved);
         return { ...saved, checksum_valid: true, blocked: state === "open", issues: [], file, idempotent: false, recorded: true };
+    });
+}
+/** 读取台账并按冷却策略推导本次调度是否放行（closed / half_open 试探 / open）。 */
+function readGroupMemoryAutoCompactCircuitAdmission(groupId, groupSessionId, options = {}) {
+    const ledger = readGroupMemoryAutoCompactCircuitBreaker(groupId, groupSessionId);
+    const admission = (0, group_memory_auto_compact_circuit_policy_1.evaluateAutoCompactCircuitAdmission)(ledger, options);
+    return { ...admission, ledger };
+}
+/**
+ * 人工重置：把熔断台账写回 closed。相较直接删除文件，这里保留 revision 与
+ * 重置事件，便于审计「谁在什么时候解开了熔断」。
+ */
+function resetGroupMemoryAutoCompactCircuitBreaker(groupId, groupSessionId, options = {}) {
+    const id = String(groupId || "").trim();
+    const sessionId = String(groupSessionId || "").trim();
+    if (!id || !sessionId.startsWith("gcs_"))
+        throw new Error("auto compact circuit breaker reset requires groupId + gcs_* identity");
+    const file = getGroupMemoryAutoCompactCircuitBreakerFile(id, sessionId);
+    return (0, atomic_json_file_1.withFileLock)(file, () => {
+        const current = readGroupMemoryAutoCompactCircuitBreaker(id, sessionId);
+        const now = String(options.at || new Date().toISOString());
+        const eventCore = {
+            attempt_id: `reset_${checksum([id, sessionId, now], 16)}`,
+            outcome: "reset",
+            reason: String(options.reason || "manual_reset").replace(/[^a-zA-Z0-9._:-]+/g, "_").slice(0, 120),
+            error_class: "",
+            error_fingerprint: "",
+            failure_mode: "",
+            counted: false,
+            consecutive_failures: 0,
+            state: "closed",
+            actor: String(options.actor || "local-user").replace(/[^a-zA-Z0-9._@:-]+/g, "_").slice(0, 80),
+            recorded_at: now,
+        };
+        const event = { event_id: `acbe_${checksum([id, sessionId, eventCore], 24)}`, ...eventCore };
+        const payload = {
+            schema: exports.GROUP_MEMORY_AUTO_COMPACT_CIRCUIT_BREAKER_SCHEMA,
+            version: 1,
+            group_id: id,
+            group_session_id: sessionId,
+            scope_id: `${id}::${sessionId}`,
+            state: "closed",
+            consecutive_failures: 0,
+            max_consecutive_failures: exports.GROUP_MEMORY_AUTO_COMPACT_MAX_CONSECUTIVE_FAILURES,
+            failure_mode: "",
+            // 保留历史打开次数，退避阶梯不因一次人工重置而清零。
+            open_count: Number(current.open_count || 0),
+            revision: Number(current.revision || 0) + 1,
+            opened_at: "",
+            last_failure_at: String(current.last_failure_at || ""),
+            last_success_at: String(current.last_success_at || ""),
+            last_attempt_id: event.attempt_id,
+            recent_events: [...(Array.isArray(current.recent_events) ? current.recent_events : []), event].slice(-80),
+            updated_at: now,
+        };
+        const saved = { ...payload, ledger_checksum: ledgerChecksum(payload) };
+        (0, atomic_json_file_1.writeJsonAtomic)(file, saved);
+        return { ...saved, checksum_valid: true, blocked: false, issues: [], file, reset: true, previousState: String(current.state || "") };
     });
 }
 function deleteGroupMemoryAutoCompactCircuitBreaker(groupId, groupSessionId) {

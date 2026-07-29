@@ -4,6 +4,7 @@ exports.isKnowledgeDocumentAllowed = isKnowledgeDocumentAllowed;
 exports.searchAgentKnowledge = searchAgentKnowledge;
 const knowledge_index_1 = require("./knowledge-index");
 const knowledge_files_1 = require("./knowledge-files");
+const model_token_preflight_1 = require("../../system/model-token-preflight");
 let indexReady = null;
 async function ensureKnowledgeIndex() {
     const status = (0, knowledge_index_1.getKnowledgeIndexStatus)();
@@ -60,12 +61,12 @@ function formatKnowledgeContext(rows, mode) {
 async function searchAgentKnowledge(query, context, options = {}) {
     const normalizedQuery = String(query || "").trim().slice(0, 8000);
     if (!normalizedQuery)
-        return { results: [], citations: [], context: "", embeddingMode: "hashing", embeddingError: "", fallback: true };
+        return { results: [], citations: [], context: "", embeddingMode: "lexical", embeddingError: "", fallback: true };
     await ensureKnowledgeIndex();
     const metadata = (0, knowledge_files_1.loadKnowledgeMetadata)();
     const filenames = Object.keys(metadata).filter(filename => isKnowledgeDocumentAllowed(metadata[filename], context));
     if (!filenames.length)
-        return { results: [], citations: [], context: "", embeddingMode: "hashing", embeddingError: "", fallback: true };
+        return { results: [], citations: [], context: "", embeddingMode: "lexical", embeddingError: "", fallback: true };
     const limit = Math.max(1, Math.min(12, Number(options.limit || 6)));
     const search = await (0, knowledge_index_1.searchKnowledgeBase)(normalizedQuery, {
         limit,
@@ -73,23 +74,29 @@ async function searchAgentKnowledge(query, context, options = {}) {
         filenames,
     });
     const maxChunkChars = Math.max(500, Math.min(8000, Number(options.maxChunkChars || 4000)));
-    const maxContextChars = Math.max(2000, Math.min(40000, Number(options.maxContextChars || 16000)));
-    let usedChars = 0;
+    const maxContextTokens = Math.max(500, Math.min(20000, Number(options.maxContextTokens || Math.ceil(Number(options.maxContextChars || 16000) / 4))));
+    let usedTokens = 0;
     const results = search.results.flatMap(item => {
         const source = metadata[item.chunk.filename];
         if (!isKnowledgeDocumentAllowed(source, context))
             return [];
-        const remaining = maxContextChars - usedChars;
-        if (remaining < 200)
+        const text = String(item.chunk.text || "");
+        if (!text || text.length > maxChunkChars)
             return [];
-        const text = String(item.chunk.text || "").slice(0, Math.min(maxChunkChars, remaining));
-        usedChars += text.length;
+        const tokenCount = (0, model_token_preflight_1.estimateModelTextTokens)(`${item.chunk.filename}\n${item.chunk.heading || ""}\n${text}`).safetyAdjustedTokens;
+        if (usedTokens + tokenCount > maxContextTokens)
+            return [];
+        usedTokens += tokenCount;
         return [{
                 citation: String(item.chunk.id || ""),
                 filename: item.chunk.filename,
                 heading: item.chunk.heading || "",
                 text,
                 score: Number(item.score.toFixed(4)),
+                lexicalScore: Number(Number(item.keywordScore || 0).toFixed(4)),
+                semanticScore: Number(Number(item.semanticScore || item.vectorScore || 0).toFixed(4)),
+                retrievalMode: item.retrievalMode || item.embeddingMode || "lexical",
+                tokenCount,
                 scope: source?.scope || item.chunk.scope,
                 visibility: source?.visibility || "shared",
                 source: source?.source || { type: "manual" },
@@ -101,7 +108,12 @@ async function searchAgentKnowledge(query, context, options = {}) {
         context: formatKnowledgeContext(results, search.embeddingMode),
         embeddingMode: search.embeddingMode,
         embeddingError: search.embeddingError,
-        fallback: search.embeddingMode === "hashing" || search.embeddingMode.includes("fallback"),
+        fallback: search.embeddingMode === "lexical" || search.embeddingMode.includes("fallback"),
+        fallbackReason: search.fallbackReason || "",
+        indexGeneration: search.indexGeneration || "",
+        staleServed: search.staleServed === true,
+        scopeChecksum: search.scopeChecksum || "",
+        tokenBudget: { used: usedTokens, max: maxContextTokens },
     };
 }
 //# sourceMappingURL=knowledge-access.js.map

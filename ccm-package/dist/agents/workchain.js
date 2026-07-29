@@ -1072,6 +1072,7 @@ function collectCompletionEvidence(input) {
         ...(Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.map((item) => item?.path || item?.file || item).filter(Boolean) : []),
     ].slice(0, 20);
     const verification = narrativeList(summary.verification_executed || completion.verification || completion.evidence, 12, "验证记录已整理，技术细节已放入技术详情。");
+    const verificationFailed = narrativeList(summary.verification_failed || summary.verificationFailed || completion.verification_failed || completion.verificationFailed, 12, "验证失败记录已整理，技术细节已放入技术详情。");
     const receipts = Number(summary.receipt_count || 0);
     const workersDone = (input.workers || []).filter((item) => ["done", "completed", "succeeded"].includes(String(item?.status || "").toLowerCase())).length;
     const evidence = [
@@ -1094,7 +1095,7 @@ function collectCompletionEvidence(input) {
             independentReviewGate.riskText,
             postReviewSpotCheck.failedText,
         ], 12).map(item => sanitizeWorkchainUserText(item, "排障信息已放入技术详情。", 240)).filter(Boolean))].slice(0, 8);
-    return { files, verification, acceptance, independentReview, independentReviewGate, postReviewSpotCheck, receipts, workersDone, evidence: [...new Set(evidence)].slice(0, 10), risks };
+    return { files, verification, verificationFailed, acceptance, independentReview, independentReviewGate, postReviewSpotCheck, receipts, workersDone, evidence: [...new Set(evidence)].slice(0, 10), risks };
 }
 function hasExecutableWorkEvidence(input, evidence) {
     const actionIds = (input.actionIds || []).map(item => String(item || ""));
@@ -1112,26 +1113,22 @@ function hasExecutableWorkEvidence(input, evidence) {
         || !!(summary.delivery_report || summary.deliveryReport);
 }
 function hasStrongWorkchainVerificationEvidence(evidence) {
-    return evidence.verification.some(item => !workchainVerificationFailureText(item))
+    return evidence.verification.length > 0 && evidence.verificationFailed.length === 0
         || evidence.independentReview.length > 0
-        || evidence.acceptance.some(item => !isBareWorkchainAcceptanceLine(item) && !workchainAcceptanceFailureText(item));
+        || evidence.acceptance.length > 0;
 }
 function workchainVerificationFailureText(item) {
-    const text = String(item || "").trim();
-    if (!text)
+    if (!item || typeof item !== "object")
         return false;
-    if (/无失败|未发现.*失败|没有.*失败|0\s*项?失败/i.test(text))
-        return false;
-    return /未通过|测试失败|验证失败|执行失败|命令失败|失败|报错|错误|\bfailed\b|\bfailure\b|\berror\b|exit code [1-9]\d*|exit_code [1-9]\d*|exitCode [1-9]\d*/i.test(text);
+    return ["failed", "rejected", "blocked", "timed_out", "timeout", "error"].includes(String(item.status || item.verdict || "").toLowerCase());
 }
 function isBareWorkchainAcceptanceLine(item) {
-    return /^最终验收(已通过|未通过)/.test(String(item || "").trim());
+    return !item || typeof item !== "object";
 }
 function workchainAcceptanceFailureText(item) {
-    const text = String(item || "").trim();
-    if (!text)
+    if (!item || typeof item !== "object")
         return false;
-    return /未通过|失败|缺口|待处理|需要返工|需返工/i.test(text);
+    return ["failed", "rejected", "blocked", "needs_rework", "needs_user", "unverified"].includes(String(item.status || item.verdict || "").toLowerCase());
 }
 // ===== merged from workchain-part-01-part-02.ts =====
 function buildWorkchainTodoPlan(input, stages, evidence, terminal, options = {}) {
@@ -1491,14 +1488,13 @@ function buildFinalSummaryQuality(input, evidence, terminal, headline, nextActio
     const isOrdinaryConversation = input.mode === "conversation";
     const required = terminal && !isOrdinaryConversation && hasExecutableWorkEvidence(input, evidence);
     const strongVerificationEvidence = hasStrongWorkchainVerificationEvidence(evidence);
-    const failedVerificationEvidence = evidence.verification.some(workchainVerificationFailureText);
-    const failedAcceptanceEvidence = evidence.acceptance.some(workchainAcceptanceFailureText)
-        || summary.acceptance_gate_passed === false
+    const failedVerificationEvidence = evidence.verificationFailed.length > 0;
+    const failedAcceptanceEvidence = summary.acceptance_gate_passed === false
         || deliveryReport.acceptance_gate_passed === false;
     const acceptanceGatePassed = summary.acceptance_gate_passed === true || deliveryReport.acceptance_gate_passed === true;
     const verificationStatus = evidence.verification.length
         ? failedVerificationEvidence
-            ? `验证未通过：${evidence.verification.find(workchainVerificationFailureText)}`
+            ? `验证未通过：${evidence.verificationFailed[0] || "存在结构化失败记录"}`
             : `已记录 ${evidence.verification.length} 项验证或检查。`
         : failedAcceptanceEvidence
             ? "最终验收未通过，缺口已整理。"

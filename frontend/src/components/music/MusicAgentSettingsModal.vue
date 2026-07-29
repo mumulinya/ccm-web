@@ -73,7 +73,7 @@ const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-locat
             <input type="checkbox" :checked="playbackSettings.volumeNormalization" @change="emit('update-setting', 'volumeNormalization', $event.target.checked)" />
           </label>
           <label class="setting-row switch-row">
-            <span><strong>记住播放进度</strong><small>重新打开歌曲时从上次位置继续</small></span>
+            <span><strong>记住播放进度</strong><small>刷新或重新进入音乐页时续播；主动切歌会从头播放</small></span>
             <input type="checkbox" :checked="playbackSettings.rememberProgress" @change="emit('update-setting', 'rememberProgress', $event.target.checked)" />
           </label>
           <label class="setting-row">

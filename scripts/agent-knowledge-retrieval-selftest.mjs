@@ -13,6 +13,7 @@ process.env.HOME = tempHome
 const files = require(path.join(root, 'ccm-package', 'dist', 'modules', 'knowledge', 'knowledge-files.js'))
 const index = require(path.join(root, 'ccm-package', 'dist', 'modules', 'knowledge', 'knowledge-index.js'))
 const access = require(path.join(root, 'ccm-package', 'dist', 'modules', 'knowledge', 'knowledge-access.js'))
+files.saveRagEmbeddingConfig({ mode: 'lexical' })
 const checks = []
 const check = (name, fn) => { fn(); checks.push({ name, pass: true }) }
 
@@ -35,7 +36,7 @@ try {
 
   const local = await access.searchAgentKnowledge('GLOBAL-SHARED-731', { role: 'project-agent', project: 'project-a' })
   check('no Embedding configuration uses local hybrid retrieval', () => {
-    assert.equal(local.embeddingMode, 'hashing')
+    assert.equal(local.embeddingMode, 'lexical')
     assert.equal(local.fallback, true)
     assert.deepEqual(local.citations, ['global-shared.md#0'])
   })
@@ -65,10 +66,11 @@ try {
   const exactProject = await access.searchAgentKnowledge('PROJECT-A-275', { role: 'project-agent', project: 'project-a' })
   check('exact project Agent reads its restricted project knowledge', () => assert.ok(exactProject.citations.includes('project-a.md#0')))
 
-  files.saveRagEmbeddingConfig({ enabled: true, apiUrl: 'http://127.0.0.1:9/v1', apiKey: 'selftest', model: 'unreachable-test-model' })
+  files.saveRagEmbeddingConfig({ mode: 'remote', enabled: true, apiUrl: 'http://127.0.0.1:9/v1', apiKey: 'selftest', model: 'unreachable-test-model' })
+  await index.rebuildKnowledgeIndex('agent-knowledge-remote-degraded')
   const degraded = await access.searchAgentKnowledge('GLOBAL-SHARED-731', { role: 'project-agent', project: 'project-a' })
   check('remote Embedding failure falls back to local retrieval', () => {
-    assert.equal(degraded.embeddingMode, 'hashing-fallback')
+    assert.equal(degraded.embeddingMode, 'lexical-fallback')
     assert.equal(degraded.fallback, true)
     assert.ok(degraded.citations.includes('global-shared.md#0'))
     assert.ok(degraded.embeddingError)

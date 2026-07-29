@@ -17,9 +17,20 @@
       "build": "backend",
       "tests": [
         "all-session-cc-compaction-alignment-selftest.mjs",
+        "provider-neutral-context-cache-selftest.mjs",
+        "context-engine-v2-selftest.mjs",
+        "session-execution-ledger-selftest.mjs",
+        "session-model-context-selftest.mjs",
+        "memory-center-microcompact-display-selftest.mjs",
         "session-memory-dynamic-window-selftest.mjs",
         "global-agent-model-session-compaction-selftest.mjs",
-        "third-party-memory-mcp-hydration-selftest.mjs"
+        "third-party-memory-mcp-hydration-selftest.mjs",
+        "memory-reliability-upgrade-selftest.mjs",
+        "group-session-maintenance-race-selftest.mjs",
+        "group-session-memory-delivery-fencing-selftest.mjs",
+        "model-capability-cache-selftest.mjs",
+        "model-capability-recovery-selftest.mjs",
+        "model-capability-refresh-race-selftest.mjs"
       ]
     },
     "tasks": {
@@ -32,10 +43,20 @@
         "task-permission-broker-selftest.mjs",
         "group-test-targets-selftest.mjs",
         "project-main-agent-orchestration-selftest.mjs",
+        "project-plan-production-closure-selftest.mjs",
         "project-main-agent-source-selftest.mjs",
         "project-main-agent-runtime-diagnostics-selftest.mjs",
-        "unified-auto-development-workflow-selftest.mjs",
-        "test-agent-production-hardening-selftest.mjs"
+        "group-main-source-planning-selftest.mjs",
+        "task-replay-event-compaction-selftest.mjs",
+        "task-replay-presentation-selftest.mjs",
+        "test-agent-review-policy-selftest.mjs",
+      "unified-auto-development-workflow-selftest.mjs",
+      "automatic-development-production-chain-selftest.mjs",
+        "automatic-development-unified-task-v2-audit.mjs",
+        "test-agent-browser-orchestration-selftest.mjs",
+        "test-agent-production-hardening-selftest.mjs",
+        "group-status-visibility-selftest.mjs",
+        "ordinary-reply-visibility-selftest.mjs"
       ]
     },
     "agents": {
@@ -44,10 +65,16 @@
       "tests": [
         "unified-model-retry-selftest.mjs",
         "model-semantic-routing-audit.mjs",
+        "semantic-decision-runtime-selftest.mjs",
+        "agent-tool-inheritance-selftest.mjs",
+        "fetch-web-mcp-selftest.mjs",
+        "provider-task-circuit-selftest.mjs",
         "internal-mcp-catalog-selftest.mjs",
         "runtime-path-integrity-selftest.mjs",
         "agent-provider-settings-selftest.mjs",
-        "gemini-opencode-agent-integration-selftest.mjs"
+        "gemini-opencode-agent-integration-selftest.mjs",
+        "agent-provider-browser-login-selftest.mjs",
+        "cc-connect-direct-acp-selftest.mjs"
       ]
     },
     "integrations": {
@@ -66,6 +93,7 @@
         "project-runtime-workbench-selftest.mjs",
         "project-java-toolchain-selftest.mjs",
         "terminal-pty-workbench-selftest.mjs",
+        "project-run-console-resize-selftest.mjs",
         "project-path-git-workspace-selftest.mjs"
       ]
     },
@@ -73,16 +101,31 @@
       "label": "前端与性能",
       "build": "frontend",
       "tests": [
+        "unified-chat-task-experience-selftest.mjs",
         "workbench-homepage-selftest.mjs",
         "workbench-full-width-render-regression.mjs",
         "modal-layout-reliability-selftest.mjs",
         "settings-render-regression.mjs",
+        "settings-api-key-reveal-selftest.mjs",
         "project-management-render-regression.mjs",
         "collapsible-session-groups-selftest.mjs",
         "code-changes-render-regression.mjs",
         "agent-code-change-visualization-selftest.mjs",
         "theme-background-contract-selftest.mjs",
-        "global-page-loading-overlay-selftest.mjs"
+        "global-page-loading-overlay-selftest.mjs",
+        "agent-provider-account-model-render-selftest.mjs",
+        "auto-dev-full-width-redesign-selftest.mjs",
+        "clipboard-attachments-selftest.mjs",
+        "deferred-session-creation-selftest.mjs",
+        "project-stream-message-layout-selftest.mjs",
+        "sidebar-brand-header-selftest.mjs",
+        "task-dispatch-console-redesign-selftest.mjs",
+        "usability-workbench-live-operations-selftest.mjs",
+        "usability-workbench-redesign-selftest.mjs",
+        "task-user-runtime-ux-selftest.mjs",
+        "task-plan-production-render-regression.mjs",
+        "agent-metrics-pagination-selftest.mjs",
+        "test-agent-settings-selftest.mjs"
       ]
     },
     "knowledge": {
@@ -90,21 +133,30 @@
       "build": "backend",
       "tests": [
         "knowledge-production-selftest.mjs",
+        "knowledge-embedding-v3-selftest.mjs",
         "agent-knowledge-retrieval-selftest.mjs",
-        "conversation-search-selftest.mjs"
+        "conversation-search-selftest.mjs",
+        "online-document-workflow-selftest.mjs"
       ]
     },
     "media": {
       "label": "音乐与宠物",
       "build": "backend",
       "tests": [
-          "music-production-selftest.mjs",
-          "music-latest-playback-wins-selftest.mjs",
-          "music-next-recommendation-selftest.mjs",
-          "music-playback-queue-selftest.mjs",
-          "music-quote-mode-selftest.mjs",
-          "music-platform-features-selftest.mjs",
-          "pet-workspace-companion-selftest.mjs"
+        "music-production-selftest.mjs",
+        "music-latest-playback-wins-selftest.mjs",
+        "music-playback-progress-selftest.mjs",
+        "music-next-recommendation-selftest.mjs",
+        "music-playback-queue-selftest.mjs",
+        "music-quote-mode-selftest.mjs",
+        "music-platform-features-selftest.mjs",
+        "pet-workspace-companion-selftest.mjs",
+        "authenticated-music-release-selftest.mjs",
+        "music-ui-regression-selftest.mjs",
+        "music-weather-selftest.mjs",
+        "pet-built-in-action-preview-selftest.mjs",
+        "pet-space-management-redesign-selftest.mjs",
+        "yuexinmiao1-replacement-selftest.mjs"
       ]
     },
     "release": {
@@ -119,18 +171,33 @@
       ]
     }
   },
+  "helpers": [
+    {
+      "file": "final-dispatch-model-view-exact-session-restart-selftest.mjs",
+      "reason": "由 Provider usage/identity restart 包装测试传入 create 阶段参数"
+    },
+    {
+      "file": "npm-installed-package-selftest.mjs",
+      "reason": "由 npm package install release 测试传入安装目录和版本参数"
+    }
+  ],
   "quick": [
     "domain-test-catalog-selftest.mjs",
+    "unified-chat-task-experience-selftest.mjs",
     "unified-model-retry-selftest.mjs",
     "model-semantic-routing-audit.mjs",
+    "semantic-decision-runtime-selftest.mjs",
     "local-auth-selftest.mjs",
     "session-memory-dynamic-window-selftest.mjs",
     "task-permission-broker-selftest.mjs",
     "group-test-targets-selftest.mjs",
     "project-main-agent-orchestration-selftest.mjs",
+    "project-plan-production-closure-selftest.mjs",
+    "task-user-runtime-ux-selftest.mjs",
     "project-main-agent-source-selftest.mjs",
     "project-main-agent-runtime-diagnostics-selftest.mjs",
     "unified-auto-development-workflow-selftest.mjs",
+    "automatic-development-unified-task-v2-audit.mjs",
     "internal-mcp-catalog-selftest.mjs",
     "feishu-global-agent-roundtrip-selftest.mjs",
     "runtime-event-bus-selftest.mjs",

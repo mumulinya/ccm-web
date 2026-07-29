@@ -2803,10 +2803,27 @@ export function handleBasicGroupRoutes(
         task_card: _storedTaskCardSnake,
         ...messageWithoutStoredRuntime
       } = message || {};
-      if (!task || runtimeAttachedTaskIds.has(taskId)) return messageWithoutStoredRuntime;
+      const taskThreadId = String(
+        messageWithoutStoredRuntime.task_thread_id
+          || messageWithoutStoredRuntime.taskThreadId
+          || task?.task_thread_id
+          || task?.taskThreadId
+          || task?.root_task_id
+          || task?.rootTaskId
+          || task?.retry_of_task_id
+          || task?.retryOfTaskId
+          || task?.source_task_id
+          || task?.sourceTaskId
+          || taskId
+          || "",
+      );
+      const enrichedMessage = taskThreadId
+        ? { ...messageWithoutStoredRuntime, task_thread_id: taskThreadId }
+        : messageWithoutStoredRuntime;
+      if (!task || runtimeAttachedTaskIds.has(taskId)) return enrichedMessage;
       runtimeAttachedTaskIds.add(taskId);
       const runtime = getRuntime(task);
-      return { ...messageWithoutStoredRuntime, taskRuntime: runtime };
+      return { ...enrichedMessage, taskRuntime: runtime };
     });
     const memory = deps.loadGroupMemory(groupIdText, sessionId);
     const sessionTaskIds = new Set(sessionTasks.map((task: any) => String(task.id || "")));

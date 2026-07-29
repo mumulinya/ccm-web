@@ -12,7 +12,7 @@ import { browserActionEffectRequired, browserActionEffectSession } from "./brows
 import { planVerificationCommands } from "./command-planner";
 import { TestAgentContractIssue, TestAgentWorkOrderContractValidation } from "./contract";
 import { BrowserCheckSpec, NormalizedTestAgentWorkOrder, TestAgentOptions, TestAgentWorkOrder, WorkOrderIssue } from "./types";
-import { hasRequiredCheck, resolveUrl } from "./utils";
+import { requiredCheckEnabled, resolveUrl } from "./utils";
 import { normalizeTestAgentWorkOrder } from "./work-order";
 import { buildAdversarialEvidenceRelevance } from "./adversarial-relevance";
 import { httpConcurrencySpecFor } from "./http-concurrency";
@@ -205,7 +205,7 @@ function expectedArtifactTypes(
     types.add("browser_network_log");
   }
   if (detailEligibleBrowserChecks.some(check => check.screenshot)
-    || (detailEligibleBrowserChecks.length && hasRequiredCheck(workOrder.requiredChecks, /screenshot/i))) {
+    || (detailEligibleBrowserChecks.length && requiredCheckEnabled(workOrder.requiredChecks, "screenshots"))) {
     types.add("screenshot");
   }
   const hasArtifactEligibleBrowserCheck = detailEligibleBrowserChecks.some(check => !check.authenticationConfigured);
@@ -230,7 +230,7 @@ function devServerNeeded(workOrder: NormalizedTestAgentWorkOrder, project: Norma
   ) {
     return false;
   }
-  if (hasRequiredCheck(workOrder.requiredChecks, /browser|e2e|screenshot|console|http|api/i)) return true;
+  if (requiredCheckEnabled(workOrder.requiredChecks, "browser_e2e", "screenshots", "console_errors", "http", "api")) return true;
   return !!project.targetUrl || !!project.startupUrl || !!project.browserChecks.length || !!project.httpChecks.length || !!project.adversarialHttpChecks.length;
 }
 
@@ -406,7 +406,7 @@ export function buildTestAgentExecutionPlan(
   });
 
   const adversarialProbeRequired = workOrder.options.requireAdversarialProbe
-    || workOrder.requiredChecks.some(check => /adversarial|boundary|orphan|idempot|concurr|race/i.test(String(check || "")));
+    || requiredCheckEnabled(workOrder.requiredChecks, "adversarial");
   const adversarialProbeCount = projects.reduce(
     (sum, project) => sum
       + project.httpChecks.filter(check => check.adversarial).length

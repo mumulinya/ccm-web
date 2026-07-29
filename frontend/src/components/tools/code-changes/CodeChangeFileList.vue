@@ -118,7 +118,17 @@ watch(groupingMode, value => {
       <span><FileCode2 :size="15" />变更文件</span>
       <strong>{{ tabs[0].count }}</strong>
     </div>
-    <label class="file-search"><Search :size="14" /><input v-model="query" placeholder="搜索文件或目录" /></label>
+    <label class="file-search">
+      <Search :size="14" aria-hidden="true" />
+      <input
+        v-model="query"
+        type="search"
+        aria-label="搜索文件或目录"
+        placeholder="搜索文件或目录"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </label>
     <div class="grouping-switch" role="group" aria-label="分组依据">
       <button type="button" :class="{ active: groupingMode === 'directory' }" title="按目录树分组" @click="groupingMode = 'directory'"><FolderTree :size="13" />目录</button>
       <button type="button" :class="{ active: groupingMode === 'module' }" title="按首级模块分组" @click="groupingMode = 'module'"><Boxes :size="13" />模块</button>
@@ -168,7 +178,7 @@ watch(groupingMode, value => {
 <style scoped>
 .change-files { width:100%; min-width:0; min-height:0; height:100%; align-self:stretch; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--border-color,rgba(15,23,42,.09)); border-radius:7px; background:color-mix(in srgb,var(--bg-primary,#fff) 96%,#f8fafc); box-shadow:var(--shadow-sm); }
 .files-title { padding:12px 14px 9px; display:flex; align-items:center; justify-content:space-between; }.files-title span { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:650; color:var(--text-primary); }.files-title strong { font-size:11px; color:var(--text-muted); }
-.file-search { margin:0 12px 8px; height:32px; padding:0 9px; display:flex; align-items:center; gap:7px; border:1px solid var(--border-color,rgba(15,23,42,.1)); border-radius:6px; color:var(--text-muted); }.file-search:focus-within { border-color:#3b82f6; }.file-search input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--text-primary); font-size:12px; }
+.file-search { margin:0 12px 8px; height:34px; padding:0 10px; display:flex; align-items:center; gap:7px; border:1px solid var(--border-color,rgba(15,23,42,.1)); border-radius:6px; background:var(--surface,var(--bg-primary,#fff)); color:var(--text-muted); transition:border-color .15s ease,box-shadow .15s ease,background .15s ease; }.file-search:focus-within { border-color:var(--accent-blue,#2563eb); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent-blue,#2563eb) 12%,transparent); }.file-search input,.file-search input:focus { min-width:0; width:100%; height:auto; min-height:0; flex:1; padding:0; border:0; border-radius:0; outline:0; box-shadow:none; background:transparent; color:var(--text-primary); font-size:12px; }.file-search input::-webkit-search-cancel-button { cursor:pointer; }
 .grouping-switch { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin:0 12px 8px; padding:3px; border:1px solid var(--border-color,rgba(15,23,42,.09)); border-radius:6px; background:var(--bg-secondary,#f8fafc); }.grouping-switch button { min-width:0; height:27px; display:flex; align-items:center; justify-content:center; gap:4px; border:0; border-radius:4px; background:transparent; color:var(--text-muted); font-size:10px; cursor:pointer; }.grouping-switch button.active { background:var(--bg-primary,#fff); color:#2563eb; box-shadow:0 1px 3px rgba(15,23,42,.08); }
 .file-tabs { display:grid; grid-template-columns:repeat(5,1fr); padding:0 12px 8px; gap:3px; }.file-tabs button { min-width:0; border:0; border-radius:5px; padding:5px 1px; background:transparent; color:var(--text-muted); font-size:9px; cursor:pointer; white-space:nowrap; }.file-tabs button.active { background:rgba(37,99,235,.09); color:#2563eb; }.file-tabs button.danger { color:#b45309; }.file-tabs button.danger:last-child { color:#b91c1c; }
 .select-visible { margin:0 12px 8px; padding:6px 8px; display:flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--border-color,rgba(15,23,42,.09)); border-radius:6px; background:transparent; color:var(--text-secondary); font-size:11px; cursor:pointer; }.select-visible:disabled { opacity:.45; cursor:not-allowed; }

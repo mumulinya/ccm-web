@@ -134,9 +134,14 @@ try {
   assert.ok(!JSON.stringify(sessionARecall).includes(sessionBOnly), "session B typed memory must not enter session A recall");
   assert.ok(!JSON.stringify(sessionBRecall).includes(sessionAOnly), "session A typed memory must not enter session B recall");
 
-  const ignored = index.buildGroupTypedMemoryRecall(scopeA, "本轮忽略记忆，只处理当前任务", { max: 10 });
+  const ignored = index.buildGroupTypedMemoryRecall(scopeA, "本轮忽略记忆，只处理当前任务", {
+    max: 10,
+    workflowDecision: { memoryPolicy: "ignore" },
+  });
   assert.equal(ignored.ignored, true, "explicit ignore-memory request must remain authoritative");
   assert.deepEqual(ignored.recalled, [], "ignored recall must be empty");
+  const unclassifiedIgnoreText = index.buildGroupTypedMemoryRecall(scopeA, "本轮忽略记忆，只处理当前任务", { max: 10 });
+  assert.equal(unclassifiedIgnoreText.ignored, false, "raw natural language must not bypass the model workflow decision");
 
   storage.saveGroupMessages(groupId, [{ id: "phase235-a", role: "user", content: sessionAOnly, group_session_id: sessionA }], sessionA);
   storage.saveGroupMessages(groupId, [{ id: "phase235-b", role: "user", content: sessionBOnly, group_session_id: sessionB }], sessionB);

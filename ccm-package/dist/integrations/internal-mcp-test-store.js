@@ -253,6 +253,7 @@ function buildConfiguredTargetProjects(context, projectBindings, input, complete
     }
     const bindings = [];
     const projects = [];
+    const browserScenarios = internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.browser_scenarios || input.browserScenarios || [], 12, 600);
     for (const project of projectBindings) {
         const targets = byProject.get(project.name) || [];
         const expanded = targets.length ? targets : [null];
@@ -271,6 +272,7 @@ function buildConfiguredTargetProjects(context, projectBindings, input, complete
                 devServerCommand: internal_mcp_task_store_1.internalMcpTaskPayload.cleanText(target?.startupCommand || "", 500),
                 verificationCommands: [...new Set([...projectCommands, ...configuredCommands])],
                 browserChecks: target ? configuredBrowserChecks(target, project.workDir) : [],
+                browserScenarios,
                 changedFiles: internal_mcp_task_store_1.internalMcpTaskPayload.cleanList(input.changed_files?.length ? input.changed_files : project.changedFiles || [], 200, 400),
                 completedTasks,
                 agentSummary: [

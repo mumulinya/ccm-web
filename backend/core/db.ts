@@ -5,7 +5,11 @@ import * as os from "os";
 import { isCredentialReference, protectCredential, protectObjectSecrets, resolveObjectSecrets } from "./credential-store";
 import { normalizeMcpEnvironment } from "../tools/tool-catalog-management";
 import { assertCcmInternalSkillMutable, isCcmInternalSkillName } from "../skills/internal-skill-catalog";
-import { buildBundledFeishuMcpTool } from "../tools/internal-mcp-registry";
+import {
+  buildBundledFeishuMcpTool,
+  buildBundledFetchWebMcpTool,
+  isLegacyFetchWebMcpDefinition,
+} from "../tools/internal-mcp-registry";
 import { publishRuntimeEvent } from "../system/runtime-events";
 import {
   getTaskByIdFromSqlite,
@@ -159,6 +163,12 @@ export function loadMcpTools(): any[] {
         return { ...content, filename: f };
       } catch { return null; }
     }).filter(Boolean) as any[];
+    const storedFetchIndex = storedTools.findIndex(tool => String(tool?.name || "") === "fetch-web-mcp");
+    if (storedFetchIndex >= 0 && isLegacyFetchWebMcpDefinition(storedTools[storedFetchIndex])) {
+      const migrated = buildBundledFetchWebMcpTool(storedTools[storedFetchIndex]);
+      saveMcpTool(migrated);
+      storedTools[storedFetchIndex] = { ...migrated, filename: "fetch-web-mcp.json" };
+    }
     const storedFeishu = storedTools.find(tool => String(tool?.name || "") === "mcp-feishu") || null;
     const bundledFeishu = buildBundledFeishuMcpTool(loadFeishuConfig(), storedFeishu || {});
     return bundledFeishu
@@ -249,7 +259,7 @@ export function deleteSkill(name: string) {
 }
 
 // === Metrics ===
-const METRICS_EVENT_LIMIT = 1200;
+const METRICS_EVENT_LIMIT = 10_000;
 const METRICS_DURATION_SAMPLE_LIMIT = 240;
 
 function emptyMetricsStore() {
@@ -260,6 +270,17 @@ function localDateKey(value: Date | string | number = new Date()) {
   const date = value instanceof Date ? value : new Date(value);
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function normalizeMetricDateFilter(value: any) {
+  const text = String(value || "").trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? text : "";
 }
 
 function finiteMetricNumber(value: any) {
@@ -410,6 +431,64 @@ export function applyMetricToStore(value: any, agent: string, data: any = {}, no
 
 export function loadMetrics(): any {
   return normalizeMetricsStore(readJsonWithBackup(METRICS_FILE, emptyMetricsStore()));
+}
+
+export function queryMetricEvents(value: any, filters: any = {}) {
+  const metrics = normalizeMetricsStore(value);
+  const scopeType = String(filters.scopeType || filters.scope_type || "").trim().toLowerCase();
+  const scopeId = String(filters.scopeId || filters.scope_id || "").trim();
+  const status = String(filters.status || "all").trim().toLowerCase();
+  const days = Math.max(0, Math.floor(Number(filters.days) || 0));
+  const pageSize = Math.max(5, Math.min(100, Math.floor(Number(filters.pageSize || filters.page_size) || 20)));
+  const requestedPage = Math.max(1, Math.floor(Number(filters.page) || 1));
+  let fromDate = normalizeMetricDateFilter(filters.fromDate || filters.from_date);
+  const toDate = normalizeMetricDateFilter(filters.toDate || filters.to_date);
+  if (!fromDate && days > 0) {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - days + 1);
+    fromDate = localDateKey(date);
+  }
+  const scoped = metrics.events
+    .filter((event: any) => !scopeType || String(event?.scopeType || "").toLowerCase() === scopeType)
+    .filter((event: any) => !scopeId || String(event?.scopeId || "") === scopeId || String(event?.groupId || "") === scopeId)
+    .filter((event: any) => {
+      const date = String(event?.date || event?.at || "").slice(0, 10);
+      return (!fromDate || date >= fromDate) && (!toDate || date <= toDate);
+    })
+    .map((event: any) => {
+      const explicit = String(event?.status || "").trim().toLowerCase();
+      const resolvedStatus = ["completed", "failed", "cancelled"].includes(explicit)
+        ? explicit
+        : event?.success === true
+          ? "completed"
+          : (/cancell?ed/i.test(String(event?.error || "")) ? "cancelled" : "failed");
+      return { ...event, resolvedStatus };
+    })
+    .sort((a: any, b: any) => String(b.at || "").localeCompare(String(a.at || "")));
+  const statusCounts = scoped.reduce((result: any, event: any) => {
+    result.all += 1;
+    result[event.resolvedStatus] = Number(result[event.resolvedStatus] || 0) + 1;
+    return result;
+  }, { all: 0, completed: 0, failed: 0, cancelled: 0 });
+  const filtered = ["completed", "failed", "cancelled"].includes(status)
+    ? scoped.filter((event: any) => event.resolvedStatus === status)
+    : scoped;
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * pageSize;
+  return {
+    events: filtered.slice(offset, offset + pageSize),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    status: ["completed", "failed", "cancelled"].includes(status) ? status : "all",
+    statusCounts,
+    retentionLimit: METRICS_EVENT_LIMIT,
+    range: { days, fromDate: fromDate || null, toDate: toDate || null },
+  };
 }
 
 export function saveMetrics(metrics: any) {
@@ -605,12 +684,12 @@ export function saveAutoDevNotifyConfig(config: any) {
 }
 
 // === RAG Watch Paths ===
-export function loadRagWatchPaths(): string[] {
+export function loadRagWatchPaths(): any[] {
   const parsed = readJsonWithBackup<any>(RAG_WATCH_PATHS_FILE, []);
   return Array.isArray(parsed) ? parsed : [];
 }
 
-export function saveRagWatchPaths(paths: string[]) {
+export function saveRagWatchPaths(paths: any[]) {
   writeJsonAtomic(RAG_WATCH_PATHS_FILE, paths || []);
 }
 

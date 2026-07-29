@@ -48,11 +48,25 @@ import {
 } from "../collaboration/group-session-lifecycle-head";
 import { MemoryScope, CONTROL_DIR, AUDIT_FILE, GROUP_MEMORY_DIR, GROUP_SESSION_SCOPED_MEMORY_DIR, PROJECT_MEMORY_DIR, GLOBAL_MEMORY_FILE, now, readJson, hash, cleanId, readGroupSessionMemorySnapshotForCenter, readGroupToolContinuitySnapshotForCenter, appendAudit } from "./memory-control-center-types";
 import { getMemoryItemId, itemText, scopeControls, applyMemoryControls } from "./memory-control-center-controls";
-import { estimateGroupMessageTokens } from "../collaboration/group-compaction-projections";
+import {
+  estimateGroupMessageTokens,
+  verifyGroupTimeBasedToolResultProjectionReceipt,
+  verifyGroupPostCompactFileRestoreDedupReceipt,
+  verifyGroupPostCompactInvokedSkillAttachmentReceipt,
+  verifyGroupPostCompactPlanAttachmentReceipt,
+  verifyGroupPostCompactDynamicContextDeltaReceipt,
+  verifyGroupPostCompactTaskStatusProjectionReceipt,
+} from "../collaboration/group-compaction-projections";
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { readGroupCompactionActivity } from "../collaboration/group-compaction-activity";
+import { buildAutoCompactCircuitDisplayState } from "../collaboration/group-memory-auto-compact-circuit-policy";
 import { readGroupMainContextUsageBaseline } from "../collaboration/group-prompt-cache-break-detection";
+import { verifySessionModelContentReplacementReceipt, verifySessionModelMicroCompactReceipt } from "../../system/session-model-context";
+import { readLatestProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
+import { readProviderCacheCapabilityState } from "../../system/provider-cache-capability-registry";
+import { readContextEngineTrends } from "../../system/context-engine-observability";
+import { listContextEngineRecoveryPoints } from "../../system/context-engine-recovery";
 
 function latestGroupContextAccounting(scopeId: string, memory: any) {
   try {
@@ -86,6 +100,7 @@ function rebuildCurrentGroupContextAccounting(scopeId: string, memory: any) {
     const storage = require("../collaboration/storage") as typeof import("../collaboration/storage");
     const group = storage.loadGroups().find((item: any) => String(item?.id || "") === exact.groupId);
     if (!group) return null;
+    if (!(storage.getGroupMessages(exact.groupId, exact.sessionId) || []).length) return null;
     const projection = require("../collaboration/group-session-model-context") as typeof import("../collaboration/group-session-model-context");
     const routing = require("../collaboration/group-orchestrator-routing") as typeof import("../collaboration/group-orchestrator-routing");
     const core = require("../../system/session-compaction-core") as typeof import("../../system/session-compaction-core");
@@ -119,6 +134,9 @@ function rebuildCurrentSessionContextAccounting(scope: MemoryScope, scopeId: str
     const core = require("../../system/session-compaction-core") as typeof import("../../system/session-compaction-core");
     if (scope === "global_session") {
       const sessionId = scopeId.replace(/^session:/, "");
+      const globalMemory = require("../../agents/global/memory") as typeof import("../../agents/global/memory");
+      const transcript = globalMemory.loadGlobalAgentTranscript(sessionId);
+      if (!(transcript?.messages || []).length) return null;
       const globalAgent = require("../global/global-agent") as typeof import("../global/global-agent");
       const context = globalAgent.buildAgenticContext("", sessionId, {
         includeSessionContinuity: true,
@@ -147,8 +165,8 @@ function rebuildCurrentSessionContextAccounting(scope: MemoryScope, scopeId: str
       });
       const payload = core.modelVisiblePayloadAccounting(snapshot);
       if (!payload?.tokenBreakdown || payload.totalTokens <= 0) return null;
-      const updatedAtMs = Date.parse(String(memory?.transcriptUpdatedAt || memory?.updatedAt || "")) || Date.now();
-      return { payload, updatedAt: new Date(updatedAtMs).toISOString(), source: "current_model_visible_payload_projection" };
+      const updatedAt = String(memory?.transcriptUpdatedAt || transcript?.updatedAt || memory?.updatedAt || "");
+      return { payload, updatedAt, source: "current_model_visible_payload_projection" };
     }
     if (scope === "project_session") {
       const separator = scopeId.indexOf("::");
@@ -568,6 +586,241 @@ export function healthAlerts(scope: MemoryScope, scopeId: string, memory: any) {
   return alerts;
 }
 
+export function memoryCenterMicroCompactState(scope: MemoryScope, scopeId: string, memory: any) {
+  const applicable = ["group", "global_session", "project_session"].includes(scope)
+    && !(scope === "group" && !String(scopeId || "").includes("::gcs_"));
+  if (!applicable) return {
+    schema: "ccm-memory-center-microcompact-state-v1",
+    applicable: false,
+    status: "not_applicable",
+    reason: "session_scope_required",
+    hasReceipt: false,
+    receiptValid: false,
+    historicalDataUnrecorded: false,
+  };
+  const compactionContainer = memory?.compaction || {};
+  const compaction = compactionContainer?.v2 || compactionContainer;
+  const receipt = compactionContainer.timeBasedToolResultProjection
+    || compaction.timeBasedToolResultProjection
+    || compaction.time_based_tool_result_projection
+    || compactionContainer.microCompactReceipt
+    || compactionContainer.micro_compact_receipt
+    || compaction.microCompactReceipt
+    || compaction.micro_compact_receipt
+    || null;
+  if (!receipt) return {
+    schema: "ccm-memory-center-microcompact-state-v1",
+    applicable: true,
+    status: "historical_unrecorded",
+    reason: "receipt_missing",
+    hasReceipt: false,
+    receiptValid: false,
+    historicalDataUnrecorded: true,
+    scope,
+    scopeId,
+    trigger: "",
+    clearedToolResultCount: 0,
+    keptToolResultCount: 0,
+    tokensSaved: 0,
+    gapMinutes: 0,
+    gapThresholdMinutes: 0,
+    evaluatedAt: "",
+    rawTranscriptPreserved: true,
+    receiptChecksum: "",
+  };
+  let verification = { valid: false, issues: ["unsupported_receipt_schema"] as string[] };
+  if (receipt.schema === "ccm-group-time-based-tool-result-projection-v1") {
+    const exact = parseGroupMemoryScopeId(scopeId, memory);
+    verification = verifyGroupTimeBasedToolResultProjectionReceipt(receipt, { groupId: exact.groupId, groupSessionId: exact.sessionId });
+  } else if (receipt.schema === "ccm-session-microcompact-receipt-v1") {
+    const sessionId = scope === "global_session"
+      ? String(scopeId).replace(/^session:/, "")
+      : scope === "project_session" ? String(scopeId).split("::").slice(1).join("::") : "";
+    verification = verifySessionModelMicroCompactReceipt(receipt, { scope: scope === "global_session" ? "global" : "project", sessionId });
+  }
+  const sharedReceipt = receipt.schema === "ccm-session-microcompact-receipt-v1";
+  return {
+    schema: "ccm-memory-center-microcompact-state-v1",
+    applicable: true,
+    status: verification.valid ? (sharedReceipt ? (receipt.applied === true ? "applied" : "skipped") : String(receipt.status || "skipped")) : "invalid_receipt",
+    reason: String(receipt.reason || ""),
+    hasReceipt: true,
+    receiptValid: verification.valid,
+    receiptIssues: verification.issues,
+    historicalDataUnrecorded: false,
+    scope,
+    scopeId,
+    groupId: String(receipt.group_id || ""),
+    groupSessionId: String(receipt.group_session_id || ""),
+    trigger: String(receipt.trigger || "") || (String(receipt.reason || "").includes("gap") ? "time_based" : ""),
+    clearedToolResultCount: Math.max(0, Number(receipt.cleared_tool_result_count || receipt.clearedToolResultCount || receipt.clearedToolCallIds?.length || 0)),
+    keptToolResultCount: Math.max(0, Number(receipt.kept_tool_count || receipt.keptToolResultCount || receipt.keep_recent || receipt.keepRecent || 0)),
+    compactableToolCount: Math.max(0, Number(receipt.compactable_tool_count || receipt.compactableToolCount || 0)),
+    tokensSaved: Math.max(0, Number(receipt.tokens_saved || receipt.tokensSaved || receipt.clearedResultTokens || 0)),
+    gapMinutes: Math.max(0, Number(receipt.gap_minutes || receipt.gapMinutes || 0)),
+    gapThresholdMinutes: Math.max(0, Number(receipt.gap_threshold_minutes || receipt.gapThresholdMinutes || 0)),
+    evaluatedAt: String(receipt.evaluated_at || receipt.evaluatedAt || ""),
+    lastAssistantAt: String(receipt.last_assistant_at || receipt.lastAssistantAt || ""),
+    rawTranscriptPreserved: receipt.raw_transcript_preserved === true || receipt.rawTranscriptPreserved === true || receipt.rawLedgerPreserved === true,
+    receiptChecksum: String(receipt.receipt_checksum || receipt.receiptChecksum || ""),
+  };
+}
+
+function memoryCenterPostCompactUsage(scope: MemoryScope, scopeId: string, memory: any, microCompactState: any) {
+  const usage: any = { timeBasedToolResultMicrocompact: microCompactState };
+  if (["global_session", "project_session"].includes(scope)) {
+    const container = memory?.compaction || {};
+    const compaction = container?.v2 || container;
+    const receipt = container.toolResultContentReplacementReceipt
+      || container.tool_result_content_replacement_receipt
+      || compaction.toolResultContentReplacementReceipt
+      || compaction.tool_result_content_replacement_receipt
+      || null;
+    if (receipt) {
+      const sessionId = scope === "global_session"
+        ? String(scopeId).replace(/^session:/, "")
+        : String(scopeId).split("::").slice(1).join("::");
+      const verification = verifySessionModelContentReplacementReceipt(receipt, {
+        scope: scope === "global_session" ? "global" : "project",
+        sessionId,
+      });
+      usage.toolResultContentReplacement = {
+        schema: "ccm-memory-center-tool-result-content-replacement-v1",
+        status: verification.valid ? (receipt.applied === true ? "applied" : "skipped") : "invalid_receipt",
+        receiptValid: verification.valid,
+        receiptIssues: verification.issues,
+        replacementCount: Array.isArray(receipt.replacements) ? receipt.replacements.length : 0,
+        rawLedgerPreserved: receipt.rawLedgerPreserved === true,
+        receipt,
+      };
+    }
+    return usage;
+  }
+  if (scope !== "group") return usage;
+  const exact = parseGroupMemoryScopeId(scopeId, memory);
+  const plan = memory?.compaction?.postCompactReinject
+    || memory?.compactBoundary?.post_compact_restore?.reinjectionPlan
+    || {};
+  const expose = (key: string, receipt: any, verification: any, extra: any = {}) => {
+    if (!receipt) return;
+    usage[key] = {
+      schema: "ccm-memory-center-post-compact-projection-v1",
+      status: verification.valid === true ? "applied" : "invalid_receipt",
+      receiptValid: verification.valid === true,
+      receiptIssues: verification.issues || [],
+      groupId: exact.groupId,
+      groupSessionId: exact.sessionId,
+      receipt,
+      ...extra,
+    };
+  };
+  expose("postCompactFileRestoreDedup", plan.preservedFileDedup,
+    verifyGroupPostCompactFileRestoreDedupReceipt(plan.preservedFileDedup, { groupId: exact.groupId, groupSessionId: exact.sessionId }));
+  expose("postCompactInvokedSkillAttachment", plan.invokedSkillAttachmentReceipt,
+    verifyGroupPostCompactInvokedSkillAttachmentReceipt(plan.invokedSkillAttachmentReceipt, {
+      groupId: exact.groupId,
+      groupSessionId: exact.sessionId,
+      attachments: plan.invokedSkillAttachments || [],
+    }), { attachmentCount: Array.isArray(plan.invokedSkillAttachments) ? plan.invokedSkillAttachments.length : 0 });
+  expose("postCompactPlanAttachment", plan.planAttachmentReceipt,
+    verifyGroupPostCompactPlanAttachmentReceipt(plan.planAttachmentReceipt, {
+      groupId: exact.groupId,
+      groupSessionId: exact.sessionId,
+      attachment: plan.planAttachment || null,
+    }), { attached: !!plan.planAttachment });
+  expose("postCompactDynamicContextDelta", plan.dynamicContextDeltaReceipt,
+    verifyGroupPostCompactDynamicContextDeltaReceipt(plan.dynamicContextDeltaReceipt, {
+      groupId: exact.groupId,
+      groupSessionId: exact.sessionId,
+      attachment: plan.dynamicContextDeltaAttachment || null,
+    }), { attached: !!plan.dynamicContextDeltaAttachment });
+  const taskStatusReceipt = memory?.compaction?.postCompactTaskStatusProjection
+    || memory?.compactBoundary?.post_compact_restore?.postCompactTaskStatusProjection
+    || null;
+  expose("postCompactTaskStatusProjection", taskStatusReceipt,
+    verifyGroupPostCompactTaskStatusProjectionReceipt(taskStatusReceipt, {
+      groupId: exact.groupId,
+      groupSessionId: exact.sessionId,
+      projectionChecksum: taskStatusReceipt?.projection_checksum || "",
+    }), {
+      itemCount: Number(taskStatusReceipt?.included_task_count || 0),
+      tasks: (Array.isArray(plan.taskStatuses) ? plan.taskStatuses : []).map((row: any) => ({
+        task_id: String(row?.task_id || row?.taskId || ""),
+        status: String(row?.status || ""),
+        value: String(row?.value || ""),
+      })),
+    });
+  return usage;
+}
+
+function memoryCenterProviderContextCacheState(scope: MemoryScope, scopeId: string, memory: any) {
+  let binding: any = null;
+  if (scope === "global_session") {
+    const sessionId = String(scopeId || "").replace(/^session:/, "");
+    binding = { scope: "global", scopeId: sessionId, sessionId };
+  } else if (scope === "project_session") {
+    const separator = String(scopeId || "").indexOf("::");
+    const project = separator >= 0 ? String(scopeId).slice(0, separator) : "";
+    const sessionId = separator >= 0 ? String(scopeId).slice(separator + 2) : "";
+    if (project && sessionId) binding = { scope: "project", scopeId: project, sessionId };
+  } else if (scope === "group") {
+    const exact = parseGroupMemoryScopeId(scopeId, memory);
+    if (exact.groupId && exact.sessionId.startsWith("gcs_")) binding = { scope: "group", scopeId: exact.groupId, sessionId: exact.sessionId };
+  }
+  if (!binding) return { applicable: false, status: "not_applicable" };
+  const capability = readProviderCacheCapabilityState(loadOrchestratorConfig());
+  const state = readLatestProviderNeutralContextCacheState(binding);
+  if (!state) return { applicable: true, status: "not_recorded", ...binding, capability };
+  return {
+    applicable: true,
+    status: "recorded",
+    contextEngineSchema: String(state.schema || "ccm-provider-neutral-context-cache-state-v1"),
+    contextEngineVersion: Number(state.version || 1),
+    ...binding,
+    provider: String(state.provider || ""),
+    model: String(state.model || ""),
+    executionMode: String(state.executionMode || ""),
+    adapterKind: String(state.adapterKind || ""),
+    capabilitySource: String(state.capabilitySource || ""),
+    providerNative: ["native_api_context_management", "provider_prompt_cache", "provider_implicit_cache", "provider_explicit_cache"].includes(String(state.executionMode || "")),
+    ccmControlledProjection: ["ccm_controlled_projection", "stable_prefix_cache"].includes(String(state.executionMode || "")),
+    blockCount: Number(state.blockCount || 0),
+    totalTokens: Number(state.totalTokens || 0),
+    reusedBlockCount: Number(state.reusedBlockCount || 0),
+    changedBlockCount: Number(state.changedBlockCount || 0),
+    stablePrefixBlockCount: Number(state.stablePrefixBlockCount || 0),
+    adaptiveStablePrefix: state.adaptiveStablePrefix || null,
+    materializationCache: state.materializationCache || null,
+    downgradeReason: String(state.downgradeReason || ""),
+    projectedContentReplacementDetected: state.projectedContentReplacementDetected === true,
+    lastRequestStatus: String(state.lastRequestStatus || "prepared"),
+    providerInputTokens: Number(state.providerInputTokens || 0),
+    cacheCreationInputTokens: Number(state.cacheCreationInputTokens || 0),
+    cacheReadInputTokens: Number(state.cacheReadInputTokens || 0),
+    cacheDeletedInputTokens: Number(state.cacheDeletedInputTokens || 0),
+    cacheCreation5mInputTokens: Number(state.cacheCreation5mInputTokens || 0),
+    cacheCreation1hInputTokens: Number(state.cacheCreation1hInputTokens || 0),
+    cacheHitRate: Number(state.cacheHitRate || 0),
+    projectionDurationMs: Number(state.projectionDurationMs || 0),
+    providerLatencyMs: Number(state.providerLatencyMs || 0),
+    reportedCostUsd: Number(state.reportedCostUsd || 0),
+    estimatedInputCostUsd: Number(state.estimatedInputCostUsd || 0),
+    costSource: String(state.costSource || "unavailable"),
+    rollingMetrics: state.rollingMetrics || null,
+    cacheRecommendation: state.cacheRecommendation || null,
+    tokenGate: state.tokenGate || null,
+    blockChanges: state.blockChanges || null,
+    capability,
+    adapterEvidence: state.adapterEvidence || null,
+    lastError: String(state.lastError || ""),
+    rawTranscriptPreserved: true,
+    contentStored: false,
+    planChecksum: String(state.contextPlanChecksum || state.planChecksum || ""),
+    contextIdentityChecksum: String(state.contextIdentityChecksum || ""),
+    updatedAt: String(state.updatedAt || ""),
+  };
+}
+
 
 export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, label: string, options: any = {}) {
   const groupScope = scope === "group" ? parseGroupMemoryScopeId(scopeId, memory) : null;
@@ -582,6 +835,7 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
     ? readGroupSessionMemorySnapshotForCenter(exactGroupSessionMemoryId)
     : compaction.sessionMemoryState || compaction.session_memory_state || null;
   const toolContinuity = scope === "group" ? readGroupToolContinuitySnapshotForCenter(exactGroupSessionMemoryId) : null;
+  const microCompactState = memoryCenterMicroCompactState(scope, scopeId, memory);
   const canonicalGroupSessionMemory = scope === "group"
     && sessionMemory?.modelExtracted === true
     && sessionMemory?.hasSummary === true
@@ -612,6 +866,18 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
     ? Math.min(100, Math.round((currentTokens / tokenState.effectiveContextWindow) * 1000) / 10)
     : tokenState.tokenPressure;
   const compactionActivity = currentCompactionActivity(scope, scopeId, memory);
+  const engineScope = scope === "global_session" ? "global" : scope === "project_session" ? "project" : scope;
+  const engineScopeId = scope === "group" ? String(groupScope?.groupId || scopeId) : scope === "project" || scope === "project_session" ? String(memory?.project || scopeId) : scopeId;
+  const engineSessionId = scope === "group"
+    ? String(groupScope?.sessionId || "")
+    : String(compaction.sessionId || compaction.session_id || memory?.sessionId || memory?.session_id || scopeId);
+  const contextEngineTrends = ["global", "group", "project", "music"].includes(engineScope) && engineSessionId
+    ? readContextEngineTrends({ scope: engineScope, scopeId: engineScopeId, sessionId: engineSessionId, limit: 100 })
+    : null;
+  let recoveryPoints: any[] = [];
+  if (["global", "group", "project", "music"].includes(engineScope) && engineSessionId) {
+    try { recoveryPoints = listContextEngineRecoveryPoints({ scope: engineScope, scopeId: engineScopeId, sessionId: engineSessionId }); } catch {}
+  }
   return {
     scope, id: scopeId, label, health: alerts.some(item => item.severity === "critical") ? "critical" : alerts.length ? "warning" : "healthy",
     groupId: groupScope?.groupId || "",
@@ -648,8 +914,18 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
       || compaction.preservedRecentMessages
       || 0
     ),
+    // circuitOpen 必须反映「真正阻断自动压缩的硬熔断台账」，而不是
+    // compaction.consecutiveFailures（那是模型摘要回退确定性算法的软计数，
+    // 压缩本身其实成功了）。两者分开上报，避免互相冒充。
+    ...buildAutoCompactCircuitDisplayState({
+      autoCompactCircuitBreaker: compaction.autoCompactCircuitBreaker
+        || compaction.auto_compact_circuit_breaker
+        || memory?.finalDispatchReactiveCompactCircuitBreaker
+        || {},
+      summaryFallbackFailures: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? 0),
+      summaryFallbackLimit: 3,
+    }),
     consecutiveFailures: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? memory?.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures ?? 0),
-    circuitOpen: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? memory?.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures ?? 0) >= 3,
     postCompactGate: compaction.postCompactGate || compaction.post_compact_gate || compactionContainer.post_compact_gate || null,
     tokenMeasurement: compaction.tokenMeasurement || compaction.token_measurement || compactionContainer.token_measurement || tokenState.fallbackTokenMeasurement || null,
     modelVisiblePayload,
@@ -659,6 +935,19 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
     hookResultTokens: Number(compaction.hookResultTokens ?? compaction.hook_result_tokens ?? compactionContainer.hook_result_tokens ?? 0),
     ptlRecoveryAttempts: Number(compaction.ptlRecoveryAttempts ?? compaction.ptl_recovery_attempts ?? compactionContainer.ptl_recovery_attempts ?? 0),
     boundaryGeneration: Number(compaction.boundaryGeneration ?? compaction.boundary_generation ?? 0),
+    microCompact: microCompactState,
+    providerContextCache: memoryCenterProviderContextCacheState(scope, scopeId, memory),
+    contextEngineTrends,
+    contextEngineRecovery: {
+      schema: "ccm-context-engine-recovery-summary-v1",
+      count: recoveryPoints.length,
+      latest: recoveryPoints[0] || null,
+      points: recoveryPoints.slice(0, 10),
+      contentStored: false,
+    },
+    summaryQuality: compaction.summaryQuality || compaction.summary_quality || compactionContainer.summary_quality || compaction.modelMetadata?.summaryQuality || null,
+    secondaryReview: compaction.secondaryReview || compaction.secondary_review || compactionContainer.secondary_review || compaction.modelMetadata?.secondaryReview || null,
+    postCompactUsage: memoryCenterPostCompactUsage(scope, scopeId, memory, microCompactState),
     longTermMemory: scope === "project" ? {
       schema: memory?.memoryPolicy?.schema || "legacy_project_memory",
       durableCount: Array.isArray(memory?.durableMemories) ? memory.durableMemories.length : 0,
@@ -869,7 +1158,7 @@ export function collectItems(scope: MemoryScope, scopeId: string, memory: any) {
   const groupScope = scope === "group" ? parseGroupMemoryScopeId(scopeId, memory) : null;
   const controls = scopeControls(scope, scopeId);
   const groups: any[] = [];
-  const exactSessionScope = (scope === "group" && groupScope?.sessionId !== "default") || ["global_session", "project_session", "task_agent"].includes(scope);
+  const exactSessionScope = ["global_session", "project_session", "task_agent"].includes(scope);
   const keys = exactSessionScope ? []
     : scope === "group" ? ["persistentRequirements", "factAnchors", "decisions", "completed", "blocked", "workerLedger", "openQuestions", "nextActions"]
     : scope === "project" ? ["durableMemories"]
@@ -893,6 +1182,11 @@ export function collectItems(scope: MemoryScope, scopeId: string, memory: any) {
             missionId: item?.source?.missionId || "",
             time: item?.updatedAt || item?.time || item?.timestamp || item?.source?.timestamp || "",
           },
+          extraction_source: item?.extractionSource || item?.extraction_source || (scope === "global" ? "legacy_unverified" : ""),
+          evidence_message_ids: item?.evidenceMessageIds || item?.evidence_message_ids || item?.source?.messageIds || [],
+          semantic_status: item?.semanticStatus || item?.semantic_status || (scope === "global" ? "legacy_unverified" : "confirmed"),
+          legacy_unverified: (item?.semanticStatus || item?.semantic_status || (scope === "global" ? "legacy_unverified" : "confirmed")) === "legacy_unverified",
+          semantic_decision_receipt: item?.semanticDecisionReceipt || item?.semantic_decision_receipt || null,
           raw: item,
         };
       }),
@@ -932,12 +1226,15 @@ export function getMemoryCenterScope(scope: MemoryScope, scopeId: string) {
   if (!rawMemory) throw new Error("记忆文件无法读取");
   const policy = scope === "global" || scope === "global_session" ? require("../../agents/global/memory").getGlobalAgentMemoryPolicy() : null;
   const groupScope = scope === "group" ? parseGroupMemoryScopeId(scopeId, rawMemory) : null;
+  const microCompactState = memoryCenterMicroCompactState(scope, scopeId, rawMemory);
   return {
     scope, id: scopeId, file, backupExists: fs.existsSync(`${file}.bak`),
     groupId: groupScope?.groupId || "",
     groupSessionId: groupScope?.sessionId || "",
     policy,
     summary: memorySummary(scope, scopeId, rawMemory, scopeId, { rebuildCurrentPayload: true }), alerts: healthAlerts(scope, scopeId, rawMemory),
+    postCompactUsage: memoryCenterPostCompactUsage(scope, scopeId, rawMemory, microCompactState),
+    providerContextCache: memoryCenterProviderContextCacheState(scope, scopeId, rawMemory),
     memory: applyMemoryControls(scope, scopeId, rawMemory), rawMemory,
     itemGroups: collectItems(scope, scopeId, rawMemory),
   };

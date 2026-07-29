@@ -45,10 +45,24 @@ export declare function compactRuntimeToolAudit(audit?: any): {
     timestamp: any;
 };
 export declare function runtimeToolSnapshotFromAudit(audit?: any, allowedTools?: any): {
+    schema: string;
     snapshotId: any;
     snapshotPath: any;
     mcpConfigPath: any;
-    allowedTools: any;
+    allowedTools: {
+        mcp: string[];
+        skill: string[];
+    };
+    configuredTools: {
+        mcp: string[];
+        skill: string[];
+    };
+    executionRoleSkills: string[];
+    enforceExecutionRoleSkills: boolean;
+    effectiveTools: {
+        mcp: string[];
+        skill: string[];
+    };
     permissionRules: any;
     authorizationReadiness: any;
     dispatchGate: any;
@@ -454,7 +468,7 @@ export declare function buildUserReceiptReworkSummary(task: any, summary?: any, 
         hide_internal_protocols: boolean;
     };
 };
-export declare function buildUserCoordinationAcknowledgement(task: any, assignments?: any[]): string;
+export declare function buildUserCoordinationAcknowledgement(task: any, assignments?: any[], options?: any): string;
 export declare function sanitizeDispatchLaunchText(value: any, fallback?: string, max?: number): string;
 export declare function normalizeGroupDispatchLaunchRowStatus(rawValue?: any): {
     status: string;

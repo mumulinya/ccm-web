@@ -178,31 +178,9 @@ export function buildGroupRagQuery(group: any, input: { message?: string; contex
 }
 
 export function buildGroupRagContext(group: any, input: { message?: string; context?: string; sharedFilesContext?: string }) {
-  const queryKnowledgeBase = getLazyRagQueryKnowledgeBase();
-  if (!queryKnowledgeBase || !String(input.message || "").trim()) return { context: "", citations: [], scoped: false };
-  const query = buildGroupRagQuery(group, input);
-  const tags = buildGroupRagTags(group);
-  let scoped = "";
-  try {
-    scoped = tags.length ? queryKnowledgeBase(query, 4, tags) : "";
-  } catch {}
-  let general = "";
-  if (!scoped) {
-    try { general = queryKnowledgeBase(query, 3); } catch {}
-  }
-  const matched = scoped || general;
-  if (!matched) return { context: "", citations: [], scoped: false };
-  const citations = extractRagCitations(matched);
-  return {
-    context: [
-      `检索方式：${scoped ? "群聊/项目标签优先" : "全局兜底"}`,
-      citations.length ? `引用：${citations.join("、")}` : "",
-      "",
-      matched,
-    ].filter(Boolean).join("\n"),
-    citations,
-    scoped: !!scoped,
-  };
+  // Production retrieval is asynchronous and scope-bound in
+  // runGroupOrchestratorCore. The coded path must never use tag-only lookup.
+  return { context: "", citations: [], scoped: false };
 }
 
 export function withGroupRagContext<T extends { group: any; message?: string; context?: string; sharedFilesContext?: string; ragContext?: string; ragCitations?: string[]; ragScoped?: boolean }>(input: T): T {
@@ -280,7 +258,21 @@ export function buildDocumentAwareAnalysis(group: any, input: { message?: string
 export function buildCoordinatorPlanText(plan: any) {
   if (!plan?.phases?.length) return "";
   const lines = ["主 Agent 计划："];
+  if (plan?.architecture?.goal) lines.push(`- 目标：${plan.architecture.goal}`);
+  if (Array.isArray(plan?.architecture?.boundaries) && plan.architecture.boundaries.length) {
+    lines.push(`- 边界：${plan.architecture.boundaries.join("；")}`);
+  }
+  if (Array.isArray(plan?.architecture?.dataRelationships) && plan.architecture.dataRelationships.length) {
+    lines.push(`- 数据关系：${plan.architecture.dataRelationships.join("；")}`);
+  }
   for (const phase of plan.phases) lines.push(`- ${phase}`);
+  if (Array.isArray(plan?.architecture?.dependencySteps) && plan.architecture.dependencySteps.length) {
+    lines.push("- 执行步骤：");
+    for (const step of plan.architecture.dependencySteps) {
+      const dependency = Array.isArray(step.dependsOn) && step.dependsOn.length ? `，依赖 ${step.dependsOn.join("、")}` : "";
+      lines.push(`  - ${step.title}${step.project ? `（${step.project}${dependency}）` : dependency}`);
+    }
+  }
   if (plan.missingInfo?.length) lines.push(`- 已识别缺口：${plan.missingInfo.join("；")}`);
   return lines.join("\n");
 }

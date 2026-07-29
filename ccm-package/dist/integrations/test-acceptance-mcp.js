@@ -41,6 +41,7 @@ const child_process_1 = require("child_process");
 const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const internal_mcp_test_store_1 = require("./internal-mcp-test-store");
 const group_test_targets_1 = require("../modules/collaboration/group-test-targets");
+const internal_mcp_test_evidence_1 = require("./internal-mcp-test-evidence");
 exports.TEST_ACCEPTANCE_MCP_SERVER_NAME = "ccm__test_acceptance";
 function buildTestAcceptanceMcpServerConfig(context) {
     return (0, internal_mcp_runtime_1.buildInternalMcpServerConfig)(path.join(__dirname, "test-acceptance-mcp.js"), context);
@@ -50,7 +51,7 @@ const tools = [
         name: "create_test_work_order",
         description: "由全局或群聊主 Agent 为当前任务创建真实 TestAgent 工作单与验收计划。不会接受绑定任务以外的项目路径。",
         roles: ["group-main-agent"],
-        inputSchema: { type: "object", properties: { projects: { type: "array", items: { type: "string" } }, workspace_ids: { type: "array", items: { type: "string" } }, test_target_ids: { type: "array", items: { type: "string" } }, acceptance_criteria: { type: "array", items: { type: "string" } }, completed_tasks: { type: "array", items: { type: "string" } }, required_checks: { type: "array", items: { type: "string" } }, verification_commands: { type: "array", items: { type: "string" } }, changed_files: { type: "array", items: { type: "string" } }, target_url: { type: "string" }, browser_provider: { type: "string", enum: ["auto", "playwright", "mcp", "none"] }, collect_browser_artifacts: { type: "boolean" }, require_adversarial_probe: { type: "boolean" }, adversarial_probe_waiver: { type: "string" }, summary: { type: "string" }, start: { type: "boolean" } }, additionalProperties: false },
+        inputSchema: { type: "object", properties: { projects: { type: "array", items: { type: "string" } }, workspace_ids: { type: "array", items: { type: "string" } }, test_target_ids: { type: "array", items: { type: "string" } }, acceptance_criteria: { type: "array", items: { type: "string" } }, browser_scenarios: { type: "array", items: { type: "string" }, maxItems: 12 }, completed_tasks: { type: "array", items: { type: "string" } }, required_checks: { type: "array", items: { type: "string" } }, verification_commands: { type: "array", items: { type: "string" } }, changed_files: { type: "array", items: { type: "string" } }, target_url: { type: "string" }, browser_provider: { type: "string", enum: ["auto", "playwright", "mcp", "none"] }, collect_browser_artifacts: { type: "boolean" }, require_adversarial_probe: { type: "boolean" }, adversarial_probe_waiver: { type: "string" }, summary: { type: "string" }, start: { type: "boolean" } }, additionalProperties: false },
     },
     { name: "list_test_targets", description: "列出当前签名群聊中可供 TestAgent 选择的项目测试目标，不返回登录凭据。", roles: ["group-main-agent"], inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     {
@@ -63,6 +64,7 @@ const tools = [
     { name: "get_test_status", description: "查询当前任务 TestAgent 运行状态、项目和计划摘要。", inputSchema: { type: "object", properties: { run_id: { type: "string" } }, additionalProperties: false } },
     { name: "get_test_verdict", description: "读取 TestAgent 结论、canAccept、报告摘要和 artifact 完整性校验结果。", inputSchema: { type: "object", properties: { run_id: { type: "string" } }, additionalProperties: false } },
     { name: "list_test_evidence", description: "列出当前任务 TestAgent 保存的截图、报告、浏览器与命令证据目录，不返回任意本机文件。", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+    { name: "get_test_evidence", description: "按 list_test_evidence 返回的 run_id 与 artifact_id 读取当前任务的截图或文本证据。图片以 MCP image content 返回，不能读取任意本机路径。", inputSchema: { type: "object", properties: { run_id: { type: "string" }, artifact_id: { type: "string" } }, required: ["run_id", "artifact_id"], additionalProperties: false } },
 ];
 function startRun(context, runId = "") {
     const state = (0, internal_mcp_test_store_1.readInternalMcpTestRun)(context.taskId, runId);
@@ -102,6 +104,8 @@ function callTool(context, name, args) {
     }
     if (name === "list_test_evidence")
         return { success: true, task_id: context.taskId, runs: (0, internal_mcp_test_store_1.internalMcpTestEvidence)(context.taskId) };
+    if (name === "get_test_evidence")
+        return (0, internal_mcp_test_evidence_1.readInternalMcpTestEvidenceContent)(context.taskId, args);
     throw new Error(`未知 TestAgent 验收工具：${name}`);
 }
 function runTestAcceptanceMcpServer() {

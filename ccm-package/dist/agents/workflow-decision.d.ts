@@ -20,10 +20,12 @@ export interface WorkflowDecision {
     requiresIndependentReview: boolean;
     verificationModes: Array<"commands" | "http" | "browser" | "visual" | "integration" | "release">;
     memoryPolicy: "use" | "ignore";
+    sourcePolicy: "require_read" | "ignore_unread";
     authorizationDirective: "preserve" | "grant" | "revoke";
     riskLevel: "low" | "write" | "high";
     requiresUserConfirmation: boolean;
     source: "model" | "explicit_user_choice";
+    semanticDecisionReceipt?: any;
 }
 export declare const WORKFLOW_DECISION_GUIDANCE: string;
 export declare function normalizeWorkflowDecision(value: any, source?: WorkflowDecision["source"]): WorkflowDecision;

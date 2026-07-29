@@ -7,14 +7,14 @@ export declare function runTestAgentPlaywrightFailureScreenshotSelfTest(): Promi
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -22,6 +22,8 @@ export declare function runTestAgentPlaywrightFailureScreenshotSelfTest(): Promi
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -32,9 +34,8 @@ export declare function runTestAgentPlaywrightFailureScreenshotSelfTest(): Promi
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -51,14 +52,14 @@ export declare function runTestAgentPlaywrightFailureScreenshotSelfTest(): Promi
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -66,6 +67,8 @@ export declare function runTestAgentPlaywrightFailureScreenshotSelfTest(): Promi
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -76,9 +79,8 @@ export declare function runTestAgentPlaywrightFailureScreenshotSelfTest(): Promi
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     report: import("./types-report").TestAgentReport;
@@ -96,14 +98,14 @@ export declare function runTestAgentBrowserUrlTitleAssertionSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -111,6 +113,8 @@ export declare function runTestAgentBrowserUrlTitleAssertionSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -121,9 +125,8 @@ export declare function runTestAgentBrowserUrlTitleAssertionSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -138,14 +141,14 @@ export declare function runTestAgentBrowserUrlTitleAssertionSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -153,6 +156,8 @@ export declare function runTestAgentBrowserUrlTitleAssertionSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -163,9 +168,8 @@ export declare function runTestAgentBrowserUrlTitleAssertionSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -181,14 +185,14 @@ export declare function runTestAgentBrowserConsoleAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -196,6 +200,8 @@ export declare function runTestAgentBrowserConsoleAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -206,9 +212,8 @@ export declare function runTestAgentBrowserConsoleAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -225,14 +230,14 @@ export declare function runTestAgentBrowserConsoleAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -240,6 +245,8 @@ export declare function runTestAgentBrowserConsoleAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -250,9 +257,8 @@ export declare function runTestAgentBrowserConsoleAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -270,14 +276,14 @@ export declare function runTestAgentBrowserNetworkStateActionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -285,6 +291,8 @@ export declare function runTestAgentBrowserNetworkStateActionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -295,9 +303,8 @@ export declare function runTestAgentBrowserNetworkStateActionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -313,14 +320,14 @@ export declare function runTestAgentBrowserNetworkStateActionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -328,6 +335,8 @@ export declare function runTestAgentBrowserNetworkStateActionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -338,9 +347,8 @@ export declare function runTestAgentBrowserNetworkStateActionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -357,14 +365,14 @@ export declare function runTestAgentBrowserAccessibilityAssertionSelfTest(): Pro
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -372,6 +380,8 @@ export declare function runTestAgentBrowserAccessibilityAssertionSelfTest(): Pro
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -382,9 +392,8 @@ export declare function runTestAgentBrowserAccessibilityAssertionSelfTest(): Pro
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -400,14 +409,14 @@ export declare function runTestAgentBrowserAccessibilityAssertionSelfTest(): Pro
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -415,6 +424,8 @@ export declare function runTestAgentBrowserAccessibilityAssertionSelfTest(): Pro
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -425,9 +436,8 @@ export declare function runTestAgentBrowserAccessibilityAssertionSelfTest(): Pro
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -444,14 +454,14 @@ export declare function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -459,6 +469,8 @@ export declare function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -469,9 +481,8 @@ export declare function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -490,14 +501,14 @@ export declare function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -505,6 +516,8 @@ export declare function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -515,9 +528,8 @@ export declare function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     report: import("./types-report").TestAgentReport;
@@ -537,14 +549,14 @@ export declare function runTestAgentBrowserAriaStateAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -552,6 +564,8 @@ export declare function runTestAgentBrowserAriaStateAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -562,9 +576,8 @@ export declare function runTestAgentBrowserAriaStateAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -580,14 +593,14 @@ export declare function runTestAgentBrowserAriaStateAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -595,6 +608,8 @@ export declare function runTestAgentBrowserAriaStateAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -605,9 +620,8 @@ export declare function runTestAgentBrowserAriaStateAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -624,14 +638,14 @@ export declare function runTestAgentBrowserNetworkAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -639,6 +653,8 @@ export declare function runTestAgentBrowserNetworkAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -649,9 +665,8 @@ export declare function runTestAgentBrowserNetworkAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -667,14 +682,14 @@ export declare function runTestAgentBrowserNetworkAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -682,6 +697,8 @@ export declare function runTestAgentBrowserNetworkAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -692,9 +709,8 @@ export declare function runTestAgentBrowserNetworkAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     networkLog: string;
@@ -709,14 +725,14 @@ export declare function runTestAgentStructuredBrowserNetworkAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -724,6 +740,8 @@ export declare function runTestAgentStructuredBrowserNetworkAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -734,9 +752,8 @@ export declare function runTestAgentStructuredBrowserNetworkAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -752,14 +769,14 @@ export declare function runTestAgentStructuredBrowserNetworkAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -767,6 +784,8 @@ export declare function runTestAgentStructuredBrowserNetworkAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -777,9 +796,8 @@ export declare function runTestAgentStructuredBrowserNetworkAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     networkLog: string;
@@ -794,14 +812,14 @@ export declare function runTestAgentNegativeBrowserNetworkAssertionSelfTest(): P
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -809,6 +827,8 @@ export declare function runTestAgentNegativeBrowserNetworkAssertionSelfTest(): P
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -819,9 +839,8 @@ export declare function runTestAgentNegativeBrowserNetworkAssertionSelfTest(): P
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -837,14 +856,14 @@ export declare function runTestAgentNegativeBrowserNetworkAssertionSelfTest(): P
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -852,6 +871,8 @@ export declare function runTestAgentNegativeBrowserNetworkAssertionSelfTest(): P
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -862,9 +883,8 @@ export declare function runTestAgentNegativeBrowserNetworkAssertionSelfTest(): P
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     networkLog: string;
@@ -879,14 +899,14 @@ export declare function runTestAgentBrowserRequestMetadataAssertionSelfTest(): P
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -894,6 +914,8 @@ export declare function runTestAgentBrowserRequestMetadataAssertionSelfTest(): P
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -904,9 +926,8 @@ export declare function runTestAgentBrowserRequestMetadataAssertionSelfTest(): P
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -922,14 +943,14 @@ export declare function runTestAgentBrowserRequestMetadataAssertionSelfTest(): P
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -937,6 +958,8 @@ export declare function runTestAgentBrowserRequestMetadataAssertionSelfTest(): P
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -947,9 +970,8 @@ export declare function runTestAgentBrowserRequestMetadataAssertionSelfTest(): P
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     networkLog: string;
@@ -964,14 +986,14 @@ export declare function runTestAgentBrowserInteractionSummarySelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -979,6 +1001,8 @@ export declare function runTestAgentBrowserInteractionSummarySelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -989,9 +1013,8 @@ export declare function runTestAgentBrowserInteractionSummarySelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1009,14 +1032,14 @@ export declare function runTestAgentBrowserInteractionSummarySelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1024,6 +1047,8 @@ export declare function runTestAgentBrowserInteractionSummarySelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1034,9 +1059,8 @@ export declare function runTestAgentBrowserInteractionSummarySelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     summary: import("./types-results").BrowserInteractionSummaryItem;
@@ -1058,14 +1082,14 @@ export declare function runTestAgentAcceptanceDerivedAccessibilitySelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1073,6 +1097,8 @@ export declare function runTestAgentAcceptanceDerivedAccessibilitySelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1083,9 +1109,8 @@ export declare function runTestAgentAcceptanceDerivedAccessibilitySelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1101,14 +1126,14 @@ export declare function runTestAgentAcceptanceDerivedAccessibilitySelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1116,6 +1141,8 @@ export declare function runTestAgentAcceptanceDerivedAccessibilitySelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1126,9 +1153,8 @@ export declare function runTestAgentAcceptanceDerivedAccessibilitySelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
@@ -1145,14 +1171,14 @@ export declare function runTestAgentAcceptanceDerivedStorageAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1160,6 +1186,8 @@ export declare function runTestAgentAcceptanceDerivedStorageAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1170,9 +1198,8 @@ export declare function runTestAgentAcceptanceDerivedStorageAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1188,14 +1215,14 @@ export declare function runTestAgentAcceptanceDerivedStorageAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1203,6 +1230,8 @@ export declare function runTestAgentAcceptanceDerivedStorageAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1213,9 +1242,8 @@ export declare function runTestAgentAcceptanceDerivedStorageAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
@@ -1232,14 +1260,14 @@ export declare function runTestAgentAcceptanceDerivedCookieAssertionSelfTest(): 
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1247,6 +1275,8 @@ export declare function runTestAgentAcceptanceDerivedCookieAssertionSelfTest(): 
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1257,9 +1287,8 @@ export declare function runTestAgentAcceptanceDerivedCookieAssertionSelfTest(): 
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1275,14 +1304,14 @@ export declare function runTestAgentAcceptanceDerivedCookieAssertionSelfTest(): 
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1290,6 +1319,8 @@ export declare function runTestAgentAcceptanceDerivedCookieAssertionSelfTest(): 
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1300,9 +1331,8 @@ export declare function runTestAgentAcceptanceDerivedCookieAssertionSelfTest(): 
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
@@ -1319,14 +1349,14 @@ export declare function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1334,6 +1364,8 @@ export declare function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1344,9 +1376,8 @@ export declare function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1362,14 +1393,14 @@ export declare function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1377,6 +1408,8 @@ export declare function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1387,9 +1420,8 @@ export declare function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
@@ -1406,14 +1438,14 @@ export declare function runTestAgentAcceptanceDerivedNegativeUiSelfTest(): Promi
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1421,6 +1453,8 @@ export declare function runTestAgentAcceptanceDerivedNegativeUiSelfTest(): Promi
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1431,9 +1465,8 @@ export declare function runTestAgentAcceptanceDerivedNegativeUiSelfTest(): Promi
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1449,14 +1482,14 @@ export declare function runTestAgentAcceptanceDerivedNegativeUiSelfTest(): Promi
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1464,6 +1497,8 @@ export declare function runTestAgentAcceptanceDerivedNegativeUiSelfTest(): Promi
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1474,9 +1509,8 @@ export declare function runTestAgentAcceptanceDerivedNegativeUiSelfTest(): Promi
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
@@ -1493,7 +1527,7 @@ export declare function runTestAgentSemanticLocatorSelfTest(): {
 export declare function runTestAgentBrowserStateSelfTest(): {
     pass: boolean;
     actionTypes: ("fill" | "click" | "goto" | "doubleClick" | "rightClick" | "selectOption" | "check" | "uncheck" | "uploadFile" | "dragTo" | "setClipboard" | "setCookie" | "clearCookies" | "setLocalStorage" | "setSessionStorage" | "clearStorage" | "setOffline" | "setOnline" | "hover" | "focus" | "typeText" | "press" | "scroll" | "openApplication" | "requestAccess" | "reload" | "goBack" | "goForward" | "waitForSelector" | "waitForText" | "waitForUrl" | "waitForTimeout" | "evaluate")[];
-    assertionTypes: ("enabled" | "text" | "present" | "disabled" | "checked" | "urlIncludes" | "visible" | "notVisible" | "notPresent" | "focused" | "notFocused" | "notChecked" | "selectedValue" | "selectedTextIncludes" | "inputValueEquals" | "inputValueIncludes" | "attributeEquals" | "attributeIncludes" | "computedStyleEquals" | "computedStyleIncludes" | "elementCountEquals" | "elementCountAtLeast" | "elementCountAtMost" | "dialogAppeared" | "dialogMessageIncludes" | "dialogTypeEquals" | "popupOpened" | "popupUrlIncludes" | "popupTextIncludes" | "popupTitleIncludes" | "tableRowIncludes" | "tableCellTextIncludes" | "tableCellTextEquals" | "clipboardTextEquals" | "clipboardTextIncludes" | "elementScreenshotNotBlank" | "textOrder" | "urlEquals" | "urlNotIncludes" | "titleEquals" | "titleIncludes" | "titleNotIncludes" | "elementTextIncludes" | "accessibleNameEquals" | "accessibleNameIncludes" | "accessibleDescriptionEquals" | "accessibleDescriptionIncludes" | "ariaSnapshotIncludes" | "ariaExpanded" | "ariaCollapsed" | "ariaPressed" | "ariaNotPressed" | "ariaSelected" | "ariaNotSelected" | "ariaInvalid" | "ariaValid" | "ariaRequired" | "ariaNotRequired" | "inViewport" | "pageNotBlank" | "noHorizontalOverflow" | "onlineState" | "browserOnline" | "browserOffline" | "cookieExists" | "cookieValueEquals" | "cookieValueIncludes" | "networkNoErrors" | "networkRequest" | "networkRequestIncludes" | "networkRequestNot" | "networkRequestNotIncludes" | "networkResponse" | "networkResponseIncludes" | "networkResponseNot" | "networkResponseNotIncludes" | "downloadedFile" | "consoleIncludes" | "consoleNotIncludes" | "consoleNoErrors" | "consoleNoWarnings" | "jsTruthy" | "jsEquals" | "localStorageEquals" | "localStorageIncludes" | "sessionStorageEquals" | "sessionStorageIncludes")[];
+    assertionTypes: ("enabled" | "text" | "disabled" | "present" | "checked" | "urlIncludes" | "visible" | "notVisible" | "notPresent" | "focused" | "notFocused" | "notChecked" | "selectedValue" | "selectedTextIncludes" | "inputValueEquals" | "inputValueIncludes" | "attributeEquals" | "attributeIncludes" | "computedStyleEquals" | "computedStyleIncludes" | "elementCountEquals" | "elementCountAtLeast" | "elementCountAtMost" | "dialogAppeared" | "dialogMessageIncludes" | "dialogTypeEquals" | "popupOpened" | "popupUrlIncludes" | "popupTextIncludes" | "popupTitleIncludes" | "tableRowIncludes" | "tableCellTextIncludes" | "tableCellTextEquals" | "clipboardTextEquals" | "clipboardTextIncludes" | "elementScreenshotNotBlank" | "textOrder" | "urlEquals" | "urlNotIncludes" | "titleEquals" | "titleIncludes" | "titleNotIncludes" | "elementTextIncludes" | "accessibleNameEquals" | "accessibleNameIncludes" | "accessibleDescriptionEquals" | "accessibleDescriptionIncludes" | "ariaSnapshotIncludes" | "ariaExpanded" | "ariaCollapsed" | "ariaPressed" | "ariaNotPressed" | "ariaSelected" | "ariaNotSelected" | "ariaInvalid" | "ariaValid" | "ariaRequired" | "ariaNotRequired" | "inViewport" | "pageNotBlank" | "noHorizontalOverflow" | "onlineState" | "browserOnline" | "browserOffline" | "cookieExists" | "cookieValueEquals" | "cookieValueIncludes" | "networkNoErrors" | "networkRequest" | "networkRequestIncludes" | "networkRequestNot" | "networkRequestNotIncludes" | "networkResponse" | "networkResponseIncludes" | "networkResponseNot" | "networkResponseNotIncludes" | "downloadedFile" | "consoleIncludes" | "consoleNotIncludes" | "consoleNoErrors" | "consoleNoWarnings" | "jsTruthy" | "jsEquals" | "localStorageEquals" | "localStorageIncludes" | "sessionStorageEquals" | "sessionStorageIncludes")[];
     issues: import("./types-results").WorkOrderIssue[];
 };
 export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promise<{
@@ -1505,14 +1539,14 @@ export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1520,6 +1554,8 @@ export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1530,9 +1566,8 @@ export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1546,14 +1581,14 @@ export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1561,6 +1596,8 @@ export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1571,9 +1608,8 @@ export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     report: import("./types-report").TestAgentReport;
@@ -1588,14 +1624,14 @@ export declare function runTestAgentBrowserSelectStateSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1603,6 +1639,8 @@ export declare function runTestAgentBrowserSelectStateSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1613,9 +1651,8 @@ export declare function runTestAgentBrowserSelectStateSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1630,14 +1667,14 @@ export declare function runTestAgentBrowserSelectStateSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1645,6 +1682,8 @@ export declare function runTestAgentBrowserSelectStateSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1655,9 +1694,8 @@ export declare function runTestAgentBrowserSelectStateSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason?: undefined;
@@ -1671,14 +1709,14 @@ export declare function runTestAgentBrowserInputValueAssertionSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1686,6 +1724,8 @@ export declare function runTestAgentBrowserInputValueAssertionSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1696,9 +1736,8 @@ export declare function runTestAgentBrowserInputValueAssertionSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1713,14 +1752,14 @@ export declare function runTestAgentBrowserInputValueAssertionSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1728,6 +1767,8 @@ export declare function runTestAgentBrowserInputValueAssertionSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1738,9 +1779,8 @@ export declare function runTestAgentBrowserInputValueAssertionSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -1756,14 +1796,14 @@ export declare function runTestAgentBrowserEnabledStateSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1771,6 +1811,8 @@ export declare function runTestAgentBrowserEnabledStateSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1781,9 +1823,8 @@ export declare function runTestAgentBrowserEnabledStateSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1798,14 +1839,14 @@ export declare function runTestAgentBrowserEnabledStateSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1813,6 +1854,8 @@ export declare function runTestAgentBrowserEnabledStateSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1823,9 +1866,8 @@ export declare function runTestAgentBrowserEnabledStateSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -1841,14 +1883,14 @@ export declare function runTestAgentBrowserFocusStateSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1856,6 +1898,8 @@ export declare function runTestAgentBrowserFocusStateSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1866,9 +1910,8 @@ export declare function runTestAgentBrowserFocusStateSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1883,14 +1926,14 @@ export declare function runTestAgentBrowserFocusStateSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1898,6 +1941,8 @@ export declare function runTestAgentBrowserFocusStateSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1908,9 +1953,8 @@ export declare function runTestAgentBrowserFocusStateSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -1926,14 +1970,14 @@ export declare function runTestAgentBrowserPresenceAssertionSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1941,6 +1985,8 @@ export declare function runTestAgentBrowserPresenceAssertionSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1951,9 +1997,8 @@ export declare function runTestAgentBrowserPresenceAssertionSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -1969,14 +2014,14 @@ export declare function runTestAgentBrowserPresenceAssertionSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -1984,6 +2029,8 @@ export declare function runTestAgentBrowserPresenceAssertionSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1994,9 +2041,8 @@ export declare function runTestAgentBrowserPresenceAssertionSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2013,14 +2059,14 @@ export declare function runTestAgentBrowserElementCountSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2028,6 +2074,8 @@ export declare function runTestAgentBrowserElementCountSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2038,9 +2086,8 @@ export declare function runTestAgentBrowserElementCountSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2055,14 +2102,14 @@ export declare function runTestAgentBrowserElementCountSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2070,6 +2117,8 @@ export declare function runTestAgentBrowserElementCountSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2080,9 +2129,8 @@ export declare function runTestAgentBrowserElementCountSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2098,14 +2146,14 @@ export declare function runTestAgentBrowserDialogAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2113,6 +2161,8 @@ export declare function runTestAgentBrowserDialogAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2123,9 +2173,8 @@ export declare function runTestAgentBrowserDialogAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2141,14 +2190,14 @@ export declare function runTestAgentBrowserDialogAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2156,6 +2205,8 @@ export declare function runTestAgentBrowserDialogAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2166,9 +2217,8 @@ export declare function runTestAgentBrowserDialogAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2185,14 +2235,14 @@ export declare function runTestAgentBrowserPopupAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2200,6 +2250,8 @@ export declare function runTestAgentBrowserPopupAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2210,9 +2262,8 @@ export declare function runTestAgentBrowserPopupAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2229,14 +2280,14 @@ export declare function runTestAgentBrowserPopupAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2244,6 +2295,8 @@ export declare function runTestAgentBrowserPopupAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2254,9 +2307,8 @@ export declare function runTestAgentBrowserPopupAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2274,14 +2326,14 @@ export declare function runTestAgentBrowserTableAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2289,6 +2341,8 @@ export declare function runTestAgentBrowserTableAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2299,9 +2353,8 @@ export declare function runTestAgentBrowserTableAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2316,14 +2369,14 @@ export declare function runTestAgentBrowserTableAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2331,6 +2384,8 @@ export declare function runTestAgentBrowserTableAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2341,9 +2396,8 @@ export declare function runTestAgentBrowserTableAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2359,14 +2413,14 @@ export declare function runTestAgentBrowserDragToActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2374,6 +2428,8 @@ export declare function runTestAgentBrowserDragToActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2384,9 +2440,8 @@ export declare function runTestAgentBrowserDragToActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2401,14 +2456,14 @@ export declare function runTestAgentBrowserDragToActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2416,6 +2471,8 @@ export declare function runTestAgentBrowserDragToActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2426,9 +2483,8 @@ export declare function runTestAgentBrowserDragToActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2444,14 +2500,14 @@ export declare function runTestAgentBrowserHoverActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2459,6 +2515,8 @@ export declare function runTestAgentBrowserHoverActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2469,9 +2527,8 @@ export declare function runTestAgentBrowserHoverActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2486,14 +2543,14 @@ export declare function runTestAgentBrowserHoverActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2501,6 +2558,8 @@ export declare function runTestAgentBrowserHoverActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2511,9 +2570,8 @@ export declare function runTestAgentBrowserHoverActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2529,14 +2587,14 @@ export declare function runTestAgentBrowserHistoryNavigationActionSelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2544,6 +2602,8 @@ export declare function runTestAgentBrowserHistoryNavigationActionSelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2554,9 +2614,8 @@ export declare function runTestAgentBrowserHistoryNavigationActionSelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2570,14 +2629,14 @@ export declare function runTestAgentBrowserHistoryNavigationActionSelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2585,6 +2644,8 @@ export declare function runTestAgentBrowserHistoryNavigationActionSelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2595,9 +2656,8 @@ export declare function runTestAgentBrowserHistoryNavigationActionSelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     report: import("./types-report").TestAgentReport;
@@ -2612,14 +2672,14 @@ export declare function runTestAgentBrowserScrollActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2627,6 +2687,8 @@ export declare function runTestAgentBrowserScrollActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2637,9 +2699,8 @@ export declare function runTestAgentBrowserScrollActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2654,14 +2715,14 @@ export declare function runTestAgentBrowserScrollActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2669,6 +2730,8 @@ export declare function runTestAgentBrowserScrollActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2679,9 +2742,8 @@ export declare function runTestAgentBrowserScrollActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2697,14 +2759,14 @@ export declare function runTestAgentBrowserAdvancedMouseActionSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2712,6 +2774,8 @@ export declare function runTestAgentBrowserAdvancedMouseActionSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2722,9 +2786,8 @@ export declare function runTestAgentBrowserAdvancedMouseActionSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2739,14 +2802,14 @@ export declare function runTestAgentBrowserAdvancedMouseActionSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2754,6 +2817,8 @@ export declare function runTestAgentBrowserAdvancedMouseActionSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2764,9 +2829,8 @@ export declare function runTestAgentBrowserAdvancedMouseActionSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2782,14 +2846,14 @@ export declare function runTestAgentBrowserKeyboardActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2797,6 +2861,8 @@ export declare function runTestAgentBrowserKeyboardActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2807,9 +2873,8 @@ export declare function runTestAgentBrowserKeyboardActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2824,14 +2889,14 @@ export declare function runTestAgentBrowserKeyboardActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2839,6 +2904,8 @@ export declare function runTestAgentBrowserKeyboardActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2849,9 +2916,8 @@ export declare function runTestAgentBrowserKeyboardActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2867,14 +2933,14 @@ export declare function runTestAgentBrowserStorageActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2882,6 +2948,8 @@ export declare function runTestAgentBrowserStorageActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2892,9 +2960,8 @@ export declare function runTestAgentBrowserStorageActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2909,14 +2976,14 @@ export declare function runTestAgentBrowserStorageActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2924,6 +2991,8 @@ export declare function runTestAgentBrowserStorageActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2934,9 +3003,8 @@ export declare function runTestAgentBrowserStorageActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -2952,14 +3020,14 @@ export declare function runTestAgentBrowserCookieActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -2967,6 +3035,8 @@ export declare function runTestAgentBrowserCookieActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -2977,9 +3047,8 @@ export declare function runTestAgentBrowserCookieActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -2994,14 +3063,14 @@ export declare function runTestAgentBrowserCookieActionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3009,6 +3078,8 @@ export declare function runTestAgentBrowserCookieActionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3019,9 +3090,8 @@ export declare function runTestAgentBrowserCookieActionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -3037,14 +3107,14 @@ export declare function runTestAgentBrowserClipboardAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3052,6 +3122,8 @@ export declare function runTestAgentBrowserClipboardAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3062,9 +3134,8 @@ export declare function runTestAgentBrowserClipboardAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -3079,14 +3150,14 @@ export declare function runTestAgentBrowserClipboardAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3094,6 +3165,8 @@ export declare function runTestAgentBrowserClipboardAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3104,9 +3177,8 @@ export declare function runTestAgentBrowserClipboardAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -3122,14 +3194,14 @@ export declare function runTestAgentBrowserElementScreenshotAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3137,6 +3209,8 @@ export declare function runTestAgentBrowserElementScreenshotAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3147,9 +3221,8 @@ export declare function runTestAgentBrowserElementScreenshotAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -3164,14 +3237,14 @@ export declare function runTestAgentBrowserElementScreenshotAssertionSelfTest():
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3179,6 +3252,8 @@ export declare function runTestAgentBrowserElementScreenshotAssertionSelfTest():
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3189,9 +3264,8 @@ export declare function runTestAgentBrowserElementScreenshotAssertionSelfTest():
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -3207,14 +3281,14 @@ export declare function runTestAgentBrowserTextOrderAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3222,6 +3296,8 @@ export declare function runTestAgentBrowserTextOrderAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3232,9 +3308,8 @@ export declare function runTestAgentBrowserTextOrderAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -3249,14 +3324,14 @@ export declare function runTestAgentBrowserTextOrderAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3264,6 +3339,8 @@ export declare function runTestAgentBrowserTextOrderAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3274,9 +3351,8 @@ export declare function runTestAgentBrowserTextOrderAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -3292,14 +3368,14 @@ export declare function runTestAgentBrowserAttributeAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3307,6 +3383,8 @@ export declare function runTestAgentBrowserAttributeAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3317,9 +3395,8 @@ export declare function runTestAgentBrowserAttributeAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -3334,14 +3411,14 @@ export declare function runTestAgentBrowserAttributeAssertionSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3349,6 +3426,8 @@ export declare function runTestAgentBrowserAttributeAssertionSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3359,9 +3438,8 @@ export declare function runTestAgentBrowserAttributeAssertionSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -3377,14 +3455,14 @@ export declare function runTestAgentBrowserComputedStyleAssertionSelfTest(): Pro
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3392,6 +3470,8 @@ export declare function runTestAgentBrowserComputedStyleAssertionSelfTest(): Pro
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3402,9 +3482,8 @@ export declare function runTestAgentBrowserComputedStyleAssertionSelfTest(): Pro
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -3419,14 +3498,14 @@ export declare function runTestAgentBrowserComputedStyleAssertionSelfTest(): Pro
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3434,6 +3513,8 @@ export declare function runTestAgentBrowserComputedStyleAssertionSelfTest(): Pro
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3444,9 +3525,8 @@ export declare function runTestAgentBrowserComputedStyleAssertionSelfTest(): Pro
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -3462,14 +3542,14 @@ export declare function runTestAgentBrowserCookieAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3477,6 +3557,8 @@ export declare function runTestAgentBrowserCookieAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3487,9 +3569,8 @@ export declare function runTestAgentBrowserCookieAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -3504,14 +3585,14 @@ export declare function runTestAgentBrowserCookieAssertionSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3519,6 +3600,8 @@ export declare function runTestAgentBrowserCookieAssertionSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3529,9 +3612,8 @@ export declare function runTestAgentBrowserCookieAssertionSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -3547,14 +3629,14 @@ export declare function runTestAgentPlaywrightDownloadArtifactSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3562,6 +3644,8 @@ export declare function runTestAgentPlaywrightDownloadArtifactSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3572,9 +3656,8 @@ export declare function runTestAgentPlaywrightDownloadArtifactSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -3591,14 +3674,14 @@ export declare function runTestAgentPlaywrightDownloadArtifactSelfTest(): Promis
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -3606,6 +3689,8 @@ export declare function runTestAgentPlaywrightDownloadArtifactSelfTest(): Promis
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -3616,9 +3701,8 @@ export declare function runTestAgentPlaywrightDownloadArtifactSelfTest(): Promis
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     downloadArtifact: import("./types-results").BrowserEvidenceArtifact;

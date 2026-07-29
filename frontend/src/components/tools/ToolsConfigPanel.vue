@@ -44,7 +44,7 @@ const skills = ref([])
 const customSkills = ref([]) // 本地物理加载的高级 Customization Skills
 const currentFilter = ref('overview')
 const toolStatus = ref({ mcp: [], skills: [], servers: [] })
-const authorizationInventory = ref({ summary: { totalScopes: 0, projects: 0, groups: 0, configuredScopes: 0, ready: 0, needsAttention: 0, requestedMcp: 0, requestedSkill: 0, missingMcpServers: 0, missingMcpTools: 0, missingSkills: 0, invalidMcpGrants: 0, scopesWithRuntime: 0, scopesWithoutRuntime: 0, runtimeSnapshots: 0, runtimeOverallReady: 0, runtimeDeliveryReady: 0, runtimeCliReady: 0, runtimeCatalogStale: 0, runtimeDispatchBlocked: 0, runtimeNeedsResync: 0 }, scopes: [] })
+const authorizationInventory = ref({ summary: { totalScopes: 0, globals: 0, projects: 0, groups: 0, configuredScopes: 0, ready: 0, needsAttention: 0, requestedMcp: 0, requestedSkill: 0, missingMcpServers: 0, missingMcpTools: 0, missingSkills: 0, invalidMcpGrants: 0, scopesWithRuntime: 0, scopesWithoutRuntime: 0, runtimeSnapshots: 0, runtimeOverallReady: 0, runtimeDeliveryReady: 0, runtimeCliReady: 0, runtimeCatalogStale: 0, runtimeDispatchBlocked: 0, runtimeNeedsResync: 0 }, scopes: [] })
 const authorizationInventoryLoading = ref(false)
 const runtimeReadiness = ref({ summary: { total: 0, ready: 0, deliveryReady: 0, runtimeReady: 0 }, readiness: [] })
 const runtimeReadinessLoading = ref(false)
@@ -472,7 +472,18 @@ const authorizationMissingTotal = (row) => {
     + Number(audit.invalid_mcp_grants || 0)
 }
 
-const authorizationScopeLabel = (scope) => scope === 'group' ? '群聊' : '项目'
+const authorizationScopeLabel = (scope) => scope === 'global' ? '全局' : scope === 'group' ? '群聊' : '项目'
+const authorizationAgentLabel = (agent) => ({
+  'global-main-agent': '全局主 Agent',
+  'group-main-agent': '群聊主 Agent',
+  'project-main-agent': '项目主 Agent',
+  'project-child-agent': '项目子 Agent'
+}[agent] || agent || 'Agent')
+const authorizationAgentModeLabel = (mode) => ({
+  'ccm-model-tools': 'CCM 模型工具',
+  'read-only-mcp-and-skill': '只读 MCP + Skill',
+  'native-and-proxy': '原生注册 + CCM 代理'
+}[mode] || mode || '-')
 const authorizationStatusLabel = (row) => row?.authorization_readiness?.dispatchReady === false ? '需处理' : '可派发'
 
 const authorizationMissingText = (row) => {
@@ -678,7 +689,7 @@ const chainVerificationStatusClass = (row) => ({
   auth: ['ready_not_observed', 'verification_incomplete'].includes(row?.status)
 })
 
-const chainVerificationScopeLabel = (row) => row?.scope === 'group' ? '群聊' : '项目'
+const chainVerificationScopeLabel = (row) => row?.scope === 'global' ? '全局' : row?.scope === 'group' ? '群聊' : '项目'
 
 const chainVerificationRuntimeText = (row) => {
   const summary = row?.runtime?.summary || {}
@@ -958,7 +969,7 @@ const marketplaceImpactActionLabel = (impactOrAction) => {
   return '预检'
 }
 
-const marketplaceImpactScopeLabel = (scope) => scope?.scope === 'group' ? '群聊' : '项目'
+const marketplaceImpactScopeLabel = (scope) => scope?.scope === 'global' ? '全局' : scope?.scope === 'group' ? '群聊' : '项目'
 
 const marketplaceImpactScopeGrants = (scope) => {
   const mcp = Array.isArray(scope?.grants?.mcp) ? scope.grants.mcp : []
@@ -1416,3 +1427,8 @@ onMounted(loadTools)
 <template src="./ToolsConfig.template.html"></template>
 
 <style scoped src="./ToolsConfig.css"></style>
+    if (scope === 'global') {
+      toast.info('请在全局助手中执行一次会调用已授权 MCP 或 Skill 的真实请求，完成后验收状态会根据审计证据更新。', 7000)
+      emit('navigate', { tab: 'global-agent' })
+      return
+    }

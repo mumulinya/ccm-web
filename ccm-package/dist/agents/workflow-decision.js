@@ -5,9 +5,9 @@ exports.normalizeWorkflowDecision = normalizeWorkflowDecision;
 exports.explicitWorkflowDecision = explicitWorkflowDecision;
 exports.decideWorkflowWithModel = decideWorkflowWithModel;
 exports.runWorkflowDecisionContractSelfTest = runWorkflowDecisionContractSelfTest;
-const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
+const semantic_decision_runtime_1 = require("../system/semantic-decision-runtime");
 exports.WORKFLOW_DECISION_GUIDANCE = `
 你必须根据用户完整语义和当前上下文选择工作流，不能按关键词、正则或句子长度机械匹配。
 
@@ -87,6 +87,9 @@ function normalizeWorkflowDecision(value, source = "model") {
         verificationModes: list(value?.verificationModes || value?.verification_modes, 6)
             .filter(mode => VERIFICATION_MODES.has(mode)),
         memoryPolicy: String(value?.memoryPolicy || value?.memory_policy || "use") === "ignore" ? "ignore" : "use",
+        sourcePolicy: String(value?.sourcePolicy || value?.source_policy || "require_read") === "ignore_unread"
+            ? "ignore_unread"
+            : "require_read",
         authorizationDirective: ["grant", "revoke"].includes(String(value?.authorizationDirective || value?.authorization_directive || ""))
             ? String(value?.authorizationDirective || value?.authorization_directive)
             : "preserve",
@@ -125,6 +128,7 @@ async function decideWorkflowWithModel(input) {
 - requiresIndependentReview 只有在风险、范围或验收要求需要独立复核者时才为 true。
 - verificationModes 根据目标选择 commands/http/browser/visual/integration/release；不需要验证时为空数组。
 - memoryPolicy 只有用户明确要求本轮不使用历史记忆时才为 ignore，否则为 use。
+- sourcePolicy 只有用户在已知资料未读取的情况下明确允许忽略这些资料并继续时才为 ignore_unread，否则必须为 require_read。
 - authorizationDirective 表示本轮是否明确授予或撤销已有执行授权；没有明确改变时必须为 preserve。
 - riskLevel 根据用户要求的实际操作选择 low/write/high；requiresUserConfirmation 只表示语义上需要确认，最终权限仍由服务端工具门禁决定。
 - 模型无法可靠判断时通过 clarificationQuestions 提问，不得用本地规则补选。
@@ -133,7 +137,7 @@ async function decideWorkflowWithModel(input) {
 ${internal_skill_catalog_1.CCM_INTERNAL_SKILL_CATALOG.map(item => `- ${item.name}: ${item.description}`).join("\n")}
 
 只输出合法 JSON：
-{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false}`,
+{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","sourcePolicy":"require_read|ignore_unread","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false}`,
         },
         {
             role: "user",
@@ -145,19 +149,23 @@ ${internal_skill_catalog_1.CCM_INTERNAL_SKILL_CATALOG.map(item => `- ${item.name
             }),
         },
     ];
-    const parsed = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
-        ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, {
-            messages,
-            maxTokens: 900,
-            defaultTimeoutMs: 45_000,
-            httpErrorPrefix: "工作流决策模型调用失败",
-        })
-        : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, {
-            messages,
-            defaultTimeoutMs: 45_000,
-            httpErrorPrefix: "工作流决策模型调用失败",
-        });
-    return normalizeWorkflowDecision(parsed, "model");
+    const context = input.context || {};
+    const scopeId = input.scope === "group"
+        ? String(context.group_id || context.groupId || "")
+        : input.scope === "project"
+            ? String(context.project || context.project_id || context.projectId || "")
+            : "global-agent";
+    const sessionId = String(context.session_id || context.sessionId || context.group_session_id || context.groupSessionId || context.project_session_id || context.projectSessionId || `${input.scope}:${scopeId || "default"}`);
+    const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
+        kind: "workflow",
+        identity: { scope: input.scope, scopeId: scopeId || `${input.scope}-agent`, sessionId },
+        system: String(messages[0].content || ""),
+        input: JSON.parse(String(messages[1].content || "{}")),
+        maxTokens: 900,
+        validate: value => normalizeWorkflowDecision(value, "model"),
+        confidence: value => value.confidence,
+    });
+    return { ...result.value, semanticDecisionReceipt: result.receipt };
 }
 function runWorkflowDecisionContractSelfTest() {
     const cases = [

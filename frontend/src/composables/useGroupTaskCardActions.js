@@ -34,6 +34,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
     openCodeChangeDrawer,
     openPipelineViewer,
     openTraceReplay,
+    openTestTargets,
     beginTaskInput,
     loadMessages,
   } = options
@@ -74,7 +75,20 @@ export function createGroupTaskCardActionHandler(options = {}) {
       }
       if (action.kind === 'view_pipeline' || action.kind === 'view_report') return openPipelineViewer?.(msg)
       if (action.kind === 'view_trace') {
-        openTraceReplay?.({ task_id: action.task_id || card?.task_id || id, trace_id: action.trace_id || card?.technical?.trace_id || '', scope: action.scope || 'orchestrator' })
+        openTraceReplay?.({
+          task_id: action.task_id || card?.task_id || id,
+          trace_id: action.trace_id || card?.technical?.trace_id || '',
+          scope: action.scope || 'orchestrator',
+          preset: action.preset || 'all',
+          event_status: action.event_status || action.eventStatus || '',
+          event_query: action.event_query || action.eventQuery || '',
+          event_id: action.event_id || action.eventId || '',
+          evidence_id: action.evidence_id || action.evidenceId || '',
+        })
+        return
+      }
+      if (action.kind === 'open_test_targets') {
+        await openTestTargets?.()
         return
       }
       if (action.kind === 'cancel') {

@@ -13,7 +13,7 @@ export declare function selectCollaborationTarget(input: {
     profiles?: Record<string, any>;
     openItems?: any[];
 }): {
-    targetName: any;
+    targetName: string;
     strategy: string;
     candidates: any;
 };
@@ -63,7 +63,7 @@ export declare function evaluateCollaborationTimeout(contract: any, now?: Date |
 export declare function runAgentCollaborationProtocolSelfTest(): {
     pass: boolean;
     checks: {
-        capabilityRouting: boolean;
+        automaticRoutingRequiresModel: boolean;
         taskAndExecutionBound: boolean;
         permissionDoesNotExpand: boolean;
         admissionPasses: boolean;
@@ -74,7 +74,7 @@ export declare function runAgentCollaborationProtocolSelfTest(): {
         sideEffectDetected: boolean;
     };
     route: {
-        targetName: any;
+        targetName: string;
         strategy: string;
         candidates: any;
     };

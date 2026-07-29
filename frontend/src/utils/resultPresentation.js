@@ -58,6 +58,13 @@ export const hasUserVisiblePlan = (source = {}) => {
 
 export const hasDeliveryEvidence = (source = {}) => {
   if (source.mission_id || source.missionId || source.supervisor_id || source.supervisorId) return true
+  // 后端监工完成时写入的是 final_delivery_report（结构化交付报告）；
+  // 只认带 schema 的结构化报告，不放宽到任意 final_report，避免问答/点歌误挂交付卡。
+  const finalDeliveryReport = source.final_delivery_report || source.finalDeliveryReport || null
+  if (String(finalDeliveryReport?.schema || '').startsWith('ccm-main-agent-delivery-report')) return true
+  // 声称"验收已通过"本身就是交付主张，必须挂交付卡接受计划对齐检查，不能降级成轻量气泡。
+  const finalReport = source.final_report || source.finalReport || null
+  if (finalReport && (finalReport.acceptance_gate_passed === true || finalReport.acceptanceGatePassed === true)) return true
   const delivery = source.delivery || source.delivery_report || source.deliveryReport || null
   if (asList(delivery?.files || delivery?.changes).length) return true
   if (asList(source.files_modified || source.filesModified).length) return true
@@ -106,12 +113,19 @@ export const classifyGlobalAgentRunPresentation = (run = {}, message = {}) => {
   }
 
   const toolCalls = Number(safeRun.tool_calls || safeRun.toolCalls || 0)
-  if (toolCalls === 0 && !tools.length) return PRESENTATION_REPLY
+  // 历史恢复的运行可能丢失 tool_calls 统计；带结构化交付报告的完成态不能被零工具短路成气泡。
+  if (toolCalls === 0 && !tools.length && !hasDeliveryEvidence(safeRun)) return PRESENTATION_REPLY
   // 轻量 UI/只读优先 reply，避免误挂 plan_mode 仍出「执行前计划」卡
   if (tools.length && tools.every(isLightReadOrUiTool)) return PRESENTATION_REPLY
   if (asList(safeRun.client_effects || safeRun.clientEffects).length && !hasDeliveryEvidence(safeRun)) return PRESENTATION_REPLY
 
-  if (hasUserVisiblePlan(safeRun) || hasUserVisiblePlan(safeMessage)) return PRESENTATION_PLAN
+  // 终态失败/取消必须给可读的交付回执卡（未完成原因/验收结论的友好兜底），不能只留一句气泡。
+  // 放在轻量工具短路之后：失败的点歌/纯问答仍走轻量气泡。
+  if (['failed', 'cancelled'].includes(status)) return PRESENTATION_DELIVERY
+
+  // 已有交付证据（结构化报告/验收主张）时优先交付档：计划档不渲染交付脚手架，
+  // 带 plan_mode 的完成态若降回计划档，结构化交付报告会整体丢失。
+  if ((hasUserVisiblePlan(safeRun) || hasUserVisiblePlan(safeMessage)) && !hasDeliveryEvidence(safeRun)) return PRESENTATION_PLAN
 
   // 保守：无写交付证据时按轻量气泡，避免点歌/问答挂满脚手架
   if (!hasDeliveryEvidence(safeRun)) return PRESENTATION_REPLY

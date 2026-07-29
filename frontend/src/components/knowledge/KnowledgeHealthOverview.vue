@@ -11,7 +11,13 @@ const props = defineProps({
 
 const emit = defineEmits(['rebuild', 'open-settings'])
 
-const semanticReady = computed(() => props.embedding?.enabled && props.embedding?.hasKey && props.embedding?.model)
+const semanticReady = computed(() => Number(props.status?.semanticReady || 0) > 0)
+const retrievalLabel = computed(() => {
+  if (semanticReady.value && Number(props.status?.remoteVectors || 0) > 0) return `外部语义 + 词面混合（${props.embedding?.model || 'Embedding'}）`
+  if (semanticReady.value && Number(props.status?.localVectors || 0) > 0) return '本地多语言语义 + 词面混合'
+  if (props.status?.localModel?.state === 'downloading') return '本地模型准备中，当前使用词面检索'
+  return '本地词面检索（无语义向量）'
+})
 const healthTone = computed(() => props.status?.state === 'failed' ? 'danger' : props.status?.parseFailures?.length ? 'warning' : 'ready')
 const healthTitle = computed(() => {
   if (props.status?.state === 'building') return '正在整理知识资料'
@@ -53,8 +59,8 @@ const formatTime = value => {
           <strong>{{ healthTitle }}</strong>
           <span v-if="status?.state === 'building'">已处理 {{ status.processedDocuments || 0 }}/{{ status.totalDocuments || 0 }} 份文档</span>
           <span v-else-if="status?.state === 'failed'">{{ status.error || '索引更新失败，请查看技术详情' }}</span>
-          <span v-else-if="!semanticReady">当前使用本地混合检索；配置向量模型后可提升语义匹配</span>
-          <span v-else>语义检索已启用，回答会附带可追溯来源</span>
+          <span v-else-if="!semanticReady">{{ status?.localModel?.state === 'downloading' ? `正在准备本地语义模型 ${Number(status.localModel.progress || 0).toFixed(0)}%` : '当前仅使用词面检索；准备本地模型后可进行语义召回' }}</span>
+          <span v-else>真实语义向量已可用，回答会附带可追溯来源</span>
         </div>
       </div>
 
@@ -72,8 +78,10 @@ const formatTime = value => {
         <div><dt>索引状态</dt><dd>{{ status?.state || 'idle' }}</dd></div>
         <div><dt>最后完成</dt><dd>{{ formatTime(status?.lastSuccessfulAt) }}</dd></div>
         <div><dt>缓存命中</dt><dd>{{ status?.cacheHits || 0 }} 份</dd></div>
-        <div><dt>检索引擎</dt><dd>{{ semanticReady ? `远程语义 + 本地混合（${embedding.model}）` : '本地混合检索（无需配置）' }}</dd></div>
-        <div><dt>语义向量</dt><dd>{{ status?.semanticReady || 0 }} 成功 / {{ status?.semanticFailed || 0 }} 失败</dd></div>
+        <div><dt>检索引擎</dt><dd>{{ retrievalLabel }}</dd></div>
+        <div><dt>语义向量</dt><dd>{{ status?.semanticReady || 0 }} 成功 / {{ status?.semanticFailed || 0 }} 失败 / {{ status?.semanticPending || 0 }} 等待</dd></div>
+        <div><dt>索引代次</dt><dd>{{ status?.activeGeneration || '尚未生成' }}</dd></div>
+        <div><dt>降级原因</dt><dd>{{ status?.fallbackReason || '无' }}</dd></div>
         <div><dt>解析失败</dt><dd>{{ status?.parseFailures?.length || 0 }} 份</dd></div>
       </dl>
       <div v-if="status?.parseFailures?.length" class="failure-list">

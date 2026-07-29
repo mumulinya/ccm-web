@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildTestAgentRunnerJobKey = buildTestAgentRunnerJobKey;
 exports.listTestAgentRunnerRecords = listTestAgentRunnerRecords;
 exports.upsertTestAgentRunnerRecordForSelfTest = upsertTestAgentRunnerRecordForSelfTest;
 exports.getTestAgentRunnerRecordForSelfTest = getTestAgentRunnerRecordForSelfTest;
@@ -56,6 +57,26 @@ const activeChildren = new Map();
 const purgedRunIds = new Set();
 function nowIso() {
     return new Date().toISOString();
+}
+function runtimeEnvironmentFingerprint(runtimeEnv) {
+    const entries = Object.entries(runtimeEnv || {})
+        .filter(([name]) => /^[A-Z_][A-Z0-9_]*$/.test(name))
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, value]) => [name, hash(String(value))]);
+    return entries.length ? hash(entries) : "";
+}
+function buildTestAgentRunnerJobKey(input, sourceFingerprint) {
+    const source = sourceFingerprint || captureTestAgentSourceBinding(input.handoff).fingerprint;
+    return hash({
+        mode: input.mode,
+        taskId: input.taskId || input.handoff?.taskId || input.handoff?.task_id || "",
+        groupId: input.groupId || input.handoff?.groupId || input.handoff?.group_id || "",
+        handoff: input.handoff,
+        source,
+        idempotencyKey: input.idempotencyKey || "",
+        attemptScope: String(input.attemptScope || ""),
+        runtimeEnvFingerprint: runtimeEnvironmentFingerprint(input.runtimeEnv),
+    });
 }
 function ensureDirs() {
     fs.mkdirSync(RUN_DIR, { recursive: true });
@@ -458,6 +479,8 @@ async function startJob(input, key) {
         cancelledReason: "",
         recoveredAfterRestart: false,
         sourceBefore,
+        attemptScope: String(input.attemptScope || ""),
+        runtimeEnvFingerprint: runtimeEnvironmentFingerprint(input.runtimeEnv),
     };
     saveRecord(record);
     const outFd = fs.openSync(stdoutPath, "w");
@@ -528,14 +551,7 @@ async function startJob(input, key) {
 }
 async function runTestAgentCliJob(input) {
     const source = captureTestAgentSourceBinding(input.handoff);
-    const key = hash({
-        mode: input.mode,
-        taskId: input.taskId || input.handoff?.taskId || input.handoff?.task_id || "",
-        groupId: input.groupId || input.handoff?.groupId || input.handoff?.group_id || "",
-        handoff: input.handoff,
-        source: source.fingerprint,
-        idempotencyKey: input.idempotencyKey || "",
-    });
+    const key = buildTestAgentRunnerJobKey(input, source.fingerprint);
     const active = activeByKey.get(key);
     if (active)
         return active;

@@ -168,6 +168,18 @@ function buildInventoryScopeRow(input) {
     const readiness = payload?.authorization_readiness || buildAuthorizationReadiness(payload?.tool_audit, tools);
     const missing = readiness?.missing || auditSummary(payload?.tool_audit);
     const runtime = buildInventoryRuntimeCoverage(input.scope, input.id, input.runtimeReadiness || []);
+    const mainAgentReady = readiness?.dispatchReady !== false;
+    const agentCoverage = input.scope === "global"
+        ? [{ agent: "global-main-agent", source: "global", mode: "ccm-model-tools", ready: mainAgentReady }]
+        : input.scope === "group"
+            ? [
+                { agent: "group-main-agent", source: "group", mode: "read-only-mcp-and-skill", ready: mainAgentReady },
+                { agent: "project-child-agent", source: "group+project+task-role-skills", mode: "native-and-proxy", ready: mainAgentReady && runtime.summary.needsResync === 0 },
+            ]
+            : [
+                { agent: "project-main-agent", source: "project", mode: "read-only-mcp-and-skill", ready: mainAgentReady },
+                { agent: "project-child-agent", source: "project+task-role-skills", mode: "native-and-proxy", ready: mainAgentReady && runtime.summary.needsResync === 0 },
+            ];
     return {
         schema: "ccm-tool-authorization-inventory-scope-v1",
         scope: input.scope,
@@ -185,6 +197,7 @@ function buildInventoryScopeRow(input) {
             invalid_mcp_grants: Number(readiness?.invalid_mcp_grants || 0),
         },
         authorization_readiness: readiness,
+        agent_coverage: agentCoverage,
         runtime,
     };
 }
@@ -236,6 +249,8 @@ function runtimeMatchesInventoryScope(scope, id, snapshot) {
     const scopeId = cleanInventoryText(id);
     if (!scopeId)
         return false;
+    if (scope === "global")
+        return false;
     if (scope === "group")
         return cleanInventoryText(snapshot?.groupId) === scopeId;
     return cleanInventoryText(snapshot?.projectName) === scopeId && !cleanInventoryText(snapshot?.groupId);
@@ -278,6 +293,17 @@ function buildToolAuthorizationInventory(input = {}) {
     const runtimeReadiness = Array.isArray(input.runtimeReadiness) ? input.runtimeReadiness : [];
     const buildPayload = typeof input.buildPayload === "function" ? input.buildPayload : buildToolAuthorizationPayload;
     const scopes = [];
+    if (input.globalAuthorization) {
+        const globalStore = safeInventoryObject(input.globalAuthorization);
+        scopes.push(buildInventoryScopeRow({
+            scope: "global",
+            id: "global-agent",
+            name: "全局 Agent",
+            tools: globalStore.tools || globalStore,
+            runtimeReadiness,
+            buildPayload,
+        }));
+    }
     for (const [projectId, config] of Object.entries(projects).sort(([a], [b]) => a.localeCompare(b))) {
         const row = safeInventoryObject(config);
         scopes.push(buildInventoryScopeRow({
@@ -307,6 +333,7 @@ function buildToolAuthorizationInventory(input = {}) {
         acc.totalScopes += 1;
         acc.projects += row.scope === "project" ? 1 : 0;
         acc.groups += row.scope === "group" ? 1 : 0;
+        acc.globals += row.scope === "global" ? 1 : 0;
         acc.configuredScopes += row.counts.mcp || row.counts.skill ? 1 : 0;
         acc.emptyScopes += row.counts.mcp || row.counts.skill ? 0 : 1;
         acc.ready += readiness.dispatchReady !== false ? 1 : 0;
@@ -323,6 +350,7 @@ function buildToolAuthorizationInventory(input = {}) {
         totalScopes: 0,
         projects: 0,
         groups: 0,
+        globals: 0,
         configuredScopes: 0,
         emptyScopes: 0,
         ready: 0,
@@ -345,8 +373,8 @@ function buildToolAuthorizationInventory(input = {}) {
     });
     summary.scopesWithoutRuntime = Math.max(0, summary.totalScopes - summary.scopesWithRuntime);
     const runtimeSeen = new Set();
-    const uniqueRuntimeSnapshots = runtimeReadiness
-        .map(sanitizeInventoryRuntimeSnapshot)
+    const uniqueRuntimeSnapshots = scopes
+        .flatMap((scope) => Array.isArray(scope?.runtime?.snapshots) ? scope.runtime.snapshots : [])
         .sort((left, right) => String(right.snapshotGeneratedAt || right.checkedAt || "").localeCompare(String(left.snapshotGeneratedAt || left.checkedAt || "")))
         .filter(snapshot => {
         const key = inventorySnapshotKey(snapshot);

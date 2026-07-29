@@ -17,7 +17,6 @@ exports.buildDailyDevAgentDiagnostics = buildDailyDevAgentDiagnostics;
 const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
-const agent_receipts_1 = require("./agent-receipts");
 const storage_1 = require("./storage");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const runtime_1 = require("../../agents/runtime");
@@ -108,7 +107,7 @@ function getAgentProbeOutputFailure(output) {
             error: "empty_output",
         };
     }
-    if ((0, agent_receipts_1.checkTaskFailure)(text) || /Agent Runner 错误|Agent 错误|响应超时|ConnectionRefused|Unable to connect to API|ECONNREFUSED/i.test(text)) {
+    if (/Agent Runner 错误|Agent 错误|响应超时|ConnectionRefused|Unable to connect to API|ECONNREFUSED/i.test(text)) {
         return {
             message: `Agent CLI 探针失败：${(0, memory_1.compactMemoryText)(text, 500)}`,
             error: (0, memory_1.compactMemoryText)(text, 1000),

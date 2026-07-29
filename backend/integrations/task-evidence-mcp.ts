@@ -8,6 +8,7 @@ import {
 } from "./internal-mcp-runtime";
 import { getBoundInternalMcpTask, readInternalMcpTaskJournal } from "./internal-mcp-task-store";
 import { internalMcpTestEvidence } from "./internal-mcp-test-store";
+import { readInternalMcpTestEvidenceContent } from "./internal-mcp-test-evidence";
 
 export const TASK_EVIDENCE_MCP_SERVER_NAME = "ccm__task_evidence";
 
@@ -19,6 +20,7 @@ const tools: InternalMcpToolDefinition[] = [
   { name: "get_task_timeline", description: "读取当前绑定任务可回放的主 Agent 派发、子 Agent 执行、测试、返工、验收和完成时间线。", inputSchema: { type: "object", properties: { stage: { type: "string" }, status: { type: "string" }, search: { type: "string" }, limit: { type: "number", minimum: 1, maximum: 500 } }, additionalProperties: false } },
   { name: "get_code_changes", description: "读取当前任务已持久化的代码变更文件、行数统计和可用的历史逐行 diff。", inputSchema: { type: "object", properties: { project: { type: "string" }, include_diff: { type: "boolean" } }, additionalProperties: false } },
   { name: "list_test_evidence", description: "列出当前任务 TestAgent 的报告、截图、浏览器、接口和命令证据及保留状态。", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "get_test_evidence", description: "按证据目录中的 run_id 与 artifact_id 读取当前任务截图或文本证据。", inputSchema: { type: "object", properties: { run_id: { type: "string" }, artifact_id: { type: "string" } }, required: ["run_id", "artifact_id"], additionalProperties: false } },
   { name: "get_delivery_receipts", description: "读取项目子 Agent 交付候选、验证记录、分支合并记录和 TestAgent 结论，供主 Agent 验收或子 Agent自查。", inputSchema: { type: "object", properties: { project: { type: "string" }, limit: { type: "number", minimum: 1, maximum: 200 } }, additionalProperties: false } },
 ];
 
@@ -53,6 +55,7 @@ function callTool(context: InternalMcpTaskContext, name: string, args: any) {
     return { success: true, task_id: context.taskId, change_groups: changes, file_count: changes.reduce((sum: number, item: any) => sum + Number(item.file_count || 0), 0) };
   }
   if (name === "list_test_evidence") return { success: true, task_id: context.taskId, runs: internalMcpTestEvidence(context.taskId) };
+  if (name === "get_test_evidence") return readInternalMcpTestEvidenceContent(context.taskId, args);
   if (name === "get_delivery_receipts") {
     const project = String(args?.project || "").trim();
     const limit = Math.max(1, Math.min(200, Number(args?.limit || 80)));

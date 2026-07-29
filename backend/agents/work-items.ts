@@ -154,7 +154,7 @@ function normalizeWorkItem(raw: any = {}, context: any = {}): MainAgentWorkItem 
     blockedBy: normalizeRefList(raw.blockedBy || raw.blocked_by || raw.dependsOn || raw.depends_on || raw.depends || []),
     attempt: Math.max(1, Number(raw.attempt || raw.retry_count || 1) || 1),
     source: compactText(raw.source || context.source || "main-agent", 80),
-    createdAt: String(raw.createdAt || raw.created_at || now),
+    createdAt: String(raw.createdAt || raw.created_at || raw.timestamp || now),
     updatedAt: String(raw.updatedAt || raw.updated_at || now),
     startedAt: String(raw.startedAt || raw.started_at || ""),
     completedAt: String(raw.completedAt || raw.completed_at || ""),
@@ -168,7 +168,7 @@ function normalizeWorkItem(raw: any = {}, context: any = {}): MainAgentWorkItem 
   };
 }
 
-function assignmentToWorkItem(assignment: any, task: any, index: number): MainAgentWorkItem {
+function assignmentToWorkItem(assignment: any, task: any, index: number, now?: string): MainAgentWorkItem {
   return normalizeWorkItem({
     ...assignment,
     source: assignment.source || "assignment_evidence",
@@ -181,10 +181,11 @@ function assignmentToWorkItem(assignment: any, task: any, index: number): MainAg
     scopeId: task.group_id || task.global_mission_id || task.id,
     index,
     source: "assignment_evidence",
+    now,
   });
 }
 
-function missionTargetToWorkItem(target: any, task: any, index: number): MainAgentWorkItem {
+function missionTargetToWorkItem(target: any, task: any, index: number, now?: string): MainAgentWorkItem {
   return normalizeWorkItem({
     source: "mission_plan",
     subject: target.task || target.reason || task.business_goal || task.title,
@@ -198,10 +199,11 @@ function missionTargetToWorkItem(target: any, task: any, index: number): MainAge
     scopeId: task.group_id || task.global_mission_id || task.id,
     index,
     source: "mission_plan",
+    now,
   });
 }
 
-function fallbackTaskWorkItem(task: any): MainAgentWorkItem | null {
+function fallbackTaskWorkItem(task: any, now?: string): MainAgentWorkItem | null {
   const target = task.target_project || task.mission_target?.name || task.mission_target?.project || "";
   const executable = !!target || ["daily_dev", "project_task"].includes(String(task.workflow_type || ""));
   if (!executable) return null;
@@ -217,6 +219,7 @@ function fallbackTaskWorkItem(task: any): MainAgentWorkItem | null {
     scopeId: task.group_id || task.global_mission_id || task.id,
     index: 0,
     source: "task_target",
+    now,
   });
 }
 
@@ -412,17 +415,17 @@ export function buildMainAgentWorkItems(task: any = {}, options: { executions?: 
       : [];
   const explicitItems = explicit.map((item: any, index: number) => normalizeWorkItem(item, { taskId: task.id, scopeId: task.group_id || task.global_mission_id || task.id, index, now, source: item.source || "task_work_items" }));
   const derivedItems = [
-    ...assignments.map((assignment: any, index: number) => assignmentToWorkItem(assignment, task, index)),
-    ...(!assignments.length ? missionTargets.map((target: any, index: number) => missionTargetToWorkItem(target, task, index)) : []),
+    ...assignments.map((assignment: any, index: number) => assignmentToWorkItem(assignment, task, index, now)),
+    ...(!assignments.length ? missionTargets.map((target: any, index: number) => missionTargetToWorkItem(target, task, index, now)) : []),
     ...(!assignments.length && !missionTargets.length
       ? rehearsalPlan.map((assignment: any, index: number) => assignmentToWorkItem({
           ...assignment,
           source: assignment.source || "sandbox_rehearsal_plan",
           targetName: assignment.targetName || assignment.project,
-        }, task, index))
+        }, task, index, now))
       : []),
   ];
-  const fallback = !derivedItems.length ? fallbackTaskWorkItem(task) : null;
+  const fallback = !derivedItems.length ? fallbackTaskWorkItem(task, now) : null;
   const filteredExplicit = derivedItems.length
     ? explicitItems.filter(item => item.source !== "task_target")
     : explicitItems;

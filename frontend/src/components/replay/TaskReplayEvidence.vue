@@ -6,7 +6,7 @@ const emit = defineEmits(['open-code-changes'])
 const openGroups = ref(new Set(['test', 'code']))
 const groups = computed(() => {
   const rows = [
-    { id: 'test', title: 'TestAgent 真实验证', items: props.evidence.filter(item => !['code_changes', 'verification'].includes(item.type)) },
+    { id: 'test', title: 'TestAgent（独立验收）材料', items: props.evidence.filter(item => !['code_changes', 'verification'].includes(item.type)) },
     { id: 'code', title: '代码与命令记录', items: props.evidence.filter(item => ['code_changes', 'verification'].includes(item.type)) },
   ]
   return rows.filter(row => row.items.length)

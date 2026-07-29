@@ -32,6 +32,7 @@ import {
   rescanProjectRuntimeProfiles,
   saveProjectDisplayName,
   saveProjectRuntimeConfig,
+  stopAllProjectRuntimes,
   stopManagedProjectRuntimesForShutdown,
   subscribeProjectRuntimeLogs,
   testProjectJavaToolchain,
@@ -592,7 +593,19 @@ function stopProject(projectName: string, explicit = true) {
     fs.mkdirSync(FEISHU_CHANNEL_MANIFEST_DIR, { recursive: true });
     fs.writeFileSync(channelDisabledFile(`project-${projectName}`), `${new Date().toISOString()}\n`, "utf-8");
   }
-  return { success: true, running: false, process_owned: owned, message: pid ? (owned ? "项目 Agent 通道已断开" : "项目 Agent PID 已失效，未终止无法证明归属的进程") : "项目 Agent 通道未运行" };
+  const runtimeStop = explicit ? stopAllProjectRuntimes(projectName) : null;
+  const channelMessage = pid ? (owned ? "项目 Agent 通道已断开" : "项目 Agent PID 已失效，未终止无法证明归属的进程") : "项目 Agent 通道未运行";
+  const runtimeMessage = runtimeStop
+    ? `；已停止 ${runtimeStop.stoppedProcesses} 个源码运行进程${runtimeStop.stoppedBuilds ? `和 ${runtimeStop.stoppedBuilds} 个构建任务` : ""}`
+    : "";
+  return {
+    success: runtimeStop?.success !== false,
+    running: false,
+    process_owned: owned,
+    runtime_stop: runtimeStop,
+    error: runtimeStop?.failures?.length ? `项目通道已断开，但有 ${runtimeStop.failures.length} 个源码进程无法证明归属，未强制终止` : undefined,
+    message: `${channelMessage}${runtimeMessage}`,
+  };
 }
 
 export { startProject, stopProject };
@@ -888,6 +901,9 @@ export function handleProjectsApi(
       const project = String(parsed.query?.project || "");
       const profileId = String(parsed.query?.profile_id || "");
       const kind = String(parsed.query?.kind || "run");
+      // Validate the exact binding before opening the SSE response. Otherwise a
+      // stale profile produces a silent reconnect loop with no readable error.
+      getProjectRuntimeLogs(project, profileId, kind, 1);
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
@@ -895,7 +911,9 @@ export function handleProjectsApi(
         "X-Accel-Buffering": "no",
       });
       res.flushHeaders?.();
-      const send = (event: any) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+      const send = (event: any) => {
+        if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
       let ready = false;
       const pending: any[] = [];
       const unsubscribe = subscribeProjectRuntimeLogs(project, profileId, kind, event => {

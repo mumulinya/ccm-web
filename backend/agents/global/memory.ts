@@ -4,7 +4,7 @@ import * as path from "path";
 import { buildContextBudget, estimateTextTokens, microCompactText } from "../../system/context-budget";
 import {
   calculateSessionMemoryKeepWindow,
-  peelOldestCompleteConversationRound,
+  peelOldestApiConversationRound,
   SESSION_MEMORY_MAX_KEEP_TOKENS,
   SESSION_MEMORY_MIN_KEEP_TOKENS,
   SESSION_MEMORY_MIN_TEXT_MESSAGES,
@@ -34,6 +34,19 @@ import {
   scheduleSessionMemoryExtraction,
   sessionCompactionChecksum,
 } from "../../system/session-compaction-core";
+import {
+  createSessionExecutionEvent,
+  eventsAnchoredToMessages,
+  findPendingToolCallId,
+  mergeConversationWithExecution,
+  normalizeSessionExecutionEvents,
+  type SessionExecutionEvent,
+} from "../../system/session-execution-ledger";
+import { ccDurableMemoryTaxonomyReceipt } from "../../system/durable-memory-taxonomy";
+import { buildUnifiedSessionModelContextProjection, resolveSessionModelMicroCompactPolicy } from "../../system/session-model-context";
+import { evaluateSessionSummaryQuality } from "../../system/session-summary-quality-gate";
+import { reviewSessionSummaryIfSelected } from "../../system/session-summary-secondary-review";
+import { MemorySemanticExtractionV1, runSemanticDecision } from "../../system/semantic-decision-runtime";
 
 export type GlobalMemoryItemType = "user" | "feedback" | "authorization" | "decisions" | "missions" | "unresolved" | "references";
 
@@ -56,6 +69,12 @@ export interface GlobalMemoryItem {
     timestamp?: string;
   };
   expiresAt?: string;
+  ccMemoryType?: "user" | "feedback" | "project" | "reference";
+  taxonomy?: any;
+  extractionSource?: "model_semantic" | "structured_event" | "manual" | "legacy_unverified";
+  evidenceMessageIds?: string[];
+  semanticStatus?: "confirmed" | "legacy_unverified";
+  semanticDecisionReceipt?: any;
 }
 
 const MEMORY_DIR = process.env.CCM_GLOBAL_AGENT_MEMORY_DIR || path.join(CCM_DIR, "global-agent-memory");
@@ -78,6 +97,7 @@ const globalModelCompactions = new Map<string, {
   reason: string;
   startedAt: string;
 }>();
+const globalLongTermExtractions = new Map<string, Promise<any>>();
 
 export function getGlobalAgentSessionCompactionActivity(sessionId: string) {
   const exactSessionId = String(sessionId || "").trim();
@@ -471,7 +491,9 @@ function decryptJson(value: any) {
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(value.data, "base64")), decipher.final()]).toString("utf-8"));
 }
 
-function transcriptFile(sessionId: string) { return path.join(TRANSCRIPT_DIR, `${cleanId(sessionId)}-${sha(String(sessionId || "default"), 12)}.enc.json`); }
+export function getGlobalAgentTranscriptFile(sessionId: string) { return path.join(TRANSCRIPT_DIR, `${cleanId(sessionId)}-${sha(String(sessionId || "default"), 12)}.enc.json`); }
+
+function transcriptFile(sessionId: string) { return getGlobalAgentTranscriptFile(sessionId); }
 
 function pathInside(parent: string, child: string) {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
@@ -492,16 +514,54 @@ export function loadGlobalAgentTranscript(sessionId: string) {
     try {
       if (!fs.existsSync(candidate)) continue;
       const transcript = decryptJson(readJson(candidate, null));
-      return { version: 1, sessionId, source: transcript.source || "global-agent", messages: Array.isArray(transcript.messages) ? transcript.messages : [], updatedAt: transcript.updatedAt || "", storageRecovery: candidate.endsWith(".bak") ? { recoveredFromBackup: true, recoveredAt: now() } : null };
+      return { version: 2, sessionId, source: transcript.source || "global-agent", messages: Array.isArray(transcript.messages) ? transcript.messages : [], executionMessages: normalizeSessionExecutionEvents(transcript.executionMessages || transcript.execution_messages), updatedAt: transcript.updatedAt || "", storageRecovery: candidate.endsWith(".bak") ? { recoveredFromBackup: true, recoveredAt: now() } : null };
     } catch {}
   }
-  return { version: 1, sessionId, source: "global-agent", messages: [], updatedAt: "", storageRecovery: null };
+  return { version: 2, sessionId, source: "global-agent", messages: [], executionMessages: [] as SessionExecutionEvent[], updatedAt: "", storageRecovery: null };
 }
 
 function saveTranscript(transcript: any) {
   const file = transcriptFile(transcript.sessionId);
   writeAtomic(file, encryptJson(transcript));
   return file;
+}
+
+function globalExecutionForMessages(transcript: any, messages: any[]) {
+  return eventsAnchoredToMessages(normalizeSessionExecutionEvents(transcript.executionMessages), messages);
+}
+
+export function appendGlobalAgentExecutionEvent(sessionIdInput: string, event: any) {
+  const sessionId = String(sessionIdInput || "").trim();
+  if (!sessionId) return null;
+  const transcript = loadGlobalAgentTranscript(sessionId);
+  const events = normalizeSessionExecutionEvents(transcript.executionMessages);
+  const eventType = String(event?.type || "");
+  const type = eventType === "tool_started" ? "tool_use" : "tool_result";
+  if (!["tool_started", "tool_completed", "tool_failed", "clarification_required"].includes(eventType)) return null;
+  const toolName = String(event?.tool || event?.toolName || "tool");
+  const runId = String(event?.runId || event?.run_id || "");
+  const toolCallId = type === "tool_result"
+    ? (String(event?.toolCallId || event?.tool_call_id || "") || findPendingToolCallId(events, runId, toolName))
+    : String(event?.toolCallId || event?.tool_call_id || "");
+  const anchor = [...transcript.messages].reverse().find((message: any) => message?.role === "user") || transcript.messages.at(-1) || null;
+  const created = createSessionExecutionEvent({
+    type,
+    toolName,
+    toolCallId,
+    runId,
+    traceId: String(event?.traceId || event?.trace_id || ""),
+    anchorMessageId: String(event?.anchorMessageId || event?.anchor_message_id || anchor?.id || ""),
+    status: ["tool_failed", "clarification_required"].includes(eventType) ? "error" : type === "tool_use" ? "running" : "ok",
+    timestamp: event?.timestamp || event?.at || now(),
+    payload: type === "tool_use"
+      ? { arguments: event?.arguments || {}, risk: event?.risk || "", confirmed: event?.confirmed === true }
+      : { observation: event?.observation ?? null, error: event?.error || event?.question || "", duration_ms: event?.duration_ms || 0, confirmed: event?.confirmed === true },
+  });
+  if (!events.some(item => item.id === created.id)) events.push(created);
+  transcript.executionMessages = events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  transcript.updatedAt = now();
+  saveTranscript(transcript);
+  return created;
 }
 
 function emptyMemory() {
@@ -637,6 +697,7 @@ export function recordGlobalAgentSessionProviderUsage(sessionId: string, input: 
   const anchorMessageId = String(input.anchorMessageId || input.anchor_message_id || "");
   const anchorIndex = anchorMessageId ? unsummarized.findIndex((message: any) => String(message?.id || "") === anchorMessageId) : -1;
   const visibleMessages = anchorIndex >= 0 ? unsummarized.slice(0, anchorIndex) : unsummarized;
+  const modelVisibleMessages = mergeConversationWithExecution(visibleMessages, globalExecutionForMessages(transcript, visibleMessages));
   const currentRequest = dedupeGlobalPendingRequest(visibleMessages, input.currentRequest || input.current_request);
   const config = loadOrchestratorConfig();
   const suppliedPayload = input.modelVisiblePayload || input.model_visible_payload || null;
@@ -646,7 +707,7 @@ export function recordGlobalAgentSessionProviderUsage(sessionId: string, input: 
     system: globalFixedContext(memory, config, { fixedContext: input.fixedContext || input.fixed_context }),
     tools: input.tools || null,
     activeSummary: state.activeSummary || null,
-    recentMessages: visibleMessages,
+    recentMessages: modelVisibleMessages,
     currentRequest,
     recoveryContext: input.recoveryContext || input.recovery_context || null,
     hookResults: input.hookResults || input.hook_results || [],
@@ -667,7 +728,7 @@ export function recordGlobalAgentSessionProviderUsage(sessionId: string, input: 
   const tokenMeasurement = measureSessionContextTokens({
     scope: "global",
     sessionId: exactSessionId,
-    messages: visibleMessages,
+    messages: modelVisibleMessages,
     activeSummary: state.activeSummary,
     latestProviderUsage: measurementUsage,
     provider: String(measurementUsage?.provider || ""),
@@ -730,6 +791,11 @@ function candidate(type: GlobalMemoryItemType, text: string, message: any, sessi
   const normalized = compact(text.replace(/\s+/g, " "), 1800);
   if (shouldRejectCandidate(normalized)) return null;
   const createdAt = message.timestamp || now();
+  const taxonomy = ccDurableMemoryTaxonomyReceipt(type, {
+    content: normalized,
+    accepted: true,
+    sourceKind: "confirmed_user_message",
+  });
   return {
     id: `gmi_${sha([type, normalized.toLowerCase()], 24)}`,
     type,
@@ -740,44 +806,38 @@ function candidate(type: GlobalMemoryItemType, text: string, message: any, sessi
     confidence: Math.max(0, Math.min(1, Number(options.confidence ?? .82))),
     createdAt,
     updatedAt: createdAt,
-    source: { sessionId, messageIds: [message.id], source: message.source || "global-agent", timestamp: createdAt, traceId: message.traceId || "", missionId: message.missionId || "" },
+    source: {
+      sessionId,
+      messageIds: [...new Set([message.id, ...(Array.isArray(options.evidenceMessageIds) ? options.evidenceMessageIds : [])].map(String).filter(Boolean))].slice(0, 40),
+      source: message.source || "global-agent",
+      timestamp: createdAt,
+      traceId: message.traceId || "",
+      missionId: message.missionId || "",
+    },
     expiresAt: options.expiresAt,
+    ccMemoryType: taxonomy.type,
+    taxonomy,
+    extractionSource: options.extractionSource || "legacy_unverified",
+    evidenceMessageIds: Array.isArray(options.evidenceMessageIds) ? options.evidenceMessageIds.map(String).filter(Boolean).slice(0, 40) : [],
+    semanticStatus: options.semanticStatus || (options.extractionSource === "model_semantic" || options.extractionSource === "structured_event" || options.extractionSource === "manual" ? "confirmed" : "legacy_unverified"),
+    semanticDecisionReceipt: options.semanticDecisionReceipt || null,
   };
 }
 
 export function extractGlobalMemoryCandidates(messages: any[], sessionId: string) {
-  const result: GlobalMemoryItem[] = [];
-  let rejected = 0;
-  const push = (item: GlobalMemoryItem | null) => item ? result.push(item) : rejected += 1;
-  for (const raw of messages) {
-    const message = normalizeMessage(raw, sessionId, raw.source || "global-agent");
-    const text = message.content.trim();
-    if (!text || containsSensitiveData(text)) { if (text) rejected += 1; continue; }
-    if (message.role === "user") {
-      const durableAuthorization = /(?:以后|默认|每次|始终|一律|长期|没有明确授权)|(?:全局\s*Agent).{0,50}(?:不要|不允许|必须确认|先确认|可以直接|不用确认)/i.test(text)
-        && /(?:没有明确授权|不要|不允许|必须确认|先确认|可以直接|不用确认).{0,60}(?:操作|修改|删除|派发|执行|项目|任务|写入)/.test(text)
-        && !/[?？]/.test(text);
-      const isQuestionOrOneShot = /[?？]/.test(text)
-        || /(?:这次|本次|当前|现在|临时).{0,24}(?:只|仅|不要|无需|先别)/.test(text)
-        || /(?:只|仅)(?:需|需要|要)?(?:说明|回答|分析|查看|检查)|不要执行任何操作/.test(text);
-      if (/(?:我是|我负责|我的职责|我主要做|我以后(?:要|会)使用|我熟悉|我不熟悉)/.test(text)) {
-        push(candidate("user", text, message, sessionId, { importance: 72, why: "用于跨会话适配用户背景与工作方式", howToApply: "只在与当前问题相关时使用，不推断用户未明确表达的属性" }));
-      }
-      if (!durableAuthorization && !isQuestionOrOneShot && /(?:以后|默认|每次|总是|不要再|我希望|我更喜欢|我的偏好|就按这种方式)|(?:全局\s*Agent).{0,40}(?:必须|务必|优先|不要)|(?:必须|务必|优先).{0,40}(?:全局\s*Agent|回答方式|操作前|派发前|先确认)/i.test(text)) {
-        push(candidate("feedback", text, message, sessionId, { importance: 86, why: "用户给出了可跨会话复用的工作方式或纠正", howToApply: "后续执行前检查是否仍适用；与当前明确指令冲突时以当前指令为准" }));
-      }
-      if (durableAuthorization) {
-        push(candidate("authorization", text, message, sessionId, { importance: 96, confidence: .94, why: "约束全局 Agent 的操作授权边界", howToApply: "任何写操作决策前检查；高风险操作仍须当前确认" }));
-      }
-      if (/(?:以这个为目标|就按照这个实现|决定|目标是|下一步目标|优先实现)/.test(text)) {
-        push(candidate("decisions", text, message, sessionId, { importance: 82, why: "记录跨会话仍可能影响工作的全局目标或决策", howToApply: "先与当前任务和真实系统状态核对，再用于规划" }));
-      }
-      if (/(?:源码|文档|资料|配置|知识库).{0,30}(?:在|路径|地址)|(?:[A-Za-z]:\\|https?:\/\/)/.test(text)) {
-        push(candidate("references", text, message, sessionId, { importance: 68, why: "保存外部资源定位信息", howToApply: "使用前验证路径或资源仍存在" }));
-      }
-    }
-  }
-  return { candidates: result, rejected };
+  const sourceIds = new Set(messages.map(message => String(message?.id || "")).filter(Boolean));
+  const memory = loadGlobalAgentMemory();
+  const candidates = MEMORY_ITEM_KEYS.flatMap(key => Array.isArray(memory[key]) ? memory[key] : [])
+    .filter((item: any) => item?.semanticStatus === "confirmed")
+    .filter((item: any) => String(item?.source?.sessionId || "") === String(sessionId || ""))
+    .filter((item: any) => {
+      const evidenceIds = [
+        ...(Array.isArray(item?.evidenceMessageIds) ? item.evidenceMessageIds : []),
+        ...(Array.isArray(item?.source?.messageIds) ? item.source.messageIds : []),
+      ].map(String).filter(Boolean);
+      return evidenceIds.some(id => sourceIds.has(id));
+    }) as GlobalMemoryItem[];
+  return { candidates, rejected: 0, mode: "confirmed_semantic_facts" };
 }
 
 function upsertItems(memory: any, items: GlobalMemoryItem[]) {
@@ -796,6 +856,10 @@ function upsertItems(memory: any, items: GlobalMemoryItem[]) {
         importance: Math.max(Number(list[index].importance || 0), item.importance),
         confidence: Math.max(Number(list[index].confidence || 0), item.confidence),
         source: { ...list[index].source, messageIds: [...new Set([...(list[index].source?.messageIds || []), ...(item.source.messageIds || [])])].slice(-20) },
+        extractionSource: item.extractionSource || list[index].extractionSource,
+        evidenceMessageIds: [...new Set([...(list[index].evidenceMessageIds || []), ...(item.evidenceMessageIds || [])])].slice(-40),
+        semanticStatus: item.semanticStatus || list[index].semanticStatus,
+        semanticDecisionReceipt: item.semanticDecisionReceipt || list[index].semanticDecisionReceipt || null,
       };
     } else { list.push(item); created += 1; }
     const controlled = applyMemoryControls("global" as any, "global-agent", { ...memory, [item.type]: list })?.[item.type] || [];
@@ -808,16 +872,20 @@ function upsertItems(memory: any, items: GlobalMemoryItem[]) {
 }
 
 function buildSegmentSummary(messages: any[], candidates: GlobalMemoryItem[]) {
-  const users = messages.filter(item => item.role === "user");
-  const assistant = messages.filter(item => item.role === "assistant");
-  const errors = messages.filter(item => /(?:错误|失败|异常|阻塞|超时|error|failed|timeout)/i.test(item.content)).slice(-8);
+  const users = messages.filter(item => item.role === "user" && item.hidden_execution !== true);
+  const assistant = messages.filter(item => item.role === "assistant" && item.hidden_execution !== true);
+  const executionResults = messages.filter(item => item.type === "tool_result" || (item.hidden_execution === true && item.role === "user"));
+  const errors = messages.filter(item => item?.structuredStatus === "failed" || item?.structuredStatus === "blocked").slice(-8);
   const paths = [...new Set(messages.flatMap(item => String(item.content || "").match(/(?:[A-Za-z]:\\[^\s"'<>|]+|\/?(?:[\w.-]+\/){1,8}[\w.-]+\.[A-Za-z0-9]{1,8})/g) || []))].slice(-30);
   const missionIds = [...new Set(messages.flatMap(item => [item.missionId, ...(String(item.content || "").match(/\b(?:mission|mq)[-_a-z0-9]{6,}\b/gi) || [])]).filter(Boolean))].slice(-20);
   const byType = (type: GlobalMemoryItemType) => candidates.filter(item => item.type === type).map(item => item.text).slice(-8);
   return {
     primaryRequest: compact(users.at(-1)?.content || "", 1200),
     userRequests: users.slice(-12).map(item => `#${item.id} ${compact(item.content, 700)}`),
-    keyOutcomes: assistant.slice(-10).map(item => `#${item.id} ${compact(item.content, 700)}`),
+    keyOutcomes: [
+      ...assistant.slice(-10).map(item => `#${item.id} ${compact(item.content, 700)}`),
+      ...executionResults.slice(-12).map(item => `#${item.id} ${compact(item.content, 900)}`),
+    ].slice(-20),
     userAnchors: byType("user"),
     feedback: byType("feedback"),
     authorization: byType("authorization"),
@@ -900,7 +968,7 @@ function normalizeGlobalModelSummary(value: any, sourceMessageIds: string[]) {
   };
 }
 
-function validateGlobalModelSummary(summary: any, reference: any, sourceMessageIds: string[]) {
+function validateGlobalModelSummary(summary: any, reference: any, sourceMessageIds: string[], context: { sessionId?: string; sourceMessages?: any[]; previousSummary?: any } = {}) {
   const issues: string[] = [];
   if (!summary || typeof summary !== "object" || Array.isArray(summary)) issues.push("summary_not_object");
   if (sourceMessageIds.length && !String(summary?.primaryRequest || summary?.latestOutcome || "").trim()) issues.push("summary_core_empty");
@@ -910,7 +978,17 @@ function validateGlobalModelSummary(summary: any, reference: any, sourceMessageI
     const preserved = (Array.isArray(summary?.[key]) ? summary[key] : []).map(String);
     for (const anchor of reference?.[key] || []) if (!preserved.includes(String(anchor))) issues.push(`${key}_anchor_missing`);
   }
-  return { valid: issues.length === 0, issues: [...new Set(issues)] };
+  const quality = evaluateSessionSummaryQuality({
+    scope: "global",
+    sessionId: String(context.sessionId || "global-session"),
+    summary,
+    reference,
+    previousSummary: context.previousSummary,
+    sourceMessages: context.sourceMessages,
+    sourceMessageIds,
+  });
+  issues.push(...quality.issues);
+  return { valid: issues.length === 0, issues: [...new Set(issues)], quality };
 }
 
 function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSessionCompactionOptions = {}) {
@@ -926,6 +1004,8 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
   }
   const floorIndex = state.lastCompactedIndex + 1;
   const unsummarized = transcript.messages.slice(floorIndex);
+  const unsummarizedExecution = globalExecutionForMessages(transcript, unsummarized);
+  const unsummarizedModelTimeline = mergeConversationWithExecution(unsummarized, unsummarizedExecution);
   const config = loadOrchestratorConfig();
   const modelCapacity = resolveGroupModelContextCapacity(config);
   const threshold = getGroupAutoCompactThreshold(config);
@@ -935,7 +1015,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
     system: globalFixedContext(memory, config, options),
     tools: options.tools || null,
     activeSummary: canonicalSummary,
-    recentMessages: unsummarized,
+    recentMessages: unsummarizedModelTimeline,
     currentRequest: options.currentRequest || null,
     recoveryContext: options.recoveryContext || null,
     hookResults: [],
@@ -944,7 +1024,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
   const tokenMeasurement = measureSessionContextTokens({
     scope: "global",
     sessionId,
-    messages: unsummarized,
+    messages: unsummarizedModelTimeline,
     activeSummary: canonicalSummary,
     latestProviderUsage: state.latestProviderUsage,
     provider: String(state.latestProviderUsage?.provider || ""),
@@ -968,30 +1048,37 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
     const keepStart = recentWindow.startIndex;
     const segment = transcript.messages.slice(Number(session.lastCompactedIndex || -1) + 1, keepStart);
     if (segment.length === 0) return { compacted: false, reason: "nothing_to_compact", tokenCount, messageCount: unsummarized.length, memory };
+    const segmentExecution = globalExecutionForMessages(transcript, segment);
+    const segmentModelTimeline = mergeConversationWithExecution(segment, segmentExecution);
     const extracted = extractGlobalMemoryCandidates(segment, sessionId);
-    const expectedSourceMessageIds = segment.map((item: any) => String(item.id));
+    const expectedSourceMessageIds = segmentModelTimeline.map((item: any) => String(item.id));
     if (options.expectedSourceMessageIds && (
       options.expectedSourceMessageIds.length !== expectedSourceMessageIds.length
       || options.expectedSourceMessageIds.some((id, index) => id !== expectedSourceMessageIds[index])
     )) throw new Error("全局 Agent 会话在模型摘要期间发生变化，请重试压缩");
     const summary = normalizeGlobalModelSummary(options.summaryOverride, expectedSourceMessageIds);
-    const microCompactRecords = buildMicroCompactRecords(segment);
+    const microCompactRecords = buildMicroCompactRecords(segmentModelTimeline);
     const keptMessages = transcript.messages.slice(keepStart);
-    const recentTokenCount = keptMessages.reduce((sum: number, item: any) => sum + estimateTokens(item.content), 0);
+    const keptExecution = globalExecutionForMessages(transcript, keptMessages);
+    const keptModelTimeline = mergeConversationWithExecution(keptMessages, keptExecution);
+    const recentTokenCount = keptModelTimeline.reduce((sum: number, item: any) => sum + estimateTokens(item.content), 0);
     const postCompactPayload = options.modelVisiblePayload || buildModelVisiblePayloadSnapshot({
       scope: "global",
       sessionId,
       system: globalFixedContext(memory, config, options),
       tools: options.tools || null,
       activeSummary: summary,
-      recentMessages: keptMessages,
+      recentMessages: keptModelTimeline,
       currentRequest: options.currentRequest || null,
       recoveryContext: options.recoveryContext || null,
       hookResults: options.modelMetadata?.hookResults?.sessionStart || [],
       contextComponents: options.contextComponents,
     });
     const postCompactTokenCount = postCompactPayload.totalTokens;
-    const postCompactGate = buildSessionPostCompactGate({ modelVisiblePayload: postCompactPayload, threshold });
+    const postCompactGate = {
+      ...buildSessionPostCompactGate({ modelVisiblePayload: postCompactPayload, threshold }),
+      formalRecompaction: options.modelMetadata?.formalRecompaction || null,
+    };
     if (postCompactGate.providerCallAllowed !== true) {
       const error: any = new Error(`全局 Agent 会话压缩后仍超过阈值：${postCompactTokenCount}/${threshold}`);
       error.code = "GLOBAL_SESSION_POST_COMPACT_THRESHOLD_EXCEEDED";
@@ -1001,7 +1088,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
     const contextBudget = buildContextBudget({
       context: {
         summary,
-        recent: keptMessages.map((item: any) => ({ id: item.id, role: item.role, content: microCompactText(item.content, 1800).text })),
+        recent: keptModelTimeline.map((item: any) => ({ id: item.id, role: item.role, content: microCompactText(item.content, 1800).text })),
       },
       maxChars: 48_000,
       maxTokens: SESSION_MEMORY_MAX_KEEP_TOKENS + COMPACT_TOKEN_THRESHOLD,
@@ -1012,7 +1099,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
       references: (summary.references || []).slice(-8),
       missionIds: (summary.missionIds || []).slice(-8),
       sourceMessageIds: (summary.sourceMessageIds || []).slice(-12),
-      recentMessageIds: keptMessages.slice(-12).map((item: any) => item.id),
+      recentMessageIds: keptModelTimeline.slice(-12).map((item: any) => item.id),
     };
     const boundaryMarker = buildSessionCompactionBoundaryMarker({
       scope: "global",
@@ -1020,7 +1107,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
       generation: state.boundaryGeneration + 1,
       summarizedThroughMessageId: segment.at(-1)?.id || "",
       previousSummaryChecksum: state.activeSummaryChecksum || (canonicalSummary ? sha(canonicalSummary, 40) : ""),
-      preservedMessageIds: keptMessages.map((item: any) => String(item.id || "")),
+      preservedMessageIds: keptModelTimeline.map((item: any) => String(item.id || "")),
     });
     const archive: any = {
       id: `gma_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
@@ -1029,8 +1116,10 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
       toIndex: keepStart - 1,
       from: segment[0]?.timestamp || "",
       to: segment.at(-1)?.timestamp || "",
-      count: segment.length,
-      records: segment.map((item: any) => ({ id: item.id, role: item.role, timestamp: item.timestamp, contentHash: sha(item.content, 40) })),
+      count: segmentModelTimeline.length,
+      visibleMessageCount: segment.length,
+      executionMessageCount: segmentExecution.length,
+      records: segmentModelTimeline.map((item: any) => ({ id: item.id, role: item.role, type: item.type || "message", timestamp: item.timestamp, contentHash: sha(item.content, 40) })),
       summary,
       microCompact: {
         version: 1,
@@ -1062,7 +1151,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
       previousSummaryChecksum: state.activeSummaryChecksum || (canonicalSummary ? sha(canonicalSummary, 40) : ""),
       lastCompactedIndex: keepStart - 1,
       lastCompactedMessageId: segment.at(-1)?.id || "",
-      preservedRecentMessageIds: keptMessages.map((item: any) => String(item.id || "")),
+      preservedRecentMessageIds: keptModelTimeline.map((item: any) => String(item.id || "")),
       preservedRecentTokens: recentTokenCount,
       preservedRecentTextMessageCount: recentWindow.preservedTextMessageCount,
       tokenMeasurement,
@@ -1075,10 +1164,11 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
       fixedContextChecksum: postCompactPayload.fixedContextChecksum,
       pendingRequestChecksum: postCompactPayload.pendingRequestChecksum,
       boundaryMarker,
-      preservedSegmentChecksum: sessionCompactionChecksum(keptMessages.map((item: any) => String(item.id || ""))),
+      preservedSegmentChecksum: sessionCompactionChecksum(keptModelTimeline.map((item: any) => String(item.id || ""))),
       recoveryContextTokens: postCompactPayload.tokenBreakdown.recoveryContext,
       hookResultTokens: postCompactPayload.tokenBreakdown.hookResults,
       ptlRecoveryAttempts: Number(options.modelMetadata?.promptTooLongRetries || 0),
+      formalRecompaction: options.modelMetadata?.formalRecompaction || null,
     });
     const nextSession = {
       ...session,
@@ -1107,6 +1197,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
         preservedTextMessageCount: recentWindow.preservedTextMessageCount,
         recent_window: recentWindow,
         post_compact_restore: postCompactRestore,
+        formal_recompaction: options.modelMetadata?.formalRecompaction || null,
         context_budget: contextBudget,
       },
     };
@@ -1190,6 +1281,8 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
     const canonicalSummary = canonicalGlobalSessionSummary(session, state);
     const floorIndex = state.lastCompactedIndex + 1;
     const unsummarized = transcript.messages.slice(floorIndex);
+    const unsummarizedExecution = globalExecutionForMessages(transcript, unsummarized);
+    const unsummarizedModelTimeline = mergeConversationWithExecution(unsummarized, unsummarizedExecution);
     const currentRequest = dedupeGlobalPendingRequest(unsummarized, options.currentRequest);
     const config = loadOrchestratorConfig();
     const modelCapacity = resolveGroupModelContextCapacity(config);
@@ -1200,7 +1293,7 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       system: globalFixedContext(memory, config, options),
       tools: options.tools || null,
       activeSummary: canonicalSummary,
-      recentMessages: unsummarized,
+      recentMessages: unsummarizedModelTimeline,
       currentRequest,
       recoveryContext: options.recoveryContext || null,
       hookResults: [],
@@ -1209,7 +1302,7 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
     const tokenMeasurement = measureSessionContextTokens({
       scope: "global",
       sessionId: exactSessionId,
-      messages: unsummarized,
+      messages: unsummarizedModelTimeline,
       activeSummary: canonicalSummary,
       latestProviderUsage: state.latestProviderUsage,
       provider: String(state.latestProviderUsage?.provider || ""),
@@ -1240,10 +1333,12 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
     const keepStart = recentWindow.startIndex;
     const segment = transcript.messages.slice(floorIndex, keepStart);
     if (!segment.length) return { compacted: false, reason: "nothing_to_compact", tokenCount, messageCount: unsummarized.length };
+    const segmentExecution = globalExecutionForMessages(transcript, segment);
+    const segmentModelTimeline = mergeConversationWithExecution(segment, segmentExecution);
 
     const extracted = extractGlobalMemoryCandidates(segment, exactSessionId);
     const previousSummary = canonicalSummary;
-    const currentReference = buildSegmentSummary(segment, extracted.candidates);
+    const currentReference = buildSegmentSummary(segmentModelTimeline, extracted.candidates);
     const mergeList = (key: string, max: number) => [
       ...(Array.isArray(previousSummary?.[key]) ? previousSummary[key] : []),
       ...(Array.isArray(currentReference?.[key]) ? currentReference[key] : []),
@@ -1264,7 +1359,7 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       missionIds: mergeList("missionIds", 24),
       latestOutcome: currentReference.latestOutcome || previousSummary.latestOutcome || "",
     } : currentReference;
-    const sourceMessageIds = segment.map((item: any) => String(item.id));
+    const sourceMessageIds = segmentModelTimeline.map((item: any) => String(item.id));
     const preHookResults = await runSessionCompactionHooks("pre_compact", {
       scope: "global",
       sessionId: exactSessionId,
@@ -1282,7 +1377,7 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       "消息边界由服务端绑定，无需返回 sourceMessageIds。",
       "字段固定为 primaryRequest,userRequests,keyOutcomes,userAnchors,feedback,authorization,decisions,references,unresolved,errors,filesAndResources,missionIds,latestOutcome。",
     ].join("\n");
-    let retryTimeline = segment.map((item: any) => ({ id: item.id, role: item.role, timestamp: item.timestamp, content: item.content }));
+    let retryTimeline = segmentModelTimeline.map((item: any) => ({ id: item.id, role: item.role, type: item.type || "message", timestamp: item.timestamp, content: item.content }));
     const renderUser = () => JSON.stringify({
       sessionId: exactSessionId,
       reason: options.reason || "auto",
@@ -1308,7 +1403,11 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
         expectedLastMessageId: expectedMemoryCursor,
       });
       if (reusable.valid) {
-        validation = validateGlobalModelSummary(bindTrustedGlobalSourceBoundary(reusable.summary, sourceMessageIds), reference, sourceMessageIds);
+        validation = validateGlobalModelSummary(bindTrustedGlobalSourceBoundary(reusable.summary, sourceMessageIds), reference, sourceMessageIds, {
+          sessionId: exactSessionId,
+          sourceMessages: segmentModelTimeline,
+          previousSummary,
+        });
         if (validation.valid) modelResult = { summary: reusable.summary, provider: state.sessionMemoryState?.provider, model: state.sessionMemoryState?.model, source: "session_memory" };
       }
     }
@@ -1316,14 +1415,18 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       try {
         modelResult = await invoke({ system, user: renderUser(), maxOutputTokens: GLOBAL_COMPACTION_MODEL_MAX_OUTPUT_TOKENS, attempt, sessionId: exactSessionId });
         const candidate = bindTrustedGlobalSourceBoundary(modelResult?.summary || modelResult, sourceMessageIds);
-        validation = validateGlobalModelSummary(candidate, reference, sourceMessageIds);
+        validation = validateGlobalModelSummary(candidate, reference, sourceMessageIds, {
+          sessionId: exactSessionId,
+          sourceMessages: segmentModelTimeline,
+          previousSummary,
+        });
         if (validation.valid) break;
         lastError = new Error(`模型摘要校验失败：${validation.issues.join(", ")}`);
       } catch (error) {
         lastError = error;
         const promptTooLong = /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String((error as any)?.message || error || ""));
         if (promptTooLong && promptTooLongRetries < 3) {
-          const peeled = peelOldestCompleteConversationRound(retryTimeline);
+          const peeled = peelOldestApiConversationRound(retryTimeline);
           if (!peeled.peeled) break;
           retryTimeline = peeled.messages;
           promptTooLongRetries += 1;
@@ -1331,7 +1434,7 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       }
     }
     if (!validation.valid) throw lastError || new Error("全局 Agent 模型摘要不可用");
-    const candidate = normalizeGlobalModelSummary(
+    let candidate = normalizeGlobalModelSummary(
       bindTrustedGlobalSourceBoundary(modelResult?.summary || modelResult, sourceMessageIds),
       sourceMessageIds,
     );
@@ -1349,44 +1452,108 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       previousSummary,
       recoveryContext,
     });
-    const preservedMessages = transcript.messages.slice(keepStart);
+    const preservedVisibleMessages = transcript.messages.slice(keepStart);
+    const preservedExecutionMessages = globalExecutionForMessages(transcript, preservedVisibleMessages);
+    const preservedMessages = mergeConversationWithExecution(preservedVisibleMessages, preservedExecutionMessages);
     const boundaryMarker = buildSessionCompactionBoundaryMarker({
       scope: "global",
       sessionId: exactSessionId,
       generation: state.boundaryGeneration + 1,
-      summarizedThroughMessageId: segment.at(-1)?.id || "",
+      summarizedThroughMessageId: segmentModelTimeline.at(-1)?.id || segment.at(-1)?.id || "",
       previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? sha(previousSummary, 40) : ""),
       preservedMessageIds: preservedMessages.map((message: any) => String(message.id || "")),
     });
-    const builtPostCompactPayload = options.postCompactPayloadBuilder
+    const buildPostCompactPayload = async (activeSummary: any) => options.postCompactPayloadBuilder
       ? await options.postCompactPayloadBuilder({
-          summary: candidate,
+          summary: activeSummary,
           preservedMessages,
-          currentRequest: dedupeGlobalPendingRequest(preservedMessages, currentRequest),
+          currentRequest: dedupeGlobalPendingRequest(preservedVisibleMessages, currentRequest),
           recoveryContext: { boundaryMarker, ...recoveryContext },
           hookResults: sessionStartHookResults,
           boundaryMarker,
         })
       : null;
-    const postCompactPayload = builtPostCompactPayload?.modelVisiblePayload || builtPostCompactPayload || buildModelVisiblePayloadSnapshot({
+    let builtPostCompactPayload = await buildPostCompactPayload(candidate);
+    const fallbackPostCompactPayload = (activeSummary: any) => buildModelVisiblePayloadSnapshot({
       scope: "global",
       sessionId: exactSessionId,
       system: globalFixedContext(memory, config, options),
       tools: options.tools || null,
-      activeSummary: candidate,
+      activeSummary,
       recentMessages: preservedMessages,
-      currentRequest: dedupeGlobalPendingRequest(preservedMessages, currentRequest),
+      currentRequest: dedupeGlobalPendingRequest(preservedVisibleMessages, currentRequest),
       recoveryContext: { boundaryMarker, ...recoveryContext },
       hookResults: sessionStartHookResults,
       contextComponents: options.contextComponents,
     });
-    const postCompactGate = buildSessionPostCompactGate({ modelVisiblePayload: postCompactPayload, threshold: autoCompactTokenLimit });
+    let postCompactPayload = builtPostCompactPayload?.modelVisiblePayload || builtPostCompactPayload || fallbackPostCompactPayload(candidate);
+    let postCompactGate: any = buildSessionPostCompactGate({ modelVisiblePayload: postCompactPayload, threshold: autoCompactTokenLimit });
+    let formalRecompaction: any = {
+      schema: "ccm-bounded-formal-recompaction-v1",
+      scope: "global",
+      sessionId: exactSessionId,
+      attempted: false,
+      maxAttempts: 1,
+      initialTokens: postCompactPayload.totalTokens,
+      threshold: autoCompactTokenLimit,
+      status: "not_required",
+    };
+    if (postCompactGate.providerCallAllowed !== true) {
+      formalRecompaction = { ...formalRecompaction, attempted: true, status: "running" };
+      try {
+        const retryResult = await invoke({
+          system: `${system}\n这是压缩后容量门禁触发的唯一一次正式重压缩。只压缩已有摘要，不添加新事实；PRESERVATION_REFERENCE 必须逐字保留。`,
+          user: JSON.stringify({
+            sessionId: exactSessionId,
+            currentSummary: candidate,
+            PRESERVATION_REFERENCE: reference,
+            sourceMessageIds,
+            target: "produce a materially shorter valid summary",
+          }),
+          maxOutputTokens: Math.min(8_000, GLOBAL_COMPACTION_MODEL_MAX_OUTPUT_TOKENS),
+          attempt: "post_compact_recompact_1",
+          sessionId: exactSessionId,
+        });
+        const rebound = bindTrustedGlobalSourceBoundary(retryResult?.summary || retryResult, sourceMessageIds);
+        const retryValidation = validateGlobalModelSummary(rebound, reference, sourceMessageIds, {
+          sessionId: exactSessionId,
+          sourceMessages: segmentModelTimeline,
+          previousSummary,
+        });
+        if (!retryValidation.valid) throw new Error(`正式重压缩摘要校验失败：${retryValidation.issues.join(", ")}`);
+        candidate = normalizeGlobalModelSummary(rebound, sourceMessageIds);
+        validation = retryValidation;
+        modelResult = { ...modelResult, ...retryResult, summary: candidate, source: "model" };
+        builtPostCompactPayload = await buildPostCompactPayload(candidate);
+        postCompactPayload = builtPostCompactPayload?.modelVisiblePayload || builtPostCompactPayload || fallbackPostCompactPayload(candidate);
+        postCompactGate = buildSessionPostCompactGate({ modelVisiblePayload: postCompactPayload, threshold: autoCompactTokenLimit });
+        formalRecompaction = {
+          ...formalRecompaction,
+          status: postCompactGate.providerCallAllowed === true ? "passed" : "still_over_threshold",
+          finalTokens: postCompactPayload.totalTokens,
+          summaryValidated: true,
+        };
+      } catch (error: any) {
+        formalRecompaction = { ...formalRecompaction, status: "failed", error: compact(error?.message || error, 500) };
+      }
+    }
+    postCompactGate = { ...postCompactGate, formalRecompaction };
     if (postCompactGate.providerCallAllowed !== true) {
       const error: any = new Error(`全局 Agent 会话压缩后仍超过阈值：${postCompactPayload.totalTokens}/${autoCompactTokenLimit}`);
       error.code = "GLOBAL_SESSION_POST_COMPACT_THRESHOLD_EXCEEDED";
       error.postCompactGate = postCompactGate;
       throw error;
     }
+    const secondaryReview = await reviewSessionSummaryIfSelected({
+      config,
+      scope: "global",
+      sessionId: exactSessionId,
+      boundaryGeneration: state.boundaryGeneration + 1,
+      summary: candidate,
+      reference,
+      sourceMessageIds,
+      deterministicQuality: validation.quality,
+    });
     const compacted = commitGlobalAgentSessionCompaction(exactSessionId, {
       force: options.force,
       reason: options.reason || "auto_model",
@@ -1409,6 +1576,9 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
         sessionMemoryState: nextSessionMemoryState,
         hookResults: { pre: preHookResults, sessionStart: sessionStartHookResults },
         postCompactGate,
+        formalRecompaction,
+        summaryQuality: validation.quality || null,
+        secondaryReview,
       },
       expectedSourceMessageIds: sourceMessageIds,
       recordFailure: false,
@@ -1458,11 +1628,13 @@ export function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, op
   const floorIndex = state.lastCompactedIndex + 1;
   const recentWindow = calculateSessionMemoryKeepWindow(transcript.messages, { floorIndex });
   const keepStart = recentWindow.startIndex;
-  const timeline = transcript.messages.slice(floorIndex, keepStart);
-  if (!timeline.length) return { scheduled: false, reason: "no_compactable_messages" };
-  const cadence = evaluateSessionMemoryCadence(transcript.messages.slice(0, keepStart), state.sessionMemoryState || {});
+  const visibleTimeline = transcript.messages.slice(floorIndex, keepStart);
+  if (!visibleTimeline.length) return { scheduled: false, reason: "no_compactable_messages" };
+  const timelineExecution = globalExecutionForMessages(transcript, visibleTimeline);
+  const timeline = mergeConversationWithExecution(visibleTimeline, timelineExecution);
+  const cadence = evaluateSessionMemoryCadence(mergeConversationWithExecution(transcript.messages.slice(0, keepStart), globalExecutionForMessages(transcript, transcript.messages.slice(0, keepStart))), state.sessionMemoryState || {});
   if (!cadence.shouldExtract) return { scheduled: false, reason: cadence.reason, cadence };
-  const extracted = extractGlobalMemoryCandidates(timeline, exactSessionId);
+  const extracted = extractGlobalMemoryCandidates(visibleTimeline, exactSessionId);
   const currentReference = buildSegmentSummary(timeline, extracted.candidates);
   const previousSummary = state.sessionMemoryState?.summary || state.activeSummary || null;
   const mergeList = (key: string, max: number) => [
@@ -1502,7 +1674,10 @@ export function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, op
     boundaryGeneration: state.boundaryGeneration,
     cursorMessageId: String(timeline.at(-1)?.id || ""),
     transcriptLastMessageId: String(transcript.messages.at(-1)?.id || ""),
-    transcriptChecksum: sessionCompactionChecksum(transcript.messages.map((message: any) => [message.id, message.role, message.content])),
+    transcriptChecksum: sessionCompactionChecksum([
+      ...transcript.messages.map((message: any) => [message.id, message.role, message.content]),
+      ...normalizeSessionExecutionEvents(transcript.executionMessages).map(message => [message.id, message.type, message.toolCallId, message.payload]),
+    ]),
     cadence: { ...cadence, sourceLastMessageId: String(timeline.at(-1)?.id || ""), sourceMessageIds },
   };
   const invoke = options.modelCall || ((request: any) => callCompactionModel(config, request.system, request.user, request.maxOutputTokens));
@@ -1518,11 +1693,18 @@ export function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, op
       const latestState = globalSessionCompactionState(latestSession, exactSessionId);
       if (latestState.boundaryGeneration !== expected.boundaryGeneration
         || String(latestTranscript.messages.at(-1)?.id || "") !== expected.transcriptLastMessageId
-        || sessionCompactionChecksum(latestTranscript.messages.map((message: any) => [message.id, message.role, message.content])) !== expected.transcriptChecksum) {
+        || sessionCompactionChecksum([
+          ...latestTranscript.messages.map((message: any) => [message.id, message.role, message.content]),
+          ...normalizeSessionExecutionEvents(latestTranscript.executionMessages).map(message => [message.id, message.type, message.toolCallId, message.payload]),
+        ]) !== expected.transcriptChecksum) {
         return { committed: false, reason: "stale_identity" };
       }
       const candidate = raw?.summary || raw;
-      const validation = validateGlobalModelSummary(bindTrustedGlobalSourceBoundary(candidate, sourceMessageIds), reference, sourceMessageIds);
+      const validation = validateGlobalModelSummary(bindTrustedGlobalSourceBoundary(candidate, sourceMessageIds), reference, sourceMessageIds, {
+        sessionId: exactSessionId,
+        sourceMessages: timeline,
+        previousSummary: state.activeSummary,
+      });
       if (!validation.valid) throw new Error(`全局 Session Memory 校验失败：${validation.issues.join(", ")}`);
       const summary = normalizeGlobalModelSummary(candidate, sourceMessageIds);
       const sessionMemoryState = buildSessionMemoryState({
@@ -1555,6 +1737,149 @@ export function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, op
   return { ...scheduled, cadence };
 }
 
+async function extractGlobalLongTermMemoryWithModel(sessionId: string) {
+  const exactSessionId = String(sessionId || "").trim();
+  const transcript = loadGlobalAgentTranscript(exactSessionId);
+  const memory = loadGlobalAgentMemory();
+  const session = memory.sessions.find((item: any) => item.sessionId === exactSessionId) || { sessionId: exactSessionId };
+  const cursor = String(session?.longTermMemoryExtraction?.cursorMessageId || "");
+  const cursorIndex = cursor ? transcript.messages.findIndex((item: any) => String(item.id || "") === cursor) : -1;
+  const sourceMessages = transcript.messages
+    .slice(cursorIndex + 1)
+    .filter((item: any) => item.hidden_execution !== true && ["user", "assistant"].includes(String(item.role || "")));
+  if (!sourceMessages.length || sourceMessages.at(-1)?.role !== "assistant" || !sourceMessages.some((item: any) => item.role === "user")) {
+    return { scheduled: false, reason: "complete_turn_not_ready" };
+  }
+  const batch = sourceMessages.slice(0, 24);
+  while (batch.length && batch.at(-1)?.role !== "assistant") batch.pop();
+  if (!batch.length || !batch.some((item: any) => item.role === "user")) return { scheduled: false, reason: "complete_turn_not_ready" };
+  const bounded = batch.map((item: any) => ({ id: String(item.id || ""), role: String(item.role || ""), content: String(item.content || "") }));
+  const byId = new Map<string, { id: string; role: string; content: string }>(bounded.map(item => [item.id, item]));
+  const result = await runSemanticDecision<MemorySemanticExtractionV1>({
+    kind: "memory_extraction",
+    identity: { scope: "global", scopeId: "global-agent", sessionId: exactSessionId },
+    system: [
+      "你是 CCM 全局 Agent 长期记忆提取器。只保存用户明确表达、跨会话仍有价值的事实、偏好、授权边界、决定、引用和未完成事项。",
+      "普通问答、一次性请求、助手猜测和过程文本必须 ignore。纠正旧信息时使用 supersede。不能按关键词机械分类。",
+      "每个非 ignore 候选必须引用精确 message ID 和该消息中的逐字短证据。",
+      "只输出 JSON：{\"candidates\":[{\"type\":\"user|feedback|authorization|decisions|unresolved|references\",\"operation\":\"add|update|supersede|ignore\",\"text\":\"规范事实\",\"evidenceMessageIds\":[],\"evidenceQuotes\":[],\"confidence\":0.0,\"applicableScope\":\"global-agent\",\"supersedes\":[]}]}",
+    ].join("\n"),
+    input: { messages: bounded },
+    maxTokens: 2_400,
+    validate: value => {
+      const rows = Array.isArray(value?.candidates) ? value.candidates : [];
+      const allowedTypes = new Set<GlobalMemoryItemType>(["user", "feedback", "authorization", "decisions", "unresolved", "references"]);
+      const allowedOperations = new Set(["add", "update", "supersede", "ignore"]);
+      const candidates = rows.slice(0, 30).map((row: any) => {
+        const type = String(row?.type || "") as GlobalMemoryItemType;
+        const operation = String(row?.operation || "");
+        const text = compact(row?.text, 1_800);
+        const evidenceMessageIds = Array.isArray(row?.evidenceMessageIds || row?.evidence_message_ids) ? (row.evidenceMessageIds || row.evidence_message_ids).map(String).filter(Boolean).slice(0, 20) : [];
+        const evidenceQuotes = Array.isArray(row?.evidenceQuotes || row?.evidence_quotes) ? (row.evidenceQuotes || row.evidence_quotes).map((item: any) => compact(item, 500)).filter(Boolean).slice(0, 20) : [];
+        if (!allowedTypes.has(type) || !allowedOperations.has(operation)) throw new Error("global_memory_semantic_candidate_invalid");
+        if (operation !== "ignore") {
+          if (!text || containsSensitiveData(text) || !evidenceMessageIds.length || !evidenceQuotes.length) throw new Error("global_memory_semantic_evidence_required");
+          if (evidenceMessageIds.some((id: string) => !byId.has(id))) throw new Error("global_memory_semantic_message_scope_mismatch");
+          if (evidenceQuotes.some((quote: string) => !evidenceMessageIds.some((id: string) => String(byId.get(id)?.content || "").includes(quote)))) throw new Error("global_memory_semantic_quote_mismatch");
+        }
+        return {
+          type,
+          operation: operation as "add" | "update" | "supersede" | "ignore",
+          text,
+          evidenceMessageIds,
+          evidenceQuotes,
+          confidence: Math.max(0, Math.min(1, Number(row?.confidence || 0))),
+          applicableScope: "global-agent",
+          supersedes: Array.isArray(row?.supersedes) ? row.supersedes.map(String).filter(Boolean).slice(0, 20) : [],
+        };
+      });
+      return { schema: "ccm-memory-semantic-extraction-v1", candidates };
+    },
+  });
+  const accepted: GlobalMemoryItem[] = [];
+  for (const row of result.value.candidates) {
+    if (row.operation === "ignore" || row.confidence < 0.65) continue;
+    if (row.operation === "supersede") {
+      const removeIds = new Set(row.supersedes || []);
+      for (const key of MEMORY_ITEM_KEYS) memory[key] = (memory[key] || []).filter((item: any) => !removeIds.has(String(item.id || "")));
+    }
+    const sourceMessage = byId.get(row.evidenceMessageIds[0]);
+    const item = candidate(row.type as GlobalMemoryItemType, row.text, {
+      id: row.evidenceMessageIds[0],
+      timestamp: new Date().toISOString(),
+      source: "global-agent-model-semantic",
+    }, exactSessionId, {
+      confidence: row.confidence,
+      importance: row.type === "authorization" ? 96 : row.type === "feedback" ? 86 : 78,
+      why: "统一模型确认该信息具有跨会话价值",
+      howToApply: "使用前与当前明确指令和真实系统状态核对",
+      extractionSource: "model_semantic",
+      evidenceMessageIds: row.evidenceMessageIds,
+      semanticStatus: "confirmed",
+      semanticDecisionReceipt: result.receipt,
+      sourceMessage,
+    });
+    if (item) accepted.push(item);
+  }
+  const upsert = upsertItems(memory, accepted);
+  const nextSession = {
+    ...session,
+    longTermMemoryExtraction: {
+      status: "committed",
+      cursorMessageId: String(bounded.at(-1)?.id || ""),
+      extractedAt: new Date().toISOString(),
+      semanticDecisionReceipt: result.receipt,
+      candidateCount: accepted.length,
+    },
+  };
+  replaceGlobalSession(memory, exactSessionId, nextSession);
+  saveMemory(memory);
+  recordMemoryOperation({ action: "model_semantic_ingest", scope: "global", scopeId: "global-agent", sessionId: exactSessionId, created: upsert.created, updated: upsert.updated, itemIds: accepted.map(item => item.id), semanticDecisionReceipt: result.receipt });
+  return {
+    scheduled: true,
+    committed: true,
+    candidates: accepted.length,
+    receipt: result.receipt,
+    remaining: String(bounded.at(-1)?.id || "") !== String(sourceMessages.at(-1)?.id || ""),
+  };
+}
+
+function scheduleGlobalLongTermMemoryExtraction(sessionId: string) {
+  const exactSessionId = String(sessionId || "").trim();
+  const existing = globalLongTermExtractions.get(exactSessionId);
+  if (existing) return { scheduled: false, mode: "model_semantic", reason: "already_in_flight" };
+  let hasMore = false;
+  const operation = (async () => {
+    let result: any = null;
+    for (let batch = 0; batch < 8; batch += 1) {
+      result = await extractGlobalLongTermMemoryWithModel(exactSessionId);
+      hasMore = result?.remaining === true;
+      if (!result?.committed || !hasMore) break;
+    }
+    return result;
+  })().catch(error => {
+    const memory = loadGlobalAgentMemory();
+    const session = memory.sessions.find((item: any) => item.sessionId === exactSessionId) || { sessionId: exactSessionId };
+    replaceGlobalSession(memory, exactSessionId, {
+      ...session,
+      longTermMemoryExtraction: {
+        ...(session.longTermMemoryExtraction || {}),
+        status: "pending_retry",
+        failedAt: new Date().toISOString(),
+        error: compact(error?.message || error, 600),
+        semanticDecisionReceipt: error?.semanticDecisionReceipt || null,
+      },
+    });
+    saveMemory(memory);
+    return { committed: false, error: compact(error?.message || error, 600) };
+  }).finally(() => {
+    globalLongTermExtractions.delete(exactSessionId);
+    if (hasMore) setTimeout(() => scheduleGlobalLongTermMemoryExtraction(exactSessionId), 0);
+  });
+  globalLongTermExtractions.set(exactSessionId, operation);
+  return { scheduled: true, mode: "model_semantic" };
+}
+
 export function ingestGlobalAgentConversation(input: { sessionId: string; source?: string; messages: any[]; compact?: boolean }) {
   const sessionId = String(input.sessionId || "default");
   const transcript = loadGlobalAgentTranscript(sessionId);
@@ -1572,20 +1897,18 @@ export function ingestGlobalAgentConversation(input: { sessionId: string; source
   transcript.messages = [...byId.values()].sort((a: any, b: any) => String(a.timestamp).localeCompare(String(b.timestamp)));
   transcript.updatedAt = now();
   saveTranscript(transcript);
-  const extracted = extractGlobalMemoryCandidates(transcript.messages.slice(-20), sessionId);
   const memory = loadGlobalAgentMemory();
-  const upsert = upsertItems(memory, extracted.candidates);
-  memory.privacy = { ...(memory.privacy || {}), rejectedCandidates: Number(memory.privacy?.rejectedCandidates || 0) + extracted.rejected, encryptedTranscripts: true, lastScanAt: now() };
+  memory.privacy = { ...(memory.privacy || {}), encryptedTranscripts: true, lastScanAt: now() };
   const sessionIndex = memory.sessions.findIndex((item: any) => item.sessionId === sessionId);
   const session = { ...(sessionIndex >= 0 ? memory.sessions[sessionIndex] : {}), sessionId, source: transcript.source, messageCount: transcript.messages.length, transcriptUpdatedAt: transcript.updatedAt };
   if (sessionIndex >= 0) memory.sessions[sessionIndex] = session; else memory.sessions.push(session);
   saveMemory(memory);
-  if (upsert.created > 0 || upsert.updated > 0 || extracted.rejected > 0) {
-    recordMemoryOperation({ action: "ingest", scope: "global", scopeId: "global-agent", sessionId, source: input.source || "global-agent", created: upsert.created, updated: upsert.updated, rejected: extracted.rejected, itemIds: extracted.candidates.map(item => item.id) });
+  if (assistantAdded) {
+    scheduleGlobalLongTermMemoryExtraction(sessionId);
+    scheduleGlobalAgentSessionMemoryExtraction(sessionId);
   }
-  if (assistantAdded) scheduleGlobalAgentSessionMemoryExtraction(sessionId);
   const compaction = input.compact === false ? null : scheduleGlobalAgentModelCompaction(sessionId);
-  return { transcript: { sessionId, messageCount: transcript.messages.length, updatedAt: transcript.updatedAt }, extracted: extracted.candidates.length, rejected: extracted.rejected, compaction };
+  return { transcript: { sessionId, messageCount: transcript.messages.length, updatedAt: transcript.updatedAt }, extracted: 0, extraction: assistantAdded ? "model_semantic_scheduled" : "awaiting_complete_turn", rejected: 0, compaction };
 }
 
 function queryTerms(text: string) {
@@ -1604,18 +1927,13 @@ function relevanceScore(item: any, query: string) {
   const ageDays = Math.max(0, (Date.now() - Date.parse(item.updatedAt || item.createdAt || now())) / 86_400_000);
   const freshness = Math.max(0, 12 - Math.log2(ageDays + 1) * 2);
   const pinned = item.memoryControl?.pinned ? 100 : 0;
-  const type = String(item.type || "");
-  const typeBoost = /(?:授权|允许|确认|只读|修改|删除|操作边界)/.test(query) && type === "authorization" ? 35
-    : /(?:偏好|习惯|方式|怎么回答)/.test(query) && ["user", "feedback"].includes(type) ? 24
-      : /(?:继续|历史任务|完成|进度|遗留|阻塞)/.test(query) && ["missions", "unresolved", "decisions"].includes(type) ? 22
-        : /(?:路径|源码|文档|地址|在哪里)/.test(query) && type === "references" ? 22
-          : type === "unresolved" && !/(?:继续|遗留|未完成|阻塞|风险|下一步)/.test(query) ? -18 : 0;
   const lengthPenalty = Math.min(28, Math.max(0, String(item.text || "").length - 700) / 60);
-  return { score: pinned + hits * 12 + Number(item.importance || 0) * .18 + Number(item.confidence || 0) * 10 + freshness + typeBoost - lengthPenalty, matchedTerms };
+  return { score: pinned + hits * 12 + Number(item.importance || 0) * .18 + Number(item.confidence || 0) * 10 + freshness - lengthPenalty, matchedTerms };
 }
 
-export function recallGlobalAgentMemory(query: string, options: { sessionId?: string; limit?: number; recordMetric?: boolean } = {}) {
-  if (/(?:忽略|不要使用|别用|不参考).{0,12}(?:记忆|历史)/.test(query)) return { ignored: true, items: [], sessionSummary: null, citations: [] };
+export function recallGlobalAgentMemory(query: string, options: { sessionId?: string; limit?: number; recordMetric?: boolean; memoryPolicy?: "use" | "ignore"; workflowDecision?: any } = {}) {
+  const memoryPolicy = String(options.memoryPolicy || options.workflowDecision?.memoryPolicy || options.workflowDecision?.memory_policy || "use");
+  if (memoryPolicy === "ignore") return { ignored: true, items: [], sessionSummary: null, citations: [] };
   const raw = loadGlobalAgentMemory();
   const memory = applyMemoryControls("global" as any, "global-agent", raw);
   const limit = Math.max(1, Math.min(12, Number(options.limit || 7)));
@@ -1638,7 +1956,7 @@ export function recallGlobalAgentMemory(query: string, options: { sessionId?: st
   };
 }
 
-export function buildGlobalAgentSessionContinuation(sessionId: string) {
+export function buildGlobalAgentSessionContinuation(sessionId: string, options: { persistMicroCompactReceipt?: boolean } = {}) {
   const exactSessionId = String(sessionId || "").trim();
   if (!exactSessionId) return { schema: "ccm-global-session-continuation-v2", sessionId: "", summary: null, messages: [], boundary: null };
   const transcript = loadGlobalAgentTranscript(exactSessionId);
@@ -1646,24 +1964,44 @@ export function buildGlobalAgentSessionContinuation(sessionId: string) {
   const session = memory.sessions.find((item: any) => item.sessionId === exactSessionId) || { sessionId: exactSessionId };
   const state = globalSessionCompactionState(session, exactSessionId);
   const canonicalSummary = canonicalGlobalSessionSummary(session, state);
-  const recentStart = Math.max(0, state.lastCompactedIndex + 1);
-  const recentWindow = canonicalSummary
-    ? calculateSessionMemoryKeepWindow(transcript.messages, { floorIndex: recentStart })
-    : { startIndex: recentStart, preservedTokenCount: transcript.messages.slice(recentStart).reduce((sum: number, item: any) => sum + estimateTextTokens(item.content), 0), preservedTextMessageCount: transcript.messages.length - recentStart };
-  const recent = transcript.messages.slice(recentWindow.startIndex).map((item: any) => ({
-    id: String(item.id || ""),
-    role: item.role === "assistant" ? "assistant" : "user",
-    content: String(item.content || ""),
-    timestamp: String(item.timestamp || ""),
-  }));
+  const config = loadOrchestratorConfig();
+  const unified = buildUnifiedSessionModelContextProjection({
+    scope: "global",
+    scopeId: `global:${exactSessionId}`,
+    sessionId: exactSessionId,
+    messages: transcript.messages,
+    executionEvents: normalizeSessionExecutionEvents(transcript.executionMessages),
+    canonicalSummary,
+    summarySource: canonicalSummary ? globalSessionSummarySource(session) : "",
+    summaryChecksum: state.activeSummaryChecksum || (canonicalSummary ? sha(canonicalSummary, 40) : ""),
+    boundaryGeneration: Number(state.boundaryGeneration || 0),
+    summarizedThroughIndex: Number(state.lastCompactedIndex || -1),
+    lastSummarizedMessageId: String(state.sessionMemoryState?.lastExtractedMessageId || ""),
+    microCompact: resolveSessionModelMicroCompactPolicy(config, {
+      contextTokens: Number(state.tokenMeasurement?.activeTokens || 0),
+      pressureThresholdTokens: getGroupAutoCompactThreshold(config),
+    }),
+  });
+  if (options.persistMicroCompactReceipt === true) {
+    replaceGlobalSession(memory, exactSessionId, {
+      ...session,
+      sessionId: exactSessionId,
+      compaction: {
+        ...state,
+        microCompactReceipt: unified.microCompact,
+        toolResultContentReplacementReceipt: unified.contentReplacement,
+      },
+    });
+    saveMemory(memory);
+  }
   return {
+    ...unified,
     schema: "ccm-global-session-continuation-v2",
     sessionId: exactSessionId,
     summary: canonicalSummary,
     summaryChecksum: state.activeSummaryChecksum || (canonicalSummary ? sha(canonicalSummary, 40) : ""),
-    messages: recent,
+    messages: unified.visibleMessages,
     boundary: session.boundary || null,
-    recentWindow,
     tokenMeasurement: state.tokenMeasurement || null,
     postCompactGate: state.postCompactGate || null,
     consecutiveFailures: state.consecutiveFailures,
@@ -1708,13 +2046,61 @@ export function recordGlobalMissionMemory(input: any) {
     report.risks?.length ? `风险：${report.risks.join("；")}` : "",
     report.remaining_items?.length ? `遗留：${report.remaining_items.join("；")}` : "",
   ].filter(Boolean).join("\n");
-  const item = candidate(missionTerminal ? "missions" : "unresolved", text, { id: input.messageId || `mission:${input.missionId}`, timestamp: input.at || now(), source: input.source || "global-agent", traceId: input.traceId || "", missionId: input.missionId || "" }, input.sessionId || "global", { importance: input.status === "completed" ? 88 : 82, confidence: .98, why: "结构化全局 mission 交付结果", howToApply: "继续历史任务时先查询 mission 当前状态并验证代码与测试证据" });
+  const item = candidate(missionTerminal ? "missions" : "unresolved", text, { id: input.messageId || `mission:${input.missionId}`, timestamp: input.at || now(), source: input.source || "global-agent", traceId: input.traceId || "", missionId: input.missionId || "" }, input.sessionId || "global", {
+    importance: input.status === "completed" ? 88 : 82,
+    confidence: .98,
+    why: "结构化全局 mission 交付结果",
+    howToApply: "继续历史任务时先查询 mission 当前状态并验证代码与测试证据",
+    extractionSource: "structured_event",
+    semanticStatus: "confirmed",
+    evidenceMessageIds: input.messageId ? [input.messageId] : [],
+  });
   if (missionTerminal && input.missionId) {
     memory.unresolved = (memory.unresolved || []).filter((existing: any) => existing.source?.missionId !== input.missionId);
   }
   const upsert = item ? upsertItems(memory, [item]) : { created: 0, updated: 0 };
   saveMemory(memory);
   if (item) recordMemoryOperation({ action: "mission_writeback", scope: "global", scopeId: "global-agent", missionId: input.missionId || "", status: input.status || "", itemId: item.id, created: upsert.created, updated: upsert.updated });
+  return item;
+}
+
+export function recordGlobalStructuredMemoryFact(input: {
+  type: GlobalMemoryItemType;
+  text: string;
+  sessionId: string;
+  messageId: string;
+  source?: string;
+  importance?: number;
+  confidence?: number;
+  why?: string;
+  howToApply?: string;
+}) {
+  const memory = loadGlobalAgentMemory();
+  const item = candidate(input.type, input.text, {
+    id: input.messageId,
+    timestamp: now(),
+    source: input.source || "structured-event",
+  }, input.sessionId, {
+    importance: input.importance || 85,
+    confidence: input.confidence ?? .99,
+    why: input.why || "结构化系统事件",
+    howToApply: input.howToApply || "继续任务前核验当前状态",
+    extractionSource: "structured_event",
+    semanticStatus: "confirmed",
+    evidenceMessageIds: [input.messageId],
+  });
+  if (!item) return null;
+  upsertItems(memory, [item]);
+  saveMemory(memory);
+  recordMemoryOperation({
+    action: "structured_fact_writeback",
+    scope: "global",
+    scopeId: "global-agent",
+    sessionId: input.sessionId,
+    messageId: input.messageId,
+    itemId: item.id,
+    type: input.type,
+  });
   return item;
 }
 
@@ -1762,6 +2148,9 @@ export function recordGlobalDirectDispatchMemory(input: any) {
     confidence: .98,
     why: "全局 Agent 直接派发到群聊主 Agent 的最终交付结果",
     howToApply: "用户追问历史任务、完成状态、验证证据或继续修改时，先用这条结论定位任务，再读取当前任务/代码状态复核。",
+    extractionSource: "structured_event",
+    semanticStatus: "confirmed",
+    evidenceMessageIds: input.messageId ? [input.messageId] : [],
   });
   const upsert = item ? upsertItems(memory, [item]) : { created: 0, updated: 0 };
   saveMemory(memory);
@@ -1800,6 +2189,9 @@ export function recordGlobalDirectDispatchRollbackMemory(input: any) {
     confidence: .99,
     why: "全局直派任务的完成结论已经被安全撤销覆盖",
     howToApply: "用户追问该任务是否完成时，先说明最近一次已撤销；继续执行前读取当前系统状态，不复用已撤销交付结论。",
+    extractionSource: "structured_event",
+    semanticStatus: "confirmed",
+    evidenceMessageIds: input.messageId ? [input.messageId] : [],
   });
   const upsert = item ? upsertItems(memory, [item]) : { created: 0, updated: 0 };
   saveMemory(memory);

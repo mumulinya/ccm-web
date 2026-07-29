@@ -13,6 +13,10 @@ import {
   writeJsonAtomic as writeJsonAtomicWithBackup,
 } from "../../core/atomic-json-file";
 import {
+  buildTypedMemoryConflictRecallIndex,
+  evaluateTypedMemoryConflictPenalty,
+} from "./typed-memory-conflict";
+import {
   CLAUDE_ALWAYS_ON_SETTING_SOURCES,
   CLAUDE_EDITABLE_SETTING_SOURCES,
   GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER,
@@ -2253,6 +2257,8 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
   const semanticStats = semanticRecallCorpusStats(index.docs, text);
   const modelExtractionTopicIndex = buildGroupSessionModelExtractionTopicRecallIndex(groupId);
   const pendingStaleConflictIndex = buildGroupTypedMemoryPendingStaleConflictIndex(groupId);
+  // doc 对 doc 的语义冲突：未裁决降权，已裁决淘汰方不再召回。
+  const semanticConflictIndex = buildTypedMemoryConflictRecallIndex(groupId);
   const manifestSelection = options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || options.manifestSelection || options.manifest_selection || null;
   const manifestSelectionVerification = manifestSelection
     ? verifyGroupTypedMemoryManifestSelection(manifestSelection, groupId)
@@ -2393,6 +2399,12 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
       typedMemoryConsumption.gated = true;
       typedMemoryConsumption.gate_reason = "specialized_recall_policy_non_positive";
     }
+    const semanticConflict = evaluateTypedMemoryConflictPenalty(doc.relPath, semanticConflictIndex);
+    if (semanticConflict.suppressed && !requiredRecall) {
+      diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "semantic_conflict_resolved_against", semanticConflict, freshness });
+      return null;
+    }
+    if (semanticConflict.adjustment) score += semanticConflict.adjustment;
     if (!requiredRecall && score <= 0 && queryTokens.length && !(pathCondition.conditional && pathCondition.matched)) {
       const reason = workerContextPressureFeedbackPolicy.active === true
         && workerContextPressureFeedbackPolicy.risk_doc === true
@@ -2412,6 +2424,7 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
       workerContextPressureUsage,
       workerContextPressureFeedbackPolicy,
       semanticReference,
+      semanticConflict,
       modelExtractionTopicRecall,
       pendingStaleConflicts,
       typedMemoryConsumption,

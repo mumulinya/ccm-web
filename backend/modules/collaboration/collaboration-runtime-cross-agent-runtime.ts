@@ -412,8 +412,12 @@ import {
   evaluateCollaborationAnswer,
   evaluateCollaborationQuestionAdmission,
   runAgentCollaborationProtocolSelfTest,
-  selectCollaborationTarget,
 } from "../../agents/collaboration-protocol";
+import {
+  buildExplicitSemanticDecisionReceipt,
+  normalizeCollaborationRouteDecision,
+  runSemanticDecision,
+} from "../../system/semantic-decision-runtime";
 import {
   buildAckPreflightReview,
   buildContractTransferPlan,
@@ -706,19 +710,83 @@ export async function processCrossAgents(
   );
 }
 
-function arbitrateAgentQaRequest(request: any, group: any, sourceProject = "") {
-  const text = `${request.question || ""}\n${request.reason || ""}`;
+function arbitrateAgentQaRequest(request: any, group: any, sourceProject = "", routeDecision: any = null) {
   const members = new Set((group.members || []).map((m: any) => String(m.project || "").trim()).filter(Boolean));
+  if (routeDecision?.action === "ask_user") return { decision: "ask_user", reason: routeDecision.reason || "群聊主 Agent 需要用户确认协作目标" };
+  if (routeDecision?.action === "reject") return { decision: "reject", reason: routeDecision.reason || "群聊主 Agent 拒绝了该协作请求" };
   if (!members.has(request.targetName)) {
     return { decision: "reject", reason: `目标 Agent 不在当前群聊成员中：${request.targetName}` };
   }
   if (request.targetName === sourceProject) {
     return { decision: "reject", reason: "不能把问题发回给自己" };
   }
-  if (request.kind === "risk" || /用户确认|业务方确认|产品确认|人工确认|生产数据|密钥|token|密码|支付|扣款|删除生产|合规|隐私/i.test(text)) {
-    return { decision: "ask_user", reason: "问题涉及用户/业务/高风险确认，需要主 Agent 暂停并让用户拍板" };
+  if (request.kind === "risk") {
+    return { decision: "ask_user", reason: "结构化协作请求声明需要用户确认" };
   }
   return { decision: "ask_agent", reason: request.reason || "目标 Agent 具备该问题的上下文" };
+}
+
+async function resolveAgentQaSemanticRoute(input: {
+  request: any;
+  group: any;
+  sourceProject: string;
+  profiles: Record<string, any>;
+  openItems: any[];
+  groupId: string;
+  groupSessionId: string;
+  taskId?: string;
+}) {
+  const members = (input.group?.members || [])
+    .map((member: any) => String(member?.project || "").trim())
+    .filter((project: string) => project && project !== input.sourceProject);
+  const explicit = String(input.request?.targetName || input.request?.target || "").trim();
+  const identity = {
+    scope: "group" as const,
+    scopeId: input.groupId,
+    sessionId: input.groupSessionId || `conversation:${input.groupId}`,
+    ...(input.taskId ? { taskId: input.taskId } : {}),
+  };
+  if (explicit && explicit.toLowerCase() !== "auto") {
+    if (!members.includes(explicit)) throw new Error(`目标 Agent 不在当前群聊成员中：${explicit}`);
+    const value = normalizeCollaborationRouteDecision({ action: "ask_agent", targetProject: explicit, reason: "协作请求显式指定目标项目", confidence: 1 }, members);
+    return { value, receipt: buildExplicitSemanticDecisionReceipt("agent_collaboration_route", identity, input.request, value) };
+  }
+  const candidateProfiles = members.map(project => {
+    const profile = input.profiles?.[project] || {};
+    const load = input.openItems.filter(item => item?.to_agent === project && ["waiting", "asking", "queued"].includes(String(item?.status || ""))).length;
+    return {
+      project,
+      responsibility: String(profile.responsibility || "").slice(0, 800),
+      capabilities: Array.isArray(profile.capabilities) ? profile.capabilities.map(String).slice(0, 20) : [],
+      activeCoordinationLoad: load,
+    };
+  });
+  return runSemanticDecision({
+    kind: "agent_collaboration_route",
+    identity,
+    system: [
+      "你是 CCM 群聊主 Agent 的跨项目协作路由器。必须理解完整问题语义，不能按关键词、正则或项目名称猜测。",
+      "只从 candidateProjects 中选择确实负责该问题且能提供所需证据的项目。若需要业务或产品决定、候选不明确或没有合适项目，action=ask_user；请求无效则 action=reject。",
+      "只输出 JSON：{\"action\":\"ask_agent|ask_user|reject\",\"targetProject\":\"ask_agent 时填写\",\"reason\":\"依据\",\"confidence\":0.0}",
+    ].join("\n"),
+    input: {
+      sourceProject: input.sourceProject,
+      question: String(input.request?.question || ""),
+      reason: String(input.request?.reason || ""),
+      requiredCapabilities: input.request?.required_capabilities || input.request?.requiredCapabilities || [],
+      evidence: input.request?.evidence || [],
+      acceptanceCriteria: input.request?.acceptance_criteria || [],
+      requestKind: input.request?.kind || "information",
+      candidateProjects: candidateProfiles,
+    },
+    validate: value => {
+      const normalized = normalizeCollaborationRouteDecision(value, members);
+      if (normalized.action === "ask_agent" && normalized.confidence < 0.55) throw new Error("collaboration_route_confidence_insufficient");
+      return normalized;
+    },
+    confidence: value => value.confidence,
+    maxTokens: 700,
+  });
 }
 
 export async function resumeAgentQaFromStoredContinuation(qa: any, group: any, ctx: CollabCtx, streamRes: any = null) {
@@ -728,11 +796,14 @@ export async function resumeAgentQaFromStoredContinuation(qa: any, group: any, c
   const workDir = String(continuation.source_work_dir || runtime?.workDir || "").trim();
   const agentType = String(continuation.source_agent_type || runtime?.agentType || "claudecode").trim();
   if (!workDir) return { resumed: false, reason: "缺少原 Agent 工作目录，无法安全续跑" };
-    const toolContext = buildAgentToolContext(ctx, group, qa.from_agent, `${continuation.original_prompt || ""}\n${qa.question || ""}\n${qa.answer || ""}`);
+  let session = openTaskAgentSession({ scopeId: qa.task_id, taskId: qa.task_id, groupId: qa.group_id, project: qa.from_agent, agentType });
+  const sourceTask = getTaskById(qa.task_id);
+  const groupSessionId = String(sourceTask?.group_session_id || sourceTask?.groupSessionId || qa.group_session_id || "");
+  const toolContext = buildAgentToolContext(ctx, group, qa.from_agent, `${continuation.original_prompt || ""}\n${qa.question || ""}\n${qa.answer || ""}`);
   const resumedAllowedTools = continuation.allowed_tools || toolContext.allowedTools;
   const resumedToolOptions = continuation.allowed_tools
-    ? { taskId: qa.task_id }
-    : { taskId: qa.task_id, toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness };
+    ? { taskId: qa.task_id, task: sourceTask, groupSessionId, taskAgentSessionId: session?.id || "", nativeSessionId: session?.nativeSessionId || "" }
+    : { taskId: qa.task_id, task: sourceTask, groupSessionId, taskAgentSessionId: session?.id || "", nativeSessionId: session?.nativeSessionId || "", toolAudit: toolContext.toolAudit, authorizationReadiness: toolContext.authorizationReadiness };
   const runtimeTools = prepareAgentRuntimeTools(qa.group_id, qa.from_agent, workDir, agentType, resumedAllowedTools, streamRes, resumedToolOptions);
   if (runtimeTools.dispatchBlocked) {
     const reason = runtimeToolDispatchBlockedMessage(qa.from_agent, runtimeTools);
@@ -740,7 +811,6 @@ export async function resumeAgentQaFromStoredContinuation(qa: any, group: any, c
     if (qa.task_id) appendTaskTimelineEvent(qa.task_id, { type: "runtime_tool_dispatch_blocked", title: `${qa.from_agent} 工具授权派发被阻断`, detail: reason, status: "warn", phase: "waiting_dependency", agent: qa.from_agent, data: { runtime_tool_dispatch_gate: runtimeTools.dispatchGate } });
     return { resumed: false, reason, runtimeToolDispatchGate: runtimeTools.dispatchGate };
   }
-  let session = openTaskAgentSession({ scopeId: qa.task_id, taskId: qa.task_id, groupId: qa.group_id, project: qa.from_agent, agentType });
   let nativeSessionId = "";
   let nativeContinuationEvidence: any = null;
   let succeeded = true;
@@ -761,7 +831,7 @@ export async function resumeAgentQaFromStoredContinuation(qa: any, group: any, c
     timeoutMs: 300000,
     messageId,
     allowedTools: resumedAllowedTools,
-    mcpConfigPath: continuation.mcp_config_path || runtimeTools.audit.mcpConfigPath,
+    mcpConfigPath: runtimeTools.audit.mcpConfigPath || continuation.mcp_config_path || "",
     taskId: qa.task_id,
     executionId: qa.execution_id || qa.task_id,
     agentSession: session ? getTaskAgentSessionOptions(session) : null,
@@ -939,9 +1009,42 @@ export async function handleAgentQaRequests(input: {
       const runtime = resolveMemberRuntime(project, input.group, input.configs);
       return [project, getProjectAgentCapabilityProfile(project, runtime?.workDir || "")];
     }).filter((entry: any[]) => entry[0]));
-    const routing = selectCollaborationTarget({ request: rawRequest, group: input.group, sourceProject: input.sourceProject, profiles, openItems });
-    const request = { ...rawRequest, targetName: routing.targetName };
     const sourceTask = input.taskId ? getTaskById(input.taskId) : null;
+    let routeResult: any = null;
+    let routeError = "";
+    let routeFailureReceipt: any = null;
+    try {
+      routeResult = await resolveAgentQaSemanticRoute({
+        request: rawRequest,
+        group: input.group,
+        sourceProject: input.sourceProject,
+        profiles,
+        openItems,
+        groupId: input.groupId,
+        groupSessionId: String(sourceTask?.group_session_id || coordinationContext.groupSessionId || ""),
+        taskId: input.taskId,
+      });
+    } catch (error: any) {
+      routeError = compactMemoryText(error?.message || error || "群聊主 Agent 无法形成可靠协作路由", 600);
+      routeFailureReceipt = error?.semanticDecisionReceipt || null;
+    }
+    const routeDecision = routeResult?.value || {
+      schema: "ccm-agent-collaboration-route-decision-v1",
+      targetProject: "",
+      action: "ask_user",
+      reason: `协作目标无法可靠确定：${routeError || "模型决策失败"}`,
+      confidence: 0,
+      candidateProjects: Object.keys(profiles).filter(project => project !== input.sourceProject),
+    };
+    const routing = {
+      targetName: routeDecision.targetProject || "",
+      strategy: routeResult ? (routeResult.receipt?.provider === "explicit-structured-input" ? "explicit" : "model_semantic") : "semantic_blocked",
+      action: routeDecision.action,
+      reason: routeDecision.reason,
+      candidates: routeDecision.candidateProjects.map((project: string) => ({ project, load: openItems.filter(item => item?.to_agent === project && ["waiting", "asking", "queued"].includes(String(item?.status || ""))).length })),
+      semanticDecisionReceipt: routeResult?.receipt || routeFailureReceipt || null,
+    };
+    const request = { ...rawRequest, targetName: routing.targetName || "用户确认" };
     const contract = buildCollaborationQuestionContract({
       ...request,
       group_id: input.groupId,
@@ -962,8 +1065,10 @@ export async function handleAgentQaRequests(input: {
         rule: "写权限仅由群聊主 Agent 通过正式项目工作项授予；原子 Agent 的请求本身不授予写权限。",
       };
     }
-    const admission = evaluateCollaborationQuestionAdmission(contract, openItems);
-    const arbitration = arbitrateAgentQaRequest(request, input.group, input.sourceProject);
+    const admission = routeDecision.action === "ask_agent"
+      ? evaluateCollaborationQuestionAdmission(contract, openItems)
+      : { allowed: true, code: "semantic_route_terminal", reason: routeDecision.reason };
+    const arbitration = arbitrateAgentQaRequest(request, input.group, input.sourceProject, routeDecision);
     if (!admission.allowed) {
       arbitration.decision = "reject";
       arbitration.reason = admission.reason;
@@ -976,6 +1081,11 @@ export async function handleAgentQaRequests(input: {
       status: arbitration.decision === "ask_agent" ? "waiting" : arbitration.decision,
       timeout_at: contract.deadline_at,
       routing,
+      route_decision: routeDecision,
+      candidate_projects: routeDecision.candidateProjects,
+      escalation: routeDecision.action === "ask_user" ? "needs_user" : "none",
+      route_checksum: routeResult?.receipt?.resultChecksum || "",
+      semantic_decision_receipt: routeResult?.receipt || routeFailureReceipt || null,
       admission,
       arbitration,
       continuation: {
@@ -995,6 +1105,15 @@ export async function handleAgentQaRequests(input: {
       audit: [{ at: now, type: "created", detail: arbitration.reason || "主 Agent 已仲裁" }],
     };
     const qa = upsertAgentQaItem(qaBase);
+    updateGroupCoordinationRequest(request.coordination_request_id, {
+      route_decision: routeDecision,
+      candidate_projects: routeDecision.candidateProjects,
+      escalation: routeDecision.action === "ask_user" ? "needs_user" : "none",
+      route_checksum: routeResult?.receipt?.resultChecksum || "",
+      semantic_decision_receipt: routeResult?.receipt || routeFailureReceipt || null,
+      auditType: routeResult ? "semantic_route_confirmed" : "semantic_route_blocked",
+      auditDetail: routeDecision.reason,
+    });
     appendGroupMessage(input.groupId, buildAgentQaMessage("question", qa, request.question));
     emitAgentQaEvent(input.streamRes, "question", qa, request.question);
     safeAddGroupLog(input.groupId, "info", "agent_qa", `${input.sourceProject} 向 ${request.targetName} 提问`, {
@@ -1005,7 +1124,7 @@ export async function handleAgentQaRequests(input: {
       arbitration,
     });
     if (input.taskId) addTaskLog(input.taskId, "info", `Agent 问答：${input.sourceProject} -> ${request.targetName}；${request.question.slice(0, 220)}`);
-    if (input.taskId) appendTaskTimelineEvent(input.taskId, { type: "agent_qa_question", title: `${input.sourceProject} 向 ${request.targetName} 提问`, detail: request.question, status: "active", phase: "executing", agent: input.sourceProject, data: { qa_id: qa.id, request, arbitration } });
+    if (input.taskId) appendTaskTimelineEvent(input.taskId, { type: "agent_qa_question", title: routeDecision.action === "ask_agent" ? `${input.sourceProject} 向 ${request.targetName} 提问` : `${input.sourceProject} 的协作请求已由主 Agent 仲裁`, detail: request.question, status: routeDecision.action === "ask_agent" ? "active" : "warn", phase: routeDecision.action === "ask_agent" ? "executing" : "waiting_dependency", agent: input.sourceProject, data: { qa_id: qa.id, request, arbitration, route_decision: routeDecision, semantic_decision_receipt: routeResult?.receipt || routeFailureReceipt || null } });
     appendAgentQaTrace(input.taskId || "", "agent.qa.question", qa, request.question, "active", { routing, admission, permission_contract: qa.permission_contract });
     if (input.taskId && qa.blocking && arbitration.decision === "ask_agent") {
       updateGroupTaskInlineStatus(sourceTask || { id: input.taskId, group_id: input.groupId }, "in_progress", `等待 ${request.targetName} 回答：${compactMemoryText(request.question, 180)}`);
@@ -1041,6 +1160,8 @@ export async function handleAgentQaRequests(input: {
         commit_policy: "verified_commit",
         allowed_paths: request.requested_write_paths?.length ? request.requested_write_paths : ["."],
         requires_code_changes: true,
+        semantic_decision_receipt: routeResult?.receipt || null,
+        route_decision: routeDecision,
         requires_verification: true,
         requires_independent_review: false,
         idempotency_key: `group-coordination:${request.coordination_request_id || qa.id}`,
@@ -1127,6 +1248,34 @@ export async function handleAgentQaRequests(input: {
       appendGroupMessage(input.groupId, buildAgentQaMessage("answer", needsUser, `主 Agent 仲裁：${arbitration.reason}\n需要用户确认后再继续。`));
       emitAgentQaEvent(input.streamRes, "answer", needsUser, `主 Agent 仲裁：${arbitration.reason}\n需要用户确认后再继续。`);
       updateGroupCoordinationRequest(request.coordination_request_id, { status: "needs_user", auditType: "needs_user", auditDetail: arbitration.reason });
+      if (sourceTask?.id) {
+        updateTask(sourceTask.id, {
+          status: "blocked",
+          status_detail: arbitration.reason,
+          terminal_actor: "group-main-agent",
+          collaboration_state: {
+            ...(sourceTask.collaboration_state || {}),
+            phase: "needs_user",
+            coordination_request_id: request.coordination_request_id || "",
+            route_decision: routeDecision,
+            semantic_decision_receipt: routeResult?.receipt || routeFailureReceipt || null,
+            updated_at: new Date().toISOString(),
+          },
+        });
+        updateGroupTaskInlineStatus(sourceTask, "blocked", arbitration.reason);
+        appendTaskTimelineEvent(sourceTask.id, {
+          type: "semantic_route_needs_user",
+          title: "协作目标需要用户确认",
+          detail: arbitration.reason,
+          status: "warn",
+          phase: "needs_user",
+          agent: "group-main-agent",
+          data: {
+            route_decision: routeDecision,
+            semantic_decision_receipt: routeResult?.receipt || routeFailureReceipt || null,
+          },
+        });
+      }
       continue;
     }
     if (arbitration.decision !== "ask_agent") {

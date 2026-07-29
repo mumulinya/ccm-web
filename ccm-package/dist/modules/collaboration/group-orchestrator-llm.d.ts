@@ -1,12 +1,9 @@
 import { type LlmTokenUsage } from "./group-orchestrator-llm-client";
-import { type ToolScope } from "../../tools/tool-manager";
+import type { ToolScope } from "../../tools/tool-manager";
+import { type MainAgentToolRequest } from "../../tools/main-agent-tool-runtime";
 import { type WorkflowDecision } from "../../agents/workflow-decision";
 export declare function mergeLlmTokenUsage(...values: any[]): LlmTokenUsage | null;
-export type GroupMainToolRequest = {
-    name: string;
-    arguments: any;
-    reason: string;
-};
+export type GroupMainToolRequest = MainAgentToolRequest;
 export declare function isGroupMainReadOnlyMcpTool(tool: any): boolean;
 export declare function buildGroupMainAgentToolContext(input: {
     group: any;
@@ -132,6 +129,7 @@ export declare function buildCoordinatorResultFromAnalysis(group: any, message: 
     };
     content: string;
     coordinationPlan?: undefined;
+    projectSourceEvidence?: undefined;
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
 } | {
@@ -140,14 +138,8 @@ export declare function buildCoordinatorResultFromAnalysis(group: any, message: 
     assignments: any[];
     analysis: any;
     workflowDecision: WorkflowDecision;
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
+    coordinationPlan: any;
+    projectSourceEvidence: any;
     dispatchPolicy: {
         action: string;
         reason: string;
@@ -189,6 +181,10 @@ export declare function runLlmGroupOrchestrator(input: {
     group_session_id?: string;
     mainAgentToolResults?: any[];
     main_agent_tool_results?: any[];
+    workflowDecision?: WorkflowDecision | null;
+    workflow_decision?: WorkflowDecision | null;
+    projectSourceEvidence?: any;
+    project_source_evidence?: any;
 }): Promise<{
     usage: LlmTokenUsage;
     mainAgentToolUsage: {
@@ -231,6 +227,7 @@ export declare function runLlmGroupOrchestrator(input: {
     };
     content: string;
     coordinationPlan?: undefined;
+    projectSourceEvidence?: undefined;
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
 } | {
@@ -252,14 +249,8 @@ export declare function runLlmGroupOrchestrator(input: {
     assignments: any[];
     analysis: any;
     workflowDecision: WorkflowDecision;
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
+    coordinationPlan: any;
+    projectSourceEvidence: any;
     dispatchPolicy: {
         action: string;
         reason: string;

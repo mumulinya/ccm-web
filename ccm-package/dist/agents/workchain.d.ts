@@ -143,6 +143,7 @@ export declare function sanitizeWorkchainUserText(value: any, fallback?: string,
 export declare function collectCompletionEvidence(input: MainAgentWorkchainInput): {
     files: any[];
     verification: string[];
+    verificationFailed: string[];
     acceptance: string[];
     independentReview: string[];
     independentReviewGate: {

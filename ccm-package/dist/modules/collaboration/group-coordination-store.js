@@ -95,6 +95,7 @@ function mutateStore(operation) {
 function matchesContext(row, context) {
     return row.group_id === context.groupId
         && row.task_id === context.taskId
+        && (!context.groupSessionId || row.group_session_id === context.groupSessionId)
         && row.source_project === context.sourceProject
         && (!context.sourceTaskAgentSessionId || row.source_task_agent_session_id === context.sourceTaskAgentSessionId);
 }
@@ -166,6 +167,8 @@ function listGroupCoordinationRequests(query = {}) {
         if (context.groupId && row.group_id !== context.groupId)
             return false;
         if (context.taskId && row.task_id !== context.taskId)
+            return false;
+        if (context.groupSessionId && row.group_session_id !== context.groupSessionId)
             return false;
         if (context.sourceProject && row.source_project !== context.sourceProject)
             return false;

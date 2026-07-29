@@ -21,7 +21,6 @@ export type GroupCoordinationRequestStatus =
   | "cancelled";
 
 export interface GroupCoordinationContext {
-  schema?: "ccm-group-coordination-context-v1";
   groupId: string;
   taskId: string;
   groupSessionId?: string;
@@ -30,7 +29,6 @@ export interface GroupCoordinationContext {
   sourceTaskAgentSessionId?: string;
   sourceNativeSessionId?: string;
   sourceWorkDir?: string;
-  role?: "child_agent";
 }
 
 export interface GroupCoordinationRequestInput {
@@ -74,6 +72,11 @@ export interface GroupCoordinationRequestRecord {
   coordinator_claim_id: string;
   work_item_task_id: string;
   resolution: any;
+  route_decision?: any;
+  candidate_projects?: string[];
+  escalation?: string;
+  route_checksum?: string;
+  semantic_decision_receipt?: any;
   metadata: any;
   audit: Array<{ at: string; type: string; detail: string }>;
   created_at: string;
@@ -148,6 +151,7 @@ function mutateStore<T>(operation: (store: GroupCoordinationStore) => T): T {
 function matchesContext(row: GroupCoordinationRequestRecord, context: ReturnType<typeof normalizeContext>) {
   return row.group_id === context.groupId
     && row.task_id === context.taskId
+    && (!context.groupSessionId || row.group_session_id === context.groupSessionId)
     && row.source_project === context.sourceProject
     && (!context.sourceTaskAgentSessionId || row.source_task_agent_session_id === context.sourceTaskAgentSessionId);
 }
@@ -219,6 +223,7 @@ export function listGroupCoordinationRequests(query: Partial<GroupCoordinationCo
   return loadStore().requests.filter(row => {
     if (context.groupId && row.group_id !== context.groupId) return false;
     if (context.taskId && row.task_id !== context.taskId) return false;
+    if (context.groupSessionId && row.group_session_id !== context.groupSessionId) return false;
     if (context.sourceProject && row.source_project !== context.sourceProject) return false;
     if (context.sourceTaskAgentSessionId && row.source_task_agent_session_id !== context.sourceTaskAgentSessionId) return false;
     return !statuses.size || statuses.has(row.status);

@@ -47,6 +47,7 @@ const path = __importStar(require("path"));
 const context_budget_1 = require("../system/context-budget");
 const utils_1 = require("../core/utils");
 const memory_control_center_1 = require("../modules/knowledge/memory-control-center");
+const durable_memory_taxonomy_1 = require("../system/durable-memory-taxonomy");
 const PROJECT_MEMORY_DIR = path.join(utils_1.CCM_DIR, "project-memory");
 const PROJECT_MEMORY_VERSION = 4;
 const CONCLUSION_COMPACT_THRESHOLD = 20;
@@ -111,13 +112,25 @@ function normalizeDurableMemoryCandidate(value, fallbackType, meta) {
     const content = compact(typeof value === "string"
         ? value
         : object.content || object.value || object.text || object.decision || object.title || object.summary || "", 1000);
-    if (!content || isLowValueDurableMemory(content))
+    if (!content || isLowValueDurableMemory(content) || !(0, durable_memory_taxonomy_1.isCcDurableMemoryCandidate)({
+        content,
+        accepted: meta.accepted === true,
+        sourceKind: meta.sourceKind || "agent_receipt",
+        transient: object.transient === true,
+        derivableFromCode: object.derivableFromCode === true || object.derivable_from_code === true,
+        skillOrToolDefinition: object.skillOrToolDefinition === true || object.skill_or_tool_definition === true,
+    }))
         return null;
     const type = normalizeDurableMemoryType(object.type || object.kind, fallbackType);
     const status = ["active", "resolved", "superseded"].includes(String(object.status || "").toLowerCase())
         ? String(object.status).toLowerCase()
         : "active";
     const now = meta.time || new Date().toISOString();
+    const taxonomy = (0, durable_memory_taxonomy_1.ccDurableMemoryTaxonomyReceipt)(type, {
+        content,
+        accepted: meta.accepted === true,
+        sourceKind: meta.sourceKind || "agent_receipt",
+    });
     return {
         id: contentId(type, content),
         type,
@@ -138,6 +151,8 @@ function normalizeDurableMemoryCandidate(value, fallbackType, meta) {
             agent: String(meta.agent || ""),
         },
         sourceTaskIds: uniqueStrings(meta.taskId || []).slice(-20),
+        ccMemoryType: taxonomy.type,
+        taxonomy,
     };
 }
 function extractDurableMemoryCandidates(receipt, meta) {
@@ -868,7 +883,7 @@ function runProjectMemorySelfTest() {
                 projectMemory: {
                     constraints: ["支付接口必须保持幂等"],
                     decisions: [{ content: "支付请求使用 idempotency-key 去重", reason: "避免重复扣款" }],
-                    facts: ["任务已完成"],
+                    facts: ["任务已完成", { content: "src/payments/api.ts 当前导出 createPayment", derivableFromCode: true }],
                 },
             },
         });
@@ -894,6 +909,8 @@ function runProjectMemorySelfTest() {
         durableMemoryAdmissionWorks = stored.durableMemories.filter((item) => item.content === "支付接口必须保持幂等").length === 1
             && stored.durableMemories.find((item) => item.content === "支付接口必须保持幂等")?.occurrences === 2
             && !stored.durableMemories.some((item) => item.content === "任务已完成")
+            && !stored.durableMemories.some((item) => item.content.includes("当前导出 createPayment"))
+            && stored.durableMemories.every((item) => ["user", "feedback", "project", "reference"].includes(item.ccMemoryType))
             && relevantPacket.includes("支付接口必须保持幂等")
             && relevantPacket.includes("idempotency-key");
         failedReceiptCannotCommitDurableMemory = afterFailed.durableMemories.length === beforeFailed + 0

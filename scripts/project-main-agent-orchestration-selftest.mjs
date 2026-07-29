@@ -20,7 +20,9 @@ const projectRoutes = fs.readFileSync(path.join(root, 'backend/modules/projects/
 const runner = fs.readFileSync(path.join(root, 'backend/modules/projects/project-main-agent.ts'), 'utf8')
 const sourceReader = fs.readFileSync(path.join(root, 'backend/modules/projects/project-main-agent-source.ts'), 'utf8')
 const projectTestGate = fs.readFileSync(path.join(root, 'backend/modules/projects/project-test-agent-gate.ts'), 'utf8')
+const serverBootstrap = fs.readFileSync(path.join(root, 'backend/server-bootstrap.ts'), 'utf8')
 const taskService = fs.readFileSync(path.join(root, 'backend/modules/collaboration/collaboration-task-service.ts'), 'utf8')
+const unifiedScheduler = fs.readFileSync(path.join(root, 'backend/system/unified-task-scheduler.ts'), 'utf8')
 const projectUi = fs.readFileSync(path.join(root, 'frontend/src/components/projects/useProjectManager.js'), 'utf8')
 const targetUi = fs.readFileSync(path.join(root, 'frontend/src/components/collaboration/GroupTestTargetsModal.vue'), 'utf8')
 const projectFormUi = fs.readFileSync(path.join(root, 'frontend/src/components/projects/ProjectFormModal.vue'), 'utf8')
@@ -62,13 +64,35 @@ const checks = {
   projectMainUsesRuntimeDiagnostics: runner.includes('hydrateProjectRuntimeDiagnostics({')
     && runner.includes('current_project_runtime: runtimeHydration.prompt')
     && runner.includes('type: "project_main_runtime_diagnostics"'),
-  sendStreamUsesProjectMainAgent: server.includes('executeProjectMainTask({') && server.includes('answerAsProjectMainAgent({'),
-  directWorkerCompletionIsNotCanonical: runner.includes('acceptance_state: accepted ? "accepted" : "blocked"') && runner.includes('round <= 3'),
+  sendStreamUsesProjectMainAgent: server.includes('operation: () => executeProjectMainTask({') && server.includes('answerAsProjectMainAgent({'),
+  projectMainUsesUnifiedSerialScheduler: server.includes('scheduleUnifiedTaskOperation({')
+    && server.includes('queueKey: `conversation:project:${project}:${exactProjectSessionId}`')
+    && unifiedScheduler.includes('withUnifiedWorkspaceMutationLane'),
+  directWorkerCompletionIsNotCanonical: runner.includes('acceptance_state: accepted ? "accepted" : "blocked"') && runner.includes('round <= AUTO_REWORK_MAX_ROUNDS'),
+  projectMainUsesDurableLease: runner.includes('acquireTaskLease(taskId')
+    && runner.includes('renewTaskLease(taskId')
+    && runner.includes('releaseTaskLease(taskId'),
+  interruptedProjectMainFailsClosed: runner.includes('reconcileInterruptedProjectMainTasks')
+    && runner.includes('acceptance_state: "recovery_required"')
+    && serverBootstrap.includes('reconcileInterruptedProjectMainTasks()'),
+  testAgentReviewCacheBoundToCycle: runner.includes('reviewCycleId')
+    && projectTestGate.includes('attemptScope: input.reviewCycleId || ""'),
   testAgentIsRequiredForChanges: runner.includes('input.task.requires_code_changes === true')
     && runner.includes('runProjectTaskTestAgentReview({')
     && projectTestGate.includes('runTestAgentCliJob({'),
+  acceptanceCriteriaHaveEvidenceContracts: runner.includes('acceptanceEvidencePlan')
+    && runner.includes('normalizeTestAgentAcceptanceEvidencePlan')
+    && runner.includes('verificationProfile'),
+  testAgentFailureRoutesAreSeparated: runner.includes('reviewDecision.route === "implementation_rework"')
+    && runner.includes('reviewDecision.route === "test_agent_recheck"')
+    && runner.includes('reviewDecision.route === "environment"'),
+  incrementalReviewCarriesPreviousEvidence: runner.includes('previousReview,')
+    && projectTestGate.includes('buildTestAgentIncrementalScope')
+    && projectTestGate.includes('incrementalScope'),
   exactProjectSessionBinding: runner.includes('orchestration_scope: "project_session"') && runner.includes('project_session_id: input.projectSessionId'),
-  siblingSessionDedupeIsolation: taskService.includes('task.project_session_id || task.projectSessionId') && taskService.includes('item.project_session_id || item.projectSessionId'),
+  siblingSessionDedupeIsolation: taskService.includes('project_session_id: taskProjectSessionId || null')
+    && taskService.includes('exact_session_id: exactSessionId')
+    && taskService.includes('existingIdentity.checksum === incomingIdentity.checksum'),
   planConfirmationResumesOriginalTask: server.includes('const existingTask = parentProjectMainTask') && projectUi.includes("'/api/projects/main-agent/plan-confirm'"),
   projectTargetsAreIndependent: server.includes('/api/projects/main-agent/task') && fs.existsSync(path.join(root, 'backend/modules/projects/project-test-targets.ts')),
   projectUiShowsTestTargets: projectUi.includes('loadProjectTestTargets') && projectUi.includes('saveProjectTestTarget'),
@@ -88,14 +112,28 @@ const checks = {
   projectStorageStateIsExecutable: storageBrowserChecks.length === 1
     && storageBrowserChecks[0].storageStatePath === '.ccm/test-auth/admin.json',
   projectMainRollbackUsesSourceCheckpoint: projectUi.includes("isProjectMainTask ? projectMainRunId") && projectUi.includes("'/api/project-runs/rollback'"),
-  projectStageEventsAvoidListReload: projectUi.includes("startsWith('project.main_agent.')") && projectUi.includes('return'),
+  projectStageEventsRefreshExactSession: projectUi.includes("startsWith('project.main_agent.')")
+    && projectUi.includes('eventSessionId !== currentSession.value')
+    && projectUi.includes('refreshCurrentProjectSession(eventSessionId)'),
+  projectTaskMessageIsServerOwned: server.includes('const taskMessageId = `project-main-task:${task.id}`')
+    && server.includes('persistTaskMessage(plan.summary)')
+    && server.includes('message_id: taskMessageId')
+    && projectUi.includes('serverOwnedTaskMessage'),
+  projectTaskHydratesAfterReconnect: projectUi.includes('hydrateProjectTaskMessages')
+    && projectUi.includes('/api/projects/main-agent/task?task_id=')
+    && projectUi.includes('await hydrateProjectTaskMessages'),
+  projectPlanRevisionPreservesTask: runner.includes('reviseProjectMainTask')
+    && runner.includes('existingRevisions.find')
+    && runner.includes('planBuilder || planProjectMainTask')
+    && runner.includes('previous_plan_checksum')
+    && projectUi.includes("action: 'revise_plan'"),
   feishuTaskDetachesAfterCanonicalCreation: server.includes('accepted: true, detached: true, task_id: task.id')
     && server.includes('retainDispatchAfterResponse = true')
     && server.includes('开发 Agent 与 TestAgent 将在后台按顺序执行'),
   feishuTaskFinalResultUsesBoundOutbox: server.includes('bindFeishuTaskContext({')
     && server.includes('await notifyFeishuTaskStage({')
     && server.includes('dedupeKey: `project-main:${task.id}:${execution.status}`')
-    && server.includes('appendProjectSessionTaskMessage(project, exactProjectSessionId'),
+    && server.includes('persistTaskMessage(execution.summary, latestTaskExperience)'),
 }
 
 for (const [name, pass] of Object.entries(checks)) console.log(`${pass ? 'PASS' : 'FAIL'} ${name}`)

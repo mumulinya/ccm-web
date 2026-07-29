@@ -7,14 +7,14 @@ export declare function runTestAgentPlaywrightFileUploadSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -22,6 +22,8 @@ export declare function runTestAgentPlaywrightFileUploadSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -32,9 +34,8 @@ export declare function runTestAgentPlaywrightFileUploadSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -49,14 +50,14 @@ export declare function runTestAgentPlaywrightFileUploadSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -64,6 +65,8 @@ export declare function runTestAgentPlaywrightFileUploadSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -74,9 +77,8 @@ export declare function runTestAgentPlaywrightFileUploadSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason?: undefined;
@@ -90,14 +92,14 @@ export declare function runTestAgentPlaywrightMultiFileUploadSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -105,6 +107,8 @@ export declare function runTestAgentPlaywrightMultiFileUploadSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -115,9 +119,8 @@ export declare function runTestAgentPlaywrightMultiFileUploadSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -132,14 +135,14 @@ export declare function runTestAgentPlaywrightMultiFileUploadSelfTest(): Promise
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -147,6 +150,8 @@ export declare function runTestAgentPlaywrightMultiFileUploadSelfTest(): Promise
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -157,9 +162,8 @@ export declare function runTestAgentPlaywrightMultiFileUploadSelfTest(): Promise
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason?: undefined;
@@ -173,14 +177,14 @@ export declare function runTestAgentPlaywrightViewportSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -188,6 +192,8 @@ export declare function runTestAgentPlaywrightViewportSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -198,9 +204,8 @@ export declare function runTestAgentPlaywrightViewportSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -215,14 +220,14 @@ export declare function runTestAgentPlaywrightViewportSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -230,6 +235,8 @@ export declare function runTestAgentPlaywrightViewportSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -240,9 +247,8 @@ export declare function runTestAgentPlaywrightViewportSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason?: undefined;
@@ -256,14 +262,14 @@ export declare function runTestAgentPlaywrightContextOptionsSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -271,6 +277,8 @@ export declare function runTestAgentPlaywrightContextOptionsSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -281,9 +289,8 @@ export declare function runTestAgentPlaywrightContextOptionsSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -298,14 +305,14 @@ export declare function runTestAgentPlaywrightContextOptionsSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -313,6 +320,8 @@ export declare function runTestAgentPlaywrightContextOptionsSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -323,9 +332,8 @@ export declare function runTestAgentPlaywrightContextOptionsSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -341,14 +349,14 @@ export declare function runTestAgentPlaywrightInViewportSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -356,6 +364,8 @@ export declare function runTestAgentPlaywrightInViewportSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -366,9 +376,8 @@ export declare function runTestAgentPlaywrightInViewportSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -383,14 +392,14 @@ export declare function runTestAgentPlaywrightInViewportSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -398,6 +407,8 @@ export declare function runTestAgentPlaywrightInViewportSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -408,9 +419,8 @@ export declare function runTestAgentPlaywrightInViewportSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -426,14 +436,14 @@ export declare function runTestAgentPlaywrightNoHorizontalOverflowSelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -441,6 +451,8 @@ export declare function runTestAgentPlaywrightNoHorizontalOverflowSelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -451,9 +463,8 @@ export declare function runTestAgentPlaywrightNoHorizontalOverflowSelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -468,14 +479,14 @@ export declare function runTestAgentPlaywrightNoHorizontalOverflowSelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -483,6 +494,8 @@ export declare function runTestAgentPlaywrightNoHorizontalOverflowSelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -493,9 +506,8 @@ export declare function runTestAgentPlaywrightNoHorizontalOverflowSelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     passReport: import("./types-report").TestAgentReport;
@@ -521,14 +533,14 @@ export declare function runTestAgentPlaywrightRealBrowserSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -536,6 +548,8 @@ export declare function runTestAgentPlaywrightRealBrowserSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -546,9 +560,8 @@ export declare function runTestAgentPlaywrightRealBrowserSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -563,14 +576,14 @@ export declare function runTestAgentPlaywrightRealBrowserSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -578,6 +591,8 @@ export declare function runTestAgentPlaywrightRealBrowserSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -588,9 +603,8 @@ export declare function runTestAgentPlaywrightRealBrowserSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason?: undefined;
@@ -604,14 +618,14 @@ export declare function runTestAgentPlaywrightResourceErrorSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -619,6 +633,8 @@ export declare function runTestAgentPlaywrightResourceErrorSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -629,9 +645,8 @@ export declare function runTestAgentPlaywrightResourceErrorSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -652,14 +667,14 @@ export declare function runTestAgentPlaywrightResourceErrorSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -667,6 +682,8 @@ export declare function runTestAgentPlaywrightResourceErrorSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -677,9 +694,8 @@ export declare function runTestAgentPlaywrightResourceErrorSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     networkErrors: string[];
@@ -699,14 +715,14 @@ export declare function runTestAgentStandaloneCliRealWebSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -714,6 +730,8 @@ export declare function runTestAgentStandaloneCliRealWebSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -724,9 +742,8 @@ export declare function runTestAgentStandaloneCliRealWebSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -743,14 +760,14 @@ export declare function runTestAgentStandaloneCliRealWebSelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -758,6 +775,8 @@ export declare function runTestAgentStandaloneCliRealWebSelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -768,9 +787,8 @@ export declare function runTestAgentStandaloneCliRealWebSelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     runResult: {
@@ -800,14 +818,14 @@ export declare function runTestAgentStandaloneHandoffRealWebSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -815,6 +833,8 @@ export declare function runTestAgentStandaloneHandoffRealWebSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -825,9 +845,8 @@ export declare function runTestAgentStandaloneHandoffRealWebSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -844,14 +863,14 @@ export declare function runTestAgentStandaloneHandoffRealWebSelfTest(): Promise<
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -859,6 +878,8 @@ export declare function runTestAgentStandaloneHandoffRealWebSelfTest(): Promise<
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -869,9 +890,8 @@ export declare function runTestAgentStandaloneHandoffRealWebSelfTest(): Promise<
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     runResult: {
@@ -901,14 +921,14 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -916,6 +936,8 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -926,9 +948,8 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     unavailable: {
@@ -938,14 +959,14 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -953,6 +974,8 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -963,9 +986,8 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     fallback: {
@@ -975,14 +997,14 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -990,6 +1012,8 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -1000,9 +1024,8 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
 }>;

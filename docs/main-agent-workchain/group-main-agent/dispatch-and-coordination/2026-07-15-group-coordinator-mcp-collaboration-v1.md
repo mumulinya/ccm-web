@@ -80,7 +80,16 @@ sequenceDiagram
 - `sourceNativeSessionId`
 - `sourceWorkDir`
 
-该 MCP 由平台写入每次任务调用的隔离运行时快照，不来自技能商城或用户工具目录，也不作为可删除的外部 MCP 展示。已经验证 Claude Code、Cursor、Codex、Gemini 和 Qoder 的原生配置格式。
+该 MCP 由平台写入每次任务调用的隔离运行时快照，不来自技能商城或用户工具目录，也不作为可删除的外部 MCP 展示。已经验证 Claude Code、Cursor、Codex、Gemini、OpenCode 和 Qoder 的原生配置格式。
+
+### v2 安全绑定
+
+- 协作 MCP 复用统一 `CCM_INTERNAL_MCP_CONTEXT`，上下文使用 HMAC-SHA256 签名并带签发、失效时间；旧的无签名 Base64 上下文不再接受。
+- 每次工具调用都会从权威任务、群聊配置和任务 Agent 会话存储重新核验 `groupId + groupSessionId + taskId + sourceProject + sourceTaskAgentSessionId`。
+- 任务结束、项目退出群聊、子 Agent 会话关闭、原生会话变化或任一 scope 不一致时 fail closed，不能写入或查询协调记录。
+- 协调存储的提交、查询和主 Agent claim 都包含精确 `group_session_id`，兄弟会话不能读取或认领。
+- 调用进入统一内部 MCP 审计，只记录作用域、工具名、状态及脱敏参数，不记录 Prompt、密钥或工具结果正文。
+- 原 Agent 被依赖结果唤醒时先重建当前签名工具快照，再恢复原生会话，不复用可能过期的 MCP 配置。
 
 ## 状态与恢复
 
@@ -133,7 +142,8 @@ sequenceDiagram
 - 四个 MCP 工具可调用。
 - 重复调用幂等。
 - 新 Node 进程可读取重启前的状态。
-- Claude Code、Cursor、Codex、Gemini、Qoder 配置均包含受保护内部 MCP。
+- Claude Code、Cursor、Codex、Gemini、OpenCode、Qoder 配置均包含受保护内部 MCP；OpenCode 使用隔离 `opencode.json` 注入并通过同一签名、会话和审计门禁。
+- 篡改签名、错误群聊会话和跨会话 claim 均被拒绝。
 
 ### 业务端到端
 
@@ -176,4 +186,3 @@ sequenceDiagram
 - `scripts/group-coordination-mcp-selftest.mjs`
 - `scripts/group-coordination-business-chain-e2e.mjs`
 - `scripts/group-coordination-render-regression.mjs`
-

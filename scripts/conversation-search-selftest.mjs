@@ -19,8 +19,11 @@ const result = read('frontend/src/components/workspace/search/ConversationSearch
 const highlighter = read('frontend/src/components/workspace/search/SafeHighlightedText.vue')
 const app = read('frontend/src/App.vue')
 const project = read('frontend/src/components/projects/ProjectManager.vue')
+const projectManager = read('frontend/src/components/projects/useProjectManager.js')
 const group = read('frontend/src/components/collaboration/GroupChat.vue')
+const groupChat = read('frontend/src/components/collaboration/useGroupChat.js')
 const globalAgent = read('frontend/src/components/global/GlobalAgent.vue')
+const globalMessageList = read('frontend/src/components/global/GlobalAgentMessageList.vue')
 const globalSessions = read('frontend/src/composables/useGlobalAgentSessions.js')
 const server = read('backend/server.ts')
 const legacySessions = read('backend/modules/projects/sessions.ts')
@@ -34,9 +37,9 @@ const checks = {
   contextTaskAttachmentResult: result.includes('查看前后文') && result.includes('item.taskId') && result.includes('item.attachments'),
   unifiedRouteRegistered: server.includes('handleConversationSearchApi') && !legacySessions.includes('pathname === "/api/search"'),
   appRoutesAllConversationTypes: app.includes("item.conversationType === 'global'") && app.includes("item.conversationType === 'group'") && app.includes("item.conversationType === 'task'"),
-  exactProjectMessageNavigation: project.includes('target.messageId') && project.includes('target.messageIndex'),
-  exactGroupSessionMessageNavigation: group.includes('target.groupSessionId') && group.includes('target.messageId') && group.includes('loadMessages(1000)'),
-  exactGlobalSessionMessageNavigation: globalAgent.includes('handleSearchNavigation') && globalAgent.includes('target.messageId') && globalAgent.includes("'search-hit'"),
+  exactProjectMessageNavigation: projectManager.includes('target.messageId') && projectManager.includes('target.messageIndex'),
+  exactGroupSessionMessageNavigation: groupChat.includes('target.groupSessionId') && groupChat.includes('target.messageId') && groupChat.includes('loadMessages(1000)'),
+  exactGlobalSessionMessageNavigation: globalAgent.includes('handleSearchNavigation') && globalAgent.includes('target.messageId') && globalMessageList.includes("'search-hit'"),
   emptyGlobalWelcomeSessionNotPersistedAfterSync: globalSessions.includes('isDisposableDefaultSession(sessions.value[0]')
     && __globalAgentSessionTestHooks.isDisposableDefaultSession({ name: '默认会话', messages: [welcome] }, welcome),
 }

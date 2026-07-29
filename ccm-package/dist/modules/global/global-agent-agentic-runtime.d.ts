@@ -41,6 +41,7 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
     }) => GlobalAgentLoopRuntime;
     runAgenticGlobalRequest: (baseUrl: string, ctx: CollabCtx, input: {
         message: string;
+        originalMessage?: string;
         history?: any[];
         sessionId?: string;
         source?: string;

@@ -50,44 +50,7 @@ export declare function validateExternalRunnerRuntimeToolGate(request: any, opti
     ok: boolean;
     reason: any;
     runtimeToolSnapshot: any;
-    runtimeToolScope: {
-        ok: boolean;
-        skipped: boolean;
-        reason?: undefined;
-        current?: undefined;
-        requested?: undefined;
-        scope?: undefined;
-    } | {
-        ok: boolean;
-        reason: any;
-        current: any;
-        skipped?: undefined;
-        requested?: undefined;
-        scope?: undefined;
-    } | {
-        ok: boolean;
-        reason: string;
-        requested: {
-            mcp: any;
-            skill: any;
-        };
-        current: {
-            mcp: any;
-            skill: any;
-        };
-        scope: any;
-        skipped?: undefined;
-    } | {
-        ok: boolean;
-        current: {
-            mcp: any;
-            skill: any;
-        };
-        scope: any;
-        skipped?: undefined;
-        reason?: undefined;
-        requested?: undefined;
-    };
+    runtimeToolScope: any;
     runtimeToolDispatchGate: {
         schema: string;
         dispatchReady: boolean;
@@ -103,44 +66,7 @@ export declare function validateExternalRunnerRuntimeToolGate(request: any, opti
     reason: string;
     runtimeToolSnapshot: any;
     runtimeToolReadiness: import("../tools/runtime-tool-sync").RuntimeToolReadiness;
-    runtimeToolScope: {
-        ok: boolean;
-        skipped: boolean;
-        reason?: undefined;
-        current?: undefined;
-        requested?: undefined;
-        scope?: undefined;
-    } | {
-        ok: boolean;
-        reason: any;
-        current: any;
-        skipped?: undefined;
-        requested?: undefined;
-        scope?: undefined;
-    } | {
-        ok: boolean;
-        reason: string;
-        requested: {
-            mcp: any;
-            skill: any;
-        };
-        current: {
-            mcp: any;
-            skill: any;
-        };
-        scope: any;
-        skipped?: undefined;
-    } | {
-        ok: boolean;
-        current: {
-            mcp: any;
-            skill: any;
-        };
-        scope: any;
-        skipped?: undefined;
-        reason?: undefined;
-        requested?: undefined;
-    };
+    runtimeToolScope: any;
     runtimeToolDispatchGate: {
         schema: string;
         dispatchReady: boolean;
@@ -154,44 +80,7 @@ export declare function validateExternalRunnerRuntimeToolGate(request: any, opti
     ok: boolean;
     runtimeToolSnapshot: any;
     runtimeToolReadiness: import("../tools/runtime-tool-sync").RuntimeToolReadiness;
-    runtimeToolScope: {
-        ok: boolean;
-        skipped: boolean;
-        reason?: undefined;
-        current?: undefined;
-        requested?: undefined;
-        scope?: undefined;
-    } | {
-        ok: boolean;
-        reason: any;
-        current: any;
-        skipped?: undefined;
-        requested?: undefined;
-        scope?: undefined;
-    } | {
-        ok: boolean;
-        reason: string;
-        requested: {
-            mcp: any;
-            skill: any;
-        };
-        current: {
-            mcp: any;
-            skill: any;
-        };
-        scope: any;
-        skipped?: undefined;
-    } | {
-        ok: boolean;
-        current: {
-            mcp: any;
-            skill: any;
-        };
-        scope: any;
-        skipped?: undefined;
-        reason?: undefined;
-        requested?: undefined;
-    };
+    runtimeToolScope: any;
     runtimeToolDispatchGate: any;
     reason?: undefined;
 };

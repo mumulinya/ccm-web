@@ -7,14 +7,14 @@ export declare function runTestAgentCapabilityAwareProviderRoutingSelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -22,6 +22,8 @@ export declare function runTestAgentCapabilityAwareProviderRoutingSelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -32,9 +34,8 @@ export declare function runTestAgentCapabilityAwareProviderRoutingSelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     reason: string;
@@ -51,14 +52,14 @@ export declare function runTestAgentCapabilityAwareProviderRoutingSelfTest(): Pr
             packageAvailable: boolean;
             launchChecked: boolean;
             browser?: undefined;
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
     } | {
         available: boolean;
         diagnostics: {
+            warning?: string;
             packageAvailable: boolean;
             launchChecked: boolean;
             browser: string;
@@ -66,6 +67,8 @@ export declare function runTestAgentCapabilityAwareProviderRoutingSelfTest(): Pr
             launchAttempt: string;
             launchFallbackErrors: string[];
             launchAttempts?: undefined;
+            installCommand?: undefined;
+            linuxDependencyCommand?: undefined;
         };
         reason?: undefined;
     } | {
@@ -76,9 +79,8 @@ export declare function runTestAgentCapabilityAwareProviderRoutingSelfTest(): Pr
             launchChecked: boolean;
             browser: string;
             launchAttempts: string[];
-            channel?: undefined;
-            launchAttempt?: undefined;
-            launchFallbackErrors?: undefined;
+            installCommand: string;
+            linuxDependencyCommand: string;
         };
     };
     report: import("..").TestAgentReport;

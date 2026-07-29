@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { Bot, CheckCircle2, CircleAlert, Database, Gauge, KeyRound, RefreshCw, Save, ShieldCheck, TestTube2 } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Bot, CheckCircle2, CircleAlert, Database, Eye, EyeOff, Gauge, LoaderCircle, RefreshCw, Save, ShieldCheck, TestTube2 } from '@lucide/vue'
 import { toast } from '../../utils/toast.js'
 
 const activeModel = ref('chat')
@@ -8,6 +8,10 @@ const loading = ref(false)
 const testing = ref(false)
 const embeddingSaving = ref(false)
 const testResult = ref(null)
+const apiKeyVisible = ref(false)
+const apiKeyRevealLoading = ref(false)
+const revealedStoredApiKey = ref('')
+let apiKeyRevealTimer = null
 const modelConfig = ref({
   enabled: true,
   format: 'openai-compatible',
@@ -16,12 +20,29 @@ const modelConfig = ref({
   model: '',
   temperature: 0.2,
   reasoningEffort: 'off',
+  providerContextCacheMode: 'auto',
+  providerPromptCacheRetention: 'in_memory',
+  providerNativeCacheEnabled: false,
+  providerNativeCacheFamily: 'auto',
+  providerNativeCacheFamilyManual: false,
+  anthropicCacheReferenceEnabled: false,
+  inferenceBackendKind: 'remote_api',
+  metricsPath: '',
   timeoutMs: 120000,
   fallbackToRules: true,
   hasKey: false,
-  credentialProtected: false
+  credentialProtected: false,
+  summaryReviewerEnabled: false,
+  summaryReviewerFormat: 'openai-compatible',
+  summaryReviewerApiUrl: '',
+  summaryReviewerApiKey: '',
+  summaryReviewerModel: '',
+  summaryReviewerSampleRate: 0.1,
+  summaryReviewerTimeoutMs: 30000,
+  summaryReviewerHasKey: false
 })
 const embeddingConfig = ref({
+  mode: 'auto',
   enabled: false,
   apiUrl: 'https://api.openai.com/v1',
   apiKey: '',
@@ -30,19 +51,141 @@ const embeddingConfig = ref({
 })
 
 const modelReady = computed(() => modelConfig.value.enabled && modelConfig.value.hasKey && !!modelConfig.value.model && !!modelConfig.value.apiUrl)
-const embeddingReady = computed(() => embeddingConfig.value.enabled && embeddingConfig.value.hasKey && !!embeddingConfig.value.model)
+const embeddingReady = computed(() => embeddingConfig.value.mode === 'local' || embeddingConfig.value.mode === 'auto' || (embeddingConfig.value.mode === 'remote' && embeddingConfig.value.hasKey && !!embeddingConfig.value.model))
+const cacheAdapterLabel = computed(() => {
+  const adapter = testResult.value?.contextCacheAdapter?.active?.adapter || modelConfig.value?.providerContextCache?.adapterV2?.active?.adapter || ''
+  return ({
+    anthropic_context_management: 'Anthropic 原生上下文编辑',
+    openai_prompt_cache: 'OpenAI 原生 Prompt Cache',
+    gemini_implicit_cache: 'Gemini 原生隐式缓存',
+    stable_prefix: '稳定前缀',
+    disabled: '缓存适配关闭',
+  })[adapter] || ''
+})
+const cacheCapability = computed(() => testResult.value?.capability || modelConfig.value?.providerCacheCapability || null)
+const cacheCapabilityStatus = computed(() => cacheCapability.value?.evidence?.status || cacheCapability.value?.status || 'unproven')
+const cacheCapabilityLabel = computed(() => ({
+  confirmed: '原生缓存已确认',
+  unsupported: '接口明确不支持',
+  unproven: '原生缓存尚未证明',
+  degraded: '最近验证暂时失败',
+})[cacheCapabilityStatus.value] || '原生缓存尚未证明')
+const cacheCapabilityReason = computed(() => {
+  const evidence = cacheCapability.value?.latestAttempt || cacheCapability.value?.evidence
+  if (cacheCapability.value?.latestAttempt?.status === 'degraded' && cacheCapability.value?.evidence?.status === 'confirmed') {
+    return '最近一次网络验证失败，仍保留有效的已确认能力证据。'
+  }
+  return ({
+    confirmed: `Provider 已回传 ${Number(evidence?.cacheReadInputTokens || 0).toLocaleString()} 个缓存读取 Token。`,
+    unsupported: 'Provider 明确拒绝了所选缓存协议字段；重新验证或清除证据前不会强制发送。',
+    unproven: '接口可连接，但尚未返回可核验的缓存 Token。CCM 会使用受控投影。',
+    degraded: '验证遇到超时或网络故障，15 分钟后可再次验证。',
+  })[cacheCapabilityStatus.value] || '尚无有效能力证据。'
+})
 const consumers = computed(() => testResult.value?.consumers || [
   { id: 'global-agent', label: '全局 Agent', ready: null },
   { id: 'group-main-agent', label: '群聊主 Agent', ready: null },
+  { id: 'project-main-agent', label: '项目主 Agent', ready: null },
   { id: 'music-agent', label: '音乐 Agent', ready: null }
 ])
+
+const cacheFamilyForFormat = (format) => ({
+  'openai-compatible': 'openai',
+  'anthropic-compatible': 'anthropic',
+  'gemini-compatible': 'gemini'
+})[format] || 'auto'
+
+const syncNativeCacheFamily = () => {
+  if (modelConfig.value.providerNativeCacheFamilyManual) return
+  modelConfig.value.providerNativeCacheFamily = cacheFamilyForFormat(modelConfig.value.format)
+}
+
+const handleNativeCacheFamilyChange = (event) => {
+  const selected = event?.target?.value || modelConfig.value.providerNativeCacheFamily
+  if (selected === 'auto') {
+    modelConfig.value.providerNativeCacheFamilyManual = false
+    void nextTick(syncNativeCacheFamily)
+    return
+  }
+  modelConfig.value.providerNativeCacheFamily = selected
+  modelConfig.value.providerNativeCacheFamilyManual = true
+}
+
+watch(() => modelConfig.value.format, syncNativeCacheFamily)
+
+const clearApiKeyRevealTimer = () => {
+  if (apiKeyRevealTimer) window.clearTimeout(apiKeyRevealTimer)
+  apiKeyRevealTimer = null
+}
+
+const hideApiKey = () => {
+  clearApiKeyRevealTimer()
+  apiKeyVisible.value = false
+  if (revealedStoredApiKey.value && modelConfig.value.apiKey === revealedStoredApiKey.value) {
+    modelConfig.value.apiKey = ''
+  }
+  revealedStoredApiKey.value = ''
+}
+
+const scheduleApiKeyAutoHide = () => {
+  clearApiKeyRevealTimer()
+  apiKeyRevealTimer = window.setTimeout(hideApiKey, 30_000)
+}
+
+const toggleApiKeyVisibility = async () => {
+  if (apiKeyVisible.value) {
+    hideApiKey()
+    return
+  }
+  if (modelConfig.value.apiKey) {
+    apiKeyVisible.value = true
+    scheduleApiKeyAutoHide()
+    return
+  }
+  if (!modelConfig.value.hasKey) return
+  apiKeyRevealLoading.value = true
+  try {
+    const response = await fetch('/api/orchestrator/credential/reveal', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    const data = await response.json()
+    if (!response.ok || !data.success || !data.apiKey) throw new Error(data.error || '读取 API Key 失败')
+    revealedStoredApiKey.value = data.apiKey
+    modelConfig.value.apiKey = data.apiKey
+    apiKeyVisible.value = true
+    scheduleApiKeyAutoHide()
+  } catch (error) {
+    toast.error(error?.message || '读取 API Key 失败')
+  } finally {
+    apiKeyRevealLoading.value = false
+  }
+}
+
+const handleAdvancedToggle = async (event) => {
+  const details = event.currentTarget
+  if (details?.open) return
+  await nextTick()
+  let parent = details?.parentElement
+  while (parent) {
+    const overflowY = window.getComputedStyle(parent).overflowY
+    if (overflowY === 'auto' || overflowY === 'scroll') {
+      parent.scrollTop = Math.min(parent.scrollTop, Math.max(0, parent.scrollHeight - parent.clientHeight))
+    }
+    parent = parent.parentElement
+  }
+  details?.querySelector('summary')?.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' })
+}
 
 const loadModelConfig = async () => {
   try {
     const response = await fetch('/api/orchestrator/config')
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '读取模型配置失败')
-    modelConfig.value = { ...modelConfig.value, ...data.config, apiKey: '' }
+    hideApiKey()
+    modelConfig.value = { ...modelConfig.value, ...data.config, apiKey: '', summaryReviewerApiKey: '' }
+    syncNativeCacheFamily()
   } catch (error) {
     toast.error(error?.message || '读取统一模型配置失败')
   }
@@ -51,14 +194,16 @@ const loadModelConfig = async () => {
 const saveModelConfig = async (silent = false) => {
   loading.value = true
   const payload = { ...modelConfig.value }
-  if (!payload.apiKey) delete payload.apiKey
+  if (!payload.apiKey || (revealedStoredApiKey.value && payload.apiKey === revealedStoredApiKey.value)) delete payload.apiKey
+  if (!payload.summaryReviewerApiKey) delete payload.summaryReviewerApiKey
   try {
     const response = await fetch('/api/orchestrator/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     })
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '保存失败')
-    modelConfig.value = { ...modelConfig.value, ...data.config, apiKey: '' }
+    hideApiKey()
+    modelConfig.value = { ...modelConfig.value, ...data.config, apiKey: '', summaryReviewerApiKey: '' }
     if (!silent) toast.success('统一大模型配置已保存')
     return true
   } catch (error) {
@@ -74,15 +219,41 @@ const testConnection = async () => {
   testing.value = true
   testResult.value = null
   try {
-    const response = await fetch('/api/orchestrator/connection-test', { method: 'POST' })
+    const response = await fetch('/api/orchestrator/cache-capability/probe', { method: 'POST' })
     const data = await response.json()
-    testResult.value = data
-    if (!response.ok || !data.success) throw new Error(data.message || '连接测试失败')
-    toast.success(data.message || '统一大模型连接正常')
+    testResult.value = {
+      ...data,
+      success: data?.connection?.success === true,
+      consumers: (data?.consumers || [
+        { id: 'global-agent', label: '全局 Agent' },
+        { id: 'group-main-agent', label: '群聊主 Agent' },
+        { id: 'project-main-agent', label: '项目主 Agent' },
+        { id: 'music-agent', label: '音乐 Agent' },
+      ]).map(item => ({ ...item, ready: data?.connection?.success === true })),
+      message: data?.connection?.success
+        ? `连接正常，缓存能力：${({ confirmed: '已确认', unsupported: '不支持', unproven: '尚未证明', degraded: '临时降级' })[data?.receipt?.status] || '尚未证明'}`
+        : (data?.error || data?.receipt?.reason || '连接测试失败'),
+    }
+    if (!response.ok || !data?.connection?.success) throw new Error(testResult.value.message)
+    modelConfig.value.providerCacheCapability = data.capability
+    toast.success(testResult.value.message)
   } catch (error) {
     toast.error(error?.message || '统一大模型连接失败')
   } finally {
     testing.value = false
+  }
+}
+
+const revokeCacheCapability = async () => {
+  try {
+    const response = await fetch('/api/orchestrator/cache-capability/revoke', { method: 'POST' })
+    const data = await response.json()
+    if (!response.ok || !data.success) throw new Error(data.error || '清除证据失败')
+    testResult.value = null
+    await loadModelConfig()
+    toast.success('缓存能力证据已清除，已恢复安全默认')
+  } catch (error) {
+    toast.error(error?.message || '清除缓存能力证据失败')
   }
 }
 
@@ -116,6 +287,7 @@ const saveEmbeddingConfig = async () => {
 }
 
 onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
+onBeforeUnmount(clearApiKeyRevealTimer)
 </script>
 
 <template>
@@ -125,7 +297,7 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
         <Bot :size="20" />
         <div>
           <h2>统一大模型</h2>
-          <p>全局 Agent、群聊主 Agent 和音乐 Agent 共用这套连接配置；项目子 Agent 仍使用各项目自己的运行时设置。</p>
+          <p>全局 Agent、群聊主 Agent、项目主 Agent 和音乐 Agent 共用这套连接配置；项目开发子 Agent 仍使用各项目自己的运行时设置。</p>
         </div>
       </div>
     </header>
@@ -146,7 +318,7 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
             <span v-else>{{ modelConfig.model || '填写模型、接口地址和 API Key 后即可使用。' }}</span>
           </div>
         </div>
-        <span v-if="testResult?.latencyMs" class="settings-status-meta">{{ testResult.latencyMs }} ms</span>
+        <span v-if="testResult?.latencyMs || cacheAdapterLabel" class="settings-status-meta">{{ testResult?.latencyMs ? `${testResult.latencyMs} ms` : '' }}<template v-if="cacheAdapterLabel">{{ testResult?.latencyMs ? ' · ' : '' }}{{ cacheAdapterLabel }}</template></span>
       </div>
 
       <div class="settings-tile-grid model-consumer-grid">
@@ -155,6 +327,14 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
           <div class="settings-tile-value">{{ consumer.label }}</div>
           <div class="settings-tile-note">{{ consumer.ready === true ? '本次连接测试通过' : (consumer.ready === false ? '本次连接测试失败' : '保存后共享生效') }}</div>
         </div>
+      </div>
+
+      <div class="settings-inline-status" :class="`cache-capability-${cacheCapabilityStatus}`">
+        <div>
+          <strong>{{ cacheCapabilityLabel }}</strong>
+          <span>{{ cacheCapabilityReason }}</span>
+        </div>
+        <button v-if="cacheCapability?.evidence || cacheCapability?.latestAttempt" type="button" class="settings-button" :disabled="testing" @click="revokeCacheCapability"><RefreshCw :size="15" /> 清除证据</button>
       </div>
 
       <div class="settings-section">
@@ -171,6 +351,7 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
                 <option value="auto">自动识别</option>
                 <option value="openai-compatible">OpenAI Compatible</option>
                 <option value="anthropic-compatible">Anthropic Compatible</option>
+                <option value="gemini-compatible">Gemini Generate Content</option>
               </select>
             </div>
             <div class="settings-field">
@@ -185,11 +366,34 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
           </div>
           <div class="settings-field">
             <label for="model-key">API Key</label>
-            <input id="model-key" v-model="modelConfig.apiKey" type="password" class="settings-input" :placeholder="modelConfig.hasKey ? '已加密保存，留空不修改' : '输入 API Key'">
+            <div class="settings-secret-input">
+              <input
+                id="model-key"
+                v-model="modelConfig.apiKey"
+                :type="apiKeyVisible ? 'text' : 'password'"
+                class="settings-input"
+                autocomplete="off"
+                spellcheck="false"
+                :placeholder="modelConfig.hasKey ? '已加密保存，留空不修改' : '输入 API Key'"
+              >
+              <button
+                type="button"
+                class="settings-secret-toggle"
+                :disabled="apiKeyRevealLoading || (!modelConfig.hasKey && !modelConfig.apiKey)"
+                :title="apiKeyVisible ? '隐藏 API Key' : '显示 API Key（30 秒后自动隐藏）'"
+                :aria-label="apiKeyVisible ? '隐藏 API Key' : '显示 API Key'"
+                :aria-pressed="apiKeyVisible"
+                @click="toggleApiKeyVisibility"
+              >
+                <LoaderCircle v-if="apiKeyRevealLoading" :size="16" class="settings-spin" />
+                <EyeOff v-else-if="apiKeyVisible" :size="16" />
+                <Eye v-else :size="16" />
+              </button>
+            </div>
             <span v-if="modelConfig.credentialProtected" class="settings-field-hint"><ShieldCheck :size="12" style="vertical-align:-2px" /> 已由本机凭据仓库加密保护。</span>
           </div>
 
-          <details class="settings-details">
+          <details class="settings-details" @toggle="handleAdvancedToggle">
             <summary><Gauge :size="14" /> 高级参数</summary>
             <div class="settings-details-content">
               <div class="settings-form-grid">
@@ -211,12 +415,104 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
                   </select>
                   <span class="settings-field-hint">仅对支持推理的模型生效；OpenAI 兼容接口发送 reasoning_effort，Anthropic 兼容接口发送 thinking 预算。不支持的网关可先选「关闭」。</span>
                 </div>
+                <div class="settings-field">
+                  <label for="model-context-cache-mode">上下文缓存</label>
+                  <select id="model-context-cache-mode" v-model="modelConfig.providerContextCacheMode" class="settings-input">
+                    <option value="auto">自动选择</option>
+                    <option value="native">优先 Provider 原生</option>
+                    <option value="controlled">CCM 受控投影</option>
+                    <option value="off">关闭缓存适配</option>
+                  </select>
+                </div>
+                <div class="settings-field">
+                  <label for="model-inference-backend">推理后端</label>
+                  <select id="model-inference-backend" v-model="modelConfig.inferenceBackendKind" class="settings-input">
+                    <option value="remote_api">远程 API / 中转站</option>
+                    <option value="vllm">外接 vLLM</option>
+                    <option value="sglang">外接 SGLang</option>
+                  </select>
+                  <span class="settings-field-hint">CCM 只连接现有服务，不安装或管理 Python、CUDA、模型文件和 GPU 进程。</span>
+                </div>
+                <div v-if="modelConfig.inferenceBackendKind !== 'remote_api'" class="settings-field">
+                  <label for="model-metrics-path">同源指标路径</label>
+                  <input id="model-metrics-path" v-model="modelConfig.metricsPath" class="settings-input" placeholder="/metrics">
+                  <span class="settings-field-hint">只允许同源路径；后端指标可证明 KV 缓存启用，但只有每请求缓存 Token 才计入节省。</span>
+                </div>
+                <div class="settings-field">
+                  <label for="model-cache-retention">Prompt Cache 保留</label>
+                  <select id="model-cache-retention" v-model="modelConfig.providerPromptCacheRetention" class="settings-input">
+                    <option value="in_memory">Provider 默认</option>
+                    <option value="24h">24 小时</option>
+                  </select>
+                  <span class="settings-field-hint">24 小时模式可能在 Provider 侧保留缓存状态；需要零数据保留时请选择 Provider 默认。</span>
+                </div>
+                <div v-if="modelConfig.providerNativeCacheEnabled" class="settings-field">
+                  <label for="model-native-cache-family">自定义接口缓存协议</label>
+                  <select id="model-native-cache-family" v-model="modelConfig.providerNativeCacheFamily" class="settings-input" @change="handleNativeCacheFamilyChange($event)">
+                    <option value="auto">恢复自动跟随</option>
+                    <option value="openai">OpenAI Prompt Cache</option>
+                    <option value="anthropic">Anthropic Context Management</option>
+                    <option value="gemini">Gemini Context Cache</option>
+                    <option value="compatible">仅稳定前缀</option>
+                  </select>
+                  <span class="settings-field-hint">{{ modelConfig.providerNativeCacheFamilyManual ? '已手动指定，切换接口协议时不会覆盖。' : '自动跟随接口协议；手动选择后停止同步。' }}</span>
+                </div>
               </div>
-              <label class="settings-switch" style="margin-top:12px">
-                <input v-model="modelConfig.fallbackToRules" type="checkbox">
-                <span class="settings-switch-track"></span>
-                模型不可用时允许群聊主 Agent 使用只读规则兜底
-              </label>
+              <div class="settings-switch-stack">
+                <label class="settings-switch">
+                  <input v-model="modelConfig.providerNativeCacheEnabled" type="checkbox">
+                  <span class="settings-switch-track"></span>
+                  <span class="settings-switch-label">强制向当前自定义接口发送所选原生缓存字段</span>
+                </label>
+                <label v-if="modelConfig.format === 'anthropic-compatible'" class="settings-switch">
+                  <input v-model="modelConfig.anthropicCacheReferenceEnabled" type="checkbox">
+                  <span class="settings-switch-track"></span>
+                  <span class="settings-switch-label">启用 Anthropic cache_reference/cache_edits</span>
+                </label>
+                <label class="settings-switch">
+                  <input v-model="modelConfig.fallbackToRules" type="checkbox">
+                  <span class="settings-switch-track"></span>
+                  <span class="settings-switch-label">模型不可用时允许群聊主 Agent 使用只读规则兜底</span>
+                </label>
+              </div>
+              <div class="settings-field settings-reviewer-block">
+                <label class="settings-switch">
+                  <input v-model="modelConfig.summaryReviewerEnabled" type="checkbox">
+                  <span class="settings-switch-track"></span>
+                  <span class="settings-switch-label">抽样使用第二模型独立复核正式摘要</span>
+                </label>
+                <span class="settings-field-hint">默认关闭。命中抽样后仅调用一次且不重试；遗漏约束、编造完成状态或复核配置失效时拒绝提交摘要。</span>
+              </div>
+              <div v-if="modelConfig.summaryReviewerEnabled" class="settings-form-grid">
+                <div class="settings-field">
+                  <label for="summary-reviewer-format">复核接口协议</label>
+                  <select id="summary-reviewer-format" v-model="modelConfig.summaryReviewerFormat" class="settings-input">
+                    <option value="openai-compatible">OpenAI Compatible</option>
+                    <option value="anthropic-compatible">Anthropic Compatible</option>
+                    <option value="gemini-compatible">Gemini Generate Content</option>
+                  </select>
+                </div>
+                <div class="settings-field">
+                  <label for="summary-reviewer-model">复核模型</label>
+                  <input id="summary-reviewer-model" v-model="modelConfig.summaryReviewerModel" class="settings-input" placeholder="独立复核模型名称">
+                </div>
+                <div class="settings-field">
+                  <label for="summary-reviewer-url">复核 API 地址</label>
+                  <input id="summary-reviewer-url" v-model="modelConfig.summaryReviewerApiUrl" class="settings-input" placeholder="https://api.example.com/v1">
+                </div>
+                <div class="settings-field">
+                  <label for="summary-reviewer-key">复核 API Key</label>
+                  <input id="summary-reviewer-key" v-model="modelConfig.summaryReviewerApiKey" type="password" class="settings-input" :placeholder="modelConfig.summaryReviewerHasKey ? '已安全保存，留空不修改' : '输入复核模型 API Key'">
+                </div>
+                <div class="settings-field">
+                  <label for="summary-reviewer-rate">抽样比例</label>
+                  <input id="summary-reviewer-rate" v-model.number="modelConfig.summaryReviewerSampleRate" type="number" min="0" max="1" step="0.05" class="settings-input">
+                </div>
+                <div class="settings-field">
+                  <label for="summary-reviewer-timeout">复核超时（毫秒）</label>
+                  <input id="summary-reviewer-timeout" v-model.number="modelConfig.summaryReviewerTimeoutMs" type="number" min="5000" max="120000" step="1000" class="settings-input">
+                </div>
+              </div>
             </div>
           </details>
 
@@ -234,19 +530,23 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
           <CheckCircle2 v-if="embeddingReady" :size="18" />
           <CircleAlert v-else :size="18" />
           <div>
-            <strong>{{ embeddingReady ? '外部向量模型已启用' : '当前使用本地混合检索' }}</strong>
-            <span>{{ embeddingReady ? embeddingConfig.model : '不配置也可以正常使用知识库；系统会自动使用本地 hashing 向量。' }}</span>
+            <strong>{{ embeddingReady ? '知识库语义检索已配置' : '当前仅使用词面检索' }}</strong>
+            <span>{{ embeddingConfig.mode === 'remote' ? embeddingConfig.model : embeddingConfig.mode === 'lexical' ? '关键词、中文切词与Hashing，不标记为语义命中。' : '首次使用会准备本地多语言Embedding模型。' }}</span>
           </div>
         </div>
       </div>
 
       <div class="settings-form">
-        <label class="settings-switch">
-          <input v-model="embeddingConfig.enabled" type="checkbox">
-          <span class="settings-switch-track"></span>
-          启用外部 Embedding API
-        </label>
-        <div class="settings-form-grid">
+        <div class="settings-field">
+          <label for="embedding-mode">检索模式</label>
+          <select id="embedding-mode" v-model="embeddingConfig.mode" class="settings-select">
+            <option value="auto">自动（外部优先，本地兜底）</option>
+            <option value="local">本地语义</option>
+            <option value="remote">外部 Embedding</option>
+            <option value="lexical">仅词面检索</option>
+          </select>
+        </div>
+        <div v-if="embeddingConfig.mode === 'remote' || embeddingConfig.mode === 'auto'" class="settings-form-grid">
           <div class="settings-field">
             <label for="embedding-model">Embedding 模型</label>
             <input id="embedding-model" v-model="embeddingConfig.model" class="settings-input" placeholder="text-embedding-3-small / bge-m3">
@@ -256,7 +556,7 @@ onMounted(() => Promise.all([loadModelConfig(), loadEmbeddingConfig()]))
             <input id="embedding-url" v-model="embeddingConfig.apiUrl" class="settings-input" placeholder="https://api.openai.com/v1">
           </div>
         </div>
-        <div class="settings-field">
+        <div v-if="embeddingConfig.mode === 'remote' || embeddingConfig.mode === 'auto'" class="settings-field">
           <label for="embedding-key">API Key</label>
           <input id="embedding-key" v-model="embeddingConfig.apiKey" type="password" class="settings-input" :placeholder="embeddingConfig.hasKey ? '已安全保存，留空不修改' : '输入 API Key'">
         </div>

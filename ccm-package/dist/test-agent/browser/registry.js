@@ -59,7 +59,10 @@ async function runBrowserVerificationWithProviders(workOrder, runtime = {}) {
     if (!(0, shared_1.wantsBrowser)(workOrder))
         return [];
     const preferred = preferredProvider(workOrder, runtime);
-    const plan = (0, check_execution_coverage_1.buildBrowserCheckExecutionPlan)(workOrder, preferred);
+    // runTestAgent 在启动任何浏览器资源前已经冻结执行计划。这里必须复用同一个 planId，
+    // 否则 Provider 证据会绑定第二个随机计划，最终完整性核验会把真实结果判为越界。
+    const plan = workOrder.metadata?.browserCheckExecutionPlan
+        || (0, check_execution_coverage_1.buildBrowserCheckExecutionPlan)(workOrder, preferred);
     workOrder.metadata = {
         ...workOrder.metadata,
         browserCheckExecutionPlan: plan,

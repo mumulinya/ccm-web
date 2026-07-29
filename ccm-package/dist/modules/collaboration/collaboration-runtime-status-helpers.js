@@ -79,7 +79,6 @@ const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const agent_qa_service_1 = require("./agent-qa-service");
 const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
-const agent_receipts_1 = require("./agent-receipts");
 const agent_notifications_1 = require("./agent-notifications");
 const storage_1 = require("./storage");
 const execution_kernel_1 = require("../../agents/execution-kernel");
@@ -528,28 +527,26 @@ function isAdvisoryNeed(value, task = null) {
         || /人工(?:确认|检查|核验)/i.test(text);
 }
 function receiptHasOpenNeeds(receipt, task = null) {
+    void task;
     const blockers = splitEvidenceList(receipt?.blockers || []);
-    const needs = splitEvidenceList(receipt?.needs || []).filter((item) => {
-        const text = String(item || "").trim();
-        return !isAdvisoryNeed(text, task);
-    });
+    const needs = splitEvidenceList(receipt?.needs || []);
     return blockers.length > 0 || needs.length > 0;
 }
 function getVerificationEvidenceGate(receipts = []) {
     const executed = [];
     const suggested = [];
     const failed = [];
-    const values = uniqueStrings(...(receipts || []).map((receipt) => receipt?.verification || []));
-    for (const item of values) {
-        if (isFailedVerification(item)) {
-            failed.push(item);
-            continue;
+    for (const receipt of receipts || []) {
+        for (const result of Array.isArray(receipt?.verificationResults || receipt?.verification_results) ? (receipt.verificationResults || receipt.verification_results) : []) {
+            const label = String(result?.name || result?.command || "verification").trim();
+            const status = String(result?.status || "").toLowerCase();
+            if (status === "passed")
+                executed.push(label);
+            else if (["failed", "blocked"].includes(status))
+                failed.push(label);
+            else if (["skipped", "not_run"].includes(status))
+                suggested.push(label);
         }
-        if (isSuggestedOnlyVerification(item)) {
-            suggested.push(item);
-            continue;
-        }
-        executed.push(item);
     }
     return {
         pass: executed.length > 0 && failed.length === 0,
@@ -566,10 +563,7 @@ function normalizeVerificationMatchText(value) {
         .trim();
 }
 function isManualVerificationEvidence(value) {
-    const text = String(value || "").trim();
-    if (!text || isSuggestedOnlyVerification(text) || isFailedVerification(text))
-        return false;
-    return /人工核验|手动核验|人工检查|手动检查|manual\s+(check|verification|verified)|checked\s+manually/i.test(text);
+    return !!value && typeof value === "object" && String(value.source || "").toLowerCase() === "manual" && String(value.status || "").toLowerCase() === "passed";
 }
 function verificationTextMatchesCommand(text, command) {
     const normalizedText = normalizeVerificationMatchText(text);
@@ -587,11 +581,11 @@ function getRequiredVerificationCoverage(receipts = []) {
         const commands = (0, collaboration_runtime_runtime_tools_1.getConfiguredProjectVerificationCommands)(agent);
         if (!commands.length)
             continue;
-        const verification = splitEvidenceList(receipt?.verification || []);
-        const executed = verification.filter(item => !isSuggestedOnlyVerification(item) && !isFailedVerification(item));
-        const externalRunner = executed.filter(item => /passed by external runner\s*\(exit 0\)/i.test(item));
+        const results = Array.isArray(receipt?.verificationResults || receipt?.verification_results) ? (receipt.verificationResults || receipt.verification_results) : [];
+        const executed = results.filter((item) => String(item?.status || "").toLowerCase() === "passed");
+        const externalRunner = executed.filter((item) => ["ccm_runner", "ccm_runner_verification", "external_runner"].includes(String(item?.source || "").toLowerCase()) && (item.exitCode == null || Number(item.exitCode) === 0));
         const manual = executed.some(isManualVerificationEvidence);
-        const matched = commands.filter(command => externalRunner.some(item => verificationTextMatchesCommand(item, command)));
+        const matched = commands.filter(command => externalRunner.some((item) => verificationTextMatchesCommand(String(item.command || item.name || ""), command)));
         const item = {
             agent,
             required: commands.slice(0, 6),
@@ -1067,10 +1061,14 @@ function normalizeIndependentReviewEntry(raw, fallback = {}) {
     if (!reviewer && !verdict && !summary && evidence.length === 0)
         return null;
     const state = independentReviewVerdictState(verdict);
+    const reviewedChangeFingerprint = String(item.reviewedChangeFingerprint || item.reviewed_change_fingerprint || "").trim();
+    const reviewedAt = String(item.reviewedAt || item.reviewed_at || "").trim();
     return {
         reviewer,
         requester,
         reviewSubject,
+        ...(reviewedChangeFingerprint ? { reviewedChangeFingerprint, reviewed_change_fingerprint: reviewedChangeFingerprint } : {}),
+        ...(reviewedAt ? { reviewedAt, reviewed_at: reviewedAt } : {}),
         verdict: verdict || state,
         status: state,
         summary: (0, memory_1.compactMemoryText)(summary || evidence.join("；") || "独立复核已记录", 700),
@@ -1222,7 +1220,7 @@ function getGroupTaskExecutionStatus(review, coordinatorResult, outputText, task
         ...coordinatorEvidence,
         ...details,
     });
-    if (/llm-error|llm-not-configured/.test(runtime) || (0, agent_receipts_1.checkTaskFailure)(outputText)) {
+    if (/llm-error|llm-not-configured/.test(runtime)) {
         return buildGroupResult("failed", {
             review,
             detail: runtime ? `主 Agent 运行失败：${runtime}` : "协作输出包含失败标记",
@@ -1333,7 +1331,7 @@ function getGroupTaskExecutionStatus(review, coordinatorResult, outputText, task
             detail: `业务开发任务缺少项目配置验证命令的执行证据，不能判定完成；缺失：${missing}`,
         });
     }
-    if (isDailyDev) {
+    if (isDailyDev && task?.test_agent_enabled !== false) {
         const agentQaForTask = task?.group_id
             ? (0, agent_qa_service_1.getAgentQaItemsForGroup)(String(task.group_id), 120).filter((item) => !task?.id || !item.task_id || item.task_id === task.id)
             : [];

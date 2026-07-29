@@ -66,6 +66,18 @@ if (process.argv.includes("--child")) {
     keptMessages: [],
     postCompactReinject: { files: [{ path: "large-restore.md", content: "R".repeat(90_000) }] },
   });
+  let modelCallCount = 0;
+  const mockModelSummary = ({ user }) => {
+    modelCallCount += 1;
+    const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+    const start = user.indexOf(marker) + marker.length;
+    const ends = [
+      user.indexOf("\n用户本次 /compact 的附加要求", start),
+      user.indexOf("\n\n本次被压缩区间内的全部用户消息", start),
+    ].filter(index => index >= 0);
+    const end = Math.min(...ends);
+    return { summary: JSON.parse(user.slice(start, end)), provider: "mock", model: "mock-true-payload-gate" };
+  };
   let rejected = null;
   try {
     await compaction.compactGroupConversationMemory({
@@ -76,7 +88,9 @@ if (process.argv.includes("--child")) {
       config: {
         modelContextWindow: 32_000,
         modelAutoCompactTokenLimit: 18_000,
-        memoryCompactionUseModel: false,
+        memoryCompactionUseModel: true,
+        memoryCompactionMode: "model-required",
+        compactionModelCall: mockModelSummary,
         minKeepMessages: 5,
         minKeepTokens: 10_000,
         maxKeepTokens: 40_000,
@@ -95,6 +109,9 @@ if (process.argv.includes("--child")) {
     secondThresholdGateFailsClosed: gate?.status === "recompact_required"
       && gate.action === "reduce_restored_context_before_child_dispatch"
       && gate.true_post_compact_token_count >= gate.trigger_tokens,
+    boundedFormalRecompactionAttemptedOnce: gate?.formal_recompaction?.attempted === true
+      && gate.formal_recompaction?.maxAttempts === 1
+      && modelCallCount === 2,
     compactBoundaryNotCommitted: !memory.loadGroupMemory(groupId, sessionA.id).compactBoundary?.id,
     rawTranscriptRemainsUntouched: storage.getGroupMessages(groupId, sessionA.id).length === messages.length
       && storage.getGroupMessages(groupId, sessionA.id).at(-1)?.content === messages.at(-1)?.content,

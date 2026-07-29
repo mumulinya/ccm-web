@@ -22,6 +22,8 @@ const { extractGroupSessionMemoryBinding } = require(path.join(root, "ccm-packag
 const project = "memory-mcp-project";
 const projectSessionId = "s1";
 const workDir = path.join(home, "workspace");
+const contextPlanChecksum = "a".repeat(64);
+const contextIdentityChecksum = "b".repeat(64);
 fs.mkdirSync(workDir, { recursive: true });
 
 const messages = Array.from({ length: 16 }, (_, index) => ({
@@ -48,6 +50,8 @@ function createSnapshot(extra = {}) {
     modelContextWindow: 200000,
     autoCompactThreshold: 167000,
     requestText: "继续实现记忆 MCP",
+    contextPlanChecksum,
+    contextIdentityChecksum,
     ...extra,
   });
 }
@@ -109,6 +113,8 @@ try {
     challenge_id: firstServer.challenge.challenge_id,
     snapshot_id: first.id,
     snapshot_checksum: first.checksum,
+    context_plan_checksum: first.contextPlanChecksum,
+    confirmation_cursor: first.confirmationCursor,
   });
   assert.equal(premature.raw.isError, true);
   assert.match(premature.body.error, /必需记忆尚未读取完成/);
@@ -116,6 +122,9 @@ try {
   const manifestResult = await call(client, "get_context_manifest");
   assert.equal(manifestResult.body.manifest.snapshotId, first.id);
   assert.equal(manifestResult.body.manifest.requiredSegmentIds.length, first.requiredSegmentIds.length);
+  assert.equal(manifestResult.body.manifest.context_plan_checksum, contextPlanChecksum);
+  assert.equal(manifestResult.body.manifest.confirmation_cursor, first.confirmationCursor);
+  assert.deepEqual(manifestResult.body.manifest.block_changes, first.contextPlanBlockChanges);
   let cursor = 0;
   let allContent = "";
   while (cursor !== null) {
@@ -133,6 +142,8 @@ try {
     challenge_id: firstServer.challenge.challenge_id,
     snapshot_id: first.id,
     snapshot_checksum: first.checksum,
+    context_plan_checksum: first.contextPlanChecksum,
+    confirmation_cursor: first.confirmationCursor,
   });
   assert.notEqual(acknowledged.raw.isError, true, acknowledged.body.error);
   assert.equal(acknowledged.body.state, "loaded");

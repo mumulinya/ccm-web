@@ -4,6 +4,7 @@ import * as path from "path";
 import { CCM_DIR } from "../core/utils";
 import { estimateTextTokens } from "../system/context-budget";
 import { buildCompleteConversationRounds } from "../system/session-memory-window";
+import { readLatestProviderNeutralContextCacheState } from "../system/provider-neutral-context-cache";
 
 export const THIRD_PARTY_MEMORY_SNAPSHOT_SCHEMA = "ccm-third-party-memory-snapshot-v1";
 export const THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES = [
@@ -206,6 +207,12 @@ export function createThirdPartyMemorySnapshot(input: any) {
   const memoryItems = (Array.isArray(input.memoryItems) ? input.memoryItems : []).map(normalizeMemoryItem);
   const previous = readLatestSnapshot(key);
   const previousLedger = previous ? readLedger(previous) : null;
+  const contextBinding = input.groupId && input.groupSessionId
+    ? { scope: "group", scopeId: String(input.groupId), sessionId: String(input.groupSessionId) }
+    : { scope: "project", scopeId: String(input.project || ""), sessionId: String(input.projectSessionId || input.project_session_id || input.taskAgentSessionId || input.task_agent_session_id || "") };
+  const contextPlanState = contextBinding.sessionId ? readLatestProviderNeutralContextCacheState(contextBinding as any) : null;
+  const contextPlanChecksum = String(input.contextPlanChecksum || input.context_plan_checksum || contextPlanState?.contextPlanChecksum || contextPlanState?.planChecksum || "");
+  const contextIdentityChecksum = String(input.contextIdentityChecksum || input.context_identity_checksum || contextPlanState?.contextIdentityChecksum || "");
   const sameLineage = previous
     && previousLedger?.acknowledgedAt
     && String(previous.provider || "") === String(input.provider || "")
@@ -213,7 +220,8 @@ export function createThirdPartyMemorySnapshot(input: any) {
       || String(previous.nativeSessionId || "") === String(input.nativeSessionId || input.native_session_id || ""))
     && Number(previous.nativeGeneration || 0) === Number(input.nativeGeneration || 0)
     && Number(previous.boundaryGeneration || 0) === Number(input.boundaryGeneration || 0)
-    && String(previous.mode || "") === mode;
+    && String(previous.mode || "") === mode
+    && (!previous.contextIdentityChecksum || !contextIdentityChecksum || String(previous.contextIdentityChecksum) === contextIdentityChecksum);
   const priorMessageIds = new Set(sameLineage ? previous.allMessageIds || [] : []);
   const priorMemoryChecksums = new Set(sameLineage ? previous.allMemoryChecksums || [] : []);
   const deliveryMode = sameLineage ? "delta" : "full";
@@ -270,9 +278,14 @@ export function createThirdPartyMemorySnapshot(input: any) {
     nativeGeneration: Number(input.nativeGeneration || input.native_generation || 0),
     boundaryGeneration: Number(input.boundaryGeneration || input.boundary_generation || 0),
     previousSnapshotId: sameLineage ? String(previous.id || "") : "",
+    previousAcknowledgedCursor: sameLineage ? String(previous.messageCursor || "") : "",
     rehydrationRequired: !sameLineage,
     rehydrationReason: !previous ? "initial_generation" : sameLineage ? "delta_available" : "identity_or_boundary_changed",
     messageCursor: String(allVisibleMessages.at(-1)?.id || ""),
+    confirmationCursor: digest([id, String(allVisibleMessages.at(-1)?.id || ""), contextPlanChecksum], 32),
+    contextPlanChecksum,
+    contextIdentityChecksum,
+    contextPlanBlockChanges: contextPlanState?.blockChanges || { kept: [], inserted: [], replaced: [], deleted: [] },
     allMessageIds: allVisibleMessages.map(message => message.id),
     allMemoryChecksums: memoryItems.map(item => item.checksum),
     segments,
@@ -340,7 +353,8 @@ export function getThirdPartyMemoryManifest(context: any) {
   ledger.manifestReadAt = ledger.manifestReadAt || new Date().toISOString();
   writeLedger(snapshot, ledger);
   return {
-    schema: "ccm-third-party-memory-manifest-v1",
+    schema: "ccm-third-party-memory-manifest-v2",
+    version: 2,
     snapshotId: snapshot.id,
     snapshotChecksum: snapshot.checksum,
     mode: snapshot.mode,
@@ -351,6 +365,14 @@ export function getThirdPartyMemoryManifest(context: any) {
     nativeGeneration: snapshot.nativeGeneration,
     requiredHydrationTokens: snapshot.requiredHydrationTokens,
     messageCursor: snapshot.messageCursor,
+    previousAcknowledgedCursor: snapshot.previousAcknowledgedCursor || "",
+    confirmationCursor: snapshot.confirmationCursor || "",
+    contextPlanChecksum: snapshot.contextPlanChecksum || "",
+    contextIdentityChecksum: snapshot.contextIdentityChecksum || "",
+    contextPlanBlockChanges: snapshot.contextPlanBlockChanges || { kept: [], inserted: [], replaced: [], deleted: [] },
+    context_plan_checksum: snapshot.contextPlanChecksum || "",
+    block_changes: snapshot.contextPlanBlockChanges || { kept: [], inserted: [], replaced: [], deleted: [] },
+    confirmation_cursor: snapshot.confirmationCursor || "",
     requiredSegmentIds: snapshot.requiredSegmentIds,
     requiredMemoryItemIds: snapshot.requiredMemoryItemIds,
     sessionSegments: snapshot.segments.map((segment: any) => ({ id: segment.id, kind: segment.kind, required: segment.required, tokens: segment.tokens, messageCount: segment.messageCount, overBudget: segment.overBudget })),
@@ -443,6 +465,9 @@ export function acknowledgeThirdPartyMemoryHydration(context: any) {
   if (!hydration.ready) throw new Error(`必需记忆尚未读取完成：segments=${hydration.missingSegmentIds.join(",") || "none"}; memory=${hydration.missingMemoryItemIds.join(",") || "none"}`);
   const ledger = hydration.ledger;
   ledger.acknowledgedAt = new Date().toISOString();
+  ledger.acknowledgedMessageCursor = hydration.snapshot.messageCursor || "";
+  ledger.confirmationCursor = hydration.snapshot.confirmationCursor || "";
+  ledger.contextPlanChecksum = hydration.snapshot.contextPlanChecksum || "";
   writeLedger(hydration.snapshot, ledger);
   return { snapshot: hydration.snapshot, ledger };
 }
@@ -536,14 +561,18 @@ export function mergeThirdPartyMemoryUsageIntoReceipt(receiptInput: any, snapsho
 }
 
 export function buildThirdPartyMemoryBootstrap(snapshot: any, challenge: any) {
+  const v2Ack = snapshot.contextPlanChecksum && snapshot.confirmationCursor
+    ? `，context_plan_checksum=${snapshot.contextPlanChecksum}，confirmation_cursor=${snapshot.confirmationCursor}`
+    : "";
   return [
     "【CCM 第三方 Agent 记忆加载】",
     `- snapshot=${snapshot.id}`,
     `- checksum=${snapshot.checksum}`,
     `- mode=${snapshot.mode}; delivery=${snapshot.deliveryMode}; required_tokens=${snapshot.requiredHydrationTokens}`,
     `- boundary_generation=${snapshot.boundaryGeneration}; native_generation=${snapshot.nativeGeneration}`,
+    ...(snapshot.contextPlanChecksum ? [`- context_plan_checksum=${snapshot.contextPlanChecksum}; confirmation_cursor=${snapshot.confirmationCursor}`] : []),
     "- 执行任务前依次调用 ccm__knowledge_context/get_context_manifest、read_session_context 和 read_memory_items，直到所有 required 项读取完成。",
-    `- 然后调用 ccm__knowledge_context/acknowledge_memory_context：challenge_id=${challenge?.challenge_id || ""}，snapshot_id=${snapshot.id}，snapshot_checksum=${snapshot.checksum}。`,
+    `- 然后调用 ccm__knowledge_context/acknowledge_memory_context：challenge_id=${challenge?.challenge_id || ""}，snapshot_id=${snapshot.id}，snapshot_checksum=${snapshot.checksum}${v2Ack}。`,
     "- 未完成确认不得修改代码或提交交付；需要旧边界原文时使用 read_session_context(view=raw_archive)。",
   ].join("\n");
 }

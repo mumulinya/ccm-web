@@ -40,6 +40,7 @@ export declare function buildUsabilityWorkbench(options?: {
     resources: {
         projects: {
             name: any;
+            display_name: string;
             running: boolean;
             agent: any;
             work_dir: any;

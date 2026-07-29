@@ -183,5 +183,19 @@ export declare function buildDailyDevAgentDiagnostics(): {
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
 };

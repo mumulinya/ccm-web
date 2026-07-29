@@ -18,6 +18,8 @@ import {
 } from "./types";
 import { isUnsafeVerificationCommand, redactTestAgentSensitiveText } from "./utils";
 import { normalizeTestAgentWorkOrder } from "./work-order";
+import { browserCheckContractPrompt, validatePlannedBrowserChecks } from "./agentic-planner-browser-contract";
+import { runSemanticDecision, TestAgentSemanticPlanV2 } from "../system/semantic-decision-runtime";
 
 export interface AgenticTestProjectPlan {
   name: string;
@@ -31,6 +33,8 @@ export interface AgenticTestPlan {
   summary?: string;
   inspectedFiles?: string[];
   projects?: AgenticTestProjectPlan[];
+  criterionCoverage?: TestAgentSemanticPlanV2["criterionCoverage"];
+  semanticDecisionReceipt?: any;
 }
 
 export interface AgenticTestPlanningInput {
@@ -52,7 +56,7 @@ export interface AgenticTestFollowupInput {
 
 export interface AgenticTestFollowupPlan {
   summary?: string;
-  projects?: Array<{ name: string; rationale?: string; commands?: string[] }>;
+  projects?: Array<{ name: string; rationale?: string; commands?: string[]; browserChecks?: BrowserCheckSpec[] }>;
 }
 
 const SOURCE_EXTENSIONS = new Set([
@@ -150,9 +154,13 @@ function plannerSystemPrompt() {
     "Never propose editing files, installing dependencies, changing configuration, committing code, or weakening assertions.",
     "Commands must be read-only verification commands accepted by the existing project, preferably package.json scripts.",
     "Browser checks must use explicit Playwright-style actions and assertions against the supplied local/test URL.",
+    "When a project supplies browserScenarios, translate every scenario into a concrete browser check that proves it.",
     "Do not claim pass/fail. Return only a JSON plan; CCM's deterministic evidence gate makes the verdict.",
-    "Return: {summary, inspectedFiles, projects:[{name,rationale,commands,httpChecks,browserChecks}]}",
-    "Keep at most 6 commands, 4 HTTP checks and 4 browser checks per project.",
+    "For every acceptance criterion return exactly one criterionCoverage row. planned rows must name the executable checks that prove it; unsupported or needs_user rows must explain why execution cannot prove it.",
+    "Return: {summary, inspectedFiles, projects:[{name,rationale,commands,httpChecks,browserChecks}],criterionCoverage:[{criterion,status:'planned|unsupported|needs_user',checkNames:[],reason}]}",
+    "Keep at most 6 commands, 4 HTTP checks and 8 browser checks per project.",
+    "",
+    browserCheckContractPrompt(),
   ].join("\n");
 }
 
@@ -160,9 +168,12 @@ function followupSystemPrompt() {
   return [
     "You are CCM TestAgent's read-only verification follow-up planner.",
     "Review failed, blocked or missing verification evidence and choose at most 3 additional focused commands per project.",
+    "You may also return at most 4 additional browser checks per project to reproduce or narrow down a failing UI behaviour.",
     "Do not repeat commands already executed. Never edit files, install dependencies, mutate git, or weaken tests.",
-    "Return only JSON: {summary,projects:[{name,rationale,commands}]}. Return an empty projects array when no useful safe follow-up exists.",
+    "Return only JSON: {summary,projects:[{name,rationale,commands,browserChecks}]}. Return an empty projects array when no useful safe follow-up exists.",
     "The deterministic evidence gate, not you, decides the verdict.",
+    "",
+    browserCheckContractPrompt(),
   ].join("\n");
 }
 
@@ -195,13 +206,7 @@ async function callDefaultFollowupPlanner(input: AgenticTestFollowupInput): Prom
 }
 
 async function callDefaultPlanner(input: AgenticTestPlanningInput): Promise<AgenticTestPlan> {
-  const config = loadOrchestratorConfig();
-  if (config.enabled === false || !config.apiUrl || !config.apiKey || !config.model) {
-    throw new Error("统一大模型未配置，无法生成 TestAgent 语义检查计划");
-  }
-  const options = {
-    system: plannerSystemPrompt(),
-    messages: [{ role: "user", content: JSON.stringify({
+  const semanticInput = {
       goal: input.workOrder.originalUserGoal,
       acceptanceCriteria: input.workOrder.acceptanceCriteria,
       requiredChecks: input.workOrder.requiredChecks,
@@ -210,18 +215,54 @@ async function callDefaultPlanner(input: AgenticTestPlanningInput): Promise<Agen
         targetUrl: project.targetUrl,
         changedFiles: project.changedFiles,
         existingCommands: project.verificationCommands,
+        // 主 Agent 用自然语言指定的浏览器验证场景，规划层必须逐条翻译成真实检查。
+        browserScenarios: (project.browserScenarios || []).map(item => cleanText(item, 600)),
         targetProfile: cleanText(project.agentSummary, 1800),
       })),
       currentSource: input.sourceContext,
-    }) }],
-    temperature: 0,
-    maxTokens: 5000,
-    defaultTimeoutMs: 90_000,
-    invalidJsonMessage: "TestAgent 智能规划模型未返回有效 JSON",
   };
-  return shouldUseAnthropic(config)
-    ? await callAnthropicCompatibleJson(config, options)
-    : await callOpenAiCompatibleJson(config, options);
+  const result = await runSemanticDecision({
+    kind: "test_agent_plan",
+    identity: {
+      scope: "test_agent",
+      scopeId: input.workOrder.groupId || input.workOrder.taskId || input.workOrder.id,
+      sessionId: String(input.workOrder.metadata?.projectSessionId || input.workOrder.metadata?.groupSessionId || input.workOrder.id),
+      taskId: input.workOrder.taskId || input.workOrder.id,
+    },
+    system: plannerSystemPrompt(),
+    input: semanticInput,
+    maxTokens: 5_000,
+    validate: value => normalizeSemanticTestPlan(value, input.workOrder),
+    confidence: () => 1,
+  });
+  return { ...result.value, semanticDecisionReceipt: result.receipt };
+}
+
+function normalizeSemanticTestPlan(value: any, workOrder: NormalizedTestAgentWorkOrder): TestAgentSemanticPlanV2 {
+  const projects = Array.isArray(value?.projects) ? value.projects : [];
+  const criteria = workOrder.acceptanceCriteria.map(item => String(item || "").trim()).filter(Boolean);
+  const rows = Array.isArray(value?.criterionCoverage || value?.criterion_coverage) ? (value.criterionCoverage || value.criterion_coverage) : [];
+  const coverage = rows.map((row: any) => ({
+    criterion: String(row?.criterion || "").trim(),
+    status: String(row?.status || ""),
+    checkNames: Array.isArray(row?.checkNames || row?.check_names) ? (row.checkNames || row.check_names).map(String).filter(Boolean).slice(0, 20) : [],
+    reason: cleanText(row?.reason, 800),
+  }));
+  const allowed = new Set(["planned", "unsupported", "needs_user"]);
+  if (coverage.some((row: any) => !allowed.has(row.status))) throw new Error("TestAgent 语义计划包含无效验收覆盖状态");
+  for (const criterion of criteria) {
+    const matches = coverage.filter((row: any) => row.criterion === criterion);
+    if (matches.length !== 1) throw new Error(`TestAgent 语义计划未唯一覆盖验收标准：${criterion}`);
+    if (matches[0].status === "planned" && !matches[0].checkNames.length) throw new Error(`TestAgent 已规划验收项但未绑定检查：${criterion}`);
+  }
+  if (coverage.some((row: any) => row.criterion && !criteria.includes(row.criterion))) throw new Error("TestAgent 语义计划引用了未知验收标准");
+  return {
+    schema: "ccm-test-agent-semantic-plan-v2",
+    summary: cleanText(value?.summary, 1600),
+    inspectedFiles: Array.isArray(value?.inspectedFiles || value?.inspected_files) ? (value.inspectedFiles || value.inspected_files).map((item: any) => cleanText(item, 400)).filter(Boolean).slice(0, 40) : [],
+    projects,
+    criterionCoverage: coverage as TestAgentSemanticPlanV2["criterionCoverage"],
+  };
 }
 
 function unique<T>(items: T[], key: (item: T) => string) {
@@ -237,6 +278,7 @@ function unique<T>(items: T[], key: (item: T) => string) {
 function mergePlan(workOrder: NormalizedTestAgentWorkOrder, plan: AgenticTestPlan) {
   const byProject = new Map((Array.isArray(plan?.projects) ? plan.projects : []).map(item => [String(item?.name || "").trim(), item]));
   const additions: any[] = [];
+  const issues: WorkOrderIssue[] = [];
   const projects = workOrder.projects.map(project => {
     const candidate = byProject.get(project.name);
     if (!candidate) return project;
@@ -251,20 +293,39 @@ function mergePlan(workOrder: NormalizedTestAgentWorkOrder, plan: AgenticTestPla
       ...project.httpChecks,
       ...(Array.isArray(candidate.httpChecks) ? candidate.httpChecks.slice(0, 4) : []),
     ], item => JSON.stringify(item));
+    // 模型产出的浏览器检查先过契约校验，未知动作/断言丢弃并记 issue，不再静默消失。
+    const validated = validatePlannedBrowserChecks(
+      Array.isArray(candidate.browserChecks) ? candidate.browserChecks.slice(0, 8) : [],
+      project.name,
+      workOrder.acceptanceCriteria,
+    );
+    issues.push(...validated.issues);
     const browserChecks = unique([
       ...project.browserChecks,
-      ...(Array.isArray(candidate.browserChecks) ? candidate.browserChecks.slice(0, 4) : []),
+      ...validated.checks,
     ], item => JSON.stringify(item));
+    const scenarioCount = (project.browserScenarios || []).length;
+    if (scenarioCount && !validated.checks.length) {
+      issues.push({
+        severity: "warning",
+        code: "agentic_browser_scenarios_unplanned",
+        message: `${project.name}: ${scenarioCount} requested browser scenario(s) produced no usable browser check.`,
+      });
+    }
     additions.push({
       project: project.name,
       rationale: cleanText(candidate.rationale, 1000),
       commandsAdded: Math.max(0, commands.length - project.verificationCommands.length),
       httpChecksAdded: Math.max(0, httpChecks.length - project.httpChecks.length),
       browserChecksAdded: Math.max(0, browserChecks.length - project.browserChecks.length),
+      browserScenariosRequested: scenarioCount,
+      browserChecksRejected: validated.droppedChecks,
+      browserActionsRejected: validated.droppedActions,
+      browserAssertionsRejected: validated.droppedAssertions,
     });
     return { ...project, verificationCommands: commands, httpChecks, browserChecks };
   });
-  return { projects, additions };
+  return { projects, additions, issues };
 }
 
 export async function applyAgenticTestPlanning(
@@ -276,27 +337,39 @@ export async function applyAgenticTestPlanning(
   try {
     const planner = runtime.agenticPlanner || callDefaultPlanner;
     const plan = await planner({ workOrder, sourceContext });
+    const semanticPlan = normalizeSemanticTestPlan(plan || {}, workOrder);
     const merged = mergePlan(workOrder, plan || {});
+    const unplannedCriteria = semanticPlan.criterionCoverage.filter(item => item.status !== "planned");
     const renormalized = normalizeTestAgentWorkOrder({
       ...workOrder,
       projects: merged.projects,
       metadata: {
         ...workOrder.metadata,
         agenticPlanning: {
-          schema: "ccm-test-agent-agentic-planning-v1",
-          status: "applied",
+          schema: "ccm-test-agent-semantic-plan-v2",
+          status: unplannedCriteria.length ? "blocked" : "applied",
           summary: cleanText(plan?.summary, 1600),
           inspectedFiles: unique([
             ...(Array.isArray(plan?.inspectedFiles) ? plan.inspectedFiles.map(file => cleanText(file, 400)) : []),
             ...sourceContext.flatMap(project => project.excerpts.map(item => `${project.project}:${item.file}`)),
           ], value => value).slice(0, 40),
           additions: merged.additions,
+          rejectedBrowserPlanIssues: merged.issues.length,
           readOnly: true,
           verdictAuthority: "deterministic_evidence_gate",
         },
+        semanticPlan,
+        criterionCoverage: semanticPlan.criterionCoverage,
+        unplannedCriteria,
+        semanticDecisionReceipt: plan?.semanticDecisionReceipt || null,
       },
     }, runtime);
-    return { workOrder: renormalized.workOrder, issues: renormalized.issues };
+    const coverageIssues: WorkOrderIssue[] = unplannedCriteria.map(item => ({
+      severity: "error",
+      code: item.status === "needs_user" ? "semantic_acceptance_needs_user" : "semantic_acceptance_unsupported",
+      message: `${item.criterion}: ${item.reason || "TestAgent 无法形成可执行验收检查"}`,
+    }));
+    return { workOrder: renormalized.workOrder, issues: [...merged.issues, ...coverageIssues, ...renormalized.issues] };
   } catch (error: any) {
     return {
       workOrder: {
@@ -311,6 +384,7 @@ export async function applyAgenticTestPlanning(
             readOnly: true,
             verdictAuthority: "deterministic_evidence_gate",
           },
+          semanticDecisionReceipt: error?.semanticDecisionReceipt || null,
         },
       },
       issues: [{
@@ -343,6 +417,14 @@ export async function planAgenticTestFollowup(
     const byProject = new Map((Array.isArray(plan?.projects) ? plan.projects : []).map(item => [String(item?.name || "").trim(), item]));
     const existing = new Set(input.commandResults.map(item => `${item.project}\0${item.command.trim().toLowerCase()}`));
     const additions: any[] = [];
+    // 上一轮失败的浏览器检查要在复核轮重跑，否则 UI 缺陷第一轮之后就再也不会被验证。
+    const failedBrowserChecks = new Set(
+      input.browserResults
+        .filter((item: any) => ["failed", "blocked", "partial"].includes(String(item?.status || "")))
+        .map((item: any) => `${String(item?.project || "")}\0${String(item?.name || "")}`),
+    );
+    let browserCheckTotal = 0;
+    let commandTotal = 0;
     const projects = input.workOrder.projects.map(project => {
       const candidate = byProject.get(project.name);
       const commands = unique((Array.isArray(candidate?.commands) ? candidate!.commands : [])
@@ -350,15 +432,42 @@ export async function planAgenticTestFollowup(
         .filter(command => !isUnsafeVerificationCommand(command))
         .filter(command => !existing.has(`${project.name}\0${command.toLowerCase()}`))
         .slice(0, 3), value => value);
-      if (commands.length) additions.push({ project: project.name, commands, rationale: cleanText(candidate?.rationale, 800) });
-      return { ...project, verificationCommands: commands, httpChecks: [], adversarialHttpChecks: [], browserChecks: [], adversarialBrowserChecks: [] };
+      const retriedBrowserChecks = project.browserChecks
+        .filter(check => failedBrowserChecks.has(`${project.name}\0${String(check?.name || "")}`));
+      const plannedBrowserChecks = validatePlannedBrowserChecks(
+        Array.isArray(candidate?.browserChecks) ? candidate!.browserChecks!.slice(0, 4) : [],
+        project.name,
+        input.workOrder.acceptanceCriteria,
+      ).checks;
+      const browserChecks = unique([...retriedBrowserChecks, ...plannedBrowserChecks], item => JSON.stringify(item));
+      browserCheckTotal += browserChecks.length;
+      commandTotal += commands.length;
+      if (commands.length || browserChecks.length) {
+        additions.push({
+          project: project.name,
+          commands,
+          browserChecksRetried: retriedBrowserChecks.length,
+          browserChecksAdded: plannedBrowserChecks.length,
+          rationale: cleanText(candidate?.rationale, 800),
+        });
+      }
+      return { ...project, verificationCommands: commands, httpChecks: [], adversarialHttpChecks: [], browserChecks, adversarialBrowserChecks: [] };
     });
     if (!additions.length) return { workOrder: null, metadata: { status: "no_safe_followup", summary: cleanText(plan?.summary, 1000) } };
     const normalized = normalizeTestAgentWorkOrder({
       ...input.workOrder,
-      requiredChecks: ["commands"],
+      requiredChecks: [
+        ...(commandTotal ? ["commands"] : []),
+        ...(browserCheckTotal ? ["browser", "screenshots"] : []),
+      ],
       projects,
-      options: { ...input.workOrder.options, autoDiscoverVerificationCommands: false, browserProvider: "none" },
+      options: {
+        ...input.workOrder.options,
+        autoDiscoverVerificationCommands: false,
+        browserProvider: browserCheckTotal
+          ? (input.workOrder.options.browserProvider === "none" ? "auto" : input.workOrder.options.browserProvider)
+          : "none",
+      },
     }, runtime);
     return {
       workOrder: normalized.workOrder,
@@ -367,6 +476,7 @@ export async function planAgenticTestFollowup(
         status: "applied",
         summary: cleanText(plan?.summary, 1200),
         additions,
+        browserChecksTotal: browserCheckTotal,
         readOnly: true,
         maxRounds: 1,
       },

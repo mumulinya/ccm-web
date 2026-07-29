@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SUPPORTED_KNOWLEDGE_EXTENSIONS = exports.MAX_KNOWLEDGE_UPLOAD_FILES = exports.MAX_KNOWLEDGE_UPLOAD_BYTES = exports.MAX_KNOWLEDGE_FILE_BYTES = exports.RAG_INDEX_CACHE_FILE = exports.RAG_EMBEDDING_CONFIG_FILE = exports.KNOWLEDGE_VERSIONS_DIR = exports.KNOWLEDGE_DIR = void 0;
+exports.SUPPORTED_KNOWLEDGE_EXTENSIONS = exports.MAX_KNOWLEDGE_UPLOAD_FILES = exports.MAX_KNOWLEDGE_UPLOAD_BYTES = exports.MAX_KNOWLEDGE_FILE_BYTES = exports.KNOWLEDGE_MODEL_DIR = exports.RAG_INDEX_V3_POINTER_FILE = exports.RAG_INDEX_V3_DIR = exports.RAG_INDEX_CACHE_FILE = exports.RAG_EMBEDDING_CONFIG_FILE = exports.KNOWLEDGE_VERSIONS_DIR = exports.KNOWLEDGE_DIR = void 0;
 exports.sha256 = sha256;
 exports.normalizeKnowledgeTags = normalizeKnowledgeTags;
 exports.normalizeKnowledgeScope = normalizeKnowledgeScope;
@@ -61,6 +61,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
+const credential_store_1 = require("../../core/credential-store");
 const source_ingestion_1 = require("../requirements/source-ingestion");
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "C:/Users/admin";
 const CCM_HOME = path.join(USER_HOME, ".cc-connect");
@@ -68,6 +69,9 @@ exports.KNOWLEDGE_DIR = path.join(CCM_HOME, "knowledge");
 exports.KNOWLEDGE_VERSIONS_DIR = path.join(CCM_HOME, "knowledge-versions");
 exports.RAG_EMBEDDING_CONFIG_FILE = path.join(CCM_HOME, "rag-embedding-config.json");
 exports.RAG_INDEX_CACHE_FILE = path.join(CCM_HOME, "knowledge-index-cache-v2.json");
+exports.RAG_INDEX_V3_DIR = path.join(CCM_HOME, "knowledge-index-v3");
+exports.RAG_INDEX_V3_POINTER_FILE = path.join(exports.RAG_INDEX_V3_DIR, "active.json");
+exports.KNOWLEDGE_MODEL_DIR = path.join(CCM_HOME, "models", "embedding");
 exports.MAX_KNOWLEDGE_FILE_BYTES = 25 * 1024 * 1024;
 exports.MAX_KNOWLEDGE_UPLOAD_BYTES = 100 * 1024 * 1024;
 exports.MAX_KNOWLEDGE_UPLOAD_FILES = 20;
@@ -163,37 +167,132 @@ function atomicWriteJson(filePath, value) {
         catch { }
     }
 }
-function loadRagEmbeddingConfig() {
-    const fallback = { enabled: false, apiUrl: "https://api.openai.com/v1", apiKey: "", model: "text-embedding-3-small" };
+const EMBEDDING_CONFIG_DEFAULTS = {
+    version: 3,
+    mode: "auto",
+    enabled: false,
+    apiUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    model: "text-embedding-3-small",
+    timeoutMs: 60_000,
+    batchSize: 32,
+    localModel: "Xenova/multilingual-e5-small",
+    localRevision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+    localDtype: "q8",
+    mirrorUrl: "",
+};
+function rawEmbeddingConfig() {
     try {
         if (!fs.existsSync(exports.RAG_EMBEDDING_CONFIG_FILE))
-            return fallback;
-        return { ...fallback, ...JSON.parse(fs.readFileSync(exports.RAG_EMBEDDING_CONFIG_FILE, "utf-8")) };
+            return { ...EMBEDDING_CONFIG_DEFAULTS };
+        return { ...EMBEDDING_CONFIG_DEFAULTS, ...JSON.parse(fs.readFileSync(exports.RAG_EMBEDDING_CONFIG_FILE, "utf-8")) };
     }
     catch {
-        return fallback;
+        return { ...EMBEDDING_CONFIG_DEFAULTS };
     }
+}
+function normalizeEmbeddingMode(value, legacyEnabled = false) {
+    const mode = String(value || "").trim().toLowerCase();
+    if (["auto", "local", "remote", "lexical"].includes(mode))
+        return mode;
+    return legacyEnabled ? "remote" : "auto";
+}
+function normalizeEmbeddingEndpoint(value, fallback) {
+    const raw = String(value || "").trim() || fallback;
+    const url = new URL(raw);
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password)
+        throw new Error("Embedding地址必须是无内联凭据的HTTP/HTTPS地址");
+    url.hash = "";
+    for (const key of Array.from(url.searchParams.keys())) {
+        if (/(?:key|token|secret|signature|credential|password)/i.test(key))
+            url.searchParams.delete(key);
+    }
+    return url.toString().replace(/\/$/, "");
+}
+function loadRagEmbeddingConfig() {
+    const raw = rawEmbeddingConfig();
+    const mode = normalizeEmbeddingMode(raw.mode, raw.enabled === true);
+    let storedKey = String(raw.apiKey || "").trim();
+    let persistedChanged = false;
+    if (storedKey && !(0, credential_store_1.isCredentialReference)(storedKey)) {
+        storedKey = (0, credential_store_1.protectCredential)("knowledge-embedding", "api_key", storedKey);
+        persistedChanged = true;
+    }
+    let apiUrl = String(raw.apiUrl || EMBEDDING_CONFIG_DEFAULTS.apiUrl);
+    try {
+        const normalized = normalizeEmbeddingEndpoint(apiUrl, EMBEDDING_CONFIG_DEFAULTS.apiUrl);
+        if (normalized !== apiUrl)
+            persistedChanged = true;
+        apiUrl = normalized;
+    }
+    catch {
+        apiUrl = EMBEDDING_CONFIG_DEFAULTS.apiUrl;
+        persistedChanged = true;
+    }
+    if (persistedChanged)
+        atomicWriteJson(exports.RAG_EMBEDDING_CONFIG_FILE, { ...raw, version: 3, mode, apiKey: storedKey, apiUrl });
+    let apiKey = "";
+    try {
+        apiKey = storedKey ? (0, credential_store_1.resolveCredential)(storedKey) : "";
+    }
+    catch {
+        apiKey = "";
+    }
+    return {
+        ...EMBEDDING_CONFIG_DEFAULTS,
+        ...raw,
+        version: 3,
+        mode,
+        apiUrl,
+        enabled: mode === "remote" || (mode === "auto" && !!apiKey && !!String(raw.model || "").trim()),
+        apiKey,
+        timeoutMs: Math.max(10_000, Math.min(180_000, Number(raw.timeoutMs) || 60_000)),
+        batchSize: Math.max(1, Math.min(32, Number(raw.batchSize) || 32)),
+        localDtype: "q8",
+    };
 }
 function saveRagEmbeddingConfig(updates = {}) {
     const current = loadRagEmbeddingConfig();
-    const next = { ...current };
-    if (updates.enabled !== undefined)
-        next.enabled = !!updates.enabled;
+    const raw = rawEmbeddingConfig();
+    const next = { ...raw, version: 3 };
+    next.mode = normalizeEmbeddingMode(updates.mode, updates.enabled !== undefined ? !!updates.enabled : current.enabled);
+    if (updates.enabled !== undefined && updates.mode === undefined)
+        next.mode = updates.enabled ? "remote" : "auto";
+    next.enabled = next.mode === "remote";
     if (updates.apiUrl !== undefined)
-        next.apiUrl = String(updates.apiUrl || "").trim() || "https://api.openai.com/v1";
+        next.apiUrl = normalizeEmbeddingEndpoint(updates.apiUrl, "https://api.openai.com/v1");
     if (updates.model !== undefined)
         next.model = String(updates.model || "").trim();
-    if (updates.apiKey !== undefined && String(updates.apiKey || "").trim())
-        next.apiKey = String(updates.apiKey).trim();
-    if (updates.clearApiKey === true)
+    if (updates.timeoutMs !== undefined)
+        next.timeoutMs = Math.max(10_000, Math.min(180_000, Number(updates.timeoutMs) || 60_000));
+    if (updates.batchSize !== undefined)
+        next.batchSize = Math.max(1, Math.min(32, Number(updates.batchSize) || 32));
+    if (updates.mirrorUrl !== undefined)
+        next.mirrorUrl = updates.mirrorUrl ? normalizeEmbeddingEndpoint(updates.mirrorUrl, "") : "";
+    if (updates.apiKey !== undefined && String(updates.apiKey || "").trim()) {
+        if ((0, credential_store_1.isCredentialReference)(raw.apiKey))
+            (0, credential_store_1.deleteCredential)(raw.apiKey);
+        next.apiKey = (0, credential_store_1.protectCredential)("knowledge-embedding", "api_key", String(updates.apiKey).trim());
+    }
+    if (updates.clearApiKey === true) {
+        if ((0, credential_store_1.isCredentialReference)(raw.apiKey))
+            (0, credential_store_1.deleteCredential)(raw.apiKey);
         next.apiKey = "";
+    }
     next.updated_at = new Date().toISOString();
     atomicWriteJson(exports.RAG_EMBEDDING_CONFIG_FILE, next);
-    return next;
+    return loadRagEmbeddingConfig();
 }
 function publicRagEmbeddingConfig(config = loadRagEmbeddingConfig()) {
     const { apiKey, ...safe } = config;
-    return { ...safe, hasKey: !!apiKey };
+    let apiUrl = "";
+    try {
+        apiUrl = normalizeEmbeddingEndpoint(config.apiUrl, "https://api.openai.com/v1");
+    }
+    catch {
+        apiUrl = "invalid-endpoint";
+    }
+    return { ...safe, apiUrl, hasKey: !!apiKey, enabled: config.mode === "remote" || (config.mode === "auto" && !!apiKey) };
 }
 function updateKnowledgeMetadata(name, updates = {}) {
     resolveKnowledgeFile(name, false);

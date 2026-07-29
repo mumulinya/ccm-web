@@ -62,6 +62,7 @@ const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const session_title_1 = require("../../system/session-title");
 const group_orchestrator_1 = require("./group-orchestrator");
 const group_post_turn_summary_1 = require("./group-post-turn-summary");
@@ -486,6 +487,13 @@ function deleteGroupChatSession(groupId, sessionId, options = {}) {
     }
     groupMessagesCache.delete(`${groupId}::${sessionId}`);
     const postTurnSummaries = (0, group_post_turn_summary_1.deleteGroupPostTurnSummaryArtifacts)(groupId, sessionId);
+    let providerContextCache = { success: false, reason: "not_invalidated" };
+    try {
+        providerContextCache = (0, provider_neutral_context_cache_1.invalidateProviderNeutralContextCacheState)({ scope: "group", scopeId: groupId, sessionId }, "group_session_deleted");
+    }
+    catch (error) {
+        providerContextCache = { success: false, reason: error?.message || String(error) };
+    }
     const remaining = manifest.sessions.filter((item) => item.id !== sessionId);
     const nextActive = manifest.activeSessionId === sessionId
         ? remaining.find((item) => item.archived !== true)?.id || remaining[0]?.id || ""
@@ -494,7 +502,7 @@ function deleteGroupChatSession(groupId, sessionId, options = {}) {
     let replacement = null;
     if (!remaining.length)
         replacement = createGroupChatSession(groupId, "新会话");
-    return { session, deletedMessageFile: file, postTurnSummaries, activeTaskCount: activeTasks.length, forced: options.force === true, replacement, lifecycleTombstone, lifecycleCancellation };
+    return { session, deletedMessageFile: file, postTurnSummaries, providerContextCache, activeTaskCount: activeTasks.length, forced: options.force === true, replacement, lifecycleTombstone, lifecycleCancellation };
 }
 function purgeLegacyDefaultGroupChatSession(groupId, options = {}) {
     const manifest = readGroupSessionManifest(groupId);
@@ -606,9 +614,27 @@ function appendGroupMessage(groupId, msg) {
     const existing = messageId ? messages.find((item) => String(item?.id || "") === messageId) : null;
     if (existing)
         return existing;
-    const taskTraceId = msg?.task_id ? (0, db_1.loadTasks)().find((task) => task.id === msg.task_id)?.trace_id : "";
+    const taskRecord = msg?.task_id ? (0, db_1.loadTasks)().find((task) => task.id === msg.task_id) : null;
+    const taskTraceId = taskRecord?.trace_id || "";
     const traceId = (0, reliability_ledger_1.ensureTraceId)(msg?.trace_id || msg?.traceId || taskTraceId, "message");
-    const next = { ...msg, group_session_id: sessionId, trace_id: traceId };
+    const taskThreadId = String(msg?.task_thread_id
+        || msg?.taskThreadId
+        || taskRecord?.task_thread_id
+        || taskRecord?.taskThreadId
+        || taskRecord?.root_task_id
+        || taskRecord?.rootTaskId
+        || taskRecord?.retry_of_task_id
+        || taskRecord?.retryOfTaskId
+        || taskRecord?.source_task_id
+        || taskRecord?.sourceTaskId
+        || msg?.task_id
+        || "");
+    const next = {
+        ...msg,
+        group_session_id: sessionId,
+        trace_id: traceId,
+        ...(taskThreadId ? { task_thread_id: taskThreadId } : {}),
+    };
     messages.push(next);
     saveGroupMessages(groupId, messages, sessionId);
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });

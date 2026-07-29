@@ -4605,8 +4605,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4617,8 +4617,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4633,8 +4633,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4653,8 +4653,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        probeType?: string;
         adversarial?: boolean;
+        probeType?: string;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4888,8 +4888,8 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     id?: string;
     status?: "released" | "open" | "retained" | "cleanup_failed";
     error?: string;
-    provider?: "mcp" | "playwright";
     scope?: string;
+    provider?: "mcp" | "playwright";
     acquiredAt?: string;
     ownership?: "owned" | "external";
     planId?: string;
@@ -4900,8 +4900,8 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     id?: string;
     status?: "released" | "open" | "retained" | "cleanup_failed";
     error?: string;
-    provider?: "mcp" | "playwright";
     scope?: string;
+    provider?: "mcp" | "playwright";
     acquiredAt?: string;
     ownership?: "owned" | "external";
     planId?: string;
@@ -4952,8 +4952,8 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         id?: string;
         status?: "released" | "open" | "retained" | "cleanup_failed";
         error?: string;
-        provider?: "mcp" | "playwright";
         scope?: string;
+        provider?: "mcp" | "playwright";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
@@ -4964,8 +4964,8 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         id?: string;
         status?: "released" | "open" | "retained" | "cleanup_failed";
         error?: string;
-        provider?: "mcp" | "playwright";
         scope?: string;
+        provider?: "mcp" | "playwright";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
@@ -4980,8 +4980,8 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         id?: string;
         status?: "released" | "open" | "retained" | "cleanup_failed";
         error?: string;
-        provider?: "mcp" | "playwright";
         scope?: string;
+        provider?: "mcp" | "playwright";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
@@ -5012,8 +5012,8 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         id?: string;
         status?: "released" | "open" | "retained" | "cleanup_failed";
         error?: string;
-        provider?: "mcp" | "playwright";
         scope?: string;
+        provider?: "mcp" | "playwright";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;

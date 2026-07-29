@@ -5,5 +5,5 @@ defineEmits(['action'])
 </script>
 
 <template>
-  <TaskExperienceCard :card="card" context="group" @action="$emit('action', $event)" />
+  <TaskExperienceCard :card="card" context="group" compact @action="$emit('action', $event)" />
 </template>

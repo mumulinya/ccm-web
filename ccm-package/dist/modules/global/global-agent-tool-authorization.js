@@ -44,6 +44,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const tool_manager_1 = require("../../tools/tool-manager");
+const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const GLOBAL_AGENT_TOOL_AUTHORIZATION_FILE = path.join(utils_1.CCM_DIR, "global-agent-tool-authorization.json");
 function emptyStore() {
@@ -119,8 +120,10 @@ async function saveGlobalAgentToolAuthorization(input = {}) {
 }
 function buildGlobalAgentToolRuntimeContext(auditContext = {}) {
     const authorization = getGlobalAgentToolAuthorizationPayload();
-    const scope = {
-        ...authorization.tools,
+    const shared = (0, main_agent_tool_runtime_1.buildMainAgentToolRuntimeContext)({
+        configuredTools: authorization.tools,
+        mcpPolicy: "all",
+        label: "全局 Agent",
         auditContext: {
             runtime: "global-agent",
             project: "",
@@ -129,9 +132,8 @@ function buildGlobalAgentToolRuntimeContext(auditContext = {}) {
             executionId: String(auditContext?.executionId || ""),
             source: String(auditContext?.source || "global-agent"),
         },
-    };
-    const catalog = tool_manager_1.toolManager.getScopedToolCatalog(scope);
-    const checksum = crypto.createHash("sha256").update(JSON.stringify({ tools: authorization.tools, catalog })).digest("hex");
+    });
+    const catalog = { tools: shared.catalog.mcp, skills: shared.catalog.skills };
     return {
         schema: "ccm-global-agent-tool-runtime-context-v1",
         tools: authorization.tools,
@@ -141,8 +143,8 @@ function buildGlobalAgentToolRuntimeContext(auditContext = {}) {
         catalog,
         counts: { mcp: catalog.tools.length, skill: catalog.skills.length },
         configured_counts: { mcp: authorization.tools.mcp.length, skill: authorization.tools.skill.length },
-        checksum,
-        scope,
+        checksum: shared.checksum,
+        scope: shared.scope,
         updated_at: authorization.updated_at,
         updated_by: authorization.updated_by,
     };

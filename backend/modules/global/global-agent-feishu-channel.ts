@@ -19,17 +19,73 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     ? deps.resolveBoundFeishuGlobalSessionId
     : (_payload: any, fallbackSessionId = "") => String(fallbackSessionId || "");
 
-  async function sendFeishuConversationReply(input: { conversationId: string; title: string; markdown: string; traceId?: string; stage?: string; dedupeSuffix?: string }) {
+  async function sendFeishuConversationReply(input: {
+    conversationId: string;
+    title: string;
+    markdown: string;
+    traceId?: string;
+    stage?: string;
+    dedupeSuffix?: string;
+    cardKey?: string;
+    runId?: string;
+    missionId?: string;
+    taskId?: string;
+  }) {
     const bound = await notifyFeishuTaskStage({
       stage: input.stage || "global_agent_reply",
       title: input.title,
       markdown: input.markdown,
       sessionId: input.conversationId,
+      cardKey: input.cardKey || input.traceId || input.conversationId,
+      runId: input.runId || "",
+      missionId: input.missionId || "",
+      taskId: input.taskId || "",
       dedupeKey: `global-reply:${input.traceId || input.conversationId}:${input.dedupeSuffix || crypto.createHash("sha256").update(input.markdown).digest("hex").slice(0, 16)}`,
     });
     if (bound?.success || bound?.queued) return { ...bound, channel: "bound_conversation" };
     const fallback = await sendFeishuReportMessage({ title: input.title, markdown: input.markdown });
     return { ...fallback, channel: "configured_fallback", reason: bound?.reason || "bound_delivery_unavailable" };
+  }
+
+  function feishuSourceCoverage(sourceIngestion: any) {
+    const sources = Array.isArray(sourceIngestion?.sources) ? sourceIngestion.sources : [];
+    if (!sources.length) return "";
+    const readable = sources.filter((source: any) => {
+      const status = String(source?.status || "").toLowerCase();
+      return source?.readable === true || ["parsed", "partial"].includes(status);
+    }).length;
+    const pending = sources.length - readable;
+    return pending > 0
+      ? `资料读取：已读取 ${readable}/${sources.length} 份，仍有 ${pending} 份需要授权或重新上传。`
+      : `资料读取：${readable} 份资料均已加入需求与验收上下文。`;
+  }
+
+  function formatFeishuTaskJourney(run: GlobalAgentRun, mission: any, sourceIngestion: any, fallback: string) {
+    const base = globalRunVisibleReply(run, fallback).trim();
+    const sourceLine = feishuSourceCoverage(sourceIngestion || (run as any).source_ingestion);
+    const status = String(run.status || "");
+    const lines: string[] = [];
+    if (status === "waiting_confirmation") {
+      lines.push("当前状态：等待你确认后再执行。");
+      lines.push(base);
+      lines.push("请回复“确认”继续，或回复“取消”。");
+    } else if (status === "waiting_clarification") {
+      lines.push("当前状态：需要你补充信息，任务进度已保留。");
+      lines.push(base);
+    } else if (["supervising", "running"].includes(status) || mission && !["completed", "failed", "cancelled"].includes(String(mission.status || ""))) {
+      const childCount = Array.isArray(mission?.children) ? mission.children.length : 0;
+      lines.push(`当前状态：${childCount ? `已进入自动执行链路，共 ${childCount} 个执行步骤。` : "正在处理，本消息不代表任务已完成。"}`);
+      lines.push(base);
+      lines.push("后续会在同一飞书会话更新执行、验收、返工或阻塞结果。");
+    } else if (status === "failed") {
+      lines.push("当前状态：执行未完成。");
+      lines.push(base);
+      lines.push("已完成部分和失败证据会保留，可在补齐条件后继续。");
+    } else {
+      lines.push(base);
+    }
+    if (sourceLine) lines.push(sourceLine);
+    return lines.filter(Boolean).join("\n\n");
   }
 
   function cardActionValue(payload: any) {
@@ -174,6 +230,14 @@ export function createGlobalAgentFeishuChannel(deps: any) {
         availableTargets: targets,
       });
     }
+    if (/https?:\/\//i.test(userText)) {
+      return ingestRequirementSources({
+        userText,
+        extractRequirement: true,
+        decomposeRequirement: false,
+        availableTargets: targets,
+      });
+    }
     // 纯文本直接交给 Agentic Loop；由大模型选择工作流。
     return null;
   }
@@ -220,6 +284,9 @@ export function createGlobalAgentFeishuChannel(deps: any) {
     bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot" });
     const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
     const sourceIngestion = await ingestFeishuRequirementAttachment(payload, text);
+    const agentMessage = sourceIngestion?.agent_context
+      ? `${text}${sourceIngestion.agent_context}`
+      : text;
     appendGlobalAgentConversationMessage(conversationId, "user", text, "feishu");
     const auditBase = {
       source: "feishu-control-bot",
@@ -301,7 +368,8 @@ export function createGlobalAgentFeishuChannel(deps: any) {
           });
         };
         run = await runAgenticGlobalRequest(baseUrl, ctx, {
-          message: text,
+          message: agentMessage,
+          originalMessage: text,
           history: historyBeforeUser.map((item: any) => ({ role: item.role, content: item.content })),
           sessionId: conversationId,
           source: "feishu-control-bot",
@@ -319,13 +387,24 @@ export function createGlobalAgentFeishuChannel(deps: any) {
         taskIds: [run.mission_id, ...(missionSnapshot?.children || []).map((item: any) => item.id)],
         source: "feishu-control-bot",
       });
-      const confirmationHint = run.status === "waiting_confirmation"
-        ? `\n\n待确认操作：${run.pending_tool?.name || "写入操作"}\n运行 ID：${run.id}\n回复“确认 ${run.id}”继续，或回复“取消 ${run.id}”。`
-        : "";
-      const markdown = `${globalRunVisibleReply(run, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK)}${confirmationHint}`;
+      const markdown = formatFeishuTaskJourney(run, missionSnapshot, sourceIngestion, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK);
       appendGlobalActionAudit({ ...auditBase, action: { type: "agentic_loop", params: { run_id: run.id } }, status: run.status, result: { summary: markdown, trace_id: run.trace_id, steps: run.steps.length } });
       appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-      if (sendReport) await sendFeishuConversationReply({ conversationId, title: run.status === "waiting_confirmation" ? "全局 Agent 等待确认" : "全局 Agent 执行结果", markdown, traceId, dedupeSuffix: `run:${run.id}:${run.status}` });
+      if (sendReport) await sendFeishuConversationReply({
+        conversationId,
+        title: run.status === "waiting_confirmation"
+          ? "全局 Agent 等待确认"
+          : run.status === "waiting_clarification"
+            ? "全局 Agent 需要补充信息"
+            : "全局 Agent 任务进展",
+        markdown,
+        traceId,
+        cardKey: traceId,
+        runId: run.id,
+        missionId: run.mission_id || "",
+        stage: run.status,
+        dedupeSuffix: `run:${run.id}:${run.status}`,
+      });
       return markdown;
     } catch (error: any) {
       const markdown = `指令：${text}\n\n错误：${error?.message || String(error)}`;

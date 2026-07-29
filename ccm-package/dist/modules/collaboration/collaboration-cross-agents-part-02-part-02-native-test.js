@@ -40,6 +40,10 @@ async function runNativeTestAgentDispatchBranch(input) {
     const { mention, deps, ctx, targetName, groupId, taskId, streamRes, testAgentHandoffPayload, testAgentWorkDirPolicy, runtimeAttemptTimeoutMs, laneExecutionId, sourceTask, executionOrder, activeTaskSession, testAgentProjectWorkDir, tWorkDir, state, } = input;
     const { addTaskLog, appendTaskTimelineEvent, writeSse, runTestAgentCliJob, compactMemoryText, summarizeNativeTestAgentExecutionPlan, buildNativeTestAgentPlanBlockedReceipt, formatNativeTestAgentPlanBlockedOutput, transitionExecution, buildNativeTestAgentReceipt, uniqueStrings, runMainAgentPostReviewSpotCheck, buildPostReviewSpotCheckSummary, buildNativeTestAgentReviewSummary, formatNativeTestAgentOutput, getTestAgentHandoffReviewSubject, } = deps;
     let { testAgentPlanDispatch, testAgentExecutionPlan, targetReceipt, tOutput, targetSessionSucceeded, targetSessionError, testAgentInvocationResult, testAgentCliDispatch, testAgentNativeReport, testAgentReviewSummary, targetWorkEvents, } = state;
+    const reviewCycleId = String(sourceTask?.review_cycle_id
+        || testAgentHandoffPayload?.metadata?.reviewCycleId
+        || testAgentHandoffPayload?.metadata?.review_cycle_id
+        || "");
     const testAgentActivityKey = "TestAgent";
     const reviewSubjectLabel = getTestAgentHandoffReviewSubject(testAgentHandoffPayload) || targetName || "原实现 Agent";
     ctx.setAgentActivity(testAgentActivityKey, "planning", `正在生成 ${reviewSubjectLabel} 的独立复核计划`, { tab: "groups", groupId }, 150000, {
@@ -70,6 +74,7 @@ async function runNativeTestAgentDispatchBranch(input) {
         timeoutMs: 120000,
         allowedWorkDirs: testAgentWorkDirPolicy.allowedWorkDirs,
         idempotencyKey: `${taskId || groupId}:${testAgentHandoffPayload?.id || "handoff"}:plan`,
+        attemptScope: reviewCycleId,
     });
     testAgentPlanDispatch = {
         schema: "ccm-test-agent-cli-plan-dispatch-v2",
@@ -178,6 +183,7 @@ async function runNativeTestAgentDispatchBranch(input) {
                 sourceTask?.followup_revision || 0,
                 executionOrder,
             ].join(":"),
+            attemptScope: reviewCycleId,
         });
         testAgentInvocationResult = invocationRun.invocation;
         testAgentCliDispatch = {

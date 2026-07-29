@@ -102,6 +102,13 @@ export declare function diffRequirementDecompositionPlans(previous: RequirementD
     unchanged: string[];
     has_changes: boolean;
 };
+export declare function htmlToText(html: string): string;
+export declare function assertPublicUrl(value: string): Promise<import("node:url").URL>;
+export declare function fetchPublicDocument(urlValue: string): Promise<{
+    response: any;
+    buffer: Buffer<any>;
+    finalUrl: string;
+}>;
 export declare function extractOnlineDocumentUrls(text: string): string[];
 /**
  * 兼容入口只接受上游模型已经给出的结构化决定。

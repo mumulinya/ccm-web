@@ -61,7 +61,8 @@ const hasFileChanges = computed(() => (
     v-if="taskCard"
     :card="taskCard"
     context="project"
-    :busy="!!message.streaming"
+    compact
+    :busy="!!message.streaming || !!message.taskActionBusy"
     @action="emit('task-action', $event)"
   />
   <div v-else>{{ message.content }}</div>

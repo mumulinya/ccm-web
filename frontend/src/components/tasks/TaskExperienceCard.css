@@ -140,4 +140,12 @@
 :global([data-theme="dark"] .task-experience-card .plan-mode-steps-hidden) { color:var(--text-muted); }
 .task-experience-card .task-card-button{ min-height:var(--control-height-sm); border-radius:var(--radius-md); }
 .task-experience-card .plan-mode-accept-feedback textarea,.task-experience-card select,.task-experience-card input{ border-radius:var(--radius-md); min-height:var(--control-height); }
+.plan-architecture{ display:grid; gap:6px; margin-top:9px; padding:9px; border:1px solid color-mix(in srgb,var(--accent-blue) 24%,var(--border-color)); border-radius:var(--radius-md); background:var(--surface); }
+.plan-architecture p{ margin:0; }
+.plan-architecture details{ color:var(--text-secondary); font-size:12px; }
+.plan-architecture summary{ cursor:pointer; color:var(--accent-blue); font-weight:800; }
+.plan-architecture details>div{ margin-top:8px; }
+.plan-architecture b{ color:var(--text-primary); font-size:11.5px; }
+.plan-architecture ul{ margin:4px 0 0; padding-left:18px; line-height:1.5; }
+:global([data-theme="dark"] .task-experience-card .plan-architecture){ background:var(--panel-muted); border-color:var(--border-color); }
 

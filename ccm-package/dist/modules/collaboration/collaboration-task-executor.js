@@ -5,8 +5,140 @@ exports.executeTask = executeTask;
 const group_session_model_context_1 = require("./group-session-model-context");
 const project_test_agent_gate_1 = require("../projects/project-test-agent-gate");
 const rework_policy_1 = require("./rework-policy");
+const test_agent_review_policy_1 = require("./test-agent-review-policy");
+const provider_task_circuit_breaker_1 = require("./provider-task-circuit-breaker");
+const test_agent_settings_1 = require("../system/test-agent-settings");
+function groupPlanningProjectRefs(task) {
+    return Array.from(new Set([
+        ...(Array.isArray(task?.workflow_decision?.targetRefs) ? task.workflow_decision.targetRefs : []),
+        ...(Array.isArray(task?.workflow_decision?.target_refs) ? task.workflow_decision.target_refs : []),
+    ].map(value => String(value || "").trim()).filter(Boolean)));
+}
+function isTestAgentAssignment(value) {
+    return /^(?:test[-_ ]?agent|qa[-_ ]?agent)$/i.test(String(value?.targetName || value?.project || value?.name || "").trim())
+        || String(value?.role || value?.member?.role || "").trim().toLowerCase() === "test-agent";
+}
+function buildDirectMainAgentSelfVerification(task, receipt, changedFiles, output, requiresChanges, extractRunnerVerificationEvidence) {
+    const runner = extractRunnerVerificationEvidence(output);
+    const verification = Array.from(new Set([
+        ...(Array.isArray(receipt?.verification) ? receipt.verification : []),
+        ...(Array.isArray(runner?.verification) ? runner.verification : []),
+    ].map(value => String(value || "").trim()).filter(Boolean)));
+    const gaps = [
+        String(receipt?.status || "") !== "done" ? "开发 Agent 缺少完成状态的结构化结果说明" : "",
+        requiresChanges && changedFiles.length === 0 ? "任务要求修改代码，但没有捕获到实际文件变更" : "",
+        task?.requires_verification !== false && verification.length === 0 ? "没有找到已执行验证的证据" : "",
+        ...(Array.isArray(runner?.failed) ? runner.failed : []),
+        ...(Array.isArray(receipt?.blockers) ? receipt.blockers : []),
+    ].map(value => String(value || "").trim()).filter(Boolean);
+    const accepted = gaps.length === 0;
+    const summary = accepted ? "项目主 Agent 已核对开发结果、文件变更和验证证据" : `项目主 Agent 自验发现缺口：${gaps.join("；")}`;
+    return {
+        mode: "main_agent_self_verification",
+        canAccept: accepted,
+        status: accepted ? "main_agent_self_verified" : "main_agent_self_verification_failed",
+        report: { summary, verification, risks: accepted ? ["未经过独立 TestAgent 验收"] : [], blockers: gaps },
+        verdict: { accepted, gaps, evidence: verification, nextActions: gaps },
+        decision: { route: accepted ? "complete" : "needs_user", reason: summary },
+    };
+}
+function summarizeGroupPlanningSource(source) {
+    return {
+        schema: source?.schema || "ccm-group-main-source-planning-v1",
+        checksum: String(source?.checksum || ""),
+        requested_projects: Array.isArray(source?.requestedProjects) ? source.requestedProjects : [],
+        hydrated_projects: Array.isArray(source?.hydratedProjects) ? source.hydratedProjects : [],
+        total_chars: Math.max(0, Number(source?.totalChars || 0)),
+        truncated: source?.truncated === true,
+        ready: source?.ready === true,
+        issues: Array.isArray(source?.issues) ? source.issues : [],
+        model_planning_receipt: source?.modelPlanning || null,
+        projects: (Array.isArray(source?.projects) ? source.projects : []).map((project) => ({
+            project: String(project?.project || ""),
+            status: String(project?.status || ""),
+            manifest_checksum: String(project?.manifestChecksum || ""),
+            selected_paths: Array.isArray(project?.selectedPaths) ? project.selectedPaths : [],
+            issue: String(project?.issue || ""),
+        })),
+    };
+}
+function attachGroupPlanningSourceToAssignments(assignments, source) {
+    const projects = new Map((Array.isArray(source?.projects) ? source.projects : [])
+        .map((project) => [String(project?.project || ""), project]));
+    return (assignments || []).map((assignment) => {
+        const project = projects.get(String(assignment?.project || ""));
+        if (!project)
+            return assignment;
+        const evidence = {
+            snapshot_checksum: String(source?.checksum || ""),
+            manifest_checksum: String(project?.manifestChecksum || ""),
+            selected_paths: Array.isArray(project?.selectedPaths) ? project.selectedPaths : [],
+            status: String(project?.status || ""),
+        };
+        const evidenceText = [
+            "[主 Agent 只读源码规划依据]",
+            `snapshot_checksum=${evidence.snapshot_checksum}`,
+            `manifest_checksum=${evidence.manifest_checksum}`,
+            `selected_paths=${evidence.selected_paths.join(", ") || "<none>"}`,
+            "这些路径仅是主 Agent制定计划时的只读证据。执行前必须重新读取当前源码；如实际结构与计划冲突，停止扩大修改并回报主 Agent重新规划。",
+        ].join("\n");
+        return {
+            ...assignment,
+            task: [assignment?.task || "", evidenceText].filter(Boolean).join("\n\n"),
+            source_evidence: evidence,
+        };
+    });
+}
+function sourceGroundedPlanModeUpdates(task, architecturePlan, sourceEvidence, executionOrder) {
+    const current = task?.workflow_meta?.plan_mode || task?.workflow_meta?.intake?.plan_mode || task?.intake_draft || {};
+    const currentSteps = Array.isArray(current?.steps) ? current.steps : [];
+    const retained = currentSteps.filter((step) => String(step?.grounding || "") !== "current_source");
+    const architectureSteps = (Array.isArray(architecturePlan?.dependencySteps) ? architecturePlan.dependencySteps : [])
+        .map((step, index) => ({
+        id: `model_plan_${index + 1}`,
+        label: String(step?.title || "").trim(),
+        detail: [
+            step?.project ? `项目：${step.project}` : "",
+            Array.isArray(step?.dependsOn) && step.dependsOn.length ? `依赖：${step.dependsOn.join("、")}` : "",
+            Array.isArray(step?.acceptance) && step.acceptance.length ? `验收：${step.acceptance.join("；")}` : "",
+        ].filter(Boolean).join("；"),
+        status: "pending",
+        source: "model",
+        grounding: "current_source",
+    }))
+        .filter((step) => step.label);
+    const gateIndex = retained.findIndex((step) => ["dispatch_sub_agents", "verify_and_summarize", "verify_and_reply"].includes(String(step?.id || "")));
+    const steps = gateIndex >= 0
+        ? [...retained.slice(0, gateIndex), ...architectureSteps, ...retained.slice(gateIndex)]
+        : [...retained, ...architectureSteps];
+    const planMode = {
+        ...current,
+        source: "group-main-agent-source-grounded-plan-6.0",
+        steps,
+        architecture_plan: architecturePlan,
+        execution_order: executionOrder,
+        read_only_exploration: {
+            ...(current?.read_only_exploration || {}),
+            summary: `已读取 ${sourceEvidence?.hydrated_projects?.length || 0} 个相关项目的当前源码证据，并据此生成执行计划。`,
+            projects: sourceEvidence?.hydrated_projects || [],
+            code_snapshot_used: true,
+            source_ready: sourceEvidence?.ready === true,
+            source_snapshot_checksum: sourceEvidence?.checksum || "",
+            source_evidence: sourceEvidence?.projects || [],
+        },
+    };
+    const workflowMeta = task?.workflow_meta && typeof task.workflow_meta === "object" ? task.workflow_meta : {};
+    return {
+        intake_draft: planMode,
+        workflow_meta: {
+            ...workflowMeta,
+            plan_mode: planMode,
+            ...(workflowMeta.intake ? { intake: { ...workflowMeta.intake, plan_mode: planMode } } : {}),
+        },
+    };
+}
 async function executeTask(task, ctx, deps) {
-    const { addTaskLog, admitChildTypedMemoryDelivery, alignRequirementEpicAssignments, appendGroupMessage, appendTaskTimelineEvent, assertRuntimeToolDispatchReady, attachExecutionWorkspace, attachInvokedSkillsToReceipt, attachMemoryContextConsumptionChallenge, bindTaskAgentInvocationContext, bindTaskAgentInvocationMemoryDelivery, bindTaskAgentInvocationRunnerRequest, bindTaskAgentMemoryContextSnapshot, buildAgentMemoryContextBundleWithManifestSelection, buildAgentToolContext, buildChildAgentDevelopmentContract, buildChildAgentTaskText, buildChildAgentWorkerHandoff, buildChildAgentWorktreeNotice, buildCoordinatorSharedFilesContext, buildProjectVerificationHints, buildQueuedGroupTaskMessage, buildTaskProviderSwitchRequests, buildTaskSandboxRehearsal, buildTaskSourceDocumentsContext, buildUserCoordinationAcknowledgement, buildWorkerContinuationHandoff, buildWorkflowMeta, captureReasoningFacts, checkTaskFailure, claimTaskWorkItemForAgent, commitChildTypedMemoryDelivery, commitTaskAgentSessionCapacityRevalidation, compactMemoryText, compactRuntimeToolAudit, completeTaskAgentInvocationEdge, createChildTypedMemoryDispatchWal, createExecutionCheckpoint, createMemoryContextConsumptionChallenge, dispatchTaskAgentInvocationEdge, ensureExecution, evaluateGreenContract, explainReasoningDecision, extractAgentReceipt, extractRunnerVerificationEvidence, getChildAgentIsolationMode, getConfigInfo, getConfigs, getCoordinatorActionMentions, getCoordinatorMember, getGroupTaskExecutionStatus, getInitialWorkflowMeta, getRoutableMembers, getTaskAgentSessionOptions, getTaskExecutionFromReceipt, groupSessionIdForTask, loadExecution, loadGroups, loadTasks, markChildTypedMemoryDispatchCommitted, markChildTypedMemoryDispatchStarted, markChildTypedMemoryRunnerReturned, markGroupCoordinationDependencyStarted, memoryContextConsumptionReceiptFile, mergeCoordinatorDocumentContexts, normalizeAgentReasoningState, normalizePlanAssignments, openTaskAgentSession, prepareAgentRuntimeTools, prepareChildAgentWorkDir, prepareTaskAgentInvocationEdge, prepareTaskAgentSessionCapacityRevalidation, processCrossAgents, recordAgentRuntimeLifecycle, recordReasoningDeviation, recordReplayRepairTimelineBindingsForMention, recordTaskAgentMemoryContextDelivery, recordTaskAgentSessionTurn, requirementEpicExecutionBoundary, runCoordinatorReviewLoop, runGroupOrchestrator, runtimeToolDispatchBlockedReceipt, runtimeToolSnapshotFromAudit, safeAddGroupLog, saveTasks, setReasoningAssertion, summarizeReplayRepairTimelineBindingsForEvent, summarizeWorkerHandoffForUser, taskAgentInvocationMemoryOptions, taskAgentSessionLifecycleRunnerOptions, taskRequiresCodeChanges, transitionExecution, updateGroupMemory, updateReasoningPlan, updateTask, updateTaskWorkItemFromReceipt } = deps;
+    const { addTaskLog, admitChildTypedMemoryDelivery, alignRequirementEpicAssignments, appendGroupMessage, appendTaskTimelineEvent, assertRuntimeToolDispatchReady, attachExecutionWorkspace, attachInvokedSkillsToReceipt, attachMemoryContextConsumptionChallenge, bindTaskAgentInvocationContext, bindTaskAgentInvocationMemoryDelivery, bindTaskAgentInvocationRunnerRequest, bindTaskAgentMemoryContextSnapshot, buildAgentMemoryContextBundleWithManifestSelection, buildAgentToolContext, buildChildAgentDevelopmentContract, buildChildAgentTaskText, buildChildAgentWorkerHandoff, buildChildAgentWorktreeNotice, buildCoordinatorSharedFilesContext, buildGroupMainPlanningSourceContext, buildProjectVerificationHints, buildQueuedGroupTaskMessage, buildTaskProviderSwitchRequests, buildTaskSandboxRehearsal, buildTaskSourceDocumentsContext, buildUserCoordinationAcknowledgement, buildWorkerContinuationHandoff, buildWorkflowMeta, captureReasoningFacts, checkTaskFailure, claimTaskWorkItemForAgent, commitChildTypedMemoryDelivery, commitTaskAgentSessionCapacityRevalidation, compactMemoryText, compactRuntimeToolAudit, completeTaskAgentInvocationEdge, createChildTypedMemoryDispatchWal, createExecutionCheckpoint, createMemoryContextConsumptionChallenge, dispatchTaskAgentInvocationEdge, ensureExecution, evaluateGreenContract, explainReasoningDecision, extractAgentReceipt, extractRunnerVerificationEvidence, getChildAgentIsolationMode, getConfigInfo, getConfigs, getCoordinatorActionMentions, getCoordinatorMember, getGroupTaskExecutionStatus, getInitialWorkflowMeta, getRoutableMembers, getTaskAgentSessionOptions, getTaskExecutionFromReceipt, groupSessionIdForTask, loadExecution, loadGroups, loadTasks, markChildTypedMemoryDispatchCommitted, markChildTypedMemoryDispatchStarted, markChildTypedMemoryRunnerReturned, markGroupCoordinationDependencyStarted, memoryContextConsumptionReceiptFile, mergeCoordinatorDocumentContexts, normalizeAgentReasoningState, normalizePlanAssignments, openTaskAgentSession, prepareAgentRuntimeTools, prepareChildAgentWorkDir, prepareTaskAgentInvocationEdge, prepareTaskAgentSessionCapacityRevalidation, processCrossAgents, recordAgentRuntimeLifecycle, recordReasoningDeviation, recordReplayRepairTimelineBindingsForMention, recordTaskAgentMemoryContextDelivery, recordTaskAgentSessionTurn, requirementEpicExecutionBoundary, runCoordinatorReviewLoop, runGroupOrchestrator, runtimeToolDispatchBlockedReceipt, runtimeToolSnapshotFromAudit, safeAddGroupLog, saveTasks, setReasoningAssertion, summarizeReplayRepairTimelineBindingsForEvent, summarizeWorkerHandoffForUser, taskAgentInvocationMemoryOptions, taskAgentSessionLifecycleRunnerOptions, taskRequiresCodeChanges, transitionExecution, updateGroupMemory, updateReasoningPlan, updateTask, updateTaskWorkItemFromReceipt } = deps;
     const configs = getConfigs();
     if (task.assign_type === "group" && task.group_id) {
         const groups = loadGroups();
@@ -37,7 +169,60 @@ async function executeTask(task, ctx, deps) {
             nextAction: "主 Agent 拆分任务并协调子 Agent",
         });
         const context = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(task.group_id, { groupSessionId: task.group_session_id || task.groupSessionId || "" }).rendered;
-        const sharedFilesContext = mergeCoordinatorDocumentContexts(buildCoordinatorSharedFilesContext(ctx, group), buildTaskSourceDocumentsContext(task));
+        const planningSource = await buildGroupMainPlanningSourceContext(group, message, configs, {
+            targetProjects: groupPlanningProjectRefs(task),
+            maxRounds: 3,
+        });
+        const planningSourceSummary = summarizeGroupPlanningSource(planningSource);
+        const previousSourceChecksum = String(task?.intake_draft?.read_only_exploration?.source_snapshot_checksum
+            || task?.workflow_meta?.plan_mode?.read_only_exploration?.source_snapshot_checksum
+            || task?.planning_source_evidence?.checksum
+            || "");
+        if (previousSourceChecksum && previousSourceChecksum !== planningSource.checksum) {
+            appendTaskTimelineEvent(task.id, {
+                type: "group_main_source_changed",
+                title: "源码发生变化，主 Agent 已重新规划",
+                detail: "执行前源码checksum与确认计划不一致，旧计划未直接派发；本轮使用当前源码重新生成工作项。",
+                status: "warn",
+                phase: "planning",
+                agent: coordinatorProject,
+                data: { previous_checksum: previousSourceChecksum, current_checksum: planningSource.checksum },
+            });
+            updateTask(task.id, { plan_revision_required: true, source_snapshot_changed_at: new Date().toISOString() });
+        }
+        appendTaskTimelineEvent(task.id, {
+            type: "group_main_source_hydrated",
+            title: planningSource.ready ? "群聊主 Agent 已读取相关项目源码" : "群聊主 Agent 源码读取存在缺口",
+            detail: planningSource.projects.map((project) => `${project.project}：${project.selectedPaths.length} 个文件`).join("；") || "没有可读取的项目源码",
+            status: planningSource.ready ? "ok" : "warn",
+            phase: "planning",
+            agent: coordinatorProject,
+            data: { source_evidence: planningSourceSummary },
+        });
+        if (taskRequiresCodeChanges(task) && !planningSource.ready) {
+            const detail = `群聊主 Agent 无法在规划前读取完整的目标项目源码：${planningSource.issues.join("；") || "没有可用源码证据"}`;
+            updateTask(task.id, {
+                status: "blocked",
+                acceptance_state: "source_hydration_blocked",
+                status_detail: detail,
+                planning_source_evidence: planningSourceSummary,
+            });
+            appendTaskTimelineEvent(task.id, {
+                type: "group_main_source_gate_blocked",
+                title: "源码证据门禁阻止派发",
+                detail,
+                status: "error",
+                phase: "planning",
+                agent: coordinatorProject,
+                data: { source_evidence: planningSourceSummary },
+            });
+            return {
+                status: "blocked",
+                detail,
+                sourceEvidence: planningSourceSummary,
+            };
+        }
+        const sharedFilesContext = mergeCoordinatorDocumentContexts(buildCoordinatorSharedFilesContext(ctx, group), buildTaskSourceDocumentsContext(task), planningSource.rendered);
         let coordinatorResult = await runGroupOrchestrator({
             group,
             message,
@@ -49,19 +234,69 @@ async function executeTask(task, ctx, deps) {
             traceId: task.trace_id || task.traceId || "",
             taskId: task.id,
             executionId: task.execution_id || task.executionId || task.id,
-            extraInstructions: requirementEpicExecutionBoundary(task),
+            workflowDecision: task.workflow_decision || task.workflowDecision || null,
+            projectSourceEvidence: planningSourceSummary,
+            extraInstructions: [
+                requirementEpicExecutionBoundary(task),
+                "本轮是源码驱动规划。必须引用注入的当前源码证据，生成明确的目标、边界、跨项目数据关系、依赖顺序和可验收工作项；不得把需求分析或跨项目架构设计转交给开发 Agent。开发 Agent只负责本项目内的当前源码复查、实现、验证和结果说明。",
+            ].filter(Boolean).join("\n\n"),
         });
         let coordinatorOutput = coordinatorResult.content;
         const coordinatorTranscript = [coordinatorOutput].filter(Boolean);
+        const initialCoordinatorRuntime = String(coordinatorResult.runtime || "");
+        const previousProviderCircuit = (0, provider_task_circuit_breaker_1.readTaskProviderCircuit)(task);
+        if (previousProviderCircuit?.state === "open" && !["llm-error", "llm-not-configured"].includes(initialCoordinatorRuntime)) {
+            const closedCircuit = (0, provider_task_circuit_breaker_1.closeTaskProviderCircuit)(task, "群聊主 Agent Provider 调用恢复");
+            updateTask(task.id, { provider_circuit: closedCircuit });
+            appendTaskTimelineEvent(task.id, {
+                type: "provider_circuit_closed",
+                title: "主 Agent Provider 已恢复",
+                detail: "任务级模型冷却已关闭，本轮继续执行",
+                status: "ok",
+                phase: "planning",
+                agent: coordinatorProject,
+                data: { circuit: closedCircuit },
+            });
+        }
         let coordinatorMessageId = "m" + Date.now().toString(36) + "coord";
-        let planAssignments = alignRequirementEpicAssignments(task, normalizePlanAssignments(coordinatorResult.assignments || []));
+        let planAssignments = attachGroupPlanningSourceToAssignments(alignRequirementEpicAssignments(task, normalizePlanAssignments(coordinatorResult.assignments || [])), planningSource);
+        const sourceBoundProjects = new Set(planningSource.projects.map((project) => String(project.project || "")));
+        const ungroundedAssignments = planAssignments
+            .map((assignment) => String(assignment?.project || ""))
+            .filter((project) => project && !sourceBoundProjects.has(project));
+        if (taskRequiresCodeChanges(task) && ungroundedAssignments.length) {
+            const detail = `主 Agent 计划包含尚未读取源码的项目：${ungroundedAssignments.join("、")}；本轮已停止派发，请重新生成源码范围。`;
+            updateTask(task.id, {
+                status: "blocked",
+                acceptance_state: "source_scope_mismatch",
+                status_detail: detail,
+                planning_source_evidence: planningSourceSummary,
+            });
+            appendTaskTimelineEvent(task.id, {
+                type: "group_main_source_scope_mismatch",
+                title: "计划项目与源码证据不一致",
+                detail,
+                status: "error",
+                phase: "planning",
+                agent: coordinatorProject,
+                data: { ungrounded_projects: ungroundedAssignments, source_evidence: planningSourceSummary },
+            });
+            return {
+                status: "blocked",
+                detail,
+                sourceEvidence: planningSourceSummary,
+            };
+        }
         let dispatchPolicy = coordinatorResult.dispatchPolicy || null;
         let workflowMeta = getInitialWorkflowMeta(planAssignments, dispatchPolicy, "任务队列协调");
         appendGroupMessage(task.group_id, {
             id: coordinatorMessageId,
             role: "assistant",
             agent: coordinatorProject,
-            content: buildUserCoordinationAcknowledgement(task, planAssignments),
+            content: buildUserCoordinationAcknowledgement(task, planAssignments, {
+                dispatchPolicy,
+                status: "planning",
+            }),
             technical_content: coordinatorOutput,
             timestamp: new Date().toISOString(),
             task_id: task.id,
@@ -74,6 +309,8 @@ async function executeTask(task, ctx, deps) {
         });
         appendTaskTimelineEvent(task.id, { type: "coordinator_plan", title: "主 Agent 生成计划", detail: compactMemoryText(coordinatorOutput, 500), status: planAssignments.length ? "ok" : "warn", phase: "planning", agent: coordinatorProject, data: { assignments: planAssignments, dispatchPolicy, coordinationPlan: coordinatorResult.coordinationPlan || null } });
         const semanticReasoning = coordinatorResult.analysis?.reasoning || {};
+        const architecturePlan = coordinatorResult.analysis?.architecturePlan || coordinatorResult.coordinationPlan?.architecture || null;
+        const sourcePlanUpdates = sourceGroundedPlanModeUpdates(task, architecturePlan, planningSourceSummary, coordinatorResult.executionOrder || "sequential");
         const taskReasoning = normalizeAgentReasoningState(task.reasoning_loop, task.business_goal || task.title || "");
         updateReasoningPlan(taskReasoning, coordinatorResult.coordinationPlan?.phases || [], "群聊主 Agent 基于语义拆分形成协调计划");
         captureReasoningFacts(taskReasoning, "coordinator_semantic_analysis", {
@@ -87,8 +324,48 @@ async function executeTask(task, ctx, deps) {
         (semanticReasoning.verificationAssertions || []).forEach((label, index) => setReasoningAssertion(taskReasoning, { id: `semantic_${index + 1}`, label, kind: "semantic_acceptance", status: "pending", reason: "群聊主 Agent 在派发前定义" }));
         if ((semanticReasoning.assumptionsToVerify || []).length)
             recordReasoningDeviation(taskReasoning, "unverified_assumptions", `待 Worker 核验：${semanticReasoning.assumptionsToVerify.join("；")}`, "info");
-        updateTask(task.id, { reasoning_loop: taskReasoning, coordination_plan: coordinatorResult.coordinationPlan || null });
+        updateTask(task.id, {
+            reasoning_loop: taskReasoning,
+            coordination_plan: coordinatorResult.coordinationPlan || null,
+            planning_source_evidence: planningSourceSummary,
+            architecture_plan: architecturePlan,
+            ...sourcePlanUpdates,
+            acceptance_evidence_plan: semanticReasoning.acceptanceEvidencePlan || [],
+            test_agent_verification_profile: semanticReasoning.verificationProfile || null,
+            workflow_decision: coordinatorResult.analysis?.workflowDecision || task.workflow_decision || null,
+        });
         appendTaskTimelineEvent(task.id, { type: "reasoning_plan", title: `主 Agent 推理计划 v${taskReasoning.plan_version}`, detail: `事实 ${(semanticReasoning.knownFacts || []).length} · 假设 ${(semanticReasoning.assumptionsToVerify || []).length} · 断言 ${(semanticReasoning.verificationAssertions || []).length}`, status: "ok", phase: "planning", agent: coordinatorProject, data: { plan_version: taskReasoning.plan_version, reasoning: semanticReasoning } });
+        const coordinatorRuntime = String(coordinatorResult.runtime || "");
+        if (coordinatorRuntime === "llm-error") {
+            const providerFailure = coordinatorResult.providerFailure || {};
+            const circuit = (0, provider_task_circuit_breaker_1.openTaskProviderCircuit)(task, providerFailure, {
+                reason: compactMemoryText(coordinatorOutput, 500) || "群聊主 Agent Provider 调用失败",
+            });
+            const circuitMessage = (0, provider_task_circuit_breaker_1.formatTaskProviderCircuitMessage)(circuit);
+            updateTask(task.id, {
+                provider_circuit: circuit,
+                status_detail: circuitMessage,
+            });
+            appendTaskTimelineEvent(task.id, {
+                type: "provider_circuit_opened",
+                title: "主 Agent Provider 进入任务级冷却",
+                detail: circuitMessage,
+                status: "warn",
+                phase: "planning",
+                agent: coordinatorProject,
+                data: {
+                    circuit,
+                    provider_failure: providerFailure,
+                    dispatch_repair_skipped: true,
+                },
+            });
+            addTaskLog(task.id, "warning", `${circuitMessage}；llm-error 已禁止进入派发修复`);
+            return getGroupTaskExecutionStatus(null, coordinatorResult, coordinatorTranscript.join("\n\n---\n\n"), task);
+        }
+        if (coordinatorRuntime === "llm-not-configured") {
+            addTaskLog(task.id, "warning", "主 Agent 模型未配置，本轮禁止进入派发修复");
+            return getGroupTaskExecutionStatus(null, coordinatorResult, coordinatorTranscript.join("\n\n---\n\n"), task);
+        }
         let validMentions = getCoordinatorActionMentions(coordinatorResult, group, coordinatorProject);
         if (task.workflow_type === "daily_dev" && validMentions.length === 0 && getRoutableMembers(group).length > 0) {
             const repairResult = await runGroupOrchestrator({
@@ -102,6 +379,8 @@ async function executeTask(task, ctx, deps) {
                 traceId: task.trace_id || task.traceId || "",
                 taskId: task.id,
                 executionId: task.execution_id || task.executionId || task.id,
+                workflowDecision: task.workflow_decision || task.workflowDecision || null,
+                projectSourceEvidence: planningSourceSummary,
                 extraInstructions: [
                     requirementEpicExecutionBoundary(task),
                     "上一轮模型没有生成可执行 assignments。请重新核对用户目标与群成员职责；若信息足够，必须由模型返回结构化 assignments；若不足，明确返回 clarificationQuestions，禁止规则补派。",
@@ -123,7 +402,7 @@ async function executeTask(task, ctx, deps) {
                 coordinatorOutput = repairOutput;
                 coordinatorTranscript.push(repairOutput);
                 coordinatorMessageId = "m" + Date.now().toString(36) + "repair";
-                planAssignments = alignRequirementEpicAssignments(task, normalizePlanAssignments(coordinatorResult.assignments || []));
+                planAssignments = attachGroupPlanningSourceToAssignments(alignRequirementEpicAssignments(task, normalizePlanAssignments(coordinatorResult.assignments || [])), planningSource);
                 dispatchPolicy = coordinatorResult.dispatchPolicy || null;
                 workflowMeta = getInitialWorkflowMeta(planAssignments, dispatchPolicy, "daily_dev 派发修复");
                 appendGroupMessage(task.group_id, {
@@ -155,6 +434,15 @@ async function executeTask(task, ctx, deps) {
             else {
                 addTaskLog(task.id, "warning", "daily_dev 主 Agent 空派发修复未产生可执行目标");
             }
+        }
+        const independentTestAgentEnabled = (0, test_agent_settings_1.isTestAgentEnabled)();
+        updateTask(task.id, {
+            test_agent_enabled: independentTestAgentEnabled,
+            acceptance_mode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
+        });
+        if (!independentTestAgentEnabled) {
+            validMentions = validMentions.filter((item) => !isTestAgentAssignment(item));
+            planAssignments = planAssignments.filter((item) => !isTestAgentAssignment(item));
         }
         const sandboxRehearsal = buildTaskSandboxRehearsal(task, group, coordinatorResult, planAssignments, validMentions, dispatchPolicy);
         const tasksForRehearsal = loadTasks();
@@ -485,7 +773,8 @@ ${requirementEpicExecutionBoundary(task)}
   "summary": "一句话说明实际完成/确认了什么",
   "actions": ["实际执行的动作"],
   "filesChanged": ["修改过的文件路径；没有修改填空数组"],
-  "verification": ["已经运行或建议运行的验证；不能编造未运行的测试"],
+  "verification": ["仅用于展示的验证名称或命令；不能编造未运行的测试"],
+  "verificationResults": [{"name":"检查名称","command":"实际执行命令；非命令检查可为空","status":"passed | failed | blocked | skipped | not_run","exitCode":0,"source":"agent | ccm_runner | browser | http","evidence":["真实证据引用"]}],
   "contractChanges": ["如涉及接口/字段/schema 变化，改为对象数组；没有填空数组"],
   "consumedInjectionIds": ["如果工作单包含 injection_id，填已消费的 injection_id；没有填空数组"],
   "memoryUsed": ["本轮实际使用的记忆/知识库/历史结论；未使用填空数组"],
@@ -495,7 +784,8 @@ ${requirementEpicExecutionBoundary(task)}
   "apiMicrocompactNativeApplyRequestTelemetry": [{"planChecksum": "native_applied 的 API microcompact edit plan checksum；未 native_applied 时填空字符串", "applyPlanChecksum": "native apply plan checksum；未 native_applied 时填空字符串", "requestPatchChecksum": "真实合并 provider requestPatch 后的 checksum；未 native_applied 时填空字符串", "requestBodyChecksum": "发给 provider 的请求体稳定 checksum；不要粘贴完整请求体", "hasContextManagement": true, "betaHeaders": ["context-management-2025-06-27"], "provider": "anthropic | openai-compatible | other", "model": "实际请求模型；未知填空字符串", "endpoint": "provider endpoint；可脱敏", "method": "POST", "responseStatus": 200, "requestId": "provider request id / trace id；没有填空字符串", "taskAgentSessionId": "必须与 apiMicrocompactUsage 一致", "nativeSessionId": "必须与 apiMicrocompactUsage 一致", "memoryContextSnapshotId": "必须与 apiMicrocompactUsage 一致", "memoryContextSnapshotChecksum": "必须与 apiMicrocompactUsage 一致", "sentAt": "ISO 时间；真实发送 API 请求的时间", "telemetrySource": "native_request_adapter | agent_receipt；强证明必须是 fresh native_request_adapter，agent_receipt 只能作为弱证据"}],
   "postCompactCandidateUsage": [{"gateId": "压缩后重注入 gate id；没有填空字符串", "candidateId": "candidate_id", "usageState": "used | ignored | verified", "reason": "使用、忽略或核验原因"}],
   "blockers": ["阻塞点；没有填空数组"],
-  "needs": ["还需要用户或其他 Agent 补充的内容；没有填空数组"]
+  "needs": ["会阻塞任务、需要用户或其他 Agent 补充的内容；没有填空数组"],
+  "advisoryNeeds": ["不阻塞交付的可选建议；没有填空数组"]
 }
 \`\`\``;
         let directMemoryContextSnapshot = null;
@@ -718,7 +1008,7 @@ ${requirementEpicExecutionBoundary(task)}
             }
         }
         if (directInvocationEdge) {
-            const directFailed = !directSessionSucceeded || checkTaskFailure(output);
+            const directFailed = !directSessionSucceeded;
             directInvocationEdge = completeTaskAgentInvocationEdge(directInvocationEdge, {
                 success: !directFailed,
                 nativeSessionId: directNativeSessionId || directTaskSession?.nativeSessionId || "",
@@ -874,53 +1164,95 @@ ${requirementEpicExecutionBoundary(task)}
             || task.requires_verification === true
             || taskRequiresCodeChanges(task)
             || changedFiles.length > 0;
+        const independentTestAgentEnabled = (0, test_agent_settings_1.isTestAgentEnabled)();
+        updateTask(task.id, {
+            test_agent_enabled: independentTestAgentEnabled,
+            acceptance_mode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
+        });
         let projectReview = null;
-        if (requiresProjectReview) {
-            const reviewRound = Math.max(1, Math.min(rework_policy_1.AUTO_REWORK_MAX_ROUNDS, Number(task.review_round || 0) + 1));
-            updateTask(task.id, {
-                status: "reviewing",
-                acceptance_state: "test_agent_running",
-                review_round: reviewRound,
-                status_detail: `TestAgent 正在执行第 ${reviewRound}/${rework_policy_1.AUTO_REWORK_MAX_ROUNDS} 轮独立验收`,
-            });
-            appendTaskTimelineEvent(task.id, {
-                type: "project_test_agent_started",
-                title: `TestAgent 第 ${reviewRound} 轮验收`,
-                detail: "独立读取当前项目源码、开发回执和真实验证目标",
-                status: "active",
-                phase: "reviewing",
-                agent: "test-agent",
-            });
-            projectReview = await (0, project_test_agent_gate_1.runProjectTaskTestAgentReview)({
-                task,
-                project: task.target_project,
-                workDir,
-                workerResults: [{ success: true, output, fileChanges }],
-                acceptanceCriteria: String(task.acceptance_criteria || "").split(/\r?\n|；/).filter(Boolean),
-                workItems: task.work_items || [{ title: task.title, objective: task.business_goal || task.description }],
-                fallbackVerificationCommands: Array.isArray(task.verification_commands) ? task.verification_commands : [],
-                round: reviewRound,
-                issuedBy: "project-main-agent",
-            });
-            const problems = (0, project_test_agent_gate_1.projectTestAgentProblems)(projectReview);
-            appendTaskTimelineEvent(task.id, {
-                type: "project_test_agent_finished",
-                title: projectReview.canAccept ? "TestAgent 验收通过" : "TestAgent 发现验收缺口",
-                detail: projectReview.canAccept ? "独立验收证据门禁已通过" : problems.join("；"),
-                status: projectReview.canAccept ? "ok" : "warn",
-                phase: "reviewing",
-                agent: "test-agent",
-                data: { round: reviewRound, report: projectReview.report, verdict: projectReview.verdict },
-            });
+        if (requiresProjectReview && !independentTestAgentEnabled) {
+            updateTask(task.id, { status: "reviewing", acceptance_state: "main_agent_self_verifying", status_detail: "TestAgent 已关闭，项目主 Agent 正在执行一次自验" });
+            appendTaskTimelineEvent(task.id, { type: "project_main_self_verification_started", title: "项目主 Agent 开始自验", detail: "TestAgent 已关闭，本轮不产生独立验收结论", status: "active", phase: "reviewing", agent: task.target_project });
+            projectReview = buildDirectMainAgentSelfVerification(task, receipt, changedFiles, output, taskRequiresCodeChanges(task), extractRunnerVerificationEvidence);
+            updateTask(task.id, { test_agent_review: null, main_agent_self_verification: projectReview, acceptance_state: projectReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
+            appendTaskTimelineEvent(task.id, { type: "project_main_self_verification_finished", title: projectReview.canAccept ? "项目主 Agent 自验通过" : "项目主 Agent 自验未通过", detail: projectReview.report.summary, status: projectReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: task.target_project, data: { review: projectReview } });
             if (!projectReview.canAccept) {
-                const detail = problems.join("；") || projectReview.error || "TestAgent 验收未通过";
-                if (reviewRound < rework_policy_1.AUTO_REWORK_MAX_ROUNDS) {
+                return { ...result, status: "blocked", detail: projectReview.report.summary, review: projectReview, testAgent: null, mainAgentSelfVerification: projectReview, ...coordination };
+            }
+        }
+        if (requiresProjectReview && independentTestAgentEnabled) {
+            const reviewCycle = (0, rework_policy_1.nextReviewRound)(task);
+            const reviewCycleId = String(task.review_cycle_id || (0, rework_policy_1.createReviewCycleId)(`project-${task.id}`));
+            let reviewRound = reviewCycle.round;
+            let previousReview = task.test_agent_review || null;
+            while (reviewRound <= rework_policy_1.AUTO_REWORK_MAX_ROUNDS) {
+                updateTask(task.id, {
+                    status: "reviewing",
+                    acceptance_state: "test_agent_running",
+                    review_round: reviewRound,
+                    review_round_total: reviewCycle.total + (reviewRound - reviewCycle.round),
+                    review_cycle_id: reviewCycleId,
+                    rework_exhausted: null,
+                    status_detail: `TestAgent 正在执行第 ${reviewRound}/${rework_policy_1.AUTO_REWORK_MAX_ROUNDS} 轮独立验收`,
+                });
+                appendTaskTimelineEvent(task.id, {
+                    type: "project_test_agent_started",
+                    title: `TestAgent 第 ${reviewRound} 轮验收`,
+                    detail: reviewRound === reviewCycle.round ? "独立读取当前项目源码、开发回执和真实验证目标" : "按上一轮失败范围增量复验，并保留核心回归检查",
+                    status: "active",
+                    phase: "reviewing",
+                    agent: "test-agent",
+                });
+                projectReview = await (0, project_test_agent_gate_1.runProjectTaskTestAgentReview)({
+                    task,
+                    project: task.target_project,
+                    workDir,
+                    workerResults: [{ success: true, output, fileChanges }],
+                    acceptanceCriteria: String(task.acceptance_criteria || "").split(/\r?\n|；/).filter(Boolean),
+                    workItems: task.work_items || [{ title: task.title, objective: task.business_goal || task.description }],
+                    fallbackVerificationCommands: Array.isArray(task.verification_commands) ? task.verification_commands : [],
+                    round: reviewRound,
+                    reviewCycleId,
+                    issuedBy: "project-main-agent",
+                    previousReview,
+                });
+                const decision = projectReview?.decision || (0, test_agent_review_policy_1.classifyTestAgentReview)(projectReview);
+                const problems = (0, project_test_agent_gate_1.projectTestAgentProblems)(projectReview);
+                appendTaskTimelineEvent(task.id, {
+                    type: "project_test_agent_finished",
+                    title: projectReview.canAccept ? "TestAgent 验收通过" : "TestAgent 发现验收缺口",
+                    detail: projectReview.canAccept ? "独立验收证据门禁已通过" : problems.join("；"),
+                    status: projectReview.canAccept ? "ok" : "warn",
+                    phase: "reviewing",
+                    agent: "test-agent",
+                    data: { round: reviewRound, report: projectReview.report, verdict: projectReview.verdict, decision },
+                });
+                if (projectReview.canAccept || decision.route !== "test_agent_recheck" || reviewRound >= rework_policy_1.AUTO_REWORK_MAX_ROUNDS)
+                    break;
+                previousReview = projectReview;
+                appendTaskTimelineEvent(task.id, {
+                    type: "project_test_agent_recheck_queued",
+                    title: `TestAgent 第 ${reviewRound + 1} 轮增量复验已安排`,
+                    detail: decision.reason,
+                    status: "active",
+                    phase: "reviewing",
+                    agent: "test-agent",
+                    data: { previous_round: reviewRound, incremental_scope: projectReview.incrementalScope },
+                });
+                reviewRound += 1;
+            }
+            const reviewDecision = projectReview?.decision || (0, test_agent_review_policy_1.classifyTestAgentReview)(projectReview);
+            const reworkProblems = (0, project_test_agent_gate_1.projectTestAgentReworkProblems)(projectReview);
+            if (!projectReview.canAccept) {
+                const detail = reworkProblems.join("；") || projectReview.error || "TestAgent 验收未通过";
+                if (reviewDecision.route === "implementation_rework" && reviewRound < rework_policy_1.AUTO_REWORK_MAX_ROUNDS) {
                     updateTask(task.id, {
                         status: "pending",
                         acceptance_state: "reworking",
                         status_detail: `第 ${reviewRound} 轮验收未通过，已生成返工单并重新排队`,
                         test_agent_review: projectReview,
                         review_round: reviewRound,
+                        review_round_total: reviewCycle.total,
                         workflow_meta: {
                             ...(task.workflow_meta || {}),
                             project_test_rework: { round: reviewRound, instruction: detail, created_at: new Date().toISOString() },
@@ -939,8 +1271,26 @@ ${requirementEpicExecutionBoundary(task)}
                         invokedSkills,
                     };
                 }
-                updateTask(task.id, { status: "blocked", acceptance_state: "blocked", test_agent_review: projectReview, review_round: reviewRound, status_detail: detail });
-                return { ...result, status: "blocked", detail: `三轮 TestAgent 验收后仍未通过：${detail}`, review: projectReview, testAgent: projectReview, ...coordination };
+                const blockedState = reviewDecision.route === "environment"
+                    ? "environment_blocked"
+                    : reviewDecision.route === "needs_user"
+                        ? "needs_user"
+                        : reviewDecision.route === "test_agent_recheck"
+                            ? "test_agent_recheck"
+                            : "blocked";
+                updateTask(task.id, {
+                    status: "blocked",
+                    acceptance_state: blockedState,
+                    test_agent_review: projectReview,
+                    test_agent_failure_route: reviewDecision.route,
+                    review_round: reviewRound,
+                    review_round_total: reviewCycle.total + (reviewRound - reviewCycle.round),
+                    status_detail: reviewDecision.reason || detail,
+                    ...(reviewDecision.route === "implementation_rework"
+                        ? (0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "project_direct", rounds: reviewRound })
+                        : {}),
+                });
+                return { ...result, status: "blocked", detail: `${reviewDecision.reason}：${detail}`, review: projectReview, testAgent: projectReview, ...coordination };
             }
             updateTask(task.id, {
                 acceptance_state: "test_agent_passed",
@@ -949,14 +1299,16 @@ ${requirementEpicExecutionBoundary(task)}
             });
         }
         const green = evaluateGreenContract({ receipt, fileChanges, requiresChanges: taskRequiresCodeChanges(task), requiresVerification: task.requires_verification !== false, reviewPassed: !requiresProjectReview || projectReview?.canAccept === true, requiredLevel: "project" });
-        const acceptedResult = requiresProjectReview ? { ...result, status: "done", detail: "TestAgent 与项目主 Agent 验收通过", review: projectReview, testAgent: projectReview } : result;
-        transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? "项目 Agent 已交付并通过独立验收" : acceptedResult.detail, {
+        const acceptedResult = requiresProjectReview
+            ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : "项目主 Agent 自验通过", review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview }
+            : result;
+        transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
             green,
             receipt,
             fileChanges,
             runnerVerification: extractRunnerVerificationEvidence(output),
             outputPreview: output,
-            data: { runtime_tool_sync: compactRuntimeToolAudit(runtimeToolContext.audit), invoked_skills: invokedSkills, test_agent: projectReview },
+            data: { runtime_tool_sync: compactRuntimeToolAudit(runtimeToolContext.audit), invoked_skills: invokedSkills, test_agent: independentTestAgentEnabled ? projectReview : null, main_agent_self_verification: independentTestAgentEnabled ? null : projectReview },
         });
         return { ...acceptedResult, ...coordination, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills, executionKernel: { executionId: task.id, green } };
     }

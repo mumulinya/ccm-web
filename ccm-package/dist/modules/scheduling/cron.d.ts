@@ -39,7 +39,7 @@ export declare function buildTaskFromCronJob(job: any, trigger: "manual" | "sche
             intake: {
                 backlog_file: any;
                 claimed_by_cron_job_id: any;
-                cron_trigger: "resume" | "manual" | "retry" | "recovery" | "schedule";
+                cron_trigger: "resume" | "recovery" | "manual" | "retry" | "schedule";
                 claimed_at: string;
             };
             batch: {
@@ -49,7 +49,7 @@ export declare function buildTaskFromCronJob(job: any, trigger: "manual" | "sche
             cron: any;
         };
         cron_job_id: any;
-        cron_trigger: "resume" | "manual" | "retry" | "recovery" | "schedule";
+        cron_trigger: "resume" | "recovery" | "manual" | "retry" | "schedule";
     }[];
     meta: any;
 } | {
@@ -72,7 +72,7 @@ export declare function buildTaskFromCronJob(job: any, trigger: "manual" | "sche
         source_attachment_context: string;
         source_attachment_warnings: any[];
         cron_job_id: any;
-        cron_trigger: "resume" | "manual" | "retry" | "recovery" | "schedule";
+        cron_trigger: "resume" | "recovery" | "manual" | "retry" | "schedule";
     }[];
     meta: any;
 };

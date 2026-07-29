@@ -380,6 +380,9 @@ function validateProfile(project: string, profile: any): ProjectRuntimeProfileV1
   const runCommand = String(profile?.runCommand || "").trim();
   const prepareCommand = String(profile?.prepareCommand || "").trim();
   const buildCommand = String(profile?.buildCommand || "").trim();
+  if (["maven", "gradle"].includes(projectType) && /(?:^|\s)java(?:\.exe)?\s+-jar(?:\s|$)/i.test(runCommand)) {
+    throw new Error("Java 项目的启动命令必须运行源码（Maven spring-boot:run 或 Gradle bootRun/run）；java -jar 仅用于已构建产物，不属于源码启动");
+  }
   for (const command of [runCommand, prepareCommand, buildCommand].filter(Boolean)) {
     const invocation = verificationCommandInvocation(command);
     if (invocation.error) throw new Error(`运行命令不安全：${invocation.error}`);
@@ -716,6 +719,23 @@ function profileForAction(project: string, profileId: unknown) {
   const profile = config.profiles.find(item => item.id === id);
   if (!profile || !profile.enabled || profile.stale) throw new Error("运行配置不存在、未启用或已经失效");
   return profile;
+}
+
+function runtimeLogTarget(project: string, profileId: unknown, kind: unknown) {
+  const safeProject = projectConfig(project).project;
+  const config = getProjectRuntimeConfig(safeProject);
+  const id = String(profileId || config.selectedProfileId || "");
+  if (!PROFILE_ID_PATTERN.test(id)) throw new Error("运行配置 ID 无效");
+  const safeKind: "run" | "build" = kind === "build" ? "build" : "run";
+  const file = logFile(safeProject, id, safeKind);
+  const state = readState();
+  const key = runtimeKey(safeProject, id);
+  const known = config.profiles.some(item => item.id === id)
+    || Boolean(state.processes[key])
+    || Boolean(state.builds[key])
+    || fs.existsSync(file);
+  if (!known) throw new Error("找不到该运行配置的日志记录");
+  return { safeProject, profileId: id, safeKind, file };
 }
 
 function executableFromPath(names: string[]) {
@@ -1092,6 +1112,63 @@ export function stopProjectRuntime(project: string, profileId?: unknown) {
   return { success: true, profile, state: row };
 }
 
+export function stopAllProjectRuntimes(project: string) {
+  const safeProject = projectConfig(project).project;
+  const state = normalizeProcessStates(safeProject, readState());
+  const stoppedAt = new Date().toISOString();
+  const processTargets: Array<{ key: string; row: RuntimeProcessState; child: ChildProcess }> = [];
+  const buildTargets: Array<{ key: string; row: RuntimeBuildState; child: ChildProcess }> = [];
+  const failures: Array<{ profileId: string; kind: "run" | "build"; error: string }> = [];
+
+  for (const [key, row] of Object.entries(state.processes)) {
+    if (row.project !== safeProject || !["starting", "running", "unknown"].includes(row.status)) continue;
+    const child = liveProcesses.get(key);
+    if (row.status === "unknown" || !child || Number(child.pid || 0) !== Number(row.pid || 0)) {
+      failures.push({ profileId: row.profileId, kind: "run", error: row.error || "无法证明 PID 归属，已拒绝停止" });
+      continue;
+    }
+    row.stoppedAt = stoppedAt;
+    row.stopReason = "user";
+    row.exitCode = null;
+    processTargets.push({ key, row, child });
+  }
+  for (const [key, row] of Object.entries(state.builds)) {
+    if (row.project !== safeProject || row.status !== "building") continue;
+    const child = liveBuilds.get(key);
+    if (!child || Number(child.pid || 0) !== Number(row.pid || 0)) {
+      failures.push({ profileId: row.profileId, kind: "build", error: "无法证明构建进程归属，已拒绝停止" });
+      continue;
+    }
+    row.status = "failed";
+    row.finishedAt = stoppedAt;
+    row.exitCode = null;
+    row.error = "项目已断开，构建任务已停止";
+    buildTargets.push({ key, row, child });
+  }
+
+  // 先持久化用户停止意图，避免 close 事件把主动断开误记成运行失败。
+  writeState(state);
+  for (const target of processTargets) {
+    stopProcessTree(target.child);
+    liveProcesses.delete(target.key);
+    target.row.status = "stopped";
+    publishRuntimeEvent("project", "project.runtime.stopped", { project: safeProject, profileId: target.row.profileId, status: "stopped", reason: "project_disconnected" });
+  }
+  for (const target of buildTargets) {
+    stopProcessTree(target.child);
+    liveBuilds.delete(target.key);
+    publishRuntimeEvent("project", "project.runtime.build_failed", { project: safeProject, profileId: target.row.profileId, status: "failed", reason: "project_disconnected" });
+  }
+  writeState(state);
+  return {
+    success: failures.length === 0,
+    project: safeProject,
+    stoppedProcesses: processTargets.length,
+    stoppedBuilds: buildTargets.length,
+    failures,
+  };
+}
+
 export function restartProjectRuntime(project: string, profileId?: unknown) {
   const safeProject = projectConfig(project).project;
   const profile = profileForAction(safeProject, profileId);
@@ -1134,20 +1211,14 @@ export function buildProjectRuntime(project: string, profileId?: unknown) {
 }
 
 export function getProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, lines = 300) {
-  const safeProject = projectConfig(project).project;
-  const profile = profileForAction(safeProject, profileId);
-  const safeKind = kind === "build" ? "build" : "run";
-  const file = logFile(safeProject, profile.id, safeKind);
-  if (!fs.existsSync(file)) return { project: safeProject, profileId: profile.id, kind: safeKind, logs: "" };
+  const { safeProject, profileId: id, safeKind, file } = runtimeLogTarget(project, profileId, kind);
+  if (!fs.existsSync(file)) return { project: safeProject, profileId: id, kind: safeKind, logs: "" };
   const content = fs.readFileSync(file, "utf-8").split(/\r?\n/).slice(-Math.max(1, Math.min(2000, Number(lines) || 300))).join("\n");
-  return { project: safeProject, profileId: profile.id, kind: safeKind, logs: content };
+  return { project: safeProject, profileId: id, kind: safeKind, logs: content };
 }
 
 export function subscribeProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, listener: (event: RuntimeLogEvent) => void) {
-  const safeProject = projectConfig(project).project;
-  const profile = profileForAction(safeProject, profileId);
-  const safeKind = kind === "build" ? "build" : "run";
-  const file = logFile(safeProject, profile.id, safeKind);
+  const { file } = runtimeLogTarget(project, profileId, kind);
   if (!runtimeLogListeners.has(file)) runtimeLogListeners.set(file, new Set());
   runtimeLogListeners.get(file)!.add(listener);
   return () => {

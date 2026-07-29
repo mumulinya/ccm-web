@@ -576,7 +576,7 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
     },
     receipt_schema: {
       marker: "CCM_AGENT_RECEIPT",
-      required_fields: ["status", "summary", "actions", "filesChanged", "verification", "blockers", "needs", "ack", "contractChanges", "consumedInjectionIds", "memoryUsed", "memoryIgnored", "typedMemoryUsage", "memoryContextUsage", "memoryFactCitations", "replayRepairDispatchBriefUsage", "apiMicrocompactUsage", "apiMicrocompactNativeApplyRequestTelemetry", "postCompactCandidateUsage"],
+      required_fields: ["status", "summary", "actions", "filesChanged", "verification", "verificationResults", "blockers", "needs", "advisoryNeeds", "ack", "contractChanges", "consumedInjectionIds", "memoryUsed", "memoryIgnored", "typedMemoryUsage", "memoryContextUsage", "memoryFactCitations", "replayRepairDispatchBriefUsage", "apiMicrocompactUsage", "apiMicrocompactNativeApplyRequestTelemetry", "postCompactCandidateUsage"],
       status_values: ["done", "partial", "blocked", "failed", "needs_info"],
     },
     user_summary: {
@@ -622,7 +622,8 @@ export function renderReceiptSchemaForWorker(handoff: any) {
       native_session_id: "第三方 CLI/IDE 原生 session id；没有则填空字符串",
       actions: ["实际执行的动作"],
       filesChanged: ["修改过的文件路径；没有修改填空数组"],
-      verification: ["已经运行或人工核验的验证；未运行必须写成建议"],
+      verification: ["仅用于展示的验证名称或命令；不能编造未运行的测试"],
+      verificationResults: [{ name: "检查名称", command: "实际执行命令；非命令检查可为空", status: "passed | failed | blocked | skipped | not_run", exitCode: 0, source: "agent | ccm_runner | browser | http", evidence: ["真实证据引用"] }],
       ack: {
         understoodGoal: "你理解的目标",
         plannedScope: ["准备处理的范围"],
@@ -756,7 +757,8 @@ export function renderReceiptSchemaForWorker(handoff: any) {
         reason: "为什么使用、忽略或仅核验",
       }],
       blockers: ["阻塞点；没有填空数组"],
-      needs: ["还需要用户或其他 Agent 补充的内容；没有填空数组"],
+      needs: ["会阻塞任务、需要用户或其他 Agent 补充的内容；没有填空数组"],
+      advisoryNeeds: ["不阻塞交付的可选建议；没有填空数组"],
     }, null, 2),
     "```",
     fields.length ? `必须包含字段：${fields.join("、")}` : "",

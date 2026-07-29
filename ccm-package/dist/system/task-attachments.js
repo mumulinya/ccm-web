@@ -123,6 +123,7 @@ function contextBlock(source) {
         `状态=${source.status || "unknown"}`,
         `解析器=${source.parser || "unknown"}`,
         source.path ? `本地路径=${source.path}` : "",
+        source.url ? `来源链接=${source.url}` : "",
         source.size ? `大小=${source.size} bytes` : "",
     ].filter(Boolean).join("；");
     const body = source.readable && source.content
@@ -138,12 +139,15 @@ function renderTaskAttachmentContext(contexts) {
     const rows = (Array.isArray(contexts) ? contexts : []).map(item => String(item?.text || "").trim()).filter(Boolean);
     return rows.length ? `[任务附件：以下内容属于当前任务，必须在执行和验收时读取]\n${rows.join("\n\n")}` : "";
 }
-async function ingestFiles(files, userText) {
-    if (!files.length)
+async function ingestSources(files, userText, urls = [], onlineDocumentFetcher) {
+    const onlineUrls = [...new Set([...(urls || []), ...(0, source_ingestion_1.extractOnlineDocumentUrls)(userText)])];
+    if (!files.length && !onlineUrls.length)
         return { attachments: [], contexts: [], warnings: [], technical: null };
     const ingestion = await (0, source_ingestion_1.ingestRequirementSources)({
         files,
         userText,
+        urls: onlineUrls,
+        onlineDocumentFetcher,
         extractRequirement: false,
         decomposeRequirement: false,
     });
@@ -170,16 +174,21 @@ async function buildTaskAttachmentMutation(input) {
     const retainedSelectionProvided = input.retainedIds !== undefined && input.retainedIds !== null;
     const retainedIds = new Set(retainedSelectionProvided ? requestedRetainedIds : currentAttachments.map(item => item?.id));
     const retained = currentAttachments.filter(item => retainedIds.has(String(item?.id || "")));
-    validateTaskUploadedFiles(files, retained.length, retained.reduce((sum, item) => sum + Math.max(0, Number(item?.size || 0)), 0));
+    const retainedUrls = new Set(retained.map(item => String(item?.url || "")).filter(Boolean));
+    const newUrls = (0, source_ingestion_1.extractOnlineDocumentUrls)(input.userText || "").filter(url => !retainedUrls.has(url));
+    validateTaskUploadedFiles(files, retained.length + newUrls.length, retained.reduce((sum, item) => sum + Math.max(0, Number(item?.size || 0)), 0));
     let retainedContexts = (Array.isArray(input.currentContexts) ? input.currentContexts : [])
         .filter(item => retainedIds.has(String(item?.id || "")));
     const missingContextIds = new Set(retained.map(item => String(item?.id || "")).filter(id => !retainedContexts.some(item => String(item?.id || "") === id)));
     if (missingContextIds.size) {
-        const reparsed = await ingestFiles(retained.filter(item => missingContextIds.has(String(item?.id || "")) && item?.path), input.userText || "");
+        const missing = retained.filter(item => missingContextIds.has(String(item?.id || "")));
+        const reparsed = await ingestSources(missing.filter(item => item?.path), "", missing.map(item => String(item?.url || "")).filter(Boolean), input.onlineDocumentFetcher);
         retainedContexts = [...retainedContexts, ...reparsed.contexts];
     }
-    const added = await ingestFiles(files, input.userText || "");
-    const attachments = [...retained, ...added.attachments].slice(0, exports.MAX_TASK_ATTACHMENT_COUNT);
+    const added = await ingestSources(files, input.userText || "", newUrls, input.onlineDocumentFetcher);
+    const attachments = [...retained, ...added.attachments]
+        .filter((item, index, rows) => rows.findIndex(other => String(other?.id || "") === String(item?.id || "")) === index)
+        .slice(0, exports.MAX_TASK_ATTACHMENT_COUNT);
     const contexts = [...retainedContexts, ...added.contexts]
         .filter((item, index, rows) => rows.findIndex(other => String(other?.id || "") === String(item?.id || "")) === index)
         .slice(0, exports.MAX_TASK_ATTACHMENT_COUNT);

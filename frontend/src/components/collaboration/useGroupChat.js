@@ -680,6 +680,11 @@ export function useGroupChat(props, emit) {
       task_id: target.task_id || target.taskId || '',
       trace_id: target.trace_id || target.traceId || '',
       scope: target.scope || 'orchestrator',
+      preset: target.preset || 'all',
+      event_status: target.event_status || target.eventStatus || '',
+      event_query: target.event_query || target.eventQuery || '',
+      event_id: target.event_id || target.eventId || '',
+      evidence_id: target.evidence_id || target.evidenceId || '',
       at: Date.now(),
     }
     try {
@@ -695,6 +700,7 @@ export function useGroupChat(props, emit) {
     openCodeChangeDrawer,
     openPipelineViewer,
     openTraceReplay,
+    openTestTargets: loadGroupTestTargets,
     beginTaskInput: beginTaskSupplementInput,
     loadMessages,
   })

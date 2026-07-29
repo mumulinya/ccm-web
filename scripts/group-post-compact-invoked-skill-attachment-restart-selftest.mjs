@@ -208,7 +208,7 @@ async function childCreate(fixtureFile) {
   });
   const detail = center.getMemoryCenterScope("group", `${groupId}::${groupSessionId}`);
   const centerProjection = detail.postCompactUsage?.postCompactInvokedSkillAttachment || {};
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "PostCompactRecoveryPanel.vue"), "utf8");
   const siblingMemory = memory.loadGroupMemory(groupId, siblingSessionId);
 
   const checks = {
@@ -232,8 +232,8 @@ async function childCreate(fixtureFile) {
       && centerProjection.receiptValid === true
       && centerProjection.receipt?.body_free === true
       && !JSON.stringify(centerProjection).includes(bodySentinel),
-    memoryCenterPanelPresent: uiSource.includes("Post-compact Invoked Skill Attachment")
-      && uiSource.includes("postCompactInvokedSkillAttachmentCards"),
+    memoryCenterPanelPresent: uiSource.includes("已调用 Skill 恢复")
+      && uiSource.includes("postCompactInvokedSkillAttachment"),
   };
   const finalPersisted = memory.loadGroupMemory(groupId, groupSessionId);
   const finalReceipt = finalPersisted.compaction?.postCompactReinject?.invokedSkillAttachmentReceipt || receipt;

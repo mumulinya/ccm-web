@@ -90,6 +90,13 @@ const source_ingestion_1 = require("../requirements/source-ingestion");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
 const runtime_1 = require("../../agents/global/runtime");
 const control_center_1 = require("../../agents/global/control-center");
+(0, runtime_1.registerGlobalAgentExecutionEventSink)((run, event) => {
+    (0, memory_2.appendGlobalAgentExecutionEvent)(String(run.session_id || ""), {
+        ...event,
+        runId: run.id,
+        traceId: run.trace_id,
+    });
+});
 const { GLOBAL_PET_AGENT_NAME, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_AGENT_VISIBLE_COMPLETED_EVENT_FALLBACK, compactPetText, globalVisibleText, globalSafeArray, globalUniqueStrings, globalTestAgentCoverageItemKey, globalUniqueCoverageItems, globalTestAgentCoverageLabel, globalTestAgentCoverageByStatus, globalTestAgentSummaryObjects, globalTestAgentSummaryItems, globalTestAgentSummaryByStatus, globalTestAgentAcceptanceWeakReason, globalTestAgentWeakAcceptanceItems, summarizeGlobalTestAgentCoverageGap, collectGlobalTestAgentCoverageGaps, globalTestAgentFailureTypeLabel, scrubGlobalTestAgentEvidencePathText, collectGlobalTestAgentFailureItemsFromSource, collectGlobalTestAgentFailureItems, summarizeGlobalTestAgentFailureItem, summarizeGlobalTestAgentDiagnosticItem, collectGlobalTestAgentFailureSummaries, globalRunVisibleReply, getGlobalPetToolState, getGlobalToolDisplayName, buildGlobalAgentEventUi, relayGlobalPetEvent } = globalAgentTestAgentDisplay;
 const { RANDOM_MUSIC_KEYWORD, hasExplicitGlobalWriteAuthorization, normalizeText, stripActionWords, parseMusicKeyword, findProjectName, findGroup, findAllProjectNames, resolveImplicitCurrentProject, findAllGroups, buildLocalDevelopmentTargets, hasExplicitDevelopmentExecutionIntent, chineseNumberToInt, normalizeCronHour, guessCronSchedule, inferLocalConversationFallback, inferLocalGlobalAction, createActionBlockSafeStreamer } = globalAgentLocalIntent;
 const { loadGlobalAgentBridgeStore, saveGlobalAgentBridgeStore, createGlobalAgentBridgeRequest, waitForGlobalAgentBridgeResult, getRequestBaseUrl, callLocalApi, postLocalApi, parseSseApiEvents, parseSseApiEventBlock, postLocalSseOrJsonApi } = globalAgentBridge;

@@ -11,6 +11,8 @@ const diagnostics = await import(`${pathToFileURL(compiled).href}?selftest=${Dat
 const contract = diagnostics.runProjectRuntimeDiagnosticsContractSelfTest()
 const source = fs.readFileSync(path.join(root, 'backend/modules/projects/project-main-agent-runtime-diagnostics.ts'), 'utf8')
 const mainAgent = fs.readFileSync(path.join(root, 'backend/modules/projects/project-main-agent.ts'), 'utf8')
+const runtimeReplayStart = mainAgent.indexOf('type: "project_main_runtime_diagnostics"')
+const runtimeReplayBlock = runtimeReplayStart >= 0 ? mainAgent.slice(runtimeReplayStart, runtimeReplayStart + 1800) : ''
 const sanitized = diagnostics.sanitizeProjectRuntimeLog([
   '\u001b[31mSpring Boot failed\u001b[0m',
   'password=lzy123167',
@@ -41,12 +43,11 @@ const checks = {
     && mainAgent.includes('toolRequests'),
   planningAndAnalysisReceiveEvidence: mainAgent.includes('current_project_runtime: runtimeHydration.prompt')
     && mainAgent.includes('runtimeEvidence = runtimeHydration.prompt'),
-  contextAccountingClassifiesResults: mainAgent.includes('mcpResults: runtimeHydration.prompt')
-    && mainAgent.includes('[runtimeEvidence, toolEvidence].filter(Boolean).join'),
-  replayPersistsMetadataOnly: mainAgent.includes('type: "project_main_runtime_diagnostics"')
-    && mainAgent.includes('runtime_evidence: input.plan.runtimeEvidence')
-    && mainAgent.includes('checksum: cleanText(result.output?.checksum')
-    && !mainAgent.includes('runtimeEvidence: runtimeHydration.prompt'),
+  contextAccountingClassifiesResults: mainAgent.includes('mcpResults: [runtimeHydration.prompt, configuredToolHydration.prompt]')
+    && mainAgent.includes('mcpResults: [runtimeEvidence, toolEvidence].filter(Boolean).join'),
+  replayPersistsMetadataOnly: runtimeReplayBlock.includes('data: { runtime_evidence: input.plan.runtimeEvidence }')
+    && runtimeReplayBlock.includes('input.plan.runtimeEvidence.toolCalls')
+    && !runtimeReplayBlock.includes('runtimeHydration.prompt'),
 }
 
 for (const [name, pass] of Object.entries(checks)) {

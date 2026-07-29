@@ -40,6 +40,7 @@ const credential_store_1 = require("../../core/credential-store");
 const utils_1 = require("../../core/utils");
 const agent_provider_settings_1 = require("./agent-provider-settings");
 const catalog_1 = require("../../agents/catalog");
+const test_agent_settings_1 = require("./test-agent-settings");
 const startedAt = new Date().toISOString();
 function readAppVersion() {
     const candidates = [
@@ -75,6 +76,16 @@ function handleSystemSettingsApi(pathname, req, res) {
                 entries: credentials.entries,
             },
         });
+        return true;
+    }
+    if (pathname === "/api/system/test-agent" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, settings: (0, test_agent_settings_1.loadTestAgentSettings)() });
+        return true;
+    }
+    if (pathname === "/api/system/test-agent" && req.method === "POST") {
+        readJsonBody(req)
+            .then(payload => (0, utils_1.sendJson)(res, { success: true, settings: (0, test_agent_settings_1.saveTestAgentSettings)(payload) }))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "保存 TestAgent 设置失败" }, 400));
         return true;
     }
     if (pathname === "/api/system/agent-providers" && req.method === "GET") {

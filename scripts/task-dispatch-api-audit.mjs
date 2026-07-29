@@ -12,6 +12,7 @@ const routeContracts = [
   '/api/orchestrator/diagnostics',
   '/api/reliability/traces',
   '/api/tasks',
+  '/api/tasks/acceptance',
   '/api/tasks/bulk',
   '/api/tasks/cancel',
   '/api/tasks/continue',

@@ -64,7 +64,7 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
   if (["group-main-agent", "project-child-agent", "test-agent"].includes(input.role)) {
     servers[DELIVERY_WORKSPACE_MCP_SERVER_NAME] = buildDeliveryWorkspaceMcpServerConfig(context);
   }
-  if (input.role === "project-child-agent" && input.groupId) {
+  if (input.role === "project-child-agent" && input.groupId && input.groupSessionId && input.taskAgentSessionId) {
     servers[GROUP_COORDINATION_MCP_SERVER_NAME] = buildGroupCoordinationMcpServerConfig({
       groupId: input.groupId,
       taskId: input.taskId,

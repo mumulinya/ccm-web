@@ -7,7 +7,7 @@ const auto_checks_1 = require("./auto-checks");
 function wantsBrowser(workOrder) {
     if (workOrder.options.browserProvider === "none")
         return false;
-    if ((0, utils_1.hasRequiredCheck)(workOrder.requiredChecks, /browser|e2e|screenshot|console/i))
+    if ((0, utils_1.requiredCheckEnabled)(workOrder.requiredChecks, "browser_e2e", "screenshots", "console_errors"))
         return true;
     return workOrder.projects.some(project => !!project.targetUrl || project.browserChecks.length > 0 || project.adversarialBrowserChecks.length > 0);
 }

@@ -176,10 +176,12 @@ function appendAudit(server, context, tool, args, status, error = "") {
         error: String(error || "").slice(0, 500),
         task_id: context.taskId,
         group_id: context.groupId,
+        group_session_id: context.groupSessionId || "",
         project_session_id: context.projectSessionId || "",
         project: context.project,
         role: context.role,
         task_agent_session_id: context.taskAgentSessionId || "",
+        native_session_id: context.nativeSessionId || "",
         arguments: compactAuditArgs(args),
     })}\n`, "utf-8");
 }

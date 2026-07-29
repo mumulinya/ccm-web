@@ -10,6 +10,13 @@ const file = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(file), "..");
 const resultPrefix = "PHASE321_RESULT=";
 
+function mockModelSummary({ user }) {
+  const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+  const start = user.indexOf(marker) + marker.length;
+  const ends = [user.indexOf("\n用户本次 /compact 的附加要求", start), user.indexOf("\n\n本次被压缩区间内的全部用户消息", start)].filter(index => index >= 0);
+  return { summary: JSON.parse(user.slice(start, Math.min(...ends))), provider: "mock", model: "mock-task-status" };
+}
+
 function modules() {
   const require = createRequire(import.meta.url);
   const dist = (...parts) => path.join(root, "ccm-package", "dist", ...parts);
@@ -168,7 +175,9 @@ async function childCreate(fixtureFile) {
     reason: "phase321_post_compact_task_status",
     config: {
       enabled: true,
-      memoryCompactionUseModel: false,
+      memoryCompactionUseModel: true,
+      memoryCompactionMode: "model-required",
+      compactionModelCall: mockModelSummary,
       modelContextWindow: 200000,
       modelAutoCompactTokenLimit: 167000,
       minKeepMessages: 5,
@@ -197,7 +206,7 @@ async function childCreate(fixtureFile) {
   const siblingMemory = memory.loadGroupMemory(groupId, siblingSessionId);
   const rawMessagesAfter = storage.getGroupMessages(groupId, groupSessionId);
   const rawTasksAfter = db.loadTasks();
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "PostCompactRecoveryPanel.vue"), "utf8");
   const directTaskIds = direct.tasks.map(row => row.task_id);
   const persistedTaskIds = taskStatuses.map(row => row.task_id);
 
@@ -234,8 +243,8 @@ async function childCreate(fixtureFile) {
       && centerProjection.receiptValid === true
       && centerProjection.groupSessionId === groupSessionId
       && centerProjection.tasks.some(row => row.task_id === "phase321-running"),
-    memoryCenterPanelPresent: uiSource.includes("Post-compact Child Task Status")
-      && uiSource.includes("postCompactTaskStatusProjectionCards"),
+    memoryCenterPanelPresent: uiSource.includes("子任务状态恢复")
+      && uiSource.includes("postCompactTaskStatusProjection"),
   };
   fs.writeFileSync(fixtureFile, JSON.stringify({
     groupId,

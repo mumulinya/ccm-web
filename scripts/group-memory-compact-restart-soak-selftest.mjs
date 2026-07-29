@@ -25,6 +25,16 @@ function rowsForSession() {
   }));
 }
 
+function mockModelSummary({ user }) {
+  const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+  const start = user.indexOf(marker) + marker.length;
+  const ends = [
+    user.indexOf("\n用户本次 /compact 的附加要求", start),
+    user.indexOf("\n\n本次被压缩区间内的全部用户消息", start),
+  ].filter(index => index >= 0);
+  return { summary: JSON.parse(user.slice(start, Math.min(...ends))), provider: "mock", model: "mock-restart-soak" };
+}
+
 if (phase === "crash") {
   const memory = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "memory.js"));
   const storage = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "storage.js"));
@@ -41,7 +51,7 @@ if (phase === "crash") {
     memory: memory.createEmptyGroupMemory(groupId, sessionId),
     transcriptPath,
     force: true,
-    config: { minKeepMessages: 6, minKeepTokens: 3000, maxKeepTokens: 7000 },
+    config: { memoryCompactionUseModel: true, memoryCompactionMode: "model-required", compactionModelCall: mockModelSummary, minKeepMessages: 6, minKeepTokens: 3000, maxKeepTokens: 7000 },
   });
   assert.equal(result.compacted, true);
   const saved = memory.saveGroupMemory(groupId, result.memory, sessionId);

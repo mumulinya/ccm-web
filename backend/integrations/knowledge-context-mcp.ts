@@ -2,7 +2,8 @@ import * as path from "path";
 import {
   getKnowledgeDocumentChunks,
   getParsedKnowledgeDocument,
-  rebuildKnowledgeIndex,
+  loadActiveKnowledgeIndex,
+  waitForKnowledgeIndex,
 } from "../modules/knowledge/knowledge-index";
 import { loadKnowledgeMetadata, KnowledgeDocumentMetadata } from "../modules/knowledge/knowledge-files";
 import { isKnowledgeDocumentAllowed, searchAgentKnowledge } from "../modules/knowledge/knowledge-access";
@@ -64,6 +65,8 @@ const memoryReceiptTool: InternalMcpToolDefinition = {
       challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" },
       snapshot_id: { type: "string" },
       snapshot_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      context_plan_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      confirmation_cursor: { type: "string", pattern: "^[a-f0-9]{32}$" },
     },
     additionalProperties: false,
   },
@@ -131,7 +134,9 @@ function toolsForContext(context: InternalMcpTaskContext) {
 
 let indexReady: Promise<any> | null = null;
 function ensureIndex() {
-  if (!indexReady) indexReady = rebuildKnowledgeIndex("internal-mcp");
+  if (!indexReady) indexReady = (loadActiveKnowledgeIndex()
+    ? Promise.resolve(true)
+    : waitForKnowledgeIndex("internal-mcp")).finally(() => { indexReady = null; });
   return indexReady;
 }
 
@@ -152,6 +157,12 @@ async function callTool(context: InternalMcpTaskContext, name: string, args: any
         throw new Error("记忆接收确认未绑定当前快照");
       }
       const hydration = inspectThirdPartyMemoryHydration(context);
+      if (hydration.snapshot.contextPlanChecksum && String(args.context_plan_checksum || "") !== String(hydration.snapshot.contextPlanChecksum)) {
+        throw new Error("记忆接收确认未绑定当前 ContextPlanV2");
+      }
+      if (hydration.snapshot.confirmationCursor && String(args.confirmation_cursor || "") !== String(hydration.snapshot.confirmationCursor)) {
+        throw new Error("记忆接收确认游标不匹配");
+      }
       if (!hydration.ready) throw new Error(`必需记忆尚未读取完成：segments=${hydration.missingSegmentIds.join(",") || "none"}; memory=${hydration.missingMemoryItemIds.join(",") || "none"}`);
       const receipt = recordMemoryContextConsumptionReceipt(context, args);
       acknowledgeThirdPartyMemoryHydration(context);

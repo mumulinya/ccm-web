@@ -27,8 +27,8 @@ export declare function firstBoolean(...values: any[]): boolean;
 export declare function formatDeliveryFileItem(item: any): string;
 export declare function normalizeDeliveryStatus(status: any): MainAgentDeliveryStatus;
 export declare function hasBlockingDeliveryCompletionGap(input: MainAgentDeliveryReportInput): boolean;
-export declare function deliveryStatusLabel(status: MainAgentDeliveryStatus): "已完成" | "未完成" | "已取消" | "继续处理中";
-export declare function deliveryTitle(status: MainAgentDeliveryStatus): "任务已取消" | "任务交付完成" | "任务执行失败" | "任务需要继续处理";
+export declare function deliveryStatusLabel(status: MainAgentDeliveryStatus): "已完成" | "已取消" | "未完成" | "继续处理中";
+export declare function deliveryTitle(status: MainAgentDeliveryStatus): "任务已取消" | "任务需要继续处理" | "任务交付完成" | "任务执行失败";
 export declare function getNestedReport(input: MainAgentDeliveryReportInput): {
     report: any;
     summary: any;
@@ -101,6 +101,8 @@ export declare function buildMainAgentDeliveryReport(input: MainAgentDeliveryRep
     }[];
     user_text: string;
     markdown: string;
+    technical_markdown: string;
+    technicalMarkdown: string;
     files: string[];
     plan_review: string[];
     planReview: string[];
@@ -399,7 +401,7 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         finalSummaryQualityRequiresVisibleCardSanitizer: boolean;
         visibleCardQualityGateCatchesProtocolLeaks: boolean;
         finalSummaryQualityCatchesFalseDoneForFailedStatus: boolean;
-        formattedDeliveryReplyHasRequiredSections: any;
+        formattedDeliveryReplyHasRequiredSections: boolean;
         groupHasPickupSummary: boolean;
         groupHasUserHandoff: boolean;
         globalShowsRiskAndNextAction: boolean;
@@ -446,6 +448,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -738,6 +742,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -1030,6 +1036,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -1322,6 +1330,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -1614,6 +1624,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -1906,6 +1918,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -2224,6 +2238,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -2516,6 +2532,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -2808,6 +2826,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -3100,6 +3120,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -3392,6 +3414,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -3684,6 +3708,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -3976,6 +4002,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];
@@ -4268,6 +4296,8 @@ export declare function runMainAgentDeliveryReportSelfTest(): {
         }[];
         user_text: string;
         markdown: string;
+        technical_markdown: string;
+        technicalMarkdown: string;
         files: string[];
         plan_review: string[];
         planReview: string[];

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   uploading: { type: Boolean, default: false },
@@ -24,6 +24,10 @@ const watchPath = ref('')
 const scopeNeedsId = computed(() => scopeType.value !== 'global')
 const scopeValid = computed(() => !scopeNeedsId.value || scopeId.value.trim())
 
+watch(tab, value => {
+  if (value === 'directory') visibility.value = 'restricted'
+})
+
 const options = () => ({
   scopeType: scopeType.value,
   scopeId: scopeId.value.trim(),
@@ -42,8 +46,8 @@ const submitUrl = () => {
 }
 
 const submitPath = () => {
-  if (!watchPath.value.trim()) return
-  emit('add-path', watchPath.value.trim())
+  if (!watchPath.value.trim() || !scopeValid.value) return
+  emit('add-path', { path: watchPath.value.trim(), ...options() })
   watchPath.value = ''
 }
 </script>
@@ -60,7 +64,7 @@ const submitPath = () => {
       </button>
     </div>
 
-    <div v-if="tab !== 'directory'" class="governance-form">
+    <div class="governance-form">
       <label>
         <span>知识范围</span>
         <select v-model="scopeType">
@@ -112,7 +116,7 @@ const submitPath = () => {
       <button class="primary-action" type="submit" :disabled="importingUrl || !onlineUrl.trim() || !scopeValid">
         {{ importingUrl ? '正在读取' : '导入在线文档' }}
       </button>
-      <p class="source-note">腾讯文档需要公开分享；需要登录的链接会明确提示授权状态。</p>
+      <p class="source-note">公开链接可直接读取；私有腾讯文档请先在“设置中心 → 在线文档”中配置显式授权。</p>
     </form>
 
     <div v-else class="directory-form">
@@ -121,10 +125,10 @@ const submitPath = () => {
         <button class="primary-action" type="button" :disabled="pathAdding || !watchPath.trim()" @click="submitPath">{{ pathAdding ? '添加中' : '添加' }}</button>
       </div>
       <div v-if="watchPaths.length" class="watch-list">
-        <div v-for="item in watchPaths" :key="item" class="watch-row">
+        <div v-for="item in watchPaths" :key="item.path || item" class="watch-row">
           <span class="watch-state"></span>
-          <code :title="item">{{ item }}</code>
-          <button type="button" title="停止监控" @click="emit('remove-path', item)">×</button>
+          <code :title="item.path || item">{{ item.path || item }}<small v-if="item.legacyShared">历史共享范围</small><small v-else>{{ item.scope?.type || 'global' }} · {{ item.visibility || 'restricted' }}</small></code>
+          <button type="button" title="停止监控" @click="emit('remove-path', item.path || item)">×</button>
         </div>
       </div>
       <div v-else class="empty-inline">暂无同步目录</div>
@@ -163,7 +167,7 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37
 .watch-list { display: grid; gap: 6px; margin-top: 12px; }
 .watch-row { min-width: 0; display: grid; grid-template-columns: 8px minmax(0, 1fr) 28px; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; }
 .watch-state { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; }
-.watch-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary, #334155); font-size: 10.5px; }
+.watch-row code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary, #334155); font-size: 10.5px; }.watch-row code small { display: block; margin-top: 2px; overflow: hidden; color: var(--text-secondary, #64748b); font-family: inherit; font-size: 9px; text-overflow: ellipsis; }
 .watch-row button { width: 26px; height: 26px; border: none; background: transparent; color: var(--text-secondary, #64748b); font-size: 18px; cursor: pointer; }
 .empty-inline { margin-top: 12px; padding: 18px; border: 1px dashed var(--border-color, #dbe2ea); border-radius: 6px; text-align: center; color: var(--text-secondary, #64748b); font-size: 11px; }
 @media (max-width: 720px) { .governance-form { grid-template-columns: 1fr 1fr; } .tags-field { grid-column: 1 / -1; } .url-form { grid-template-columns: 1fr; } .url-form .primary-action { width: 100%; } }

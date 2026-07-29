@@ -1,4 +1,5 @@
 import { BrowserCheckSpec, BrowserCheckResult, CommandRunResult, HttpCheckResult, HttpCheckSpec, NormalizedTestAgentWorkOrder, TestAgentRuntimeOptions, WorkOrderIssue } from "./types";
+import { TestAgentSemanticPlanV2 } from "../system/semantic-decision-runtime";
 export interface AgenticTestProjectPlan {
     name: string;
     rationale?: string;
@@ -10,6 +11,8 @@ export interface AgenticTestPlan {
     summary?: string;
     inspectedFiles?: string[];
     projects?: AgenticTestProjectPlan[];
+    criterionCoverage?: TestAgentSemanticPlanV2["criterionCoverage"];
+    semanticDecisionReceipt?: any;
 }
 export interface AgenticTestPlanningInput {
     workOrder: NormalizedTestAgentWorkOrder;
@@ -35,6 +38,7 @@ export interface AgenticTestFollowupPlan {
         name: string;
         rationale?: string;
         commands?: string[];
+        browserChecks?: BrowserCheckSpec[];
     }>;
 }
 export declare function applyAgenticTestPlanning(workOrder: NormalizedTestAgentWorkOrder, runtime: TestAgentRuntimeOptions): Promise<{

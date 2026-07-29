@@ -23,7 +23,7 @@ function normalizeTaskNotificationStatus(text: string, receipt: any = null) {
   const receiptStatus = String(receipt?.status || "").trim();
   if (!receipt) return "missing_receipt";
   if (receiptStatus === "done") return "completed";
-  if (receiptStatus === "failed" || checkTaskFailure(text)) return "failed";
+  if (receiptStatus === "failed") return "failed";
   if (receiptStatus === "blocked" || receiptStatus === "needs_info") return "blocked";
   if (receiptStatus === "partial") return "partial";
   return "completed";

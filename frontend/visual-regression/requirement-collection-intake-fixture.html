@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Requirement Collection Intake Regression</title>
+  <style>
+    :root {
+      --surface: #ffffff;
+      --surface-subtle: #f8fafc;
+      --panel-muted: #f5f7fb;
+      --border-color: #dfe4ec;
+      --text-primary: #172033;
+      --text-secondary: #475467;
+      --text-muted: #7b8494;
+      --accent-blue: #2563eb;
+      --accent-green: #15803d;
+    }
+    * { box-sizing: border-box; }
+    html, body, #app { width: 100%; min-height: 100%; margin: 0; }
+    body { background: #eef2f7; font-family: Inter, "Microsoft YaHei", sans-serif; }
+    .modal-overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(15, 23, 42, .28); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { createApp, nextTick } from 'vue/dist/vue.esm-bundler.js'
+    import Intake from '../src/components/tasks/AutomatedTaskIntakeModal.vue'
+
+    const decompositionPlan = {
+      schema: 'ccm-requirement-decomposition-v1',
+      version: 1,
+      content_hash: 'fixture-requirement',
+      epic_title: '退款审批能力升级',
+      business_goal: '完成退款申请、审批和状态展示，并提供独立验收证据。',
+      source_evidence: ['退款审批需求.md', '审批页面参考图.png'],
+      global_acceptance_criteria: ['审批主流程可用', '异常状态有明确反馈'],
+      clarification_questions: [],
+      items: [
+        {
+          item_key: 'refund-api',
+          title: '实现退款审批接口',
+          business_goal: '提供申请、审批和状态查询接口。',
+          scope: ['后端接口', '数据持久化'],
+          target_type: 'project',
+          target_id: 'refund-api',
+          acceptance_criteria: ['接口回归通过', '审批结果可查询'],
+          depends_on: [],
+          risks: [],
+          suggested_agent_capabilities: ['backend'],
+          source_evidence: ['退款审批需求.md：接口章节'],
+        },
+        {
+          item_key: 'refund-web',
+          title: '实现退款审批页面',
+          business_goal: '让操作员查看申请并完成审批。',
+          scope: ['审批列表', '审批弹窗', '错误状态'],
+          target_type: 'project',
+          target_id: 'refund-web',
+          acceptance_criteria: ['浏览器验收通过'],
+          depends_on: ['refund-api'],
+          risks: [],
+          suggested_agent_capabilities: ['frontend'],
+          source_evidence: ['审批页面参考图.png'],
+        },
+        {
+          item_key: 'epic-integration-acceptance',
+          title: '完成退款流程集成验收',
+          business_goal: '验证前后端完整退款审批流程。',
+          scope: ['端到端验证'],
+          target_type: 'project',
+          target_id: 'refund-web',
+          acceptance_criteria: ['TestAgent 独立验收通过'],
+          depends_on: ['refund-api', 'refund-web'],
+          risks: [],
+          suggested_agent_capabilities: ['test'],
+          source_evidence: ['退款审批需求.md', '审批页面参考图.png'],
+        },
+      ],
+    }
+
+    window.fetch = async (url, options = {}) => {
+      const pathname = new URL(url, location.href).pathname
+      if (options.method === 'POST' && pathname === '/api/usability/intake/preview') {
+        return Response.json({
+          success: true,
+          task: {
+            id: 'fixture-epic-draft',
+            title: decompositionPlan.epic_title,
+            business_goal: decompositionPlan.business_goal,
+            project_session_id: 'pcs_refund_fixture',
+            decomposition_plan: decompositionPlan,
+          },
+          confirmation: {
+            business_goal: decompositionPlan.business_goal,
+            decomposition_plan: decompositionPlan,
+          },
+        })
+      }
+      return Response.json({ success: true, sessions: [] })
+    }
+
+    createApp(Intake, {
+      projects: [
+        { name: 'refund-api', display_name: '退款服务' },
+        { name: 'refund-web', display_name: '退款工作台' },
+      ],
+      groups: [],
+    }).mount('#app')
+    await nextTick()
+
+    const textarea = document.querySelector('.field textarea')
+    textarea.value = '根据上传的需求资料完成退款审批业务，并通过前后端验收。'
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector('footer .primary').click()
+
+    const started = Date.now()
+    const timer = setInterval(() => {
+      if (document.querySelector('.plan-items article')) {
+        clearInterval(timer)
+        document.body.dataset.fixtureReady = 'true'
+      } else if (Date.now() - started > 5000) {
+        clearInterval(timer)
+        document.body.dataset.fixtureError = 'preview-timeout'
+      }
+    }, 30)
+  </script>
+</body>
+</html>

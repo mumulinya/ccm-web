@@ -11,6 +11,12 @@ type SessionMemoryWindowOptions = {
 };
 export declare function adjustSessionWindowForApiInvariants(messages: any[], startIndex: number, floorIndex?: number): number;
 export declare function buildCompleteConversationRounds(messagesInput: any[]): any[][];
+export declare function buildApiConversationRounds(messagesInput: any[]): any[][];
+export declare function peelOldestApiConversationRound(messagesInput: any[]): {
+    peeled: boolean;
+    messages: any[];
+    removed: any[];
+};
 export declare function peelOldestCompleteConversationRound(messagesInput: any[]): {
     peeled: boolean;
     messages: any[];

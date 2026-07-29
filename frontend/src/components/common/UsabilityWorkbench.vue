@@ -2,13 +2,14 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import AttachmentChips from './AttachmentChips.vue'
+import OnlineDocumentReferences from './OnlineDocumentReferences.vue'
 import EmptyState from './EmptyState.vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import { useUsabilityWorkbenchLive } from '../../composables/useUsabilityWorkbenchLive.js'
 import { useWorkbenchPreferences } from '../../composables/useWorkbenchPreferences.js'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Bot, CalendarClock, CheckCircle2, ChevronRight, Clock3,
-  FolderKanban, ListTodo, MessageSquare, Paperclip, Play, RefreshCw, RotateCcw, Search,
+  FolderKanban, ListTodo, LoaderCircle, MessageSquare, Paperclip, Play, RefreshCw, RotateCcw, Search,
   Settings2, Sparkles, Square, Wifi, WifiOff, Wrench,
 } from '@lucide/vue'
 
@@ -23,6 +24,7 @@ const intakeBusy = ref(false)
 const confirmation = ref(null)
 const actionBusy = ref('')
 const intakeFiles = ref([])
+const intakeClientMessageId = ref('')
 const intakeFileInput = ref(null)
 const resourceBusy = ref('')
 const attentionFilter = ref('all')
@@ -39,10 +41,15 @@ const updatedLabel = computed(() => data.value?.generated_at
   : '--:--')
 const enabledCron = computed(() => resources.value.cron.filter(item => item.enabled))
 const runningProjects = computed(() => resources.value.projects.filter(item => item.running))
-const targetOptions = computed(() => [
-  ...resources.value.groups.map(item => ({ value: `group:${item.id}`, label: `协作群 · ${item.name}` })),
-  ...resources.value.projects.map(item => ({ value: `project:${item.name}`, label: `项目 · ${item.name}` })),
-])
+const groupTargetOptions = computed(() => resources.value.groups.map(item => ({
+  value: `group:${item.id}`,
+  label: item.name,
+})))
+const projectTargetOptions = computed(() => resources.value.projects.map(item => ({
+  value: `project:${item.name}`,
+  label: item.display_name || item.displayName || item.name,
+})))
+const targetOptions = computed(() => [...groupTargetOptions.value, ...projectTargetOptions.value])
 watch(targetOptions, options => {
   if (!target.value && options.length) target.value = options[0].value
 }, { immediate: true })
@@ -85,6 +92,9 @@ const api = async (path, body) => {
   return result
 }
 
+const createClientMessageId = () => globalThis.crypto?.randomUUID?.()
+  || `workbench_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+
 const refreshWorkbench = async () => {
   const success = await load(false)
   if (!success) toast.error(lastError.value || '工作台刷新失败，已保留最近数据')
@@ -97,11 +107,16 @@ const createPreview = async () => {
   intakeBusy.value = true
   try {
     const [kind, id] = target.value.split(':')
+    if (!intakeClientMessageId.value) intakeClientMessageId.value = createClientMessageId()
     const form = new FormData()
     form.append('requirement', requirement.value.trim())
     form.append('source', 'workbench')
     form.append('request_origin', 'workbench')
     form.append('queue_scope', 'conversation_serial')
+    form.append('client_message_id', intakeClientMessageId.value)
+    form.append('source_channel', 'workbench')
+    form.append('target_scope', kind === 'group' ? 'group_session' : 'project_session')
+    form.append('target_id', id)
     form.append('group_id', kind === 'group' ? id : '')
     form.append('target_project', kind === 'project' ? id : '')
     intakeFiles.value.forEach(file => form.append('files', file))
@@ -121,6 +136,7 @@ const confirmIntake = async () => {
     toast.success(result.queued ? '已确认，任务开始推进' : (result.queue_result?.message || '已确认执行'))
     requirement.value = ''
     intakeFiles.value = []
+    intakeClientMessageId.value = ''
     confirmation.value = null
     await load()
   } catch (error) { toast.error(error.message) }
@@ -163,6 +179,7 @@ const discardIntake = async () => {
   try {
     await api('/api/tasks/delete', { id: confirmation.value.id, reason: '用户放弃执行前确认卡' })
     confirmation.value = null
+    intakeClientMessageId.value = ''
     toast.info('确认卡已放弃，没有开始执行')
     await load(true)
   } catch (error) { toast.error(error.message) }
@@ -329,14 +346,20 @@ onUnmounted(() => {
         <span class="keyboard-hint">Ctrl + Enter</span>
       </div>
       <textarea v-model="requirement" rows="3" placeholder="描述你希望完成的结果，例如：给项目增加支付退款功能，前后端都要完成并通过测试" @keydown.ctrl.enter.prevent="createPreview" />
+      <OnlineDocumentReferences :text="requirement" pending-label="整理计划时读取" />
       <AttachmentChips :files="intakeFiles" @remove="removeIntakeFile" />
       <div class="intake-footer">
         <input ref="intakeFileInput" class="hidden-file-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx" @change="addIntakeFiles">
         <div class="intake-tools">
           <button class="attach-action" type="button" :disabled="intakeBusy" title="添加图片或文档" @click="chooseIntakeFiles"><Paperclip :size="16" /><span>添加资料</span></button>
           <label class="target-select"><span>执行位置</span><select v-model="target">
-            <option value="" disabled>选择项目或协作群</option>
-            <option v-for="item in targetOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+            <option value="" disabled>选择群聊或项目</option>
+            <optgroup v-if="groupTargetOptions.length" :label="`群聊 (${groupTargetOptions.length})`">
+              <option v-for="item in groupTargetOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+            </optgroup>
+            <optgroup v-if="projectTargetOptions.length" :label="`项目 (${projectTargetOptions.length})`">
+              <option v-for="item in projectTargetOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+            </optgroup>
           </select></label>
         </div>
         <button class="primary intake-submit" :disabled="intakeBusy || (!requirement.trim() && intakeFiles.length === 0)" @click="createPreview"><Sparkles :size="16" />{{ intakeBusy ? '正在整理' : '整理执行计划' }}</button>
@@ -437,7 +460,19 @@ onUnmounted(() => {
             <div class="resource-list">
               <div v-for="project in resources.projects.slice(0, 5)" :key="project.name" class="resource-row">
                 <button class="resource-link" @click="navigateResource('projects', { project: project.name })"><span class="resource-icon project-icon"><FolderKanban :size="16" /></span><span><strong>{{ project.name }}</strong><small>{{ project.agent }} · {{ project.running ? '正在运行' : '当前空闲' }}</small></span></button>
-                <button class="resource-command" :class="{ stop: project.running }" :disabled="resourceBusy === `project:${project.name}`" :title="project.running ? '停止项目' : '启动项目'" @click="toggleProject(project)"><Square v-if="project.running" :size="13" /><Play v-else :size="13" /></button>
+                <button
+                  class="resource-command project-command"
+                  :class="{ stop: project.running, busy: resourceBusy === `project:${project.name}` }"
+                  :disabled="resourceBusy === `project:${project.name}`"
+                  :aria-busy="resourceBusy === `project:${project.name}`"
+                  :aria-label="resourceBusy === `project:${project.name}` ? `正在${project.running ? '停止' : '启动'}项目 ${project.name}` : `${project.running ? '停止' : '启动'}项目 ${project.name}`"
+                  :title="resourceBusy === `project:${project.name}` ? (project.running ? '正在停止项目' : '正在启动项目') : (project.running ? '停止项目' : '启动项目')"
+                  @click="toggleProject(project)"
+                >
+                  <LoaderCircle v-if="resourceBusy === `project:${project.name}`" :size="16" />
+                  <Square v-else-if="project.running" :size="14" />
+                  <Play v-else :size="16" fill="currentColor" />
+                </button>
               </div>
               <div v-if="!resources.projects.length" class="rail-empty">还没有项目</div>
             </div>
@@ -488,6 +523,7 @@ button{font:inherit;cursor:pointer}.primary,.ghost{display:inline-flex;align-ite
 .attention-tabs{display:flex;gap:5px;margin:-2px 0 10px;overflow-x:auto}.attention-tabs button{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;padding:6px 8px;border:1px solid var(--border-color,#dfe4ec);border-radius:6px;background:transparent;color:#667085;font-size:11px}.attention-tabs button.active{border-color:#fdb022;background:#fffaeb;color:#b54708;font-weight:800}.attention-tabs span{min-width:17px;padding:1px 4px;border-radius:9px;background:var(--bg-secondary,#f2f4f7);text-align:center;font-size:9px}.progress-row{position:relative;height:3px;margin:1px 0 8px;overflow:hidden;border-radius:2px;background:#e8edf5}.progress-row i{display:block;height:100%;min-width:4px;border-radius:inherit;background:#3157c8}.progress-row.indeterminate i{width:35%;animation:workbench-progress 1.6s ease-in-out infinite}@keyframes workbench-progress{0%{transform:translateX(-110%)}100%{transform:translateX(310%)}}.progress-facts{display:grid;gap:3px;margin-bottom:9px;color:#7a8496;font-size:10px}.progress-facts span{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rail-section{padding:0 0 22px;margin-bottom:22px;border-bottom:1px solid var(--border-color,#e5e9f2)}.rail-heading{justify-content:space-between;gap:10px;margin-bottom:10px}.resource-list,.cron-list{display:grid;gap:4px}.resource-list button,.cron-list button{width:100%;min-width:0;gap:9px;padding:8px;border:0;border-radius:7px;background:transparent;color:inherit;text-align:left}.resource-list button:hover,.cron-list button:hover,.quick-actions button:hover{background:var(--bg-secondary,#f5f7fb)}.resource-icon{flex:0 0 auto;width:30px;height:30px;display:grid;place-items:center;border-radius:7px}.project-icon{background:#e8f0fe;color:#3157c8}.group-icon{background:#e6f6f3;color:#0f766e}.resource-list button>span:nth-child(2),.cron-list button>span{min-width:0;display:grid;gap:2px}.resource-list strong,.resource-list small,.cron-list strong,.cron-list small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-list strong,.cron-list strong{font-size:12px}.resource-list small,.cron-list small{color:#98a2b3;font-size:10px}.resource-list button>i{width:7px;height:7px;margin-left:auto;border-radius:50%;background:#cbd5e1}.resource-list button>i.online{background:#12b76a}.resource-list button>svg{margin-left:auto;color:#98a2b3}.cron-summary{gap:9px;padding:10px;margin-bottom:6px;border-radius:7px;background:var(--bg-secondary,#f5f7fb);color:#9a6700}.cron-summary span{display:grid;gap:2px}.cron-summary strong{font-size:12px;color:var(--text-primary,#172033)}.cron-summary small{font-size:10px;color:#7a8496}.cron-list button>i{width:6px;height:6px;margin-left:auto;border-radius:50%;background:#f79009}.rail-empty{padding:10px;color:#98a2b3;font-size:11px}.technical{padding:2px 0;color:#667085;font-size:11px}.technical summary{cursor:pointer;font-weight:700}.technical p{margin:10px 0 0;line-height:1.6}
 .resource-row{display:flex;align-items:center;gap:3px;min-width:0;border-radius:7px}.resource-row:hover{background:var(--bg-secondary,#f5f7fb)}.resource-row .resource-link{flex:1;display:flex;align-items:center;min-width:0}.resource-row .resource-command{flex:0 0 auto;display:grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid var(--border-color,#dfe4ec);border-radius:6px;background:var(--surface,#fff);color:#067647}.resource-row .resource-command.stop{color:#b54708}.resource-row .resource-command:disabled{opacity:.45;cursor:wait}.cron-row .resource-link>span{min-width:0;display:grid;gap:2px}.technical p{display:flex;align-items:flex-start;gap:6px}.technical p svg{flex:0 0 auto;margin-top:2px}
+.resource-row .project-command{position:relative;width:36px;height:36px;margin-right:3px;border-color:color-mix(in srgb,var(--accent-blue,#2563eb) 34%,var(--border-color,#dfe4ec));background:color-mix(in srgb,var(--accent-blue,#2563eb) 9%,var(--surface,#fff));color:var(--accent-blue,#2563eb);transition:border-color .16s ease,background-color .16s ease,color .16s ease,box-shadow .16s ease,transform .16s ease}.resource-row .project-command:hover:not(:disabled){border-color:var(--accent-blue,#2563eb);background:var(--accent-blue,#2563eb);color:#fff;box-shadow:0 5px 14px color-mix(in srgb,var(--accent-blue,#2563eb) 24%,transparent);transform:translateY(-1px)}.resource-row .project-command:active:not(:disabled){box-shadow:none;transform:translateY(0)}.resource-row .project-command:focus-visible{outline:2px solid color-mix(in srgb,var(--accent-blue,#2563eb) 56%,#fff);outline-offset:2px}.resource-row .project-command.stop{border-color:color-mix(in srgb,var(--accent-yellow,#f79009) 38%,var(--border-color,#dfe4ec));background:color-mix(in srgb,var(--accent-yellow,#f79009) 10%,var(--surface,#fff));color:var(--accent-yellow,#b54708)}.resource-row .project-command.stop:hover:not(:disabled){border-color:var(--accent-yellow,#f79009);background:var(--accent-yellow,#f79009);color:#fff;box-shadow:0 5px 14px color-mix(in srgb,var(--accent-yellow,#f79009) 22%,transparent)}.resource-row .project-command.busy{border-color:var(--border-color,#dfe4ec);background:var(--bg-secondary,#f5f7fb);color:var(--text-muted,#98a2b3);opacity:1}.resource-row .project-command.busy svg{animation:project-command-spin .8s linear infinite}@keyframes project-command-spin{to{transform:rotate(360deg)}}
 @media(max-width:1050px){.quick-actions{grid-template-columns:repeat(3,minmax(0,1fr))}.workspace-grid{grid-template-columns:1fr}.workspace-rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;padding:22px 0 0;border-top:1px solid var(--border-color,#e5e9f2);border-left:0}.rail-section{margin:0;padding:0;border:0}.technical{grid-column:1/-1}}
 @media(max-width:760px){.workbench{padding:18px 14px 42px}.workbench-header{align-items:flex-start}.header-copy h1{font-size:24px}.header-copy p{font-size:12px}.header-actions{flex-wrap:wrap;justify-content:flex-end}.sync-state,.attention-counter{display:none}.layout-popover{position:fixed;top:60px;right:12px;left:12px;width:auto}.stale-banner{align-items:flex-start}.stale-banner button{white-space:nowrap}.pulse-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.pulse-item:nth-child(2){border-right:0}.pulse-item:nth-child(-n+2){border-bottom:1px solid var(--border-color,#e5e9f2)}.command-heading small,.keyboard-hint{display:none}.intake-footer,.intake-tools{align-items:stretch;flex-direction:column}.target-select{padding:0;border-left:0}.target-select span{display:none}.target-select select{width:100%}.intake-submit{width:100%}.quick-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.quick-actions button:last-child:nth-child(odd){grid-column:1/-1}.confirm-grid,.task-grid{grid-template-columns:1fr}.task-list .task-card{display:block}.task-actions{justify-content:flex-start;margin-top:12px}.compact-empty{align-items:flex-start;flex-direction:column}.completed-list button{grid-template-columns:22px minmax(0,1fr) 15px}.completed-list time{display:none}.workspace-rail{grid-template-columns:1fr}.technical{grid-column:auto}}
 </style>

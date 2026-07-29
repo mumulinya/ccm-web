@@ -47,6 +47,12 @@ const report = await runTestAgent({
     return {
       summary: 'Read the changed feature and selected the existing focused verification script.',
       inspectedFiles: ['src/feature.ts'],
+      criterionCoverage: [{
+        criterion: 'The focused feature verification passes',
+        status: 'planned',
+        checkNames: ['npm run test:initial'],
+        reason: 'The existing focused command directly exercises the changed feature.'
+      }],
       projects: [{
         name: 'fixture',
         rationale: 'The package exposes a focused verification command for the changed source.',

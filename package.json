@@ -37,13 +37,17 @@
     "test:integrations": "node scripts/domain-test-runner.mjs integrations",
     "test:frontend": "node scripts/domain-test-runner.mjs frontend",
     "test:knowledge": "node scripts/domain-test-runner.mjs knowledge",
+    "test:provider-context-cache": "npm run build:backend && node scripts/provider-neutral-context-cache-selftest.mjs",
+    "test:provider-cache-live": "npm run build:backend && node scripts/live-cache-capability-probe.mjs",
     "test:media": "node scripts/domain-test-runner.mjs media",
     "test:release": "node scripts/domain-test-runner.mjs release",
     "test:legacy": "node scripts/domain-test-runner.mjs legacy"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
+    "js-tiktoken": "1.0.21",
     "pdf-parse": "^1.1.1",
     "playwright": "^1.61.1",
     "zod": "^3.25.76"

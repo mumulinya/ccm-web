@@ -103,14 +103,14 @@ export declare function checkPlaywrightAvailability(loadPlaywright?: PlaywrightL
         packageAvailable: boolean;
         launchChecked: boolean;
         browser?: undefined;
-        channel?: undefined;
-        launchAttempt?: undefined;
-        launchFallbackErrors?: undefined;
         launchAttempts?: undefined;
+        installCommand?: undefined;
+        linuxDependencyCommand?: undefined;
     };
 } | {
     available: boolean;
     diagnostics: {
+        warning?: string;
         packageAvailable: boolean;
         launchChecked: boolean;
         browser: string;
@@ -118,6 +118,8 @@ export declare function checkPlaywrightAvailability(loadPlaywright?: PlaywrightL
         launchAttempt: string;
         launchFallbackErrors: string[];
         launchAttempts?: undefined;
+        installCommand?: undefined;
+        linuxDependencyCommand?: undefined;
     };
     reason?: undefined;
 } | {
@@ -128,9 +130,8 @@ export declare function checkPlaywrightAvailability(loadPlaywright?: PlaywrightL
         launchChecked: boolean;
         browser: string;
         launchAttempts: string[];
-        channel?: undefined;
-        launchAttempt?: undefined;
-        launchFallbackErrors?: undefined;
+        installCommand: string;
+        linuxDependencyCommand: string;
     };
 }>;
 export declare function expectedValue(assertion: BrowserAssertionSpec): string;

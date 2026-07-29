@@ -13,10 +13,24 @@ import {
   listJsonFiles,
   listMemoryAudit,
   listMemoryCenterGroupSessionScopes,
+  memoryCenterExactGroupSessionScope,
   memorySummary,
   readMemoryFile,
+  recordMemoryOperation,
 } from "./memory-control-center-api";
-import { updateMemoryControl } from "./memory-control-center-controls";
+import { pruneMemoryControls, updateMemoryControl } from "./memory-control-center-controls";
+import {
+  readGroupMemoryAutoCompactCircuitAdmission,
+  resetGroupMemoryAutoCompactCircuitBreaker,
+} from "../collaboration/group-memory-auto-compact-circuit-breaker";
+import {
+  readPromotedMemoryStore,
+  revokePromotedMemory,
+} from "../collaboration/typed-memory-promotion";
+import {
+  readTypedMemoryConflictLedger,
+  resolveTypedMemoryConflict,
+} from "../collaboration/typed-memory-conflict";
 import {
   readGroupSessionMemoryCustomPromptProfile,
   readGroupSessionMemoryCustomTemplateProfile,
@@ -110,8 +124,21 @@ export function buildMemoryCenterOverview() {
   const globals = globalSummaries();
   const tasks = taskAgentSummaries();
   const scopes = [...globals, ...groups, ...projects, ...tasks];
+  // 顺带收集每个 scope 的存活 itemId，供孤儿控制项回收使用。
+  // 读取失败的 scope 不进入这张表，宁可少回收也不能误删用户的置顶/屏蔽。
+  const liveIdsByScope = new Map<string, Set<string>>();
   const alerts = scopes.flatMap(summary => {
-    const detail = getMemoryCenterScope(summary.scope, summary.id);
+    let detail: any = null;
+    try {
+      detail = getMemoryCenterScope(summary.scope, summary.id);
+    } catch {
+      return [];
+    }
+    const live = new Set<string>();
+    for (const group of detail.itemGroups || []) {
+      for (const item of group.items || []) live.add(String(item.itemId || ""));
+    }
+    liveIdsByScope.set(`${summary.scope}::${summary.id}`, live);
     return healthAlerts(summary.scope, summary.id, detail.rawMemory).map(alert => ({
       ...alert,
       scope: summary.scope,
@@ -119,6 +146,10 @@ export function buildMemoryCenterOverview() {
       label: summary.label,
     }));
   });
+  let controlGc: any = { pruned: 0, orphans: [] };
+  try {
+    controlGc = pruneMemoryControls(liveIdsByScope, { actor: "memory-center-overview" });
+  } catch {}
   return {
     generatedAt: now(),
     groups,
@@ -126,6 +157,7 @@ export function buildMemoryCenterOverview() {
     globals,
     tasks,
     alerts,
+    controlGc: { pruned: Number(controlGc.pruned || 0) },
     totals: {
       scopes: scopes.length,
       groupSessions: groups.length,
@@ -200,6 +232,123 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
           actor: data.actor || "memory-center",
         });
         sendJson(res, { success: true, ...result });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: String(error?.message || error) }, 400);
+      }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/compact-circuit" && req.method === "GET") {
+    try {
+      const { groupId, sessionId } = memoryCenterExactGroupSessionScope(query.scopeId || query.scope_id || query.id);
+      sendJson(res, { success: true, admission: readGroupMemoryAutoCompactCircuitAdmission(groupId, sessionId) });
+    } catch (error: any) {
+      sendJson(res, { success: false, error: String(error?.message || error) }, 400);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/compact-circuit-reset" && req.method === "POST") {
+    readBody(req, data => {
+      try {
+        const { groupId, sessionId } = memoryCenterExactGroupSessionScope(data.scopeId || data.scope_id || data.id);
+        const reason = String(data.reason || "").trim();
+        if (!reason) throw new Error("重置压缩熔断必须填写原因");
+        const actor = String(data.actor || "memory-center");
+        const ledger = resetGroupMemoryAutoCompactCircuitBreaker(groupId, sessionId, { reason, actor });
+        const audit = recordMemoryOperation({
+          action: "compact_circuit_reset",
+          scope: "group",
+          scopeId: `${groupId}::${sessionId}`,
+          actor,
+          reason,
+          previousState: ledger.previousState,
+        });
+        sendJson(res, { success: true, ledger, audit });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: String(error?.message || error) }, 400);
+      }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/conflicts" && req.method === "GET") {
+    try {
+      const { typedScopeId } = memoryCenterExactGroupSessionScope(query.scopeId || query.scope_id || query.id);
+      const ledger = readTypedMemoryConflictLedger(typedScopeId);
+      sendJson(res, {
+        success: true,
+        scopeId: typedScopeId,
+        file: ledger.file,
+        pairs: ledger.pairs,
+        pendingCount: ledger.pairs.filter((pair: any) => String(pair?.status || "pending") === "pending").length,
+      });
+    } catch (error: any) {
+      sendJson(res, { success: false, error: String(error?.message || error) }, 400);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/conflict-resolve" && req.method === "POST") {
+    readBody(req, data => {
+      try {
+        const { typedScopeId } = memoryCenterExactGroupSessionScope(data.scopeId || data.scope_id || data.id);
+        const result = resolveTypedMemoryConflict(typedScopeId, String(data.pairId || data.pair_id || ""), {
+          resolution: data.resolution,
+          reason: data.reason,
+          actor: data.actor || "memory-center",
+        });
+        const audit = recordMemoryOperation({
+          action: "memory_conflict_resolve",
+          scope: "group",
+          scopeId: typedScopeId,
+          actor: String(data.actor || "memory-center"),
+          reason: String(data.reason || ""),
+          pairId: result.pair?.pairId || "",
+          resolution: result.pair?.resolution || "",
+        });
+        sendJson(res, { success: true, ...result, audit });
+      } catch (error: any) {
+        sendJson(res, { success: false, error: String(error?.message || error) }, 400);
+      }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/promoted" && req.method === "GET") {
+    try {
+      const store = readPromotedMemoryStore(String(query.project || query.projectId || "unassigned"));
+      sendJson(res, {
+        success: true,
+        project: store.project,
+        file: store.file,
+        entries: store.entries,
+        activeCount: store.entries.filter((entry: any) => String(entry?.status || "active") === "active").length,
+      });
+    } catch (error: any) {
+      sendJson(res, { success: false, error: String(error?.message || error) }, 400);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/promoted-revoke" && req.method === "POST") {
+    readBody(req, data => {
+      try {
+        const result = revokePromotedMemory(
+          String(data.project || data.projectId || "unassigned"),
+          String(data.promotionId || data.promotion_id || ""),
+          { reason: data.reason, actor: data.actor || "memory-center", restore: data.restore === true },
+        );
+        const audit = recordMemoryOperation({
+          action: data.restore === true ? "promoted_memory_restore" : "promoted_memory_revoke",
+          scope: "project",
+          scopeId: result.project,
+          actor: String(data.actor || "memory-center"),
+          reason: String(data.reason || ""),
+          promotionId: result.entry?.promotionId || "",
+        });
+        sendJson(res, { success: true, ...result, audit });
       } catch (error: any) {
         sendJson(res, { success: false, error: String(error?.message || error) }, 400);
       }

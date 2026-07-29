@@ -53,6 +53,15 @@ try {
     source: 'fixture',
     evidence_ids: [],
   }))
+  const audienceEvents = [
+    { ...syntheticEvents[0], id: 'aud-readable', source: 'execution', status: 'info', audience: 'user', title: 'web 正在修改登录状态恢复逻辑' },
+    { ...syntheticEvents[0], id: 'aud-machine', source: 'trace', status: 'info', audience: 'technical', title: 'agent.run', summary: '' },
+  ]
+  const defaultAudienceView = paginateReplayEventsForView(audienceEvents, { eventLimit: 10 })
+  assert.deepEqual(defaultAudienceView.events.map(item => item.id), ['aud-readable'], 'readable low-level events must stay visible by default')
+  const allAudienceView = paginateReplayEventsForView(audienceEvents, { eventLimit: 10, includeSystemEvents: true })
+  assert.equal(allAudienceView.events.length, 2, 'technical events appear once the toggle is on')
+
   const tailPage = paginateReplayEventsForView(syntheticEvents, { eventLimit: 3, eventTail: true })
   assert.deepEqual(tailPage.events.map(item => item.id), ['event-5', 'event-6', 'event-7'])
   assert.equal(tailPage.eventPage.offset, 5)
@@ -85,6 +94,12 @@ try {
     const replay = buildCompleteTaskReplay(index.tasks[0].id)
     assert.equal(replay?.schema, 'ccm-complete-task-replay-v1')
     assert.equal(replay?.replay_capabilities?.raw_machine_paths_exposed, false)
+    assert.equal(replay?.replay_capabilities?.plan_visibility, true)
+    assert.equal(replay?.replay_capabilities?.work_item_visibility, true)
+    assert.equal(Array.isArray(replay?.plans), true, 'replay must expose plan views')
+    assert.equal(Array.isArray(replay?.work_items), true, 'replay must expose work item rows')
+    assert.equal(replay?.summary?.plan_count, replay?.plans?.length)
+    assert.equal(replay?.summary?.work_item_count, replay?.work_items?.length)
     assert.equal(JSON.stringify(replay).includes('C:\\Users\\'), false, 'public replay must redact Windows user paths')
     const page = buildCompleteTaskReplay(index.tasks[0].id, { eventLimit: 2, eventTail: true, includeSystemEvents: true })
     assert.equal(page?.replay_capabilities?.event_pagination, true)

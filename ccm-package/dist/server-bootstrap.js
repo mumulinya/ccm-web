@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.bootstrapServerRuntime = bootstrapServerRuntime;
 // Mechanically extracted startup recovery and scheduler bootstrap.
 function bootstrapServerRuntime(startupCollabCtx, port, deps) {
-    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startCronScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
+    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileInterruptedProjectMainTasks, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startCronScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
     const recoveredConversationTurns = conversationTurnControl.recoverInterrupted();
     if (recoveredConversationTurns.recovered > 0) {
         console.log(`[会话消息队列] 已恢复 ${recoveredConversationTurns.recovered} 条服务重启前发送中的消息`);
@@ -78,6 +78,12 @@ function bootstrapServerRuntime(startupCollabCtx, port, deps) {
     const soakResume = resumeSoakTest();
     if (soakResume.resumed)
         console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
+    const projectMainRecovery = reconcileInterruptedProjectMainTasks();
+    if (projectMainRecovery.checked > 0) {
+        console.log(`[项目主 Agent] 启动检查 ${projectMainRecovery.checked} 个中断编排：`
+            + `安全暂停 ${projectMainRecovery.interrupted} 个，`
+            + `仍由其他实例执行 ${projectMainRecovery.active_elsewhere} 个`);
+    }
     const resumeResult = resumeTaskQueues(startupCollabCtx);
     if (resumeResult.total > 0) {
         console.log(`[任务队列] 启动恢复检查 ${resumeResult.total} 个未完成任务：`

@@ -1833,12 +1833,8 @@ function extractMergeAnchors(markdown, requiredTemplate = group_session_memory_c
         const normalized = normalizeMergeAnchor(raw);
         if (!normalized || normalized.length < 4)
             continue;
-        if (/(?:必须|禁止|不可|不得|不要|务必|始终|只能|不能|must\b|never\b|always\b|required\b|do not\b)/i.test(normalized)) {
-            anchors.push({ type: "constraint", value: normalized });
-        }
-        else if (/(?:TODO|FIXME|待办|待处理|未完成|下一步|pending|unresolved|next step)/i.test(normalized)) {
-            anchors.push({ type: "unresolved", value: normalized });
-        }
+        // Natural-language facts are selected by the model. This validator only
+        // protects syntax-addressable symbols and paths below.
     }
     for (const match of text.matchAll(/`([^`\r\n]{2,160})`/g)) {
         const value = normalizeMergeAnchor(match[1]);
@@ -1928,102 +1924,15 @@ function parseSupersessionSourceRows(sourceText) {
         return [];
     }
 }
-function supersessionReferenceTokens(value) {
-    const generic = new Set([
-        "必须保留", "必须使用", "不能使用", "不得使用", "不要使用", "用户要求", "下一步", "未完成",
-        "required", "always", "never", "must", "pending", "unresolved",
-    ]);
-    return Array.from(new Set(String(value || "").match(/[A-Za-z_][A-Za-z0-9_.:/\\-]{3,}|[\u4e00-\u9fff]{4,}/g) || [])).filter(token => !generic.has(token.toLowerCase())).sort((a, b) => b.length - a.length).slice(0, 12);
-}
-function extractReplacementText(content) {
-    const match = String(content || "").match(/(?:改为|替换为|更新为|变更为|instead(?:\s+use)?|replaced?\s+with|use\s+instead)\s*[:：]?\s*([^\r\n]{2,500})/i);
-    return String(match?.[1] || "").replace(/<[^>]+>/g, "").trim().replace(/[。；;]+$/, "").slice(0, 500);
-}
 function modelConfirmedSourceFacts(sourceRows, markdown) {
-    const outputComparable = String(markdown || "").replace(/[`*]/g, "").replace(/\s+/g, " ").toLowerCase();
-    const candidates = [];
-    for (const row of sourceRows) {
-        if (row.role !== "user")
-            continue;
-        const fragments = String(row.content || "")
-            .split(/\r?\n|(?<=[。！？!?;；])\s*/)
-            .map(fragment => normalizeMergeAnchor(fragment).replace(/[。！？!?;；]+$/, "").trim())
-            .filter(fragment => fragment.length >= 4 && fragment.length <= 500);
-        for (const fragment of fragments) {
-            const correction = /(?:纠正|更正|取消|不再|改为|替换为|更新为|已废弃|supersed|correction|no longer|instead|replace)/i.test(fragment);
-            const constraint = /(?:必须|禁止|不可|不得|不要|务必|始终|只能|不能|长期|每次|must\b|never\b|always\b|required\b|do not\b)/i.test(fragment);
-            const ephemeral = /(?:当前状态|这一次|本次进度|刚刚完成|待办|待处理|未完成|下一步|pending|unresolved|next step)/i.test(fragment);
-            let text = fragment;
-            let type = "constraint";
-            if (correction) {
-                const replacement = extractReplacementText(fragment);
-                if (!replacement)
-                    continue;
-                text = normalizeMergeAnchor(replacement);
-                type = "replacement";
-            }
-            else if (!constraint || ephemeral) {
-                continue;
-            }
-            const comparable = normalizeMergeAnchor(text).toLowerCase();
-            if (!comparable || !outputComparable.includes(comparable))
-                continue;
-            const factChecksum = hashText(text, 32);
-            candidates.push({
-                factId: `gsmf_${factChecksum.slice(0, 20)}`,
-                factChecksum,
-                type,
-                text,
-                status: "model_confirmed",
-                source: "model_confirmed_source",
-                sourceMessageId: row.id,
-                sourceMessageIndex: row.index,
-                sourceMessageChecksum: hashText(row.content, 32),
-                sourceMessageText: row.content,
-            });
-        }
-    }
-    const seen = new Set();
-    return candidates.filter(fact => {
-        const key = `${fact.type}:${normalizeMergeAnchor(fact.text).toLowerCase()}`;
-        if (seen.has(key))
-            return false;
-        seen.add(key);
-        return true;
-    }).slice(0, 80);
+    void sourceRows;
+    void markdown;
+    return [];
 }
 function findFactSupersessionEdge(anchor, sourceRows, outputComparable) {
-    const tokens = supersessionReferenceTokens(String(anchor.value || ""));
-    for (let index = sourceRows.length - 1; index >= 0; index -= 1) {
-        const row = sourceRows[index];
-        if (!/(?:纠正|更正|取消|不再|改为|替换为|更新为|已废弃|supersed|correction|no longer|instead|replace)/i.test(row.content))
-            continue;
-        const rowComparable = normalizeMergeAnchor(row.content).toLowerCase();
-        const referencesOldFact = tokens.length
-            ? tokens.some(token => rowComparable.includes(token.toLowerCase()))
-            : rowComparable.includes(normalizeMergeAnchor(anchor.value).toLowerCase());
-        if (!referencesOldFact)
-            continue;
-        const replacementText = extractReplacementText(row.content);
-        const replacementComparable = normalizeMergeAnchor(replacementText).toLowerCase();
-        if (!replacementComparable || !outputComparable.includes(replacementComparable))
-            continue;
-        const oldFactChecksum = hashText(`${anchor.type}\0${anchor.value}`, 32);
-        const newFactChecksum = hashText(replacementText, 32);
-        const sourceMessageChecksum = hashText(row.content, 32);
-        const edgeCore = {
-            oldFactId: `gsmf_${oldFactChecksum.slice(0, 20)}`,
-            oldFactChecksum,
-            newFactChecksum,
-            sourceMessageId: row.id,
-            sourceMessageIndex: row.index,
-            sourceMessageChecksum,
-            sourceMessageText: row.content,
-            replacementText,
-            relation: "explicit_replacement",
-        };
-        return { ...edgeCore, edgeId: `gsmse_${hashText(JSON.stringify(edgeCore), 24)}` };
-    }
+    void anchor;
+    void sourceRows;
+    void outputComparable;
     return null;
 }
 function buildFactSupersessionGraph(input = {}) {
@@ -2145,7 +2054,7 @@ function analyzeGroupSessionMemoryModelMergeQuality(input = {}) {
     const supersededAnchors = evaluatedAnchors.filter(anchor => anchor.superseded);
     const lostAnchors = evaluatedAnchors.filter(anchor => !anchor.retained && !anchor.superseded);
     const lostConstraints = lostAnchors.filter(anchor => anchor.type === "constraint");
-    const correctionSignal = /(?:用户.{0,12}(?:纠正|更正|取消|改为)|不再|替换为|已废弃|supersed|correction|no longer|instead)/i.test(sourceText);
+    const correctionSignal = false;
     const anchorRetentionPercent = anchors.length ? Math.round((retainedAnchors.length / anchors.length) * 1000) / 10 : 100;
     const populatedSectionPercent = Math.round(((sectionRows.length - sectionRows.filter(row => row.empty).length) / sectionRows.length) * 1000) / 10;
     const justifiedPercent = anchors.length ? Math.round(((retainedAnchors.length + supersededAnchors.length) / anchors.length) * 1000) / 10 : 100;

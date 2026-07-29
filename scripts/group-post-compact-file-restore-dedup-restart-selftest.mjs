@@ -136,7 +136,7 @@ async function childCreate(fixtureFile) {
   const detail = center.getMemoryCenterScope("group", `${groupId}::${groupSessionId}`);
   const centerProjection = detail.postCompactUsage?.postCompactFileRestoreDedup || {};
   const siblingMemory = memory.loadGroupMemory(groupId, siblingSessionId);
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "PostCompactRecoveryPanel.vue"), "utf8");
   const noDedupTokens = compact.estimateGroupTextTokens(JSON.stringify(noDedupPlan.files));
   const dedupTokens = compact.estimateGroupTextTokens(JSON.stringify(dedupPlan.files));
 
@@ -173,8 +173,8 @@ async function childCreate(fixtureFile) {
       && centerProjection.receiptValid === true
       && centerProjection.groupSessionId === groupSessionId
       && centerProjection.receipt?.deduped_file_candidate_count >= 1,
-    memoryCenterPanelPresent: uiSource.includes("Post-compact File Restore Dedup")
-      && uiSource.includes("postCompactFileRestoreDedupCards"),
+    memoryCenterPanelPresent: uiSource.includes("文件恢复与去重")
+      && uiSource.includes("postCompactFileRestoreDedup"),
   };
   fs.writeFileSync(fixtureFile, JSON.stringify({ groupId, groupSessionId, siblingSessionId, originalJson, persistedReceipt }, null, 2));
   process.stdout.write(`${resultPrefix}${JSON.stringify(checks)}\n`);

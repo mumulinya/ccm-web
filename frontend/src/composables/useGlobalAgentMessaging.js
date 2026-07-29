@@ -481,7 +481,7 @@ const sendMessage = async (options = {}) => {
           const run = mergeGlobalRunTestAgentExecutionPlan(data.run || {}, agentMsg.agenticRun || {})
           const pendingToolName = sanitizeGlobalVisibleStreamText(run.pending_tool?.name || '写入操作', '写入操作', 80)
           const confirmationHint = run.status === 'waiting_confirmation'
-            ? `\n\n⚠️ 等待确认：${pendingToolName}。请使用下方按钮决定是否继续。`
+            ? `\n\n等待确认：${pendingToolName}。请使用任务卡中的按钮决定是否继续。`
             : ''
           agentMsg.content = sanitizeGlobalVisibleStreamText(run.final_reply || GLOBAL_RESULT_VISIBLE_FALLBACK, GLOBAL_RESULT_VISIBLE_FALLBACK, 8000) + confirmationHint
           const sourceFiles = data.source_files || data.sourceFiles || []

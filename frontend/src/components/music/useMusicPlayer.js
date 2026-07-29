@@ -102,6 +102,7 @@ export function useMusicPlayer(options = {}) {
 
   const playbackFailures = ref({})
   const clearedQueueSnapshot = ref(null)
+  const initialResumeFilename = ref('')
   let clearedQueueTimer = null
 
   const queueSourceLabel = (source) => {
@@ -664,6 +665,7 @@ export function useMusicPlayer(options = {}) {
     currentIndex.value = savedCurrent
       ? savedQueue.findIndex(track => track.filename === savedCurrent)
       : (savedQueue.length ? 0 : -1)
+    initialResumeFilename.value = currentIndex.value >= 0 ? savedCurrent : ''
     return savedQueue
   }
 
@@ -863,6 +865,13 @@ export function useMusicPlayer(options = {}) {
   const getSavedPlaybackProgress = (track) => playbackSettings.value.rememberProgress
     ? Number(loadPlaybackProgress()[track?.filename] || 0)
     : 0
+  const consumeInitialPlaybackProgress = (track) => {
+    const eligibleFilename = initialResumeFilename.value
+    initialResumeFilename.value = ''
+    return playbackSettings.value.rememberProgress
+      && Boolean(eligibleFilename)
+      && eligibleFilename === track?.filename
+  }
   const savePlaybackProgress = (track, time, total) => {
     if (!playbackSettings.value.rememberProgress || !track?.filename || Date.now() - lastProgressPersistAt < 4000) return
     if (!Number.isFinite(time) || time < 2 || (Number.isFinite(total) && total > 0 && time >= total - 8)) return
@@ -940,6 +949,7 @@ export function useMusicPlayer(options = {}) {
     fadeSeconds: computed(() => playbackSettings.value.fadeSeconds),
     setOutputGain,
     getSavedPlaybackProgress,
+    consumeInitialPlaybackProgress,
     savePlaybackProgress,
     clearSavedPlaybackProgress,
     volumeNormalization: computed(() => playbackSettings.value.volumeNormalization),

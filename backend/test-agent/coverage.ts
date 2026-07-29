@@ -148,6 +148,12 @@ function httpCandidate(result: HttpCheckResult) {
 
 function browserCandidate(result: BrowserCheckResult) {
   const steps = result.steps.map(step => `${step.status} ${step.name} ${step.detail || ""} ${step.error || ""}`).join("\n");
+  const contextCriteria = [
+    ...((result.context?.acceptanceCriteria || []) as string[]),
+    ...((result.context?.acceptance_criteria || []) as string[]),
+    ...((result.context?.coversAcceptanceCriteria || []) as string[]),
+    ...((result.context?.covers_acceptance_criteria || []) as string[]),
+  ].map(item => String(item || "").trim()).filter(Boolean);
   return candidate(
     `${result.project}: ${result.adversarial ? "adversarial " : ""}browser ${result.name}`,
     result.status,
@@ -157,6 +163,7 @@ function browserCandidate(result: BrowserCheckResult) {
       result.finalUrl || "",
       result.title || "",
       result.pageTextPreview || "",
+      contextCriteria.join("\n"),
       result.context ? JSON.stringify(result.context) : "",
       (result.consoleMessages || []).join("\n"),
       result.consoleLogPath || "",

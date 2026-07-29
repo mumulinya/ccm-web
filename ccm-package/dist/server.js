@@ -64,6 +64,8 @@ const utils_1 = require("./core/utils");
 const db_1 = require("./core/db");
 const server_instance_lock_1 = require("./core/server-instance-lock");
 const task_store_1 = require("./core/task-store");
+const context_engine_recovery_1 = require("./system/context-engine-recovery");
+const unified_task_scheduler_1 = require("./system/unified-task-scheduler");
 // 导入子模块控制器
 const projects_1 = require("./modules/projects/projects");
 const project_chat_intent_1 = require("./modules/projects/project-chat-intent");
@@ -82,6 +84,7 @@ const pet_activity_coordinator_1 = require("./modules/pets/pet-activity-coordina
 const music_1 = require("./modules/music/music");
 const collaboration_1 = require("./modules/collaboration/collaboration");
 const task_permission_routes_1 = require("./modules/collaboration/task-permission-routes");
+const collaboration_task_service_1 = require("./modules/collaboration/collaboration-task-service");
 const task_permission_broker_1 = require("./modules/collaboration/task-permission-broker");
 const storage_1 = require("./modules/collaboration/storage");
 const group_session_lifecycle_head_1 = require("./modules/collaboration/group-session-lifecycle-head");
@@ -99,6 +102,7 @@ const session_compaction_hooks_1 = require("./system/session-compaction-hooks");
 const context_budget_1 = require("./system/context-budget");
 const global_agent_1 = require("./modules/global/global-agent");
 const rag_1 = require("./modules/knowledge/rag");
+const source_ingestion_1 = require("./modules/requirements/source-ingestion");
 const knowledge_access_1 = require("./modules/knowledge/knowledge-access");
 const slash_commands_1 = require("./modules/tools/slash-commands");
 const credential_store_1 = require("./core/credential-store");
@@ -647,20 +651,71 @@ function handleRequest(req, res) {
     if (["/api/projects/main-agent/plan-confirm", "/api/projects/main-agent/task-action"].includes(pathname) && req.method === "POST") {
         let body = "";
         req.on("data", chunk => body += chunk);
-        req.on("end", () => {
+        req.on("end", async () => {
             try {
                 const payload = JSON.parse(body || "{}");
                 const taskId = String(payload.task_id || payload.taskId || "");
                 const project = String(payload.project || "");
                 const projectSessionId = String(payload.project_session_id || payload.projectSessionId || payload.session_id || "");
                 const action = pathname.endsWith("/plan-confirm") ? "confirm_plan" : String(payload.action || "");
+                const persistProjectTaskProjection = (taskInput, content, source) => {
+                    const task = (0, project_main_agent_1.projectMainTaskPublic)(taskInput);
+                    (0, sessions_1.upsertProjectSessionTaskMessage)(project, projectSessionId, {
+                        id: task.message_id,
+                        role: "assistant",
+                        content,
+                        timestamp: new Date().toISOString(),
+                        messageMode: "task",
+                        type: "project_main_task",
+                        task_id: taskId,
+                        run_id: task.project_main_run_id || "",
+                        taskExperience: { ...task, requires_card: true },
+                        source,
+                    });
+                    return task;
+                };
                 if (action === "confirm_plan") {
-                    const task = (0, project_main_agent_1.confirmProjectMainTask)(taskId, project, projectSessionId);
-                    return (0, utils_1.sendJson)(res, { success: true, task: (0, project_main_agent_1.projectMainTaskPublic)(task), resume_required: true, resume_parent_run_id: task.id });
+                    const confirmedTask = (0, project_main_agent_1.confirmProjectMainTask)(taskId, project, projectSessionId);
+                    const task = persistProjectTaskProjection(confirmedTask, "执行计划已经确认，项目主 Agent 将继续安排开发和验收。", "project-main-agent-plan-confirmed");
+                    return (0, utils_1.sendJson)(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id, resume_required: true, resume_parent_run_id: confirmedTask.id });
                 }
                 if (action === "cancel") {
-                    const task = (0, project_main_agent_1.cancelProjectMainTask)(taskId, project, projectSessionId, String(payload.reason || "用户取消项目主 Agent 任务"));
-                    return (0, utils_1.sendJson)(res, { success: true, task: (0, project_main_agent_1.projectMainTaskPublic)(task) });
+                    const cancelledTask = (0, project_main_agent_1.cancelProjectMainTask)(taskId, project, projectSessionId, String(payload.reason || "用户取消项目主 Agent 任务"));
+                    const task = persistProjectTaskProjection(cancelledTask, "任务已停止。原计划、修订记录和已经产生的执行证据会继续保留。", "project-main-agent-cancelled");
+                    return (0, utils_1.sendJson)(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id });
+                }
+                if (action === "revise_plan") {
+                    const feedback = String(payload.feedback || "").trim();
+                    const clientMessageId = String(payload.client_message_id || payload.clientMessageId || "").trim();
+                    if (!feedback)
+                        return (0, utils_1.sendJson)(res, { success: false, error: "请填写需要调整的计划要求" }, 400);
+                    if (!clientMessageId)
+                        return (0, utils_1.sendJson)(res, { success: false, error: "缺少计划修订的客户端消息 ID" }, 400);
+                    const revisionTask = (0, project_main_agent_1.getProjectMainTask)(taskId);
+                    if (!revisionTask)
+                        return (0, utils_1.sendJson)(res, { success: false, error: "项目主 Agent 任务不存在" }, 404);
+                    if (String(revisionTask.target_project || "") !== project || String(revisionTask.project_session_id || "") !== projectSessionId) {
+                        return (0, utils_1.sendJson)(res, { success: false, error: "任务不属于当前项目会话" }, 400);
+                    }
+                    (0, sessions_1.upsertProjectSessionTaskMessage)(project, projectSessionId, {
+                        id: clientMessageId,
+                        role: "user",
+                        content: feedback,
+                        timestamp: new Date().toISOString(),
+                        type: "project_plan_revision",
+                        task_id: taskId,
+                        source: "project-plan-revision",
+                    });
+                    const result = await (0, project_main_agent_1.reviseProjectMainTask)({ taskId, project, projectSessionId, feedback, clientMessageId });
+                    const task = persistProjectTaskProjection(result.task, `我已根据你的补充要求更新执行计划，这是第 ${result.revision.revision} 次修订。确认后会继续执行。`, "project-main-agent-plan-revision");
+                    return (0, utils_1.sendJson)(res, {
+                        success: true,
+                        task,
+                        taskExperience: { ...task, requires_card: true },
+                        revision: result.revision,
+                        duplicate: result.duplicate,
+                        message_id: task.message_id,
+                    });
                 }
                 return (0, utils_1.sendJson)(res, { success: false, error: "不支持的项目主 Agent 操作" }, 400);
             }
@@ -674,9 +729,23 @@ function handleRequest(req, res) {
     if (pathname === "/api/send-stream" && req.method === "POST") {
         const contentType = req.headers["content-type"] || "";
         const handleStreamSend = async (project, message, files = [], parentRunId = "", projectSessionId = "", source = "web", platformContext = {}) => {
-            const finalMessage = files && files.length > 0
-                ? `${message || ""}${(0, utils_1.buildUploadedFilesContext)(files, "本次消息附件")}`
-                : (message || "");
+            let sourceIngestion = null;
+            try {
+                sourceIngestion = await (0, source_ingestion_1.ingestRequirementSources)({
+                    files: Array.isArray(files) ? files : [],
+                    userText: message || "",
+                    extractRequirement: false,
+                    decomposeRequirement: false,
+                });
+            }
+            catch (error) {
+                console.warn(`[项目资料读取] ${project || "unknown"} 统一解析失败：${error?.message || error}`);
+            }
+            const sourceContext = String(sourceIngestion?.agent_context || "");
+            const fallbackFileContext = !sourceContext && files && files.length > 0
+                ? (0, utils_1.buildUploadedFilesContext)(files, "本次消息附件")
+                : "";
+            const finalMessage = `${message || ""}${sourceContext || fallbackFileContext}`;
             if (!project || !finalMessage.trim())
                 return (0, utils_1.sendJson)(res, { error: "参数不足" }, 400);
             const configs = (0, db_1.getConfigs)();
@@ -727,9 +796,36 @@ function handleRequest(req, res) {
             catch (error) {
                 console.warn(`[项目知识检索] ${project} 已使用无知识上下文继续：${error?.message || error}`);
             }
+            if (exactProjectSessionId) {
+                const knowledgeToolCallId = `knowledge_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+                (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
+                    type: "tool_use",
+                    toolName: "query_knowledge",
+                    toolCallId: knowledgeToolCallId,
+                    runId: `project-main:${exactProjectSessionId}`,
+                    arguments: { query_checksum: projectKnowledge.scopeChecksum || "", limit: 6 },
+                });
+                (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
+                    type: "tool_result",
+                    toolName: "query_knowledge",
+                    toolCallId: knowledgeToolCallId,
+                    runId: `project-main:${exactProjectSessionId}`,
+                    status: projectKnowledge.embeddingError && !projectKnowledge.results?.length ? "error" : "ok",
+                    observation: {
+                        context: projectKnowledge.context || "",
+                        citations: projectKnowledge.citations || [],
+                        retrieval_mode: projectKnowledge.embeddingMode || "lexical",
+                        fallback_reason: projectKnowledge.fallbackReason || "",
+                        index_generation: projectKnowledge.indexGeneration || "",
+                        stale_served: projectKnowledge.staleServed === true,
+                        token_budget: projectKnowledge.tokenBudget || null,
+                    },
+                    error: projectKnowledge.embeddingError || "",
+                });
+            }
             let chatIntent;
             try {
-                chatIntent = await (0, project_chat_intent_1.classifyProjectChatIntentWithModel)(message, files, { forceTask: !!parentRunId, project });
+                chatIntent = await (0, project_chat_intent_1.classifyProjectChatIntentWithModel)(finalMessage, files, { forceTask: !!parentRunId, project, sessionId: exactProjectSessionId });
             }
             catch (error) {
                 return (0, utils_1.sendJson)(res, {
@@ -783,7 +879,7 @@ function handleRequest(req, res) {
             if (exactProjectSessionId && chatIntent.mode === "task") {
                 try {
                     const prepareProjectMemoryMcp = () => {
-                        const projection = (0, project_session_compaction_1.buildProjectSessionModelContextProjection)(project, exactProjectSessionId, { currentRequest: finalMessage });
+                        const projection = (0, project_session_compaction_1.buildProjectSessionModelContextProjection)(project, exactProjectSessionId, { currentRequest: finalMessage, persistMicroCompactReceipt: true });
                         if (!projection)
                             throw new Error("项目会话连续性不存在");
                         const binding = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(project, exactProjectSessionId);
@@ -900,22 +996,25 @@ function handleRequest(req, res) {
                     if (!responseDetached && !res.writableEnded && !res.destroyed)
                         writeSse(res, data);
                 };
+                let taskHeartbeatFactory = null;
                 const heartbeat = setInterval(() => {
                     if (!res.writableEnded && !res.destroyed) {
                         try {
                             res.write(": keep-alive\n\n");
+                            const taskHeartbeat = taskHeartbeatFactory?.();
+                            if (taskHeartbeat)
+                                send(taskHeartbeat);
                         }
-                        catch { }
+                        catch (error) {
+                            console.warn(`[project-main] task heartbeat skipped: ${error?.message || error}`);
+                        }
                     }
                 }, 15000);
                 heartbeat.unref?.();
                 if (chatIntent.mode !== "task") {
                     send({ type: "presentation", message_mode: chatIntent.mode, show_task_card: false, main_agent: "project" });
                     send({ type: "status", text: chatIntent.mode === "project_analysis" ? "项目主 Agent 正在分析当前项目..." : "项目主 Agent 正在回复...", agent: "project-main-agent" });
-                    const projectMainContext = [
-                        exactProjectSessionId ? (0, project_session_compaction_1.buildProjectSessionPostCompactContext)(project, exactProjectSessionId, agentType, { currentRequest: finalMessage }) : "",
-                        projectKnowledge.context,
-                    ].filter(Boolean).join("\n\n");
+                    const projectMainContext = projectKnowledge.context;
                     let streamedAnswer = false;
                     const answer = await (0, project_main_agent_1.answerAsProjectMainAgent)({
                         project,
@@ -951,7 +1050,7 @@ function handleRequest(req, res) {
                     projectSessionId: exactProjectSessionId,
                     userMessage: finalMessage,
                     workflowDecision: chatIntent.workflowDecision,
-                    context: [projectSessionContext, projectKnowledge.context].filter(Boolean).join("\n\n"),
+                    context: projectKnowledge.context,
                 });
                 const task = existingTask || (0, project_main_agent_1.createProjectMainTask)({
                     project,
@@ -963,7 +1062,7 @@ function handleRequest(req, res) {
                     sourceAttachments: files,
                 });
                 projectRun.project_main_task_id = task.id;
-                projectRun.status = plan.requiresConfirmation && !existingTask ? "paused" : "running";
+                projectRun.status = plan.requiresConfirmation && !existingTask ? "paused" : "queued";
                 projectRun.updated_at = new Date().toISOString();
                 (0, chat_runs_1.saveProjectChatRuns)();
                 const feishuTask = source === "feishu";
@@ -989,14 +1088,39 @@ function handleRequest(req, res) {
                     session_ids: [activeTaskAgentSession.id],
                     parent_run_id: projectRun.parent_run_id || "",
                 });
+                const taskMessageId = `project-main-task:${task.id}`;
+                const persistTaskMessage = (content = "", experience = taskExperience()) => (0, sessions_1.upsertProjectSessionTaskMessage)(project, exactProjectSessionId, {
+                    id: taskMessageId,
+                    role: "assistant",
+                    content: String(content || experience.final_summary || experience.status_detail || plan.summary || "项目主 Agent 正在推进任务"),
+                    timestamp: new Date().toISOString(),
+                    messageMode: "task",
+                    type: "project_main_task",
+                    task_id: task.id,
+                    run_id: projectRun.id,
+                    taskExperience: experience,
+                    source: source === "feishu" ? "feishu-project-main-agent" : "web-project-main-agent",
+                });
+                taskHeartbeatFactory = () => {
+                    const experience = taskExperience();
+                    return {
+                        type: "task_heartbeat",
+                        message_id: taskMessageId,
+                        task_id: task.id,
+                        at: new Date().toISOString(),
+                        text: experience.runtime_status?.status_detail || experience.phase_label || "项目主 Agent 正在推进任务",
+                        taskExperience: experience,
+                    };
+                };
                 send({ type: "presentation", message_mode: "task", show_task_card: true, workflow_decision: chatIntent.workflowDecision, main_agent: "project" });
                 send({ type: "planning", status: "completed", plan, task_id: task.id });
-                send({ type: "task_runtime", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
+                send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
+                persistTaskMessage(plan.summary);
                 if (plan.requiresConfirmation && !existingTask) {
                     const planText = `我已经整理好执行计划，需要你确认后才会安排开发 Agent。\n\n${plan.summary}\n\n${plan.workItems.map((item, index) => `${index + 1}. ${item.title}：${item.objective}`).join("\n")}`;
                     scheduleFeishuSessionTitle(planText);
                     send({ type: "chunk", text: planText, agent: "project-main-agent" });
-                    send({ type: "done", message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), workEvents: [], taskExperience: taskExperience() });
+                    send({ type: "done", message_id: taskMessageId, message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), workEvents: [], taskExperience: taskExperience() });
                     clearInterval(heartbeat);
                     res.end();
                     return;
@@ -1006,7 +1130,7 @@ function handleRequest(req, res) {
                     const acceptedText = `项目主 Agent 已完成任务规划并创建正式任务。\n\n任务：${plan.title}\n任务编号：${task.id}\n工作项：${plan.workItems.length} 个\n\n开发 Agent 与 TestAgent 将在后台按顺序执行，完成或阻塞后会回到当前飞书会话。`;
                     scheduleFeishuSessionTitle(acceptedText);
                     send({ type: "chunk", text: acceptedText, agent: "project-main-agent" });
-                    send({ type: "done", message_mode: "task", accepted: true, detached: true, task_id: task.id, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
+                    send({ type: "done", message_id: taskMessageId, message_mode: "task", accepted: true, detached: true, task_id: task.id, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
                     clearInterval(heartbeat);
                     responseDetached = true;
                     res.end();
@@ -1014,92 +1138,126 @@ function handleRequest(req, res) {
                 let firstMemoryReceiptRequired = memoryMcpEnabled;
                 const workerResults = [];
                 let finalSummaryStreamed = false;
-                const execution = await (0, project_main_agent_1.executeProjectMainTask)({
-                    task,
-                    plan,
-                    confirmed: !!existingTask || !plan.requiresConfirmation,
-                    verificationCommands: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands)
-                        ? (0, db_1.loadProjectConfigs)()[project].verification_commands
-                        : [],
-                    onEvent: (event) => {
-                        send(event);
-                        const label = {
-                            planning: "项目主 Agent 已完成任务规划",
-                            work_item: event.status === "running" ? `开发 Agent 正在执行：${event.work_item?.title || "工作项"}` : `开发 Agent 已提交：${event.work_item?.title || "工作项"}`,
-                            testing: event.status === "running" ? `TestAgent 正在执行第 ${event.round || 1} 轮验收` : event.status === "passed" ? "TestAgent 验收通过" : "TestAgent 发现验收缺口",
-                            reworking: event.status === "running" ? "项目主 Agent 已安排原开发 Agent 返工" : "返工结果已提交，准备重新验收",
-                            accepting: event.status === "running" ? "项目主 Agent 正在完成最终验收" : "项目主 Agent 已完成最终验收",
-                            blocked: event.summary || "任务存在阻塞",
-                        };
-                        const text = label[event.type] || event.summary || "项目主 Agent 正在推进任务";
-                        send({ type: "status", text, agent: event.type === "testing" ? "test-agent" : "project-main-agent" });
-                        const workEvent = { id: `pma_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, time: new Date().toISOString(), kind: event.status === "failed" || event.status === "blocked" ? "error" : event.status === "completed" || event.status === "passed" ? "done" : "status", agent: event.type === "testing" ? "TestAgent" : "项目主 Agent", text, phase: event.type, data: event };
-                        projectRun.workEvents = [...(projectRun.workEvents || []), workEvent].slice(-80);
-                        projectRun.updated_at = new Date().toISOString();
-                        (0, chat_runs_1.saveProjectChatRuns)();
-                        send({ type: "work_event", event: workEvent });
-                        send({ type: "task_runtime", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
-                    },
-                    onDelta: delta => {
-                        if (!delta)
-                            return;
-                        finalSummaryStreamed = true;
-                        send({ type: "chunk", text: delta, agent: "project-main-agent" });
-                    },
-                    executeWorker: async (workItem, round, reworkProblems) => {
-                        let doneState = null;
-                        const workerPrompt = [
-                            toolContext.prompt,
-                            projectKnowledge.context,
-                            projectSessionContext,
-                            (0, memory_1.buildProjectExecutionBrief)(project, workItem.objective, {
-                                workDir,
-                                query: finalMessage,
-                                verificationHints: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands) ? (0, db_1.loadProjectConfigs)()[project].verification_commands : [],
-                                memoryDeliveryMode: memoryMcpEnabled ? "mcp" : "prompt",
-                                memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
-                            }),
-                            `你是当前项目唯一的开发 Agent。项目主 Agent 分配给你的工作项如下：\n标题：${workItem.title}\n目标：${workItem.objective}\n验收标准：${workItem.acceptanceCriteria.join("；") || plan.acceptanceCriteria.join("；")}\n${reworkProblems.length ? `这是第 ${round} 轮返工，必须逐项解决 TestAgent 的真实失败证据：\n${reworkProblems.join("\n")}` : ""}\n请实际完成工作、运行适用验证，并在结尾准确列出变更文件、执行过的验证和仍存在的阻塞。不得自行宣布主任务最终验收通过。`,
-                        ].filter(Boolean).join("\n\n");
-                        const output = await callAgent(project, workerPrompt, workDir, agentType, 300000, {
-                            background: true,
-                            taskId: task.id,
-                            executionId: `${task.id}:${workItem.id}:attempt:${workItem.attempts}`,
-                            projectSessionId: exactProjectSessionId,
-                            role: "project-child-agent",
-                            source: "project-main-agent",
-                            title: workItem.title,
-                            allowedTools: toolContext.allowedTools,
-                            mcpConfigPath: toolContext.audit.mcpConfigPath,
-                            runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
-                            runtimeToolDispatchGate: toolContext.dispatchGate,
-                            agentSession: activeAgentSessionOptions,
-                            taskAgentSessionId: activeTaskAgentSession.id,
-                            memoryContextConsumptionReceiptRequired: firstMemoryReceiptRequired,
-                            memoryContextConsumptionChallenge: firstMemoryReceiptRequired ? projectMemoryMcp?.challenge || null : null,
-                            onDone: (state) => { doneState = state; },
+                const execution = await (0, unified_task_scheduler_1.scheduleUnifiedTaskOperation)({
+                    taskId: task.id,
+                    queueKey: `conversation:project:${project}:${exactProjectSessionId}`,
+                    workspaceLane: (0, unified_task_scheduler_1.canonicalWorkspaceMutationLane)(workDir, `workspace:project:${project}`),
+                    priority: task.priority || "normal",
+                    onState: schedulerState => {
+                        const queued = schedulerState.state === "queued";
+                        const running = schedulerState.state === "running";
+                        if (queued || running) {
+                            projectRun.status = queued ? "queued" : "running";
+                            projectRun.updated_at = new Date().toISOString();
+                            (0, chat_runs_1.saveProjectChatRuns)();
+                        }
+                        (0, collaboration_task_service_1.updateTask)(task.id, {
+                            scheduler_state: schedulerState,
+                            queue_target_key: schedulerState.queue_key,
+                            queue_position: schedulerState.position,
+                            queue_state: schedulerState.state,
+                            ...(queued ? { status: "pending", status_detail: `项目任务已进入会话串行队列，当前位置 ${schedulerState.position}` } : {}),
+                            ...(running ? { status: "in_progress", status_detail: "项目主 Agent 已取得会话队列和源码工作区执行权" } : {}),
                         });
-                        firstMemoryReceiptRequired = false;
-                        activeTaskAgentSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(activeTaskAgentSession.id, {
-                            nativeSessionId: doneState?.nativeSessionId || "",
-                            nativeContinuationEvidence: doneState?.nativeContinuationEvidence || null,
-                            success: doneState?.isError !== true,
-                            error: doneState?.error || "",
-                            runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
-                        }) || activeTaskAgentSession;
-                        activeAgentSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(activeTaskAgentSession);
-                        const result = {
-                            success: doneState?.isError !== true && !/^\[[^\]]+\]\s*Agent (?:Runner )?错误:/i.test(String(output || "")),
-                            output: String(output || ""),
-                            fileChanges: doneState?.fileChanges || { count: 0, files: [] },
-                            nativeSessionId: doneState?.nativeSessionId || "",
-                            sessionId: activeTaskAgentSession.id,
-                            usage: doneState?.usage || null,
-                            error: doneState?.error || "",
-                        };
-                        workerResults.push(result);
-                        return result;
+                        const latestExperience = taskExperience();
+                        if (queued || running) {
+                            const text = queued
+                                ? `项目任务正在排队，当前位置 ${schedulerState.position}`
+                                : "项目主 Agent 已开始执行当前任务";
+                            persistTaskMessage(text, latestExperience);
+                            send({ type: "status", text, agent: "project-main-agent", scheduler_state: schedulerState });
+                            send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: latestExperience });
+                        }
                     },
+                    operation: () => (0, project_main_agent_1.executeProjectMainTask)({
+                        task,
+                        plan,
+                        confirmed: !!existingTask || !plan.requiresConfirmation,
+                        verificationCommands: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands)
+                            ? (0, db_1.loadProjectConfigs)()[project].verification_commands
+                            : [],
+                        onEvent: (event) => {
+                            const label = {
+                                planning: "项目主 Agent 已完成任务规划",
+                                work_item: event.status === "running" ? `开发 Agent 正在执行：${event.work_item?.title || "工作项"}` : `开发 Agent 已提交：${event.work_item?.title || "工作项"}`,
+                                testing: event.status === "running" ? `TestAgent 正在执行第 ${event.round || 1} 轮验收` : event.status === "passed" ? "TestAgent 验收通过" : "TestAgent 发现验收缺口",
+                                reworking: event.status === "running" ? "项目主 Agent 已安排原开发 Agent 返工" : "返工结果已提交，准备重新验收",
+                                accepting: event.status === "running" ? "项目主 Agent 正在完成最终验收" : "项目主 Agent 已完成最终验收",
+                                blocked: event.summary || "任务存在阻塞",
+                            };
+                            const text = label[event.type] || event.summary || "项目主 Agent 正在推进任务";
+                            const latestExperience = taskExperience();
+                            persistTaskMessage(text, latestExperience);
+                            send(event);
+                            send({ type: "status", text, agent: event.type === "testing" ? "test-agent" : "project-main-agent" });
+                            const workEvent = { id: `pma_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, time: new Date().toISOString(), kind: event.status === "failed" || event.status === "blocked" ? "error" : event.status === "completed" || event.status === "passed" ? "done" : "status", agent: event.type === "testing" ? "TestAgent" : "项目主 Agent", text, phase: event.type, data: event };
+                            projectRun.workEvents = [...(projectRun.workEvents || []), workEvent].slice(-80);
+                            projectRun.updated_at = new Date().toISOString();
+                            (0, chat_runs_1.saveProjectChatRuns)();
+                            send({ type: "work_event", event: workEvent });
+                            send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: latestExperience });
+                        },
+                        onDelta: delta => {
+                            if (!delta)
+                                return;
+                            finalSummaryStreamed = true;
+                            send({ type: "chunk", text: delta, agent: "project-main-agent" });
+                        },
+                        executeWorker: async (workItem, round, reworkProblems) => {
+                            let doneState = null;
+                            const workerPrompt = [
+                                toolContext.prompt,
+                                projectKnowledge.context,
+                                projectSessionContext,
+                                (0, memory_1.buildProjectExecutionBrief)(project, workItem.objective, {
+                                    workDir,
+                                    query: finalMessage,
+                                    verificationHints: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands) ? (0, db_1.loadProjectConfigs)()[project].verification_commands : [],
+                                    memoryDeliveryMode: memoryMcpEnabled ? "mcp" : "prompt",
+                                    memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
+                                }),
+                                `你是当前项目唯一的开发 Agent。项目主 Agent 分配给你的工作项如下：\n标题：${workItem.title}\n目标：${workItem.objective}\n验收标准：${workItem.acceptanceCriteria.join("；") || plan.acceptanceCriteria.join("；")}\n${reworkProblems.length ? `这是第 ${round} 轮返工，必须逐项解决 TestAgent 的真实失败证据：\n${reworkProblems.join("\n")}` : ""}\n请实际完成工作、运行适用验证，并在结尾准确列出变更文件、执行过的验证和仍存在的阻塞。不得自行宣布主任务最终验收通过。`,
+                            ].filter(Boolean).join("\n\n");
+                            const output = await callAgent(project, workerPrompt, workDir, agentType, 300000, {
+                                background: true,
+                                taskId: task.id,
+                                executionId: `${task.id}:${workItem.id}:attempt:${workItem.attempts}`,
+                                projectSessionId: exactProjectSessionId,
+                                role: "project-child-agent",
+                                source: "project-main-agent",
+                                title: workItem.title,
+                                allowedTools: toolContext.allowedTools,
+                                mcpConfigPath: toolContext.audit.mcpConfigPath,
+                                runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
+                                runtimeToolDispatchGate: toolContext.dispatchGate,
+                                agentSession: activeAgentSessionOptions,
+                                taskAgentSessionId: activeTaskAgentSession.id,
+                                memoryContextConsumptionReceiptRequired: firstMemoryReceiptRequired,
+                                memoryContextConsumptionChallenge: firstMemoryReceiptRequired ? projectMemoryMcp?.challenge || null : null,
+                                onDone: (state) => { doneState = state; },
+                            });
+                            firstMemoryReceiptRequired = false;
+                            activeTaskAgentSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(activeTaskAgentSession.id, {
+                                nativeSessionId: doneState?.nativeSessionId || "",
+                                nativeContinuationEvidence: doneState?.nativeContinuationEvidence || null,
+                                success: doneState?.isError !== true,
+                                error: doneState?.error || "",
+                                runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
+                            }) || activeTaskAgentSession;
+                            activeAgentSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(activeTaskAgentSession);
+                            const result = {
+                                success: doneState?.isError !== true && !/^\[[^\]]+\]\s*Agent (?:Runner )?错误:/i.test(String(output || "")),
+                                output: String(output || ""),
+                                fileChanges: doneState?.fileChanges || { count: 0, files: [] },
+                                nativeSessionId: doneState?.nativeSessionId || "",
+                                sessionId: activeTaskAgentSession.id,
+                                usage: doneState?.usage || null,
+                                error: doneState?.error || "",
+                            };
+                            workerResults.push(result);
+                            return result;
+                        },
+                    }),
                 });
                 if (execution.status === "completed") {
                     try {
@@ -1136,12 +1294,14 @@ function handleRequest(req, res) {
                 if (execution.summary && !finalSummaryStreamed)
                     send({ type: "chunk", text: execution.summary, agent: "project-main-agent" });
                 const latestTaskExperience = taskExperience();
+                persistTaskMessage(execution.summary, latestTaskExperience);
                 if (execution.status === "failed") {
-                    send({ type: "error", text: execution.summary, message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), fileChanges: execution.fileChanges, taskExperience: latestTaskExperience });
+                    send({ type: "error", message_id: taskMessageId, text: execution.summary, message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), fileChanges: execution.fileChanges, taskExperience: latestTaskExperience });
                 }
                 else {
                     send({
                         type: "done",
+                        message_id: taskMessageId,
                         message_mode: "task",
                         run: (0, chat_runs_1.publicProjectChatRun)(projectRun),
                         fileChanges: execution.fileChanges,
@@ -1152,21 +1312,6 @@ function handleRequest(req, res) {
                 }
                 clearInterval(heartbeat);
                 if (feishuTask) {
-                    try {
-                        (0, sessions_1.appendProjectSessionTaskMessage)(project, exactProjectSessionId, {
-                            id: `project-main-final:${task.id}:${execution.status}`,
-                            role: "assistant",
-                            content: execution.summary || (execution.status === "completed" ? "项目任务已经通过项目主 Agent 验收。" : "项目任务执行失败或仍有阻塞。"),
-                            timestamp: new Date().toISOString(),
-                            source: "feishu-project-main-agent-final",
-                            task_id: task.id,
-                            run_id: projectRun.id,
-                            taskExperience: latestTaskExperience,
-                        });
-                    }
-                    catch (sessionWriteError) {
-                        console.warn(`[项目主 Agent] 飞书任务最终回复写入会话失败 (${project}/${exactProjectSessionId})：${sessionWriteError?.message || sessionWriteError}`);
-                    }
                     await (0, feishu_channel_1.notifyFeishuTaskStage)({
                         stage: execution.status === "completed" ? "completion" : "failure",
                         title: execution.status === "completed" ? `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务完成` : `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务未完成`,
@@ -1373,6 +1518,7 @@ function bootstrapServerRuntime(startupCollabCtx, port) {
         reconcileGroupSessionLifecycleAgentCancellations: storage_1.reconcileGroupSessionLifecycleAgentCancellations,
         reconcileMemoryContextConsumptionReceipts: memory_context_consumption_receipt_1.reconcileMemoryContextConsumptionReceipts,
         reconcileMemoryContextConsumptionRecoveries: memory_context_consumption_recovery_1.reconcileMemoryContextConsumptionRecoveries,
+        reconcileInterruptedProjectMainTasks: project_main_agent_1.reconcileInterruptedProjectMainTasks,
         reconcileTaskAgentContinuationSoak: task_agent_continuation_soak_1.reconcileTaskAgentContinuationSoak,
         reconcileTaskAgentInvocationRecovery: task_agent_invocation_lineage_1.reconcileTaskAgentInvocationRecovery,
         recoverChildTypedMemoryDispatchWal: memory_2.recoverChildTypedMemoryDispatchWal,
@@ -1419,6 +1565,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
     PORT = port;
     LISTEN_HOST = normalizeListenHost(host);
     const instanceLock = (0, server_instance_lock_1.acquireCcmServerInstanceLock)(port, LISTEN_HOST);
+    (0, context_engine_recovery_1.registerContextEngineRecoveryHook)();
     const startupCollabCtx = createCollabCtx();
     const server = http.createServer(handleRequest);
     server.on("error", () => (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock));

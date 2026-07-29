@@ -211,7 +211,9 @@
     <TaskBacklogModal
       v-if="showBacklog"
       :backlogs="dailyDevBacklogs"
+      :collections="requirementCollections"
       :counts="backlogCounts"
+      :collection-counts="requirementCollectionCounts"
       :import-loading="backlogImportLoading"
       :bulk-dispatch-loading="backlogBulkDispatchLoading"
       :import-result="backlogImportResult"
@@ -232,6 +234,8 @@
       @dispatch="dispatchBacklog"
       @restore-ready="(item) => updateBacklogStatus(item, 'ready')"
       @mark-blocked="(item) => updateBacklogStatus(item, 'blocked')"
+      @create-from-doc="openRequirementIntake"
+      @open-collection="openRequirementCollection"
       @close="showBacklog = false"
     />
 
@@ -349,6 +353,7 @@
           <TaskAttachmentPicker
             :files="newTask.files"
             :existing="newTask.existingAttachments"
+            :text="[newTask.title, newTask.description].filter(Boolean).join('\n')"
             @update:files="newTask.files = $event"
             @remove-existing="removeExistingTaskAttachment"
           />
@@ -463,15 +468,15 @@
           <div>{{ visibleTaskStatusDetail() }}</div>
         </div>
         <details v-if="currentTaskReport?.trace_id || taskTraceLoading || currentTaskTrace?.events?.length" class="technical-report-details">
-          <summary>Trace 技术详情</summary>
+          <summary>排障信息</summary>
           <div v-if="currentTaskReport?.trace_id" class="trace-identity">
             <span>执行记录</span>
             <code>已关联</code>
           </div>
-          <div v-if="taskTraceLoading" class="trace-panel muted">正在读取全链路记录…</div>
+          <div v-if="taskTraceLoading" class="trace-panel muted">正在读取完整运行记录…</div>
           <div v-else-if="currentTaskTrace?.events?.length" class="trace-panel">
             <div class="trace-panel-head">
-              <strong>全链路 Trace</strong>
+              <strong>完整运行记录</strong>
               <span>{{ currentTaskTrace.events.length }} 个事件</span>
             </div>
             <div class="kernel-timeline trace-events">

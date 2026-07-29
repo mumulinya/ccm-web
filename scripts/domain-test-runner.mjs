@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -18,6 +19,7 @@ const run = (command, commandArgs, options = {}) => {
     windowsHide: true,
     shell: options.shell === true,
     timeout: options.timeout || 180_000,
+    env: { ...process.env, ...(options.env || {}) },
   })
   return { ok: result.status === 0, status: result.status, duration_ms: Date.now() - started, error: result.error?.message || '' }
 }
@@ -58,11 +60,29 @@ const tests = target === 'quick'
   : [...new Set(selectedDomains.flatMap(domain => config.domains[domain].tests))]
 const buildKinds = new Set(selectedDomains.map(domain => config.domains[domain].build))
 if (target === 'quick') buildKinds.add('backend')
+let isolatedBackendRoot = ''
+let isolatedBackendDist = ''
 
 if (!noBuild) {
-  const buildScript = buildKinds.has('full') ? 'build' : buildKinds.has('backend') && buildKinds.has('frontend') ? 'build' : buildKinds.has('frontend') ? 'build:frontend' : 'build:backend'
-  const build = run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', buildScript], { timeout: 10 * 60_000 })
-  if (!build.ok) process.exit(build.status || 1)
+  const needsBackend = buildKinds.has('backend') || buildKinds.has('full')
+  const needsFrontend = buildKinds.has('frontend') || buildKinds.has('full')
+  if (needsFrontend) {
+    const frontendBuild = run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build:frontend'], { timeout: 10 * 60_000, shell: true })
+    if (!frontendBuild.ok) process.exit(frontendBuild.status || 1)
+  }
+  if (buildKinds.has('full')) {
+    const mcpBuild = run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build:mcp-feishu'], { timeout: 10 * 60_000, shell: true })
+    if (!mcpBuild.ok) process.exit(mcpBuild.status || 1)
+  }
+  if (needsBackend) {
+    isolatedBackendRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-domain-backend-'))
+    isolatedBackendDist = path.join(isolatedBackendRoot, 'dist')
+    const tsc = run(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['tsc', '-p', 'backend/tsconfig.json', '--outDir', isolatedBackendDist], { timeout: 10 * 60_000, shell: true })
+    if (!tsc.ok) {
+      console.error(`[domain-test] 独立后端构建失败，诊断目录保留：${isolatedBackendRoot}`)
+      process.exit(tsc.status || 1)
+    }
+  }
 }
 
 const report = { schema: 'ccm-domain-test-report-v1', target, started_at: new Date().toISOString(), tests: [], passed: 0, failed: 0 }
@@ -74,14 +94,23 @@ for (const file of tests) {
     continue
   }
   console.log(`\n[domain-test] ${file}`)
-  const result = run(process.execPath, [absolute], { timeout: 5 * 60_000 })
+  const result = run(process.execPath, [absolute], {
+    timeout: 5 * 60_000,
+    env: isolatedBackendDist ? { CCM_BACKEND_DIST_DIR: isolatedBackendDist } : {},
+  })
   report.tests.push({ file, ...result })
   if (result.ok) report.passed++
   else report.failed++
 }
 report.completed_at = new Date().toISOString()
 report.pass = report.failed === 0
+report.isolated_backend_build = isolatedBackendDist || null
 fs.mkdirSync(path.join(root, 'scratch'), { recursive: true })
 fs.writeFileSync(path.join(root, 'scratch', 'domain-test-report.json'), `${JSON.stringify(report, null, 2)}\n`)
 console.log(`\n${JSON.stringify({ pass: report.pass, target, passed: report.passed, failed: report.failed, report: 'scratch/domain-test-report.json' }, null, 2)}`)
+if (report.pass && isolatedBackendRoot) {
+  try { fs.rmSync(isolatedBackendRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 }) } catch {}
+} else if (!report.pass && isolatedBackendRoot) {
+  console.error(`[domain-test] 测试失败，独立构建目录已保留：${isolatedBackendRoot}`)
+}
 process.exit(report.pass ? 0 : 1)

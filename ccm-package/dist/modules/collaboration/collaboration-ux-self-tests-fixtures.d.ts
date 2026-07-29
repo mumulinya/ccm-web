@@ -315,6 +315,7 @@ export declare function buildUxSelfTestChecks(ctx?: any): {
     reportHidesProtocol: boolean;
     groupReportFormatsObjects: boolean;
     acknowledgementHasCleanPunctuation: boolean;
+    acknowledgementIsUserOriented: boolean;
     dispatchLaunchSummaryVisible: any;
     dispatchLaunchSummaryHidesProtocol: boolean;
     dispatchLaunchSummaryDoneTargetStaysReviewing: boolean;

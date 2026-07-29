@@ -43,7 +43,15 @@ const prepare = async page => {
   await page.route('**/api/usability/workbench/stream**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
   await page.route('**/api/usability/workbench', route => route.fulfill(json({ success: true, snapshot: {} })))
   await page.route('**/api/music/remote-command', route => route.fulfill(json({ success: true, commands: [] })))
-  await page.route('**/api/projects', route => route.fulfill(json({ projects: [{ name: 'coordinator', running: true }] })))
+  await page.route('**/api/projects/folders', route => route.fulfill(json({
+    success: true,
+    folders: [{ id: 'folder-business', name: '业务平台' }],
+    assignments: { coordinator: 'folder-business', secondary: 'folder-business' },
+  })))
+  await page.route('**/api/projects', route => route.fulfill(json({ projects: [
+    { name: 'coordinator', display_name: '协作中台', agent: 'codex', running: true },
+    { name: 'secondary', display_name: '业务后台', agent: 'cursor', running: false },
+  ] })))
   await page.route('**/api/git/status*', route => route.fulfill(json({ success: true, branch: 'feature/code-workbench', files, summary: { total: effectiveFileCount, additions: 178, deletions: 43, staged: 1, unstaged: effectiveFileCount, untracked: 1, indexResidual: 1, conflicts: 0, modules: ['frontend', 'backend', 'docs', 'modules'], riskLevel: 'medium', warnings: ['1 个索引残留已单独归类'] }, repository: { remoteUrl: 'https://github.com/example/ccm.git', remoteName: 'origin', branch: 'feature/code-workbench', upstream: 'origin/feature/code-workbench', pushTarget: 'origin/feature/code-workbench', ahead: 2, behind: 1, dirty: true, changedFiles: effectiveFileCount, indexResidualFiles: 1, canFetch: true, canPull: false, canPush: true, canCommitAndPush: true }, context: { attribution: 'exact', tasks: [{ taskId: 'task-code-workbench', title: '完善代码变更工作台', status: 'in_progress', agent: 'codex', traceId: 'trace-code-workbench', exactFiles: files.filter(file => !file.indexResidual).map(file => file.path), association: 'exact', verification: ['npm run build:frontend'] }], latestTestAgent: { status: 'passed', recommendation: 'accept', summary: '浏览器与接口检查通过', browserChecks: 4 } } })))
   await page.route('**/api/git/remote-operation', async route => route.fulfill(json({ success: true, message: '远端引用已拉取', operation: 'fetch' })))
   await page.route('**/api/git/diff*', route => route.fulfill(json({ success: true, raw, hunks, additions: 2, deletions: 1 })))
@@ -140,6 +148,11 @@ const capture = async (page, name) => { const file = path.join(outputDir, `${nam
 try {
   const desktop = await (await browser.newContext({ viewport: { width: 1440, height: 960 } })).newPage()
   await prepare(desktop)
+  await desktop.locator('.project-selector-trigger').click()
+  assert.equal(await desktop.locator('.project-picker .folder-toggle').filter({ hasText: '业务平台' }).isVisible(), true)
+  await desktop.locator('.project-picker-select').filter({ hasText: '业务后台' }).click()
+  await desktop.locator('.project-selector-trigger').filter({ hasText: '业务后台' }).waitFor()
+  report.checks.push({ name: 'code collaboration reuses the project management grouped selector and switches within the shared folder', pass: true })
   await noOverflow(desktop, 'desktop')
   await assertIndependentPaneScroll(desktop, 'desktop')
   report.checks.push({ name: 'desktop uses equal-height file and Diff panels with isolated vertical scrolling', pass: true })

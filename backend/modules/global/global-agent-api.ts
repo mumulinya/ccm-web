@@ -1079,6 +1079,7 @@ export function createGlobalAgentApi(deps: any) {
         };
         try {
           let message = String(payload.message || "").trim();
+          const originalMessage = message;
           const sourceIngestion = await ingestRequirementSources({
             files,
             userText: message,
@@ -1089,13 +1090,16 @@ export function createGlobalAgentApi(deps: any) {
           if (sourceIngestion.agent_context) {
             message = message ? `${message}${sourceIngestion.agent_context}` : `请处理以下资料：${sourceIngestion.agent_context}`;
           }
+          const displayMessage = originalMessage || (files.length
+            ? `请处理已上传的 ${files.length} 份资料：${files.map((file: any) => file.filename || "附件").join("、")}`
+            : message);
           const sourceFiles = serializeGlobalRequestAttachments(files);
           if (!message) throw new Error("消息不能为空");
           let history: any[] = [];
           try { history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]")); } catch {}
           const sessionId = String(payload.session_id || payload.sessionId || "web:default");
           ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "thinking", "全局 Agent 正在思考...", { tab: "global-agent" }, 12 * 60 * 1000);
-          ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: message, final: true, source: "global" });
+          ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: displayMessage, final: true, source: "global" });
           const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || "").trim();
           const operationKey = requestId ? `${sessionId}:${requestId}` : "";
           streamRequestId = requestId;
@@ -1117,6 +1121,7 @@ export function createGlobalAgentApi(deps: any) {
           let finalPetEventRelayed = false;
           const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
             message,
+            originalMessage: displayMessage,
             history,
             sessionId,
             source: "web",
@@ -1192,6 +1197,7 @@ export function createGlobalAgentApi(deps: any) {
         };
         try {
           let message = String(payload.message || "").trim();
+          const originalMessage = message;
           const sourceIngestion = await ingestRequirementSources({
             files,
             userText: message,
@@ -1202,12 +1208,16 @@ export function createGlobalAgentApi(deps: any) {
           if (sourceIngestion.agent_context) {
             message = message ? `${message}${sourceIngestion.agent_context}` : `请处理以下资料：${sourceIngestion.agent_context}`;
           }
+          const displayMessage = originalMessage || (files.length
+            ? `请处理已上传的 ${files.length} 份资料：${files.map((file: any) => file.filename || "附件").join("、")}`
+            : message);
           if (!message) throw new Error("消息不能为空");
           let history: any[] = [];
           try { history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]")); } catch {}
           const sessionId = String(payload.session_id || payload.sessionId || "legacy:web");
           const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
             message,
+            originalMessage: displayMessage,
             history,
             sessionId,
             source: "legacy-chat-proxy",

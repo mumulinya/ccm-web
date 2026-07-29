@@ -244,7 +244,7 @@ async function childCreate(fixtureFile) {
   });
   const detail = center.getMemoryCenterScope("group", `${groupId}::${groupSessionId}`);
   const centerProjection = detail.postCompactUsage?.postCompactPlanAttachment || {};
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "PostCompactRecoveryPanel.vue"), "utf8");
   const siblingMemory = memory.loadGroupMemory(groupId, siblingSessionId);
   const checks = {
     ...direct.checks,
@@ -261,7 +261,7 @@ async function childCreate(fixtureFile) {
     tasksJsonUntouched: JSON.stringify(db.loadTasks()) === originalTasksJson,
     siblingSessionUnaffected: !siblingMemory.compaction?.postCompactReinject?.planAttachmentReceipt,
     memoryCenterBodyFree: centerProjection.status === "applied" && centerProjection.receiptValid === true && centerProjection.receipt?.body_free === true && !JSON.stringify(centerProjection).includes(currentSentinel),
-    memoryCenterPanelPresent: uiSource.includes("Post-compact Current Plan Attachment") && uiSource.includes("postCompactPlanAttachmentCards"),
+    memoryCenterPanelPresent: uiSource.includes("当前计划恢复") && uiSource.includes("postCompactPlanAttachment"),
   };
   const finalReceipt = memory.loadGroupMemory(groupId, groupSessionId).compaction?.postCompactReinject?.planAttachmentReceipt || receipt;
   fs.writeFileSync(fixtureFile, JSON.stringify({ groupId, groupSessionId, siblingSessionId, currentTaskId, currentSentinel, siblingSentinel, originalTranscriptJson, originalTasksJson, receipt: finalReceipt }, null, 2));

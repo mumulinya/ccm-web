@@ -97,6 +97,11 @@ const normalizeUserFacingWhitespace = (value = '') => String(value || '')
 export const sanitizeUserFacingAgentText = (value, fallback = '我正在处理当前请求。', max = 260) => {
   let text = normalizeUserFacingWhitespace(value)
   if (!text) text = fallback
+  text = text
+    .replace(/\bllm[-_\s]*error\b/gi, '模型服务调用失败')
+    .replace(/\bProvider\b/gi, '模型服务')
+    .replace(/外部\s+(?:Agent\s*)?Runner\b/gi, '独立验证环境')
+    .replace(/\b(?:Agent\s*)?Runner\b/gi, '执行环境')
   if (/Agent\s*intent\s*gateway|intent\s*gateway/i.test(text)) {
     text = /does not create|不创建|no tasks?|未创建|read-?only|只读|project analysis|项目分析/i.test(text)
       ? '本轮只做只读分析，未创建任务。'
@@ -114,7 +119,7 @@ export const sanitizeUserFacingAgentText = (value, fallback = '我正在处理�
     .replace(/\bTrace Replay\b/g, '技术回放')
     .replace(/Agent\s*intent\s*gateway[^.。;；:]*/gi, '')
     .replace(/intent\s*gateway[^.。;；:]*/gi, '')
-    .replace(/\s{2,}/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
     .trim()
   if (!text) text = fallback
   text = sanitizeUserFacingLegacyTerminology(text)
@@ -270,11 +275,23 @@ export const getStreamlinedToolSummary = (source, fallback = '') => {
 
 export const getTechnicalDetailSections = (source, fallbackTechnical = null) => {
   const stream = getDisplayStream(source)
+  const technicalLabel = (value) => ({
+    trace: '追踪编号',
+    trace_id: '追踪编号',
+    task: '任务编号',
+    task_id: '任务编号',
+    provider: '模型服务',
+    generation: '会话代次',
+    session: '会话编号',
+    session_id: '会话编号',
+    session_ids: '会话编号',
+    mcp: 'MCP 工具',
+    skill: 'Skills',
+    skills: 'Skills',
+  }[String(value || '').trim().toLowerCase()] || value)
   const normalizeSections = (sections) => sections.map(section => ({
     ...section,
-    items: (section.items || []).map(item => String(item?.label || '').toLowerCase() === 'trace'
-      ? { ...item, label: '执行记录', value: '已关联' }
-      : item),
+    items: (section.items || []).map(item => ({ ...item, label: technicalLabel(item?.label) })),
   }))
   const technical = fallbackTechnical || source?.technical || {}
   const sourceIngestion = source?.source_ingestion || source?.sourceIngestion || technical.source_ingestion || technical.sourceIngestion || null
@@ -348,12 +365,18 @@ export const getTechnicalDetailSections = (source, fallbackTechnical = null) => 
       ].filter(Boolean).join('；'),
     })
   }
-  if (technical.trace_id) records.push({ label: '执行记录', value: '已关联' })
-  if (technical.execution_ids?.length) records.push({ label: '执行', value: technical.execution_ids.join('、') })
-  if (technical.session_ids?.length) records.push({ label: '会话', value: technical.session_ids.join('、') })
-  if (technical.run_id) records.push({ label: 'Run', value: technical.run_id })
-  if (technical.parent_run_id) records.push({ label: '上轮', value: technical.parent_run_id })
-  if (technical.supervisor_id) records.push({ label: '跟进记录', value: technical.supervisor_id })
+  if (technical.trace_id) records.push({ label: '追踪编号', value: technical.trace_id })
+  if (technical.task_id) records.push({ label: '任务编号', value: technical.task_id })
+  if (technical.execution_ids?.length) records.push({ label: '执行编号', value: technical.execution_ids.join('、') })
+  if (technical.session_ids?.length) records.push({ label: '会话编号', value: technical.session_ids.join('、') })
+  if (technical.session_id) records.push({ label: '会话编号', value: technical.session_id })
+  if (technical.provider) records.push({ label: '模型服务', value: technical.provider })
+  if (technical.generation !== undefined && technical.generation !== null) records.push({ label: '会话代次', value: String(technical.generation) })
+  if (technical.mcp) records.push({ label: 'MCP 工具', value: (Array.isArray(technical.mcp) ? technical.mcp : [technical.mcp]).join('、') })
+  if (technical.skills || technical.skill) records.push({ label: 'Skills', value: (Array.isArray(technical.skills || technical.skill) ? (technical.skills || technical.skill) : [technical.skills || technical.skill]).join('、') })
+  if (technical.run_id) records.push({ label: '运行编号', value: technical.run_id })
+  if (technical.parent_run_id) records.push({ label: '上轮运行编号', value: technical.parent_run_id })
+  if (technical.supervisor_id) records.push({ label: '跟进编号', value: technical.supervisor_id })
   if (technical.gap_fingerprint) records.push({ label: '缺口指纹', value: technical.gap_fingerprint })
   return normalizeSections([
     { id: 'troubleshooting', title: '排障摘要', items: troubleshooting },

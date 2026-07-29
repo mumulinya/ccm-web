@@ -31,6 +31,8 @@ async function callLlm(config, messages, options = {}) {
             onUsage: options.onUsage,
             stream: typeof options.onDelta === "function",
             onDelta: options.onDelta,
+            providerContextCache: options.providerContextCache,
+            onProviderContextCache: options.onProviderContextCache,
         });
     }
     return (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, {
@@ -41,6 +43,8 @@ async function callLlm(config, messages, options = {}) {
         onUsage: options.onUsage,
         stream: typeof options.onDelta === "function",
         onDelta: options.onDelta,
+        providerContextCache: options.providerContextCache,
+        onProviderContextCache: options.onProviderContextCache,
     });
 }
 function shouldRetryGlobalModelError(error) {
@@ -48,7 +52,12 @@ function shouldRetryGlobalModelError(error) {
 }
 async function callGlobalModelWithRetry(config, messages, options = {}) {
     if (!options.call)
-        return callLlm(config, messages, { onUsage: options.onUsage, onDelta: options.onDelta });
+        return callLlm(config, messages, {
+            onUsage: options.onUsage,
+            onDelta: options.onDelta,
+            providerContextCache: options.providerContextCache,
+            onProviderContextCache: options.onProviderContextCache,
+        });
     const attempts = Math.max(1, Math.min(5, Number(options.attempts || 5)));
     const delayMs = Math.max(0, Math.min(5_000, Number(options.delayMs ?? 500)));
     const call = options.call;

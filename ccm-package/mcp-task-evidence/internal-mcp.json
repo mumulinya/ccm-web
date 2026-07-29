@@ -12,6 +12,7 @@
     { "name": "get_task_timeline", "label": "读取任务时间线", "description": "查看任务从派发到验收的完整过程。" },
     { "name": "get_code_changes", "label": "读取代码变更", "description": "查看已保存的文件统计和逐行 diff。" },
     { "name": "list_test_evidence", "label": "列出测试证据", "description": "查看截图、报告、浏览器和命令证据。" },
+    { "name": "get_test_evidence", "label": "读取测试证据", "description": "按证据 ID读取当前任务的截图或文本证据。" },
     { "name": "get_delivery_receipts", "label": "读取交付回执", "description": "汇总交付候选、验证、合并和 TestAgent 结论。" }
   ]
 }

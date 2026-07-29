@@ -17,6 +17,8 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
     }[];
     user_text: string;
     markdown: string;
+    technical_markdown: string;
+    technicalMarkdown: string;
     files: string[];
     plan_review: string[];
     planReview: string[];

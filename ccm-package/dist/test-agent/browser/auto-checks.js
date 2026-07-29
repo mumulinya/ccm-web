@@ -124,11 +124,47 @@ function buildAcceptancePathBrowserSmokeChecks(project, acceptanceCriteria = [])
     }
     return Array.from(checksByUrl.values()).map(entry => buildAutoBrowserSmokeCheckForUrl(project, entry.url, entry.assertions, entry.criteria, "acceptance_path_smoke"));
 }
+/**
+ * 显式检查（测试目标登录、项目配置、模型规划）通常只覆盖登录本身。
+ * 把它们的登录态继承给派生检查，否则派生检查会停在登录页。
+ */
+function inheritedAuthentication(explicit) {
+    const source = explicit.find(check => check.authentication
+        || check.authenticationMode
+        || check.storageStatePath
+        || check.storage_state_path
+        || check.authStatePath
+        || check.auth_state_path);
+    if (!source)
+        return {};
+    return {
+        ...(source.authentication ? { authentication: source.authentication } : {}),
+        ...(source.authenticationMode ? { authenticationMode: source.authenticationMode } : {}),
+        ...(source.existingSessionProvider ? { existingSessionProvider: source.existingSessionProvider } : {}),
+        ...(source.storageStatePath ? { storageStatePath: source.storageStatePath } : {}),
+        ...(source.storage_state_path ? { storage_state_path: source.storage_state_path } : {}),
+        ...(source.authStatePath ? { authStatePath: source.authStatePath } : {}),
+        ...(source.auth_state_path ? { auth_state_path: source.auth_state_path } : {}),
+    };
+}
+function browserCheckKey(check) {
+    return `${String(check.name || "").toLowerCase()}\0${normalizedUrlKey(String(check.url || ""))}`;
+}
 function buildBrowserChecksForProject(project, acceptanceCriteria = []) {
+    void acceptanceCriteria;
     const explicit = [...project.browserChecks, ...project.adversarialBrowserChecks];
-    if (explicit.length)
-        return explicit;
-    const auto = buildAutoBrowserSmokeCheck(project, acceptanceCriteria);
+    const combined = [];
+    const seen = new Set();
+    for (const check of explicit) {
+        const key = browserCheckKey(check);
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        combined.push(check);
+    }
+    if (combined.length)
+        return combined;
+    const auto = buildAutoBrowserSmokeCheck(project, []);
     return auto ? [auto] : [];
 }
 //# sourceMappingURL=auto-checks.js.map

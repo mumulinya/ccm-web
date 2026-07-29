@@ -1,9 +1,12 @@
 export declare const GROUP_COORDINATOR_INTERNAL_MCP = "ccm__group_coordinator";
 export declare const FEISHU_INTERNAL_MCP = "mcp-feishu";
+export declare const FETCH_WEB_BUNDLED_MCP = "fetch-web-mcp";
 export declare function findCcmPackageRoot(): string;
 export declare function discoverBundledInternalMcpManifests(packageRoot?: string): any[];
 export declare function isInternalMcpName(value: any): boolean;
 export declare function buildBundledFeishuMcpTool(config?: any, fallback?: any): any;
+export declare function isLegacyFetchWebMcpDefinition(value?: any): any;
+export declare function buildBundledFetchWebMcpTool(fallback?: any): any;
 export declare function buildInternalMcpCatalog(options?: {
     feishuConfig?: any;
     runtimeServers?: any[];

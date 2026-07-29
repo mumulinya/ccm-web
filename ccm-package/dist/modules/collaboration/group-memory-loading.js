@@ -87,6 +87,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../../core/atomic-json-file");
+const typed_memory_conflict_1 = require("./typed-memory-conflict");
 const group_memory_index_1 = require("./group-memory-index");
 // ===== merged from group-memory-loading-part-01.ts =====
 // Extracted functional module. The original entry remains a compatibility facade.
@@ -2304,6 +2305,8 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
     const semanticStats = (0, group_memory_index_1.semanticRecallCorpusStats)(index.docs, text);
     const modelExtractionTopicIndex = (0, group_memory_index_1.buildGroupSessionModelExtractionTopicRecallIndex)(groupId);
     const pendingStaleConflictIndex = (0, group_memory_index_1.buildGroupTypedMemoryPendingStaleConflictIndex)(groupId);
+    // doc 对 doc 的语义冲突：未裁决降权，已裁决淘汰方不再召回。
+    const semanticConflictIndex = (0, typed_memory_conflict_1.buildTypedMemoryConflictRecallIndex)(groupId);
     const manifestSelection = options.typedMemoryManifestSelection || options.typed_memory_manifest_selection || options.manifestSelection || options.manifest_selection || null;
     const manifestSelectionVerification = manifestSelection
         ? verifyGroupTypedMemoryManifestSelection(manifestSelection, groupId)
@@ -2464,6 +2467,13 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
             typedMemoryConsumption.gated = true;
             typedMemoryConsumption.gate_reason = "specialized_recall_policy_non_positive";
         }
+        const semanticConflict = (0, typed_memory_conflict_1.evaluateTypedMemoryConflictPenalty)(doc.relPath, semanticConflictIndex);
+        if (semanticConflict.suppressed && !requiredRecall) {
+            diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "semantic_conflict_resolved_against", semanticConflict, freshness });
+            return null;
+        }
+        if (semanticConflict.adjustment)
+            score += semanticConflict.adjustment;
         if (!requiredRecall && score <= 0 && queryTokens.length && !(pathCondition.conditional && pathCondition.matched)) {
             const reason = workerContextPressureFeedbackPolicy.active === true
                 && workerContextPressureFeedbackPolicy.risk_doc === true
@@ -2483,6 +2493,7 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
             workerContextPressureUsage,
             workerContextPressureFeedbackPolicy,
             semanticReference,
+            semanticConflict,
             modelExtractionTopicRecall,
             pendingStaleConflicts,
             typedMemoryConsumption,

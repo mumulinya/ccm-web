@@ -13,6 +13,7 @@ import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
 import GlobalAgentFeishuBindingModal from './GlobalAgentFeishuBindingModal.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
 import AgentToolsModal from '../common/AgentToolsModal.vue'
+import OnlineDocumentReferences from '../common/OnlineDocumentReferences.vue'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useGlobalAgentAttachments } from '../../composables/useGlobalAgentAttachments.js'
 import { useGlobalAgentControlCenter } from '../../composables/useGlobalAgentControlCenter.js'
@@ -1383,6 +1384,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           @guide="guideGlobalQueuedTurn"
           @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
         />
+        <OnlineDocumentReferences :text="chatInput" compact pending-label="发送后读取" />
                 <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
           <input 
             type="file" 

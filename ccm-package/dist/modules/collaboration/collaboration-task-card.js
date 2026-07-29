@@ -120,6 +120,7 @@ exports.buildTodoStepActions = buildTodoStepActions;
 exports.loopStageStatus = loopStageStatus;
 exports.planStepHasVerificationSignal = planStepHasVerificationSignal;
 exports.summaryHasExecutedVerification = summaryHasExecutedVerification;
+const task_user_runtime_1 = require("../../agents/task-user-runtime");
 const collaboration_1 = require("./collaboration");
 const collaboration_coordination_ux_1 = require("./collaboration-coordination-ux");
 const collaboration_memory_gates_1 = require("./collaboration-memory-gates");
@@ -186,21 +187,20 @@ function isAgentExecutionBlockedPendingTask(task) {
         || /Agent CLI|执行通道|Agent Runner|外部 Agent Runner|spawn\s+EPERM|ConnectionRefused|Unable to connect to API|ECONNREFUSED/i.test(text);
 }
 function isPositiveAcceptanceEvidenceText(value) {
-    const text = String(value || "").trim();
-    if (!text)
+    if (!value || typeof value !== "object")
         return false;
-    if (/未通过|失败|待补|待处理|缺口|证据不足|无法确认|无法验证|failed|failure|partial|incomplete|missing|blocked/i.test(text))
-        return false;
-    return /已通过|通过|可以接受|已覆盖|已执行|已复核|已验证|passed|pass|success|ok/i.test(text);
+    return ["passed", "approved", "accepted", "success", "succeeded", "ok"].includes(String(value.verdict || value.status || "").toLowerCase());
 }
 function isBareAcceptanceMarker(value) {
-    return /^(最终验收|主\s*Agent\s*验收|验收结论)\s*[：:]?\s*(已通过|通过)$/i.test(String(value || "").trim());
+    return !value || typeof value !== "object" || rowEvidenceCount(value) === 0;
 }
 function isStrongExecutedVerificationText(value) {
-    const text = String(value || "").trim();
-    if (!text || (0, collaboration_coordination_ux_1.isFailedVerification)(text) || (0, collaboration_coordination_ux_1.isSuggestedOnlyVerification)(text))
+    if (!value || typeof value !== "object")
         return false;
-    return /已实际执行|已执行|外部 Runner|验证来源|命令|npm|pnpm|yarn|test|check|lint|build|playwright|pytest|exit\s*0|passed|success|ok/i.test(text);
+    const status = String(value.status || value.verdict || "").toLowerCase();
+    const exitCode = value.exit_code ?? value.exitCode;
+    return ["passed", "success", "succeeded", "completed", "ok"].includes(status)
+        && (exitCode === undefined || Number(exitCode) === 0);
 }
 function flattenAcceptanceEvidenceRows(...values) {
     const rows = [];
@@ -252,12 +252,10 @@ function rowEvidenceCount(row) {
 }
 function isStrongPositiveReviewRow(row) {
     if (!row || typeof row !== "object")
-        return isPositiveAcceptanceEvidenceText(row) && !isBareAcceptanceMarker(row);
+        return false;
     const verdict = String(row.verdict || row.status || "").toLowerCase();
-    const passed = /pass|passed|approved|accepted|success|ok|通过|已通过/.test(verdict)
-        && !/fail|failed|rejected|partial|incomplete|blocked|未通过|失败|待补/.test(verdict);
-    const text = evidenceRowText(row);
-    return passed && (rowEvidenceCount(row) > 0 || (isPositiveAcceptanceEvidenceText(text) && !isBareAcceptanceMarker(text)));
+    const passed = ["pass", "passed", "approved", "accepted", "success", "succeeded", "ok"].includes(verdict);
+    return passed && rowEvidenceCount(row) > 0;
 }
 function hasStrongTaskAcceptanceEvidence(task, executions = [], explicitSummary = null) {
     const summary = explicitSummary || task?.delivery_summary || {};
@@ -289,7 +287,8 @@ function hasStrongTaskAcceptanceEvidence(task, executions = [], explicitSummary 
         return true;
     const deliveryReport = summary.delivery_report || summary.deliveryReport || {};
     const verificationRows = (0, collaboration_1.uniqueStrings)(summary.verification_executed, summary.external_runner_verification, summary.verification_results, summary.verification, task?.verification_results, task?.verification, deliveryReport.verification, deliveryReport.verification_evidence?.executed, deliveryReport.verificationEvidence?.executed, deliveryReport.verification_evidence?.items, deliveryReport.verificationEvidence?.items);
-    if (verificationRows.some(isStrongExecutedVerificationText))
+    const verificationFailures = (0, collaboration_1.uniqueStrings)(summary.verification_failed, summary.verificationFailed);
+    if (verificationRows.length > 0 && verificationFailures.length === 0)
         return true;
     if (summary.verification_source_gate_passed === true && Number(summary.external_runner_verification_count || 0) > 0)
         return true;
@@ -299,10 +298,7 @@ function hasStrongTaskAcceptanceEvidence(task, executions = [], explicitSummary 
     if (independentReviewRows.some(isStrongPositiveReviewRow))
         return true;
     const acceptanceRows = flattenAcceptanceEvidenceRows(summary.acceptance, summary.acceptance_evidence, summary.acceptanceEvidence, deliveryReport.acceptance, deliveryReport.acceptance_evidence, deliveryReport.acceptanceEvidence);
-    if (acceptanceRows.some((row) => {
-        const text = evidenceRowText(row) || String(row || "");
-        return isPositiveAcceptanceEvidenceText(text) && !isBareAcceptanceMarker(text);
-    }))
+    if (acceptanceRows.some((row) => isPositiveAcceptanceEvidenceText(row) && !isBareAcceptanceMarker(row)))
         return true;
     const executionGreen = executions.some((item) => item?.green?.pass === true && ["project", "workspace", "merge_ready"].includes(String(item?.green?.level || "")));
     if (executionGreen && (verificationRows.length > 0 || gateTotal > 0))
@@ -903,7 +899,10 @@ function buildUserChangeSummary(task, summary = {}, workers = [], workItems = []
 function buildUserTaskActions(task, phase, executions) {
     const actions = [];
     const completed = String(task?.status || "") === "done" && hasStrongTaskAcceptanceEvidence(task, executions, task?.delivery_summary || {});
-    const terminal = completed || String(task?.status || "") === "cancelled";
+    const stopped = ["cancelled", "reverted"].includes(String(task?.status || "")) || ["cancelled", "reverted"].includes(phase);
+    const retryable = ["failed", "blocked", "environment_blocked", "recovery_required"].includes(phase)
+        || ["failed", "blocked"].includes(String(task?.status || ""));
+    const terminal = completed || stopped || retryable;
     if (task?.intake_state === "awaiting_confirmation") {
         actions.push({ id: "confirm_plan", label: "确认执行", kind: "confirm_plan", tone: "primary" });
         actions.push({ id: "revise_plan", label: "调整计划", kind: "revise_plan", tone: "warning" });
@@ -922,7 +921,7 @@ function buildUserTaskActions(task, phase, executions) {
         actions.push({ id: "continue", label: "继续修改", kind: "continue", tone: "primary" });
     else if (!terminal)
         actions.push({ id: "supplement", label: "追加要求", kind: "continue", tone: "primary" });
-    if (["failed", "blocked"].includes(String(task?.status || "")) || phase === "blocked")
+    if (retryable)
         actions.push({ id: "retry", label: "重新执行", kind: "retry", tone: "warning" });
     const checkpointIds = executions.flatMap((item) => Array.isArray(item.checkpointIds) ? item.checkpointIds : []).filter(Boolean);
     if (completed && checkpointIds.length)
@@ -1159,6 +1158,10 @@ function buildTaskCardView(task, executions, sessions) {
         ...executions.filter(item => ["spawning", "ready", "prompt_accepted", "running", "reviewing"].includes(item.state)).map(item => item.project),
         ...workers.filter((item) => ["running", "in_progress", "pending", "partial", "blocked"].includes(String(item.status || ""))).map((item) => item.agent),
     ].filter(Boolean));
+    const responsibleProjects = (0, collaboration_1.uniqueStrings)([
+        ...workItems.map((item) => item.target || item.owner),
+        ...workers.map((item) => item.agent),
+    ].filter((item) => item && !/^(coordinator|test-agent)$/i.test(String(item)))).slice(0, 6);
     const files = (0, collaboration_1.uniqueStrings)([
         ...(Array.isArray(summary.files_changed) ? summary.files_changed : []),
         ...(Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.map((item) => item?.path || item) : []),
@@ -1237,18 +1240,32 @@ function buildTaskCardView(task, executions, sessions) {
         taskId: task?.id || "",
     });
     const progressCheckpoints = displayStream.progress_checkpoints || displayStream.workchain?.progress_checkpoints || null;
+    const runtimeStatus = (0, task_user_runtime_1.buildTaskUserRuntimeStatus)(task, { phase, statusDetail: summary.headline || task?.status_detail || "" });
     return {
         version: 1,
         visible: visible && presentation !== "reply",
         presentation,
         task_id: task?.id || "",
+        task_thread_id: task?.task_thread_id || task?.taskThreadId || task?.root_task_id || task?.rootTaskId || task?.retry_of_task_id || task?.retryOfTaskId || task?.source_task_id || task?.sourceTaskId || task?.id || "",
         title: task?.title || "开发任务",
         goal: task?.business_goal || task?.goal || task?.title || "",
         phase,
         phase_label: waitingUserResolved && phase === "reworking" ? "正在继续" : phaseLabels[phase] || phase,
+        runtime_status: runtimeStatus,
+        status_detail: task?.status_detail || runtimeStatus.status_detail,
         status: task?.status || "pending",
+        usage_summary: task?.usage_summary || task?.usageSummary || task?.provider_usage || task?.providerUsage || {
+            model_calls: Number.isFinite(Number(task?.model_calls)) ? Number(task.model_calls) : undefined,
+            input_tokens: Number.isFinite(Number(task?.input_tokens)) ? Number(task.input_tokens) : undefined,
+            output_tokens: Number.isFinite(Number(task?.output_tokens)) ? Number(task.output_tokens) : undefined,
+            retry_count: Number.isFinite(Number(task?.retry_count)) ? Number(task.retry_count) : undefined,
+            test_agent_rounds: Number.isFinite(Number(task?.review_round_total ?? task?.review_round)) ? Number(task.review_round_total ?? task.review_round) : undefined,
+        },
         progress: progressByPhase[phase] ?? 0,
         active_agents: activeAgents.map((name) => `${userAgentRole(name)} · ${name} 正在处理`),
+        responsible_projects: responsibleProjects,
+        responsibleProjects,
+        requires_confirmation: planMode?.requires_confirmation === true && !planMode?.accepted_at && !planMode?.confirmed_at,
         agents: workers.map((item) => ({ name: `${userAgentRole(item.agent)} · ${item.agent}`, status: item.status, summary: userAgentProgress(item), blockers: item.blockers.slice(0, 3) })),
         live_todo_plan: liveTodoPlan,
         work_items: workItems,
@@ -1329,7 +1346,39 @@ function buildTaskCardView(task, executions, sessions) {
             steps_hidden_count: Array.isArray(planMode.steps) ? Math.max(0, planMode.steps.length - 8) : 0,
             risk: planMode.risk ? { level: planMode.risk.level || "low", summary: planMode.risk.summary || "", reasons: Array.isArray(planMode.risk.reasons) ? planMode.risk.reasons.slice(0, 6) : [] } : null,
             impact_scope: planMode.impact_scope ? { areas: Array.isArray(planMode.impact_scope.areas) ? planMode.impact_scope.areas.slice(0, 6) : [], projects: Array.isArray(planMode.impact_scope.projects) ? planMode.impact_scope.projects.slice(0, 8) : [], multi_agent: planMode.impact_scope.multi_agent === true } : null,
-            read_only_exploration: planMode.read_only_exploration ? { summary: (0, memory_1.compactMemoryText)(planMode.read_only_exploration.summary || "", 520), projects: Array.isArray(planMode.read_only_exploration.projects) ? planMode.read_only_exploration.projects.slice(0, 8) : [], knowledge_used: planMode.read_only_exploration.knowledge_used === true, code_snapshot_used: planMode.read_only_exploration.code_snapshot_used === true } : null,
+            architecture_plan: planMode.architecture_plan ? {
+                goal: (0, memory_1.compactMemoryText)(planMode.architecture_plan.goal || "", 700),
+                boundaries: Array.isArray(planMode.architecture_plan.boundaries) ? planMode.architecture_plan.boundaries.slice(0, 12).map((item) => (0, memory_1.compactMemoryText)(item, 300)) : [],
+                data_relationships: Array.isArray(planMode.architecture_plan.dataRelationships || planMode.architecture_plan.data_relationships)
+                    ? (planMode.architecture_plan.dataRelationships || planMode.architecture_plan.data_relationships).slice(0, 16).map((item) => (0, memory_1.compactMemoryText)(item, 420))
+                    : [],
+                dependency_steps: Array.isArray(planMode.architecture_plan.dependencySteps || planMode.architecture_plan.dependency_steps)
+                    ? (planMode.architecture_plan.dependencySteps || planMode.architecture_plan.dependency_steps).slice(0, 12).map((item) => ({
+                        id: item.id || "",
+                        title: (0, memory_1.compactMemoryText)(item.title || "", 220),
+                        project: (0, memory_1.compactMemoryText)(item.project || "", 120),
+                        depends_on: Array.isArray(item.dependsOn || item.depends_on) ? (item.dependsOn || item.depends_on).slice(0, 12) : [],
+                        acceptance: Array.isArray(item.acceptance) ? item.acceptance.slice(0, 8).map((value) => (0, memory_1.compactMemoryText)(value, 300)) : [],
+                    }))
+                    : [],
+                source_snapshot_checksum: planMode.architecture_plan.sourceSnapshotChecksum || planMode.architecture_plan.source_snapshot_checksum || "",
+            } : null,
+            read_only_exploration: planMode.read_only_exploration ? {
+                summary: (0, memory_1.compactMemoryText)(planMode.read_only_exploration.summary || "", 520),
+                projects: Array.isArray(planMode.read_only_exploration.projects) ? planMode.read_only_exploration.projects.slice(0, 8) : [],
+                knowledge_used: planMode.read_only_exploration.knowledge_used === true,
+                code_snapshot_used: planMode.read_only_exploration.code_snapshot_used === true,
+                source_ready: planMode.read_only_exploration.source_ready === true,
+                source_snapshot_checksum: planMode.read_only_exploration.source_snapshot_checksum || "",
+                source_evidence: Array.isArray(planMode.read_only_exploration.source_evidence)
+                    ? planMode.read_only_exploration.source_evidence.slice(0, 8).map((item) => ({
+                        project: item.project || "",
+                        status: item.status || "",
+                        selected_paths: Array.isArray(item.selected_paths) ? item.selected_paths.slice(0, 12) : [],
+                        issue: (0, memory_1.compactMemoryText)(item.issue || "", 240),
+                    }))
+                    : [],
+            } : null,
             acceptance: Array.isArray(planMode.acceptance) ? planMode.acceptance.slice(0, 6) : [],
             clarification_questions: Array.isArray(planMode.clarification_questions) ? planMode.clarification_questions.slice(0, 5).map((item) => ({
                 id: item.id || "",
@@ -1362,7 +1411,7 @@ function buildTaskCardView(task, executions, sessions) {
         pickup_summary: summary.delivery_report?.pickup_summary || summary.pickup_summary || null,
         pickupSummary: summary.delivery_report?.pickup_summary || summary.pickupSummary || null,
         delivery: { headline: summary.headline || task?.status_detail || "", files: files.slice(0, 30), changes: Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.slice(0, 30) : [], verification: verification.slice(0, 20), risks: (0, collaboration_1.uniqueStrings)([...(summary.risks || []), ...(summary.remaining_items || []), ...(summary.advisory_needs || [])]).slice(0, 10), acceptance_passed: deliveryAccepted },
-        actions: buildUserTaskActions(task, phase, executions),
+        actions: buildUserTaskActions(task, runtimeStatus.phase, executions),
         technical: { trace_id: task?.trace_id || "", execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), source_ingestion: task?.source_ingestion || task?.sourceIngestion || null, requirement_extraction: task?.requirement_extraction || task?.requirementExtraction || null, work_item_ids: workItems.map((item) => item.id), work_item_summary: workItemSummary, work_item_claim_summary: workItemClaimSummary, work_item_unlock_summary: workItemUnlockSummary, completion_readiness_summary: completionReadinessSummary, recovery_summary: recoverySummary, continuation_state: task?.collaboration_state?.last_continuation || null, receipt_rework_summary: receiptReworkSummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: summary.post_review_spot_check || null, gap_fingerprint: terminalPhase ? "" : (0, collaboration_1.getTaskGapFingerprint)(task), entity_chain_endpoint: `/api/tasks/entity-chain?id=${encodeURIComponent(task?.id || "")}`, mainAgentDecision: liveMainAgentDecision, main_agent_decision: liveMainAgentDecision, runtime_kernel: runtimeKernel, display_stream: displayStream },
         updated_at: task?.updated_at || new Date().toISOString(),
     };

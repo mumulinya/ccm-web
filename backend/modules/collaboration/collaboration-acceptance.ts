@@ -197,6 +197,7 @@ import {
   globalMissionChildGatePassed as globalMissionChildGatePassedBase,
   refreshGlobalMissionParentInTaskList as refreshGlobalMissionParentInTaskListBase,
 } from "./global-mission";
+import { buildMissionEvidenceContract } from "./mission-evidence-contract";
 import {
   addGroupLog,
   addTaskLog,
@@ -893,7 +894,7 @@ export function scoreChildAgentReceipt(task: any, receipt: any = {}, context: an
     { id: "verification", label: "列出已执行验证", ok: !taskRequiresVerification(task) || (Array.isArray(receipt.verification || receipt.tests) && (receipt.verification || receipt.tests).length > 0) },
     { id: "not_handoff_only", label: "完成执行而非仅建议", ok: handoffQuality.pass, detail: handoffQuality.reason },
     { id: "contract_changes", label: "结构化契约变化", ok: !contractLikely || contractChanges.length > 0 },
-    { id: "no_open_blockers", label: "无开放阻塞", ok: !(Array.isArray(receipt.blockers) && receipt.blockers.length) && !(Array.isArray(receipt.needs) && receipt.needs.some((item: any) => !isAdvisoryNeed(item, task))) },
+    { id: "no_open_blockers", label: "无开放阻塞", ok: !(Array.isArray(receipt.blockers) && receipt.blockers.length) && !(Array.isArray(receipt.needs) && receipt.needs.length) },
     { id: "memory_declared", label: "声明记忆使用", ok: Array.isArray(receipt.memoryUsed || receipt.memory_used) || Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) },
     { id: "task_agent_memory_snapshot", label: "匹配本轮记忆快照", ok: !taskAgentMemorySnapshot.required || taskAgentMemorySnapshot.pass, detail: taskAgentMemorySnapshot.required ? `snapshot=${taskAgentMemorySnapshot.matched_snapshot_ids.join(",") || "missing"} session=${taskAgentMemorySnapshot.receipt_task_agent_session_id || "missing"}` : "not_required" },
     { id: "memory_gate", label: "引用记忆派发 gate", ok: !effectiveMemoryGate.required || effectiveMemoryGate.pass, detail: effectiveMemoryGate.required ? `gate=${effectiveMemoryGate.gate_ids.join(",") || "unknown"}` : "not_required" },
@@ -942,7 +943,14 @@ export function buildIndependentReviewGate(task: any, actualFileChanges: any[] =
   const decision = explainIndependentReviewTriggerDecision(task, actualFileChanges);
   const highRiskFiles = decision.highRiskFiles || (actualFileChanges || []).filter(changeLooksHighRiskForIndependentReview);
   const required = decision.required === true;
-  const evidence = collectIndependentReviewEvidence(receipts, agentQa);
+  const { buildReviewChangeFingerprint, applyReviewFreshnessToEvidence } = require("./review-freshness");
+  // 复核结论必须与当前变更集对得上：过期的"通过"会被降级为 needs_recheck，阻断验收并要求重新复验。
+  const currentChangeFingerprint = buildReviewChangeFingerprint(actualFileChanges);
+  const freshnessApplied = applyReviewFreshnessToEvidence(
+    collectIndependentReviewEvidence(receipts, agentQa),
+    currentChangeFingerprint,
+  );
+  const evidence = freshnessApplied.rows;
   const failedEvidence = evidence.filter((item: any) => item.status === "failed");
   const passedEvidence = evidence.filter((item: any) => item.status === "passed");
   const recheckEvidence = evidence.filter((item: any) => item.status === "needs_recheck");
@@ -966,8 +974,12 @@ export function buildIndependentReviewGate(task: any, actualFileChanges: any[] =
                 ? "passed"
                 : "missing",
     reason: required
-      ? (decision.triggerReasons.join("；") || "复杂代码变更需要另一个 Agent 复核")
+      ? (freshnessApplied.staleCount > 0
+        ? `上一次复核通过后代码又发生变更，${freshnessApplied.staleCount} 条复核结论已过期，需要基于最新改动重新复验`
+        : (decision.triggerReasons.join("；") || "复杂代码变更需要另一个 Agent 复核"))
       : (decision.skipReasons.join("；") || "本次变更不强制独立复核"),
+    stale_evidence_count: freshnessApplied.staleCount,
+    reviewed_change_fingerprint: currentChangeFingerprint,
     decision_detail: decision.decisionDetail,
     decisionDetail: decision.decisionDetail,
     trigger_reasons: decision.triggerReasons,
@@ -1117,11 +1129,13 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
   const verification = uniqueStrings(...receipts.map((receipt: any) => receipt.verification));
   const verificationGate = getVerificationEvidenceGate(receipts);
   const requiredVerificationCoverage = getRequiredVerificationCoverage(receipts);
-  const externalRunnerVerification = uniqueStrings(
-    ...receipts.map((receipt: any) => (receipt.verification || []).filter(
-      (item: any) => /passed by external runner\s*\(exit 0\)/i.test(String(item))
-    ))
-  );
+  const externalRunnerVerification = uniqueStrings(...receipts.map((receipt: any) =>
+    (Array.isArray(receipt.verificationResults || receipt.verification_results) ? (receipt.verificationResults || receipt.verification_results) : [])
+      .filter((item: any) => String(item?.status || "").toLowerCase() === "passed"
+        && ["ccm_runner", "ccm_runner_verification", "external_runner"].includes(String(item?.source || "").toLowerCase())
+        && (item.exitCode == null || Number(item.exitCode) === 0))
+      .map((item: any) => item.command || item.name)
+  ));
   const projectAgentProfiles = agents
     .map((agent: string) => getProjectAgentCapabilityProfile(agent))
     .filter((profile: any) => profile.configured);
@@ -1134,13 +1148,12 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
   if (projectPolicyViolations.length) blockers.push(...projectPolicyViolations.map((item: any) => item.message));
   const needs = uniqueStrings(...receipts.map((receipt: any) => receipt.needs));
   const executionDetail = String(execution?.detail || "").trim();
-  const executionDetailConfirmsCompletion = /(?:主\s*Agent|协调(?:者|Agent)|任务|最终)?\s*(?:复盘|验收|检查)?\s*(?:判定|确认)?\s*(?:已)?完成|(?:复盘|验收).{0,12}(?:通过|完成)/i.test(executionDetail);
-  if (finalStatus !== "done" && executionDetail && !executionDetailConfirmsCompletion && !needs.length && !blockers.length) {
+  if (finalStatus !== "done" && executionDetail && !needs.length && !blockers.length) {
     needs.push(executionDetail);
   }
   const actions = uniqueStrings(...receipts.map((receipt: any) => receipt.actions));
-  const advisoryNeeds = needs.filter((item: any) => isAdvisoryNeed(item, task));
-  const blockingNeeds = needs.filter((item: any) => !advisoryNeeds.includes(item));
+  const advisoryNeeds = uniqueStrings(...receipts.map((receipt: any) => receipt.advisoryNeeds || receipt.advisory_needs || []));
+  const blockingNeeds = needs;
   const receiptStatuses = receipts.map((receipt: any) => ({
     agent: receipt.agent,
     status: receipt.status,
@@ -1706,6 +1719,7 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
   summary.runtime_kernel = buildRuntimeKernelSnapshot(task, summary);
   summary.acceptance_gate = buildAcceptanceGate(task, execution, summary, finalStatus);
   summary.acceptance_gate_passed = summary.acceptance_gate.pass;
+  summary.evidence_contract = buildMissionEvidenceContract(summary);
   summary.reasoning_loop = buildTaskReasoningState(task, summary);
   summary.plan_version = summary.reasoning_loop.plan_version;
   summary.reasoning_deviation_count = summary.reasoning_loop.deviations.length;
@@ -1717,7 +1731,7 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
     finalStatus as any,
     execution?.report || execution?.result || execution?.detail || ""
   );
-  summary.user_report = summary.delivery_report.markdown || buildUserDeliveryReport(
+  summary.user_report = summary.delivery_report.user_text || summary.delivery_report.markdown || buildUserDeliveryReport(
     task,
     summary,
     finalStatus as any,
@@ -1733,13 +1747,12 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
 
 export function getTaskExecutionFromReceipt(response: string, receipt: any, details: any = {}) {
   if (!receipt) {
-    if (checkTaskFailure(response)) {
-      return buildTaskExecutionResult("failed", response, { ...details, detail: details.detail || "Agent 输出包含失败标记" });
-    }
-    if (checkTaskCompletion(response)) {
-      return buildTaskExecutionResult("done", response, { ...details, detail: details.detail || "兼容旧 Agent：检测到完成标记但缺少结构化结果说明" });
-    }
-    return buildTaskExecutionResult("waiting", response, { ...details, detail: details.detail || "缺少结构化结果说明，无法可靠验收" });
+    return buildTaskExecutionResult("waiting", response, {
+      ...details,
+      detail: details.detail || "缺少结构化结果说明，无法可靠验收",
+      legacy_unverified: true,
+      missing_receipt: true,
+    });
   }
 
   if (receipt.status === "done") {
@@ -2107,7 +2120,7 @@ export function canCompleteDailyDevFromDeliverySummary(task: any, execution: any
     ...(Array.isArray(summary.blockers) ? summary.blockers : []),
     ...(Array.isArray(summary.blocking_needs)
       ? summary.blocking_needs
-      : (Array.isArray(summary.needs) ? summary.needs.filter((item: any) => !isAdvisoryNeed(item, task)) : [])),
+      : (Array.isArray(summary.needs) ? summary.needs : [])),
     ...(Array.isArray(summary.verification_failed) ? summary.verification_failed : []),
     ...(Array.isArray(summary.verification_suggested) ? summary.verification_suggested : []),
   ].filter(Boolean);

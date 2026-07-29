@@ -385,10 +385,13 @@ export function useProjectManager(props, emit) {
 
   const runProjectRuntimeAction = async action => {
     if (!currentProject.value || !selectedRuntimeProfileId.value || projectRuntimeBusy.value) return
-    if (['start', 'restart', 'build'].includes(action)) openProjectRuntimeLogs(action === 'build' ? 'build' : 'run')
+    const targetProfileId = selectedRuntimeProfileId.value
+    if (['start', 'restart', 'build'].includes(action)) {
+      openProjectRuntimeLogs(action === 'build' ? 'build' : 'run', targetProfileId)
+    }
     projectRuntimeBusy.value = action
     try {
-      const result = await projectsApi.runtimeAction(currentProject.value, selectedRuntimeProfileId.value, action)
+      const result = await projectsApi.runtimeAction(currentProject.value, targetProfileId, action)
       await loadProjectRuntime(currentProject.value)
       await loadProjects()
       const labels = { start: '源码项目已启动', stop: '源码项目已暂停', restart: '源码项目已重新运行', build: '构建任务已开始' }
@@ -400,6 +403,7 @@ export function useProjectManager(props, emit) {
   // 选择项目
   const selectProject = async (name) => {
     if (isStreaming.value) stopStreaming()
+    showLogsPanel.value = false
     currentProject.value = name
     currentSession.value = null
     currentSessionDraft.value = false
@@ -437,6 +441,39 @@ export function useProjectManager(props, emit) {
   }
 
   let projectSessionRefreshSequence = 0
+  const projectTaskMessageId = message => String(message?.task_id || message?.taskExperience?.task_id || '').trim()
+  const isProjectTaskTerminal = task => ['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(String(task?.phase || task?.status || '').toLowerCase())
+  const hydrateProjectTaskMessages = async (history, project, sessionId) => {
+    const rows = Array.isArray(history) ? history : []
+    const candidates = rows
+      .filter(message => message?.role === 'assistant' && projectTaskMessageId(message) && !isProjectTaskTerminal(message.taskExperience || {}))
+      .slice(-12)
+    if (!candidates.length) return rows
+    const hydrated = await Promise.all(candidates.map(async message => {
+      const taskId = projectTaskMessageId(message)
+      try {
+        const response = await fetch(`/api/projects/main-agent/task?task_id=${encodeURIComponent(taskId)}`)
+        const payload = await response.json()
+        if (!response.ok || !payload.success || !payload.task) return null
+        if (String(payload.task.project || '') !== String(project || '') || String(payload.task.project_session_id || '') !== String(sessionId || '')) return null
+        return { message, task: payload.task }
+      } catch { return null }
+    }))
+    const byTask = new Map(hydrated.filter(Boolean).map(item => [String(item.task.task_id), item.task]))
+    return rows.map(message => {
+      const taskId = projectTaskMessageId(message)
+      const task = byTask.get(taskId)
+      if (!task) return message
+      return {
+        ...message,
+        id: task.message_id || message.id || `project-main-task:${taskId}`,
+        messageMode: 'task',
+        task_id: taskId,
+        taskExperience: { ...task, requires_card: true },
+        fileChanges: task.file_changes || message.fileChanges,
+      }
+    })
+  }
   const refreshCurrentProjectSession = async (expectedSessionId = '') => {
     const project = currentProject.value
     const sessionId = currentSession.value
@@ -448,7 +485,7 @@ export function useProjectManager(props, emit) {
       loadSessions(project),
     ])
     if (sequence !== projectSessionRefreshSequence || project !== currentProject.value || sessionId !== currentSession.value) return false
-    messages.value = detail.history || []
+    messages.value = await hydrateProjectTaskMessages(detail.history || [], project, sessionId)
     if (wasPinned) nextTick(() => scrollToBottom({ force: true }))
     return true
   }
@@ -463,7 +500,7 @@ export function useProjectManager(props, emit) {
     if (project) localStorage.setItem(`ccm:project-session:${project}`, sessionId)
     const data = await sessionsApi.detail(project, sessionId)
     if (project !== currentProject.value || sessionId !== currentSession.value) return
-    messages.value = data.history || []
+    messages.value = await hydrateProjectTaskMessages(data.history || [], project, sessionId)
     scrollToBottom({ force: true })
   }
 
@@ -795,19 +832,60 @@ export function useProjectManager(props, emit) {
       if (action.kind === 'revise_plan') {
         const requirement = window.prompt('需要怎样调整这份计划？', '')
         if (!requirement) return
-        await postTaskAction('/api/projects/main-agent/task-action', {
-          action: 'cancel', task_id: id, project: currentProject.value, project_session_id: currentSession.value,
-          reason: '用户要求修改原计划，旧计划已停止',
-        })
-        pendingProjectParentRunId.value = ''
-        chatInput.value = requirement
-        await nextTick()
-        await sendMessage()
+        msg.taskActionBusy = true
+        try {
+          const data = await postTaskAction('/api/projects/main-agent/task-action', {
+            action: 'revise_plan',
+            task_id: id,
+            project: currentProject.value,
+            project_session_id: currentSession.value,
+            feedback: requirement,
+            client_message_id: `plan-revision:${makeProjectMessageId()}`,
+          })
+          msg.id = data.message_id || msg.id
+          msg.task_id = id
+          msg.messageMode = 'task'
+          msg.taskExperience = data.taskExperience || data.task || msg.taskExperience
+          await refreshCurrentProjectSession(currentSession.value)
+          toast.success(data.duplicate ? '这次计划调整已记录' : `计划已完成第 ${data.revision?.revision || 1} 次修订`)
+        } finally {
+          msg.taskActionBusy = false
+        }
         return
       }
       if (action.kind === 'view_changes') {
         if (msg?.fileChanges?.files?.length) openCodeChangeDrawer(msg.fileChanges, { title: card?.title || '项目 Agent 代码改动', subtitle: card?.goal || '' })
         else toast.info('暂无可查看的文件改动')
+        return
+      }
+      if (action.kind === 'view_trace') {
+        const payload = {
+          tab: 'trace-replay',
+          scope: 'project',
+          project: currentProject.value || '',
+          project_session_id: currentSession.value || '',
+          task_id: action.task_id || action.taskId || id || '',
+          trace_id: action.trace_id || action.traceId || card?.technical?.trace_id || '',
+          preset: action.preset || 'all',
+          event_status: action.event_status || action.eventStatus || '',
+          event_query: action.event_query || action.eventQuery || '',
+          event_id: action.event_id || action.eventId || '',
+          evidence_id: action.evidence_id || action.evidenceId || '',
+          at: Date.now(),
+        }
+        localStorage.setItem('trace-replay-target', JSON.stringify(payload))
+        slashNavigate('trace-replay')
+        window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: payload }))
+        return
+      }
+      if (action.kind === 'open_test_targets') {
+        await loadProjectTestTargets()
+        return
+      }
+      if (action.kind === 'open_project_settings') {
+        const project = projects.value.find(item => item.name === currentProject.value)
+        if (project) await openEditModal(project)
+        else toast.info('请先选择项目')
         return
       }
       if (action.kind === 'save_knowledge') {
@@ -1023,7 +1101,8 @@ export function useProjectManager(props, emit) {
         if (data.type === 'presentation') {
           const mode = String(data.message_mode || data.messageMode || 'conversation')
           agentMsg.messageMode = mode
-        } else if (data.type === 'task_runtime') {
+        } else if (data.type === 'task_runtime' || data.type === 'task_heartbeat') {
+          if (data.message_id) agentMsg.id = data.message_id
           agentMsg.projectRun = data.run || agentMsg.projectRun
           activeProjectRunId.value = data.run?.id || activeProjectRunId.value
           agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
@@ -1031,6 +1110,12 @@ export function useProjectManager(props, emit) {
             ? (data.taskExperience?.task_id || activeProjectMainTaskId.value)
             : activeProjectMainTaskId.value
           agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
+          if (data.type === 'task_heartbeat' && agentMsg.taskExperience) {
+            agentMsg.taskExperience = {
+              ...agentMsg.taskExperience,
+              updated_at: data.at || agentMsg.taskExperience.updated_at,
+            }
+          }
           if (agentMsg.messageMode === 'task') {
             addAgentMessage()
             scrollToBottom()
@@ -1051,6 +1136,7 @@ export function useProjectManager(props, emit) {
           agentMsg.content += data.text
           scrollToBottom()
         } else if (data.type === 'done') {
+          if (data.message_id) agentMsg.id = data.message_id
           if (data.usage_anchor_id) agentMsg.id = data.usage_anchor_id
           if (data.provider_usage) agentMsg.provider_usage = data.provider_usage
           notifySessionContextUsage('project_session', `${projectAtSend}::${sessionAtSend}`, { reason: 'provider_usage_updated' })
@@ -1063,6 +1149,7 @@ export function useProjectManager(props, emit) {
           agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
           agentMsg.workEvents = data.workEvents || agentMsg.workEvents
         } else if (data.type === 'error') {
+          if (data.message_id) agentMsg.id = data.message_id
           addAgentMessage()
           agentMsg.messageMode = data.message_mode || data.messageMode || agentMsg.messageMode
           agentMsg.projectRun = data.run || agentMsg.projectRun
@@ -1139,7 +1226,8 @@ export function useProjectManager(props, emit) {
       const hasAgentResult = agentMsg.content || agentMsg.taskExperience || agentMsg.workEvents.length
       if (hasAgentResult) {
         addAgentMessage()
-        if (userPersisted) {
+        const serverOwnedTaskMessage = agentMsg.messageMode === 'task' && !!agentMsg.task_id
+        if (userPersisted && !serverOwnedTaskMessage) {
           try {
             await sessionsApi.saveMessage({
               project: projectAtSend,
@@ -1224,14 +1312,18 @@ export function useProjectManager(props, emit) {
   const logsRuntimeProcess = computed(() => projectRuntime.value?.processes?.find(row => row.profileId === logsProfileId.value)
     || { status: 'stopped', pid: 0 })
 
-  const openProjectRuntimeLogs = kind => {
-    if (!currentProject.value || !selectedRuntimeProfileId.value) return
-    const profile = projectRuntime.value?.profiles?.find(item => item.id === selectedRuntimeProfileId.value)
+  const openProjectRuntimeLogs = (kind, profileId = selectedRuntimeProfileId.value) => {
+    if (!currentProject.value || !profileId) return
+    const profile = projectRuntime.value?.profiles?.find(item => item.id === profileId)
     logsTitle.value = `${profile?.label || '项目'} · ${kind === 'build' ? '构建日志' : '运行日志'}`
-    logsProfileId.value = selectedRuntimeProfileId.value
+    logsProfileId.value = profileId
     logsKind.value = kind === 'build' ? 'build' : 'run'
     showLogsPanel.value = true
   }
+  watch(selectedRuntimeProfileId, profileId => {
+    if (!showLogsPanel.value || !profileId || profileId === logsProfileId.value) return
+    openProjectRuntimeLogs(logsKind.value, profileId)
+  })
 
   // 飞书扫码创建机器人
   const openFeishuQr = () => {
@@ -1654,6 +1746,19 @@ export function useProjectManager(props, emit) {
       if (!eventProject || eventProject !== currentProject.value) return
       if (event?.type === 'project.session_messages_changed') {
         const eventSessionId = String(event?.data?.sessionId || event?.data?.session_id || '')
+        const eventTaskId = String(event?.data?.taskId || event?.data?.task_id || '')
+        if (isStreaming.value && (!eventTaskId || eventTaskId === activeProjectMainTaskId.value || eventSessionId === currentSession.value)) return
+        window.clearTimeout(projectSessionRefreshTimer)
+        projectSessionRefreshTimer = window.setTimeout(() => {
+          void refreshCurrentProjectSession(eventSessionId)
+        }, 120)
+        return
+      }
+      if (String(event?.type || '').startsWith('project.main_agent.')) {
+        const eventSessionId = String(event?.data?.sessionId || event?.data?.session_id || '')
+        const eventTaskId = String(event?.data?.taskId || event?.data?.task_id || '')
+        if (eventSessionId !== currentSession.value) return
+        if (isStreaming.value && (!eventTaskId || eventTaskId === activeProjectMainTaskId.value || eventSessionId === currentSession.value)) return
         window.clearTimeout(projectSessionRefreshTimer)
         projectSessionRefreshTimer = window.setTimeout(() => {
           void refreshCurrentProjectSession(eventSessionId)
@@ -1665,7 +1770,6 @@ export function useProjectManager(props, emit) {
         void loadSessions(eventProject)
         return
       }
-      if (String(event?.type || '').startsWith('project.main_agent.')) return
       window.clearTimeout(loadProjectRuntime._eventTimer)
       loadProjectRuntime._eventTimer = window.setTimeout(() => {
         loadProjectRuntime(eventProject)

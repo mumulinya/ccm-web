@@ -51,6 +51,11 @@ function sanitizeDeliveryUserTerminology(value: string) {
 export function sanitizeMainAgentDeliveryText(value: any, fallback = "处理结果已整理，是否可验收以验证详情为准。", max = 260) {
   let text = compactDeliveryText(value, max);
   if (!text) text = fallback;
+  text = text
+    .replace(/\bllm[-_\s]*error\b/gi, "模型服务调用失败")
+    .replace(/\bProvider\b/gi, "模型服务")
+    .replace(/外部\s+(?:Agent\s*)?Runner\b/gi, "独立验证环境")
+    .replace(/\b(?:Agent\s*)?Runner\b/gi, "独立验证环境");
   if (INTERNAL_DELIVERY_TEXT_PATTERN.test(text)) {
     if (/error|失败|denied|invalid|权限|门禁/i.test(text)) text = "执行过程中遇到待排查的问题，我会继续定位；排障信息已放入技术详情。";
     else if (/done|完成|receipt|回执/i.test(text)) text = "执行成员已提交结果说明，我已完成汇总。";
@@ -454,31 +459,24 @@ function collectRawDeliveryVerificationEvidence(input: MainAgentDeliveryReportIn
 }
 
 export function deliveryVerificationFailureText(value: any) {
-  const text = String(value || "").trim();
-  if (!text) return false;
-  const lower = text.toLowerCase();
-  if (/未通过|验证失败|测试失败|执行失败|命令失败|报错|错误/i.test(text)) return true;
-  if (/无失败|未发现.*失败|没有.*失败|0\s*项?失败/i.test(text)) return false;
-  if (/\b(failed|failure|error|errored|non[-_\s]?zero|exit code [1-9]\d*|exit_code [1-9]\d*|exitCode [1-9]\d*)\b/i.test(lower)
-    && !/\b(no|not|without|zero|0)\s+(failed|failures|errors?)\b/i.test(lower)) return true;
-  if (/失败/i.test(text)) return true;
-  return false;
+  const status = typeof value === "object" && value
+    ? String(value.status || value.result || value.verdict || "")
+    : String(value || "");
+  return ["failed", "failure", "error", "errored", "rejected", "blocked"].includes(status.trim().toLowerCase());
 }
 
 export function deliveryVerificationSuccessText(value: any) {
-  const text = String(value || "").trim().toLowerCase();
-  if (!text) return false;
-  return ["passed", "pass", "success", "succeeded", "ok", "done", "complete", "completed"].includes(text)
-    || /通过|成功|无失败|未发现.*失败|没有.*失败|no failed|no failures|0 failed|0 failures|exit code 0|exit_code 0/i.test(text);
+  const status = typeof value === "object" && value
+    ? String(value.status || value.result || value.verdict || "")
+    : String(value || "");
+  return ["passed", "pass", "success", "succeeded", "ok", "done", "complete", "completed"].includes(status.trim().toLowerCase());
 }
 
 function deliveryVerificationIncompleteText(value: any) {
-  const text = String(value || "").trim();
-  if (!text) return false;
-  const lower = text.toLowerCase();
-  if (/无法验证|未验证|未执行|未运行|跳过|仅部分|部分通过|部分完成|待验证|待补跑|待补齐|证据不足|无法确认|未覆盖|缺失验证|需要补跑|需补跑/i.test(text)) return true;
-  if (/\b(partial|incomplete|inconclusive|unable[_\s-]?to[_\s-]?verify|not[_\s-]?verified|not[_\s-]?run|not[_\s-]?executed|skipped|pending|todo)\b/i.test(lower)) return true;
-  return false;
+  const status = typeof value === "object" && value
+    ? String(value.status || value.result || value.verdict || "")
+    : String(value || "");
+  return ["partial", "incomplete", "inconclusive", "unable_to_verify", "not_verified", "not_run", "not_executed", "skipped", "pending"].includes(status.trim().toLowerCase().replace(/[\s-]+/g, "_"));
 }
 
 function formatDeliveryVerificationFailureEvidence(item: any) {
@@ -783,16 +781,13 @@ export function collectDeliveryVerificationEvidence(input: MainAgentDeliveryRepo
 }
 
 function deliveryIndependentReviewLabel(value: any) {
-  const text = String(value || "").trim().toLowerCase();
-  if (!text) return "";
-  if (/无阻塞|无高风险|未发现.*(阻塞|风险)|没有.*(阻塞|风险)/.test(text)) return "已通过";
-  if (["failed", "fail", "rejected", "reject", "blocked", "block", "needs_rework", "changes_requested"].includes(text) || /未通过|失败|拒绝|阻塞|需要返工|需返工/.test(text)) return "未通过";
-  if (["passed", "pass", "approved", "approve", "success", "ok", "done", "complete", "completed"].includes(text) || /已通过|通过|批准|无阻塞|无高风险|未发现.*(阻塞|风险)|没有.*(阻塞|风险)/.test(text)) return "已通过";
-  if (/风险/.test(text)) return "未通过";
-  if (["partial", "incomplete", "inconclusive", "unable_to_verify", "unable-to-verify", "skipped"].includes(text) || /部分|无法验证|无法确认|未验证|未完成|跳过|证据不足/.test(text)) return "待补齐";
-  if (["missing", "pending", "waiting", "required"].includes(text) || /待|缺|等待/.test(text)) return "待补齐";
-  if (["not_required", "not-required", "none"].includes(text)) return "未触发";
-  return sanitizeMainAgentDeliveryText(value, "已记录", 80);
+  const status = (typeof value === "object" && value ? String(value.status || value.verdict || value.result || "") : String(value || "")).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!status) return "";
+  if (["failed", "fail", "rejected", "reject", "blocked", "block", "needs_rework", "changes_requested"].includes(status)) return "未通过";
+  if (["passed", "pass", "approved", "approve", "success", "ok", "done", "complete", "completed"].includes(status)) return "已通过";
+  if (["partial", "incomplete", "inconclusive", "unable_to_verify", "skipped", "missing", "pending", "waiting", "required"].includes(status)) return "待补齐";
+  if (["not_required", "none"].includes(status)) return "未触发";
+  return "验收状态无法证明";
 }
 
 export function collectRawDeliveryIndependentReviewEvidence(input: MainAgentDeliveryReportInput) {
@@ -843,26 +838,14 @@ export function collectRawDeliveryIndependentReviewEvidence(input: MainAgentDeli
 }
 
 function deliveryIndependentReviewFailureText(value: any) {
-  const text = String(value || "").trim();
-  if (!text) return false;
-  const lower = text.toLowerCase();
-  const normalized = lower.replace(/\s+/g, " ").replace(/-/g, "_");
-  if (/未通过|复核失败|审核失败|验证失败|拒绝|需要返工|需返工|要求返工|不能通过|未满足/i.test(text)) return true;
-  if (["failed", "fail", "rejected", "reject", "blocked", "block", "needs_rework", "need_rework", "changes_requested"].includes(normalized)) return true;
-  if (/\b(needs[_\s-]?rework|changes requested|rejected|blocked)\b/i.test(lower)) return true;
-  if (/未发现.*(阻塞|失败|风险)|没有.*(阻塞|失败|风险)|无阻塞|无高风险|no blocking|no blockers|no failed|without blocking/i.test(text)) return false;
-  if (/失败|阻塞/i.test(text)) return true;
-  if (/\bfailed?\b/i.test(lower) && !/\b(no|not|without|zero|0)\s+failed?\b/i.test(lower)) return true;
-  return false;
+  const status = (typeof value === "object" && value ? String(value.status || value.verdict || value.result || "") : String(value || "")).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ["failed", "fail", "rejected", "reject", "blocked", "block", "needs_rework", "need_rework", "changes_requested"].includes(status);
 }
 
 function deliveryIndependentReviewIncompleteText(value: any) {
-  const text = String(value || "").trim();
-  if (!text) return false;
-  if (deliveryIndependentReviewFailureText(text)) return false;
-  if (/部分|无法验证|无法确认|未验证|未完成|跳过|证据不足|待补齐|待确认/i.test(text)) return true;
-  if (/\b(partial|incomplete|inconclusive|unable[_\s-]?to[_\s-]?verify|not[_\s-]?verified|skipped|pending)\b/i.test(text)) return true;
-  return false;
+  if (deliveryIndependentReviewFailureText(value)) return false;
+  const status = (typeof value === "object" && value ? String(value.status || value.verdict || value.result || "") : String(value || "")).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ["partial", "incomplete", "inconclusive", "unable_to_verify", "not_verified", "skipped", "pending"].includes(status);
 }
 
 function deliveryIndependentReviewFailureSummary(item: any) {
@@ -2099,6 +2082,44 @@ function deliveryUserHandoffSectionItems(handoff: any) {
   ).slice(0, 4);
 }
 
+function compactDeliveryVisibleScope(files: string[]) {
+  if (!files.length) return ["本轮没有检测到代码文件变更。"];
+  const visible = files.slice(0, 4);
+  const hidden = Math.max(0, files.length - visible.length);
+  return [`共 ${files.length} 个文件：${visible.join("、")}${hidden ? `，另有 ${hidden} 个可在“查看改动”中查看` : ""}`];
+}
+
+function buildCompactDeliveryMarkdown(input: {
+  status: MainAgentDeliveryStatus;
+  title: string;
+  completed: string[];
+  files: string[];
+  verification: string[];
+  acceptance: string[];
+  independentReview: string[];
+  risks: string[];
+  nextAction: string[];
+}) {
+  const verificationItems = uniqueDeliveryStrings(
+    input.verification.slice(0, 3),
+    input.independentReview.slice(0, 2).map(item => `TestAgent（独立验收）：${item}`),
+    input.acceptance.slice(0, 1),
+  ).slice(0, 5);
+  const visibleSections = [
+    buildDeliverySection("completed", deliveryPrimarySectionTitle(input.status), input.completed.slice(0, 4), deliveryPrimarySectionEmpty(input.status)),
+    buildDeliverySection("scope", "涉及范围", compactDeliveryVisibleScope(input.files), ""),
+    buildDeliverySection("verification", "验证结果", verificationItems, input.status === "done" ? "暂未捕获可核验的验证结果。" : "验证尚未完成。"),
+    buildDeliverySection("risks", input.status === "failed" ? "未完成原因" : input.status === "cancelled" ? "停止原因" : "风险与待确认", input.risks.slice(0, 3), deliveryRiskSectionEmpty(input.status)),
+    buildDeliverySection("next_action", "下一步", input.nextAction.slice(0, 2), "可以继续补充新的要求。"),
+  ];
+  const intro = [
+    `【${deliveryTitle(input.status)}】`,
+    `任务：${input.title}`,
+    `状态：${deliveryStatusLabel(input.status)}`,
+  ].join("\n");
+  return `${intro}\n\n${visibleSections.map(section => formatDeliverySection(section.title, section.items)).join("\n\n")}`;
+}
+
 export function shouldShowMainAgentDeliveryReport(input: MainAgentDeliveryReportInput) {
   if (input.ordinaryConversation) return false;
   if (input.executed === true) return true;
@@ -2162,14 +2183,24 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
     visiblePayloads: [completionCard, pickupSummary, userHandoff],
     doneEvidencePresent,
   });
-  const header = `【${deliveryTitle(status)}】`;
-  const intro = [
-    header,
+  const technicalMarkdown = [
+    `【${deliveryTitle(status)}】`,
     `任务：${title}`,
     `状态：${deliveryStatusLabel(status)}`,
+    "",
+    sections.map(section => formatDeliverySection(section.title, section.items)).join("\n\n"),
   ].join("\n");
-  const body = sections.map(section => formatDeliverySection(section.title, section.items)).join("\n\n");
-  const markdown = `${intro}\n\n${body}`;
+  const markdown = buildCompactDeliveryMarkdown({
+    status,
+    title,
+    completed,
+    files,
+    verification,
+    acceptance,
+    independentReview,
+    risks,
+    nextAction,
+  });
   return {
     schema: "ccm-main-agent-delivery-report-v1",
     surface: input.surface,
@@ -2179,7 +2210,9 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
     headline,
     sections,
     user_text: markdown,
-    markdown,
+    markdown: technicalMarkdown,
+    technical_markdown: technicalMarkdown,
+    technicalMarkdown,
     files,
     plan_review: planReview,
     planReview,
@@ -2236,7 +2269,7 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
 
 export function formatMainAgentDeliveryReply(report: any) {
   if (!report) return "";
-  if (report.schema === "ccm-main-agent-delivery-report-v1") return report.markdown || report.user_text || report.headline || "";
+  if (report.schema === "ccm-main-agent-delivery-report-v1") return report.user_text || report.markdown || report.headline || "";
   return String(report.formatted || report.user_text || report.summary || "").trim();
 }
 
@@ -2649,9 +2682,9 @@ export function runMainAgentDeliveryReportSelfTest() {
       && group.completion_card?.metrics?.some((item: any) => item.id === "acceptance" && item.value === "已通过"),
     groupHasVerificationEvidenceQuality: group.verification_evidence?.schema === "ccm-main-agent-verification-evidence-v1"
       && group.verification_evidence?.items?.some((item: string) => item.includes("已实际执行 1 项验证"))
-      && group.verification_evidence?.items?.some((item: string) => item.includes("外部 Runner 证据 1 项"))
+      && group.verification_evidence?.items?.some((item: string) => item.includes("独立验证环境") && item.includes("1 项"))
       && group.completion_card?.metrics?.some((item: any) => item.id === "verification" && item.value.includes("实际执行"))
-      && group.markdown.includes("验收证据"),
+      && group.technical_markdown.includes("验收证据"),
     groupHasCompletionCard: group.completion_card?.schema === "ccm-main-agent-completion-card-v1" && group.completion_card?.metrics?.some((item: any) => item.id === "verification" && item.value.includes("1")),
     groupHasFinalSummaryQualityGate: group.final_summary_quality?.schema === "ccm-main-agent-final-summary-quality-v1" && group.final_summary_quality?.passed === true,
     finalSummaryQualityRequiresVisibleProtocolSanitizer: group.final_summary_quality?.checks?.some((item: any) => item.id === "user_visible_protocol_sanitized" && item.passed === true)
@@ -2664,7 +2697,10 @@ export function runMainAgentDeliveryReportSelfTest() {
       && structuredLeakQuality.checks?.some((item: any) => item.id === "user_visible_cards_sanitized" && item.passed === false && item.label === "交付卡普通文本不含内部协议"),
     finalSummaryQualityCatchesFalseDoneForFailedStatus: falseDoneFailedQuality.passed === false
       && falseDoneFailedQuality.checks?.some((item: any) => item.id === "failed_status_false_done_visible" && item.passed === false && item.label === "未完成状态不含已完成口径"),
-    formattedDeliveryReplyHasRequiredSections: formattedGroup.includes("完成内容") && formattedGroup.includes("验证结果") && formattedGroup.includes("验收证据") && formattedGroup.includes("验收结论") && formattedGroup.includes("下一步"),
+    formattedDeliveryReplyHasRequiredSections: ["完成内容", "涉及范围", "验证结果", "风险与待确认", "下一步"].every(label => formattedGroup.includes(label))
+      && !formattedGroup.includes("计划回顾")
+      && group.technical_markdown.includes("计划回顾")
+      && group.technical_markdown.includes("验收证据"),
     groupHasPickupSummary: group.pickup_summary?.schema === "ccm-main-agent-pickup-summary-v1" && group.pickup_summary?.review_items?.some((item: string) => item.includes("src/Tickets.vue")) && group.pickup_summary?.review_items?.some((item: string) => item.includes("验收")) && group.pickup_summary?.technical_hint?.includes("技术详情"),
     groupHasUserHandoff: group.user_handoff?.schema === "ccm-main-agent-user-handoff-v1"
       && group.user_handoff?.primary_action?.kind === "view_changes"

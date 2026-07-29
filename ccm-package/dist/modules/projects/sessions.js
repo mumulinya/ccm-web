@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WEB_SESSIONS_DIR = void 0;
 exports.getProjectSessionDir = getProjectSessionDir;
+exports.getSessionFilePath = getSessionFilePath;
 exports.findCcSessionFile = findCcSessionFile;
 exports.getProjectFeishuSessionTargets = getProjectFeishuSessionTargets;
 exports.resolveProjectFeishuTargetForAcpSession = resolveProjectFeishuTargetForAcpSession;
@@ -48,6 +49,7 @@ exports.createProjectSessionRecord = createProjectSessionRecord;
 exports.bindProjectFeishuSession = bindProjectFeishuSession;
 exports.ensureProjectAutomationSession = ensureProjectAutomationSession;
 exports.appendProjectSessionTaskMessage = appendProjectSessionTaskMessage;
+exports.upsertProjectSessionTaskMessage = upsertProjectSessionTaskMessage;
 exports.scheduleProjectSessionAutoTitle = scheduleProjectSessionAutoTitle;
 exports.handleSessionsApi = handleSessionsApi;
 const fs = __importStar(require("fs"));
@@ -61,6 +63,7 @@ const project_session_compaction_1 = require("./project-session-compaction");
 const project_session_agent_binding_1 = require("./project-session-agent-binding");
 const project_main_agent_1 = require("./project-main-agent");
 const runtime_events_1 = require("../../system/runtime-events");
+const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 exports.WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
 function getProjectSessionDir(projectName) {
     return (0, project_validation_1.resolveContainedPath)(exports.WEB_SESSIONS_DIR, (0, project_validation_1.validateProjectName)(projectName));
@@ -233,6 +236,10 @@ function syncFromCcToFilesystem(projectName) {
             const filePath = getSessionFilePath(projectName, (0, project_validation_1.validateSessionId)(sid));
             // 只更新有变化的
             const existing = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, "utf-8")) : null;
+            if (Array.isArray(existing?.execution_history)) {
+                sessionData.execution_history_version = Number(existing.execution_history_version || 1);
+                sessionData.execution_history = existing.execution_history;
+            }
             const historyChanged = JSON.stringify(existing?.history || []) !== JSON.stringify(sessionData.history || []);
             const bindingsChanged = JSON.stringify(existing?.feishu_platform_keys || []) !== JSON.stringify(sessionData.feishu_platform_keys || []);
             if (!existing
@@ -268,7 +275,8 @@ function syncToFilesystemToCc(projectName) {
         for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".json"))) {
             const sid = f.replace(".json", "");
             const sessionData = JSON.parse(fs.readFileSync((0, project_validation_1.resolveContainedPath)(dir, f), "utf-8"));
-            ccData.sessions[sid] = sessionData;
+            const { execution_history, executionHistory, execution_history_version, ...sharedSessionData } = sessionData;
+            ccData.sessions[sid] = sharedSessionData;
         }
         // 更新 counter
         const maxNum = Math.max(0, ...Object.keys(ccData.sessions).map(s => parseInt(s.replace("s", "")) || 0));
@@ -322,8 +330,9 @@ function getSessionDetail(projectName, sessionId) {
     if (fs.existsSync(filePath)) {
         try {
             const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+            const { execution_history, executionHistory, execution_history_version, ...publicData } = data;
             return {
-                ...data,
+                ...publicData,
                 source: projectSessionSource(sessionId, data, targets),
                 feishu_bindings: targets.filter((target) => target.active_session_id === sessionId),
                 agent_binding: (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(projectName, sessionId),
@@ -359,6 +368,8 @@ function normalizeWebSessionMessage(message) {
     };
     for (const key of [
         "requestText",
+        "messageMode",
+        "message_mode",
         "task_id",
         "run_id",
         "taskExperience",
@@ -368,6 +379,7 @@ function normalizeWebSessionMessage(message) {
         "agenticRun",
         "managementReceipt",
         "provider_usage",
+        "source",
         "type",
     ]) {
         if (Object.prototype.hasOwnProperty.call(input, key))
@@ -511,6 +523,49 @@ function appendProjectSessionTaskMessage(projectName, sessionId, message) {
         });
     }
     return normalized;
+}
+function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
+    const safeProject = requireActiveProject(projectName).project;
+    const safeSessionId = (0, project_validation_1.validateSessionId)(sessionId);
+    const filePath = getSessionFilePath(safeProject, safeSessionId);
+    if (!fs.existsSync(filePath))
+        throw new Error("项目会话不存在");
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const normalized = normalizeWebSessionMessage(message);
+    const taskId = String(normalized.task_id || normalized.taskExperience?.task_id || "").trim();
+    data.history = Array.isArray(data.history) ? data.history : [];
+    const existingIndex = data.history.findIndex((item) => {
+        if (String(item?.id || "") === normalized.id)
+            return true;
+        if (!taskId)
+            return false;
+        return item?.role === "assistant"
+            && String(item?.task_id || item?.taskExperience?.task_id || "") === taskId;
+    });
+    if (existingIndex >= 0) {
+        const existing = data.history[existingIndex] || {};
+        data.history[existingIndex] = {
+            ...existing,
+            ...normalized,
+            id: String(existing.id || normalized.id),
+            timestamp: existing.timestamp || normalized.timestamp,
+        };
+    }
+    else {
+        data.history.push(normalized);
+    }
+    data.updated_at = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    syncToFilesystemToCc(safeProject);
+    (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_messages_changed", {
+        project: safeProject,
+        sessionId: safeSessionId,
+        taskId,
+        messageId: existingIndex >= 0 ? String(data.history[existingIndex]?.id || normalized.id) : normalized.id,
+        status: String(normalized.taskExperience?.status || normalized.taskExperience?.phase || "changed").slice(0, 40),
+        source: "project-main-agent-session-projection",
+    });
+    return existingIndex >= 0 ? data.history[existingIndex] : normalized;
 }
 function scheduleProjectSessionAutoTitle(project, sessionId, options = {}) {
     const safeProject = (0, project_validation_1.validateProjectName)(project);
@@ -673,13 +728,20 @@ function handleSessionsApi(pathname, req, res, parsed) {
                     return (0, utils_1.sendJson)(res, { error: "会话不存在" }, 404);
                 const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
                 const before = Array.isArray(data.history) ? data.history.length : 0;
+                const removedIds = new Set((Array.isArray(data.history) ? data.history : [])
+                    .filter((message, index) => messageMatchesDeleteSelector(message, payload, index))
+                    .map((message) => String(message?.id || message?.message_id || ""))
+                    .filter(Boolean));
                 data.history = (Array.isArray(data.history) ? data.history : []).filter((message, index) => !messageMatchesDeleteSelector(message, payload, index));
                 const deleted = before - data.history.length;
                 if (deleted > 0)
                     (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, "项目会话消息被删除，取消未完成的项目主 Agent 任务");
                 const rotation = deleted > 0 ? (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, "项目会话消息删除，压缩边界失效") : null;
-                if (deleted > 0)
+                if (deleted > 0) {
                     delete data.compaction;
+                    data.execution_history = (Array.isArray(data.execution_history) ? data.execution_history : [])
+                        .filter((event) => !removedIds.has(String(event?.anchorMessageId || event?.anchor_message_id || "")));
+                }
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
                 syncToFilesystemToCc(project);
@@ -709,6 +771,7 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 const before = Array.isArray(data.history) ? data.history.length : 0;
                 (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, "项目会话消息被替换，取消未完成的项目主 Agent 任务");
                 data.history = payload.messages.map(normalizeWebSessionMessage);
+                data.execution_history = [];
                 const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, "项目会话消息替换，压缩边界失效");
                 delete data.compaction;
                 data.updated_at = new Date().toISOString();
@@ -738,6 +801,7 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, "用户清空项目会话，取消未完成的项目主 Agent 任务");
                 const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, "用户清空项目会话");
                 data.history = [];
+                data.execution_history = [];
                 delete data.compaction;
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
@@ -784,6 +848,15 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 const bindingCleanup = (0, project_session_agent_binding_1.purgeProjectSessionAgentBinding)(project, sessionId);
                 const runCleanup = (0, chat_runs_1.purgeProjectChatRunsForSession)(project, sessionId);
                 fs.unlinkSync(filePath);
+                let contextCacheCleanup = null;
+                try {
+                    contextCacheCleanup = (0, provider_neutral_context_cache_1.invalidateProviderNeutralContextCacheState)({
+                        scope: "project",
+                        scopeId: project,
+                        sessionId,
+                    }, "project_session_deleted");
+                }
+                catch { }
                 const ccFile = findCcSessionFile(project);
                 if (ccFile) {
                     try {
@@ -802,7 +875,12 @@ function handleSessionsApi(pathname, req, res, parsed) {
                     }
                     catch { }
                 }
-                (0, utils_1.sendJson)(res, { success: true, removed_agent_sessions: bindingCleanup.removed.length, removed_project_runs: runCleanup.removed.length });
+                (0, utils_1.sendJson)(res, {
+                    success: true,
+                    removed_agent_sessions: bindingCleanup.removed.length,
+                    removed_project_runs: runCleanup.removed.length,
+                    context_cache_invalidated: contextCacheCleanup?.success === true,
+                });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

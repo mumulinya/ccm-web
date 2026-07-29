@@ -6,6 +6,8 @@ import { execFileSync } from 'node:child_process'
 
 const root = path.resolve(import.meta.dirname, '..')
 const cli = path.join(root, 'ccm-package', 'bin', 'ccm.js')
+const distributionPackage = JSON.parse(fs.readFileSync(path.join(root, 'ccm-package', 'package.json'), 'utf8'))
+const escapedVersion = distributionPackage.version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const fixtureHome = path.join(root, 'scratch', 'cli-release-selftest-home')
 const dataDir = path.join(fixtureHome, '.cc-connect')
 const lockFile = path.join(dataDir, 'run', 'ccm-server-instance.lock')
@@ -31,7 +33,7 @@ const env = {
 const run = (args, options = {}) => execFileSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: options.timeout || 45_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 
 try {
-  assert.match(run(['--version']), /@mumulinya167\/cc-web 1\.0\.24/)
+  assert.match(run(['--version']), new RegExp(`@mumulinya167/cc-web ${escapedVersion}`))
   const help = run(['help'])
   for (const command of ['start', 'stop', 'restart', 'status', 'doctor', 'open', 'logs', 'update', 'project']) assert.match(help, new RegExp(`\\b${command}\\b`))
   assert.match(help, /--host 127\.0\.0\.1/)
@@ -41,7 +43,7 @@ try {
   assert.match(started, new RegExp(`http://localhost:${port}`))
 
   const status = JSON.parse(run(['status', '--json']))
-  assert.equal(status.package.version, '1.0.24')
+  assert.equal(status.package.version, distributionPackage.version)
   assert.equal(status.service.active, true)
   assert.equal(status.service.port, port)
   assert.equal(status.service.host, '127.0.0.1')
@@ -60,7 +62,7 @@ try {
   const logDeadline = Date.now() + 5_000
   while ((!fs.existsSync(logFile) || !fs.readFileSync(logFile, 'utf8').includes('CCM Workspace')) && Date.now() < logDeadline) await new Promise(resolve => setTimeout(resolve, 100))
   const startupLog = fs.readFileSync(logFile, 'utf8')
-  assert.match(startupLog, /CCM Workspace  v1\.0\.24/)
+  assert.match(startupLog, new RegExp(`CCM Workspace  v${escapedVersion}`))
   assert.match(startupLog, new RegExp(`Local URL\\s+http://localhost:${port}`))
   assert.match(startupLog, new RegExp(`Listen\\s+127\\.0\\.0\\.1:${port}`))
   assert.doesNotMatch(startupLog, /╔|cc-web 控制台/)

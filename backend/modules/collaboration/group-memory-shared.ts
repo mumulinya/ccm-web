@@ -642,8 +642,12 @@ export function buildFactAnchor(message: any, index: number, type: string, text:
 export function mergeFactAnchorList(existing: any[] = [], incoming: any[] = [], limit = 300) {
   const merged = new Map<string, any>();
   for (const item of [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])]) {
-    if (!item?.id || !item?.text) continue;
-    merged.set(String(item.id), item);
+    const text = String(item?.text || "").trim();
+    if (!text) continue;
+    const type = String(item?.type || "legacy_memory");
+    const sourceId = String(item?.messageId || item?.source?.messageId || item?.source?.sessionId || "legacy");
+    const id = String(item?.id || `${sourceId}:${type}:${anchorChecksum(type, text)}`);
+    merged.set(id, { ...item, id, text });
   }
   return [...merged.values()].slice(-limit);
 }

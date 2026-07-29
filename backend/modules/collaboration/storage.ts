@@ -7,6 +7,7 @@ import {
 import { loadTasks } from "../../core/db";
 import { appendTraceEvent, ensureTraceId } from "../../system/reliability-ledger";
 import { requestGroupSessionAgentCancellation } from "../../agents/execution-kernel";
+import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
 import {
   generateSessionTitleWithModel,
   isMeaningfulSessionTitleInput,
@@ -408,6 +409,8 @@ export function deleteGroupChatSession(groupId: string, sessionId: string, optio
   }
   groupMessagesCache.delete(`${groupId}::${sessionId}`);
   const postTurnSummaries = deleteGroupPostTurnSummaryArtifacts(groupId, sessionId);
+  let providerContextCache: any = { success: false, reason: "not_invalidated" };
+  try { providerContextCache = invalidateProviderNeutralContextCacheState({ scope: "group", scopeId: groupId, sessionId }, "group_session_deleted"); } catch (error: any) { providerContextCache = { success: false, reason: error?.message || String(error) }; }
   const remaining = manifest.sessions.filter((item: any) => item.id !== sessionId);
   const nextActive = manifest.activeSessionId === sessionId
     ? remaining.find((item: any) => item.archived !== true)?.id || remaining[0]?.id || ""
@@ -415,7 +418,7 @@ export function deleteGroupChatSession(groupId: string, sessionId: string, optio
   writeGroupSessionManifest(groupId, { ...manifest, activeSessionId: nextActive || GROUP_DEFAULT_SESSION_ID, sessions: remaining });
   let replacement: any = null;
   if (!remaining.length) replacement = createGroupChatSession(groupId, "新会话");
-  return { session, deletedMessageFile: file, postTurnSummaries, activeTaskCount: activeTasks.length, forced: options.force === true, replacement, lifecycleTombstone, lifecycleCancellation };
+  return { session, deletedMessageFile: file, postTurnSummaries, providerContextCache, activeTaskCount: activeTasks.length, forced: options.force === true, replacement, lifecycleTombstone, lifecycleCancellation };
 }
 
 export function purgeLegacyDefaultGroupChatSession(groupId: string, options: any = {}) {
@@ -521,9 +524,29 @@ export function appendGroupMessage(groupId: string, msg: any) {
   const messageId = String(msg?.id || "").trim();
   const existing = messageId ? messages.find((item: any) => String(item?.id || "") === messageId) : null;
   if (existing) return existing;
-  const taskTraceId = msg?.task_id ? loadTasks().find((task: any) => task.id === msg.task_id)?.trace_id : "";
+  const taskRecord = msg?.task_id ? loadTasks().find((task: any) => task.id === msg.task_id) : null;
+  const taskTraceId = taskRecord?.trace_id || "";
   const traceId = ensureTraceId(msg?.trace_id || msg?.traceId || taskTraceId, "message");
-  const next = { ...msg, group_session_id: sessionId, trace_id: traceId };
+  const taskThreadId = String(
+    msg?.task_thread_id
+      || msg?.taskThreadId
+      || taskRecord?.task_thread_id
+      || taskRecord?.taskThreadId
+      || taskRecord?.root_task_id
+      || taskRecord?.rootTaskId
+      || taskRecord?.retry_of_task_id
+      || taskRecord?.retryOfTaskId
+      || taskRecord?.source_task_id
+      || taskRecord?.sourceTaskId
+      || msg?.task_id
+      || "",
+  );
+  const next = {
+    ...msg,
+    group_session_id: sessionId,
+    trace_id: traceId,
+    ...(taskThreadId ? { task_thread_id: taskThreadId } : {}),
+  };
   messages.push(next);
   saveGroupMessages(groupId, messages, sessionId);
   appendTraceEvent(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });

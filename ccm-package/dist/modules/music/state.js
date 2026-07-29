@@ -284,8 +284,19 @@ function runMusicRemoteCommandQueueSelfTest() {
 function loadMusicAgentConfig() {
     const llm = (0, group_orchestrator_1.loadOrchestratorConfig)();
     const music = (0, db_1.loadMusicConfig)();
+    let boundaryGeneration = 0;
+    try {
+        const memory = JSON.parse(fs.readFileSync(path.join(utils_1.CCM_DIR, "music-agent-memory.json"), "utf8"));
+        boundaryGeneration = Math.max(0, Number(memory?.compaction?.boundaryGeneration || memory?.compactBoundary?.generation || 0));
+    }
+    catch { }
     return {
         ...llm,
+        contextEngineScope: "music",
+        contextEngineScopeId: "music-agent",
+        contextEngineSessionId: "music-agent",
+        contextEngineBoundaryGeneration: boundaryGeneration,
+        contextEngineSource: "music_agent",
         proxy: music.proxy || "",
         weatherLocation: String(music.weatherLocation || ""),
         defaultMode: String(music.defaultMode || music.mode || "cloud"),

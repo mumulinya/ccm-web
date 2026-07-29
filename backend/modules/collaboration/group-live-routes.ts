@@ -940,7 +940,7 @@ export function handleGroupLiveRoutes(
             return !["false", "0", "no", "off"].includes(String(value).trim().toLowerCase());
           };
           addGroupLog(group_id, "info", "project_task_preflight", "正在生成执行前计划");
-          const planModePreflight = buildGroupPlanModePreflight({
+          const planModePreflight = await buildGroupPlanModePreflight({
             group,
             message: [businessGoal, ...(extractedRequirement?.scope || []).map((item: string) => `范围：${item}`)].join("\n") || taskTitle,
             ctx,
@@ -1044,7 +1044,7 @@ export function handleGroupLiveRoutes(
               taskIntent?.workflowDecision?.requiresIndependentReview === true,
             ),
             requires_agent_qa: requiresAgentQa,
-            workflow_decision: taskIntent?.workflowDecision || null,
+            workflow_decision: planModePreflight.workflow_decision || taskIntent?.workflowDecision || null,
             business_goal: businessGoal,
             acceptance_criteria: acceptanceCriteria,
             source_documents: sourceDocuments,
@@ -1520,7 +1520,8 @@ export function handleGroupLiveRoutes(
     req.on("data", (chunk) => body += chunk);
     req.on("end", async () => {
       try {
-        const { group_id, requirement, group_session_id, groupSessionId: groupSessionIdCamel } = JSON.parse(body);
+        const payload = JSON.parse(body);
+        const { group_id, requirement, group_session_id, groupSessionId: groupSessionIdCamel } = payload;
         let groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
         const groups = loadGroups();
         const group = groups.find(g => g.id === group_id);
@@ -1540,15 +1541,31 @@ export function handleGroupLiveRoutes(
         const tasks = await decomposeRequirementWithModelCoordinator(group, requirement);
         const output = JSON.stringify({ coordinator: coordinator.project, members: memberList, tasks }, null, 2);
 
-        const createdTasks = tasks.map(t => createTask({
+        const requestId = String(payload.client_message_id || payload.clientMessageId || `legacy_decompose_${crypto.randomUUID()}`);
+        const createdTasks = tasks.map((t, index) => createTask({
           title: t.title,
           description: t.description || "",
+          business_goal: t.description || t.title,
+          acceptance_criteria: Array.isArray(t.acceptance_criteria) ? t.acceptance_criteria.join("；") : String(t.acceptance_criteria || ""),
           target_project: t.target_project || coordinator.project,
           group_id,
           group_session_id: groupSessionId || undefined,
           assign_type: "group",
-          priority: t.priority || "normal"
+          orchestration_scope: "group_session",
+          queue_scope: "conversation_serial",
+          request_origin: "legacy-group-decompose",
+          source_channel: "legacy-group-decompose",
+          target_scope: "group_session",
+          target_id: group_id,
+          exact_session_id: groupSessionId,
+          client_message_id: `${requestId}:${index + 1}`,
+          workflow_type: "daily_dev",
+          requires_code_changes: t.requires_code_changes !== false,
+          requires_verification: t.requires_verification !== false,
+          priority: t.priority || "normal",
+          auto_execute: payload.auto_execute !== false,
         }));
+        const queueResults = createdTasks.map(task => task.auto_execute ? enqueueTask(task.id, ctx) : { queued: false, message: "等待手动启动" });
 
         appendGroupMessage(group_id, {
           id: "m" + Date.now().toString(36) + "decompose",
@@ -1559,7 +1576,7 @@ export function handleGroupLiveRoutes(
           ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
         });
 
-        sendJson(res, { success: true, tasks: createdTasks, raw_output: output });
+        sendJson(res, { success: true, tasks: createdTasks, queue_results: queueResults, raw_output: output, compatibility_route: true });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 500);
       }

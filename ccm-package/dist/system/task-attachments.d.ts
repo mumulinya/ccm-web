@@ -10,6 +10,7 @@ export declare function buildTaskAttachmentMutation(input: {
     currentContexts?: any[];
     retainedIds?: any;
     userText?: string;
+    onlineDocumentFetcher?: (url: string) => Promise<any>;
 }): Promise<{
     attachments: any[];
     contexts: any[];

@@ -88,7 +88,9 @@ export function useTaskManager(props, emit) {
   const {
     showBacklog,
     dailyDevBacklogs,
+    requirementCollections,
     backlogCounts,
+    requirementCollectionCounts,
     backlogBulkDispatchLoading,
     backlogBulkDispatchResult,
     backlogImportLoading,
@@ -114,6 +116,9 @@ export function useTaskManager(props, emit) {
     loadOrchestratorDiagnostics: () => loadOrchestratorDiagnostics(),
   })
 
+  const createTaskClientMessageId = (prefix = 'task') => globalThis.crypto?.randomUUID?.()
+    || `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+
   // 新建任务表单
   const newTask = ref({
     title: '',
@@ -123,6 +128,7 @@ export function useTaskManager(props, emit) {
     projectId: '',
     priority: 'normal',
     autoExecute: true,
+    clientMessageId: createTaskClientMessageId('standard'),
     files: [],
     existingAttachments: []
   })
@@ -162,6 +168,7 @@ export function useTaskManager(props, emit) {
     requiresCodeChanges: true,
     persistDocuments: true,
     autoExecute: true,
+    clientMessageId: createTaskClientMessageId('daily-dev'),
     files: []
   })
   const dailyDevTask = ref(defaultDailyDevTask())
@@ -540,7 +547,11 @@ export function useTaskManager(props, emit) {
       group_id: newTask.value.assignType === 'group' ? newTask.value.groupId : null,
       priority: newTask.value.priority,
       assign_type: newTask.value.assignType,
-      auto_execute: newTask.value.autoExecute
+      auto_execute: newTask.value.autoExecute,
+      queue_scope: 'conversation_serial',
+      client_message_id: newTask.value.clientMessageId || createTaskClientMessageId('standard'),
+      source_channel: 'task-dispatch',
+      target_scope: newTask.value.assignType === 'group' ? 'group_session' : 'project_session'
     }
     const requestPayload = editingTaskId.value ? { id: editingTaskId.value, ...payload } : payload
     requestPayload.retained_attachment_ids = newTask.value.existingAttachments.map(item => item.id)
@@ -559,6 +570,7 @@ export function useTaskManager(props, emit) {
         projectId: projects.value[0]?.name || '',
         priority: 'normal',
         autoExecute: true,
+        clientMessageId: createTaskClientMessageId('standard'),
         files: [],
         existingAttachments: []
       }
@@ -586,6 +598,10 @@ export function useTaskManager(props, emit) {
     requires_code_changes: dailyDevTask.value.requiresCodeChanges,
     persist_documents: dailyDevTask.value.persistDocuments,
     auto_execute: dailyDevTask.value.autoExecute,
+    queue_scope: 'conversation_serial',
+    client_message_id: dailyDevTask.value.clientMessageId || createTaskClientMessageId('daily-dev'),
+    source_channel: 'task-dispatch-daily-dev',
+    target_scope: 'group_session',
     force_quality_gate: forceQualityGate
   })
 
@@ -648,7 +664,7 @@ export function useTaskManager(props, emit) {
 
   const openCreateTask = () => {
     editingTaskId.value = ''
-    newTask.value = { title: '', description: '', assignType: 'group', groupId: groups.value[0]?.id || '', projectId: projects.value[0]?.name || '', priority: 'normal', autoExecute: true, files: [], existingAttachments: [] }
+    newTask.value = { title: '', description: '', assignType: 'group', groupId: groups.value[0]?.id || '', projectId: projects.value[0]?.name || '', priority: 'normal', autoExecute: true, clientMessageId: createTaskClientMessageId('standard'), files: [], existingAttachments: [] }
     showCreate.value = true
   }
 
@@ -658,6 +674,7 @@ export function useTaskManager(props, emit) {
       title: task.title || '', description: task.description || '', assignType: task.assign_type || 'group',
       groupId: task.group_id || groups.value[0]?.id || '', projectId: task.target_project || projects.value[0]?.name || '',
       priority: task.priority || 'normal', autoExecute: task.auto_execute !== false,
+      clientMessageId: task.client_message_id || createTaskClientMessageId('standard'),
       files: [], existingAttachments: Array.isArray(task.source_attachments) ? [...task.source_attachments] : [],
     }
     showCreate.value = true
@@ -834,8 +851,19 @@ export function useTaskManager(props, emit) {
     if (!task) return
     const confirmed = await confirmDialog(`确认将任务 "${task.title}" 标记完成？系统仍会执行验收门禁校验。`)
     if (!confirmed) return
-    await updateStatus(task.id, 'done')
-    await refreshTaskWork()
+    try {
+      const response = await fetch('/api/tasks/acceptance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: task.id, reason: '用户在任务控制台核对结构化验收证据后批准交付' })
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error(data.error || '验收门禁未通过')
+      toast.success('最终交付已批准')
+      await refreshTaskWork()
+    } catch (error) {
+      toast.error(error.message || '任务仍缺少最终验收证据')
+    }
   }
 
   const handleDashboardAction = async (item, action) => {
@@ -1073,6 +1101,14 @@ export function useTaskManager(props, emit) {
 
   const priorityLabel = { high: '🔴 高', normal: '🟡 中', low: '⚪ 低' }
   const openTaskReplay = task => emit('navigate', { tab: 'trace-replay', task_id: task.id, trace_id: task.trace_id || '', scope: 'orchestrator' })
+  const openRequirementIntake = () => {
+    showBacklog.value = false
+    showAutomatedIntake.value = true
+  }
+  const openRequirementCollection = item => {
+    showBacklog.value = false
+    openTaskReplay(item)
+  }
   const changeTaskPriority = async (task, priority) => {
     try {
       const result = await tasksApi.update({ id: task.id, priority })
@@ -1162,7 +1198,8 @@ export function useTaskManager(props, emit) {
     dashboardFilterOptions, filteredDashboardItems, setDashboardFilter, isDashboardItemExpanded, toggleDashboardItem, phaseLabel,
     phaseTone, actionClass, findTaskByDashboardItem, compactDashboardText, actionVisible, workflowAgentPreview,
     receiptStatusText, workflowStatusTone, loadExecutionDashboard, loadActiveAgentRuns, stopAgentRun, previewRuntimeDebtCleanup,
-    cleanupRuntimeDebt, runDashboardProbe, showBacklog, dailyDevBacklogs, backlogCounts, backlogBulkDispatchLoading,
+    cleanupRuntimeDebt, runDashboardProbe, showBacklog, dailyDevBacklogs, requirementCollections, backlogCounts,
+    requirementCollectionCounts, backlogBulkDispatchLoading,
     backlogBulkDispatchResult, backlogImportLoading, backlogImportResult, backlogStatusLabel, formatBacklogTime, backlogState,
     backlogCount, backlogQualityText, backlogLatestHistory, backlogCanDispatch, backlogCanRestoreReady, loadDailyDevBacklogs,
     openBacklog, updateBacklogStatus, dispatchBacklog, dispatchReadyBacklogs, importSharedDocsToBacklog, newTask,
@@ -1182,6 +1219,7 @@ export function useTaskManager(props, emit) {
     visibleTaskTitle, visibleTaskStatusDetail, visibleRequiredVerification, visibleDeliveryBlockers, visibleUserDeliveryReport, loadTaskTrace,
     viewReport, cancelTask, rollbackExecution, mergeExecution, cleanupExecution, openContinueTask,
     continueFromReport, submitContinuationPayload, submitTaskContinuation, autoContinueFromReport, resendTask, priorityLabel,
-    visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission, openTaskReplay, changeTaskPriority
+    visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission, openTaskReplay,
+    openRequirementIntake, openRequirementCollection, changeTaskPriority
   }
 }

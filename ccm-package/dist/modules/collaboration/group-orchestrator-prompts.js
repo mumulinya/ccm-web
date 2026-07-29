@@ -69,9 +69,11 @@ CCM_AGENT_RECEIPT 格式：
   "summary": "一句话说明本项目实际完成/确认了什么",
   "actions": ["实际执行的动作；如果只是分析，写分析了哪些代码/配置"],
   "filesChanged": ["修改过的文件路径；没有修改填空数组"],
-  "verification": ["已经运行或建议运行的验证；不能编造未运行的测试"],
+  "verification": ["仅用于展示的验证名称或命令；不能编造未运行的测试"],
+  "verificationResults": [{"name":"检查名称","command":"实际执行命令；非命令检查可为空","status":"passed | failed | blocked | skipped | not_run","exitCode":0,"source":"agent | ccm_runner | browser | http","evidence":["真实证据引用"]}],
   "blockers": ["阻塞点或缺失信息；没有填空数组"],
-  "needs": ["还需要用户或其他 Agent 补充的内容；没有填空数组"]
+  "needs": ["会阻塞任务、需要用户或其他 Agent 补充的内容；没有填空数组"],
+  "advisoryNeeds": ["不阻塞交付的可选建议；没有填空数组"]
 }
 \`\`\``;
 }

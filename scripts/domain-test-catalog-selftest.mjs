@@ -15,6 +15,7 @@ const activeTestScripts = Object.keys(packageJson.scripts || {})
 const legacyAliases = Object.keys(legacyConfig.aliases || {})
 const domainEntries = Object.values(domainConfig.domains || {}).flatMap(domain => domain.tests || [])
 const quickEntries = domainConfig.quick || []
+const helperEntries = (domainConfig.helpers || []).map(entry => typeof entry === 'string' ? entry : entry.file)
 const configuredEntries = [...domainEntries, ...quickEntries]
 const missingFiles = [...new Set(configuredEntries)]
   .filter(file => !fs.existsSync(path.join(scriptsDirectory, file)))
@@ -22,9 +23,16 @@ const duplicateDomainEntries = domainEntries.filter((file, index) => domainEntri
 const duplicateQuickEntries = quickEntries.filter((file, index) => quickEntries.indexOf(file) !== index)
 const selftestFiles = fs.readdirSync(scriptsDirectory)
   .filter(file => file.endsWith('selftest.mjs'))
+const legacyReferencedFiles = new Set()
+for (const command of Object.values(legacyConfig.aliases || {})) {
+  for (const match of String(command).matchAll(/scripts[\\/]([^\s"']+selftest\.mjs)/g)) legacyReferencedFiles.add(match[1])
+}
+const inventoriedFiles = new Set([...configuredEntries, ...helperEntries, ...legacyReferencedFiles])
+const unclassifiedFiles = selftestFiles.filter(file => !inventoriedFiles.has(file))
+const missingHelperReasons = (domainConfig.helpers || []).filter(entry => typeof entry !== 'object' || !String(entry.reason || '').trim())
 
-check('active npm test entrypoints remain consolidated', activeTestScripts.length === 14, {
-  expected: 14,
+check('active npm test entrypoints remain consolidated', activeTestScripts.length === 16, {
+  expected: 16,
   actual: activeTestScripts.length,
 })
 check('legacy npm aliases remain available', legacyAliases.length === 213, {
@@ -37,6 +45,10 @@ check('domain entries are unique', duplicateDomainEntries.length === 0, {
 })
 check('quick entries are unique', duplicateQuickEntries.length === 0, {
   duplicateQuickEntries: [...new Set(duplicateQuickEntries)],
+})
+check('specialized selftests are classified', unclassifiedFiles.length === 0, { unclassifiedFiles })
+check('parameterized helper exclusions explain their wrapper contract', missingHelperReasons.length === 0, {
+  missingHelperReasons,
 })
 check('specialized selftests remain preserved', selftestFiles.length >= 191, {
   minimum: 191,
@@ -52,6 +64,8 @@ console.log(JSON.stringify({
     legacyAliases: legacyAliases.length,
     domainEntries: domainEntries.length,
     quickEntries: quickEntries.length,
+    helperEntries: helperEntries.length,
+    unclassifiedFiles: unclassifiedFiles.length,
     selftestFiles: selftestFiles.length,
   },
 }, null, 2))

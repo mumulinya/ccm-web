@@ -1,6 +1,7 @@
 import { type ResolvedProjectTestTarget } from "./project-test-targets";
 export declare function buildProjectTestTargetBrowserChecks(target: ResolvedProjectTestTarget, workDir: string): any[];
 export declare function projectTestAgentProblems(review: any): string[];
+export declare function projectTestAgentReworkProblems(review: any): string[];
 export declare function runProjectTaskTestAgentReview(input: {
     task: any;
     project: string;
@@ -10,7 +11,9 @@ export declare function runProjectTaskTestAgentReview(input: {
     workItems?: any[];
     fallbackVerificationCommands?: string[];
     round: number;
+    reviewCycleId?: string;
     issuedBy?: string;
+    previousReview?: any;
 }): Promise<{
     canAccept: boolean;
     status: string;
@@ -36,16 +39,18 @@ export declare function runProjectTaskTestAgentReview(input: {
             acceptanceCriteria: string[];
             verificationCommands: string[];
             browserChecks: any[];
+            browserScenarios: string[];
             agentSummary: string;
             risks: any[];
         }[];
         options: {
+            agenticPlanning: boolean;
+            adversarialProbeWaiver?: string;
             verificationOnly: boolean;
             browserProvider: string;
             autoDiscoverVerificationCommands: boolean;
             collectBrowserArtifacts: boolean;
             requireAdversarialProbe: boolean;
-            agenticPlanning: boolean;
         };
         metadata: {
             handoffSource: string;
@@ -74,13 +79,17 @@ export declare function runProjectTaskTestAgentReview(input: {
                 };
             }[];
             reviewRound: number;
+            reviewCycleId: string;
+            reviewPolicy: import("../collaboration/test-agent-review-policy").TestAgentReviewPolicy;
+            incrementalScope: import("../collaboration/test-agent-review-policy").TestAgentIncrementalScope;
         };
     };
-    invocation?: undefined;
-    report?: undefined;
-    verdict?: undefined;
-    runner?: undefined;
 } | {
+    decision: {
+        route: import("../collaboration/test-agent-review-policy").TestAgentFailureRoute;
+        reason: string;
+    };
+    failureRoute: import("../collaboration/test-agent-review-policy").TestAgentFailureRoute;
     canAccept: boolean;
     status: "completed" | "cancelled" | "failed" | "passed" | "running" | "blocked" | "interrupted" | "rejected" | "queued" | "partial" | "runtime_error";
     error: string;
@@ -108,16 +117,18 @@ export declare function runProjectTaskTestAgentReview(input: {
             acceptanceCriteria: string[];
             verificationCommands: string[];
             browserChecks: any[];
+            browserScenarios: string[];
             agentSummary: string;
             risks: any[];
         }[];
         options: {
+            agenticPlanning: boolean;
+            adversarialProbeWaiver?: string;
             verificationOnly: boolean;
             browserProvider: string;
             autoDiscoverVerificationCommands: boolean;
             collectBrowserArtifacts: boolean;
             requireAdversarialProbe: boolean;
-            agenticPlanning: boolean;
         };
         metadata: {
             handoffSource: string;
@@ -146,7 +157,12 @@ export declare function runProjectTaskTestAgentReview(input: {
                 };
             }[];
             reviewRound: number;
+            reviewCycleId: string;
+            reviewPolicy: import("../collaboration/test-agent-review-policy").TestAgentReviewPolicy;
+            incrementalScope: import("../collaboration/test-agent-review-policy").TestAgentIncrementalScope;
         };
     };
     runner: import("../collaboration/test-agent-runner").TestAgentRunnerRecord;
+    reviewPolicy: import("../collaboration/test-agent-review-policy").TestAgentReviewPolicy;
+    incrementalScope: import("../collaboration/test-agent-review-policy").TestAgentIncrementalScope;
 }>;

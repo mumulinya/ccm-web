@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProjectSessionCompactionActivity = getProjectSessionCompactionActivity;
+exports.appendProjectSessionExecutionEvent = appendProjectSessionExecutionEvent;
 exports.recordProjectSessionProviderUsage = recordProjectSessionProviderUsage;
 exports.scheduleProjectSessionMemoryExtraction = scheduleProjectSessionMemoryExtraction;
 exports.compactProjectSessionWithModel = compactProjectSessionWithModel;
@@ -54,6 +55,10 @@ const project_session_agent_binding_1 = require("./project-session-agent-binding
 const project_validation_1 = require("./project-validation");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const session_recovery_context_1 = require("../../system/session-recovery-context");
+const session_execution_ledger_1 = require("../../system/session-execution-ledger");
+const session_model_context_1 = require("../../system/session-model-context");
+const session_summary_quality_gate_1 = require("../../system/session-summary-quality-gate");
+const session_summary_secondary_review_1 = require("../../system/session-summary-secondary-review");
 const MODEL_MAX_OUTPUT_TOKENS = 20_000;
 const compactions = new Map();
 function getProjectSessionCompactionActivity(project, projectSessionId) {
@@ -100,8 +105,53 @@ function persistSession(project, projectSessionId, value) {
         return;
     const data = JSON.parse(fs.readFileSync(ccFile, "utf8"));
     data.sessions = data.sessions || {};
-    data.sessions[projectSessionId] = value;
+    const { execution_history, executionHistory, execution_history_version, ...sharedSessionValue } = value || {};
+    data.sessions[projectSessionId] = sharedSessionValue;
     writeAtomic(ccFile, data);
+}
+function projectExecutionEvents(data) {
+    return (0, session_execution_ledger_1.normalizeSessionExecutionEvents)(data?.execution_history || data?.executionHistory);
+}
+function projectExecutionForMessages(data, messages) {
+    return (0, session_execution_ledger_1.eventsAnchoredToMessages)(projectExecutionEvents(data), messages);
+}
+function projectModelTimeline(data, messages) {
+    return (0, session_execution_ledger_1.mergeConversationWithExecution)(messages, projectExecutionForMessages(data, messages));
+}
+function appendProjectSessionExecutionEvent(projectInput, projectSessionIdInput, event) {
+    const project = (0, project_validation_1.validateProjectName)(projectInput);
+    const projectSessionId = (0, project_validation_1.validateSessionId)(projectSessionIdInput);
+    const file = sessionFile(project, projectSessionId);
+    if (!fs.existsSync(file))
+        return null;
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    const events = projectExecutionEvents(data);
+    const type = String(event?.type || "") === "tool_use" || String(event?.type || "") === "tool_started" ? "tool_use" : "tool_result";
+    const toolName = String(event?.toolName || event?.tool_name || event?.tool || "tool");
+    const runId = String(event?.runId || event?.run_id || "");
+    const toolCallId = type === "tool_result"
+        ? (String(event?.toolCallId || event?.tool_call_id || "") || (0, session_execution_ledger_1.findPendingToolCallId)(events, runId, toolName))
+        : String(event?.toolCallId || event?.tool_call_id || "");
+    const history = Array.isArray(data.history) ? data.history : [];
+    const anchor = [...history].reverse().find((message) => message?.role === "user") || history.at(-1) || null;
+    const created = (0, session_execution_ledger_1.createSessionExecutionEvent)({
+        type,
+        toolName,
+        toolCallId,
+        runId,
+        traceId: String(event?.traceId || event?.trace_id || ""),
+        anchorMessageId: String(event?.anchorMessageId || event?.anchor_message_id || anchor?.id || ""),
+        timestamp: event?.timestamp || event?.at || new Date().toISOString(),
+        status: event?.status === "error" || event?.error ? "error" : type === "tool_use" ? "running" : "ok",
+        payload: event?.payload ?? (type === "tool_use" ? { arguments: event?.arguments || {} } : { observation: event?.observation ?? null, error: event?.error || "" }),
+    });
+    if (!events.some(item => item.id === created.id))
+        events.push(created);
+    data.execution_history_version = 1;
+    data.execution_history = events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    data.updated_at = new Date().toISOString();
+    persistSession(project, projectSessionId, data);
+    return created;
 }
 function projectCompactionState(data, project, projectSessionId) {
     const state = (0, session_compaction_core_1.normalizeSessionCompactionState)(data?.compaction?.v2 || data?.compaction || {}, {
@@ -170,6 +220,7 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
     const state = projectCompactionState(data, safeProject, safeSessionId);
     const history = Array.isArray(data.history) ? data.history.filter((message) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
     const visibleMessages = history.slice(state.lastCompactedIndex + 1);
+    const modelVisibleMessages = projectModelTimeline(data, visibleMessages);
     const currentRequest = pendingProjectRequest(visibleMessages, input.currentRequest || input.current_request);
     const suppliedPayload = input.modelVisiblePayload || input.model_visible_payload || null;
     const payload = suppliedPayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? suppliedPayload : (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
@@ -178,7 +229,7 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
         system: input.fixedContext || input.fixed_context || null,
         tools: input.tools || null,
         activeSummary: state.activeSummary || null,
-        recentMessages: visibleMessages,
+        recentMessages: modelVisibleMessages,
         currentRequest,
         recoveryContext: input.recoveryContext || input.recovery_context || null,
         hookResults: input.hookResults || input.hook_results || [],
@@ -199,7 +250,7 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
     const tokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
         scope: "project",
         sessionId: `${safeProject}:${safeSessionId}`,
-        messages: visibleMessages,
+        messages: modelVisibleMessages,
         activeSummary: state.activeSummary,
         latestProviderUsage: measurementUsage,
         provider: String(measurementUsage?.provider || ""),
@@ -247,9 +298,10 @@ function scheduleProjectSessionMemoryExtraction(project, projectSessionId, optio
     if (!cadence.shouldExtract)
         return { scheduled: false, reason: cadence.reason, cadence };
     const startIndex = Math.max(0, state.lastCompactedIndex + 1);
-    const timeline = history.slice(startIndex);
-    if (!timeline.length)
+    const visibleTimeline = history.slice(startIndex);
+    if (!visibleTimeline.length)
         return { scheduled: false, reason: "no_messages" };
+    const timeline = projectModelTimeline(data, visibleTimeline);
     const reference = referenceSummary(timeline);
     const sourceMessageIds = reference.sourceMessageIds;
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
@@ -268,7 +320,10 @@ function scheduleProjectSessionMemoryExtraction(project, projectSessionId, optio
     const identity = {
         boundaryGeneration: state.boundaryGeneration,
         lastMessageId: String(history.at(-1)?.id || ""),
-        transcriptChecksum: (0, session_compaction_core_1.sessionCompactionChecksum)(history.map((message) => [message.id, message.role, message.content])),
+        transcriptChecksum: (0, session_compaction_core_1.sessionCompactionChecksum)([
+            ...history.map((message) => [message.id, message.role, message.content]),
+            ...projectExecutionEvents(data).map(message => [message.id, message.type, message.toolCallId, message.payload]),
+        ]),
         cadence,
     };
     const invoke = options.modelCall || ((request) => (0, group_compaction_engine_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
@@ -283,11 +338,18 @@ function scheduleProjectSessionMemoryExtraction(project, projectSessionId, optio
             const latestState = projectCompactionState(latest, safeProject, safeSessionId);
             if (latestState.boundaryGeneration !== expected.boundaryGeneration
                 || String(latestHistory.at(-1)?.id || "") !== expected.lastMessageId
-                || (0, session_compaction_core_1.sessionCompactionChecksum)(latestHistory.map((message) => [message.id, message.role, message.content])) !== expected.transcriptChecksum) {
+                || (0, session_compaction_core_1.sessionCompactionChecksum)([
+                    ...latestHistory.map((message) => [message.id, message.role, message.content]),
+                    ...projectExecutionEvents(latest).map(message => [message.id, message.type, message.toolCallId, message.payload]),
+                ]) !== expected.transcriptChecksum) {
                 return { committed: false, reason: "stale_identity" };
             }
             const candidate = raw?.summary || raw;
-            const validation = validateSummary(bindTrustedProjectSourceBoundary(candidate, sourceMessageIds), reference, sourceMessageIds);
+            const validation = validateSummary(bindTrustedProjectSourceBoundary(candidate, sourceMessageIds), reference, sourceMessageIds, {
+                sessionId: `${safeProject}:${safeSessionId}`,
+                sourceMessages: history,
+                previousSummary: state.activeSummary,
+            });
             if (!validation.valid)
                 throw new Error(`项目 Session Memory 校验失败：${validation.issues.join(", ")}`);
             const summary = normalizeSummary(candidate, sourceMessageIds);
@@ -320,21 +382,26 @@ function scheduleProjectSessionMemoryExtraction(project, projectSessionId, optio
     return { ...scheduled, cadence };
 }
 function referenceSummary(messages) {
-    const users = messages.filter(message => message.role === "user");
-    const assistants = messages.filter(message => message.role === "assistant");
+    const users = messages.filter(message => message.role === "user" && message.hidden_execution !== true);
+    const assistants = messages.filter(message => message.role === "assistant" && message.hidden_execution !== true);
+    const executionResults = messages.filter(message => message.type === "tool_result" || (message.hidden_execution === true && message.role === "user"));
     const allText = messages.map(message => String(message.content || ""));
     const filesAndResources = [...new Set(allText.flatMap(text => text.match(/(?:[A-Za-z]:\\[^\s"'<>|]+|\/?(?:[\w.-]+\/){1,8}[\w.-]+\.[A-Za-z0-9]{1,8})/g) || []))].slice(-40);
-    const authorization = users
-        .filter(message => /授权|允许|不要|禁止|只能|必须|可以修改|只读|permission|authorize/i.test(String(message.content || "")))
-        .map(message => compactText(message.content, 1200))
-        .slice(-16);
+    const structuredFacts = messages.flatMap(message => Array.isArray(message?.structured_memory_facts) ? message.structured_memory_facts : []);
+    const byStructuredType = (type) => structuredFacts
+        .filter((item) => String(item?.type || "") === type && String(item?.text || "").trim())
+        .map((item) => compactText(item.text, 1200))
+        .slice(-24);
     return {
         primaryRequest: compactText(users.at(-1)?.content, 1800),
         userRequests: users.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1000)}`),
-        keyOutcomes: assistants.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1000)}`),
-        authorization,
-        decisions: allText.filter(text => /决定|采用|选择|改为|方案|decision/i.test(text)).slice(-20).map(text => compactText(text, 1000)),
-        unresolved: allText.filter(text => /未完成|下一步|待处理|阻塞|失败|错误|todo|remaining|blocked|failed/i.test(text)).slice(-20).map(text => compactText(text, 1000)),
+        keyOutcomes: [
+            ...assistants.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1000)}`),
+            ...executionResults.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1200)}`),
+        ].slice(-24),
+        authorization: byStructuredType("authorization"),
+        decisions: byStructuredType("decision"),
+        unresolved: byStructuredType("unresolved"),
         filesAndResources,
         latestOutcome: compactText(assistants.at(-1)?.content, 1800),
         sourceMessageIds: messages.map(message => String(message.id || "")),
@@ -354,7 +421,7 @@ function normalizeSummary(value, sourceMessageIds) {
         sourceMessageIds,
     };
 }
-function validateSummary(value, reference, sourceMessageIds) {
+function validateSummary(value, reference, sourceMessageIds, context = {}) {
     const issues = [];
     if (!value || typeof value !== "object" || Array.isArray(value))
         issues.push("summary_not_object");
@@ -369,7 +436,17 @@ function validateSummary(value, reference, sourceMessageIds) {
             if (!preserved.includes(String(anchor)))
                 issues.push(`${key}_anchor_missing`);
     }
-    return { valid: issues.length === 0, issues: [...new Set(issues)] };
+    const quality = (0, session_summary_quality_gate_1.evaluateSessionSummaryQuality)({
+        scope: "project",
+        sessionId: String(context.sessionId || "project-session"),
+        summary: value,
+        reference,
+        previousSummary: context.previousSummary,
+        sourceMessages: context.sourceMessages,
+        sourceMessageIds,
+    });
+    issues.push(...quality.issues);
+    return { valid: issues.length === 0, issues: [...new Set(issues)], quality };
 }
 function bindTrustedProjectSourceBoundary(summary, sourceMessageIds) {
     if (!summary || typeof summary !== "object" || Array.isArray(summary))
@@ -380,7 +457,7 @@ function summaryChecksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value || null)).digest("hex");
 }
 function fitProjectCompactionPrompt(system, payload, maxInputTokens) {
-    const rounds = (0, session_memory_window_1.buildCompleteConversationRounds)(payload.timeline || []);
+    const rounds = (0, session_memory_window_1.buildApiConversationRounds)(payload.timeline || []);
     const selectedRounds = [...rounds];
     const droppedMessageIds = [];
     let droppedRounds = 0;
@@ -464,19 +541,20 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
         }
         const startIndex = Math.max(0, state.lastCompactedIndex + 1);
         const unsummarized = history.slice(startIndex);
+        const unsummarizedModelTimeline = projectModelTimeline(data, unsummarized);
         const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
         const compactionModelCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
         const bindingAtMeasurement = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(safeProject, safeSessionId);
         const modelCapacity = resolveProjectCompactionCapacity(data, config, bindingAtMeasurement, state, options);
         const threshold = Math.max(1, Number(modelCapacity.autoCompactThreshold || 0));
         const currentRequest = pendingProjectRequest(history, options.currentRequest);
-        const triggerPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+        const triggerPayload = options.modelVisiblePayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? options.modelVisiblePayload : (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
             scope: "project",
             sessionId: `${safeProject}:${safeSessionId}`,
             system: options.fixedContext || { project: safeProject, provider: modelCapacity.provider, model: modelCapacity.model },
             tools: options.tools || null,
             activeSummary: state.activeSummary,
-            recentMessages: unsummarized,
+            recentMessages: unsummarizedModelTimeline,
             currentRequest,
             recoveryContext: options.recoveryContext || null,
             hookResults: [],
@@ -485,7 +563,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
         const tokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
             scope: "project",
             sessionId: `${safeProject}:${safeSessionId}`,
-            messages: unsummarized,
+            messages: unsummarizedModelTimeline,
             activeSummary: state.activeSummary,
             latestProviderUsage: state.latestProviderUsage,
             provider: String(state.latestProviderUsage?.provider || bindingAtMeasurement.provider || ""),
@@ -523,11 +601,13 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
         const segment = history.slice(startIndex, keepStart);
         if (!segment.length)
             return { compacted: false, reason: "nothing_to_compact", before_tokens: tokenCount };
+        const segmentExecution = projectExecutionForMessages(data, segment);
+        const segmentModelTimeline = (0, session_execution_ledger_1.mergeConversationWithExecution)(segment, segmentExecution);
         const previousSummary = state.activeSummary || null;
         if (previousSummary && String(data.compaction?.active_summary_checksum || "") !== summaryChecksum(previousSummary)) {
             throw new Error("项目会话上一轮压缩摘要校验失败");
         }
-        const currentReference = referenceSummary(segment);
+        const currentReference = referenceSummary(segmentModelTimeline);
         const reference = previousSummary ? {
             ...currentReference,
             primaryRequest: currentReference.primaryRequest || previousSummary.primaryRequest || "",
@@ -563,7 +643,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             previousSummary,
             previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
             preservationReference: reference,
-            timeline: segment.map((message) => ({ id: message.id, role: message.role, timestamp: message.timestamp, content: message.content })),
+            timeline: segmentModelTimeline.map((message) => ({ id: message.id, role: message.role, type: message.type || "message", timestamp: message.timestamp, content: message.content })),
         };
         const maxInputTokens = Math.max(18_000, Number(compactionModelCapacity.effectiveContextWindow || 180_000) - 3_000);
         const promptFit = fitProjectCompactionPrompt(system, promptPayload, maxInputTokens);
@@ -573,7 +653,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
         let lastError = null;
         let nextSessionMemoryState = state.sessionMemoryState || null;
         const exactMemorySessionId = `${safeProject}:${safeSessionId}`;
-        const expectedMemoryCursor = String(segment.at(-1)?.id || "");
+        const expectedMemoryCursor = String(segmentModelTimeline.at(-1)?.id || segment.at(-1)?.id || "");
         if (!options.customInstructions) {
             const reusable = (0, session_compaction_core_1.validateSessionMemoryState)(state.sessionMemoryState, {
                 scope: "project",
@@ -581,7 +661,11 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
                 expectedLastMessageId: expectedMemoryCursor,
             });
             if (reusable.valid) {
-                validation = validateSummary(bindTrustedProjectSourceBoundary(reusable.summary, sourceMessageIds), reference, sourceMessageIds);
+                validation = validateSummary(bindTrustedProjectSourceBoundary(reusable.summary, sourceMessageIds), reference, sourceMessageIds, {
+                    sessionId: exactMemorySessionId,
+                    sourceMessages: segmentModelTimeline,
+                    previousSummary,
+                });
                 if (validation.valid)
                     result = { summary: reusable.summary, provider: state.sessionMemoryState?.provider, model: state.sessionMemoryState?.model, source: "session_memory" };
             }
@@ -593,7 +677,11 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             try {
                 result = await invoke({ system, user: retryUser, maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS, attempt });
                 const candidate = bindTrustedProjectSourceBoundary(result?.summary || result, sourceMessageIds);
-                validation = validateSummary(candidate, reference, sourceMessageIds);
+                validation = validateSummary(candidate, reference, sourceMessageIds, {
+                    sessionId: exactMemorySessionId,
+                    sourceMessages: segmentModelTimeline,
+                    previousSummary,
+                });
                 if (validation.valid)
                     break;
                 lastError = new Error(`项目会话模型摘要校验失败：${validation.issues.join(", ")}`);
@@ -601,7 +689,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             catch (error) {
                 lastError = error;
                 if (isPromptTooLong(error) && ptlRecoveryAttempts < 3) {
-                    const peeled = (0, session_memory_window_1.peelOldestCompleteConversationRound)(retryTimeline);
+                    const peeled = (0, session_memory_window_1.peelOldestApiConversationRound)(retryTimeline);
                     if (!peeled.peeled)
                         break;
                     retryTimeline = peeled.messages;
@@ -622,7 +710,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
         }
         if (!validation.valid)
             throw lastError || new Error("项目会话模型摘要不可用");
-        const summary = normalizeSummary(result?.summary || result, sourceMessageIds);
+        let summary = normalizeSummary(result?.summary || result, sourceMessageIds);
         const verifiedRecoveryAttachments = (0, session_recovery_context_1.buildVerifiedSessionRecoveryContext)({
             rootDir: String(options.fixedContext?.workDir || options.fixedContext?.work_dir || ""),
             fileReferences: summary.filesAndResources || [],
@@ -643,7 +731,9 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
                 verifiedAttachments: verifiedRecoveryAttachments,
             },
         });
-        const preservedMessages = history.slice(keepStart);
+        const preservedVisibleMessages = history.slice(keepStart);
+        const preservedExecutionMessages = projectExecutionForMessages(data, preservedVisibleMessages);
+        const preservedMessages = (0, session_execution_ledger_1.mergeConversationWithExecution)(preservedVisibleMessages, preservedExecutionMessages);
         const recoveryContext = options.recoveryContext || {
             project: safeProject,
             filesAndResources: summary.filesAndResources || [],
@@ -655,35 +745,101 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             scope: "project",
             sessionId: `${safeProject}:${safeSessionId}`,
             generation: state.boundaryGeneration + 1,
-            summarizedThroughMessageId: segment.at(-1)?.id || "",
+            summarizedThroughMessageId: segmentModelTimeline.at(-1)?.id || segment.at(-1)?.id || "",
             previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
             preservedMessageIds: preservedMessages.map((message) => String(message.id || "")),
         });
-        const postCompactPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+        const buildPostCompactPayload = (activeSummary) => (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
             scope: "project",
             sessionId: `${safeProject}:${safeSessionId}`,
             system: options.fixedContext || { project: safeProject, provider: modelCapacity.provider, model: modelCapacity.model },
             tools: options.tools || null,
-            activeSummary: summary,
+            activeSummary,
             recentMessages: preservedMessages,
             currentRequest,
             recoveryContext: { boundaryMarker, ...recoveryContext },
             hookResults: sessionStartHookResults,
             contextComponents: options.contextComponents || options.context_components || undefined,
         });
-        const afterTokens = postCompactPayload.totalTokens;
-        const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: postCompactPayload, threshold });
+        let postCompactPayload = buildPostCompactPayload(summary);
+        let afterTokens = postCompactPayload.totalTokens;
+        let postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: postCompactPayload, threshold });
+        let formalRecompaction = {
+            schema: "ccm-bounded-formal-recompaction-v1",
+            scope: "project",
+            sessionId: `${safeProject}:${safeSessionId}`,
+            attempted: false,
+            maxAttempts: 1,
+            initialTokens: afterTokens,
+            threshold,
+            status: "not_required",
+        };
+        if (postCompactGate.providerCallAllowed !== true) {
+            formalRecompaction = { ...formalRecompaction, attempted: true, status: "running" };
+            try {
+                const retryResult = await invoke({
+                    system: `${system}\n这是压缩后容量门禁触发的唯一一次正式重压缩。只压缩已有摘要，不添加新事实；preservationReference 必须逐字保留。`,
+                    user: JSON.stringify({
+                        project: safeProject,
+                        projectSessionId: safeSessionId,
+                        currentSummary: summary,
+                        preservationReference: reference,
+                        sourceMessageIds,
+                        target: "produce a materially shorter valid summary",
+                    }),
+                    maxOutputTokens: Math.min(8_000, MODEL_MAX_OUTPUT_TOKENS),
+                    attempt: "post_compact_recompact_1",
+                });
+                const rebound = bindTrustedProjectSourceBoundary(retryResult?.summary || retryResult, sourceMessageIds);
+                const retryValidation = validateSummary(rebound, reference, sourceMessageIds, {
+                    sessionId: exactMemorySessionId,
+                    sourceMessages: segmentModelTimeline,
+                    previousSummary,
+                });
+                if (!retryValidation.valid)
+                    throw new Error(`项目会话正式重压缩摘要校验失败：${retryValidation.issues.join(", ")}`);
+                summary = normalizeSummary(rebound, sourceMessageIds);
+                validation = retryValidation;
+                result = { ...result, ...retryResult, summary, source: "model" };
+                postCompactPayload = buildPostCompactPayload(summary);
+                afterTokens = postCompactPayload.totalTokens;
+                postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: postCompactPayload, threshold });
+                formalRecompaction = {
+                    ...formalRecompaction,
+                    status: postCompactGate.providerCallAllowed === true ? "passed" : "still_over_threshold",
+                    finalTokens: afterTokens,
+                    summaryValidated: true,
+                };
+            }
+            catch (error) {
+                formalRecompaction = { ...formalRecompaction, status: "failed", error: compactText(error?.message || error, 500) };
+            }
+        }
+        postCompactGate = { ...postCompactGate, formalRecompaction };
         if (postCompactGate.providerCallAllowed !== true) {
             const error = new Error(`项目会话压缩后仍超过阈值：${afterTokens}/${threshold}`);
             error.code = "PROJECT_SESSION_POST_COMPACT_THRESHOLD_EXCEEDED";
             error.postCompactGate = postCompactGate;
             throw error;
         }
+        const secondaryReview = await (0, session_summary_secondary_review_1.reviewSessionSummaryIfSelected)({
+            config,
+            scope: "project",
+            scopeId: safeProject,
+            sessionId: safeSessionId,
+            boundaryGeneration: state.boundaryGeneration + 1,
+            summary,
+            reference,
+            sourceMessageIds,
+            deterministicQuality: validation.quality,
+        });
         const archive = {
             id: `pca_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
             from_index: startIndex,
             to_index: keepStart - 1,
             source_message_ids: sourceMessageIds,
+            visible_message_count: segment.length,
+            execution_message_count: segmentExecution.length,
             summary,
             summary_checksum: summaryChecksum(summary),
             summary_source: "model",
@@ -694,6 +850,9 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             input_projection: promptFit.projection,
             ptl_recovery_attempts: ptlRecoveryAttempts,
             previous_summary_checksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
+            formal_recompaction: formalRecompaction,
+            summary_quality: validation.quality || null,
+            secondary_review: secondaryReview,
         };
         const beforeBinding = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(safeProject, safeSessionId);
         const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(safeProject, safeSessionId, `项目会话模型压缩 ${archive.id}`);
@@ -705,9 +864,9 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
                 previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
                 lastCompactedIndex: keepStart - 1,
                 lastCompactedMessageId: segment.at(-1)?.id || "",
-                preservedRecentMessageIds: history.slice(keepStart).map((message) => String(message.id || "")),
-                preservedRecentTokens: recentWindow.preservedTokenCount,
-                preservedRecentTextMessageCount: recentWindow.preservedTextMessageCount,
+                preservedRecentMessageIds: preservedMessages.map((message) => String(message.id || "")),
+                preservedRecentTokens: preservedMessages.reduce((sum, message) => sum + (0, context_budget_1.estimateTextTokens)(String(message?.content || "")), 0),
+                preservedRecentTextMessageCount: preservedMessages.filter((message) => String(message?.content || "").trim()).length,
                 latestProviderUsage: null,
                 tokenMeasurement,
                 sessionMemoryState: nextSessionMemoryState,
@@ -722,6 +881,9 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
                 recoveryContextTokens: postCompactPayload.tokenBreakdown.recoveryContext,
                 hookResultTokens: postCompactPayload.tokenBreakdown.hookResults,
                 ptlRecoveryAttempts,
+                formalRecompaction,
+                summaryQuality: validation.quality || null,
+                secondaryReview,
             });
             data.compaction = {
                 schema: "ccm-project-session-model-compaction-v2",
@@ -732,9 +894,9 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
                 archives: [...(Array.isArray(data.compaction?.archives) ? data.compaction.archives : []), archive].slice(-100),
                 last_compacted_index: keepStart - 1,
                 last_compacted_message_id: segment.at(-1)?.id || "",
-                preserved_recent_message_ids: history.slice(keepStart).map((message) => message.id),
-                preserved_recent_token_count: recentWindow.preservedTokenCount,
-                preserved_recent_text_message_count: recentWindow.preservedTextMessageCount,
+                preserved_recent_message_ids: preservedMessages.map((message) => message.id),
+                preserved_recent_token_count: nextState.preservedRecentTokens,
+                preserved_recent_text_message_count: nextState.preservedRecentTextMessageCount,
                 recent_window: recentWindow,
                 before_tokens: tokenCount,
                 after_tokens: afterTokens,
@@ -748,6 +910,8 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
                 token_measurement: tokenMeasurement,
                 session_memory_state: nextState.sessionMemoryState,
                 post_compact_gate: postCompactGate,
+                summary_quality: validation.quality || null,
+                secondary_review: secondaryReview,
                 consecutive_failures: 0,
                 boundary_generation: nextState.boundaryGeneration,
                 boundary_marker: boundaryMarker,
@@ -758,6 +922,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
                 recovery_context_tokens: postCompactPayload.tokenBreakdown.recoveryContext,
                 hook_result_tokens: postCompactPayload.tokenBreakdown.hookResults,
                 ptl_recovery_attempts: ptlRecoveryAttempts,
+                formal_recompaction: formalRecompaction,
                 v2: nextState,
                 hook_results: { pre: preHookResults, session_start: sessionStartHookResults },
             };
@@ -787,6 +952,8 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             recovery_context_tokens: postCompactPayload.tokenBreakdown.recoveryContext,
             hook_result_tokens: postCompactPayload.tokenBreakdown.hookResults,
             ptl_recovery_attempts: ptlRecoveryAttempts,
+            summary_quality: validation.quality || null,
+            secondary_review: secondaryReview,
         };
         await (0, session_compaction_core_1.runSessionCompactionHooks)("post_compact", {
             scope: "project",
@@ -853,7 +1020,7 @@ function buildProjectSessionPostCompactContext(project, projectSessionId, target
         && binding.turn_count > 0
         && (!targetProvider || binding.provider === targetProvider))
         return "";
-    const projection = buildProjectSessionModelContextProjection(project, projectSessionId, options);
+    const projection = buildProjectSessionModelContextProjection(project, projectSessionId, { ...options, persistMicroCompactReceipt: true });
     if (!projection)
         return "";
     if (!projection.summary && !projection.visibleMessages.length)
@@ -861,15 +1028,7 @@ function buildProjectSessionPostCompactContext(project, projectSessionId, target
     return [
         "【当前项目逻辑会话连续性上下文】",
         "这是 CCM 为新第三方 Agent 会话世代恢复的历史上下文。执行前仍须核验当前文件和真实状态。",
-        `- mode=${projection.mode}`,
-        "- raw_transcript_preserved=true；不使用本地摘要、固定消息条数或字符截断。",
-        `- current_request_deduplicated=${projection.currentRequestDeduplicated}`,
-        projection.canonicalSummary
-            ? `正式模型摘要：${JSON.stringify(projection.summary)}`
-            : "正式模型摘要：无；尚未发生正式模型压缩，以下为当前会话全部历史原文。",
-        projection.visibleMessages.length
-            ? `${projection.canonicalSummary ? "压缩后近期完整原文" : "压缩前完整会话原文"}（${projection.visibleMessages.length}/${projection.historyMessageCount} 条，${projection.visibleMessageTokens} tokens）：${JSON.stringify(projection.visibleMessages)}`
-            : `${projection.canonicalSummary ? "压缩后近期完整原文" : "压缩前完整会话原文"}：无`,
+        projection.rendered,
     ].join("\n");
 }
 function buildProjectSessionModelContextProjection(project, projectSessionId, options = {}) {
@@ -888,49 +1047,41 @@ function buildProjectSessionModelContextProjection(project, projectSessionId, op
     const history = Array.isArray(data.history)
         ? data.history.filter((message) => ["user", "assistant"].includes(String(message?.role || "")))
         : [];
-    const pending = excludePendingProjectRequest(history, options.currentRequest);
-    const historyBeforeCurrentTurn = pending.history;
     const canonicalSummary = !!summary;
-    const recentFloor = Math.max(0, state.lastCompactedIndex + 1);
-    const recentWindow = canonicalSummary ? (0, session_memory_window_1.calculateSessionMemoryKeepWindow)(historyBeforeCurrentTurn, {
-        floorIndex: recentFloor,
-        lastSummarizedMessageId: String(state.sessionMemoryState?.lastExtractedMessageId || ""),
-    }) : {
-        startIndex: 0,
-        preservedTokenCount: historyBeforeCurrentTurn.reduce((sum, message) => sum + (0, context_budget_1.estimateTextTokens)(projectSessionMessageContent(message)), 0),
-        preservedMessageCount: historyBeforeCurrentTurn.length,
-        preservedTextMessageCount: historyBeforeCurrentTurn.filter((message) => projectSessionMessageContent(message).trim()).length,
-    };
-    const visibleMessages = canonicalSummary
-        ? historyBeforeCurrentTurn.slice(recentWindow.startIndex)
-        : historyBeforeCurrentTurn;
-    const visible = visibleMessages.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: projectSessionMessageContent(message),
-    }));
-    const mode = canonicalSummary ? "canonical_summary_recent_raw" : "precompact_full_raw";
-    const archiveMessages = canonicalSummary
-        ? historyBeforeCurrentTurn.slice(0, recentWindow.startIndex).map((message) => ({ id: message.id, role: message.role, content: projectSessionMessageContent(message) }))
-        : [];
-    return {
-        schema: "ccm-project-session-model-context-v1",
-        project,
-        projectSessionId,
-        mode,
-        canonicalSummary,
-        summary,
+    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const unified = (0, session_model_context_1.buildUnifiedSessionModelContextProjection)({
+        scope: "project",
+        scopeId: `${project}:${projectSessionId}`,
+        sessionId: projectSessionId,
+        messages: history,
+        executionEvents: projectExecutionEvents(data),
+        canonicalSummary: canonicalSummary ? summary : null,
         summarySource: canonicalSummary ? String(data.compaction?.summary_source || data.compaction?.summarySource || "") : "",
         summaryChecksum: canonicalSummary ? summaryChecksum(summary) : "",
         boundaryGeneration: Number(state.boundaryGeneration || 0),
+        summarizedThroughIndex: Number(state.lastCompactedIndex || -1),
+        lastSummarizedMessageId: String(state.sessionMemoryState?.lastExtractedMessageId || ""),
+        currentRequest: options.currentRequest,
+        microCompact: (0, session_model_context_1.resolveSessionModelMicroCompactPolicy)(config, {
+            contextTokens: Number(state.tokenMeasurement?.activeTokens || 0),
+            pressureThresholdTokens: Number(data.compaction?.auto_compact_threshold || state.postCompactGate?.threshold || 0),
+        }),
+    });
+    if (options.persistMicroCompactReceipt === true) {
+        data.compaction = {
+            ...(data.compaction || {}),
+            micro_compact_receipt: unified.microCompact,
+            tool_result_content_replacement_receipt: unified.contentReplacement,
+        };
+        data.updated_at = new Date().toISOString();
+        persistSession(project, projectSessionId, data);
+    }
+    return {
+        ...unified,
+        schema: "ccm-project-session-model-context-v1",
+        project,
+        projectSessionId,
         lastCompactedIndex: Number(state.lastCompactedIndex || -1),
-        currentRequestDeduplicated: pending.deduplicated,
-        historyMessageCount: history.length,
-        visibleMessages: visible,
-        archiveMessages,
-        visibleMessageTokens: Number(recentWindow.preservedTokenCount || 0),
-        recentWindow,
-        transcriptChecksum: (0, session_compaction_core_1.sessionCompactionChecksum)(historyBeforeCurrentTurn.map((message) => [message.id, message.role, projectSessionMessageContent(message)])),
     };
 }
 //# sourceMappingURL=project-session-compaction.js.map

@@ -80,7 +80,7 @@ const second = await memory.compactMusicAgentMemoryWithModel({
         dislikes: [],
         artistsAndGenres: ['钢琴', '氛围音乐'],
         playbackDecisions: ['优先本地曲库'],
-        unresolved: [],
+        unresolved: [...(JSON.parse(request.user).previousSummary?.unresolved || [])],
         latestContext: '第二轮连续点歌',
       },
     }
@@ -116,8 +116,8 @@ const merged = hooks.mergeLongTerm(
 )
 check(merged.preferences.includes('喜欢夜间轻音乐') && merged.preferences.includes('工作时低音量'), '长期偏好应增量合并')
 check(!merged.favoriteArtists.includes('旧歌手') && merged.favoriteArtists.includes('新歌手'), '用户纠正应删除旧偏好并加入新偏好')
-check(hooks.shouldExtractLongTerm('以后默认播放轻音乐') === true, '明确偏好应触发模型长期记忆提取')
-check(hooks.shouldExtractLongTerm('播放晴天') === false, '一次点歌不应自动成为长期偏好')
+check(hooks.shouldExtractLongTerm('以后默认播放轻音乐') === true, '完整轮次应进入模型长期记忆提取')
+check(hooks.shouldExtractLongTerm('播放晴天') === true, '一次点歌也应交给模型判断并允许返回 ignore')
 
 fs.writeFileSync(memory.MUSIC_AGENT_MEMORY_FILE, JSON.stringify({
   ...memory.loadMusicAgentMemory(),

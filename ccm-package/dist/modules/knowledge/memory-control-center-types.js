@@ -39,6 +39,7 @@ exports.compactMemoryCenterText = compactMemoryCenterText;
 exports.ensureDir = ensureDir;
 exports.readJson = readJson;
 exports.writeJsonAtomic = writeJsonAtomic;
+exports.withMemoryCenterFileLock = withMemoryCenterFileLock;
 exports.hash = hash;
 exports.canonicalFleetValue = canonicalFleetValue;
 exports.cleanId = cleanId;
@@ -63,6 +64,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
+const atomic_json_file_1 = require("../../core/atomic-json-file");
 exports.CONTROL_DIR = process.env.CCM_MEMORY_CONTROL_DIR || path.join(utils_1.CCM_DIR, "memory-control");
 exports.CONTROL_FILE = path.join(exports.CONTROL_DIR, "overrides.json");
 exports.AUDIT_FILE = path.join(exports.CONTROL_DIR, "audit.jsonl");
@@ -100,18 +102,20 @@ function ensureDir() {
     fs.mkdirSync(exports.CONTROL_DIR, { recursive: true });
 }
 function readJson(file, fallback) {
-    try {
-        return JSON.parse(fs.readFileSync(file, "utf-8"));
-    }
-    catch {
-        return fallback;
-    }
+    return (0, atomic_json_file_1.readJsonWithBackup)(file, fallback);
 }
+/**
+ * 控制中心的共享状态文件（overrides/quality 等）与记忆域其余部分保持一致：
+ * 走 core/atomic-json-file 的落盘实现（fsync + .bak 备份 + Windows 重命名重试）。
+ * 注意：本函数只保证「写」原子，读改写序列必须由调用方用 withMemoryCenterFileLock 包住。
+ */
 function writeJsonAtomic(file, value) {
+    (0, atomic_json_file_1.writeJsonAtomic)(file, value);
+}
+/** 读改写临界区：避免并发的 pin/edit/deprecate 互相覆盖。 */
+function withMemoryCenterFileLock(file, operation) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-    fs.renameSync(temp, file);
+    return (0, atomic_json_file_1.withFileLock)(file, operation, { timeoutMs: 10_000 });
 }
 function hash(value, length = 16) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, length);

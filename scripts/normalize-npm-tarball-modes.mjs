@@ -5,8 +5,10 @@ import process from 'node:process'
 import { createGunzip, createGzip } from 'node:zlib'
 import tar from 'tar-stream'
 
-const input = path.resolve(String(process.argv[2] || '').trim())
-if (!input || !fs.existsSync(input)) throw new Error('Usage: normalize-npm-tarball-modes <package.tgz>')
+const requestedInput = String(process.argv[2] || '').trim()
+if (!requestedInput) throw new Error('Usage: normalize-npm-tarball-modes <package.tgz>')
+const input = path.resolve(requestedInput)
+if (!fs.existsSync(input) || !fs.statSync(input).isFile()) throw new Error('Usage: normalize-npm-tarball-modes <package.tgz>')
 
 const executableEntries = new Set([
   'package/bin/ccm.js',

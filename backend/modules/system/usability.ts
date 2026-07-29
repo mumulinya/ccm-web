@@ -4,6 +4,7 @@ import { loadCronJobs, loadTasks, saveTasks, getConfigs, getConfigInfo, isRunnin
 import { CCM_DIR, sendJson } from "../../core/utils";
 import { loadGroups } from "../collaboration/collaboration";
 import { reconcileTaskAgentSessions } from "../../tasks/agent-sessions";
+import { projectDisplayName } from "../projects/project-runtime";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -184,7 +185,7 @@ export function buildUsabilityWorkbench(options: { runArchive?: boolean } = {}) 
   const projects = getConfigs().map((config: any) => {
     const info = getConfigInfo(config.path)?.[0] || {};
     const running = isRunning(config.name);
-    return { name: config.name, running, agent: info.agent || "claudecode", work_dir: info.workDir || "", actions: running ? ["open", "stop"] : ["open", "start"] };
+    return { name: config.name, display_name: projectDisplayName(config.name), running, agent: info.agent || "claudecode", work_dir: info.workDir || "", actions: running ? ["open", "stop"] : ["open", "start"] };
   });
   const groups = loadGroups().map((group: any) => ({ id: group.id, name: group.name, members: Array.isArray(group.members) ? group.members.length : 0 }));
   const cron = loadCronJobs().filter((job: any) => !job.archived && !job.deleted_at).map((job: any) => ({

@@ -76,6 +76,12 @@ function normalizeProject(raw, index, globalStartupTimeoutMs, issues) {
         browserChecks: (0, utils_1.asArray)(raw?.browserChecks || raw?.browser_checks)
             .map((check, checkIndex) => (0, work_order_normalize_checks_1.normalizeBrowserCheck)(check, issues, name, checkIndex))
             .filter(Boolean),
+        // 主 Agent 用自然语言描述要验证的浏览器场景，由智能规划层翻译成真实动作与断言。
+        browserScenarios: (0, utils_1.asArray)(raw?.browserScenarios || raw?.browser_scenarios)
+            .map(String)
+            .map(item => item.trim())
+            .filter(Boolean)
+            .slice(0, 12),
         agentSummary: (0, work_order_aliases_1.text)(raw?.agentSummary || raw?.agent_summary),
         risks: (0, utils_1.asArray)(raw?.risks).map(String).filter(Boolean),
     };

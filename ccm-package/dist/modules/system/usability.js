@@ -44,6 +44,7 @@ const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
 const collaboration_1 = require("../collaboration/collaboration");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
+const project_runtime_1 = require("../projects/project-runtime");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const DAY = 24 * 60 * 60 * 1000;
@@ -234,7 +235,7 @@ function buildUsabilityWorkbench(options = {}) {
     const projects = (0, db_1.getConfigs)().map((config) => {
         const info = (0, db_1.getConfigInfo)(config.path)?.[0] || {};
         const running = (0, db_1.isRunning)(config.name);
-        return { name: config.name, running, agent: info.agent || "claudecode", work_dir: info.workDir || "", actions: running ? ["open", "stop"] : ["open", "start"] };
+        return { name: config.name, display_name: (0, project_runtime_1.projectDisplayName)(config.name), running, agent: info.agent || "claudecode", work_dir: info.workDir || "", actions: running ? ["open", "stop"] : ["open", "start"] };
     });
     const groups = (0, collaboration_1.loadGroups)().map((group) => ({ id: group.id, name: group.name, members: Array.isArray(group.members) ? group.members.length : 0 }));
     const cron = (0, db_1.loadCronJobs)().filter((job) => !job.archived && !job.deleted_at).map((job) => ({

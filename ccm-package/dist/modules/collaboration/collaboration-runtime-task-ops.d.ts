@@ -35,6 +35,20 @@ export declare function switchTaskExecutor(id: string, requestedRuntime: string,
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
     status?: undefined;
     error?: undefined;
@@ -61,6 +75,20 @@ export declare function retryRuntimeFailedTasks(ctx: CollabCtx, options?: any): 
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
 } | {
     success: boolean;
@@ -77,6 +105,20 @@ export declare function retryRuntimeFailedTasks(ctx: CollabCtx, options?: any): 
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
     dry_run?: undefined;
 };

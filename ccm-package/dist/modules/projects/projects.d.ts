@@ -70,6 +70,18 @@ declare function stopProject(projectName: string, explicit?: boolean): {
     success: boolean;
     running: boolean;
     process_owned: boolean;
+    runtime_stop: {
+        success: boolean;
+        project: string;
+        stoppedProcesses: number;
+        stoppedBuilds: number;
+        failures: {
+            profileId: string;
+            kind: "run" | "build";
+            error: string;
+        }[];
+    };
+    error: string;
     message: string;
 };
 export { startProject, stopProject };

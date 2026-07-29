@@ -154,8 +154,8 @@ try {
     maintenanceDeletesOnlyFilteredEvidence: executed.deletedCount === 1 && remaining.length === 0,
     workerHandoffBypassUsesProviderCapacity: originalHandoff.worker_context_packet.context_usage.max_tokens === 300_000,
     capacityDowngradeCreatesAlert: downgraded.downgrade?.previousContextWindow === 320_000 && downgraded.downgrade?.currentContextWindow === 64_000,
-    reusedPacketRecompactsAfterDowngrade: downgradedHandoff.worker_context_packet.capacity_downgrade_gate?.action === "recompact_before_dispatch"
-      && downgradedHandoff.worker_context_packet.context_compaction_retry?.schema === "ccm-worker-context-capacity-downgrade-recompact-v1"
+    reusedPacketRequiresCanonicalRecompactAfterDowngrade: downgradedHandoff.worker_context_packet.capacity_downgrade_gate?.action === "recompact_before_dispatch"
+      && !downgradedHandoff.worker_context_packet.context_compaction_retry
       && downgradedHandoff.worker_context_packet.context_usage.max_tokens === 56_000,
     expiredSmallWindowRemainsSafeBound: staleSafe.source === "stale_safe_bound" && staleSafe.contextWindow === 64_000,
     refreshDueEntryIsQueued: refreshPlan.requests.some(entry => entry.provider === refreshProvider && entry.status === "pending_native_telemetry"),

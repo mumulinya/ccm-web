@@ -14,10 +14,25 @@ export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
     queued: boolean;
     message: string;
     blocked?: undefined;
+    reason?: undefined;
+    retry_after?: undefined;
+    remaining_ms?: undefined;
+    duplicate_block_suppressed?: undefined;
     dependency_wait?: undefined;
     dependencies?: undefined;
-    duplicate_block_suppressed?: undefined;
-    reason?: undefined;
+    readiness?: undefined;
+    targetKey?: undefined;
+    position?: undefined;
+} | {
+    queued: boolean;
+    blocked: boolean;
+    reason: string;
+    retry_after: string;
+    remaining_ms: number;
+    duplicate_block_suppressed: boolean;
+    message: string;
+    dependency_wait?: undefined;
+    dependencies?: undefined;
     readiness?: undefined;
     targetKey?: undefined;
     position?: undefined;
@@ -27,8 +42,10 @@ export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
     dependency_wait: boolean;
     dependencies: any;
     message: string;
-    duplicate_block_suppressed?: undefined;
     reason?: undefined;
+    retry_after?: undefined;
+    remaining_ms?: undefined;
+    duplicate_block_suppressed?: undefined;
     readiness?: undefined;
     targetKey?: undefined;
     position?: undefined;
@@ -39,6 +56,8 @@ export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
     reason: string;
     message: any;
     readiness: any;
+    retry_after?: undefined;
+    remaining_ms?: undefined;
     dependency_wait?: undefined;
     dependencies?: undefined;
     targetKey?: undefined;
@@ -49,10 +68,12 @@ export declare function enqueueTask(taskId: string, ctx: CollabCtx): {
     targetKey: string;
     position: number;
     blocked?: undefined;
+    reason?: undefined;
+    retry_after?: undefined;
+    remaining_ms?: undefined;
+    duplicate_block_suppressed?: undefined;
     dependency_wait?: undefined;
     dependencies?: undefined;
-    duplicate_block_suppressed?: undefined;
-    reason?: undefined;
     readiness?: undefined;
 };
 export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
@@ -61,10 +82,25 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         queued: boolean;
         message: string;
         blocked?: undefined;
+        reason?: undefined;
+        retry_after?: undefined;
+        remaining_ms?: undefined;
+        duplicate_block_suppressed?: undefined;
         dependency_wait?: undefined;
         dependencies?: undefined;
-        duplicate_block_suppressed?: undefined;
-        reason?: undefined;
+        readiness?: undefined;
+        targetKey?: undefined;
+        position?: undefined;
+    } | {
+        queued: boolean;
+        blocked: boolean;
+        reason: string;
+        retry_after: string;
+        remaining_ms: number;
+        duplicate_block_suppressed: boolean;
+        message: string;
+        dependency_wait?: undefined;
+        dependencies?: undefined;
         readiness?: undefined;
         targetKey?: undefined;
         position?: undefined;
@@ -74,8 +110,10 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         dependency_wait: boolean;
         dependencies: any;
         message: string;
-        duplicate_block_suppressed?: undefined;
         reason?: undefined;
+        retry_after?: undefined;
+        remaining_ms?: undefined;
+        duplicate_block_suppressed?: undefined;
         readiness?: undefined;
         targetKey?: undefined;
         position?: undefined;
@@ -86,6 +124,8 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         reason: string;
         message: any;
         readiness: any;
+        retry_after?: undefined;
+        remaining_ms?: undefined;
         dependency_wait?: undefined;
         dependencies?: undefined;
         targetKey?: undefined;
@@ -96,10 +136,12 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         targetKey: string;
         position: number;
         blocked?: undefined;
+        reason?: undefined;
+        retry_after?: undefined;
+        remaining_ms?: undefined;
+        duplicate_block_suppressed?: undefined;
         dependency_wait?: undefined;
         dependencies?: undefined;
-        duplicate_block_suppressed?: undefined;
-        reason?: undefined;
         readiness?: undefined;
     };
 };
@@ -134,9 +176,23 @@ export declare function resumeTaskQueues(ctx: CollabCtx, options?: any): {
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
 };
-export declare function getTaskWatchdogStatus(staleMs?: number, gapCooldownMs?: number, gapMaxCount?: number, taskSnapshot?: any[]): {
+export declare function getTaskWatchdogStatus(staleMs?: number, gapCooldownMs?: number, gapMaxCount?: number, taskSnapshot?: any[], recoveryMaxCount?: number): {
     stale_ms: number;
     checked_at: string;
     stale_pending: any[];
@@ -145,6 +201,7 @@ export declare function getTaskWatchdogStatus(staleMs?: number, gapCooldownMs?: 
     runtime_failed: any[];
     gap_rework: any[];
     work_item_stalled: any[];
+    recovery_exhausted: any[];
     queue_status: {
         total_queued: number;
         running_targets: number;
@@ -153,6 +210,20 @@ export declare function getTaskWatchdogStatus(staleMs?: number, gapCooldownMs?: 
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
 };
 export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
@@ -161,6 +232,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
     total_recoverable: number;
     stale_recovered: number;
     stale_recoverable: number;
+    recovery_exhausted: number;
     work_item_stalled_total: number;
     work_item_requeued: any;
     work_item_results: any[];
@@ -188,6 +260,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
         runtime_failed: any[];
         gap_rework: any[];
         work_item_stalled: any[];
+        recovery_exhausted: any[];
         queue_status: {
             total_queued: number;
             running_targets: number;
@@ -196,6 +269,20 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
             in_progress_tasks: number;
             failed_tasks: number;
             running_task_ids: string[];
+            unified_scheduler: {
+                schema: string;
+                queued: number;
+                running_lanes: string[];
+                running_task_ids: string[];
+                workspace_lanes: string[];
+                queues: {
+                    queue_key: string;
+                    task_ids: string[];
+                }[];
+            };
+            unified_queued: number;
+            unified_running_lanes: number;
+            workspace_mutation_lanes: string[];
         };
     };
 };
@@ -271,6 +358,20 @@ export declare function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options?: an
             in_progress_tasks: number;
             failed_tasks: number;
             running_task_ids: string[];
+            unified_scheduler: {
+                schema: string;
+                queued: number;
+                running_lanes: string[];
+                running_task_ids: string[];
+                workspace_lanes: string[];
+                queues: {
+                    queue_key: string;
+                    task_ids: string[];
+                }[];
+            };
+            unified_queued: number;
+            unified_running_lanes: number;
+            workspace_mutation_lanes: string[];
         };
     };
 }>;

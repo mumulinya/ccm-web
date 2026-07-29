@@ -13,6 +13,7 @@ process.env.USERPROFILE = tempHome
 
 const files = require(path.join(root, 'ccm-package', 'dist', 'modules', 'knowledge', 'knowledge-files.js'))
 const index = require(path.join(root, 'ccm-package', 'dist', 'modules', 'knowledge', 'knowledge-index.js'))
+files.saveRagEmbeddingConfig({ mode: 'lexical' })
 
 const checks = []
 const check = (name, fn) => {

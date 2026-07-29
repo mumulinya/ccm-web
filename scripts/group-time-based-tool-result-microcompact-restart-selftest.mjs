@@ -124,7 +124,9 @@ function childCreate(fixtureFile) {
   const centerMicro = detail.postCompactUsage?.timeBasedToolResultMicrocompact || {};
   const siblingMemory = memory.loadGroupMemory(groupId, siblingSessionId);
   const rawAfter = storage.getGroupMessages(groupId, groupSessionId);
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const uiSource = ["MemoryCenter.vue", "MemoryCenterPanel.vue", "MicroCompactStatusPanel.vue"]
+    .map(name => fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", name), "utf8"))
+    .join("\n");
 
   const checks = {
     oldCompactableResultsCleared: direct.applied === true

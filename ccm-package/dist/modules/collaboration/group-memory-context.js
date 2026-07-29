@@ -71,6 +71,9 @@ const group_runtime_memory_admission_1 = require("./group-runtime-memory-admissi
 const group_memory_compaction_1 = require("./group-memory-compaction");
 const group_memory_index_1 = require("./group-memory-index");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
+const group_typed_memory_distillation_throttle_1 = require("./group-typed-memory-distillation-throttle");
+const typed_memory_promotion_1 = require("./typed-memory-promotion");
+const typed_memory_model_judgment_1 = require("./typed-memory-model-judgment");
 const storage_1 = require("./storage");
 const group_memory_boundary_journal_1 = require("./group-memory-boundary-journal");
 const memory_1 = require("../../agents/global/memory");
@@ -79,6 +82,7 @@ const group_compact_head_1 = require("./group-compact-head");
 const provider_native_compact_execution_receipt_1 = require("./provider-native-compact-execution-receipt");
 const provider_native_compact_session_capacity_1 = require("./provider-native-compact-session-capacity");
 const group_memory_auto_compact_circuit_breaker_1 = require("./group-memory-auto-compact-circuit-breaker");
+const group_memory_auto_compact_circuit_policy_1 = require("./group-memory-auto-compact-circuit-policy");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const group_agent_memory_packet_1 = require("./group-agent-memory-packet");
 const group_compact_file_references_1 = require("./group-compact-file-references");
@@ -361,7 +365,59 @@ function buildGroupMemoryContext(memory) {
     addList("下一步", modelRuntime.nextActions, (item) => String(item.action || item));
     return lines.join("\n");
 }
+function mergeVerifiedGroupPostCompactReinjection(groupId, groupSessionId, stored, rebuilt) {
+    const previous = stored?.schema === "ccm-post-compact-reinjection-v1" ? stored : {};
+    const next = rebuilt?.schema === "ccm-post-compact-reinjection-v1" ? rebuilt : {};
+    const expected = { groupId, groupSessionId };
+    const fileValid = previous.preservedFileDedup
+        && (0, group_memory_compaction_1.verifyGroupPostCompactFileRestoreDedupReceipt)(previous.preservedFileDedup, expected).valid === true;
+    const skillsValid = previous.invokedSkillAttachmentReceipt
+        && (0, group_memory_compaction_1.verifyGroupPostCompactInvokedSkillAttachmentReceipt)(previous.invokedSkillAttachmentReceipt, {
+            ...expected,
+            attachments: previous.invokedSkillAttachments || [],
+        }).valid === true;
+    const planValid = previous.planAttachmentReceipt
+        && (0, group_memory_compaction_1.verifyGroupPostCompactPlanAttachmentReceipt)(previous.planAttachmentReceipt, {
+            ...expected,
+            attachment: previous.planAttachment || null,
+        }).valid === true;
+    const dynamicValid = previous.dynamicContextDeltaReceipt
+        && (0, group_memory_compaction_1.verifyGroupPostCompactDynamicContextDeltaReceipt)(previous.dynamicContextDeltaReceipt, {
+            ...expected,
+            attachment: previous.dynamicContextDeltaAttachment || null,
+        }).valid === true;
+    const merged = { ...previous, ...next };
+    if (fileValid) {
+        merged.files = previous.files || [];
+        merged.preservedFileDedup = previous.preservedFileDedup;
+    }
+    if (skillsValid && !(next.invokedSkillAttachments || []).length) {
+        merged.invokedSkillAttachments = previous.invokedSkillAttachments || [];
+        merged.invokedSkillAttachmentReceipt = previous.invokedSkillAttachmentReceipt;
+    }
+    if (planValid && !next.planAttachment) {
+        merged.planAttachment = previous.planAttachment;
+        merged.planAttachmentReceipt = previous.planAttachmentReceipt;
+    }
+    if (dynamicValid && !next.dynamicContextDeltaAttachment) {
+        merged.dynamicContextDeltaAttachment = previous.dynamicContextDeltaAttachment;
+        merged.dynamicContextDeltaReceipt = previous.dynamicContextDeltaReceipt;
+    }
+    merged.hasCandidates = !!((merged.files || []).length
+        || (merged.skills || []).length
+        || (merged.verification || []).length
+        || (merged.blockers || []).length
+        || (merged.taskStatuses || []).length
+        || (merged.invokedSkillAttachments || []).length
+        || merged.planAttachment
+        || merged.dynamicContextDeltaAttachment);
+    return merged;
+}
 function prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages, storedMemory, options = {}) {
+    const storedPostCompactReinject = storedMemory?.compaction?.postCompactReinject
+        || storedMemory?.compactBoundary?.post_compact_restore?.reinjectionPlan
+        || null;
+    const storedTaskStatusProjection = storedMemory?.compaction?.postCompactTaskStatusProjection || null;
     const projectionOptions = {
         groupId,
         sessionId: groupSessionId,
@@ -442,6 +498,34 @@ function prepareGroupMemoryResumeProjection(groupId, groupSessionId, allMessages
             messages: allMessages,
             memory
         });
+    }
+    if (storedPostCompactReinject?.schema === "ccm-post-compact-reinjection-v1") {
+        const currentPlan = memory?.compaction?.postCompactReinject
+            || memory?.compactBoundary?.post_compact_restore?.reinjectionPlan
+            || null;
+        const mergedPlan = mergeVerifiedGroupPostCompactReinjection(groupId, groupSessionId, storedPostCompactReinject, currentPlan);
+        const rebuiltTaskStatusProjection = memory?.compaction?.postCompactTaskStatusProjection || null;
+        const storedTaskStatusValid = storedTaskStatusProjection
+            && (0, group_memory_compaction_1.verifyGroupPostCompactTaskStatusProjectionReceipt)(storedTaskStatusProjection, {
+                groupId,
+                groupSessionId,
+                projectionChecksum: storedTaskStatusProjection.projection_checksum || "",
+            }).valid === true;
+        const stableTaskStatusProjection = storedTaskStatusValid
+            ? storedTaskStatusProjection
+            : rebuiltTaskStatusProjection;
+        if (storedTaskStatusValid) {
+            mergedPlan.taskStatuses = storedPostCompactReinject.taskStatuses || [];
+            mergedPlan.hasCandidates = mergedPlan.hasCandidates === true || mergedPlan.taskStatuses.length > 0;
+        }
+        memory = (0, group_memory_storage_1.saveGroupMemory)(groupId, {
+            ...memory,
+            compaction: {
+                ...(memory.compaction || {}),
+                postCompactReinject: mergedPlan,
+                postCompactTaskStatusProjection: stableTaskStatusProjection,
+            },
+        }, groupSessionId);
     }
     let compactHeadRecovery = null;
     if (projection.status === "verified" && memory?.compactBoundary?.id) {
@@ -653,9 +737,9 @@ function scheduleGroupMemoryAutoCompaction(groupId, options = {}) {
     const sessionId = String(options.sessionId || options.session_id || (0, storage_1.getActiveGroupChatSessionId)(id));
     if (!sessionId.startsWith("gcs_"))
         return { scheduled: false, reason: "legacy_default_session_rejected", groupId: id, sessionId };
-    const circuitBreaker = (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId);
-    if (circuitBreaker.blocked === true && options.force !== true) {
-        return { scheduled: false, reason: "auto_compact_circuit_breaker_open", groupId: id, sessionId, circuitBreaker };
+    const circuitAdmission = (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitAdmission)(id, sessionId);
+    if (circuitAdmission.allowed !== true && options.force !== true) {
+        return { scheduled: false, reason: circuitAdmission.reason, groupId: id, sessionId, circuitBreaker: circuitAdmission.ledger, circuitAdmission };
     }
     const scopeKey = `${id}::${sessionId}`;
     if (group_memory_shared_1.groupMemoryAutoCompactTimers.has(scopeKey)) {
@@ -676,9 +760,10 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
     const sessionId = String(options.sessionId || options.session_id || (0, storage_1.getActiveGroupChatSessionId)(id));
     if (!sessionId.startsWith("gcs_"))
         return { success: false, compacted: false, reason: "legacy_default_session_rejected", groupId: id, sessionId };
-    const initialCircuitBreaker = (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId);
-    if (initialCircuitBreaker.blocked === true && options.force !== true) {
-        return { success: true, compacted: false, skipped: true, reason: "auto_compact_circuit_breaker_open", groupId: id, sessionId, circuitBreaker: initialCircuitBreaker };
+    const initialCircuitAdmission = (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitAdmission)(id, sessionId);
+    const initialCircuitBreaker = initialCircuitAdmission.ledger;
+    if (initialCircuitAdmission.allowed !== true && options.force !== true) {
+        return { success: true, compacted: false, skipped: true, reason: initialCircuitAdmission.reason, groupId: id, sessionId, circuitBreaker: initialCircuitBreaker, circuitAdmission: initialCircuitAdmission };
     }
     const typedMemoryScopeId = `${id}--${sessionId}`;
     const scopeKey = `${id}::${sessionId}`;
@@ -852,9 +937,15 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                     startedAt,
                     completedAt: new Date().toISOString()
                 });
-                const logDistillation = (0, group_memory_index_1.distillGroupMessagesToTypedMemory)(typedMemoryScopeId, messages, nextMemory, {
+                // 蒸馏走独立节流：压缩真正落边界时强制执行，否则按批量/间隔阈值决定，
+                // 避免每条消息 append 都进一次蒸馏事务。
+                const logDistillation = (0, group_typed_memory_distillation_throttle_1.runTypedMemoryDistillationIfDue)(typedMemoryScopeId, messages, nextMemory, {
                     reason: `auto_compaction:${background.reason || "message_append"}`,
                     throughMessageId: result.boundary?.summarizedThroughMessageId || nextMemory?.compaction?.lastCompactedMessageId || "",
+                    compacted: result.compacted === true,
+                    force: force === true,
+                    distillMinPendingMessages: options.distillMinPendingMessages || options.distill_min_pending_messages,
+                    distillMaxIdleMs: options.distillMaxIdleMs || options.distill_max_idle_ms,
                     maxMessages: options.distillMaxMessages || options.distill_max_messages
                 });
                 const memoryBeforePostCompactState = {
@@ -898,6 +989,8 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                         };
                     }
                 }
+                // 压缩成功记 success；低于阈值被跳过记 clean_run——两者都证明流水线是通的，
+                // 都必须能把连续失败计数清零，否则熔断只增不减、永远打开。
                 const circuitBreaker = result.compacted === true && !!result.boundary?.id && !!compactHead?.head
                     ? (0, group_memory_auto_compact_circuit_breaker_1.recordGroupMemoryAutoCompactCircuitBreakerOutcome)({
                         groupId: id,
@@ -907,7 +1000,14 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                         reason: options.force === true ? "manual_compact_succeeded" : "auto_compact_succeeded",
                         at: background.completedAt
                     })
-                    : (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId);
+                    : (0, group_memory_auto_compact_circuit_breaker_1.recordGroupMemoryAutoCompactCircuitBreakerOutcome)({
+                        groupId: id,
+                        groupSessionId: sessionId,
+                        attemptId: autoCompactAttemptId,
+                        outcome: "clean_run",
+                        reason: result.compacted === true ? "compact_committed_without_head" : "compact_skipped_below_threshold",
+                        at: background.completedAt
+                    });
                 const postCompactSessionStateReset = result.compacted === true && !!result.boundary?.id
                     ? (0, group_memory_compaction_1.buildGroupPostCompactSessionStateResetReceipt)({
                         groupId: id,
@@ -962,6 +1062,10 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                             state: circuitBreaker.state,
                             consecutiveFailures: Number(circuitBreaker.consecutive_failures || 0),
                             maxConsecutiveFailures: Number(circuitBreaker.max_consecutive_failures || 3),
+                            failureMode: String(circuitBreaker.failure_mode || ""),
+                            openCount: Number(circuitBreaker.open_count || 0),
+                            openedAt: circuitBreaker.opened_at || "",
+                            lastFailureAt: circuitBreaker.last_failure_at || "",
                             lastSuccessAt: circuitBreaker.last_success_at || "",
                             ledgerChecksum: circuitBreaker.ledger_checksum || ""
                         },
@@ -1031,6 +1135,8 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
             startedAt,
             completedAt: new Date().toISOString()
         });
+        // 错误分级：用户取消不计入熔断；结构性错误重试无益，标记为需人工处理。
+        const failureClassification = (0, group_memory_auto_compact_circuit_policy_1.classifyAutoCompactFailure)(error);
         const circuitBreaker = options.force === true
             ? (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitBreaker)(id, sessionId)
             : (0, group_memory_auto_compact_circuit_breaker_1.recordGroupMemoryAutoCompactCircuitBreakerOutcome)({
@@ -1039,7 +1145,8 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 attemptId: autoCompactAttemptId,
                 outcome: "failure",
                 reason: "auto_compact_failed",
-                errorClass: error?.name || error?.code || "Error",
+                errorClass: error?.name || error?.code || failureClassification.errorClass || "Error",
+                failureMode: failureClassification.failureMode,
                 error: error?.message || String(error),
                 at: background.completedAt
             });
@@ -1053,7 +1160,10 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                     state: circuitBreaker.state,
                     consecutiveFailures: Number(circuitBreaker.consecutive_failures || 0),
                     maxConsecutiveFailures: Number(circuitBreaker.max_consecutive_failures || 3),
+                    failureMode: String(circuitBreaker.failure_mode || failureClassification.failureMode || ""),
+                    openCount: Number(circuitBreaker.open_count || 0),
                     openedAt: circuitBreaker.opened_at || "",
+                    lastFailureAt: circuitBreaker.last_failure_at || "",
                     ledgerChecksum: circuitBreaker.ledger_checksum || ""
                 },
                 health: "degraded",
@@ -2005,6 +2115,16 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             maxImportFiles: options.projectMemoryMaxImportFiles || options.project_memory_max_import_files
         })
         : null;
+    // 跨会话记忆继承：把该项目历史会话已升格的规则导入本会话。
+    // 升格（写入方向）走异步的模型判定路径，见 buildAgentMemoryContextBundleWithManifestSelection；
+    // 这里只在没有模型判定的降级场景下用本地阈值兜底。
+    const memoryPromotion = options.enableMemoryPromotion === false || options.enable_memory_promotion === false
+        || options.deferMemoryPromotionToModel === true
+        ? null
+        : (0, typed_memory_promotion_1.safeMemoryPromotion)(typedMemoryScopeId, project);
+    const promotedMemoryImport = options.includePromotedMemory === false || options.include_promoted_memory === false
+        ? null
+        : (0, typed_memory_promotion_1.safePromotedMemoryImport)(typedMemoryScopeId, project);
     const typedMemorySync = (0, group_memory_index_1.syncGroupTypedMemoryFromGroupMemory)(typedMemoryScopeId, memory);
     const providerRankingCompactRepairReceiptRecall = buildProviderRankingProvenanceCompactRepairReceiptWorkerContextRecall(typedMemoryScopeId, task, memory, options);
     const postCompactReinjectionRepairReceiptRecall = buildPostCompactReinjectionRepairReceiptWorkerContextRecall(typedMemoryScopeId, task, memory, options);
@@ -2221,6 +2341,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         globalClaudeMemoryImport,
         globalAgentMemoryRecall,
         projectMemoryImport,
+        memoryPromotion,
+        promotedMemoryImport,
         postCompactRecoveryAudit: memory.compaction?.postCompactRecoveryAudit
             || memory.compactBoundary?.post_compact_restore?.recoveryAudit
             || memory.messageCompression?.postCompactRecoveryAudit
@@ -2430,8 +2552,20 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
     const storedPostCompactReinject = memory.compaction?.postCompactReinject
         || memory.compactBoundary?.post_compact_restore?.reinjectionPlan
         || null;
+    const liveDynamicContextCatalog = groupSessionId.startsWith("gcs_")
+        ? buildGroupPostCompactDynamicContextCatalog(groupId, memory, options)
+        : null;
+    if (liveDynamicContextCatalog && project && !liveDynamicContextCatalog.agents.some((item) => String(item?.project || item?.name || "") === project)) {
+        const agentType = (0, runtime_1.normalizeAgentRuntimeId)(options.agentType || options.agent_type || "claudecode");
+        liveDynamicContextCatalog.agents.push({
+            name: project,
+            project,
+            agentType,
+            line: `${project} (${agentType}): current exact child dispatch target; dispatch remains limited by the live group and runtime authorization gates`,
+        });
+    }
     const liveDynamicContextDelta = groupSessionId.startsWith("gcs_")
-        ? (0, group_memory_compaction_1.buildGroupPostCompactDynamicContextDeltaProjection)(buildGroupPostCompactDynamicContextCatalog(groupId, memory, options), {
+        ? (0, group_memory_compaction_1.buildGroupPostCompactDynamicContextDeltaProjection)(liveDynamicContextCatalog, {
             groupId,
             groupSessionId,
             scanMode: "full",
@@ -2449,8 +2583,12 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                 version: 1,
                 strategy: "restore_dynamic_runtime_context_for_new_child_session"
             }),
-            dynamicContextDeltaAttachment: liveDynamicContextDelta?.attachment || null,
-            dynamicContextDeltaReceipt: liveDynamicContextDelta?.receipt || null
+            dynamicContextDeltaAttachment: liveDynamicContextDelta?.attachment
+                || storedPostCompactReinject?.dynamicContextDeltaAttachment
+                || null,
+            dynamicContextDeltaReceipt: liveDynamicContextDelta?.attachment
+                ? liveDynamicContextDelta?.receipt || null
+                : storedPostCompactReinject?.dynamicContextDeltaReceipt || liveDynamicContextDelta?.receipt || null
         }
         : null;
     const modelVisibleRuntime = (0, group_runtime_memory_admission_1.modelVisibleGroupRuntimeState)(memory);
@@ -2866,6 +3004,8 @@ async function buildAgentMemoryContextBundleWithManifestSelection(groupId, targe
     });
     const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
         ...options,
+        // 升格改由下面的模型判定统一处理，避免同一轮里本地阈值先斩后奏。
+        deferMemoryPromotionToModel: true,
         typedMemoryManifestSelection: selection
     });
     const recall = bundle.typedMemoryRecall || bundle.typed_memory_recall || bundle.group_state?.typedMemory?.recall || null;
@@ -2889,6 +3029,23 @@ async function buildAgentMemoryContextBundleWithManifestSelection(groupId, targe
     bundle.typedMemoryManifestSelection = selection;
     bundle.typed_memory_manifest_selector_outcome = selectorOutcome;
     bundle.typedMemoryManifestSelectorOutcome = selectorOutcome;
+    const memoryModelConfig = (0, group_memory_shared_1.loadGroupMemoryCompactionConfig)(options.compactionConfig || options.compaction_config || {});
+    // 升格判定：本地阈值只做初筛，「是否值得跨会话继承」由模型决定。
+    const memoryPromotion = options.enableMemoryPromotion === false || options.enable_memory_promotion === false
+        ? null
+        : await (0, typed_memory_promotion_1.safeMemoryPromotionWithModel)(scopeId, targetProject, { modelConfig: memoryModelConfig });
+    if (memoryPromotion) {
+        bundle.memory_promotion = memoryPromotion;
+        bundle.memoryPromotion = memoryPromotion;
+    }
+    // 模型重排：本地 TF-IDF/正则只做初筛，最终排序交给模型判断「这条记忆会不会
+    // 改变本次任务的做法」。模型不可用时保持本地顺序，并把降级原因带回包里。
+    const modelRerank = await (0, typed_memory_model_judgment_1.applyModelRecallRerankToBundle)(scopeId, String(typedMemory.recallQuery || task || ""), bundle, memoryModelConfig);
+    bundle.typed_memory_model_rerank = modelRerank;
+    bundle.typedMemoryModelRerank = modelRerank;
+    if (modelRerank.applied || modelRerank.degraded) {
+        bundle.rendered_text = (0, group_memory_shared_1.compactPreserveLines)(renderGroupMemoryContextBundle(bundle), Number(options.maxRenderedChars || 14_000));
+    }
     return bundle;
 }
 // ===== merged from group-memory-context-part-04-part-01.ts =====
@@ -3097,6 +3254,16 @@ function renderGroupMemoryContextBundle(bundle) {
         "- 记忆边界：你每轮执行都可能是新的第三方 CLI 会话；必须把本包当作当前任务上下文，不要假定 Claude Code/Cursor/Codex 内部 session 记得旧群聊。",
         "- 上下文策略：旧消息已被 CCM 压缩为摘要；近期消息保留原文窗口；本包如附带“压缩前原文证据”，该证据优先于摘要。",
     ];
+    const appendCriticalMemory = (title, items, mapper, limit) => {
+        const selected = (Array.isArray(items) ? items : []).filter(Boolean).slice(-limit);
+        if (!selected.length)
+            return;
+        lines.push(`- ${title}：`);
+        for (const item of selected)
+            lines.push(`  - ${mapper(item)}`);
+    };
+    appendCriticalMemory("持久用户要求/验收约束", groupState.persistentRequirements, (item) => `#${item.messageId || ""} ${item.text || item}`, 6);
+    appendCriticalMemory("关键事实锚点", groupState.factAnchors, (item) => `#${item.messageId || ""} [${item.actor || item.type || ""}] ${item.text || item}`, 5);
     const invokedSkillAttachmentText = String(bundle.invoked_skill_attachment_text || bundle.invokedSkillAttachmentText || renderGroupPostCompactInvokedSkillAttachments(compaction.postCompactReinject || {})).trim();
     const planAttachmentText = String(bundle.plan_attachment_text || bundle.planAttachmentText || renderGroupPostCompactPlanAttachment(compaction.postCompactReinject || {})).trim();
     const dynamicContextDeltaText = String(bundle.dynamic_context_delta_text || bundle.dynamicContextDeltaText || renderGroupPostCompactDynamicContextDelta(compaction.postCompactReinject || {})).trim();
@@ -3745,6 +3912,15 @@ function renderGroupMemoryContextBundle(bundle) {
             lines.push(`- 项目记忆导入警告：${imported.issues.slice(0, 4).map((issue) => issue.type || issue.error || "issue").join("、")}。`);
         }
     }
+    if (Number(typedMemory.promotedMemoryImport?.imported || 0) > 0) {
+        lines.push(`- 跨会话升格记忆：从项目 ${typedMemory.promotedMemoryImport.project} 继承 ${typedMemory.promotedMemoryImport.imported} 条历史会话已升格的持久规则（可在记忆控制中心撤销）。`);
+    }
+    if (Number(typedMemory.memoryPromotion?.promoted || 0) > 0) {
+        lines.push(`- 本会话新升格 ${typedMemory.memoryPromotion.promoted} 条持久规则到项目 ${typedMemory.memoryPromotion.project}，后续新会话将自动继承。`);
+    }
+    if (typedMemory.memoryPromotion?.failed || typedMemory.promotedMemoryImport?.failed) {
+        lines.push(`- 记忆升格通道异常：${typedMemory.memoryPromotion?.error || typedMemory.promotedMemoryImport?.error || "unknown"}；本轮按无升格记忆处理。`);
+    }
     const typedLoadPlanText = (0, group_memory_index_1.renderGroupTypedMemoryLoadPlan)(typedMemory.loadPlan);
     if (typedLoadPlanText)
         lines.push(typedLoadPlanText);
@@ -3788,8 +3964,6 @@ function renderGroupMemoryContextBundle(bundle) {
         for (const item of list)
             lines.push(`  - ${mapper(item)}`);
     };
-    addList("持久用户要求/验收约束", groupState.persistentRequirements || [], (item) => `#${item.messageId || ""} ${item.text || item}`, 6);
-    addList("关键事实锚点", groupState.factAnchors || [], (item) => `#${item.messageId || ""} [${item.actor || item.type || ""}] ${item.text || item}`, 5);
     addList("关键决策", groupState.decisions || [], (item) => `${item.decision}${item.reason ? `（${item.reason}）` : ""}`, 6);
     addList("开放问题", groupState.openQuestions || [], (item) => String(item.question || item), 4);
     addList("下一步", groupState.nextActions || [], (item) => String(item.action || item), 4);

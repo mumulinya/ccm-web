@@ -1,7 +1,6 @@
 export type GroupCoordinationRequestKind = "information" | "implementation" | "review" | "risk";
 export type GroupCoordinationRequestStatus = "submitted" | "triaged" | "waiting_agent" | "work_item_created" | "executing" | "needs_user" | "evidence_review" | "merging" | "merge_conflict" | "resolved" | "resumed" | "failed" | "timeout" | "cancelled";
 export interface GroupCoordinationContext {
-    schema?: "ccm-group-coordination-context-v1";
     groupId: string;
     taskId: string;
     groupSessionId?: string;
@@ -10,7 +9,6 @@ export interface GroupCoordinationContext {
     sourceTaskAgentSessionId?: string;
     sourceNativeSessionId?: string;
     sourceWorkDir?: string;
-    role?: "child_agent";
 }
 export interface GroupCoordinationRequestInput {
     kind?: GroupCoordinationRequestKind;
@@ -52,6 +50,11 @@ export interface GroupCoordinationRequestRecord {
     coordinator_claim_id: string;
     work_item_task_id: string;
     resolution: any;
+    route_decision?: any;
+    candidate_projects?: string[];
+    escalation?: string;
+    route_checksum?: string;
+    semantic_decision_receipt?: any;
     metadata: any;
     audit: Array<{
         at: string;

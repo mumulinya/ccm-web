@@ -1,10 +1,42 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
 import { chromium } from 'playwright'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
+const configuredBaseUrl = String(process.env.CCM_BASE_URL || '').replace(/\/+$/, '')
+const publicRoot = path.join(root, 'ccm-package', 'public')
+const contentTypes = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
+}
+let staticServer = null
+let baseUrl = configuredBaseUrl
+if (!baseUrl) {
+  staticServer = http.createServer((request, response) => {
+    const pathname = decodeURIComponent(new URL(request.url || '/', 'http://127.0.0.1').pathname)
+    const requested = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
+    const candidate = path.resolve(publicRoot, requested)
+    const insidePublic = candidate === publicRoot || candidate.startsWith(`${publicRoot}${path.sep}`)
+    const file = insidePublic && fs.existsSync(candidate) && fs.statSync(candidate).isFile()
+      ? candidate
+      : path.join(publicRoot, 'index.html')
+    response.writeHead(200, { 'Content-Type': contentTypes[path.extname(file)] || 'application/octet-stream' })
+    fs.createReadStream(file).pipe(response)
+  })
+  await new Promise((resolve, reject) => {
+    staticServer.once('error', reject)
+    staticServer.listen(0, '127.0.0.1', resolve)
+  })
+  baseUrl = `http://127.0.0.1:${staticServer.address().port}`
+}
 const outputDir = path.join(root, 'scratch', 'agent-provider-account-model-render')
 fs.rmSync(outputDir, { recursive: true, force: true })
 fs.mkdirSync(outputDir, { recursive: true })
@@ -69,7 +101,9 @@ const prepare = async page => {
     if (!pathname.startsWith('/api/')) return route.continue()
     if (pathname === '/api/runtime/events' || pathname.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' })
     if (pathname === '/api/auth/session') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, authenticated: true, user: { username: 'selftest' } }) })
-    if (pathname === '/api/system/agent-providers') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, config, statuses, providers }) })
+    if (pathname === '/api/system/agent-providers' || pathname === '/api/system/agent-providers/status') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, config, statuses, providers }) })
+    }
     const modelMatch = pathname.match(/^\/api\/system\/agent-providers\/([^/]+)\/models$/)
     if (modelMatch) {
       const models = modelCatalog[modelMatch[1]] || []
@@ -127,6 +161,7 @@ try {
   process.exitCode = 1
 } finally {
   await browser.close()
+  if (staticServer) await new Promise(resolve => staticServer.close(resolve))
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report, null, 2))
 }

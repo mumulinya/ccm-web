@@ -29,10 +29,13 @@ try {
   if (registration.status !== 201) throw new Error(`temporary registration failed: ${registration.status} ${await registration.text()}`)
   const cookie = String(registration.headers.get('set-cookie') || '').split(';')[0]
   if (!cookie) throw new Error('temporary auth cookie missing')
-  const npmCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
-  const command = fs.existsSync(npmCli) ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm')
-  const args = fs.existsSync(npmCli) ? [npmCli, 'run', 'test:music-production'] : ['run', 'test:music-production']
-  execFileSync(command, args, { cwd: root, env: { ...env, CCM_MUSIC_URL: `http://127.0.0.1:${port}`, CCM_AUTH_COOKIE: cookie }, timeout: 180_000, windowsHide: true, stdio: 'inherit' })
+  execFileSync(process.execPath, [path.join(root, 'scripts', 'music-production-selftest.mjs')], {
+    cwd: root,
+    env: { ...env, CCM_MUSIC_URL: `http://127.0.0.1:${port}`, CCM_AUTH_COOKIE: cookie },
+    timeout: 180_000,
+    windowsHide: true,
+    stdio: 'inherit',
+  })
   console.log(JSON.stringify({ success: true, authenticatedIsolation: true, port, paidProviderCalls: 0 }, null, 2))
 } finally {
   try { runCli(['stop']) } catch {}

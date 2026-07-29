@@ -36,6 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MAX_ONLINE_DOCUMENT_BYTES = exports.MAX_VISION_IMAGE_BYTES = exports.MAX_REQUIREMENT_FILE_BYTES = exports.MAX_REQUIREMENT_TOTAL_CHARS = exports.MAX_REQUIREMENT_SOURCE_CHARS = exports.REQUIREMENT_DECOMPOSITION_SCHEMA = exports.REQUIREMENT_EXTRACTION_SCHEMA = exports.REQUIREMENT_SOURCE_SCHEMA = void 0;
 exports.validateRequirementDecomposition = validateRequirementDecomposition;
 exports.diffRequirementDecompositionPlans = diffRequirementDecompositionPlans;
+exports.htmlToText = htmlToText;
+exports.assertPublicUrl = assertPublicUrl;
+exports.fetchPublicDocument = fetchPublicDocument;
 exports.extractOnlineDocumentUrls = extractOnlineDocumentUrls;
 exports.shouldDecomposeRequirementIntent = shouldDecomposeRequirementIntent;
 exports.decomposeRequirementToTaskPlan = decomposeRequirementToTaskPlan;
@@ -470,7 +473,10 @@ async function fetchPublicDocument(urlValue) {
             const response = await (0, group_orchestrator_llm_client_1.fetchWithNodeHttpFallback)(checked, {
                 method: "GET",
                 redirect: "manual",
-                headers: { "User-Agent": "CCM-Requirement-Ingestion/1.0", "Accept": "text/html,text/plain,application/pdf,application/json;q=0.9,*/*;q=0.5" },
+                headers: {
+                    "User-Agent": "CCM-Requirement-Ingestion/1.0",
+                    "Accept": "text/html,text/plain,application/pdf,application/json;q=0.9,*/*;q=0.5",
+                },
                 signal: controller.signal,
             });
             if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -499,6 +505,17 @@ function looksLikeAuthorizationPage(text, url) {
     return /登录后查看|扫码登录|请先登录|无权访问|申请权限|访问权限|文档已加密|login required|access denied|permission required/i.test(sample)
         || /docs\.qq\.com/i.test(url) && /(?:登录|login).{0,40}(?:腾讯文档|Tencent Docs)/i.test(sample) && sample.length < 3000;
 }
+function onlineDocumentProviderForUrl(value) {
+    try {
+        const hostname = new URL(value).hostname.toLowerCase();
+        return hostname === "docs.qq.com" || hostname.endsWith(".docs.qq.com")
+            ? "tencent_docs"
+            : "generic";
+    }
+    catch {
+        return "generic";
+    }
+}
 async function parseOnlineDocument(urlValue, fetcher = fetchPublicDocument) {
     const name = (() => { try {
         return new URL(urlValue).hostname;
@@ -506,7 +523,8 @@ async function parseOnlineDocument(urlValue, fetcher = fetchPublicDocument) {
     catch {
         return "在线文档";
     } })();
-    const base = { id: sourceId("url", urlValue), source_type: "online_document", name, kind: /docs\.qq\.com/i.test(urlValue) ? "tencent_document" : "online_document", url: urlValue };
+    const provider = onlineDocumentProviderForUrl(urlValue);
+    const base = { id: sourceId("url", urlValue), source_type: "online_document", name, kind: provider === "tencent_docs" ? "tencent_document" : "online_document", url: urlValue };
     try {
         const { response, buffer, finalUrl } = await fetcher(urlValue);
         if (response.status === 401 || response.status === 403) {
@@ -526,7 +544,16 @@ async function parseOnlineDocument(urlValue, fetcher = fetchPublicDocument) {
             content = htmlToText(html);
             parser = /docs\.qq\.com/i.test(finalUrl) ? "tencent-docs-public-page" : "public-url-html";
             if (looksLikeAuthorizationPage(content, finalUrl)) {
-                return { ...base, url: finalUrl, status: "needs_authorization", parser, readable: false, content: "", summary: "腾讯文档需要公开分享或授权后才能读取", error: "页面要求登录或访问授权" };
+                return {
+                    ...base,
+                    url: finalUrl,
+                    status: "needs_authorization",
+                    parser,
+                    readable: false,
+                    content: "",
+                    summary: "腾讯文档需要设置为公开分享后才能读取",
+                    error: "页面要求登录或访问授权",
+                };
             }
         }
         else if (contentType.includes("text/") || contentType.includes("json") || contentType.includes("xml")) {
@@ -553,7 +580,15 @@ async function parseOnlineDocument(urlValue, fetcher = fetchPublicDocument) {
         };
     }
     catch (error) {
-        return { ...base, status: "failed", parser: "public-url-fetch", readable: false, content: "", summary: "在线文档读取失败", error: compact(error?.message || error, 300) };
+        return {
+            ...base,
+            status: "failed",
+            parser: "public-url-fetch",
+            readable: false,
+            content: "",
+            summary: "在线文档读取失败",
+            error: compact(error?.message || error, 300),
+        };
     }
 }
 function extractOnlineDocumentUrls(text) {
@@ -801,6 +836,9 @@ async function ingestRequirementSources(input = {}) {
             content_hash: contentHash,
             warnings,
             sources: attachments,
+            online_document_access_mode: sources.some(source => source.kind === "tencent_document")
+                ? "public_link_only"
+                : "public_url",
         },
     };
 }

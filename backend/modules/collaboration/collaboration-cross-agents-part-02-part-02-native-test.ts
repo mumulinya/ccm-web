@@ -55,6 +55,12 @@ export async function runNativeTestAgentDispatchBranch(input: {
     targetSessionSucceeded, targetSessionError, testAgentInvocationResult,
     testAgentCliDispatch, testAgentNativeReport, testAgentReviewSummary, targetWorkEvents,
   } = state;
+  const reviewCycleId = String(
+    sourceTask?.review_cycle_id
+    || testAgentHandoffPayload?.metadata?.reviewCycleId
+    || testAgentHandoffPayload?.metadata?.review_cycle_id
+    || "",
+  );
 
       const testAgentActivityKey = "TestAgent";
       const reviewSubjectLabel = getTestAgentHandoffReviewSubject(testAgentHandoffPayload) || targetName || "原实现 Agent";
@@ -86,6 +92,7 @@ export async function runNativeTestAgentDispatchBranch(input: {
         timeoutMs: 120000,
         allowedWorkDirs: testAgentWorkDirPolicy.allowedWorkDirs,
         idempotencyKey: `${taskId || groupId}:${testAgentHandoffPayload?.id || "handoff"}:plan`,
+        attemptScope: reviewCycleId,
       });
       testAgentPlanDispatch = {
         schema: "ccm-test-agent-cli-plan-dispatch-v2",
@@ -192,6 +199,7 @@ export async function runNativeTestAgentDispatchBranch(input: {
             sourceTask?.followup_revision || 0,
             executionOrder,
           ].join(":"),
+          attemptScope: reviewCycleId,
         });
         testAgentInvocationResult = invocationRun.invocation;
         testAgentCliDispatch = {

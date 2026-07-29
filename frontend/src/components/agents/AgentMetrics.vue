@@ -8,6 +8,14 @@ const props = defineProps({
 })
 
 const GLOBAL_SCOPE_ID = '__global__'
+const CUSTOM_RANGE_DAYS = -1
+const pad = (value) => String(value).padStart(2, '0')
+const dateKey = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+const today = new Date()
+const defaultCustomEnd = dateKey(today)
+const defaultCustomStartDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
+const defaultCustomStart = dateKey(defaultCustomStartDate)
+const validDateKey = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))
 
 const emptyPayload = () => ({
   metrics: { version: 2, agents: {}, daily: {}, scopes: {}, events: [], updatedAt: null },
@@ -21,7 +29,14 @@ const emptyPayload = () => ({
 
 const payload = ref(emptyPayload())
 const selectedGroupId = ref(localStorage.getItem('metrics-selected-group') || GLOBAL_SCOPE_ID)
-const rangeDays = ref(Number(localStorage.getItem('metrics-range-days') || 7))
+const savedRangeDays = Number(localStorage.getItem('metrics-range-days') || 7)
+const rangeDays = ref([CUSTOM_RANGE_DAYS, 0, 1, 7, 14, 30, 90].includes(savedRangeDays) ? savedRangeDays : 7)
+const savedCustomStart = localStorage.getItem('metrics-custom-date-from') || defaultCustomStart
+const savedCustomEnd = localStorage.getItem('metrics-custom-date-to') || defaultCustomEnd
+const customDateFrom = ref(validDateKey(savedCustomStart) ? savedCustomStart : defaultCustomStart)
+const customDateTo = ref(validDateKey(savedCustomEnd) ? savedCustomEnd : defaultCustomEnd)
+const appliedCustomDateFrom = ref(customDateFrom.value)
+const appliedCustomDateTo = ref(customDateTo.value)
 const loading = ref(true)
 const refreshing = ref(false)
 const navigatingEventId = ref('')
@@ -31,12 +46,24 @@ const activeRuns = ref([])
 const scopeQuery = ref('')
 const scopeMenuOpen = ref(false)
 const scopeInputRef = ref(null)
+const executionStatus = ref(localStorage.getItem('metrics-execution-status') || 'all')
+const executionPage = ref(1)
+const executionPageSize = ref(Number(localStorage.getItem('metrics-execution-page-size') || 20))
+const executionResult = ref({
+  events: [],
+  total: 0,
+  page: 1,
+  pageSize: 20,
+  totalPages: 1,
+  statusCounts: { all: 0, completed: 0, failed: 0, cancelled: 0 },
+})
+const executionLoading = ref(false)
+const executionError = ref('')
 let poller = null
 let metricsInFlight = false
+let executionRequestId = 0
 
 const safeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : 0
-const pad = (value) => String(value).padStart(2, '0')
-const dateKey = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 const formatNumber = (value) => new Intl.NumberFormat('zh-CN').format(safeNumber(value))
 const formatPercent = (value) => `${Math.round(safeNumber(value))}%`
 const formatDuration = (value) => {
@@ -78,7 +105,39 @@ const percentile = (values, ratio = 0.95) => {
   if (!rows.length) return 0
   return rows[Math.min(rows.length - 1, Math.ceil(rows.length * ratio) - 1)]
 }
-const rangeLabel = computed(() => (rangeDays.value === 1 ? '今天' : `近 ${rangeDays.value} 天`))
+const rangeLabel = computed(() => {
+  if (rangeDays.value === CUSTOM_RANGE_DAYS) {
+    const format = value => String(value || '').split('-').map(Number).filter(Number.isFinite).join('/')
+    return `${format(appliedCustomDateFrom.value)} 至 ${format(appliedCustomDateTo.value)}`
+  }
+  if (rangeDays.value === 0) return '全部历史'
+  return rangeDays.value === 1 ? '今天' : `近 ${rangeDays.value} 天`
+})
+const customRangeError = computed(() => {
+  if (!validDateKey(customDateFrom.value) || !validDateKey(customDateTo.value)) return '请选择完整的开始和结束日期'
+  if (customDateFrom.value > customDateTo.value) return '开始日期不能晚于结束日期'
+  const [fromYear, fromMonth, fromDay] = customDateFrom.value.split('-').map(Number)
+  const [toYear, toMonth, toDay] = customDateTo.value.split('-').map(Number)
+  const from = new Date(fromYear, fromMonth - 1, fromDay)
+  const to = new Date(toYear, toMonth - 1, toDay)
+  const days = Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1
+  if (days > 366) return '自定义时间范围最多为 366 天'
+  return ''
+})
+
+const applyCustomRange = () => {
+  if (customRangeError.value) return
+  appliedCustomDateFrom.value = customDateFrom.value
+  appliedCustomDateTo.value = customDateTo.value
+  localStorage.setItem('metrics-custom-date-from', appliedCustomDateFrom.value)
+  localStorage.setItem('metrics-custom-date-to', appliedCustomDateTo.value)
+  if (rangeDays.value !== CUSTOM_RANGE_DAYS) {
+    rangeDays.value = CUSTOM_RANGE_DAYS
+    return
+  }
+  if (executionPage.value !== 1) executionPage.value = 1
+  else if (props.active !== false) loadExecutionEvents()
+}
 
 const loadActiveRuns = async () => {
   if (!isGlobalScope.value) {
@@ -142,6 +201,7 @@ const loadMetrics = async ({ silent = false } = {}) => {
     const ids = [GLOBAL_SCOPE_ID, ...(payload.value.catalog.groups || []).map(group => group.id)]
     if (!ids.includes(selectedGroupId.value)) selectedGroupId.value = GLOBAL_SCOPE_ID
     await loadActiveRuns()
+    await loadExecutionEvents()
   } catch (cause) {
     error.value = cause?.message || '性能指标加载失败'
   } finally {
@@ -207,6 +267,49 @@ const selectedScopeLabel = computed(() => {
   return option?.name || scopeDisplayName.value
 })
 
+const loadExecutionEvents = async () => {
+  if (!hasScopeSelection.value) return
+  const requestId = ++executionRequestId
+  executionLoading.value = true
+  executionError.value = ''
+  try {
+    const params = new URLSearchParams({
+      scope_type: isGlobalScope.value ? 'global' : 'group',
+      scope_id: isGlobalScope.value ? 'global' : selectedGroupId.value,
+      days: String(rangeDays.value === CUSTOM_RANGE_DAYS ? 0 : rangeDays.value),
+      status: executionStatus.value,
+      page: String(executionPage.value),
+      page_size: String(executionPageSize.value),
+    })
+    if (rangeDays.value === CUSTOM_RANGE_DAYS) {
+      params.set('from', appliedCustomDateFrom.value)
+      params.set('to', appliedCustomDateTo.value)
+    }
+    const response = await fetch(`/api/metrics/events?${params.toString()}`, { cache: 'no-store' })
+    if (!response.ok) throw new Error(`执行记录接口返回 ${response.status}`)
+    const data = await response.json()
+    if (requestId !== executionRequestId) return
+    executionResult.value = {
+      events: Array.isArray(data.events) ? data.events : [],
+      total: safeNumber(data.total),
+      page: Math.max(1, safeNumber(data.page) || 1),
+      pageSize: Math.max(5, safeNumber(data.pageSize) || executionPageSize.value),
+      totalPages: Math.max(1, safeNumber(data.totalPages) || 1),
+      statusCounts: {
+        all: safeNumber(data.statusCounts?.all),
+        completed: safeNumber(data.statusCounts?.completed),
+        failed: safeNumber(data.statusCounts?.failed),
+        cancelled: safeNumber(data.statusCounts?.cancelled),
+      },
+    }
+    if (executionPage.value !== executionResult.value.page) executionPage.value = executionResult.value.page
+  } catch (cause) {
+    if (requestId === executionRequestId) executionError.value = cause?.message || '执行记录加载失败'
+  } finally {
+    if (requestId === executionRequestId) executionLoading.value = false
+  }
+}
+
 const openScopeMenu = async () => {
   scopeMenuOpen.value = true
   scopeQuery.value = ''
@@ -233,6 +336,22 @@ const onScopeKeydown = (event) => {
 }
 
 const rangeKeys = computed(() => {
+  if (rangeDays.value === CUSTOM_RANGE_DAYS) {
+    const [fromYear, fromMonth, fromDay] = appliedCustomDateFrom.value.split('-').map(Number)
+    const [toYear, toMonth, toDay] = appliedCustomDateTo.value.split('-').map(Number)
+    const cursor = new Date(fromYear, fromMonth - 1, fromDay)
+    const end = new Date(toYear, toMonth - 1, toDay)
+    const keys = []
+    while (cursor <= end && keys.length < 366) {
+      keys.push(dateKey(cursor))
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    return keys
+  }
+  if (rangeDays.value === 0) {
+    const daily = activeScope.value?.dailyRoles || activeScope.value?.daily || {}
+    return Object.keys(daily).sort()
+  }
   const keys = []
   const now = new Date()
   for (let offset = rangeDays.value - 1; offset >= 0; offset--) {
@@ -304,7 +423,21 @@ const scopedRangeEvents = computed(() => (payload.value.metrics?.events || [])
   .filter(event => eventInSelectedScope(event) && rangeKeys.value.includes(event.date || String(event.at || '').slice(0, 10)))
   .sort((a, b) => String(b.at).localeCompare(String(a.at)))
   .map(event => ({ ...event, resolvedStatus: resolveEventStatus(event) })))
-const recentEvents = computed(() => scopedRangeEvents.value.slice(0, 30))
+const recentEvents = computed(() => (executionResult.value.events || [])
+  .map(event => ({ ...event, resolvedStatus: event.resolvedStatus || resolveEventStatus(event) })))
+const executionStatusOptions = computed(() => ([
+  { value: 'all', label: '全部', count: executionResult.value.statusCounts.all },
+  { value: 'completed', label: '成功', count: executionResult.value.statusCounts.completed },
+  { value: 'failed', label: '失败', count: executionResult.value.statusCounts.failed },
+  { value: 'cancelled', label: '取消', count: executionResult.value.statusCounts.cancelled },
+]))
+const executionPageStart = computed(() => (
+  executionResult.value.total ? (executionResult.value.page - 1) * executionResult.value.pageSize + 1 : 0
+))
+const executionPageEnd = computed(() => Math.min(
+  executionResult.value.total,
+  executionResult.value.page * executionResult.value.pageSize,
+))
 
 const statusBuckets = computed(() => {
   const buckets = { completed: 0, failed: 0, cancelled: 0 }
@@ -521,8 +654,27 @@ const onDocumentPointerDown = (event) => {
 watch(selectedGroupId, (value) => {
   if (value) localStorage.setItem('metrics-selected-group', value)
   if (props.active !== false) loadActiveRuns()
+  if (executionPage.value !== 1) executionPage.value = 1
+  else if (props.active !== false) loadExecutionEvents()
 })
-watch(rangeDays, (value) => localStorage.setItem('metrics-range-days', String(value)))
+watch(rangeDays, (value) => {
+  localStorage.setItem('metrics-range-days', String(value))
+  if (executionPage.value !== 1) executionPage.value = 1
+  else if (props.active !== false) loadExecutionEvents()
+})
+watch(executionStatus, (value) => {
+  localStorage.setItem('metrics-execution-status', value)
+  if (executionPage.value !== 1) executionPage.value = 1
+  else if (props.active !== false) loadExecutionEvents()
+})
+watch(executionPage, () => {
+  if (props.active !== false) loadExecutionEvents()
+})
+watch(executionPageSize, (value) => {
+  localStorage.setItem('metrics-execution-page-size', String(value))
+  if (executionPage.value !== 1) executionPage.value = 1
+  else if (props.active !== false) loadExecutionEvents()
+})
 watch(() => props.active, (isActive) => {
   if (isActive === false) {
     if (poller) clearInterval(poller)
@@ -592,8 +744,24 @@ onUnmounted(() => {
             <option :value="7">近 7 天</option>
             <option :value="14">近 14 天</option>
             <option :value="30">近 30 天</option>
+            <option :value="90">近 90 天</option>
+            <option :value="0">全部历史</option>
+            <option :value="CUSTOM_RANGE_DAYS">自定义日期</option>
           </select>
         </label>
+        <div v-if="rangeDays === CUSTOM_RANGE_DAYS" class="custom-date-range">
+          <label>
+            <span>开始日期</span>
+            <input v-model="customDateFrom" type="date" :max="customDateTo || defaultCustomEnd">
+          </label>
+          <i>至</i>
+          <label>
+            <span>结束日期</span>
+            <input v-model="customDateTo" type="date" :min="customDateFrom" :max="defaultCustomEnd">
+          </label>
+          <button class="apply-range-btn" type="button" :disabled="!!customRangeError" :title="customRangeError || '按选择日期统计'" @click="applyCustomRange">应用</button>
+          <small v-if="customRangeError" class="custom-range-error">{{ customRangeError }}</small>
+        </div>
         <button class="refresh-btn" :disabled="refreshing" @click="loadMetrics({ silent: true })">
           <span :class="{ spinning: refreshing }">↻</span>{{ refreshing ? '刷新中' : '刷新' }}
         </button>
@@ -760,11 +928,36 @@ onUnmounted(() => {
         <div class="panel-head">
           <div>
             <span class="panel-kicker">RECENT EXECUTIONS</span>
-            <h3>{{ isGlobalScope ? '全局最近执行记录' : '该群最近执行记录' }}</h3>
+            <h3>{{ isGlobalScope ? '全局执行记录' : '该群执行记录' }}</h3>
           </div>
-          <span class="panel-note">最多展示 30 条 · 可点击跳转</span>
+          <span class="panel-note">{{ rangeLabel }}共 {{ formatNumber(executionResult.total) }} 条 · 可点击跳转</span>
         </div>
-        <div v-if="recentEvents.length" class="event-list">
+        <div class="event-controls">
+          <div class="event-status-tabs" role="tablist" aria-label="执行状态筛选">
+            <button
+              v-for="option in executionStatusOptions"
+              :key="option.value"
+              type="button"
+              :class="{ active: executionStatus === option.value }"
+              @click="executionStatus = option.value"
+            >
+              {{ option.label }} <span>{{ formatNumber(option.count) }}</span>
+            </button>
+          </div>
+          <label class="page-size-control">
+            <span>每页</span>
+            <select v-model.number="executionPageSize">
+              <option :value="10">10 条</option>
+              <option :value="20">20 条</option>
+              <option :value="50">50 条</option>
+            </select>
+          </label>
+        </div>
+        <div v-if="executionError" class="event-load-error">
+          <span>{{ executionError }}</span>
+          <button type="button" @click="loadExecutionEvents">重新加载</button>
+        </div>
+        <div v-if="recentEvents.length" class="event-list" :class="{ loading: executionLoading }">
           <article
             v-for="event in recentEvents"
             :key="event.id"
@@ -788,7 +981,9 @@ onUnmounted(() => {
                 <span>{{ sourceLabel(event.source) }}</span>
               </div>
               <p v-if="event.resolvedStatus !== 'completed' && event.error" class="event-error" :title="event.error">{{ event.error }}</p>
-              <p v-else>{{ event.runtime || '默认运行时' }} · {{ formatTime(event.at) }}</p>
+              <p class="event-time" :title="formatTime(event.at)">
+                {{ event.runtime || '默认运行时' }} · {{ formatTime(event.at) }}
+              </p>
             </div>
             <div class="event-metrics">
               <span>{{ formatDuration(event.durationMs) }}</span>
@@ -800,10 +995,23 @@ onUnmounted(() => {
             </code>
           </article>
         </div>
-        <div v-else class="event-empty">
-          {{ isGlobalScope
-            ? '全局助手尚无执行事件。下一次全局 Agent 终态完成后会自动出现。'
-            : '该群尚无新版执行事件。下一次主 Agent 或成员 Agent 调用后会自动出现。' }}
+        <div v-else-if="!executionLoading && !executionError" class="event-empty">
+          {{ executionStatus === 'all'
+            ? (isGlobalScope
+              ? '所选时间范围内暂无全局执行记录。'
+              : '所选时间范围内暂无该群执行记录。')
+            : `所选时间范围内暂无“${eventStatusLabel(executionStatus)}”记录。` }}
+        </div>
+        <div v-if="executionLoading && !recentEvents.length" class="event-loading">正在加载执行记录…</div>
+        <div v-if="executionResult.totalPages > 1" class="event-pagination">
+          <span>第 {{ executionPageStart }}–{{ executionPageEnd }} 条，共 {{ formatNumber(executionResult.total) }} 条</span>
+          <div>
+            <button type="button" :disabled="executionResult.page <= 1 || executionLoading" @click="executionPage = 1">首页</button>
+            <button type="button" :disabled="executionResult.page <= 1 || executionLoading" @click="executionPage -= 1">上一页</button>
+            <strong>{{ executionResult.page }} / {{ executionResult.totalPages }}</strong>
+            <button type="button" :disabled="executionResult.page >= executionResult.totalPages || executionLoading" @click="executionPage += 1">下一页</button>
+            <button type="button" :disabled="executionResult.page >= executionResult.totalPages || executionLoading" @click="executionPage = executionResult.totalPages">末页</button>
+          </div>
         </div>
       </section>
 
@@ -817,7 +1025,7 @@ onUnmounted(() => {
 
 <style scoped>
 .metrics-page{height:100%;overflow:auto;padding:24px 28px 40px;background:linear-gradient(180deg,var(--bg-secondary),var(--bg-primary));color:var(--text-primary)}
-.page-header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px}.eyebrow,.panel-kicker{display:block;color:var(--accent-blue);font-size:9px;font-weight:900;letter-spacing:.16em}.page-header h2{margin:5px 0 4px;font-size:23px;letter-spacing:-.03em}.page-header p{margin:0;color:var(--text-muted);font-size:12px}.toolbar{display:flex;align-items:flex-end;gap:9px}.toolbar label{display:flex;flex-direction:column;gap:5px}.toolbar label span{color:var(--text-muted);font-size:9px;font-weight:800}.toolbar select,.refresh-btn,.scope-trigger{height:35px;border:1px solid var(--border-color);border-radius:9px;background:var(--bg-card);color:var(--text-primary);font-size:11px;font-weight:700;outline:none}.toolbar select{min-width:100px;padding:0 30px 0 10px}.refresh-btn{display:flex;align-items:center;gap:5px;padding:0 13px;cursor:pointer}.refresh-btn:hover{border-color:var(--border-strong);color:var(--accent-blue)}.refresh-btn:disabled{opacity:.6;cursor:wait}.spinning{display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.page-header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px}.eyebrow,.panel-kicker{display:block;color:var(--accent-blue);font-size:9px;font-weight:900;letter-spacing:.16em}.page-header h2{margin:5px 0 4px;font-size:23px;letter-spacing:-.03em}.page-header p{margin:0;color:var(--text-muted);font-size:12px}.toolbar{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;justify-content:flex-end}.toolbar label{display:flex;flex-direction:column;gap:5px}.toolbar label span{color:var(--text-muted);font-size:9px;font-weight:800}.toolbar select,.toolbar input[type=date],.refresh-btn,.scope-trigger,.apply-range-btn{height:35px;border:1px solid var(--border-color);border-radius:9px;background:var(--bg-card);color:var(--text-primary);font-size:11px;font-weight:700;outline:none}.toolbar select{min-width:100px;padding:0 30px 0 10px}.toolbar input[type=date]{box-sizing:border-box;width:132px;padding:0 9px;color-scheme:light dark}.custom-date-range{position:relative;display:flex;align-items:flex-end;gap:7px;padding-left:9px;border-left:1px solid var(--border-color)}.custom-date-range>i{height:35px;display:flex;align-items:center;color:var(--text-muted);font-size:10px;font-style:normal}.apply-range-btn{padding:0 12px;cursor:pointer}.apply-range-btn:hover:not(:disabled){border-color:var(--accent-blue);color:var(--accent-blue)}.apply-range-btn:disabled{opacity:.5;cursor:not-allowed}.custom-range-error{position:absolute;top:100%;right:0;margin-top:3px;color:var(--danger,#ef4444);font-size:9px;white-space:nowrap}.refresh-btn{display:flex;align-items:center;gap:5px;padding:0 13px;cursor:pointer}.refresh-btn:hover{border-color:var(--border-strong);color:var(--accent-blue)}.refresh-btn:disabled{opacity:.6;cursor:wait}.spinning{display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .scope-combobox{position:relative;min-width:180px}.scope-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:180px;padding:0 10px;cursor:pointer;text-align:left}.scope-trigger strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.scope-trigger i{font-style:normal;color:var(--text-muted)}.scope-menu{position:absolute;top:calc(100% + 4px);left:0;z-index:20;width:min(280px,70vw);border:1px solid var(--border-color);border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow-md);padding:8px}.scope-menu input{width:100%;height:32px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-secondary);color:var(--text-primary);padding:0 10px;font-size:11px;outline:none}.scope-options{margin-top:6px;max-height:220px;overflow:auto}.scope-option{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;border:0;background:transparent;color:var(--text-primary);padding:8px 8px;border-radius:8px;cursor:pointer;text-align:left}.scope-option:hover,.scope-option.active{background:var(--accent-soft)}.scope-option strong{font-size:11px}.scope-option small{color:var(--text-muted);font-size:9px}.scope-empty{padding:14px 8px;text-align:center;color:var(--text-muted);font-size:10px}
 .state-banner,.scope-strip,.legacy-notice,.panel,.kpi-card,.empty-state,.bucket-strip{border:1px solid var(--border-color);background:var(--bg-card);box-shadow:var(--shadow-sm)}.state-banner{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-radius:12px;margin-bottom:16px}.state-banner div{display:flex;flex-direction:column;gap:3px}.state-banner strong{font-size:12px}.state-banner span{font-size:11px;color:var(--text-muted)}.state-banner button{border:0;border-radius:8px;background:var(--accent-blue);color:white;padding:7px 12px}.error-state{border-color:color-mix(in srgb,var(--accent-red) 32%,transparent);background:var(--danger-soft)}
 .loading-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.skeleton{height:128px;border-radius:14px;background:linear-gradient(90deg,var(--bg-tertiary),var(--bg-card),var(--bg-tertiary));background-size:220% 100%;animation:shimmer 1.4s infinite}@keyframes shimmer{to{background-position:-220% 0}}.empty-state{border-radius:16px;padding:70px 20px;text-align:center}.empty-icon{font-size:38px;color:var(--accent-blue)}.empty-state h3{font-size:16px;margin:12px 0 7px}.empty-state p{font-size:12px;color:var(--text-muted)}
@@ -827,7 +1035,8 @@ onUnmounted(() => {
 .overview-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(330px,1fr);gap:13px;margin-bottom:13px}.panel{border-radius:14px;overflow:hidden}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 16px;border-bottom:1px solid rgba(148,163,184,.13)}.panel-head h3{font-size:12.5px;margin:3px 0 0}.panel-note{font-size:9.5px;color:var(--text-muted)}.legend{display:flex;gap:12px;color:var(--text-muted);font-size:9px}.legend span{display:flex;align-items:center;gap:5px}.legend i{width:7px;height:7px;border-radius:2px}.legend .ok{background:#2563eb}.legend .fail{background:#ef4444}.chart{position:relative;display:flex;align-items:flex-end;gap:6px;height:190px;padding:25px 16px 13px}.chart-column{display:flex;flex:1;min-width:0;height:100%;flex-direction:column;align-items:center}.chart-value{height:15px;font:8px ui-monospace,monospace;color:var(--text-muted)}.bar-track{display:flex;align-items:flex-end;width:min(70%,28px);height:125px;border-radius:5px;background:rgba(148,163,184,.08);overflow:hidden}.bar-total{position:relative;width:100%;min-height:2px;background:#ef4444;border-radius:4px 4px 0 0;overflow:hidden;transition:height .3s}.bar-success{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,#60a5fa,#2563eb)}.chart-label{margin-top:7px;color:var(--text-muted);font-size:8px;white-space:nowrap}.chart-empty{margin:-112px 0 83px;text-align:center;color:var(--text-muted);font-size:10px;pointer-events:none}.live-dot{font-size:8px;font-weight:900;letter-spacing:.12em;color:#059669;background:rgba(16,185,129,.1);border-radius:99px;padding:5px 8px}.runtime-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;padding:7px 16px 13px}.runtime-grid>div{min-height:69px;padding:11px 8px;border-bottom:1px solid rgba(148,163,184,.1)}.runtime-grid>div:nth-last-child(-n+2){border-bottom:0}.runtime-grid span{display:block;color:var(--text-muted);font-size:9px}.runtime-grid strong{display:block;margin-top:5px;font-size:15px}.runtime-grid strong.sample-time{font-size:10px;margin-top:8px}.runtime-grid small{display:block;margin-top:5px;color:var(--text-muted);font-size:8px}.meter{height:3px;margin-top:7px;border-radius:3px;background:rgba(148,163,184,.14);overflow:hidden}.meter i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#8b5cf6);border-radius:inherit}
 .agent-panel,.event-panel{margin-bottom:13px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:790px}th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border-color);font-size:10px;white-space:nowrap}th{color:var(--text-muted);font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel-muted)}td strong{font-size:10.5px}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--accent-soft)}.role-badge,.status-badge{display:inline-flex;border-radius:99px;padding:3px 7px;background:var(--panel-muted);color:var(--text-muted);font-size:8px;font-weight:800}.role-badge.main{background:var(--accent-soft);color:var(--accent-blue)}.status-badge.success{background:rgba(16,185,129,.12);color:#059669}.status-badge.failed{background:rgba(239,68,68,.12);color:#dc2626}.status-badge.cancelled{background:rgba(148,163,184,.16);color:#64748b}.rate{color:var(--accent-green);font-weight:800}.rate.bad{color:var(--accent-red)}
 .runtime-empty{display:grid;place-items:center;min-height:220px;padding:30px;text-align:center;color:var(--text-muted);font-size:10px}
-.event-list{padding:2px 14px 8px}.event-row{display:grid;grid-template-columns:27px minmax(0,1fr) auto minmax(80px,140px);align-items:center;gap:10px;padding:10px 8px;margin:0 -6px;border-radius:8px;border-bottom:1px solid rgba(148,163,184,.1)}.event-row:last-child{border-bottom:0}.event-row.is-clickable{cursor:pointer}.event-row.is-clickable:hover{background:var(--accent-soft)}.event-row.is-failed{background:rgba(239,68,68,.05);box-shadow:inset 3px 0 0 #ef4444}.event-row.is-cancelled{background:rgba(148,163,184,.06);box-shadow:inset 3px 0 0 #94a3b8}.event-row.is-navigating{opacity:.65}.event-state{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;font-size:10px;font-weight:900}.event-state.success{background:rgba(16,185,129,.1);color:#059669}.event-state.failed{background:rgba(239,68,68,.1);color:#dc2626}.event-state.cancelled{background:rgba(148,163,184,.16);color:#64748b}.event-main{min-width:0}.event-main>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.event-main strong{font-size:10.5px}.event-main>div>span:last-child{color:var(--text-muted);font-size:9px}.event-main p{margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:9px}.event-main p.event-error{color:#dc2626;font-weight:700}.event-metrics{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:9px;color:var(--text-secondary)}.event-row code{overflow:hidden;text-overflow:ellipsis;color:var(--text-muted);font-size:8px;background:rgba(100,116,139,.06);padding:4px 6px;border-radius:5px}.event-empty{padding:38px;text-align:center;color:var(--text-muted);font-size:10px}.page-foot{display:flex;justify-content:space-between;padding:2px 3px;color:var(--text-muted);font-size:8.5px}
+.event-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(148,163,184,.12);background:var(--panel-muted)}.event-status-tabs{display:flex;align-items:center;gap:4px}.event-status-tabs button{height:29px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text-muted);padding:0 9px;font-size:9.5px;font-weight:800;cursor:pointer}.event-status-tabs button span{margin-left:3px;font:8.5px ui-monospace,monospace;opacity:.72}.event-status-tabs button:hover{color:var(--text-primary);background:var(--bg-card)}.event-status-tabs button.active{border-color:var(--border-strong);background:var(--bg-card);color:var(--accent-blue);box-shadow:var(--shadow-sm)}.page-size-control{display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:9px}.page-size-control select{height:29px;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-card);color:var(--text-primary);padding:0 24px 0 8px;font-size:9.5px;outline:none}
+.event-list{padding:2px 14px 8px;transition:opacity .18s}.event-list.loading{opacity:.55;pointer-events:none}.event-row{display:grid;grid-template-columns:27px minmax(0,1fr) auto minmax(80px,140px);align-items:center;gap:10px;padding:10px 8px;margin:0 -6px;border-radius:8px;border-bottom:1px solid rgba(148,163,184,.1)}.event-row:last-child{border-bottom:0}.event-row.is-clickable{cursor:pointer}.event-row.is-clickable:hover{background:var(--accent-soft)}.event-row.is-failed{background:rgba(239,68,68,.05);box-shadow:inset 3px 0 0 #ef4444}.event-row.is-cancelled{background:rgba(148,163,184,.06);box-shadow:inset 3px 0 0 #94a3b8}.event-row.is-navigating{opacity:.65}.event-state{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;font-size:10px;font-weight:900}.event-state.success{background:rgba(16,185,129,.1);color:#059669}.event-state.failed{background:rgba(239,68,68,.1);color:#dc2626}.event-state.cancelled{background:rgba(148,163,184,.16);color:#64748b}.event-main{min-width:0}.event-main>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.event-main strong{font-size:10.5px}.event-main>div>span:last-child{color:var(--text-muted);font-size:9px}.event-main p{margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:9px}.event-main p.event-error{color:#dc2626;font-weight:700}.event-main p.event-time{font-variant-numeric:tabular-nums}.event-metrics{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:9px;color:var(--text-secondary)}.event-row code{overflow:hidden;text-overflow:ellipsis;color:var(--text-muted);font-size:8px;background:rgba(100,116,139,.06);padding:4px 6px;border-radius:5px}.event-empty,.event-loading{padding:38px;text-align:center;color:var(--text-muted);font-size:10px}.event-load-error{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 14px 0;padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent-red) 30%,transparent);border-radius:8px;background:var(--danger-soft);color:var(--accent-red);font-size:9.5px}.event-load-error button{border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.event-pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 16px;border-top:1px solid rgba(148,163,184,.12);color:var(--text-muted);font-size:9px}.event-pagination>div{display:flex;align-items:center;gap:5px}.event-pagination button{height:27px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-card);color:var(--text-secondary);padding:0 8px;font-size:9px;cursor:pointer}.event-pagination button:hover:not(:disabled){border-color:var(--border-strong);color:var(--accent-blue)}.event-pagination button:disabled{opacity:.4;cursor:not-allowed}.event-pagination strong{min-width:52px;text-align:center;color:var(--text-primary);font:9px ui-monospace,monospace}.page-foot{display:flex;justify-content:space-between;padding:2px 3px;color:var(--text-muted);font-size:8.5px}
 @media(max-width:1050px){.page-header{align-items:flex-start;flex-direction:column}.toolbar{width:100%;flex-wrap:wrap}.scope-combobox{flex:1}.scope-trigger{width:100%}.scope-strip{grid-template-columns:1fr 1fr}.scope-meta{display:none}.overview-grid{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:700px){.metrics-page{padding:16px 14px 32px}.toolbar{align-items:stretch}.toolbar label{flex:1}.toolbar select,.scope-trigger{width:100%;min-width:0}.refresh-btn{align-self:flex-end}.scope-strip{grid-template-columns:1fr}.scope-status{grid-template-columns:auto auto;}.scope-status span{grid-column:2;white-space:normal}.kpi-grid{grid-template-columns:1fr}.chart{gap:2px;padding-left:8px;padding-right:8px}.chart-label{font-size:7px;transform:rotate(-45deg);transform-origin:center}.runtime-grid{grid-template-columns:1fr}.runtime-grid>div{border-bottom:1px solid rgba(148,163,184,.1)!important}.event-row{grid-template-columns:27px minmax(0,1fr) auto}.event-row code{display:none}}
+@media(max-width:700px){.metrics-page{padding:16px 14px 32px}.toolbar{align-items:stretch}.toolbar label{flex:1}.toolbar select,.scope-trigger{width:100%;min-width:0}.custom-date-range{width:100%;box-sizing:border-box;padding:9px 0 0;border-left:0;border-top:1px solid var(--border-color);display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto}.custom-date-range label{min-width:0}.toolbar .custom-date-range input[type=date]{width:100%}.custom-range-error{position:static;grid-column:1/-1;margin:0}.refresh-btn{align-self:flex-end}.scope-strip{grid-template-columns:1fr}.scope-status{grid-template-columns:auto auto;}.scope-status span{grid-column:2;white-space:normal}.kpi-grid{grid-template-columns:1fr}.chart{gap:2px;padding-left:8px;padding-right:8px}.chart-label{font-size:7px;transform:rotate(-45deg);transform-origin:center}.runtime-grid{grid-template-columns:1fr}.runtime-grid>div{border-bottom:1px solid rgba(148,163,184,.1)!important}.event-controls,.event-pagination{align-items:stretch;flex-direction:column}.event-status-tabs{display:grid;grid-template-columns:repeat(4,1fr)}.event-status-tabs button{padding:0 5px}.page-size-control{justify-content:flex-end}.event-pagination>div{justify-content:space-between}.event-row{grid-template-columns:27px minmax(0,1fr) auto}.event-row code{display:none}}
 </style>

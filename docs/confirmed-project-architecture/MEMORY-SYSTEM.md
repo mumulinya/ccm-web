@@ -19,6 +19,7 @@ CCM 将记忆分为两层：
 回答“当前这个会话刚才讨论了什么”。每个精确会话独立保存：
 
 - 原始 transcript；
+- 主 Agent 实际工具调用的隐藏执行消息链；
 - 当前正式模型摘要；
 - 上一代摘要 checksum 和摘要 lineage；
 - 压缩后保留的动态近期完整原文；
@@ -26,6 +27,14 @@ CCM 将记忆分为两层：
 - Session Memory 提取状态和恢复上下文。
 
 没有压缩时，模型使用当前精确会话的全部原文。压缩后，模型使用正式摘要、动态近期完整原文和压缩后新增消息。压缩不会删除原始 transcript。
+
+全局、群聊和项目必须通过同一个精确会话投影核心构造上述上下文。未压缩投影不得使用固定消息数、字符截断或本地摘要；是否需要正式压缩由模型上下文窗口、保留输出 Token、Provider usage和完整模型可见 payload 的 Token 计量决定。达到门限时必须先完成正式模型压缩并重新投影，失败则禁止继续调用业务模型。
+
+工具结果的 MicroCompact 是正式压缩之外的选择性优化，不是“结果过长就裁剪”。仅已完成配对且不属于最近工作集的旧工具结果，才可在主会话缓存过期或接近 Token 门限但尚未越界时清理模型投影内容；原始隐藏执行账本永远保留。当前实现审计见 [未压缩上下文统一投影](../group-memory-cc-parity/unified-uncompressed-context-projection-2026-07-28/README.md)。
+
+压缩请求遇到 Prompt Too Long 时按 assistant response ID 划分的 API 回合从最旧处恢复，不拆分工具调用与结果；压缩成功后必须对业务模型真实可见 payload 再做一次 Token 门禁，仍超限则不提交摘要和 boundary。Anthropic 原生缓存编辑仅在 Provider 确认支持 `cache_edits/cache_reference` 时使用；其他 Provider 使用带真实回执的 CCM 内容投影，不能把内容清理伪装成原生缓存编辑。
+
+用户可见 transcript 只显示用户消息和主 Agent正式回复。全局与项目主 Agent实际执行过的 `tool_use/tool_result` 按精确会话另存为隐藏执行消息链，并参与模型上下文、正式压缩和恢复；开发子 Agent与 TestAgent的原始过程继续留在任务时间线，只有主 Agent采用的派发结果和验收结论进入父会话隐藏执行链。
 
 ### 跨会话长期记忆
 
@@ -300,3 +309,38 @@ MCP 不创建第二套记忆系统：
 9. MCP 只读；任何长期记忆写入都必须经过项目成功回执或群聊主 Agent验收。
 10. 音乐 Agent 没有用户会话，使用固定单例 transcript、正式摘要链和模型提取的长期音乐偏好。
 11. 原始 transcript 永不因压缩删除，正式摘要失败时不推进 compact boundary。
+12. 全局和项目主 Agent的工具执行链不展示为聊天气泡，但必须参与当前精确会话的 CC 风格压缩；工具调用与结果必须成对。空闲时间 MicroCompact与旧超大结果的可恢复内容替换是两种独立投影，原始账本均不修改。
+13. 记忆中心对全局、群聊和项目精确会话统一展示 MicroCompact 回执；只有 checksum核验通过的真实回执才展示清理数量和节省 Token，旧会话缺少回执时明确标记“历史数据未记录”，不补造估算值。
+14. Prompt Too Long 恢复按 API 回合执行，压缩候选还必须通过真实 post-compact payload 二次门禁；任何失败都不推进正式摘要边界。
+15. Anthropic 原生缓存编辑与 CCM 受控内容投影是两种明确能力，Provider 不支持时不会伪造 `cache_edits/cache_reference`。
+16. 普通 Provider 的 MicroCompact只由空闲时间触发；上下文压力必须进入正式模型压缩。
+17. post-compact真实 payload 首次超限时只允许一次正式模型重压缩，之后仍超限必须 fail closed。
+18. 长期记忆统一标注 `user | feedback | project | reference`；临时状态、失败过程、Skill/MCP定义、恢复附件和源码可推导事实不准入。
+19. Context Engine使用模型族Tokenizer与真实Provider usage校准执行最终Token门禁；任何校准状态均不保存Prompt正文。
+20. 全局、群聊、项目和音乐正式摘要在推进边界前必须通过统一质量门禁；第二模型抽检默认关闭，命中后只调用一次且失败时拒绝提交。
+21. 正式压缩前自动创建精确会话恢复点；恢复演练不修改canonical数据，管理员恢复前还会创建恢复前快照。
+22. 记忆中心展示真实压缩、缓存、质量和失败趋势，告警事件只保存计量与原因代码。
+23. Provider原生缓存不可用时，CCM自建缓存仍提供热物化、并发合流、稳定前缀、成本建议和受控清理；多实例只共享锁定后的元数据与能力证据，不共享Prompt正文或模型回答。
+
+五项收口与测试证据见 [CC 记忆链五项收口](../group-memory-cc-parity/cc-memory-five-improvements-2026-07-28/README.md)。
+
+## Context Engine V2
+
+全局、群聊、项目和音乐 Agent 的统一模型请求使用 `ContextPlanV2` 描述精确会话的模型可见上下文。计划只保存不可变块元数据、Token、checksum、保护状态和编辑动作，不保存 Prompt正文；超出真实容量时必须先完成正式模型压缩，字符截断和本地摘要不能作为绕过方式。
+
+Provider原生缓存只在官方端点、有效 `confirmed` 能力证据或用户明确强制且没有 `unsupported` 证据时启用。字段被接受、延迟下降和后端总量指标不能伪装为命中；只有每请求缓存 Token 回执计入节省。普通中转站不支持或无法证明时自动使用 CCM受控投影，正式摘要、长期记忆和第三方 MCP hydration仍然正常工作。
+
+第三方 Agent manifest绑定 ContextPlan checksum、块变化和确认游标。首次或 lineage变化完整读取，同 generation且上一轮确认有效时只读取增量；checksum、scope、cursor或boundary不一致时强制 rehydration。
+
+CCM自建缓存包含短期内存物化缓存、精确checksum Singleflight、自适应稳定前缀、真实usage成本/延迟建议、生命周期清理和多实例文件租约。它只复用上下文准备结果，不缓存模型最终回答；磁盘状态只保存块元数据、Token、checksum和审计摘要，Prompt正文仍不落盘。删除会话、generation或compact boundary变化必须使旧缓存失效。
+
+完整协议、Provider矩阵和测试证据见 [CCM Context Engine V2](../group-memory-cc-parity/ccm-context-engine-v2-2026-07-28/README.md)。
+
+模型级Token预检、摘要质量、趋势告警、恢复演练和抽样复核见 [Context Engine V2.1](../group-memory-cc-parity/ccm-context-engine-v21-quality-observability-recovery-2026-07-28/README.md)。
+# Provider 中立上下文缓存
+
+全局、群聊和项目主 Agent 的直接模型请求统一经过 `ProviderNeutralContextCacheV1`。该层将已通过会话容量门禁的模型可见上下文描述为不可变内容块和编辑计划：Anthropic 官方直连在能力和编辑计划均验证通过时走原生 `context_management`，其他本地 API 走 CCM 受控投影，外部 CLI 继续走签名 MCP 或完整 Prompt。缓存状态不保存正文、不修改 canonical memory，也不把非原生路径标记成原生缓存。
+
+实施与审计见 [Provider 中立上下文缓存与编辑计划](../group-memory-cc-parity/provider-neutral-context-cache-2026-07-28/README.md)。
+
+Provider Adapter V2 将同一上下文计划映射为不同的真实请求能力：OpenAI 使用稳定 `prompt_cache_key` 和可选 retention，Gemini Generate Content 使用原生隐式缓存 usage，Anthropic 使用 `context_management` 并可显式启用 `cache_reference/cache_edits`。自定义网关未经官方端点识别或用户显式能力声明时，只允许稳定前缀和 CCM 受控投影。

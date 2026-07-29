@@ -3,6 +3,8 @@ import * as path from "path";
 import {
   KNOWLEDGE_DIR,
   RAG_INDEX_CACHE_FILE,
+  RAG_INDEX_V3_DIR,
+  RAG_INDEX_V3_POINTER_FILE,
   isSupportedKnowledgeFilename,
   loadKnowledgeMetadata,
   loadRagEmbeddingConfig,
@@ -12,12 +14,32 @@ import {
   updateKnowledgeMetadata,
   type KnowledgeScope,
 } from "./knowledge-files";
+import {
+  KnowledgeEmbeddingBackend,
+  KnowledgeVectorResult,
+  embedLocalKnowledgeTexts,
+  embedRemoteKnowledgeTexts,
+  getLocalKnowledgeModelStatus,
+  preferredKnowledgeEmbeddingBackend,
+  prepareLocalKnowledgeModel,
+} from "./knowledge-embedding";
+import {
+  acquireKnowledgeIndexLease,
+  inspectKnowledgeIndexLease,
+  releaseKnowledgeIndexLease,
+  renewKnowledgeIndexLease,
+  waitForKnowledgeIndexLeaseRelease,
+} from "./knowledge-index-lease";
 
 const EMBEDDING_DIM = 256;
-const INDEX_SCHEMA = "ccm-knowledge-index-v2";
+const INDEX_SCHEMA = "ccm-knowledge-index-v3";
 const PARSER_VERSION = "semantic-chunks-v3-zh-bigram";
 const TARGET_CHUNK_CHARS = 1100;
 const MAX_CHUNK_CHARS = 1500;
+
+function cryptoRandomSuffix() {
+  return sha256(`${process.pid}:${Date.now()}:${Math.random()}`).slice(0, 10);
+}
 
 export type KnowledgeChunk = {
   id: string;
@@ -31,6 +53,7 @@ export type KnowledgeChunk = {
   tf: Record<string, number>;
   embedding: number[];
   semanticEmbedding?: number[];
+  semantic?: Omit<KnowledgeVectorResult, "vector">;
   charStart: number;
   charEnd: number;
 };
@@ -52,6 +75,7 @@ type IndexCacheEntry = {
 
 type IndexCache = {
   schema: string;
+  generation: string;
   updatedAt: string;
   entries: Record<string, IndexCacheEntry>;
 };
@@ -81,6 +105,16 @@ export type KnowledgeIndexStatus = {
   cacheHits: number;
   semanticReady: number;
   semanticFailed: number;
+  semanticPending: number;
+  localVectors: number;
+  remoteVectors: number;
+  lexicalChunks: number;
+  activeGeneration: string;
+  lastGoodGeneration: string;
+  staleServed: boolean;
+  fallbackReason: string;
+  buildLease: any;
+  localModel: any;
   parseFailures: Array<{ filename: string; error: string }>;
   queued: boolean;
 };
@@ -104,6 +138,16 @@ let indexStatus: KnowledgeIndexStatus = {
   cacheHits: 0,
   semanticReady: 0,
   semanticFailed: 0,
+  semanticPending: 0,
+  localVectors: 0,
+  remoteVectors: 0,
+  lexicalChunks: 0,
+  activeGeneration: "",
+  lastGoodGeneration: "",
+  staleServed: false,
+  fallbackReason: "",
+  buildLease: null,
+  localModel: null,
   parseFailures: [],
   queued: false,
 };
@@ -120,44 +164,68 @@ function atomicWriteJson(filePath: string, value: any) {
   }
 }
 
+function generationFile(generation: string) {
+  return path.join(RAG_INDEX_V3_DIR, `${generation}.json`);
+}
+
+function loadPointer(): { schema: string; activeGeneration: string; lastGoodGeneration: string; updatedAt: string } {
+  for (const file of [RAG_INDEX_V3_POINTER_FILE, `${RAG_INDEX_V3_POINTER_FILE}.bak`]) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+      if (parsed?.schema === "ccm-knowledge-index-pointer-v1") return parsed;
+    } catch {}
+  }
+  return { schema: "ccm-knowledge-index-pointer-v1", activeGeneration: "", lastGoodGeneration: "", updatedAt: "" };
+}
+
+function activateGeneration(cache: IndexCache) {
+  fs.mkdirSync(RAG_INDEX_V3_DIR, { recursive: true });
+  const file = generationFile(cache.generation);
+  fs.writeFileSync(file, JSON.stringify(cache), { encoding: "utf-8", mode: 0o600, flag: "wx" });
+  const pointer = {
+    schema: "ccm-knowledge-index-pointer-v1",
+    activeGeneration: cache.generation,
+    lastGoodGeneration: cache.generation,
+    updatedAt: cache.updatedAt,
+  };
+  const temp = `${RAG_INDEX_V3_POINTER_FILE}.${process.pid}.${Date.now()}.tmp`;
+  const backup = `${RAG_INDEX_V3_POINTER_FILE}.bak`;
+  fs.writeFileSync(temp, JSON.stringify(pointer), { encoding: "utf-8", mode: 0o600 });
+  try {
+    try { if (fs.existsSync(backup)) fs.unlinkSync(backup); } catch {}
+    if (fs.existsSync(RAG_INDEX_V3_POINTER_FILE)) fs.renameSync(RAG_INDEX_V3_POINTER_FILE, backup);
+    fs.renameSync(temp, RAG_INDEX_V3_POINTER_FILE);
+    try { if (fs.existsSync(backup)) fs.unlinkSync(backup); } catch {}
+  } catch (error) {
+    try { if (!fs.existsSync(RAG_INDEX_V3_POINTER_FILE) && fs.existsSync(backup)) fs.renameSync(backup, RAG_INDEX_V3_POINTER_FILE); } catch {}
+    throw error;
+  } finally {
+    try { if (fs.existsSync(temp)) fs.unlinkSync(temp); } catch {}
+  }
+  const retained = new Set([pointer.activeGeneration, pointer.lastGoodGeneration]);
+  const generations = fs.readdirSync(RAG_INDEX_V3_DIR).filter(name => /^gen_[a-z0-9_-]+\.json$/i.test(name)).sort().reverse();
+  for (const name of generations.slice(3)) {
+    const generation = name.replace(/\.json$/, "");
+    if (!retained.has(generation)) try { fs.unlinkSync(path.join(RAG_INDEX_V3_DIR, name)); } catch {}
+  }
+  return pointer;
+}
+
 function loadIndexCache(): IndexCache {
   try {
-    if (!fs.existsSync(RAG_INDEX_CACHE_FILE)) return { schema: INDEX_SCHEMA, updatedAt: "", entries: {} };
-    const parsed = JSON.parse(fs.readFileSync(RAG_INDEX_CACHE_FILE, "utf-8"));
-    if (parsed?.schema !== INDEX_SCHEMA || !parsed?.entries) return { schema: INDEX_SCHEMA, updatedAt: "", entries: {} };
-    return parsed;
+    const pointer = loadPointer();
+    if (pointer.activeGeneration) {
+      const parsed = JSON.parse(fs.readFileSync(generationFile(pointer.activeGeneration), "utf-8"));
+      if (parsed?.schema === INDEX_SCHEMA && parsed?.entries) return parsed;
+    }
+    if (fs.existsSync(RAG_INDEX_CACHE_FILE)) {
+      const legacy = JSON.parse(fs.readFileSync(RAG_INDEX_CACHE_FILE, "utf-8"));
+      if (legacy?.entries) return { ...legacy, schema: INDEX_SCHEMA, generation: "legacy-v2" };
+    }
   } catch {
-    return { schema: INDEX_SCHEMA, updatedAt: "", entries: {} };
+    // A broken active pointer must not prevent a clean rebuild.
   }
-}
-
-function normalizeEmbeddingUrl(apiUrl = "") {
-  const base = String(apiUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
-  if (base.endsWith("/embeddings")) return base;
-  if (base.endsWith("/v1")) return `${base}/embeddings`;
-  return `${base}/v1/embeddings`;
-}
-
-async function callEmbeddingApi(text: string, config = loadRagEmbeddingConfig()) {
-  if (!config.enabled || !config.apiKey || !config.model) return null;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.max(10_000, Number(config.timeoutMs) || 60_000));
-  try {
-    const response = await fetch(normalizeEmbeddingUrl(config.apiUrl), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${config.apiKey}` },
-      body: JSON.stringify({ model: config.model, input: text.slice(0, 12_000) }),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Embedding API 返回异常 (${response.status}): ${(await response.text()).slice(0, 500)}`);
-    const data: any = await response.json();
-    const vector = data?.data?.[0]?.embedding;
-    if (!Array.isArray(vector) || !vector.length) throw new Error("Embedding API 未返回向量");
-    const norm = Math.sqrt(vector.reduce((sum: number, value: number) => sum + value * value, 0)) || 1;
-    return vector.map((value: number) => value / norm);
-  } finally {
-    clearTimeout(timeout);
-  }
+  return { schema: INDEX_SCHEMA, generation: "", updatedAt: "", entries: {} };
 }
 
 export function tokenizeKnowledgeText(text: string): string[] {
@@ -323,10 +391,190 @@ function hydrateChunk(chunk: StoredChunk, scope: KnowledgeScope, domain: string)
   return { ...chunk, scope, domain, tokens: new Set(chunk.tokens || []) };
 }
 
+function recordChunkEmbeddingStatus(chunks: KnowledgeChunk[], status: KnowledgeIndexStatus) {
+  for (const chunk of chunks) {
+    if (chunk.semantic?.state === "ready" && chunk.semanticEmbedding?.length === chunk.semantic.dimension) {
+      status.semanticReady += 1;
+      if (chunk.semantic.backend === "remote") status.remoteVectors += 1;
+      else if (chunk.semantic.backend === "local") status.localVectors += 1;
+      else status.lexicalChunks += 1;
+    } else if (chunk.semantic?.state === "pending") {
+      status.semanticPending += 1;
+      status.lexicalChunks += 1;
+    } else if (chunk.semantic?.state === "failed") {
+      status.semanticFailed += 1;
+      status.lexicalChunks += 1;
+    } else {
+      status.lexicalChunks += 1;
+    }
+  }
+}
+
+function hydrateActiveCache(cache: IndexCache) {
+  if (!cache.generation) return false;
+  const metadata = loadKnowledgeMetadata();
+  const nextChunks: KnowledgeChunk[] = [];
+  const nextContent = new Map<string, { content: string; parser: string; status: string; error: string }>();
+  for (const [filename, entry] of Object.entries(cache.entries || {})) {
+    const scope = metadata[filename]?.scope || { type: "global", id: "" };
+    const domain = metadata[filename]?.domain || scope.id || scope.type || "global";
+    nextContent.set(filename, { content: entry.content, parser: entry.parser, status: entry.parseStatus, error: entry.parseError });
+    nextChunks.push(...(entry.chunks || []).map(chunk => hydrateChunk(chunk, scope, domain)));
+  }
+  documentChunks = nextChunks;
+  documentContent = nextContent;
+  return true;
+}
+
+export function loadActiveKnowledgeIndex() {
+  const cache = loadIndexCache();
+  const loaded = hydrateActiveCache(cache);
+  if (loaded) {
+    const pointer = loadPointer();
+    const nextStatus: KnowledgeIndexStatus = {
+      ...indexStatus,
+      state: "ready",
+      reason: "active-generation",
+      completedAt: cache.updatedAt,
+      lastSuccessfulAt: cache.updatedAt,
+      documents: Object.keys(cache.entries).length,
+      chunks: documentChunks.length,
+      processedDocuments: Object.keys(cache.entries).length,
+      totalDocuments: Object.keys(cache.entries).length,
+      semanticReady: 0,
+      semanticFailed: 0,
+      semanticPending: 0,
+      localVectors: 0,
+      remoteVectors: 0,
+      lexicalChunks: 0,
+      activeGeneration: cache.generation,
+      lastGoodGeneration: pointer.lastGoodGeneration || cache.generation,
+      staleServed: inspectKnowledgeIndexLease().active,
+      buildLease: inspectKnowledgeIndexLease().lease,
+      localModel: getLocalKnowledgeModelStatus(),
+      queued: false,
+    };
+    recordChunkEmbeddingStatus(documentChunks, nextStatus);
+    indexStatus = nextStatus;
+  }
+  return loaded;
+}
+
 function embeddingSignature(config: any) {
-  return config.enabled && config.apiKey && config.model
-    ? `api:${String(config.apiUrl || "").replace(/\/+$/, "")}:${config.model}`
-    : "hashing";
+  const backend = preferredKnowledgeEmbeddingBackend(config);
+  if (backend === "remote") {
+    let endpoint = "remote";
+    try { const url = new URL(config.apiUrl); endpoint = `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`; } catch {}
+    return `remote:${endpoint}:${config.model}`;
+  }
+  if (backend === "local") return `local:${config.localModel}:${config.localRevision}:${config.localDtype}`;
+  return "lexical";
+}
+
+function semanticReceipt(result: KnowledgeVectorResult): Omit<KnowledgeVectorResult, "vector"> {
+  const { vector: _vector, ...receipt } = result;
+  return receipt;
+}
+
+async function embedChunkBatch(texts: string[], backend: KnowledgeEmbeddingBackend, embeddingConfig: any) {
+  if (backend === "remote") return embedRemoteKnowledgeTexts(texts, "passage", embeddingConfig);
+  if (backend === "local") return embedLocalKnowledgeTexts(texts, "passage", embeddingConfig);
+  return [];
+}
+
+async function populateChunkEmbeddings(chunks: KnowledgeChunk[], embeddingConfig: any, status: KnowledgeIndexStatus) {
+  const preferred = preferredKnowledgeEmbeddingBackend(embeddingConfig);
+  if (preferred === "lexical" || !chunks.length) {
+    status.lexicalChunks += chunks.length;
+    return;
+  }
+  if (preferred === "local" && getLocalKnowledgeModelStatus().state !== "ready") {
+    for (const chunk of chunks) {
+      chunk.semantic = {
+        state: "pending",
+        backend: "local",
+        model: embeddingConfig.localModel,
+        revision: embeddingConfig.localRevision,
+        dimension: 384,
+        checksum: "",
+        error: "本地Embedding模型正在准备",
+      };
+    }
+    status.semanticPending += chunks.length;
+    status.lexicalChunks += chunks.length;
+    status.fallbackReason = "local_model_preparing";
+    void prepareLocalKnowledgeModel();
+    return;
+  }
+  const batchSize = preferred === "remote" ? Math.max(1, Math.min(32, Number(embeddingConfig.batchSize) || 32)) : 8;
+  const batches: KnowledgeChunk[][] = [];
+  for (let offset = 0; offset < chunks.length; offset += batchSize) batches.push(chunks.slice(offset, offset + batchSize));
+  let cursor = 0;
+  let consecutiveRemoteFailures = 0;
+  let remoteCircuitOpen = false;
+  const worker = async () => {
+    while (cursor < batches.length) {
+      const batch = batches[cursor++];
+      let results: KnowledgeVectorResult[] = [];
+      let usedBackend = preferred;
+      try {
+        if (preferred === "remote" && remoteCircuitOpen) throw new Error("远程Embedding本轮熔断已打开");
+        results = await embedChunkBatch(batch.map(chunk => `${chunk.filename}\n${chunk.heading}\n${chunk.text}`), preferred, embeddingConfig);
+        consecutiveRemoteFailures = 0;
+      } catch (batchError: any) {
+        if (preferred === "remote" && batch.length > 1 && !remoteCircuitOpen) {
+          try {
+            results = [];
+            for (const chunk of batch) results.push(...await embedRemoteKnowledgeTexts([`${chunk.filename}\n${chunk.heading}\n${chunk.text}`], "passage", embeddingConfig));
+            consecutiveRemoteFailures = 0;
+          } catch (singleError: any) {
+            consecutiveRemoteFailures += 1;
+            if (consecutiveRemoteFailures >= 3) remoteCircuitOpen = true;
+            if (!status.error) status.error = `部分远程语义向量生成失败：${String(singleError?.message || singleError).slice(0, 300)}`;
+          }
+        } else {
+          consecutiveRemoteFailures += preferred === "remote" ? 1 : 0;
+          if (consecutiveRemoteFailures >= 3) remoteCircuitOpen = true;
+          if (!status.error) status.error = `部分语义向量生成失败：${String(batchError?.message || batchError).slice(0, 300)}`;
+        }
+        if (!results.length && preferred === "remote" && getLocalKnowledgeModelStatus().state === "ready") {
+          try {
+            usedBackend = "local";
+            results = await embedLocalKnowledgeTexts(batch.map(chunk => `${chunk.filename}\n${chunk.heading}\n${chunk.text}`), "passage", embeddingConfig);
+          } catch {}
+        }
+      }
+      for (let index = 0; index < batch.length; index++) {
+        const result = results[index];
+        if (result?.state === "ready" && result.vector?.length) {
+          batch[index].semanticEmbedding = result.vector;
+          batch[index].semantic = semanticReceipt({ ...result, backend: usedBackend });
+          status.semanticReady += 1;
+          if (usedBackend === "remote") status.remoteVectors += 1;
+          else status.localVectors += 1;
+        } else {
+          batch[index].semanticEmbedding = undefined;
+          batch[index].semantic = {
+            state: "failed",
+            backend: preferred,
+            model: preferred === "remote" ? embeddingConfig.model : embeddingConfig.localModel,
+            revision: preferred === "local" ? embeddingConfig.localRevision : "",
+            dimension: 0,
+            checksum: "",
+            error: status.error || "Embedding向量缺失",
+          };
+          status.semanticFailed += 1;
+          status.lexicalChunks += 1;
+        }
+      }
+      if (remoteCircuitOpen) {
+        status.fallbackReason = "remote_embedding_circuit_open";
+        if (getLocalKnowledgeModelStatus().state !== "ready") void prepareLocalKnowledgeModel();
+      }
+    }
+  };
+  const concurrency = preferred === "remote" ? Math.min(2, batches.length) : 1;
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 }
 
 async function buildDocumentChunks(filename: string, content: string, scope: KnowledgeScope, domain: string, embeddingConfig: any, status: KnowledgeIndexStatus) {
@@ -337,16 +585,6 @@ async function buildDocumentChunks(filename: string, content: string, scope: Kno
     const tokens = tokenizeKnowledgeText(`${filename} ${piece.heading} ${piece.text}`);
     const tf: Record<string, number> = {};
     for (const token of tokens) tf[token] = (tf[token] || 0) + 1;
-    let semanticEmbedding: number[] | undefined;
-    if (embeddingConfig.enabled && embeddingConfig.apiKey && embeddingConfig.model) {
-      try {
-        semanticEmbedding = await callEmbeddingApi(`${filename}\n${piece.heading}\n${piece.text}`, embeddingConfig) || undefined;
-        if (semanticEmbedding) status.semanticReady += 1;
-      } catch (error: any) {
-        status.semanticFailed += 1;
-        if (!status.error) status.error = `部分语义向量生成失败，已回退本地检索：${String(error?.message || error).slice(0, 300)}`;
-      }
-    }
     chunks.push({
       id: `${filename}#${index}`,
       filename,
@@ -358,11 +596,11 @@ async function buildDocumentChunks(filename: string, content: string, scope: Kno
       tokens: new Set(tokens),
       tf,
       embedding: buildHashingEmbedding(tf),
-      semanticEmbedding,
       charStart: piece.charStart,
       charEnd: piece.charEnd,
     });
   }
+  await populateChunkEmbeddings(chunks, embeddingConfig, status);
   return chunks;
 }
 
@@ -385,6 +623,14 @@ async function performRebuild(reason: string) {
     cacheHits: 0,
     semanticReady: 0,
     semanticFailed: 0,
+    semanticPending: 0,
+    localVectors: 0,
+    remoteVectors: 0,
+    lexicalChunks: 0,
+    staleServed: documentChunks.length > 0,
+    fallbackReason: "",
+    buildLease: inspectKnowledgeIndexLease().lease,
+    localModel: getLocalKnowledgeModelStatus(),
     parseFailures: [],
     queued: rebuildQueued,
   };
@@ -392,7 +638,8 @@ async function performRebuild(reason: string) {
   const embeddingConfig = loadRagEmbeddingConfig();
   const signature = embeddingSignature(embeddingConfig);
   const previousCache = loadIndexCache();
-  const nextCache: IndexCache = { schema: INDEX_SCHEMA, updatedAt: "", entries: {} };
+  const generation = `gen_${Date.now().toString(36)}_${process.pid}_${cryptoRandomSuffix()}`;
+  const nextCache: IndexCache = { schema: INDEX_SCHEMA, generation, updatedAt: "", entries: {} };
   const nextChunks: KnowledgeChunk[] = [];
   const nextContent = new Map<string, { content: string; parser: string; status: string; error: string }>();
 
@@ -403,14 +650,25 @@ async function performRebuild(reason: string) {
     const scope = metadata[filename]?.scope || { type: "global", id: "" };
     const domain = metadata[filename]?.domain || scope.id || scope.type || "global";
     const cached = previousCache.entries[filename];
+    const cachedChunks = Array.isArray(cached?.chunks) ? cached.chunks : [];
+    const semanticCacheValid = signature === "lexical" || (cachedChunks.length > 0 && cachedChunks.every((chunk: any) => {
+      const expectedBackend = preferredKnowledgeEmbeddingBackend(embeddingConfig);
+      return chunk.semantic?.state === "ready"
+        && chunk.semantic?.backend === expectedBackend
+        && Array.isArray(chunk.semanticEmbedding)
+        && chunk.semanticEmbedding.length === Number(chunk.semantic?.dimension || 0)
+        && !!chunk.semantic?.checksum;
+    }));
     const cacheValid = cached
       && cached.hash === fileHash
       && cached.parserVersion === PARSER_VERSION
-      && cached.embeddingSignature === signature;
+      && cached.embeddingSignature === signature
+      && semanticCacheValid;
     let entry: IndexCacheEntry;
     if (cacheValid) {
       entry = cached;
       indexStatus.cacheHits += 1;
+      recordChunkEmbeddingStatus(entry.chunks.map(chunk => hydrateChunk(chunk, scope, domain)), indexStatus);
     } else {
       const parsed = await parseKnowledgeDocument(filePath, filename);
       const built = parsed.content
@@ -449,7 +707,7 @@ async function performRebuild(reason: string) {
   }
 
   nextCache.updatedAt = new Date().toISOString();
-  atomicWriteJson(RAG_INDEX_CACHE_FILE, nextCache);
+  const pointer = activateGeneration(nextCache);
   documentChunks = nextChunks;
   documentContent = nextContent;
   indexStatus = {
@@ -459,9 +717,19 @@ async function performRebuild(reason: string) {
     lastSuccessfulAt: nextCache.updatedAt,
     documents: files.length,
     chunks: nextChunks.length,
+    activeGeneration: nextCache.generation,
+    lastGoodGeneration: pointer.lastGoodGeneration || nextCache.generation,
+    staleServed: false,
+    buildLease: inspectKnowledgeIndexLease().lease,
+    localModel: getLocalKnowledgeModelStatus(),
     queued: rebuildQueued,
   };
   console.log(`[RAG] 索引构建完成：${files.length} 份文档，${nextChunks.length} 个语义分片，缓存命中 ${indexStatus.cacheHits}`);
+  if (indexStatus.semanticPending > 0 && preferredKnowledgeEmbeddingBackend(embeddingConfig) === "local") {
+    void prepareLocalKnowledgeModel().then(model => {
+      if (model.state === "ready") void rebuildKnowledgeIndex("local-model-ready");
+    });
+  }
 }
 
 export function rebuildKnowledgeIndex(reason = "manual") {
@@ -470,12 +738,30 @@ export function rebuildKnowledgeIndex(reason = "manual") {
   indexStatus.queued = !!activeRebuild;
   if (activeRebuild) return activeRebuild;
   activeRebuild = (async () => {
+    let leaseOwner = "";
     try {
       while (rebuildQueued) {
         const nextReason = queuedReason || reason;
         rebuildQueued = false;
         queuedReason = "";
-        await performRebuild(nextReason);
+        const lease = acquireKnowledgeIndexLease(nextReason);
+        if (!lease.acquired) {
+          if (loadActiveKnowledgeIndex()) {
+            indexStatus = { ...indexStatus, staleServed: true, buildLease: lease.lease, reason: "waiting-for-index-builder" };
+            await waitForKnowledgeIndexLeaseRelease(60_000);
+            loadActiveKnowledgeIndex();
+            continue;
+          }
+          const released = await waitForKnowledgeIndexLeaseRelease(60_000);
+          if (!released || !loadActiveKnowledgeIndex()) throw new Error("知识索引由其他进程构建中，等待可用generation超时");
+          continue;
+        }
+        leaseOwner = String(lease.lease?.ownerId || "");
+        const renewTimer = setInterval(() => renewKnowledgeIndexLease(leaseOwner), 60_000);
+        renewTimer.unref?.();
+        try { await performRebuild(nextReason); } finally { clearInterval(renewTimer); }
+        releaseKnowledgeIndexLease(leaseOwner);
+        leaseOwner = "";
       }
       return getKnowledgeIndexStatus();
     } catch (error: any) {
@@ -484,10 +770,15 @@ export function rebuildKnowledgeIndex(reason = "manual") {
         state: "failed",
         completedAt: new Date().toISOString(),
         error: String(error?.message || error || "索引构建失败").slice(0, 500),
+        staleServed: documentChunks.length > 0,
+        fallbackReason: documentChunks.length > 0 ? "last_good_generation" : "index_unavailable",
+        buildLease: inspectKnowledgeIndexLease().lease,
+        localModel: getLocalKnowledgeModelStatus(),
         queued: false,
       };
       return getKnowledgeIndexStatus();
     } finally {
+      if (leaseOwner) releaseKnowledgeIndexLease(leaseOwner);
       activeRebuild = null;
       indexStatus.queued = false;
     }
@@ -498,11 +789,31 @@ export function rebuildKnowledgeIndex(reason = "manual") {
 export function waitForKnowledgeIndex(reason = "agent-retrieval") {
   if (activeRebuild) return activeRebuild;
   if (indexStatus.state === "ready") return Promise.resolve(getKnowledgeIndexStatus());
+  if (loadActiveKnowledgeIndex()) return Promise.resolve(getKnowledgeIndexStatus());
   return rebuildKnowledgeIndex(reason);
 }
 
 export function getKnowledgeIndexStatus(): KnowledgeIndexStatus {
-  return JSON.parse(JSON.stringify(indexStatus));
+  return JSON.parse(JSON.stringify({
+    ...indexStatus,
+    localModel: getLocalKnowledgeModelStatus(),
+    buildLease: inspectKnowledgeIndexLease().lease,
+  }));
+}
+
+export function pruneKnowledgeIndexGenerations() {
+  const pointer = loadPointer();
+  const keep = new Set([pointer.activeGeneration, pointer.lastGoodGeneration].filter(Boolean));
+  let removed = 0;
+  if (fs.existsSync(RAG_INDEX_V3_DIR)) {
+    for (const name of fs.readdirSync(RAG_INDEX_V3_DIR).filter(item => /^gen_[a-z0-9_-]+\.json$/i.test(item))) {
+      const generation = name.replace(/\.json$/, "");
+      if (keep.has(generation)) continue;
+      try { fs.unlinkSync(path.join(RAG_INDEX_V3_DIR, name)); removed += 1; } catch {}
+    }
+  }
+  try { if (fs.existsSync(RAG_INDEX_CACHE_FILE)) { fs.unlinkSync(RAG_INDEX_CACHE_FILE); removed += 1; } } catch {}
+  return { removed, retained: Array.from(keep), activeGeneration: pointer.activeGeneration };
 }
 
 export function getKnowledgeDocumentChunks(filename: string) {
@@ -531,15 +842,9 @@ function matchesScope(chunk: KnowledgeChunk, options: KnowledgeSearchOptions) {
   return options.includeGlobal !== false && scopeType !== "global" && chunk.scope.type === "global";
 }
 
-function keywordSearch(query: string, options: KnowledgeSearchOptions = {}) {
-  const queryTokens = tokenizeKnowledgeText(query);
-  if (!queryTokens.length || !documentChunks.length) return [];
-  const queryTf: Record<string, number> = {};
-  for (const token of queryTokens) queryTf[token] = (queryTf[token] || 0) + 1;
-  const queryEmbedding = buildHashingEmbedding(queryTf);
-  const querySet = new Set(queryTokens);
+function eligibleKnowledgeChunks(options: KnowledgeSearchOptions = {}) {
   const metadata = loadKnowledgeMetadata();
-  const eligible = documentChunks.filter(chunk => {
+  return documentChunks.filter(chunk => {
     if (options.filename && chunk.filename !== options.filename) return false;
     if (Array.isArray(options.filenames) && !options.filenames.includes(chunk.filename)) return false;
     if (options.domain && chunk.domain !== options.domain) return false;
@@ -550,6 +855,16 @@ function keywordSearch(query: string, options: KnowledgeSearchOptions = {}) {
     }
     return true;
   });
+}
+
+function keywordSearch(query: string, options: KnowledgeSearchOptions = {}) {
+  const queryTokens = tokenizeKnowledgeText(query);
+  if (!queryTokens.length || !documentChunks.length) return [];
+  const queryTf: Record<string, number> = {};
+  for (const token of queryTokens) queryTf[token] = (queryTf[token] || 0) + 1;
+  const queryEmbedding = buildHashingEmbedding(queryTf);
+  const querySet = new Set(queryTokens);
+  const eligible = eligibleKnowledgeChunks(options);
   const total = Math.max(1, eligible.length);
   const df: Record<string, number> = {};
   for (const token of querySet) df[token] = eligible.filter(chunk => chunk.tokens.has(token)).length;
@@ -570,29 +885,107 @@ function keywordSearch(query: string, options: KnowledgeSearchOptions = {}) {
 }
 
 export async function searchKnowledgeBase(query: string, options: KnowledgeSearchOptions = {}) {
+  if (indexStatus.state !== "ready" && documentChunks.length === 0) await waitForKnowledgeIndex("search");
+  if (indexStatus.state !== "ready" && documentChunks.length === 0) {
+    return {
+      results: [],
+      embeddingMode: "index-building",
+      embeddingError: indexStatus.error || "知识索引正在构建",
+      fallbackReason: "index_building",
+      indexGeneration: indexStatus.activeGeneration,
+      staleServed: false,
+      scopeChecksum: "",
+      candidateCounts: { eligible: 0, lexical: 0, semantic: 0, merged: 0 },
+    };
+  }
+  const servedStale = indexStatus.state !== "ready" && documentChunks.length > 0;
   const config = loadRagEmbeddingConfig();
-  let querySemanticEmbedding: number[] | null = null;
-  let embeddingMode = "hashing";
+  const eligible = eligibleKnowledgeChunks(options);
+  const queryVectors = new Map<KnowledgeEmbeddingBackend, number[]>();
+  let embeddingMode = "lexical";
   let embeddingError = "";
-  if (config.enabled && config.apiKey && config.model) {
-    try {
-      querySemanticEmbedding = await callEmbeddingApi(query, config);
-      embeddingMode = `api:${config.model}`;
-    } catch (error: any) {
-      embeddingError = String(error?.message || error || "语义向量查询失败").slice(0, 500);
-      embeddingMode = "hashing-fallback";
+  let fallbackReason = "";
+  const semanticBackends = new Set(eligible
+    .filter(chunk => chunk.semantic?.state === "ready" && chunk.semanticEmbedding?.length)
+    .map(chunk => chunk.semantic!.backend)
+    .filter(backend => backend === "remote" || backend === "local"));
+  if (config.mode !== "lexical") {
+    for (const backend of semanticBackends) {
+      try {
+        const result = backend === "remote"
+          ? (await embedRemoteKnowledgeTexts([query], "query", config))[0]
+          : (await embedLocalKnowledgeTexts([query], "query", config))[0];
+        if (result?.state === "ready" && result.vector?.length) queryVectors.set(backend, result.vector);
+      } catch (error: any) {
+        embeddingError = [embeddingError, String(error?.message || error || "语义向量查询失败").slice(0, 300)].filter(Boolean).join("；");
+      }
     }
   }
   const limit = Math.min(20, Math.max(1, Number(options.limit || 5)));
-  const candidates = keywordSearch(query, options).slice(0, Math.max(limit * 5, 30));
-  const results = candidates.map(item => {
-    if (querySemanticEmbedding && item.chunk.semanticEmbedding?.length) {
-      const semanticScore = Math.max(0, cosineSimilarity(querySemanticEmbedding, item.chunk.semanticEmbedding));
-      return { ...item, vectorScore: semanticScore, score: item.keywordScore * 0.52 + semanticScore * 4.2 + item.coverage * 1.2, embeddingMode };
-    }
-    return { ...item, embeddingMode };
+  const candidateLimit = Math.max(limit * 5, 30);
+  const lexicalCandidates = keywordSearch(query, options).slice(0, candidateLimit);
+  const merged = new Map<string, any>();
+  lexicalCandidates.forEach((item, rank) => merged.set(item.chunk.id, {
+    ...item,
+    lexicalRank: rank + 1,
+    semanticRank: 0,
+    semanticScore: 0,
+    retrievalMode: "lexical",
+  }));
+  const semanticCandidates = eligible.flatMap(chunk => {
+    const backend = chunk.semantic?.backend;
+    const queryVector = backend ? queryVectors.get(backend) : null;
+    if (!queryVector || !chunk.semanticEmbedding?.length || chunk.semantic?.dimension !== chunk.semanticEmbedding.length) return [];
+    const semanticScore = cosineSimilarity(queryVector, chunk.semanticEmbedding);
+    return semanticScore > 0 ? [{ chunk, semanticScore, backend }] : [];
+  }).sort((a, b) => b.semanticScore - a.semanticScore).slice(0, candidateLimit);
+  semanticCandidates.forEach((item, rank) => {
+    const existing = merged.get(item.chunk.id) || {
+      chunk: item.chunk,
+      keywordScore: 0,
+      vectorScore: 0,
+      coverage: 0,
+      lexicalRank: 0,
+    };
+    merged.set(item.chunk.id, {
+      ...existing,
+      vectorScore: item.semanticScore,
+      semanticScore: item.semanticScore,
+      semanticRank: rank + 1,
+      retrievalMode: existing.lexicalRank ? `hybrid:${item.backend}` : `semantic:${item.backend}`,
+    });
+  });
+  const maxKeyword = Math.max(1, ...Array.from(merged.values()).map(item => Number(item.keywordScore || 0)));
+  const results = Array.from(merged.values()).map(item => {
+    const lexicalNormalized = Number(item.keywordScore || 0) / maxKeyword;
+    const semantic = Math.max(0, Number(item.semanticScore || 0));
+    const lexicalRrf = item.lexicalRank ? 1 / (60 + item.lexicalRank) : 0;
+    const semanticRrf = item.semanticRank ? 1 / (60 + item.semanticRank) : 0;
+    const score = lexicalNormalized * 0.38 + semantic * 0.5 + Number(item.coverage || 0) * 0.08 + (lexicalRrf + semanticRrf) * 3;
+    return { ...item, score, embeddingMode: item.retrievalMode };
   }).sort((a, b) => b.score - a.score).slice(0, limit);
-  return { results, embeddingMode, embeddingError };
+  if (queryVectors.size) {
+    embeddingMode = queryVectors.size > 1 ? "hybrid:multi-semantic" : `hybrid:${Array.from(queryVectors.keys())[0]}`;
+  } else if (semanticBackends.size) {
+    fallbackReason = "semantic_query_unavailable";
+    embeddingMode = "lexical-fallback";
+    if (!embeddingError) embeddingError = "语义查询向量不可用，已使用词面检索";
+    if (preferredKnowledgeEmbeddingBackend(config) === "remote" && getLocalKnowledgeModelStatus().state !== "ready") void prepareLocalKnowledgeModel();
+  } else if (preferredKnowledgeEmbeddingBackend(config) !== "lexical") {
+    fallbackReason = "semantic_document_vectors_unavailable";
+    embeddingMode = "lexical-fallback";
+    embeddingError = embeddingError || indexStatus.error || "语义文档向量不可用，已使用词面检索";
+  }
+  return {
+    results,
+    embeddingMode,
+    embeddingError,
+    fallbackReason,
+    indexGeneration: indexStatus.activeGeneration,
+    staleServed: servedStale || indexStatus.staleServed,
+    scopeChecksum: sha256(JSON.stringify(eligible.map(chunk => [chunk.id, chunk.scope.type, chunk.scope.id]).sort())),
+    candidateCounts: { eligible: eligible.length, lexical: lexicalCandidates.length, semantic: semanticCandidates.length, merged: merged.size },
+  };
 }
 
 export function queryKnowledgeBase(query: string, limit = 3, filterTags?: string[]): string {

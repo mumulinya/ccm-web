@@ -3,6 +3,7 @@ import { computed, ref, useSlots } from 'vue'
 import AttachmentChips from './AttachmentChips.vue'
 import SlashCommandMenu from './SlashCommandMenu.vue'
 import TemplatePicker from './TemplatePicker.vue'
+import OnlineDocumentReferences from './OnlineDocumentReferences.vue'
 import {
   countNewAttachmentFiles,
   extractClipboardAttachmentFiles,
@@ -96,6 +97,7 @@ const onInput = (event) => {
         <span class="action">一键格式化提示词</span>
       </div>
       <AttachmentChips :files="props.files" @remove="emit('remove-file', $event)" />
+      <OnlineDocumentReferences :text="props.modelValue" compact />
       <textarea
         :id="props.inputId"
         :value="props.modelValue"

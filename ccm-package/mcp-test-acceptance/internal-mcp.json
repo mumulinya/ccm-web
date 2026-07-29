@@ -14,6 +14,7 @@
     { "name": "get_test_plan", "label": "查看测试计划", "description": "读取结构化测试范围和执行计划。" },
     { "name": "get_test_status", "label": "查询测试状态", "description": "查询后台 TestAgent 运行状态。" },
     { "name": "get_test_verdict", "label": "读取验收结论", "description": "读取 canAccept、报告摘要和证据完整性。" },
-    { "name": "list_test_evidence", "label": "列出测试证据", "description": "列出截图、报告、浏览器和命令证据。" }
+    { "name": "list_test_evidence", "label": "列出测试证据", "description": "列出截图、报告、浏览器和命令证据。" },
+    { "name": "get_test_evidence", "label": "读取测试证据", "description": "按证据 ID读取当前任务的截图或文本证据。" }
   ]
 }

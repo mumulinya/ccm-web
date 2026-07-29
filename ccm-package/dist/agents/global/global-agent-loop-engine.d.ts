@@ -490,6 +490,7 @@ export declare function buildGlobalDisplayStreamFromWorkchain(workchain: any): {
 export declare function completeRun(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime, status: GlobalAgentRunStatus, reply: string, error?: string): GlobalAgentRun;
 export declare function startGlobalAgentRun(input: {
     message: string;
+    originalMessage?: string;
     history?: any[];
     sessionId?: string;
     source?: string;

@@ -1,6 +1,6 @@
 import { ChildProcess, spawn, spawnSync } from "child_process";
 import { DevServerResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder } from "./types";
-import { appendLimited, buildTestAgentSubprocessEnv, compactText, hasRequiredCheck, nowIso, redactTestAgentSensitiveText, verificationCommandInvocation } from "./utils";
+import { appendLimited, buildTestAgentSubprocessEnv, compactText, nowIso, redactTestAgentSensitiveText, requiredCheckEnabled, verificationCommandInvocation } from "./utils";
 import { browserCheckUsesExistingSession } from "./browser/existing-session";
 import { checksForProject } from "./browser/shared";
 
@@ -10,7 +10,7 @@ export interface ManagedDevServer {
 }
 
 function browserChecksRequested(workOrder: NormalizedTestAgentWorkOrder) {
-  if (hasRequiredCheck(workOrder.requiredChecks, /browser|e2e|screenshot|console|http|api/i)) return true;
+  if (requiredCheckEnabled(workOrder.requiredChecks, "browser_e2e", "screenshots", "console_errors", "http", "api")) return true;
   return workOrder.projects.some(project => !!project.targetUrl || project.browserChecks.length > 0 || project.httpChecks.length > 0 || project.adversarialHttpChecks.length > 0);
 }
 

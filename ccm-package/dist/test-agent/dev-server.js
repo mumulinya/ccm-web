@@ -6,7 +6,7 @@ const utils_1 = require("./utils");
 const existing_session_1 = require("./browser/existing-session");
 const shared_1 = require("./browser/shared");
 function browserChecksRequested(workOrder) {
-    if ((0, utils_1.hasRequiredCheck)(workOrder.requiredChecks, /browser|e2e|screenshot|console|http|api/i))
+    if ((0, utils_1.requiredCheckEnabled)(workOrder.requiredChecks, "browser_e2e", "screenshots", "console_errors", "http", "api"))
         return true;
     return workOrder.projects.some(project => !!project.targetUrl || project.browserChecks.length > 0 || project.httpChecks.length > 0 || project.adversarialHttpChecks.length > 0);
 }

@@ -1,6 +1,8 @@
 // Support helpers extracted from server-agent-runner.ts (behavior-freeze).
 // Contains tool/verification/external-runner plumbing used by the three orchestrators.
 import { THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } from "./integrations/third-party-memory-snapshot";
+import { signInternalMcpEvidence } from "./integrations/internal-mcp-runtime";
+import { loadTasks } from "./core/db";
 
 export function createAgentRunnerSupport(deps: any) {
   const {
@@ -70,8 +72,8 @@ export function createAgentRunnerSupport(deps: any) {
   function normalizeToolSelection(tools: any = {}) {
     const source = tools && typeof tools === "object" ? tools : {};
     return {
-      mcp: Array.isArray(source.mcp) ? source.mcp.map((x: any) => String(x).trim()).filter(Boolean) : [],
-      skill: Array.isArray(source.skill) ? source.skill.map((x: any) => String(x).trim()).filter(Boolean) : [],
+      mcp: Array.isArray(source.mcp) ? source.mcp.map((x: any) => String(x).trim()).filter(Boolean).sort() : [],
+      skill: Array.isArray(source.skill) ? source.skill.map((x: any) => String(x).trim()).filter(Boolean).sort() : [],
     };
   }
 
@@ -80,7 +82,7 @@ export function createAgentRunnerSupport(deps: any) {
     return normalized.mcp.length > 0 || normalized.skill.length > 0;
   }
 
-  function buildAgentRunnerRuntimeToolPayload(allowedTools: any = null, mcpConfigPath = "", executionInfo: any = null) {
+  function buildAgentRunnerRuntimeToolPayload(projectName: string, agentType: string, allowedTools: any = null, mcpConfigPath = "", executionInfo: any = null) {
     const providedSnapshot = executionInfo?.runtimeToolSnapshot || executionInfo?.runtime_tool_snapshot || null;
     const snapshotPath = providedSnapshot ? "" : findRuntimeToolSnapshotPath(mcpConfigPath);
     const loadedSnapshot = providedSnapshot || readJsonFileSafe(snapshotPath) || null;
@@ -95,6 +97,30 @@ export function createAgentRunnerSupport(deps: any) {
         mcpConfigPath,
         allowedTools: allowedTools || { mcp: [], skill: [] },
       }, allowedTools, mcpConfigPath);
+    const boundTaskId = String(executionInfo?.taskId || executionInfo?.task_id || "");
+    const boundTask = boundTaskId ? loadTasks().find((item: any) => String(item?.id || "") === boundTaskId) : null;
+    const scopeIdentity = {
+      projectName: String(projectName || ""),
+      groupId: String(executionInfo?.groupId || executionInfo?.group_id || ""),
+      exactSessionId: String(executionInfo?.groupSessionId || executionInfo?.group_session_id || executionInfo?.projectSessionId || executionInfo?.project_session_id || boundTask?.group_session_id || boundTask?.project_session_id || ""),
+      taskId: boundTaskId,
+      taskAgentSessionId: String(executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || executionInfo?.agentSession?.id || ""),
+      nativeGeneration: Number(executionInfo?.nativeGeneration || executionInfo?.native_generation || executionInfo?.agentSession?.nativeGeneration || 0),
+      runtime: normalizeAgentRuntimeId(agentType || runtimeToolSnapshot.runtime || "claudecode"),
+    };
+    const authorizationCore = {
+      schema: "ccm-runtime-tool-authorization-snapshot-v2",
+      snapshotId: String(runtimeToolSnapshot.snapshotId || ""),
+      catalogRevision: String(runtimeToolSnapshot.catalogRevision || ""),
+      configuredTools: normalizeToolSelection(runtimeToolSnapshot.configuredTools || {}),
+      executionRoleSkills: Array.from(new Set((runtimeToolSnapshot.executionRoleSkills || []).map((item: any) => String(item || "").trim()).filter(Boolean))).sort(),
+      enforceExecutionRoleSkills: runtimeToolSnapshot.enforceExecutionRoleSkills === true,
+      effectiveTools: normalizeToolSelection(runtimeToolSnapshot.effectiveTools || runtimeToolSnapshot.allowedTools || {}),
+      scopeIdentity,
+    };
+    Object.assign(runtimeToolSnapshot, authorizationCore, {
+      authorizationSignature: signInternalMcpEvidence(authorizationCore),
+    });
     const runtimeToolDispatchGate = executionInfo?.runtimeToolDispatchGate
       || executionInfo?.runtime_tool_dispatch_gate
       || runtimeToolSnapshot.dispatchGate
@@ -247,13 +273,21 @@ export function createAgentRunnerSupport(deps: any) {
   function runtimeToolSnapshotFromAudit(audit: any = {}, allowedTools: any = {}) {
     const dispatchGate = audit.dispatch_gate || audit.dispatchGate || null;
     const authorizationReadiness = audit.authorization_readiness || audit.authorizationReadiness || null;
+    const configuredTools = normalizeToolSelection(allowedTools?.configuredTools || allowedTools?.configured_tools || allowedTools);
+    const executionRoleSkills = Array.from(new Set((allowedTools?.executionRoleSkills || allowedTools?.execution_role_skills || []).map((item: any) => String(item || "").trim()).filter(Boolean)));
+    const effectiveTools = normalizeToolSelection(allowedTools || audit.requested || {});
     return {
+      schema: "ccm-runtime-tool-authorization-snapshot-v2",
       snapshotId: String(audit.snapshotId || audit.snapshot_id || ""),
       snapshotPath: String(audit.snapshotPath || audit.snapshot_path || ""),
       mcpConfigPath: String(audit.mcpConfigPath || audit.mcp_config_path || ""),
       runtime: normalizeAgentRuntimeId(audit.runtime || ""),
-      allowedTools: allowedTools || audit.requested || { mcp: [], skill: [] },
-      requested: audit.requested || allowedTools || { mcp: [], skill: [] },
+      allowedTools: effectiveTools,
+      requested: effectiveTools,
+      configuredTools,
+      executionRoleSkills,
+      enforceExecutionRoleSkills: allowedTools?.enforceExecutionRoleSkills === true || allowedTools?.enforce_execution_role_skills === true,
+      effectiveTools,
       permissionRules: Array.isArray(audit.permission_rules) ? audit.permission_rules : [],
       permission_rules: Array.isArray(audit.permission_rules) ? audit.permission_rules : [],
       authorizationReadiness,
@@ -274,8 +308,12 @@ export function createAgentRunnerSupport(deps: any) {
       snapshotPath: String(source.snapshotPath || source.snapshot_path || ""),
       mcpConfigPath: String(source.mcpConfigPath || source.mcp_config_path || mcpConfigPath || ""),
       runtime: normalizeAgentRuntimeId(source.runtime || ""),
-      allowedTools: allowedTools || source.allowedTools || source.allowed_tools || source.requested || { mcp: [], skill: [] },
+      allowedTools: normalizeToolSelection(allowedTools || source.allowedTools || source.allowed_tools || source.effectiveTools || source.effective_tools || source.requested || {}),
       requested: source.requested || allowedTools || source.allowedTools || source.allowed_tools || { mcp: [], skill: [] },
+      configuredTools: normalizeToolSelection(source.configuredTools || source.configured_tools || allowedTools?.configuredTools || allowedTools?.configured_tools || allowedTools || {}),
+      executionRoleSkills: Array.from(new Set((source.executionRoleSkills || source.execution_role_skills || allowedTools?.executionRoleSkills || allowedTools?.execution_role_skills || []).map((item: any) => String(item || "").trim()).filter(Boolean))),
+      enforceExecutionRoleSkills: source.enforceExecutionRoleSkills === true || source.enforce_execution_role_skills === true || allowedTools?.enforceExecutionRoleSkills === true,
+      effectiveTools: normalizeToolSelection(source.effectiveTools || source.effective_tools || allowedTools || source.allowedTools || source.requested || {}),
       permissionRules: source.permissionRules || source.permission_rules || [],
       permission_rules: source.permission_rules || source.permissionRules || [],
       authorizationReadiness,
@@ -430,7 +468,7 @@ export function createAgentRunnerSupport(deps: any) {
     const groupId = String(executionInfo?.groupId || executionInfo?.group_id || executionInfo?.toolScope?.groupId || executionInfo?.tool_scope?.group_id || "");
     const groupSessionId = String(executionInfo?.groupSessionId || executionInfo?.group_session_id || "");
     const sessionLifecycleFence = executionInfo?.sessionLifecycleFence || executionInfo?.session_lifecycle_fence || null;
-    const runtimeToolPayload = buildAgentRunnerRuntimeToolPayload(allowedTools, mcpConfigPath, executionInfo);
+    const runtimeToolPayload = buildAgentRunnerRuntimeToolPayload(projectName, agentType, allowedTools, mcpConfigPath, { ...(executionInfo || {}), agentSession: agentSession || null });
     const request = {
       id,
       projectName,

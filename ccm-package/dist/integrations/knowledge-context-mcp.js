@@ -81,6 +81,8 @@ const memoryReceiptTool = {
             challenge_id: { type: "string", pattern: "^mcrc_[a-f0-9]{28}$" },
             snapshot_id: { type: "string" },
             snapshot_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+            context_plan_checksum: { type: "string", pattern: "^[a-f0-9]{64}$" },
+            confirmation_cursor: { type: "string", pattern: "^[a-f0-9]{32}$" },
         },
         additionalProperties: false,
     },
@@ -146,7 +148,9 @@ function toolsForContext(context) {
 let indexReady = null;
 function ensureIndex() {
     if (!indexReady)
-        indexReady = (0, knowledge_index_1.rebuildKnowledgeIndex)("internal-mcp");
+        indexReady = ((0, knowledge_index_1.loadActiveKnowledgeIndex)()
+            ? Promise.resolve(true)
+            : (0, knowledge_index_1.waitForKnowledgeIndex)("internal-mcp")).finally(() => { indexReady = null; });
     return indexReady;
 }
 function scopeAllowed(metadata, context) {
@@ -164,6 +168,12 @@ async function callTool(context, name, args) {
                 throw new Error("记忆接收确认未绑定当前快照");
             }
             const hydration = (0, third_party_memory_snapshot_1.inspectThirdPartyMemoryHydration)(context);
+            if (hydration.snapshot.contextPlanChecksum && String(args.context_plan_checksum || "") !== String(hydration.snapshot.contextPlanChecksum)) {
+                throw new Error("记忆接收确认未绑定当前 ContextPlanV2");
+            }
+            if (hydration.snapshot.confirmationCursor && String(args.confirmation_cursor || "") !== String(hydration.snapshot.confirmationCursor)) {
+                throw new Error("记忆接收确认游标不匹配");
+            }
             if (!hydration.ready)
                 throw new Error(`必需记忆尚未读取完成：segments=${hydration.missingSegmentIds.join(",") || "none"}; memory=${hydration.missingMemoryItemIds.join(",") || "none"}`);
             const receipt = (0, memory_context_consumption_receipt_1.recordMemoryContextConsumptionReceipt)(context, args);

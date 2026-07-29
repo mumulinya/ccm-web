@@ -1,19 +1,20 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
 import process from 'node:process'
 import { globalAgentRunTaskCard } from '../frontend/src/utils/taskExperience.js'
 import { sanitizeUserFacingAgentText } from '../frontend/src/utils/agentDisplay.js'
 
 const root = path.resolve(import.meta.dirname, '..')
-const isolatedHome = path.join(root, 'scratch', 'main-agent-runtime-e2e-home')
+const isolatedHome = path.join(root, 'scratch', `main-agent-runtime-e2e-home-${process.pid}-${Date.now().toString(36)}`)
 const ccmHome = path.join(isolatedHome, '.cc-connect')
 const port = 33100 + (process.pid % 500)
 const baseUrl = `http://127.0.0.1:${port}`
 
 assert.ok(isolatedHome.startsWith(path.join(root, 'scratch') + path.sep), 'isolated home must stay inside scratch')
-fs.rmSync(isolatedHome, { recursive: true, force: true })
+fs.rmSync(isolatedHome, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
 fs.mkdirSync(ccmHome, { recursive: true })
 fs.writeFileSync(path.join(ccmHome, 'groups.json'), JSON.stringify([{
   id: 'runtime-e2e-group',
@@ -27,6 +28,46 @@ fs.writeFileSync(path.join(ccmHome, 'groups.json'), JSON.stringify([{
 fs.writeFileSync(path.join(ccmHome, 'tasks.json'), '[]')
 fs.writeFileSync(path.join(ccmHome, 'group-logs.json'), '[]')
 
+const mockModel = http.createServer(async (request, response) => {
+  let body = ''
+  for await (const chunk of request) body += chunk
+  let prompt = body
+  try {
+    const payload = JSON.parse(body)
+    prompt = (payload.messages || []).map(item => String(item?.content || '')).join('\n')
+  } catch {}
+  let content
+  if (prompt.includes('shouldDelegate') && prompt.includes('dispatchPolicy')) {
+    content = JSON.stringify({
+      workflowDecision: { mode: 'answer', reason: '普通问答', confidence: 0.99, actionRequired: false, intentKind: 'question', memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false },
+      intent: 'question', summary: '用户询问主 Agent 身份', domains: ['general'], deliverables: [], constraints: [], documentFindings: [], missingInfo: [],
+      dispatchPolicy: { action: 'direct_answer', reason: '普通问答由群聊主 Agent 直接回复', requiresConfirmation: false, risk: '', nextStep: '直接回答用户' },
+      coordinationStrategy: 'direct_worker_execution', coordinationPlan: { phases: [], synthesisStrategy: '' },
+      reasoning: { knownFacts: ['用户只提出普通问题'], assumptionsToVerify: [], verificationAssertions: [], dependencyRationale: [], replanTriggers: [] },
+      toolRequests: [], shouldDelegate: false, executionOrder: 'sequential', targets: [], friendlyResponse: '你好，我是这个群聊的主 Agent。', questionForUser: '', directResponse: '你好，我是这个群聊的主 Agent。', confidence: 0.99,
+    })
+  } else if (prompt.includes('ccm-model-workflow-decision-v1') || prompt.includes('needsEpicDecomposition')) {
+    content = JSON.stringify({ mode: 'answer', reason: '用户只提出普通问答', confidence: 0.99, needsPlanning: false, needsEpicDecomposition: false, actionRequired: false, continuationKind: 'new_task', readAction: 'none', targetRefs: [], impactScope: [], planSteps: [], clarificationQuestions: [], selectedSkills: [], intentKind: 'question', requiresCodeChanges: false, requiresAgentQa: false, requiresIndependentReview: false, verificationModes: [], memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false })
+  } else {
+    content = JSON.stringify({ state: 'answer', message: '你好，我是 CCM 全局 Agent。', workflowDecision: { mode: 'answer', reason: '普通问答', confidence: 0.99, actionRequired: false, intentKind: 'question', memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false }, intent: { category: 'question', goal: '了解 Agent 身份', action_required: false, target_refs: [], impact_scope: [], confidence: 0.99, authorization_basis: 'none', reason: '普通问答' }, plan: [], tool: null, completion: { summary: '已直接回答', evidence: [], risks: [], next_action: '' } })
+  }
+  response.writeHead(200, { 'Content-Type': 'application/json' })
+  response.end(JSON.stringify({ choices: [{ message: { content } }], usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 } }))
+})
+await new Promise((resolve, reject) => {
+  mockModel.once('error', reject)
+  mockModel.listen(0, '127.0.0.1', resolve)
+})
+const mockModelUrl = `http://127.0.0.1:${mockModel.address().port}/v1`
+fs.writeFileSync(path.join(ccmHome, 'group-orchestrator-config.json'), JSON.stringify({
+  enabled: true,
+  format: 'openai-compatible',
+  apiUrl: mockModelUrl,
+  apiKey: 'runtime-e2e-mock-key',
+  model: 'runtime-e2e-mock-model',
+  timeoutMs: 5_000,
+}, null, 2))
+
 const child = spawn(process.execPath, [path.join(root, 'ccm-package', 'dist', 'server.js'), String(port)], {
   cwd: root,
   env: { ...process.env, USERPROFILE: isolatedHome, HOME: isolatedHome },
@@ -39,6 +80,19 @@ child.stdout.on('data', chunk => { serverOutput += String(chunk) })
 child.stderr.on('data', chunk => { serverOutput += String(chunk) })
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+const removeTreeWithRetry = async target => {
+  let lastError = null
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      await fs.promises.rm(target, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 })
+      return
+    } catch (error) {
+      lastError = error
+      await sleep(150 + attempt * 50)
+    }
+  }
+  throw lastError || new Error(`unable to remove ${target}`)
+}
 
 async function waitForServer() {
   const deadline = Date.now() + 30_000
@@ -88,7 +142,7 @@ try {
   await waitForServer()
 
   const page = await (await fetch(baseUrl)).text()
-  assert.match(page, /<div id="app"><\/div>/, 'production frontend should be served')
+  assert.match(page, /<div id="app">/, 'production frontend should be served')
 
   assert.equal((await loadTasks()).length, 0, 'isolated runtime should start without tasks')
 
@@ -161,12 +215,20 @@ try {
   }, null, 2))
 } finally {
   if (child.exitCode === null) {
-    child.kill('SIGTERM')
+    if (process.platform === 'win32') {
+      spawnSync('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' })
+    } else {
+      child.kill('SIGTERM')
+    }
     await Promise.race([
       new Promise(resolve => child.once('exit', resolve)),
       sleep(5_000),
     ])
-    if (child.exitCode === null) child.kill('SIGKILL')
+    if (child.exitCode === null) {
+      child.kill('SIGKILL')
+      await Promise.race([new Promise(resolve => child.once('exit', resolve)), sleep(2_000)])
+    }
   }
-  fs.rmSync(isolatedHome, { recursive: true, force: true })
+  await new Promise(resolve => mockModel.close(resolve))
+  await removeTreeWithRetry(isolatedHome)
 }

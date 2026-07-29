@@ -30,7 +30,7 @@ function normalizeTaskNotificationStatus(text, receipt = null) {
         return "missing_receipt";
     if (receiptStatus === "done")
         return "completed";
-    if (receiptStatus === "failed" || (0, agent_receipts_1.checkTaskFailure)(text))
+    if (receiptStatus === "failed")
         return "failed";
     if (receiptStatus === "blocked" || receiptStatus === "needs_info")
         return "blocked";

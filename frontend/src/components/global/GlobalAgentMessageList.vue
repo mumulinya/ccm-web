@@ -113,7 +113,7 @@ defineProps({
                     </div>
                   </div>
                   <div
-                    v-for="currentTodo in [buildGlobalStreamCurrentTodoSummary(msg)].filter(Boolean)"
+                    v-for="currentTodo in (getGlobalTaskCard(msg) ? [] : [buildGlobalStreamCurrentTodoSummary(msg)].filter(Boolean))"
                     :key="currentTodo.step_id || currentTodo.label"
                     class="global-stream-current-todo"
                     :class="globalStreamCurrentTodoTone(currentTodo)"
@@ -135,7 +135,7 @@ defineProps({
                     </em>
                   </div>
                   <div
-                    v-for="refreshSummary in [globalStreamProgressRefreshSummary(msg)].filter(Boolean)"
+                    v-for="refreshSummary in (getGlobalTaskCard(msg) ? [] : [globalStreamProgressRefreshSummary(msg)].filter(Boolean))"
                     :key="refreshSummary.schema || refreshSummary.title || 'global-progress-refresh'"
                     class="global-stream-progress-refresh"
                     :class="globalStreamProgressRefreshTone(refreshSummary)"
@@ -149,7 +149,7 @@ defineProps({
                     <em>{{ refreshSummary.status_label || refreshSummary.statusLabel || '已整理' }}</em>
                   </div>
                   <div
-                    v-for="toolSummary in [globalStreamToolUseSummary(msg)].filter(Boolean)"
+                    v-for="toolSummary in (getGlobalTaskCard(msg) ? [] : [globalStreamToolUseSummary(msg)].filter(Boolean))"
                     :key="toolSummary.schema || toolSummary.title"
                     class="global-stream-tool-summary"
                   >
@@ -162,7 +162,7 @@ defineProps({
                       <span v-if="toolSummary.failed_count" class="failed">待排查 {{ toolSummary.failed_count }}</span>
                     </div>
                   </div>
-                  <details v-if="globalDispatchLaunchRows(msg).length" class="global-stream-dispatch" open>
+                  <details v-if="!getGlobalTaskCard(msg) && globalDispatchLaunchRows(msg).length" class="global-stream-dispatch" open>
                     <summary>
                       <div>
                         <strong>{{ globalDispatchLaunchSummary(msg)?.title || '已派发的工作' }}</strong>
@@ -188,7 +188,7 @@ defineProps({
                     </div>
                     <small v-if="globalDispatchLaunchSummary(msg)?.next_action" class="global-stream-dispatch-next">下一步：{{ globalDispatchLaunchSummary(msg).next_action }}</small>
                   </details>
-                  <div class="global-stream-events">
+                  <div v-if="!getGlobalTaskCard(msg)" class="global-stream-events">
                     <div
                       v-for="(event, eventIndex) in msg.streamEvents || []"
                       :key="eventIndex"
@@ -214,6 +214,7 @@ defineProps({
                     class="global-stream-plan-card"
                     :card="getGlobalTaskCard(msg)"
                     context="global"
+                    compact
                     :busy="!!msg.agenticRunLoading"
                     @action="handleGlobalTaskAction(msg, $event)"
                   />
@@ -241,6 +242,7 @@ defineProps({
                   v-else-if="getGlobalTaskCard(msg) && isGlobalMissionTaskMessage(msg)"
                   :card="getGlobalTaskCard(msg)"
                   context="global"
+                  compact
                   :busy="!!msg.agenticRunLoading"
                   @action="handleGlobalTaskAction(msg, $event)"
                 />
@@ -315,6 +317,7 @@ defineProps({
                     v-if="getGlobalTaskCard(msg)"
                     :card="getGlobalTaskCard(msg)"
                     context="global"
+                    compact
                     :busy="!!msg.agenticRunLoading"
                     @action="handleGlobalTaskAction(msg, $event)"
                   />

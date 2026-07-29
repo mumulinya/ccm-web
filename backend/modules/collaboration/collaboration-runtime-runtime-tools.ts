@@ -1,5 +1,6 @@
 // collaboration-runtime-runtime-tools.ts — merged from 2 part files (behavior-freeze merge).
 
+import { buildReviewCycleResetUpdate } from "./rework-policy";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -804,7 +805,12 @@ export function looksLikeTaskContinuation(message: string) {
 }
 
 function getGlobalMissionDeps() {
-  return { listExecutions, taskRequiresCodeChanges, taskRequiresVerification };
+  return {
+    listExecutions,
+    taskRequiresCodeChanges,
+    taskRequiresVerification,
+    listPermissionRequests: (filters: any = {}) => require("./task-permission-broker").listTaskPermissionRequests(filters),
+  };
 }
 
 export function getGlobalMissionChildDeliveryEvidence(task: any) {
@@ -1121,6 +1127,10 @@ export function updateTask(id: string, updates: any) {
   return require("./collaboration-task-service").updateTask(id, updates);
 }
 
+export function normalizeTaskTerminalStateView(task: any) {
+  return require("./collaboration-task-service").normalizeTaskTerminalStateView(task);
+}
+
 export function refreshGlobalDevelopmentMissions() {
   return require("./collaboration-global-missions").refreshGlobalDevelopmentMissions();
 }
@@ -1285,6 +1295,11 @@ export function reconcileTaskDeliveryEvidence(taskId: string) {
 }
 export function validateTaskManualStatusUpdate(current: any, updates: any) {
   if (updates?.status !== "done") return null;
+  const terminalError = require("./collaboration-task-service").validateTaskTerminalTransition(current, {
+    ...updates,
+    terminal_actor: updates.terminal_actor || "user",
+  });
+  if (terminalError) return terminalError;
   if (current?.workflow_type !== "daily_dev") return null;
   const summary = updates.delivery_summary || current.delivery_summary || null;
   const missing: string[] = [];
@@ -1800,6 +1815,9 @@ export function continueTaskWithMessage(taskId: string, message: string, ctx: Co
     updates.auto_gap_continue_count = Number(current.auto_gap_continue_count || 0) + 1;
     updates.last_auto_gap_continue_at = followup.time;
   }
+  // 任何形式的继续/返工都开启新的验收周期：清零本周期轮次，保留累计值。
+  // 不清零的话，监工的 gate_gap_rework 重发会让新一轮从上限起步，TestAgent 一失败即 blocked。
+  Object.assign(updates, buildReviewCycleResetUpdate(current, `继续任务：${source}`));
   // 用户在计划书给出后继续追加要求：把追加内容并入计划书（新增步骤 + 修订历史）。
   // 等待确认阶段的计划要求重新确认；已执行中的任务并入后继续，不打断执行。
   const awaitingPlanConfirmation = current.intake_state === "awaiting_confirmation";

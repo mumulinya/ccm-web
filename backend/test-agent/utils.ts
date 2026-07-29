@@ -229,3 +229,8 @@ export function resolveUrl(baseUrl: string, maybeUrl: string) {
 export function hasRequiredCheck(requiredChecks: string[], pattern: RegExp) {
   return requiredChecks.some(item => pattern.test(String(item || "")));
 }
+
+export function requiredCheckEnabled(requiredChecks: string[], ...allowed: string[]) {
+  const accepted = new Set(allowed.map(item => String(item || "").trim().toLowerCase()).filter(Boolean));
+  return requiredChecks.some(item => accepted.has(String(item || "").trim().toLowerCase()));
+}

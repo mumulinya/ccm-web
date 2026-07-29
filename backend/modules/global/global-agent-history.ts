@@ -1,6 +1,7 @@
 import fs from "fs";
 import crypto from "crypto";
 import { sanitizeGlobalHistoryAttachments } from "./global-agent-attachments";
+import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
 
 // Persistent Web/Feishu conversation history and session routing.
 export function createGlobalAgentHistoryRuntime(deps: any) {
@@ -375,7 +376,15 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       store.current_session_id = (store.sessions || []).find((item: any) => String(item.source || "web") === "web")?.id || "";
     }
     saveGlobalAgentHistoryStore(store);
-    return { deleted: true, session };
+    let contextCacheCleanup: any = null;
+    try {
+      contextCacheCleanup = invalidateProviderNeutralContextCacheState({
+        scope: "global",
+        scopeId: id,
+        sessionId: id,
+      }, "global_session_deleted");
+    } catch {}
+    return { deleted: true, session, context_cache_invalidated: contextCacheCleanup?.success === true };
   }
   
   function getBaseGlobalAgentMessages(store: any) {

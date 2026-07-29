@@ -5,9 +5,9 @@ import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 
 const root = path.resolve(import.meta.dirname, '..')
-const scratch = path.join(root, 'scratch', 'group-coordination-chain-selftest')
+const scratch = path.join(root, 'scratch', `group-coordination-chain-selftest-${process.pid}-${Date.now().toString(36)}`)
 if (!scratch.startsWith(path.join(root, 'scratch') + path.sep)) throw new Error('unsafe scratch path')
-fs.rmSync(scratch, { recursive:true, force:true })
+fs.rmSync(scratch, { recursive:true, force:true, maxRetries:12, retryDelay:100 })
 fs.mkdirSync(scratch, { recursive:true })
 const home = path.join(scratch, 'home')
 const ccmHome = path.join(home, '.cc-connect')
@@ -16,7 +16,7 @@ const backendDir = path.join(scratch, 'backend-project')
 let cleanupPassedArtifacts = false
 process.on('exit', () => {
   if (!cleanupPassedArtifacts) return
-  for (const target of [home, frontendDir, backendDir]) fs.rmSync(target, { recursive:true, force:true })
+  for (const target of [home, frontendDir, backendDir]) fs.rmSync(target, { recursive:true, force:true, maxRetries:20, retryDelay:150 })
 })
 for (const dir of [ccmHome, path.join(ccmHome, 'configs'), frontendDir, backendDir]) fs.mkdirSync(dir, { recursive: true })
 const git = (cwd, args) => {
@@ -57,6 +57,8 @@ const store = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collabo
 const { loadTasks } = require(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))
 const { closeSqliteTaskStore } = require(path.join(root, 'ccm-package', 'dist', 'core', 'task-store.js'))
 const { McpClient } = require(path.join(root, 'ccm-package', 'dist', 'tools', 'mcp-client.js'))
+const { openTaskAgentSession } = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'agent-sessions.js'))
+const { createGroupChatSession } = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'storage.js'))
 
 const group = {
   id: 'group-business-chain',
@@ -68,16 +70,19 @@ const group = {
   ],
 }
 fs.writeFileSync(path.join(ccmHome, 'groups.json'), JSON.stringify([group], null, 2))
+const sourceGroupSession = createGroupChatSession(group.id, '协作链自测会话')
 const parent = collaboration.createTask({
   title: '完成订单提交流程',
   description: '前端完成订单提交，后端提供接口',
   target_project: 'frontend-agent',
   group_id: group.id,
+  group_session_id: sourceGroupSession.id,
   assign_type: 'group',
   workflow_type: 'daily_dev',
   requires_code_changes: true,
   requires_verification: true,
 })
+const sourceTaskSession = openTaskAgentSession({ scopeId: parent.id, taskId: parent.id, groupId: group.id, project: 'frontend-agent', agentType: 'claudecode' })
 const existingBackendTask = collaboration.createTask({
   title: '后端正在处理的既有任务',
   description: '保持当前原生会话运行，用于验证协作会话不会打断它',
@@ -93,10 +98,11 @@ const existingBackendTask = collaboration.createTask({
 const context = {
   groupId: group.id,
   taskId: parent.id,
+  groupSessionId: parent.group_session_id,
   sourceProject: 'frontend-agent',
   sourceAgentType: 'claudecode',
-  sourceTaskAgentSessionId: 'tas-business-frontend',
-  sourceNativeSessionId: 'native-business-frontend',
+  sourceTaskAgentSessionId: sourceTaskSession.id,
+  sourceNativeSessionId: sourceTaskSession.nativeSessionId,
   sourceWorkDir: frontendDir,
 }
 const server = integration.buildGroupCoordinationMcpServerConfig(context)
@@ -360,7 +366,7 @@ const report = {
 fs.writeFileSync(path.join(scratch, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
 closeSqliteTaskStore()
 for (const target of [home, frontendDir, backendDir]) {
-  fs.rmSync(target, { recursive:true, force:true })
+  fs.rmSync(target, { recursive:true, force:true, maxRetries:20, retryDelay:150 })
 }
 cleanupPassedArtifacts = false
 console.log(JSON.stringify(report, null, 2))

@@ -24,6 +24,7 @@ const mockBaseApi = async page => {
     if (pathname === '/api/feishu/config') return route.fulfill(json({ success: true, enabled: false, control_bot_enabled: false }))
     if (pathname === '/api/feishu/control-bot/status') return route.fulfill(json({ success: true, running: false, pid: null }))
     if (pathname === '/api/feishu/health' || pathname === '/api/feishu/health/probe') return route.fulfill(json({ success: true, healthy: false, socket_connected: false }))
+    if (pathname === '/api/orchestrator/credential/reveal') return route.fulfill(json({ success: true, apiKey: 'sk-settings-render-secret' }))
     if (pathname === '/api/orchestrator/config') return route.fulfill(json({ success: true, config: { enabled: true, apiUrl: 'https://api.example.test/v1', model: 'test-model', hasKey: true } }))
     if (pathname === '/api/rag/embedding-config') return route.fulfill(json({ success: true, config: { enabled: false, provider: 'local', model: 'local' }, chunksCount: 0 }))
     if (pathname === '/api/runtime/events' || pathname === '/api/status/stream' || pathname === '/api/usability/workbench/stream') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' })
@@ -93,19 +94,15 @@ const screenshot = async (page, name) => {
 }
 
 const runDesktop = async () => {
-  const context = await browser.newContext({ viewport: { width: 1680, height: 1000 } })
+  const context = await browser.newContext({ viewport: { width: 1536, height: 830 } })
   const page = await context.newPage()
   page.on('pageerror', error => report.errors.push(`desktop page: ${error.message}`))
   page.on('console', message => { if (message.type() === 'error') report.errors.push(`desktop console: ${message.text()}`) })
   await mockBaseApi(page)
-  await page.route('**/api/orchestrator/connection-test', route => route.fulfill({
+  await page.route('**/api/orchestrator/cache-capability/probe', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, message: '连接正常，响应耗时 128 ms', latencyMs: 128, consumers: [
-      { id: 'global-agent', label: '全局 Agent', ready: true },
-      { id: 'group-main-agent', label: '群聊主 Agent', ready: true },
-      { id: 'music-agent', label: '音乐 Agent', ready: true }
-    ] })
+    body: JSON.stringify({ success: true, connection: { success: true, providerCallCount: 2 }, receipt: { status: 'confirmed', cacheReadInputTokens: 2048 }, capability: { status: 'confirmed', evidence: { status: 'confirmed', cacheReadInputTokens: 2048 } } })
   }))
   await openSettings(page)
   await assertLayout(page, 'desktop channels')
@@ -116,9 +113,79 @@ const runDesktop = async () => {
   await page.locator('[data-settings-panel="models"]').waitFor()
   await page.getByRole('button', { name: /保存并测试连接/ }).click()
   await page.getByText('统一大模型连接正常', { exact: true }).waitFor()
-  assert.equal(await page.getByText('本次连接测试通过', { exact: true }).count(), 3)
+  assert.equal(await page.getByText('本次连接测试通过', { exact: true }).count(), 4)
   assert.equal(await page.getByText('v1.0.8', { exact: true }).count(), 0)
-  report.checks.push({ name: 'model connection result maps to global, group and music agents', pass: true })
+  report.checks.push({ name: 'model connection result maps to global, group, project and music agents', pass: true })
+  const apiKeyInput = page.locator('#model-key')
+  const revealButton = page.getByRole('button', { name: '显示 API Key' })
+  assert.equal(await revealButton.count(), 1)
+  await revealButton.click()
+  assert.equal(await apiKeyInput.getAttribute('type'), 'text')
+  assert.equal(await apiKeyInput.inputValue(), 'sk-settings-render-secret')
+  await page.getByRole('button', { name: '隐藏 API Key' }).click()
+  assert.equal(await apiKeyInput.getAttribute('type'), 'password')
+  assert.equal(await apiKeyInput.inputValue(), '')
+  report.checks.push({ name: 'saved API key reveals on demand and clears from the form when hidden', pass: true })
+  const advancedSummary = page.locator('.settings-details summary')
+  assert.equal(await advancedSummary.count(), 1)
+  await advancedSummary.click()
+  const nativeCacheToggle = page.getByText('强制向当前自定义接口发送所选原生缓存字段', { exact: true })
+  assert.equal(await nativeCacheToggle.count(), 1)
+  await nativeCacheToggle.click()
+  await page.locator('#model-native-cache-family').waitFor()
+  const interfaceProtocol = page.locator('#model-format')
+  const cacheProtocol = page.locator('#model-native-cache-family')
+  assert.equal(await cacheProtocol.inputValue(), 'openai')
+  await interfaceProtocol.selectOption('anthropic-compatible')
+  assert.equal(await cacheProtocol.inputValue(), 'anthropic')
+  await cacheProtocol.selectOption('openai')
+  await interfaceProtocol.selectOption('gemini-compatible')
+  assert.equal(await cacheProtocol.inputValue(), 'openai')
+  await cacheProtocol.selectOption('auto')
+  assert.equal(await cacheProtocol.inputValue(), 'gemini')
+  report.checks.push({ name: 'cache protocol follows interface protocol until the user overrides it', pass: true })
+  const nativeCacheLayout = await page.evaluate(() => {
+    const pageElement = document.querySelector('.settings-page')
+    const details = document.querySelector('.settings-details-content')
+    const switches = Array.from(document.querySelectorAll('.settings-switch-stack .settings-switch'))
+      .map(item => item.getBoundingClientRect())
+    const detailsRect = details.getBoundingClientRect()
+    return {
+      pageClientWidth: pageElement.clientWidth,
+      pageScrollWidth: pageElement.scrollWidth,
+      detailsLeft: detailsRect.left,
+      detailsRight: detailsRect.right,
+      switches: switches.map(rect => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })),
+    }
+  })
+  assert.equal(nativeCacheLayout.pageScrollWidth, nativeCacheLayout.pageClientWidth, JSON.stringify(nativeCacheLayout))
+  assert.equal(nativeCacheLayout.switches.every(item => item.left >= nativeCacheLayout.detailsLeft && item.right <= nativeCacheLayout.detailsRight + 1), true)
+  assert.equal(nativeCacheLayout.switches.every((item, index, rows) => index === 0 || item.top >= rows[index - 1].bottom), true)
+  report.checks.push({ name: 'native cache controls stay in separate rows without horizontal overflow', pass: true, details: nativeCacheLayout })
+  await screenshot(page, 'desktop-models-native-cache')
+  await page.evaluate(() => {
+    const scrollers = [document.querySelector('.settings-page'), document.querySelector('.tab-pane.scrollable-pane')].filter(Boolean)
+    for (const scroller of scrollers) scroller.scrollTop = scroller.scrollHeight
+  })
+  await advancedSummary.click()
+  await page.waitForTimeout(60)
+  const collapsedLayout = await page.evaluate(() => {
+    const summary = document.querySelector('.settings-details summary').getBoundingClientRect()
+    const settingsPage = document.querySelector('.settings-page').getBoundingClientRect()
+    const scrollers = [document.querySelector('.settings-page'), document.querySelector('.tab-pane.scrollable-pane')]
+      .filter(Boolean)
+      .map(item => ({ scrollTop: item.scrollTop, maxScrollTop: Math.max(0, item.scrollHeight - item.clientHeight) }))
+    return {
+      summaryTop: summary.top,
+      summaryBottom: summary.bottom,
+      viewportTop: settingsPage.top,
+      viewportBottom: settingsPage.bottom,
+      scrollers,
+    }
+  })
+  assert.equal(collapsedLayout.summaryBottom >= collapsedLayout.viewportTop && collapsedLayout.summaryTop <= collapsedLayout.viewportBottom, true, JSON.stringify(collapsedLayout))
+  assert.equal(collapsedLayout.scrollers.every(item => item.scrollTop <= item.maxScrollTop + 1), true, JSON.stringify(collapsedLayout))
+  report.checks.push({ name: 'collapsing advanced settings restores a visible valid scroll position', pass: true, details: collapsedLayout })
   await assertLayout(page, 'desktop models')
   await screenshot(page, 'desktop-models')
 

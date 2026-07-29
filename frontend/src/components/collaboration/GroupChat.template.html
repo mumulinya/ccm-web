@@ -103,10 +103,10 @@
                   <div v-html="highlightMentions(msg.content)"></div>
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
-                <!-- 项目主 Agent 任务接管 -->
+                <!-- 项目主 Agent 任务接管：主任务只保留统一紧凑卡，避免接管摘要和任务详情重复。 -->
+                <TaskCollaborationCard v-else-if="msg.type === 'project_task_intake' && isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :display-content="getVisibleGroupMessageContent(msg, '我已接管项目任务。')" :accent-style="getAgentAccentStyle(msg.agent)">
                   <MainAgentDecisionCard v-if="getMainAgentDecision(msg) && !isPrimaryTaskCard(msg, i)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
-                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </ProjectTaskIntakeMessage>
                 <ConflictPlanMessage v-else-if="msg.type === 'conflict_plan'" :msg="msg" />
                 <!-- Agent 问答 -->

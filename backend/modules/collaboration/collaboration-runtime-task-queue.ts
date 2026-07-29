@@ -484,6 +484,7 @@ export const TASK_WATCHDOG_INTERVAL_MS = 60 * 1000;
 export const TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
 export const TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = 60 * 1000;
 export const TASK_WATCHDOG_GAP_REWORK_MAX = 3;
+export const TASK_WATCHDOG_RECOVERY_MAX = 3;
 export const AGENT_RECOVERY_PROBE_INTERVAL_MS = 5 * 60 * 1000;
 export const AGENT_RECOVERY_PROBE_TIMEOUT_MS = 45 * 1000;
 export const AGENT_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
@@ -1370,7 +1371,7 @@ export function buildPlanModeClarificationQuestions(message: string, risk: any =
   return require("./collaboration-task-intake").buildPlanModeClarificationQuestions(message, risk, selectedProjects);
 }
 
-export function buildGroupPlanModePreflight(input: { group: any; message: string; ctx: CollabCtx; configs?: any[]; taskIntent?: any; attachmentCount?: number; coordinatorProject?: string }) {
+export async function buildGroupPlanModePreflight(input: { group: any; message: string; ctx: CollabCtx; configs?: any[]; taskIntent?: any; attachmentCount?: number; coordinatorProject?: string }) {
   return require("./collaboration-task-intake").buildGroupPlanModePreflight(input);
 }
 

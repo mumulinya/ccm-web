@@ -1134,6 +1134,62 @@ async function continueLoop(run, runtime) {
                     && !!run.supervisor_id;
                 step.observation = compactObservation(result);
                 (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `tool:${decision.tool.name}`, result);
+                if (result?.needs_clarification === true) {
+                    const question = String((Array.isArray(result?.clarification_questions) ? result.clarification_questions[0] : "")
+                        || result?.message
+                        || result?.error
+                        || "当前执行缺少必要信息，请补充后继续。").trim();
+                    step.duration_ms = Math.max(0, (runtime.now ? runtime.now() : Date.now()) - toolStarted);
+                    run.tool_calls += 1;
+                    run.consecutive_failures = 0;
+                    (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, {
+                        id: `tool_${signature}`,
+                        label: `工具 ${decision.tool.name} 的执行条件已满足`,
+                        kind: "tool_outcome",
+                        status: "blocked",
+                        evidence: [compactObservation(result)],
+                        reason: question,
+                    });
+                    (0, reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "tool_precondition_missing", question, "warning");
+                    (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", question);
+                    run.steps.push(step);
+                    run.pending_tool = null;
+                    run.status = "waiting_clarification";
+                    run.phase = "needs_confirmation";
+                    run.clarification_question = question;
+                    run.final_reply = question;
+                    run.clarification_summary = buildGlobalClarificationSummary({
+                        run,
+                        question,
+                        decision: quality,
+                        reason: String(result?.error || result?.message || "执行条件尚未满足"),
+                    });
+                    run.confirmation_summary = null;
+                    run.presentation = classifyGlobalAgentRunPresentation(run, run.status);
+                    run.updated_at = nowIso(runtime);
+                    (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, {
+                        type: "clarification_required",
+                        tool: decision.tool.name,
+                        question,
+                        observation: step.observation,
+                    });
+                    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, {
+                        id: `${run.id}:tool-clarification:${step.index}:${signature}`,
+                        type: "global_agent.clarification_required",
+                        status: "warning",
+                        message: question,
+                        data: { tool: decision.tool.name, risk, source_coverage: result?.source_coverage || null },
+                    });
+                    saveRun(run, runtime.persist !== false);
+                    emit(runtime, {
+                        type: "clarification_required",
+                        reply: question,
+                        decision: quality,
+                        clarification_summary: run.clarification_summary,
+                        clarificationSummary: run.clarification_summary,
+                    }, run);
+                    return run;
+                }
                 const toolSucceeded = result?.success !== false && !result?.error;
                 if (toolSucceeded && LIGHT_UI_TOOL_NAMES.includes(String(decision.tool.name || ""))) {
                     lightUiToolSucceeded = true;
@@ -1255,7 +1311,7 @@ async function startGlobalAgentRun(input, runtime) {
         session_id: input.sessionId || "default",
         source: input.source || "web",
         user_message: input.message,
-        original_user_message: input.message,
+        original_user_message: input.originalMessage || input.message,
         history: input.history || [],
         status: "running",
         phase: "plan",
@@ -1278,13 +1334,13 @@ async function startGlobalAgentRun(input, runtime) {
         consecutive_failures: 0,
         client_effects: [],
         reasoning_loop: (0, reasoning_loop_1.createAgentReasoningState)({
-            goal: input.message,
+            goal: input.originalMessage || input.message,
             authorizationScope: input.explicitWriteAuthorization ? ["本次明确请求所涉及的目标与影响范围"] : [],
             assertions: [{ id: "goal", label: "用户目标得到回答或可核验交付", kind: "goal" }],
         }),
     });
     saveRun(run, runtime.persist !== false);
-    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:created`, type: "global_agent.run_created", status: "info", message: input.message.slice(0, 1000), data: { session_id: run.session_id, source: run.source, explicit_write_authorization: run.explicit_write_authorization } });
+    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:created`, type: "global_agent.run_created", status: "info", message: (input.originalMessage || input.message).slice(0, 1000), data: { session_id: run.session_id, source: run.source, explicit_write_authorization: run.explicit_write_authorization } });
     return continueLoop(run, runtime);
 }
 async function resumeGlobalAgentRun(id, runtime, options = {}) {
@@ -1449,6 +1505,14 @@ async function continueGlobalAgentRunWithClarification(id, answer, runtime, opti
     run.user_message = run.reasoning_loop.effective_goal;
     run.workflow_decision = clarificationDecision;
     run.workflowDecision = clarificationDecision;
+    if (clarificationDecision.sourcePolicy === "ignore_unread") {
+        run.source_execution_waiver = {
+            granted_at: nowIso(runtime),
+            answer: clarification,
+            scope: "current_run",
+        };
+        run.sourceExecutionWaiver = run.source_execution_waiver;
+    }
     run.explicit_write_authorization = currentAuthorization || inheritedAuthorization;
     run.status = "running";
     run.phase = "plan";

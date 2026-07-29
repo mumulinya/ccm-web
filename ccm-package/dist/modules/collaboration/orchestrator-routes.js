@@ -2,14 +2,57 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleOrchestratorRoutes = handleOrchestratorRoutes;
 const utils_1 = require("../../core/utils");
+const local_auth_1 = require("../system/local-auth");
 const storage_1 = require("./storage");
 const group_orchestrator_1 = require("./group-orchestrator");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const model_capability_cache_1 = require("./model-capability-cache");
+const provider_cache_capability_probe_1 = require("../../system/provider-cache-capability-probe");
+const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
+const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const context_engine_observability_1 = require("../../system/context-engine-observability");
+const context_engine_recovery_1 = require("../../system/context-engine-recovery");
 function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
+    const requireAdmin = () => {
+        const auth = (0, local_auth_1.resolveLocalAuthSession)(req);
+        if (!auth) {
+            (0, utils_1.sendJson)(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
+            return null;
+        }
+        if (auth.user.role !== "admin") {
+            (0, utils_1.sendJson)(res, { success: false, error: "仅管理员可以修改 Provider 缓存能力证据", code: "ADMIN_REQUIRED" }, 403);
+            return null;
+        }
+        return auth;
+    };
     if (pathname === "/api/orchestrator/config" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { success: true, config: (0, group_orchestrator_1.publicOrchestratorConfig)((0, group_orchestrator_1.loadOrchestratorConfig)()) });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/credential/reveal" && req.method === "POST") {
+        try {
+            const auth = (0, local_auth_1.resolveLocalAuthSession)(req);
+            if (!auth) {
+                (0, utils_1.sendJson)(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
+                return true;
+            }
+            if (auth.user.role !== "admin") {
+                (0, utils_1.sendJson)(res, { success: false, error: "仅管理员可以查看 API Key", code: "ADMIN_REQUIRED" }, 403);
+                return true;
+            }
+            const apiKey = String((0, group_orchestrator_1.loadOrchestratorConfig)().apiKey || "");
+            res.setHeader("Cache-Control", "private, no-store, max-age=0");
+            res.setHeader("Pragma", "no-cache");
+            if (!apiKey) {
+                (0, utils_1.sendJson)(res, { success: false, error: "尚未保存统一大模型 API Key" }, 404);
+                return true;
+            }
+            (0, utils_1.sendJson)(res, { success: true, apiKey });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "读取 API Key 失败" }, 500);
+        }
         return true;
     }
     if (pathname === "/api/orchestrator/config" && req.method === "POST") {
@@ -48,6 +91,120 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
             (0, utils_1.sendJson)(res, result, result.success ? 200 : 422);
         }).catch((error) => {
             (0, utils_1.sendJson)(res, { success: false, message: error?.message || "模型连接测试失败" }, 500);
+        });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/cache-capability" && req.method === "GET") {
+        const config = (0, group_orchestrator_1.loadOrchestratorConfig)();
+        (0, utils_1.sendJson)(res, { success: true, capability: (0, provider_cache_capability_registry_1.readProviderCacheCapabilityState)(config) });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/cache-capability/probe" && req.method === "POST") {
+        if (!requireAdmin())
+            return true;
+        void (0, provider_cache_capability_probe_1.probeProviderCacheCapability)((0, group_orchestrator_1.loadOrchestratorConfig)()).then(result => {
+            (0, utils_1.sendJson)(res, result, result.connection.success ? 200 : 422);
+        }).catch((error) => {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "缓存能力探测失败" }, 500);
+        });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/cache-capability/revoke" && req.method === "POST") {
+        if (!requireAdmin())
+            return true;
+        try {
+            (0, utils_1.sendJson)(res, (0, provider_cache_capability_registry_1.revokeProviderCacheCapabilityEvidence)((0, group_orchestrator_1.loadOrchestratorConfig)()));
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "清除缓存能力证据失败" }, 500);
+        }
+        return true;
+    }
+    if (pathname === "/api/context-engine/status" && req.method === "GET") {
+        const scope = String(parsed.query.scope || "").trim().toLowerCase();
+        const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "").trim();
+        const sessionId = String(parsed.query.session_id || parsed.query.sessionId || "").trim();
+        if (!['global', 'group', 'project', 'music', 'other'].includes(scope) || !sessionId) {
+            (0, utils_1.sendJson)(res, { success: false, error: "必须提供有效 scope 和精确 session_id" }, 400);
+            return true;
+        }
+        let recoveryPoints = [];
+        try {
+            recoveryPoints = (0, context_engine_recovery_1.listContextEngineRecoveryPoints)({ scope, scopeId: scopeId || sessionId, sessionId });
+        }
+        catch { }
+        (0, utils_1.sendJson)(res, {
+            success: true,
+            status: {
+                ...(0, provider_neutral_context_cache_1.readContextEngineV2Status)({ scope: scope, scopeId, sessionId }, (0, group_orchestrator_1.loadOrchestratorConfig)()),
+                trends: (0, context_engine_observability_1.readContextEngineTrends)({ scope, scopeId, sessionId, limit: 100 }),
+                recovery: { count: recoveryPoints.length, latest: recoveryPoints[0] || null, contentStored: false },
+            },
+        });
+        return true;
+    }
+    if (pathname === "/api/context-engine/trends" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, trends: (0, context_engine_observability_1.readContextEngineTrends)({
+                scope: String(parsed.query.scope || ""),
+                scopeId: String(parsed.query.scope_id || parsed.query.scopeId || ""),
+                sessionId: String(parsed.query.session_id || parsed.query.sessionId || ""),
+                since: String(parsed.query.since || ""),
+                limit: Number(parsed.query.limit || 100),
+            }) });
+        return true;
+    }
+    if (pathname === "/api/context-engine/cache/runtime" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, runtime: (0, provider_neutral_context_cache_1.readProviderNeutralContextCacheRuntimeStatus)() });
+        return true;
+    }
+    if (pathname === "/api/context-engine/cache/maintenance" && req.method === "POST") {
+        if (!requireAdmin())
+            return true;
+        let body = "";
+        req.on("data", chunk => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                (0, utils_1.sendJson)(res, { success: true, result: (0, provider_neutral_context_cache_1.runProviderNeutralContextCacheMaintenance)({
+                        dryRun: payload.dry_run === true || payload.dryRun === true,
+                        stateRetentionDays: Number(payload.state_retention_days || payload.stateRetentionDays || 30),
+                        archiveRetentionDays: Number(payload.archive_retention_days || payload.archiveRetentionDays || 90),
+                    }) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "上下文缓存清理失败" }, 500);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/context-engine/recovery" && req.method === "GET") {
+        try {
+            (0, utils_1.sendJson)(res, { success: true, recoveryPoints: (0, context_engine_recovery_1.listContextEngineRecoveryPoints)({
+                    scope: String(parsed.query.scope || ""),
+                    scopeId: String(parsed.query.scope_id || parsed.query.scopeId || ""),
+                    sessionId: String(parsed.query.session_id || parsed.query.sessionId || ""),
+                }) });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "读取恢复点失败" }, 400);
+        }
+        return true;
+    }
+    if (["/api/context-engine/recovery/drill", "/api/context-engine/recovery/restore"].includes(String(pathname)) && req.method === "POST") {
+        const restore = pathname.endsWith("/restore");
+        if (restore && !requireAdmin())
+            return true;
+        let body = "";
+        req.on("data", chunk => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const result = restore ? (0, context_engine_recovery_1.restoreContextEngineRecoveryPoint)(payload) : (0, context_engine_recovery_1.drillContextEngineRecoveryPoint)(payload);
+                (0, utils_1.sendJson)(res, { success: true, result });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || (restore ? "恢复失败" : "恢复演练失败") }, 400);
+            }
         });
         return true;
     }

@@ -34,3 +34,4 @@ export declare function appendLimited(current: string, chunk: any, maxChars: num
 export declare function isUnsafeVerificationCommand(command: string): string;
 export declare function resolveUrl(baseUrl: string, maybeUrl: string): string;
 export declare function hasRequiredCheck(requiredChecks: string[], pattern: RegExp): boolean;
+export declare function requiredCheckEnabled(requiredChecks: string[], ...allowed: string[]): boolean;

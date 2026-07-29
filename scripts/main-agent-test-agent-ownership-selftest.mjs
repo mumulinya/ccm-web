@@ -39,7 +39,7 @@ const checks = {
     && !collaboration.includes('coordinator: "global-agent"')
     && !collaboration.includes('reviewer: "global-agent"'),
   directIndependentReviewFailsClosed:
-    collaboration.includes('需要 TestAgent 独立复核的任务必须先交给真实群聊主 Agent'),
+    collaboration.includes('无法交给群聊主 Agent 完成计划、验收和 TestAgent 复核'),
   projectTargetsResolveToRealGroups:
     collaboration.includes('candidateGroups = groups.filter')
     && collaboration.includes('validateDailyDevGroupReady(group)')

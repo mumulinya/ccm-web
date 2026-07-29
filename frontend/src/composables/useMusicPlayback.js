@@ -52,6 +52,7 @@ export function useMusicPlayback(deps) {
     fadeSeconds,
     setOutputGain,
     getSavedPlaybackProgress,
+    consumeInitialPlaybackProgress,
     clearSavedPlaybackProgress,
     savePlaybackProgress,
     volumeNormalization,
@@ -69,6 +70,14 @@ export function useMusicPlayback(deps) {
   }
   let activePlayCalls = 0
   let runtimeRecoveryActive = false
+  let playbackLoadGeneration = 0
+  let pendingMetadataPosition = null
+
+  const clearPendingMetadataPosition = () => {
+    if (!pendingMetadataPosition) return
+    pendingMetadataPosition.el?.removeEventListener?.('loadedmetadata', pendingMetadataPosition.handler)
+    pendingMetadataPosition = null
+  }
 
   /** Keep Vue UI locked to the real <audio> element (global/remote play races otherwise). */
   const syncUiFromAudio = () => {
@@ -105,7 +114,11 @@ export function useMusicPlayback(deps) {
         attempts: 1,
         failedAt: new Date().toISOString(),
       })
-      play(currentTrack.value, { source: '播放错误恢复', maxAttempts: 3 })
+      play(currentTrack.value, {
+        source: '播放错误恢复',
+        maxAttempts: 3,
+        startPosition: Number(el.currentTime || currentTime.value || 0),
+      })
         .finally(() => { runtimeRecoveryActive = false })
     })
     // Keep isPlaying/filename aligned even if Vue state was stomped mid-download.
@@ -200,20 +213,46 @@ export function useMusicPlayback(deps) {
     const src = `/api/music/stream?file=${encodeURIComponent(track.filename)}`
     if (!audioEl.value) return { success: false, error: '播放器未准备就绪' }
     if (!isPlaybackIntentCurrent(playbackIntent)) return supersededResult(playbackIntent)
+    const loadGeneration = ++playbackLoadGeneration
+    clearPendingMetadataPosition()
     audioEl.value.src = src
     audioEl.value.volume = volume.value
     initAnalyser()
     setVolumeNormalization?.(volumeNormalization?.value ?? volumeNormalization ?? false)
     if (fadeDuration > 0) setOutputGain?.(0, 0)
-    const restoreProgress = () => {
-      const saved = Number(getSavedPlaybackProgress?.(track) || 0)
+    const explicitStartPosition = Number(options.startPosition)
+    const restoreSavedProgress = !Number.isFinite(explicitStartPosition)
+      && options.restoreSavedProgress !== false
+      && (options.restoreSavedProgress === true || consumeInitialPlaybackProgress?.(track) === true)
+    const saved = restoreSavedProgress
+      ? Number(getSavedPlaybackProgress?.(track) || 0)
+      : 0
+    const knownDuration = Number(audioEl.value?.duration || track.durationSec || 0)
+    const startPosition = Number.isFinite(explicitStartPosition)
+      ? Math.max(0, explicitStartPosition)
+      : (saved > 2 && (!knownDuration || saved < knownDuration - 10) ? saved : 0)
+    const applyStartPosition = () => {
+      if (
+        loadGeneration !== playbackLoadGeneration
+        || !isPlaybackIntentCurrent(playbackIntent)
+        || activePlaybackFilename?.value !== track.filename
+      ) return
+      const el = audioEl.value
+      if (!el) return
       const knownDuration = Number(audioEl.value?.duration || track.durationSec || 0)
-      if (saved > 2 && (!knownDuration || saved < knownDuration - 10)) {
-        try { audioEl.value.currentTime = saved } catch {}
-      }
+      const safePosition = knownDuration > 0
+        ? Math.min(startPosition, Math.max(0, knownDuration - 0.1))
+        : startPosition
+      try { el.currentTime = safePosition } catch {}
+      currentTime.value = safePosition
     }
-    audioEl.value.addEventListener?.('loadedmetadata', restoreProgress, { once: true })
-    restoreProgress()
+    const applyStartPositionAfterMetadata = () => {
+      applyStartPosition()
+      if (pendingMetadataPosition?.handler === applyStartPositionAfterMetadata) pendingMetadataPosition = null
+    }
+    pendingMetadataPosition = { el: audioEl.value, handler: applyStartPositionAfterMetadata }
+    audioEl.value.addEventListener?.('loadedmetadata', applyStartPositionAfterMetadata, { once: true })
+    applyStartPosition()
     resetPetLyricIndex()
     // 加载弹幕
     loadDanmaku(track.bvid, track.title, track.artist)

@@ -27,23 +27,31 @@ const compactPercent = computed(() => autoCompactThreshold.value > 0
   : 0)
 const isCompacting = computed(() => props.compacting || props.usage?.compacting === true || props.usage?.compactionActivity?.active === true)
 
+// 硬熔断（自动压缩被阻断）与软降级（压缩成功但摘要回退确定性算法）是两回事，
+// 后端已分开上报，这里也分开展示，避免把降级误报成熔断。
+const circuitBlocked = computed(() => props.usage?.circuitOpen === true)
+const circuitWaitingRetry = computed(() => circuitBlocked.value && !!props.usage?.circuitAutoRetryAt)
+const summaryDegraded = computed(() => props.usage?.summaryDegraded === true)
+
 const state = computed(() => {
   if (props.error) return 'unavailable'
   if (isCompacting.value) return 'compacting'
-  if (props.usage?.circuitOpen) return 'blocked'
+  if (circuitBlocked.value) return 'blocked'
   if (contextWindow.value > 0 && currentTokens.value >= contextWindow.value) return 'critical'
   if (autoCompactThreshold.value > 0 && currentTokens.value >= autoCompactThreshold.value) return 'threshold'
   if (compactPercent.value >= 85) return 'warning'
+  if (summaryDegraded.value) return 'degraded'
   return 'normal'
 })
 
 const stateLabel = computed(() => ({
   normal: '上下文正常',
+  degraded: '摘要质量降级',
   warning: '接近自动压缩线',
   threshold: '已到自动压缩线',
   critical: '已超过模型上下文',
   compacting: '正在压缩上下文',
-  blocked: '压缩已熔断',
+  blocked: circuitWaitingRetry.value ? '压缩熔断（等待自动重试）' : '压缩熔断（需人工重置）',
   unavailable: '上下文信息暂不可用',
 })[state.value])
 
@@ -111,7 +119,8 @@ const breakdownRows = computed(() => {
 })
 const compactStateLabel = computed(() => {
   if (isCompacting.value) return '正在压缩'
-  if (props.usage?.circuitOpen) return '压缩熔断'
+  if (circuitBlocked.value) return circuitWaitingRetry.value ? '压缩熔断（待重试）' : '压缩熔断（待重置）'
+  if (summaryDegraded.value) return '摘要降级但压缩正常'
   if (props.usage?.summarySource) return '可继续对话'
   return '尚未压缩'
 })
@@ -235,6 +244,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
 .session-context-usage.is-critical,
 .session-context-usage.is-blocked { color: #dc2626; background: color-mix(in srgb, var(--surface, #fff) 90%, #ef4444 10%); }
 .session-context-usage.is-compacting { color: #0369a1; background: color-mix(in srgb, var(--surface, #fff) 90%, #0ea5e9 10%); }
+.session-context-usage.is-degraded { color: #7c3aed; background: color-mix(in srgb, var(--surface, #fff) 92%, #8b5cf6 8%); }
 .session-context-usage.is-unavailable { color: var(--text-muted, #64748b); }
 
 .context-usage-popover {

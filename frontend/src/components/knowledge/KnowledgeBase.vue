@@ -11,7 +11,7 @@ import KnowledgeTagEditorModal from './KnowledgeTagEditorModal.vue'
 
 const documents = ref([])
 const status = ref({ state: 'idle', chunks: 0, parseFailures: [] })
-const embedding = ref({ enabled: false, hasKey: false, apiUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small' })
+const embedding = ref({ version: 3, mode: 'auto', enabled: false, hasKey: false, apiUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small' })
 const watchPaths = ref([])
 const loading = ref(true)
 const rebuilding = ref(false)
@@ -142,10 +142,10 @@ const importOnlineDocument = async payload => {
   }
 }
 
-const addWatchPath = async path => {
+const addWatchPath = async payload => {
   pathAdding.value = true
   try {
-    const data = await readJson(await fetch('/api/rag/watch-paths', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }))
+    const data = await readJson(await fetch('/api/rag/watch-paths', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }))
     watchPaths.value = data.paths || []
     toast.success(data.message || '同步目录已添加')
   } catch (error) {
@@ -304,12 +304,62 @@ const saveEmbeddingSettings = async payload => {
     status.value = data.status || status.value
     settingsVisible.value = false
     await loadDocuments()
-    toast.success(payload.enabled ? '语义检索配置已保存' : '已切换为本地混合检索')
+    const labels = { auto: '自动选择', local: '本地语义', remote: '外部Embedding', lexical: '仅词面检索' }
+    toast.success(`检索模式已切换为${labels[payload.mode] || '自动选择'}`)
   } catch (error) {
     toast.error(error?.message || '保存检索设置失败')
   } finally {
     settingsSaving.value = false
   }
+}
+
+const prepareLocalModel = async () => {
+  settingsSaving.value = true
+  try {
+    const data = await readJson(await fetch('/api/rag/local-model/prepare', { method: 'POST' }))
+    status.value = data.status || status.value
+    toast.success('本地语义模型已开始准备，可在状态区查看进度')
+    await loadStatus()
+  } catch (error) {
+    toast.error(error?.message || '本地模型准备失败')
+  } finally { settingsSaving.value = false }
+}
+
+const removeLocalModel = async () => {
+  const confirmed = await confirmDialog('删除本地语义模型缓存？知识文档不会删除，检索会暂时降级。')
+  if (!confirmed) return
+  settingsSaving.value = true
+  try {
+    const data = await readJson(await fetch('/api/rag/local-model', { method: 'DELETE' }))
+    status.value = data.status || status.value
+    toast.success('本地模型缓存已删除')
+    await loadStatus()
+  } catch (error) {
+    toast.error(error?.message || '删除本地模型失败')
+  } finally { settingsSaving.value = false }
+}
+
+const repairVectors = async () => {
+  settingsSaving.value = true
+  try {
+    const data = await readJson(await fetch('/api/rag/repair-vectors', { method: 'POST' }))
+    status.value = data.status || status.value
+    toast.success('缺失向量已重新检查')
+    await refreshWorkspace(true)
+  } catch (error) {
+    toast.error(error?.message || '向量修复失败')
+  } finally { settingsSaving.value = false }
+}
+
+const cleanupIndex = async () => {
+  settingsSaving.value = true
+  try {
+    const data = await readJson(await fetch('/api/rag/index-cache', { method: 'DELETE' }))
+    toast.success(`已清理 ${data.cleanup?.removed || 0} 份失效索引，当前索引保持可用`)
+    await loadStatus()
+  } catch (error) {
+    toast.error(error?.message || '清理失效索引失败')
+  } finally { settingsSaving.value = false }
 }
 
 const formatSize = bytes => {
@@ -329,7 +379,7 @@ const formatDate = value => {
 onMounted(async () => {
   await refreshWorkspace()
   pollTimer = window.setInterval(() => {
-    if (status.value.state === 'building') void refreshWorkspace(true)
+    if (status.value.state === 'building' || status.value.localModel?.state === 'downloading') void refreshWorkspace(true)
   }, 1500)
 })
 
@@ -350,7 +400,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 
     <KnowledgeChunksDrawer :visible="drawerVisible" :preview-file-name="previewFileName" :doc-chunks="docChunks" :doc-original-content="docOriginalContent" :chunks-loading="chunksLoading" :original-loading="originalLoading" :drawer-sub-tab="drawerSubTab" :active-chunk-index="activeDrawerChunkIndex" :parse-status="previewDocument?.parseStatus" :parse-error="previewDocument?.parseError" :versions="docVersions" :versions-loading="versionsLoading" :version-preview="versionPreview" :version-preview-loading="versionPreviewLoading" @close="drawerVisible = false" @show-chunks="drawerSubTab = 'chunks'" @show-original="showOriginal" @show-versions="drawerSubTab = 'versions'" @preview-version="previewVersion" @restore-version="restoreVersion" />
     <KnowledgeTagEditorModal v-model:new-tag="editorNewTag" v-model:scope-type="editorScopeType" v-model:scope-id="editorScopeId" v-model:visibility="editorVisibility" :visible="editorVisible" :doc="editorDocument" :tags="editorTags" :saving="editorSaving" @close="editorVisible = false" @add-tag="addEditorTag" @remove-tag="editorTags = editorTags.filter(item => item !== $event)" @save="saveDocumentMetadata" />
-    <KnowledgeSettingsModal :visible="settingsVisible" :config="embedding" :saving="settingsSaving" @close="settingsVisible = false" @save="saveEmbeddingSettings" />
+    <KnowledgeSettingsModal :visible="settingsVisible" :config="embedding" :status="status" :saving="settingsSaving" @close="settingsVisible = false" @save="saveEmbeddingSettings" @prepare-local="prepareLocalModel" @remove-local="removeLocalModel" @repair-vectors="repairVectors" @cleanup-index="cleanupIndex" />
   </main>
 </template>
 

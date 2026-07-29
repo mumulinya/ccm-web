@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { UPLOAD_DIR } from "../core/utils";
-import { ingestRequirementSources } from "../modules/requirements/source-ingestion";
+import { extractOnlineDocumentUrls, ingestRequirementSources } from "../modules/requirements/source-ingestion";
 
 export const MAX_TASK_ATTACHMENT_COUNT = 10;
 export const MAX_TASK_ATTACHMENT_FILE_BYTES = 25 * 1024 * 1024;
@@ -78,6 +78,7 @@ function contextBlock(source: any) {
     `状态=${source.status || "unknown"}`,
     `解析器=${source.parser || "unknown"}`,
     source.path ? `本地路径=${source.path}` : "",
+    source.url ? `来源链接=${source.url}` : "",
     source.size ? `大小=${source.size} bytes` : "",
   ].filter(Boolean).join("；");
   const body = source.readable && source.content
@@ -95,11 +96,14 @@ export function renderTaskAttachmentContext(contexts: any[]) {
   return rows.length ? `[任务附件：以下内容属于当前任务，必须在执行和验收时读取]\n${rows.join("\n\n")}` : "";
 }
 
-async function ingestFiles(files: any[], userText: string) {
-  if (!files.length) return { attachments: [], contexts: [], warnings: [], technical: null };
+async function ingestSources(files: any[], userText: string, urls: string[] = [], onlineDocumentFetcher?: (url: string) => Promise<any>) {
+  const onlineUrls = [...new Set([...(urls || []), ...extractOnlineDocumentUrls(userText)])];
+  if (!files.length && !onlineUrls.length) return { attachments: [], contexts: [], warnings: [], technical: null };
   const ingestion = await ingestRequirementSources({
     files,
     userText,
+    urls: onlineUrls,
+    onlineDocumentFetcher,
     extractRequirement: false,
     decomposeRequirement: false,
   });
@@ -126,6 +130,7 @@ export async function buildTaskAttachmentMutation(input: {
   currentContexts?: any[];
   retainedIds?: any;
   userText?: string;
+  onlineDocumentFetcher?: (url: string) => Promise<any>;
 }) {
   const files = Array.isArray(input.files) ? input.files : [];
   const currentAttachments = Array.isArray(input.currentAttachments) ? input.currentAttachments : [];
@@ -133,18 +138,28 @@ export async function buildTaskAttachmentMutation(input: {
   const retainedSelectionProvided = input.retainedIds !== undefined && input.retainedIds !== null;
   const retainedIds = new Set(retainedSelectionProvided ? requestedRetainedIds : currentAttachments.map(item => item?.id));
   const retained = currentAttachments.filter(item => retainedIds.has(String(item?.id || "")));
-  validateTaskUploadedFiles(files, retained.length, retained.reduce((sum, item) => sum + Math.max(0, Number(item?.size || 0)), 0));
+  const retainedUrls = new Set(retained.map(item => String(item?.url || "")).filter(Boolean));
+  const newUrls = extractOnlineDocumentUrls(input.userText || "").filter(url => !retainedUrls.has(url));
+  validateTaskUploadedFiles(files, retained.length + newUrls.length, retained.reduce((sum, item) => sum + Math.max(0, Number(item?.size || 0)), 0));
 
   let retainedContexts = (Array.isArray(input.currentContexts) ? input.currentContexts : [])
     .filter(item => retainedIds.has(String(item?.id || "")));
   const missingContextIds = new Set(retained.map(item => String(item?.id || "")).filter(id => !retainedContexts.some(item => String(item?.id || "") === id)));
   if (missingContextIds.size) {
-    const reparsed = await ingestFiles(retained.filter(item => missingContextIds.has(String(item?.id || "")) && item?.path), input.userText || "");
+    const missing = retained.filter(item => missingContextIds.has(String(item?.id || "")));
+    const reparsed = await ingestSources(
+      missing.filter(item => item?.path),
+      "",
+      missing.map(item => String(item?.url || "")).filter(Boolean),
+      input.onlineDocumentFetcher,
+    );
     retainedContexts = [...retainedContexts, ...reparsed.contexts];
   }
 
-  const added = await ingestFiles(files, input.userText || "");
-  const attachments = [...retained, ...added.attachments].slice(0, MAX_TASK_ATTACHMENT_COUNT);
+  const added = await ingestSources(files, input.userText || "", newUrls, input.onlineDocumentFetcher);
+  const attachments = [...retained, ...added.attachments]
+    .filter((item, index, rows) => rows.findIndex(other => String(other?.id || "") === String(item?.id || "")) === index)
+    .slice(0, MAX_TASK_ATTACHMENT_COUNT);
   const contexts = [...retainedContexts, ...added.contexts]
     .filter((item, index, rows) => rows.findIndex(other => String(other?.id || "") === String(item?.id || "")) === index)
     .slice(0, MAX_TASK_ATTACHMENT_COUNT);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import http from 'node:http'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 
@@ -28,7 +29,7 @@ const task = {
   group_session_id: 'session-internal-mcp-e2e',
   title: '内部 MCP 真实链路验证',
   business_goal: '验证任务、知识、TestAgent、交付工作区与证据 MCP 能被第三方 Agent 调用',
-  acceptance_criteria: ['npm run check 成功', '任务时间线保存内部 MCP 事件'],
+  acceptance_criteria: ['command npm run check'],
   target_project: 'demo-project',
   status: 'in_progress',
   workflow_timeline: [],
@@ -37,6 +38,36 @@ const task = {
 }
 fs.writeFileSync(path.join(ccmHome, 'tasks.json'), `${JSON.stringify([task], null, 2)}\n`)
 fs.writeFileSync(path.join(ccmHome, 'project-configs.json'), '{}\n')
+fs.writeFileSync(path.join(ccmHome, 'groups.json'), `${JSON.stringify([{
+  id: task.group_id,
+  name: '内部 MCP 自测群',
+  members: [{ project: 'coordinator', role: 'coordinator' }, { project: task.target_project, agent: 'codex' }],
+}], null, 2)}\n`)
+
+let modelCalls = 0
+const mockModel = http.createServer(async (request, response) => {
+  modelCalls += 1
+  for await (const _chunk of request) {}
+  const content = JSON.stringify({
+    summary: '读取当前项目配置并选择已声明的只读验证命令。',
+    inspectedFiles: ['package.json', 'README.md'],
+    projects: [{ name: 'demo-project', rationale: '项目已声明 npm run check，适合作为当前交付的确定性验证。', commands: ['npm run check'] }],
+  })
+  response.writeHead(200, { 'Content-Type': 'application/json' })
+  response.end(JSON.stringify({ choices: [{ message: { content } }], usage: { prompt_tokens: 80, completion_tokens: 30, total_tokens: 110 } }))
+})
+await new Promise((resolve, reject) => {
+  mockModel.once('error', reject)
+  mockModel.listen(0, '127.0.0.1', resolve)
+})
+fs.writeFileSync(path.join(ccmHome, 'group-orchestrator-config.json'), `${JSON.stringify({
+  enabled: true,
+  format: 'openai-compatible',
+  apiUrl: `http://127.0.0.1:${mockModel.address().port}/v1`,
+  apiKey: 'internal-workflow-selftest-only',
+  model: 'internal-workflow-mock-model',
+  timeoutMs: 5000,
+}, null, 2)}\n`)
 
 const require = createRequire(import.meta.url)
 const { McpClient } = require(path.join(root, 'ccm-package', 'dist', 'tools', 'mcp-client.js'))
@@ -64,11 +95,11 @@ const mainServers = buildTaskBoundInternalMcpServers({ ...baseContext, project: 
 const globalServers = buildTaskBoundInternalMcpServers({ ...baseContext, groupId: '', project: 'global', role: 'global-agent', taskAgentSessionId: 'global-session' })
 const testAgentServers = buildTaskBoundInternalMcpServers({ ...baseContext, project: 'demo-project', role: 'test-agent', taskAgentSessionId: 'test-session' })
 
-const expectedChildServers = ['ccm__group_coordinator', 'ccm__task_runtime', 'ccm__knowledge_context', 'ccm__test_acceptance', 'ccm__delivery_workspace', 'ccm__task_evidence']
+const expectedChildServers = ['ccm__group_coordinator', 'ccm__task_runtime', 'ccm__knowledge_context', 'ccm__test_acceptance', 'ccm__delivery_workspace', 'ccm__task_evidence', 'ccm__permission_broker']
 assert.deepEqual(Object.keys(childServers).sort(), expectedChildServers.sort())
 assert.equal(Object.keys(mainServers).includes('ccm__group_coordinator'), false)
-assert.equal(Object.keys(mainServers).length, 5)
-assert.deepEqual(Object.keys(globalServers).sort(), ['ccm__knowledge_context', 'ccm__task_evidence', 'ccm__task_runtime'])
+assert.equal(Object.keys(mainServers).length, 6)
+assert.deepEqual(Object.keys(globalServers).sort(), ['ccm__knowledge_context', 'ccm__permission_broker', 'ccm__task_evidence', 'ccm__task_runtime'])
 assert.equal(Object.keys(testAgentServers).includes('ccm__delivery_workspace'), true)
 assert.equal(Object.keys(testAgentServers).includes('ccm__group_coordinator'), false)
 
@@ -155,7 +186,7 @@ try {
 
   const testInput = {
     projects: ['demo-project'],
-    acceptance_criteria: ['npm run check 成功'],
+    acceptance_criteria: ['command npm run check'],
     required_checks: ['commands'],
     verification_commands: ['npm run check'],
     browser_provider: 'none',
@@ -210,8 +241,8 @@ try {
   const catalog = registry.buildInternalMcpCatalog({ packageRoot: path.join(root, 'ccm-package'), feishuConfig: {} })
   const names = new Set(catalog.items.map(item => item.name))
   for (const name of ['ccm__task_runtime', 'ccm__knowledge_context', 'ccm__test_acceptance', 'ccm__delivery_workspace', 'ccm__task_evidence']) assert.equal(names.has(name), true, `catalog missing ${name}`)
-  assert.equal(catalog.summary.total, 7)
-  assert.equal(catalog.summary.tools, 39)
+  assert.equal(catalog.summary.total, 8)
+  assert.equal(catalog.summary.tools, 44)
 
   const report = {
     pass: true,
@@ -224,10 +255,13 @@ try {
     task_evidence_and_timeline: true,
     role_least_privilege: { global_has_no_test_acceptance: true, child_cannot_start_test_or_merge: true, test_agent_cannot_submit_delivery: true, group_main_owns_acceptance_and_merge: true },
     signed_context_tamper_rejected: true,
+    mock_model_calls: modelCalls,
+    paid_provider_calls: 0,
     third_party_runtime_injection: Object.fromEntries(Object.entries(runtimeAudits).map(([agentType, audit]) => [agentType, audit.internal_mcp.map(row => row.name)])),
   }
   fs.writeFileSync(path.join(scratch, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify(report, null, 2))
 } finally {
   for (const client of clients) client.disconnect()
+  await new Promise(resolve => mockModel.close(resolve))
 }

@@ -216,7 +216,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       }) : "",
       global_knowledge: options.knowledgeContext || options.knowledge_context || "",
       session_continuity: sessionId && options.includeSessionContinuity !== false && options.include_session_continuity !== false
-        ? buildGlobalAgentSessionContinuation(sessionId)
+        ? buildGlobalAgentSessionContinuation(sessionId, { persistMicroCompactReceipt: true })
         : null,
       memory_context_boundary: {
         schema: "ccm-global-agent-memory-boundary-v1",
@@ -484,8 +484,54 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     (run as any).post_review_spot_check = event.technical?.post_review_spot_check || event.post_review_spot_check || event.postReviewSpotCheck || null;
     (run as any).postReviewSpotCheck = event.postReviewSpotCheck || event.post_review_spot_check || event.technical?.post_review_spot_check || null;
   }
+
+  function unresolvedRequiredSources(run: GlobalAgentRun) {
+    const rows = Array.isArray((run as any).requirement_sources)
+      ? (run as any).requirement_sources
+      : Array.isArray((run as any).source_ingestion?.sources)
+        ? (run as any).source_ingestion.sources
+        : Array.isArray((run as any).source_attachments)
+          ? (run as any).source_attachments
+          : [];
+    return rows.filter((source: any) => {
+      if (source?.required === false) return false;
+      const status = String(source?.status || "").toLowerCase();
+      return source?.readable !== true && !["parsed", "partial"].includes(status);
+    });
+  }
+
+  function sourceExecutionGate(run: GlobalAgentRun, toolName: string, args: any) {
+    const spec = GLOBAL_AGENT_TOOL_SPECS.find((item: any) => item.name === toolName);
+    const risk = typeof spec?.risk === "function" ? spec.risk(args || {}) : spec?.risk;
+    if (!["write", "high"].includes(String(risk || ""))) return null;
+    if ((run as any).source_execution_waiver?.scope === "current_run") return null;
+    const unresolved = unresolvedRequiredSources(run);
+    if (!unresolved.length) return null;
+    const names = unresolved.slice(0, 4).map((source: any) => compactPetText(source?.name || source?.url || source?.path || "任务资料", 80));
+    return {
+      success: false,
+      accepted: false,
+      completed: false,
+      needs_clarification: true,
+      clarification_questions: [
+        `以下关键资料尚未完整读取：${names.join("、")}。请完成授权、重新上传可读取版本，或明确允许忽略这些资料后再继续。`,
+      ],
+      source_coverage: {
+        total: Array.isArray((run as any).requirement_sources) ? (run as any).requirement_sources.length : unresolved.length,
+        unresolved: unresolved.map((source: any) => ({
+          id: source?.id || "",
+          name: source?.name || source?.url || source?.path || "任务资料",
+          status: source?.status || "failed",
+          reason: source?.error || source?.summary || "未读取正文",
+        })),
+      },
+      error: "关键任务资料尚未完整读取，已阻止执行操作",
+    };
+  }
   
   async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string, args: any, run: GlobalAgentRun, onEvent?: (event: any) => void) {
+    const sourceGate = sourceExecutionGate(run, name, args);
+    if (sourceGate) return sourceGate;
     const signature = crypto.createHash("sha256").update(`${name}:${JSON.stringify(args || {})}`).digest("hex").slice(0, 24);
     const operationKey = `${run.id}:${signature}`;
     const operation = acquireIdempotency({
@@ -902,7 +948,19 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
         const invoke = (providerMessages: Array<{ role: string; content: string }>) => {
           (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""));
+          const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
           return callGlobalModelWithRetry(config, providerMessages, {
+          providerContextCache: {
+            scope: "global",
+            scopeId: String(run.session_id || ""),
+            sessionId: String(run.session_id || ""),
+            generation: Number((run as any).generation || 0),
+            boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
+            source: "global_main_agent",
+          },
+          onProviderContextCache: (receipt: any) => {
+            (run as any).latest_provider_context_cache = receipt;
+          },
           onUsage: (usage: any) => {
             (run as any).latest_context_usage = usage;
             accumulateGlobalAgentRunUsage(run, usage);
@@ -942,6 +1000,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
   
   async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {
     message: string;
+    originalMessage?: string;
     history?: any[];
     sessionId?: string;
     source?: string;
@@ -951,6 +1010,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     sourceIngestion?: RequirementIngestionResult | null;
   }) {
     const sessionId = input.sessionId || "default";
+    const visibleUserMessage = input.originalMessage || input.message;
     let deferredTerminalEvent: any = null;
     const runtimeEventSink = input.onEvent
       ? (event: any) => {
@@ -969,7 +1029,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     }
     const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: runtimeEventSink, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
     if (!/feishu/i.test(input.source || "")) {
-      ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
+      ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: visibleUserMessage, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
     }
     const compactionFixedContext = buildAgenticContext(input.message, sessionId, {
       includeSessionContinuity: false,
@@ -1016,6 +1076,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         })
       : await startGlobalAgentRun({
           message: input.message,
+          originalMessage: input.originalMessage || input.message,
           history: input.history || [],
           sessionId,
           source: input.source || "web",
@@ -1039,12 +1100,24 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
             },
             {
               role: "user",
-              content: JSON.stringify({ user_request: input.message, official_reply: canonicalReply }),
+              content: JSON.stringify({ user_request: visibleUserMessage, official_reply: canonicalReply }),
             },
           ];
           (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(renderMessages, String(run.session_id || ""));
           const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
+          const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
           const renderedReply = await callGlobalModelWithRetry(config, renderMessages, {
+            providerContextCache: {
+              scope: "global",
+              scopeId: String(run.session_id || ""),
+              sessionId: String(run.session_id || ""),
+              generation: Number((run as any).generation || 0),
+              boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
+              source: "global_final_reply",
+            },
+            onProviderContextCache: (receipt: any) => {
+              (run as any).latest_provider_context_cache = receipt;
+            },
             onDelta: (delta: string) => {
               if (!delta) return;
               emittedVisibleDelta = true;

@@ -547,6 +547,32 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
     const persistentRequirements = (0, group_memory_shared_1.mergeFactAnchorList)(memory?.persistentRequirements || [], (0, group_memory_shared_1.extractPersistentRequirementsFromAnchors)(anchors), 160);
     const modelSummaryRequired = options.modelSummaryRequired === true
         || String(options.config?.memoryCompactionMode || options.config?.memory_compaction_mode || "").toLowerCase() === "model-required";
+    const currentTasks = (0, db_1.loadTasks)();
+    const postCompactTaskStatusProjection = (0, group_memory_compaction_1.buildGroupPostCompactTaskStatusProjection)(currentTasks, {
+        groupId,
+        groupSessionId,
+        taskStatusBudget: options.postCompactReinject?.taskStatusBudget || options.postCompactReinject?.task_status_budget,
+        completedMaxAgeMs: options.postCompactReinject?.completedMaxAgeMs || options.postCompactReinject?.completed_max_age_ms,
+    });
+    const reinjectionSourceMessages = messagesToSummarize.length ? messagesToSummarize : messages;
+    const recoveredMicroCompact = (0, group_memory_compaction_1.buildGroupMicroCompactPlan)(reinjectionSourceMessages);
+    const recoveredPostCompactReinject = (0, group_memory_compaction_1.buildPostCompactReinjectionPlan)(reinjectionSourceMessages, recoveredMicroCompact, {
+        groupId,
+        groupSessionId,
+        sessionMessages: messages,
+        preservedMessages: messagesToSummarize.length ? keptMessages : [],
+        taskStatuses: postCompactTaskStatusProjection.tasks,
+        tasks: currentTasks,
+        currentTaskId: options.currentTaskId || options.current_task_id,
+        dynamicContextCatalog: (0, group_memory_context_1.buildGroupPostCompactDynamicContextCatalog)(groupId, memory, options),
+        dynamicContextScanMode: "full",
+    });
+    const storedPostCompactReinject = memory?.compaction?.postCompactReinject
+        || memory?.compactBoundary?.post_compact_restore?.reinjectionPlan
+        || {};
+    const postCompactReinject = Object.keys(storedPostCompactReinject).length
+        ? { ...recoveredPostCompactReinject, ...storedPostCompactReinject }
+        : recoveredPostCompactReinject;
     if (!messagesToSummarize.length || modelSummaryRequired) {
         const now = new Date().toISOString();
         const hasCommittedCompactBoundary = !!memory?.compactBoundary?.id;
@@ -600,6 +626,8 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
                 compactWarning: currentPressureWarning,
                 compactStrategyDecision,
                 apiMicroCompactEditPlan,
+                postCompactReinject,
+                postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
                 lastPressureSampleAt: now,
             },
             factAnchors: (0, group_memory_shared_1.mergeFactAnchorList)(memory?.factAnchors || [], (0, group_memory_shared_1.extractGroupFactAnchors)(messages), 300),
@@ -625,16 +653,8 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
     }
     const conversationSummary = (0, group_memory_compaction_1.buildDeterministicConversationSummary)(messagesToSummarize, memory, memory?.conversationSummary || {});
     const now = new Date().toISOString();
-    const currentTasks = (0, db_1.loadTasks)();
-    const postCompactTaskStatusProjection = (0, group_memory_compaction_1.buildGroupPostCompactTaskStatusProjection)(currentTasks, {
-        groupId,
-        groupSessionId,
-        taskStatusBudget: options.postCompactReinject?.taskStatusBudget || options.postCompactReinject?.task_status_budget,
-        completedMaxAgeMs: options.postCompactReinject?.completedMaxAgeMs || options.postCompactReinject?.completed_max_age_ms,
-        now,
-    });
     const microCompact = (0, group_memory_compaction_1.buildGroupMicroCompactPlan)(messagesToSummarize);
-    const postCompactReinject = (0, group_memory_compaction_1.buildPostCompactReinjectionPlan)(messagesToSummarize, microCompact, {
+    const freshPostCompactReinject = (0, group_memory_compaction_1.buildPostCompactReinjectionPlan)(messagesToSummarize, microCompact, {
         groupId,
         groupSessionId,
         sessionMessages: messages,
@@ -666,7 +686,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
                 tokensFreed: microCompact.tokensFreed,
                 records: (microCompact.records || []).slice(-12),
             },
-            postCompactReinject,
+            postCompactReinject: freshPostCompactReinject,
             keptRecent: keptMessages.map((message) => (0, group_memory_shared_1.getMemoryMessageContent)(message)),
         },
         maxChars: 48_000,
@@ -771,7 +791,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             apiMicroCompactEditPlan,
             transcriptPath: (0, group_memory_shared_1.getGroupMessagesFileHint)(groupId, groupSessionId),
             microCompact,
-            reinjectionPlan: postCompactReinject,
+            reinjectionPlan: freshPostCompactReinject,
             postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
             ptlRecovery,
             recoveryAudit: null,
@@ -811,7 +831,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         summaryChecksum,
         transcriptPath: (0, group_memory_shared_1.getGroupMessagesFileHint)(groupId, groupSessionId),
         preservedSegment,
-        postCompactReinject,
+        postCompactReinject: freshPostCompactReinject,
         microCompact,
         contextPressureWarning: postCompactWarning,
         contextBudget: effectiveContextBudget,
@@ -827,7 +847,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         apiMicroCompactEditPlan,
         postCompactRecoveryAudit,
         microCompact,
-        postCompactReinject,
+        postCompactReinject: freshPostCompactReinject,
         postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
         preservedSegment,
         transcriptPath: (0, group_memory_shared_1.getGroupMessagesFileHint)(groupId, groupSessionId),
@@ -857,7 +877,7 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
                 : postCompactTokenCount < preCompactTokenCount ? "healthy" : "watch",
         context_budget: boundary.context_budget,
         microCompact,
-        postCompactReinject,
+        postCompactReinject: freshPostCompactReinject,
         postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
         ptlEmergency: activePtlEmergency,
         ptlRecovery,

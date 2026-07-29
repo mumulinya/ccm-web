@@ -153,6 +153,7 @@ export declare function runCollaborationUxSelfTest(): {
         reportHidesProtocol: boolean;
         groupReportFormatsObjects: boolean;
         acknowledgementHasCleanPunctuation: boolean;
+        acknowledgementIsUserOriented: boolean;
         dispatchLaunchSummaryVisible: any;
         dispatchLaunchSummaryHidesProtocol: boolean;
         dispatchLaunchSummaryDoneTargetStaysReviewing: boolean;

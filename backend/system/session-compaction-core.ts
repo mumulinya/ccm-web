@@ -1,5 +1,6 @@
 import { estimateTextTokens } from "./context-budget";
 import * as crypto from "crypto";
+import { recordContextEngineEvent } from "./context-engine-observability";
 
 export const SESSION_COMPACTION_STATE_SCHEMA = "ccm-session-compaction-state-v2";
 export const SESSION_COMPACTION_MAX_CONSECUTIVE_FAILURES = 3;
@@ -643,6 +644,15 @@ export function recordSessionCompactionFailure(state: any, error: any) {
   );
   normalized.lastFailureAt = new Date().toISOString();
   normalized.lastError = String(error?.message || error || "session_compaction_failed").slice(0, 800);
+  recordContextEngineEvent({
+    kind: "compaction_failure",
+    scope: normalized.scope || "other",
+    scopeId: normalized.scopeId || normalized.project || normalized.groupId || normalized.sessionId || "",
+    sessionId: normalized.sessionId || "",
+    status: "failed",
+    consecutiveFailures: normalized.consecutiveFailures,
+    reasonCode: error?.code || normalized.lastError,
+  });
   return normalized;
 }
 
@@ -658,5 +668,19 @@ export function registerSessionCompactionHook(phase: SessionCompactionHookPhase,
 export async function runSessionCompactionHooks(phase: SessionCompactionHookPhase, input: any) {
   const results: any[] = [];
   for (const hook of lifecycleHooks[phase]) results.push(await hook({ ...input, phase }));
+  if (phase === "post_compact") {
+    const result = input?.result || {};
+    const quality = result.summaryQuality || result.summary_quality || result.modelMetadata?.summaryQuality || null;
+    recordContextEngineEvent({
+      kind: "compaction_success",
+      scope: input?.scope || "other",
+      scopeId: input?.scopeId || input?.project || input?.groupId || input?.sessionId || "",
+      sessionId: input?.sessionId || "",
+      status: "completed",
+      beforeTokens: result.before_tokens ?? result.beforeTokens,
+      afterTokens: result.after_tokens ?? result.afterTokens,
+      summaryQualityScore: quality?.score,
+    });
+  }
   return results.filter(result => result !== undefined && result !== null);
 }

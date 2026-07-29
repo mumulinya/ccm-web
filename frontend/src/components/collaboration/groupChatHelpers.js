@@ -125,8 +125,13 @@ export const getTaskCard = (msg) => {
   if (isLegacyNonTaskCard(card)) return null
   const presentation = classifyGroupTaskCardPresentation(card, msg)
   if (!shouldAttachTaskExperienceCard(presentation)) return null
-  if (card.presentation) return card
-  return { ...card, presentation, delivery_scaffold: showDeliveryScaffold(presentation) }
+  const enriched = {
+    ...card,
+    queue: card.queue || msg?.queue || null,
+    intake_summary: card.intake_summary || card.intakeSummary || msg?.intake_summary || msg?.intakeSummary || null,
+  }
+  if (enriched.presentation) return enriched
+  return { ...enriched, presentation, delivery_scaffold: showDeliveryScaffold(presentation) }
 }
 
 export const shouldShowOrchestrationPlan = (msg) => {
@@ -149,16 +154,35 @@ export const isInternalProtocolMessage = (msg) => {
 
 export const getMessageTaskId = (msg) => msg?.task_id || msg?.task?.id || ''
 
+export const getMessageTaskThreadId = (msg) => msg?.task_thread_id
+  || msg?.taskThreadId
+  || msg?.task?.task_thread_id
+  || msg?.task?.taskThreadId
+  || msg?.task?.root_task_id
+  || msg?.task?.rootTaskId
+  || msg?.task?.retry_of_task_id
+  || msg?.task?.retryOfTaskId
+  || msg?.task?.source_task_id
+  || msg?.task?.sourceTaskId
+  || getMessageTaskId(msg)
+  || ''
+
 export const isPrimaryTaskMessage = (messages, msg, index) => {
-  const taskId = getMessageTaskId(msg)
-  if (!taskId || isInternalProtocolMessage(msg)) return false
-  return messages.findIndex((item) => getMessageTaskId(item) === taskId && !isInternalProtocolMessage(item)) === index
+  const taskThreadId = getMessageTaskThreadId(msg)
+  if (!taskThreadId || isInternalProtocolMessage(msg)) return false
+  const candidates = messages
+    .map((item, itemIndex) => ({ item, itemIndex }))
+    .filter(({ item }) => getMessageTaskThreadId(item) === taskThreadId && !isInternalProtocolMessage(item))
+  if (!candidates.length) return false
+  const cardCandidates = candidates.filter(({ item }) => !!getTaskCard(item))
+  const primary = cardCandidates.length ? cardCandidates[cardCandidates.length - 1] : candidates[0]
+  return primary.itemIndex === index
 }
 
 export const shouldShowGroupMessage = (messages, msg, index) => {
   if (isInternalProtocolMessage(msg)) return false
-  const taskId = getMessageTaskId(msg)
-  if (!taskId) return true
+  const taskThreadId = getMessageTaskThreadId(msg)
+  if (!taskThreadId) return true
   if (isPrimaryTaskMessage(messages, msg, index)) return true
   return msg.role === 'user' && !/【主 Agent 业务开发工作单】|任务前沙盘演练|CCM_AGENT_RECEIPT|task-notification/i.test(String(msg.content || ''))
 }

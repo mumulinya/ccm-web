@@ -52,7 +52,7 @@ const prepare = async page => {
   })
   await page.goto(`${baseUrl}/?tab=dashboard`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.locator('.workbench').waitFor({ state: 'visible', timeout: 20_000 })
-  await page.getByText('workspace-5', { exact: true }).waitFor({ state: 'attached', timeout: 10_000 })
+  await page.getByRole('button', { name: /^workspace-5 claudecode/ }).waitFor({ state: 'attached', timeout: 10_000 })
   await page.locator('[data-page-loading="dashboard"]').waitFor({ state: 'detached', timeout: 10_000 })
 }
 

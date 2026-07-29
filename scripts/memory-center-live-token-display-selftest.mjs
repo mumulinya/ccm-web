@@ -64,7 +64,9 @@ if (process.argv.includes("--exact-session-child")) {
     recentWindowExposed: rows.every(row => row.preservedRecentTokens === 10_000 && row.preservedRecentMessages === 5),
     sessionMemoryStatusExposed: rows.every(row => ["ready", "waiting", "waiting_model", "invalid"].includes(String(row.sessionMemory?.status || ""))),
     postCompactGateExposed: rows.every(row => row.postCompactGate),
-    taskCircuitIsExact: rows[3].circuitOpen === true && rows.slice(0, 3).every(row => row.circuitOpen === false),
+    taskCircuitIsExact: rows.every(row => row.circuitOpen === false)
+      && rows[3].summaryDegraded === true
+      && rows[3].summaryFallbackFailures === 3,
     exactDetailsResolve: details.every((detail, index) => detail?.summary?.currentTokens === expectedTokens[index]),
   };
   assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify({ checks, rows }, null, 2));

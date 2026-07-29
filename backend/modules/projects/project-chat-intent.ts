@@ -28,7 +28,7 @@ export function classifyProjectChatIntent(message: string, uploadedFiles: any[] 
 export async function classifyProjectChatIntentWithModel(
   message: string,
   uploadedFiles: any[] = [],
-  options: { forceTask?: boolean; project?: string } = {},
+  options: { forceTask?: boolean; project?: string; sessionId?: string } = {},
 ): Promise<ProjectChatIntent> {
   const workflowDecision = options.forceTask
     ? explicitWorkflowDecision("execute_direct", "用户显式继续已有项目任务")
@@ -38,6 +38,7 @@ export async function classifyProjectChatIntentWithModel(
         sourceCount: Array.isArray(uploadedFiles) ? uploadedFiles.length : 0,
         context: {
           project: String(options.project || ""),
+          project_session_id: String(options.sessionId || ""),
           attachments: (uploadedFiles || []).map((file: any) => ({
             name: String(file?.filename || file?.name || ""),
             type: String(file?.type || ""),

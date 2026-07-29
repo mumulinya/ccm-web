@@ -66,6 +66,17 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
         reviewSubject: string;
         verifier: string;
         previousLedger: any;
+        reviewPolicy: {
+            browserEnabled: boolean;
+            requireAdversarialProbe: boolean;
+            requiredChecks: string[];
+            schema: "ccm-test-agent-review-policy-v1";
+            tier: import("./test-agent-review-policy").TestAgentReviewTier;
+            reason: string;
+            httpEnabled: boolean;
+            collectBrowserArtifacts: boolean;
+            autoDiscoverVerificationCommands: boolean;
+        };
         coordinatorOutputPreview: string;
         projectRuntimeSource: string;
         reviewInstructions: string[];
@@ -90,16 +101,7 @@ export declare function buildNativeTestAgentReceipt(targetName: string, report: 
     verification: string[];
     blockers: string[];
     needs: string[];
-    independentReview: {
-        reviewer: string;
-        verdict: string;
-        summary: string;
-        evidence: string[];
-        reviewSubject: string;
-        workOrderId: string;
-        reportId: string;
-        artifactDir: string;
-    }[];
+    independentReview: any[];
     reviewer: string;
     role: string;
     testAgentReport: {

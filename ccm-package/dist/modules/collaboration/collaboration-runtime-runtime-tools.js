@@ -64,6 +64,7 @@ exports.appendGlobalDirectDispatchContinuationToHistory = appendGlobalDirectDisp
 exports.appendGlobalDirectDispatchCompletionToHistory = appendGlobalDirectDispatchCompletionToHistory;
 exports.appendGlobalDirectDispatchRollbackToHistory = appendGlobalDirectDispatchRollbackToHistory;
 exports.updateTask = updateTask;
+exports.normalizeTaskTerminalStateView = normalizeTaskTerminalStateView;
 exports.refreshGlobalDevelopmentMissions = refreshGlobalDevelopmentMissions;
 exports.getGlobalDevelopmentMission = getGlobalDevelopmentMission;
 exports.getMissionDependencyRefs = getMissionDependencyRefs;
@@ -94,6 +95,7 @@ exports.buildExecutionDashboard = buildExecutionDashboard;
 exports.continueDailyDevTasksFromGaps = continueDailyDevTasksFromGaps;
 exports.continueTaskWithMessage = continueTaskWithMessage;
 exports.retryTask = retryTask;
+const rework_policy_1 = require("./rework-policy");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -420,7 +422,12 @@ function looksLikeTaskContinuation(message) {
     return require("./collaboration-task-service").looksLikeTaskContinuation(message);
 }
 function getGlobalMissionDeps() {
-    return { listExecutions: execution_kernel_1.listExecutions, taskRequiresCodeChanges: collaboration_runtime_status_helpers_1.taskRequiresCodeChanges, taskRequiresVerification: collaboration_runtime_status_helpers_1.taskRequiresVerification };
+    return {
+        listExecutions: execution_kernel_1.listExecutions,
+        taskRequiresCodeChanges: collaboration_runtime_status_helpers_1.taskRequiresCodeChanges,
+        taskRequiresVerification: collaboration_runtime_status_helpers_1.taskRequiresVerification,
+        listPermissionRequests: (filters = {}) => require("./task-permission-broker").listTaskPermissionRequests(filters),
+    };
 }
 function getGlobalMissionChildDeliveryEvidence(task) {
     return (0, global_mission_1.getGlobalMissionChildDeliveryEvidence)(task, getGlobalMissionDeps());
@@ -732,6 +739,9 @@ function appendGlobalDirectDispatchRollbackToHistory(task, previousStatus = "") 
 function updateTask(id, updates) {
     return require("./collaboration-task-service").updateTask(id, updates);
 }
+function normalizeTaskTerminalStateView(task) {
+    return require("./collaboration-task-service").normalizeTaskTerminalStateView(task);
+}
 function refreshGlobalDevelopmentMissions() {
     return require("./collaboration-global-missions").refreshGlobalDevelopmentMissions();
 }
@@ -876,6 +886,12 @@ function reconcileTaskDeliveryEvidence(taskId) {
 function validateTaskManualStatusUpdate(current, updates) {
     if (updates?.status !== "done")
         return null;
+    const terminalError = require("./collaboration-task-service").validateTaskTerminalTransition(current, {
+        ...updates,
+        terminal_actor: updates.terminal_actor || "user",
+    });
+    if (terminalError)
+        return terminalError;
     if (current?.workflow_type !== "daily_dev")
         return null;
     const summary = updates.delivery_summary || current.delivery_summary || null;
@@ -1410,6 +1426,9 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
         updates.auto_gap_continue_count = Number(current.auto_gap_continue_count || 0) + 1;
         updates.last_auto_gap_continue_at = followup.time;
     }
+    // 任何形式的继续/返工都开启新的验收周期：清零本周期轮次，保留累计值。
+    // 不清零的话，监工的 gate_gap_rework 重发会让新一轮从上限起步，TestAgent 一失败即 blocked。
+    Object.assign(updates, (0, rework_policy_1.buildReviewCycleResetUpdate)(current, `继续任务：${source}`));
     // 用户在计划书给出后继续追加要求：把追加内容并入计划书（新增步骤 + 修订历史）。
     // 等待确认阶段的计划要求重新确认；已执行中的任务并入后继续，不打断执行。
     const awaitingPlanConfirmation = current.intake_state === "awaiting_confirmation";

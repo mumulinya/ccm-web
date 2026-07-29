@@ -174,7 +174,7 @@
         <strong>下一步可派发</strong>
         <div v-for="item in nextClaimableWorkItems" :key="item.id || item.target || item.subject">
           <span>
-            <b>{{ item.target || item.owner || '执行成员' }}：{{ item.subject || item.title || '继续处理已解锁工作项' }}</b>
+            <b>{{ item.target || item.owner || '执行成员' }}：{{ item.subject || item.title || '继续处理已解锁执行步骤' }}</b>
             <small v-if="workItemActiveForm(item)" class="work-item-active-form">当前：{{ workItemActiveForm(item) }}</small>
           </span>
           <button type="button" :disabled="busy" @click="emit('action', { kind: 'continue_work_item', label: '继续派发', tone: 'primary', work_item_id: item.id, target: item.target || item.owner || '', reason: item.subject || item.title || '' })">继续派发</button>
@@ -182,7 +182,7 @@
       </div>
       <div v-if="workItemVerificationReminder" class="work-item-verification-reminder">
         <strong>{{ workItemVerificationReminder.title || '执行队列还缺验收' }}</strong>
-        <small>{{ workItemVerificationReminder.headline || '工作项都完成了，但还没有看到专门的验证/验收工作项或验证证据。' }}</small>
+        <small>{{ workItemVerificationReminder.headline || '执行步骤都完成了，但还没有看到专门的验收步骤或验证证据。' }}</small>
         <small v-if="workItemVerificationReminder.next_action || workItemVerificationReminder.nextAction" class="work-item-verification-next">下一步：{{ workItemVerificationReminder.next_action || workItemVerificationReminder.nextAction }}</small>
       </div>
     </div>
@@ -374,6 +374,21 @@
         <small>{{ planExecutionFollowup.headline || '我会按这份计划推进执行，并在最终总结前逐项核对验收标准。' }}</small>
         <small v-if="planExecutionFollowup.next_action || planExecutionFollowup.nextAction" class="plan-mode-followup-next">下一步：{{ planExecutionFollowup.next_action || planExecutionFollowup.nextAction }}</small>
       </div>
+      <div v-if="planMode.architecture_plan?.goal" class="plan-architecture">
+        <strong>实施方案</strong>
+        <p>{{ planMode.architecture_plan.goal }}</p>
+        <details v-if="planMode.architecture_plan.boundaries?.length || planMode.architecture_plan.data_relationships?.length">
+          <summary>查看边界与数据关系</summary>
+          <div v-if="planMode.architecture_plan.boundaries?.length">
+            <b>执行边界</b>
+            <ul><li v-for="item in planMode.architecture_plan.boundaries" :key="item">{{ item }}</li></ul>
+          </div>
+          <div v-if="planMode.architecture_plan.data_relationships?.length">
+            <b>数据关系</b>
+            <ul><li v-for="item in planMode.architecture_plan.data_relationships" :key="item">{{ item }}</li></ul>
+          </div>
+        </details>
+      </div>
       <div v-if="planMode.clarification_questions?.length" class="plan-mode-questions">
         <strong>{{ planMode.needs_clarification ? '需要确认' : '已按反馈确认' }}</strong>
         <ul>
@@ -405,8 +420,11 @@
           <small v-if="planMode.impact_scope?.areas?.length">区域：{{ planMode.impact_scope.areas.join('、') }}</small>
         </div>
         <div v-if="planMode.read_only_exploration?.summary">
-          <strong>只读探索</strong>
+          <strong>源码依据</strong>
           <small>{{ planMode.read_only_exploration.summary }}</small>
+          <small v-if="planMode.read_only_exploration?.source_evidence?.length">
+            {{ planMode.read_only_exploration.source_evidence.map(item => `${item.project} ${item.selected_paths?.length || 0} 个文件`).join(' · ') }}
+          </small>
         </div>
       </div>
       <div v-if="planAcceptanceItems.length" class="plan-mode-list">
@@ -628,8 +646,8 @@
 
     <details v-if="runtimeKernel" class="task-card-section runtime-kernel" :class="{ active: runtimeKernel.ack_only?.active }">
       <summary class="runtime-kernel-summary">
-        <strong>技术详情</strong>
-        <span>可展开排查</span>
+        <strong>排障信息</strong>
+        <span>内部运行数据</span>
       </summary>
       <div class="runtime-grid">
         <div>
@@ -653,8 +671,8 @@
           <small>{{ postCompactDispatchStatusLabel(postCompactDispatchSummary.status) }} · 首次 {{ postCompactDispatchSummary.first_dispatch_count || 0 }}/{{ postCompactDispatchSummary.marker_count || 0 }}</small>
         </div>
         <div v-if="runtimeTooling">
-          <strong>MCP/Skill Gate</strong>
-          <small>{{ runtimeToolingLabel(runtimeTooling.status) }} · 快照 {{ runtimeTooling.snapshots?.length || 0 }} · Skill {{ runtimeTooling.invoked_skills?.length || 0 }}</small>
+          <strong>MCP 与 Skill</strong>
+          <small>{{ runtimeToolingLabel(runtimeTooling.status) }} · 快照 {{ runtimeTooling.snapshots?.length || 0 }} · 已调用 Skill {{ runtimeTooling.invoked_skills?.length || 0 }}</small>
         </div>
       </div>
       <div v-if="runtimeKernel.worker_context_packet_ids?.length || runtimeKernel.injection_ids?.length || postCompactDispatchSummary?.marker_ids?.length || runtimeTooling?.snapshots?.length || runtimeTooling?.invoked_skills?.length" class="runtime-tags">
@@ -779,7 +797,7 @@
 
     <div v-if="testAgentExecutionPlanSummary" class="task-card-section test-agent-plan-summary" :class="testAgentExecutionPlanSummary.status">
       <div class="section-head">
-        <label>{{ testAgentExecutionPlanSummary.title || 'TestAgent 复核计划' }}</label>
+        <label>{{ testAgentExecutionPlanSummary.title || 'TestAgent（独立验收）计划' }}</label>
         <span>{{ testAgentExecutionPlanSummary.status_label || '已生成' }}</span>
       </div>
       <p v-if="testAgentExecutionPlanSummary.headline">{{ testAgentExecutionPlanSummary.headline }}</p>
@@ -802,7 +820,7 @@
       <ul v-if="completionReadinessRows.length">
         <li v-for="row in completionReadinessRows" :key="`${row.target || row.owner}-${row.subject}`">
           <strong>{{ row.target || row.owner || '执行成员' }}</strong>
-          <span>{{ row.subject || '未完成工作项' }}</span>
+          <span>{{ row.subject || '未完成执行步骤' }}</span>
           <em>{{ row.status_label || workItemStatusLabel(row.status) }}</em>
         </li>
       </ul>
@@ -889,13 +907,13 @@
     </div>
 
     <details v-if="card.technical" class="task-card-technical">
-      <summary>技术详情</summary>
+      <summary>排障信息</summary>
       <section v-for="section in technicalSections" :key="section.id" class="technical-section">
         <strong>{{ section.title }}</strong>
         <div v-for="item in section.items" :key="`${section.id}-${item.label}-${item.value}`">
           <span>{{ item.label }}</span>
           <code>{{ item.value }}</code>
-          <button v-if="item.label === '执行记录' && card.technical.trace_id" type="button" :disabled="busy" @click="emit('action', { kind: 'view_trace', label: '任务回放', task_id: card.task_id, trace_id: card.technical.trace_id })">回放</button>
+          <button v-if="item.label === '追踪编号' && card.technical.trace_id" type="button" :disabled="busy" @click="emit('action', { kind: 'view_trace', label: '任务回放', task_id: card.task_id, trace_id: card.technical.trace_id })">回放</button>
         </div>
       </section>
       <section v-if="archivedMainAgentDecision" class="technical-section archived-decision-summary">
@@ -907,7 +925,7 @@
       </section>
       <section class="technical-section">
         <strong>任务记录</strong>
-        <div v-if="card.task_id"><span>Task</span><code>{{ card.task_id }}</code></div>
+        <div v-if="card.task_id"><span>任务编号</span><code>{{ card.task_id }}</code></div>
         <div v-if="mainAgentDecision"><span>主Agent</span><code>{{ mainAgentDecision.mode }} / {{ mainAgentDecision.verify?.passed ? 'verified' : 'needs-check' }}</code></div>
         <div v-if="continuationStatus?.route_label"><span>处理方式</span><code>{{ continuationStatus.route_label }}</code></div>
         <div v-if="recoverySummary"><span>恢复</span><code>{{ recoverySummary.technical?.recovery_checks || 0 }} checks / {{ recoverySummary.technical?.lease_recovery_count || 0 }} resumes</code></div>

@@ -33,10 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = void 0;
 exports.normalizeLlmTokenUsage = normalizeLlmTokenUsage;
 exports.normalizeChatCompletionsUrl = normalizeChatCompletionsUrl;
 exports.normalizeAnthropicMessagesUrl = normalizeAnthropicMessagesUrl;
+exports.normalizeGeminiGenerateContentUrl = normalizeGeminiGenerateContentUrl;
 exports.shouldUseAnthropic = shouldUseAnthropic;
+exports.shouldUseGemini = shouldUseGemini;
 exports.extractJsonObject = extractJsonObject;
 exports.resolveLlmTimeoutMs = resolveLlmTimeoutMs;
 exports.resolveReasoningEffort = resolveReasoningEffort;
@@ -44,9 +47,13 @@ exports.buildOpenAiReasoningFields = buildOpenAiReasoningFields;
 exports.parseOpenAiStreamText = parseOpenAiStreamText;
 exports.buildAnthropicThinkingFields = buildAnthropicThinkingFields;
 exports.fetchWithNodeHttpFallback = fetchWithNodeHttpFallback;
+exports.applyAnthropicCacheReferenceEditing = applyAnthropicCacheReferenceEditing;
+exports.resolveLlmRetryOptions = resolveLlmRetryOptions;
 exports.callOpenAiCompatibleChat = callOpenAiCompatibleChat;
+exports.callGeminiCompatibleChat = callGeminiCompatibleChat;
 exports.callAnthropicCompatibleChat = callAnthropicCompatibleChat;
 exports.callOpenAiCompatibleJson = callOpenAiCompatibleJson;
+exports.callGeminiCompatibleJson = callGeminiCompatibleJson;
 exports.callAnthropicCompatibleJson = callAnthropicCompatibleJson;
 exports.runLlmTokenUsageSelfTest = runLlmTokenUsageSelfTest;
 exports.runLlmStreamingSelfTest = runLlmStreamingSelfTest;
@@ -57,25 +64,182 @@ const model_call_retry_1 = require("../../system/model-call-retry");
 const provider_native_compact_execution_receipt_1 = require("./provider-native-compact-execution-receipt");
 const group_memory_compaction_1 = require("./group-memory-compaction");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
+const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const provider_context_cache_adapters_1 = require("../../system/provider-context-cache-adapters");
+function providerContextCacheOptions(config, options, provider) {
+    const explicit = options.providerContextCache || options.provider_context_cache || null;
+    const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
+    let fallback = null;
+    if (tracking?.groupSessionId || tracking?.group_session_id) {
+        const groupId = String(tracking?.groupId || tracking?.group_id || "");
+        const sessionId = String(tracking?.groupSessionId || tracking?.group_session_id || "");
+        let boundaryGeneration = Math.max(0, Number(tracking?.boundaryGeneration || tracking?.boundary_generation || 0));
+        if (!boundaryGeneration && groupId && sessionId.startsWith("gcs_")) {
+            try {
+                const memory = require("./group-memory-storage").loadGroupMemory(groupId, sessionId);
+                boundaryGeneration = Math.max(0, Number(memory?.compaction?.boundaryGeneration || memory?.compaction?.boundary_generation || memory?.compactBoundary?.generation || 0));
+            }
+            catch { }
+        }
+        fallback = {
+            scope: "group",
+            scopeId: groupId,
+            sessionId,
+            boundaryGeneration,
+            source: String(tracking?.source || "group_main_model"),
+        };
+    }
+    if (!fallback && config.contextEngineSessionId) {
+        fallback = {
+            scope: String(config.contextEngineScope || "other"),
+            scopeId: String(config.contextEngineScopeId || config.contextEngineSessionId),
+            sessionId: String(config.contextEngineSessionId),
+            generation: Math.max(0, Number(config.contextEngineGeneration || 0)),
+            boundaryGeneration: Math.max(0, Number(config.contextEngineBoundaryGeneration || 0)),
+            source: String(config.contextEngineSource || "unified_model_consumer"),
+        };
+    }
+    const binding = explicit || fallback;
+    if (!binding?.sessionId)
+        return null;
+    const adapterCapability = (0, provider_context_cache_adapters_1.resolveProviderContextCacheAdapter)(config, (0, provider_context_cache_adapters_1.detectProviderCacheFamily)(config, provider));
+    return {
+        ...binding,
+        enabled: binding.enabled ?? (config.providerContextCacheMode !== "off" && config.provider_context_cache_mode !== "off"),
+        mode: binding.mode || config.providerContextCacheMode || config.provider_context_cache_mode || "auto",
+        provider,
+        model: String(config.model || ""),
+        apiUrl: String(config.apiUrl || ""),
+        format: String(config.format || "auto"),
+        providerNativeCacheFamily: String(config.providerNativeCacheFamily || "auto"),
+        inferenceBackendKind: String(config.inferenceBackendKind || "remote_api"),
+        contextWindowTokens: Math.max(0, Number(config.modelContextWindow || config.model_context_window || 0)),
+        maxOutputTokens: Math.max(0, Number(options.maxTokens || config.modelMaxOutputTokens || config.model_max_output_tokens || 0)),
+        reservedTokens: Math.max(0, Number(config.contextPlanReservedTokens || config.context_plan_reserved_tokens || 2_000)),
+        formalCompactionStatus: String(binding.formalCompactionStatus || binding.formal_compaction_status || "not_required_or_completed"),
+        adaptiveStablePrefix: binding.adaptiveStablePrefix ?? binding.adaptive_stable_prefix ?? config.contextAdaptiveStablePrefix !== false,
+        providerPromptCacheRetention: String(config.providerPromptCacheRetention || config.provider_prompt_cache_retention || "in_memory"),
+        inputCostPerMillionTokens: Math.max(0, Number(config.inputCostPerMillionTokens || config.input_cost_per_million_tokens || 0)),
+        cacheReadCostPerMillionTokens: Math.max(0, Number(config.cacheReadCostPerMillionTokens || config.cache_read_cost_per_million_tokens || 0)),
+        cacheCreationCostPerMillionTokens: Math.max(0, Number(config.cacheCreationCostPerMillionTokens || config.cache_creation_cost_per_million_tokens || 0)),
+        nativeApplyPlan: getApiMicrocompactNativeApplyPlan(options),
+        adapterCapability,
+    };
+}
+async function prepareContextCache(config, options, provider) {
+    const sourceMessages = options.system != null
+        && !(options.messages || []).some(message => String(message?.role || "") === "system")
+        ? [{ role: "system", content: options.system }, ...(options.messages || [])]
+        : options.messages || [];
+    const cacheOptions = providerContextCacheOptions(config, options, provider);
+    if (provider === "anthropic" && cacheOptions && !cacheOptions.nativeApplyPlan) {
+        const requested = String(cacheOptions.mode || "auto").toLowerCase();
+        const officialAnthropic = /(?:^|\.)anthropic\.com$/i.test((() => {
+            try {
+                return new URL(String(config.apiUrl || "")).hostname;
+            }
+            catch {
+                return "";
+            }
+        })());
+        const nativeAllowed = requested === "native"
+            || config.supportsApiContextManagement === true
+            || config.supports_api_context_management === true
+            || requested === "auto" && officialAnthropic;
+        if (nativeAllowed && requested !== "controlled" && requested !== "off") {
+            const activeTokens = sourceMessages.reduce((sum, message) => sum + Math.max(0, Math.ceil(JSON.stringify(message?.content ?? "").length / 4)), 0);
+            const maxInputTokens = Math.max(32_000, Number(config.modelContextWindow || config.model_context_window || 200_000));
+            const targetInputTokens = Math.max(20_000, Math.min(maxInputTokens - 3_000, Number(config.modelAutoCompactTokenLimit || config.model_auto_compact_token_limit || Math.floor(maxInputTokens * 0.8))));
+            const editPlan = (0, group_memory_compaction_1.buildGroupApiMicroCompactEditPlan)(sourceMessages, {
+                groupId: String(cacheOptions.scopeId || ""),
+                activeTokens,
+                maxInputTokens,
+                targetInputTokens,
+                canApplyNatively: true,
+                advisoryOnly: false,
+            });
+            const nativePlan = (0, group_memory_compaction_1.buildGroupApiMicrocompactNativeApplyPlan)(editPlan, {
+                groupId: String(cacheOptions.scopeId || ""),
+                groupSessionId: String(cacheOptions.sessionId || ""),
+                agentType: "anthropic-api",
+                transport: "anthropic_api",
+                provider: "anthropic",
+                supportsApiContextManagement: true,
+                nativeApiRequestLayer: true,
+                contextManagementBetaHeaderEnabled: true,
+            });
+            if (nativePlan.nativeApplyReady === true) {
+                options.apiMicrocompactNativeApplyPlan = nativePlan;
+                cacheOptions.nativeApplyPlan = nativePlan;
+            }
+        }
+    }
+    if (!cacheOptions)
+        return { messages: sourceMessages, plan: null, adapterPatch: null };
+    const prepared = await (0, provider_neutral_context_cache_1.prepareProviderNeutralContextCacheRequestSingleflight)(sourceMessages, cacheOptions);
+    const result = {
+        ...prepared,
+        adapterPatch: (0, provider_context_cache_adapters_1.buildProviderContextCacheAdapterRequestPatch)(config, prepared.plan, cacheOptions.adapterCapability),
+    };
+    if (result.plan)
+        Object.defineProperty(result.plan, "_runtimeProviderStartedAtMs", { value: Date.now(), enumerable: false, configurable: true });
+    return result;
+}
+function finishContextCache(options, plan, input) {
+    const receipt = (0, provider_neutral_context_cache_1.completeProviderNeutralContextCacheRequest)(plan, input);
+    if (receipt) {
+        try {
+            options.onProviderContextCache?.(receipt);
+        }
+        catch { }
+    }
+    return receipt;
+}
+function providerAdapterEvidence(cache) {
+    const fields = Object.keys(cache?.adapterPatch?.body || {});
+    return {
+        applied: cache?.plan?.providerNative === true,
+        adapter: String(cache?.plan?.adapterKind || ""),
+        requestPatchApplied: fields.length > 0,
+        requestFields: fields,
+        reason: fields.length > 0 ? "provider_request_fields_applied" : cache?.plan?.providerNative === true ? "provider_implicit_cache" : "stable_prefix_or_ccm_projection",
+    };
+}
 function finiteTokenCount(value) {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
 }
 function normalizeLlmTokenUsage(value, provider = "openai") {
     const usage = value && typeof value === "object" ? value : {};
-    const outputTokens = Math.max(finiteTokenCount(usage.output_tokens), finiteTokenCount(usage.outputTokens), finiteTokenCount(usage.completion_tokens), finiteTokenCount(usage.completionTokens));
-    const directInputTokens = Math.max(finiteTokenCount(usage.input_tokens), finiteTokenCount(usage.inputTokens), finiteTokenCount(usage.prompt_tokens), finiteTokenCount(usage.promptTokens));
+    const outputTokens = Math.max(finiteTokenCount(usage.output_tokens), finiteTokenCount(usage.outputTokens), finiteTokenCount(usage.completion_tokens), finiteTokenCount(usage.completionTokens), finiteTokenCount(usage.candidatesTokenCount), finiteTokenCount(usage.candidates_token_count));
+    const reportedInputTokens = Math.max(finiteTokenCount(usage.input_tokens), finiteTokenCount(usage.inputTokens), finiteTokenCount(usage.prompt_tokens), finiteTokenCount(usage.promptTokens), finiteTokenCount(usage.promptTokenCount), finiteTokenCount(usage.prompt_token_count));
     const cacheCreationTokens = provider === "anthropic"
         ? Math.max(finiteTokenCount(usage.cache_creation_input_tokens), finiteTokenCount(usage.cacheCreationInputTokens))
         : 0;
-    const cacheReadTokens = provider === "anthropic"
-        ? Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens))
+    const cacheReadTokens = Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens), finiteTokenCount(usage.prompt_tokens_details?.cached_tokens), finiteTokenCount(usage.promptTokensDetails?.cachedTokens), finiteTokenCount(usage.input_tokens_details?.cached_tokens), finiteTokenCount(usage.inputTokensDetails?.cachedTokens), finiteTokenCount(usage.cachedContentTokenCount), finiteTokenCount(usage.cached_content_token_count), finiteTokenCount(usage.total_cached_tokens));
+    const directInputTokens = provider === "anthropic"
+        ? reportedInputTokens
+        : Math.max(0, reportedInputTokens - cacheReadTokens);
+    const cacheDeletedInputTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_deleted_input_tokens), finiteTokenCount(usage.cacheDeletedInputTokens))
+        : 0;
+    const cacheCreation5mInputTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_creation?.ephemeral_5m_input_tokens), finiteTokenCount(usage.cacheCreation?.ephemeral5mInputTokens))
+        : 0;
+    const cacheCreation1hInputTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_creation?.ephemeral_1h_input_tokens), finiteTokenCount(usage.cacheCreation?.ephemeral1hInputTokens))
         : 0;
     // Anthropic reports uncached input and cache buckets separately. Keep
     // inputTokens as the direct-input component so the shared CC-style
     // measurement can add each bucket exactly once.
     const inputTokens = directInputTokens;
     const reported = inputTokens > 0 || cacheCreationTokens > 0 || cacheReadTokens > 0 || outputTokens > 0;
+    const costUsd = Math.max(0, Number(usage.cost_usd
+        ?? usage.costUsd
+        ?? usage.estimated_cost_usd
+        ?? usage.estimatedCostUsd
+        ?? usage.cost?.usd
+        ?? 0) || 0);
     return {
         inputTokens,
         outputTokens,
@@ -84,6 +248,10 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
         directInputTokens,
         cacheCreationInputTokens: cacheCreationTokens,
         cacheReadInputTokens: cacheReadTokens,
+        cacheDeletedInputTokens,
+        cacheCreation5mInputTokens,
+        cacheCreation1hInputTokens,
+        costUsd,
     };
 }
 function reportTokenUsage(options, usage) {
@@ -116,12 +284,35 @@ function normalizeAnthropicMessagesUrl(apiUrl) {
         return base;
     return `${base}/v1/messages`;
 }
+function normalizeGeminiGenerateContentUrl(apiUrl, model, stream = false) {
+    const base = String(apiUrl || "").trim().replace(/\/+$/, "");
+    if (!base)
+        return "";
+    const method = stream ? "streamGenerateContent" : "generateContent";
+    if (/:(?:generateContent|streamGenerateContent)(?:\?|$)/i.test(base)) {
+        return base.replace(/:(?:generateContent|streamGenerateContent)/i, `:${method}`);
+    }
+    const cleanModel = String(model || "").trim().replace(/^models\//i, "");
+    if (!cleanModel)
+        return "";
+    if (/\/models\/[^/]+$/i.test(base))
+        return `${base}:${method}`;
+    if (/\/v1(?:beta)?$/i.test(base))
+        return `${base}/models/${encodeURIComponent(cleanModel)}:${method}`;
+    return `${base}/v1beta/models/${encodeURIComponent(cleanModel)}:${method}`;
+}
 function shouldUseAnthropic(config) {
     const format = String(config.format || "auto");
     const apiUrl = String(config.apiUrl || "").toLowerCase();
     return format === "anthropic-compatible"
         || format === "auto" && apiUrl.includes("anthropic")
         || format === "openai-compatible" && /\/anthropic(?:\/|$)/i.test(apiUrl);
+}
+function shouldUseGemini(config) {
+    const format = String(config.format || "auto").toLowerCase();
+    const apiUrl = String(config.apiUrl || "").toLowerCase();
+    return format === "gemini-compatible"
+        || format === "auto" && /generativelanguage\.googleapis\.com|:generatecontent|:streamgeneratecontent/.test(apiUrl);
 }
 function extractJsonObject(text) {
     const raw = String(text || "").trim();
@@ -453,6 +644,84 @@ function applyApiMicrocompactNativeRequestPatch(bodyObj, headers, options) {
     const nextHeaders = appendCsvHeader({ ...headers }, "anthropic-beta", betaHeaders);
     return { applied: true, plan, requestPatch, verification, body: nextBody, headers: nextHeaders };
 }
+function anthropicBlockText(block) {
+    if (typeof block === "string")
+        return block;
+    const value = block?.content ?? block?.text ?? block?.output ?? block?.result ?? "";
+    if (typeof value === "string")
+        return value;
+    try {
+        return JSON.stringify(value);
+    }
+    catch {
+        return "";
+    }
+}
+function insertAfterLeadingToolResults(blocks, value) {
+    let index = 0;
+    while (index < blocks.length && ["tool_result", "web_search_tool_result"].includes(String(blocks[index]?.type || "")))
+        index += 1;
+    return [...blocks.slice(0, index), value, ...blocks.slice(index)];
+}
+function applyAnthropicCacheReferenceEditing(bodyInput, config = {}) {
+    if (config.anthropicCacheReferenceEnabled !== true && config.anthropic_cache_reference_enabled !== true) {
+        return { body: bodyInput, applied: false, cacheReferenceCount: 0, cacheEditCount: 0, reason: "disabled" };
+    }
+    const messages = (Array.isArray(bodyInput?.messages) ? bodyInput.messages : []).map((message) => ({
+        ...message,
+        content: Array.isArray(message?.content)
+            ? message.content.map((block) => block && typeof block === "object" ? { ...block } : block)
+            : [{ type: "text", text: String(message?.content || "") }],
+    }));
+    const lastUserIndex = (() => {
+        for (let index = messages.length - 1; index >= 0; index -= 1)
+            if (messages[index]?.role === "user")
+                return index;
+        return -1;
+    })();
+    if (lastUserIndex < 0)
+        return { body: bodyInput, applied: false, cacheReferenceCount: 0, cacheEditCount: 0, reason: "user_message_missing" };
+    const deletions = new Set();
+    let cacheReferenceCount = 0;
+    for (let index = 0; index < lastUserIndex; index += 1) {
+        const message = messages[index];
+        if (message?.role !== "user")
+            continue;
+        message.content = message.content.map((block) => {
+            if (!block || !["tool_result", "web_search_tool_result"].includes(String(block.type || "")))
+                return block;
+            const reference = String(block.cache_reference || block.tool_use_id || block.toolUseId || "").trim();
+            if (!reference)
+                return block;
+            cacheReferenceCount += 1;
+            if (/Old tool result content cleared|Large old tool result replaced|旧工具结果.*清理/i.test(anthropicBlockText(block)))
+                deletions.add(reference);
+            return { ...block, cache_reference: reference };
+        });
+    }
+    const markerMessage = messages[lastUserIndex];
+    if (markerMessage.content.length === 0)
+        markerMessage.content.push({ type: "text", text: "" });
+    const markerIndex = markerMessage.content.length - 1;
+    const markerBlock = markerMessage.content[markerIndex];
+    if (markerBlock && typeof markerBlock === "object" && markerBlock.type !== "cache_edits") {
+        markerMessage.content[markerIndex] = { ...markerBlock, cache_control: markerBlock.cache_control || { type: "ephemeral" } };
+    }
+    if (deletions.size > 0) {
+        markerMessage.content = insertAfterLeadingToolResults(markerMessage.content, {
+            type: "cache_edits",
+            edits: [...deletions].map(cacheReference => ({ type: "delete", cache_reference: cacheReference })),
+        });
+    }
+    const applied = cacheReferenceCount > 0 || deletions.size > 0;
+    return {
+        body: applied ? { ...bodyInput, messages } : bodyInput,
+        applied,
+        cacheReferenceCount,
+        cacheEditCount: deletions.size,
+        reason: applied ? "verified_block_placement" : "no_eligible_tool_results_before_cache_boundary",
+    };
+}
 function responseHeader(response, name) {
     try {
         return String(response?.headers?.get?.(name) || "");
@@ -538,6 +807,7 @@ async function callOpenAiCompatibleChatOnce(config, options) {
     assertLlmConfig(config, endpoint);
     const streaming = options.stream === true || typeof options.onDelta === "function";
     let emitted = false;
+    const cache = await prepareContextCache(config, options, "openai");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     try {
@@ -553,7 +823,8 @@ async function callOpenAiCompatibleChatOnce(config, options) {
                 ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
                 ...(streaming ? { stream: true } : {}),
                 ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
-                messages: options.messages,
+                ...(cache.adapterPatch?.body || {}),
+                messages: cache.messages,
             }),
             signal: controller.signal,
         });
@@ -576,7 +847,9 @@ async function callOpenAiCompatibleChatOnce(config, options) {
             });
             if (!content.trim())
                 throw new Error("模型返回空响应");
-            reportTokenUsage(options, normalizeLlmTokenUsage(usage, "openai"));
+            const normalizedUsage = normalizeLlmTokenUsage(usage, "openai");
+            reportTokenUsage(options, normalizedUsage);
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
             return content;
         }
         const text = await response.text();
@@ -584,10 +857,109 @@ async function callOpenAiCompatibleChatOnce(config, options) {
         const content = String(data?.choices?.[0]?.message?.content || "");
         if (!content.trim())
             throw new Error("模型返回空响应");
-        reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "openai"));
+        const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "openai");
+        reportTokenUsage(options, normalizedUsage);
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
         return content;
     }
     catch (error) {
+        finishContextCache(options, cache.plan, { ok: false, error });
+        throw markStreamInterrupted(error, emitted);
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+}
+function geminiContentText(value) {
+    if (typeof value === "string")
+        return value;
+    if (Array.isArray(value)) {
+        return value.map(item => typeof item === "string" ? item : item?.text || JSON.stringify(item)).join("\n");
+    }
+    return value == null ? "" : JSON.stringify(value);
+}
+function geminiResponseText(data) {
+    return (data?.candidates || [])
+        .flatMap((candidate) => candidate?.content?.parts || [])
+        .map((part) => String(part?.text || ""))
+        .join("");
+}
+function geminiEndpointWithKey(endpoint, apiKey, stream) {
+    const url = new URL(endpoint);
+    if (!url.searchParams.has("key"))
+        url.searchParams.set("key", apiKey);
+    if (stream && !url.searchParams.has("alt"))
+        url.searchParams.set("alt", "sse");
+    return url.toString();
+}
+async function callGeminiCompatibleChatOnce(config, options) {
+    const streaming = options.stream === true || typeof options.onDelta === "function";
+    const endpoint = normalizeGeminiGenerateContentUrl(config.apiUrl, config.model, streaming);
+    assertLlmConfig(config, endpoint);
+    const cache = await prepareContextCache(config, options, "gemini");
+    const system = cache.messages.filter((message) => String(message?.role || "") === "system")
+        .map((message) => geminiContentText(message?.content)).filter(Boolean).join("\n\n");
+    const contents = cache.messages
+        .filter((message) => String(message?.role || "") !== "system")
+        .map((message) => ({
+        role: String(message?.role || "") === "assistant" ? "model" : "user",
+        parts: [{ text: geminiContentText(message?.content) }],
+    }))
+        .filter((message) => message.parts[0].text.trim());
+    const body = {
+        ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        contents,
+        generationConfig: {
+            temperature: options.temperature ?? resolveTemperature(config, 0.2),
+            ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
+        },
+    };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    let emitted = false;
+    try {
+        const response = await fetchWithNodeHttpFallback(geminiEndpointWithKey(endpoint, config.apiKey, streaming), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            const detail = await response.text();
+            throw new Error(formatHttpError(options.httpErrorPrefix || "Gemini HTTP", response.status, detail));
+        }
+        if (streaming) {
+            let content = "";
+            let usage = null;
+            await consumeSseJson(response, payload => {
+                for (const event of Array.isArray(payload) ? payload : [payload]) {
+                    const delta = emitStreamDelta(options, geminiResponseText(event));
+                    if (delta) {
+                        emitted = true;
+                        content += delta;
+                    }
+                    if (event?.usageMetadata || event?.usage)
+                        usage = event.usageMetadata || event.usage;
+                }
+            });
+            if (!content.trim())
+                throw new Error("模型返回空响应");
+            const normalizedUsage = normalizeLlmTokenUsage(usage, "gemini");
+            reportTokenUsage(options, normalizedUsage);
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
+            return content;
+        }
+        const data = JSON.parse(await response.text());
+        const content = geminiResponseText(data).trim();
+        if (!content)
+            throw new Error("模型返回空响应");
+        const normalizedUsage = normalizeLlmTokenUsage(data?.usageMetadata || data?.usage, "gemini");
+        reportTokenUsage(options, normalizedUsage);
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
+        return content;
+    }
+    catch (error) {
+        finishContextCache(options, cache.plan, { ok: false, error });
         throw markStreamInterrupted(error, emitted);
     }
     finally {
@@ -599,7 +971,8 @@ async function callAnthropicCompatibleChatOnce(config, options) {
     assertLlmConfig(config, endpoint);
     const streaming = options.stream === true || typeof options.onDelta === "function";
     let emitted = false;
-    const messages = options.messages || [];
+    const cache = await prepareContextCache(config, options, "anthropic");
+    const messages = cache.messages;
     const system = options.system ?? (messages.find((m) => m.role === "system")?.content || "");
     const userMessages = messages
         .filter((m) => m.role !== "system")
@@ -620,6 +993,8 @@ async function callAnthropicCompatibleChatOnce(config, options) {
             "x-api-key": config.apiKey,
             "anthropic-version": "2023-06-01",
         }, options);
+        const cacheReferenceEditing = applyAnthropicCacheReferenceEditing(patched.body, config);
+        patched.body = cacheReferenceEditing.body;
         recordAnthropicPromptCacheState(config, options, patched.body, patched.headers);
         const sentAt = new Date().toISOString();
         let response = null;
@@ -706,7 +1081,9 @@ async function callAnthropicCompatibleChatOnce(config, options) {
             });
             if (!content.trim())
                 throw new Error("模型返回空响应");
-            reportTokenUsage(options, normalizeLlmTokenUsage(usage, "anthropic"));
+            const normalizedUsage = normalizeLlmTokenUsage(usage, "anthropic");
+            reportTokenUsage(options, normalizedUsage);
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
             return content;
         }
         const text = await response.text();
@@ -751,23 +1128,36 @@ async function callAnthropicCompatibleChatOnce(config, options) {
             .trim();
         if (!content)
             throw new Error("模型返回空响应");
-        reportTokenUsage(options, normalizeLlmTokenUsage(data?.usage, "anthropic"));
+        const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "anthropic");
+        reportTokenUsage(options, normalizedUsage);
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
         return content;
     }
     catch (error) {
+        finishContextCache(options, cache.plan, { ok: false, error });
         throw markStreamInterrupted(error, emitted);
     }
     finally {
         clearTimeout(timeout);
     }
 }
-function retryOptions(config, options, fallbackScope) {
+exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = 360_000;
+function resolveLlmRetryOptions(config, options, fallbackScope) {
     const configuredTimeoutMs = resolveLlmTimeoutMs(config, options.defaultTimeoutMs || model_call_retry_1.UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS, options.timeoutMs);
+    const attempts = Math.max(1, Math.min(model_call_retry_1.UNIFIED_MODEL_MAX_ATTEMPTS, Math.floor(Number(options.retryAttempts) || model_call_retry_1.UNIFIED_MODEL_MAX_ATTEMPTS)));
+    const configuredTotalTimeoutMs = Number(options.retryTotalTimeoutMs);
+    const derivedTotalTimeoutMs = Math.max(model_call_retry_1.UNIFIED_MODEL_TOTAL_TIMEOUT_MS, Math.min(exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS, configuredTimeoutMs * Math.min(3, attempts)));
     return {
-        attempts: options.retryAttempts,
-        attemptTimeoutMs: Math.min(model_call_retry_1.UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS, configuredTimeoutMs),
+        attempts,
+        // timeoutMs is a per-provider-request contract. Do not silently replace a
+        // user configured 120 second request with the historical 30 second default.
+        attemptTimeoutMs: configuredTimeoutMs,
         baseDelayMs: options.retryBaseDelayMs,
-        totalTimeoutMs: options.retryTotalTimeoutMs || model_call_retry_1.UNIFIED_MODEL_TOTAL_TIMEOUT_MS,
+        // Long reasoning requests get up to six minutes overall, while transient
+        // fast failures can still consume all five attempts.
+        totalTimeoutMs: Number.isFinite(configuredTotalTimeoutMs) && configuredTotalTimeoutMs > 0
+            ? Math.max(configuredTimeoutMs, configuredTotalTimeoutMs)
+            : derivedTotalTimeoutMs,
         scope: options.retryScope || fallbackScope,
         onRetry: options.onRetry || ((notice) => {
             const message = String(notice.error?.message || notice.error || "temporary model error").slice(0, 240);
@@ -776,16 +1166,25 @@ function retryOptions(config, options, fallbackScope) {
     };
 }
 async function callOpenAiCompatibleChat(config, options) {
+    if (shouldUseGemini(config))
+        return callGeminiCompatibleChat(config, options);
     if (options.retry === false)
         return callOpenAiCompatibleChatOnce(config, options);
-    return (0, model_call_retry_1.runModelCallWithRetry)(context => callOpenAiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), retryOptions(config, options, "OpenAI-compatible model call"));
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callOpenAiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), resolveLlmRetryOptions(config, options, "OpenAI-compatible model call"));
+}
+async function callGeminiCompatibleChat(config, options) {
+    if (options.retry === false)
+        return callGeminiCompatibleChatOnce(config, options);
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callGeminiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), resolveLlmRetryOptions(config, options, "Gemini-compatible model call"));
 }
 async function callAnthropicCompatibleChat(config, options) {
     if (options.retry === false)
         return callAnthropicCompatibleChatOnce(config, options);
-    return (0, model_call_retry_1.runModelCallWithRetry)(context => callAnthropicCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), retryOptions(config, options, "Anthropic-compatible model call"));
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callAnthropicCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), resolveLlmRetryOptions(config, options, "Anthropic-compatible model call"));
 }
 async function callOpenAiCompatibleJson(config, options) {
+    if (shouldUseGemini(config))
+        return callGeminiCompatibleJson(config, options);
     if (options.retry === false) {
         const content = await callOpenAiCompatibleChatOnce(config, options);
         const parsed = extractJsonObject(content);
@@ -807,7 +1206,31 @@ async function callOpenAiCompatibleJson(config, options) {
         if (usage)
             reportTokenUsage(options, usage);
         return parsed;
-    }, retryOptions(config, options, "OpenAI-compatible JSON model call"));
+    }, resolveLlmRetryOptions(config, options, "OpenAI-compatible JSON model call"));
+}
+async function callGeminiCompatibleJson(config, options) {
+    if (options.retry === false) {
+        const content = await callGeminiCompatibleChatOnce(config, options);
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        return parsed;
+    }
+    return (0, model_call_retry_1.runModelCallWithRetry)(async (context) => {
+        let usage = null;
+        const content = await callGeminiCompatibleChatOnce(config, {
+            ...options,
+            retry: false,
+            timeoutMs: context.attemptTimeoutMs,
+            onUsage: value => { usage = value; },
+        });
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        if (usage)
+            reportTokenUsage(options, usage);
+        return parsed;
+    }, resolveLlmRetryOptions(config, options, "Gemini-compatible JSON model call"));
 }
 async function callAnthropicCompatibleJson(config, options) {
     if (options.retry === false) {
@@ -831,7 +1254,7 @@ async function callAnthropicCompatibleJson(config, options) {
         if (usage)
             reportTokenUsage(options, usage);
         return parsed;
-    }, retryOptions(config, options, "Anthropic-compatible JSON model call"));
+    }, resolveLlmRetryOptions(config, options, "Anthropic-compatible JSON model call"));
 }
 async function runLlmTokenUsageSelfTest() {
     const originalFetch = globalThis.fetch;

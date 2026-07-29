@@ -27,6 +27,7 @@ export interface NormalizedTestAgentProjectTarget {
     adversarialHttpChecks: HttpCheckSpec[];
     adversarialBrowserChecks: BrowserCheckSpec[];
     browserChecks: BrowserCheckSpec[];
+    browserScenarios?: string[];
     agentSummary: string;
     risks: string[];
 }

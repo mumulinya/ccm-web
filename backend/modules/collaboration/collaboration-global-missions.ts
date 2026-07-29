@@ -1098,9 +1098,17 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
   const groups = loadGroups();
   const configs = getConfigs();
   const requestedTargets = Array.isArray(payload.targets) ? payload.targets : [];
-  const fallbackTarget = groups[0]
-    ? [{ type: "group", group_id: groups[0].id, reason: "未明确目标，交由默认开发群聊主 Agent分析" }]
+  // 只有唯一群时才允许默认兜底；多群且未指定目标必须澄清，禁止静默猜测 groups[0]。
+  const fallbackTarget = groups.length === 1
+    ? [{ type: "group", group_id: groups[0].id, reason: "当前仅有一个协作群，默认交由其主 Agent分析" }]
     : [];
+  if (requestedTargets.length === 0 && fallbackTarget.length === 0) {
+    if (groups.length === 0) {
+      throw new Error("当前没有任何协作群，无法派发开发任务；请先创建群聊并配置主 Agent 后重试");
+    }
+    const groupNames = groups.slice(0, 8).map((item: any) => item.name || item.id).join("、");
+    throw new Error(`未指定目标群聊，且存在多个协作群（${groupNames}${groups.length > 8 ? " 等" : ""}）。请在 targets 中明确 group_id，或先向用户澄清应派发到哪个群`);
+  }
   const targets = (requestedTargets.length > 0 ? requestedTargets : fallbackTarget)
     .map((item: any) => ({
       ...item,

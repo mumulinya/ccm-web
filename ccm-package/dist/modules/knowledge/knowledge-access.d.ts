@@ -15,16 +15,33 @@ export type AgentKnowledgeSearchOptions = {
     filename?: string;
     maxChunkChars?: number;
     maxContextChars?: number;
+    maxContextTokens?: number;
 };
 export declare function isKnowledgeDocumentAllowed(metadata: KnowledgeDocumentMetadata | undefined, context: AgentKnowledgeAccessContext): boolean;
 export declare function searchAgentKnowledge(query: string, context: AgentKnowledgeAccessContext, options?: AgentKnowledgeSearchOptions): Promise<{
+    results: any[];
+    citations: any[];
+    context: string;
+    embeddingMode: string;
+    embeddingError: string;
+    fallback: boolean;
+    fallbackReason?: undefined;
+    indexGeneration?: undefined;
+    staleServed?: undefined;
+    scopeChecksum?: undefined;
+    tokenBudget?: undefined;
+} | {
     results: {
         citation: string;
-        filename: string;
-        heading: string;
+        filename: any;
+        heading: any;
         text: string;
         score: number;
-        scope: import("./knowledge-files").KnowledgeScope;
+        lexicalScore: number;
+        semanticScore: number;
+        retrievalMode: any;
+        tokenCount: number;
+        scope: any;
         visibility: "shared" | "restricted";
         source: Record<string, any>;
     }[];
@@ -33,4 +50,12 @@ export declare function searchAgentKnowledge(query: string, context: AgentKnowle
     embeddingMode: string;
     embeddingError: string;
     fallback: boolean;
+    fallbackReason: string;
+    indexGeneration: string;
+    staleServed: boolean;
+    scopeChecksum: string;
+    tokenBudget: {
+        used: number;
+        max: number;
+    };
 }>;

@@ -20,7 +20,7 @@ import {
 import {
   compactText,
   ensureDir,
-  hasRequiredCheck,
+  requiredCheckEnabled,
   nowIso,
   resolveUrl,
   safeSegment,
@@ -41,6 +41,7 @@ import {
   writePlaywrightAccessibilitySnapshotArtifact,
 } from "./accessibility-snapshot-artifacts";
 import {
+  writePlaywrightEvidenceScreenshot,
   writePlaywrightFailureScreenshot,
 } from "./failure-screenshots";
 import {
@@ -267,6 +268,8 @@ const PLAYWRIGHT_LAUNCH_ATTEMPTS: PlaywrightLaunchAttempt[] = [
   { label: "chrome-channel", options: { channel: "chrome" } },
 ];
 
+const PLAYWRIGHT_BROWSER_INSTALL_HINT = "Install the bundled browser with `npx playwright install chromium` (Linux may also require `npx playwright install-deps chromium`), or install a supported Chrome/Edge channel.";
+
 export async function launchChromiumWithFallback(playwright: any, baseOptions: Record<string, any> = {}) {
   const errors: string[] = [];
   for (const attempt of PLAYWRIGHT_LAUNCH_ATTEMPTS) {
@@ -316,17 +319,20 @@ export async function checkPlaywrightAvailability(loadPlaywright: PlaywrightLoad
         channel: launched.channel,
         launchAttempt: launched.launchAttempt,
         launchFallbackErrors: launched.errors,
+        ...(launched.errors.length ? { warning: `Bundled Chromium was unavailable; TestAgent used ${launched.channel}. ${PLAYWRIGHT_BROWSER_INSTALL_HINT}` } : {}),
       },
     };
   } catch (error: any) {
     return {
       available: false,
-      reason: `Playwright Chromium launch failed: ${error.message || String(error)}`,
+      reason: `Playwright Chromium launch failed: ${error.message || String(error)}. ${PLAYWRIGHT_BROWSER_INSTALL_HINT}`,
       diagnostics: {
         packageAvailable: true,
         launchChecked: true,
         browser: "chromium",
         launchAttempts: PLAYWRIGHT_LAUNCH_ATTEMPTS.map(attempt => attempt.label),
+        installCommand: "npx playwright install chromium",
+        linuxDependencyCommand: "npx playwright install-deps chromium",
       },
     };
   } finally {
@@ -2614,7 +2620,7 @@ export async function runBrowserCheck(browser: any, context: BrowserProviderCont
     && (workOrder.options.collectBrowserArtifacts || workOrder.options.collectBrowserVideo);
   const collectBrowserArtifacts = workOrder.options.collectBrowserArtifacts && !authenticationConfigured;
   const collectBrowserVideo = workOrder.options.collectBrowserVideo && !authenticationConfigured;
-  const normalScreenshotRequested = check.screenshot !== false || hasRequiredCheck(workOrder.requiredChecks, /screenshot/i);
+  const normalScreenshotRequested = check.screenshot !== false || requiredCheckEnabled(workOrder.requiredChecks, "screenshots");
   const evidenceDir = collectBrowserArtifacts ? ensureDir(path.join(workOrder.options.artifactDir, "browser-artifacts")) : "";
   const downloadDir = ensureDir(path.join(workOrder.options.artifactDir, "browser-artifacts", "downloads"));
   const artifactBase = browserArtifactBase(project.name, name, index);
@@ -2776,13 +2782,27 @@ export async function runBrowserCheck(browser: any, context: BrowserProviderCont
     for (let actionIndex = 0; actionIndex < actions.length; actionIndex += 1) {
       const action = actions[actionIndex];
       const verifyEffect = browserActionEffectRequired(action);
+      const evidenceStepName = `action-${actionIndex + 1}-${String(action.type || "unknown")}`;
+      if (normalScreenshotRequested && verifyEffect) {
+        const beforeRefs = await writePlaywrightEvidenceScreenshot({
+          page,
+          artifactDir: workOrder.options.artifactDir,
+          projectName: project.name,
+          checkName: name,
+          index,
+          stepName: evidenceStepName,
+          phase: "before",
+        });
+        screenshotRefs.push(...beforeRefs);
+        screenshots.push(...beforeRefs.map(item => item.path));
+      }
       const beforeObservation = verifyEffect
         ? await capturePlaywrightActionEffectObservation(page, { networkRequests, dialogs, popups, downloads }).catch(() => ({}))
         : {};
       const step = redactBrowserStepResult(await runAction(page, project, action, timeout), secretBindings);
       steps.push(step);
-      if (step.status === "failed") break;
-      if (verifyEffect) {
+      let effectFailed = false;
+      if (step.status !== "failed" && verifyEffect) {
         const verified = await verifyBrowserActionEffect({
           provider: "playwright",
           action,
@@ -2794,8 +2814,23 @@ export async function runBrowserCheck(browser: any, context: BrowserProviderCont
         actionEffects.push(verified.evidence);
         const effectStep = redactBrowserStepResult(verified.step, secretBindings);
         steps.push(effectStep);
-        if (effectStep.status === "failed") break;
+        effectFailed = effectStep.status === "failed";
       }
+      if (normalScreenshotRequested && verifyEffect) {
+        const afterRefs = await writePlaywrightEvidenceScreenshot({
+          page,
+          artifactDir: workOrder.options.artifactDir,
+          projectName: project.name,
+          checkName: name,
+          index,
+          stepName: evidenceStepName,
+          phase: "after",
+          kind: steps.slice(-1)[0]?.status === "failed" ? "failure" : "capture",
+        });
+        screenshotRefs.push(...afterRefs);
+        screenshots.push(...afterRefs.map(item => item.path));
+      }
+      if (step.status === "failed" || effectFailed) break;
     }
 
     if (!steps.some(step => step.status === "failed")) {
@@ -2833,15 +2868,26 @@ export async function runBrowserCheck(browser: any, context: BrowserProviderCont
     }
 
     if (normalScreenshotRequested) {
-      const screenshotDir = ensureDir(path.join(workOrder.options.artifactDir, "screenshots"));
-      const screenshotPath = path.join(screenshotDir, `${safeSegment(project.name)}-${safeSegment(name)}-${index + 1}.png`);
-      await page.screenshot({ path: screenshotPath, fullPage: true });
-      screenshots.push(screenshotPath);
-      screenshotRefs.push({
+      const finalRefs = await writePlaywrightEvidenceScreenshot({
+        page,
+        artifactDir: workOrder.options.artifactDir,
+        projectName: project.name,
+        checkName: name,
+        index,
         stepName: failedStep?.name || name,
-        path: screenshotPath,
+        phase: "final",
         kind: failedStep ? "failure" : "capture",
       });
+      if (!finalRefs.length) {
+        steps.push({ kind: "assertion", name: "assert:screenshot", status: "failed", error: "Playwright could not capture the required final screenshot." });
+      } else {
+        const finalPath = finalRefs[0].path;
+        screenshots.push(finalPath);
+        const assertionSteps = steps.filter(item => item.kind === "assertion");
+        screenshotRefs.push(...(assertionSteps.length
+          ? assertionSteps.map(item => ({ stepName: item.name, path: finalPath, kind: item.status === "failed" ? "failure" as const : "capture" as const }))
+          : finalRefs));
+      }
     }
 
     if (popupCapturePromises.length) await Promise.all(popupCapturePromises);
@@ -2912,7 +2958,7 @@ export async function runBrowserCheck(browser: any, context: BrowserProviderCont
   } catch (error: any) {
     const finalState = await capturePageFinalState(page, secretBindings);
     if (popupCapturePromises.length) await Promise.all(popupCapturePromises).catch(() => []);
-    if (!normalScreenshotRequested) {
+    if (!screenshots.length) {
       const failureShots = await writePlaywrightFailureScreenshot({
         page,
         artifactDir: context.workOrder.options.artifactDir,
@@ -3264,18 +3310,33 @@ async function finalizePlaywrightMultiSessionRuntime(input: {
     runtime.screenshotRefs = [...(runtime.screenshotRefs || []), ...failureShots];
   }
   if (normalScreenshotRequested) {
-    try {
-      const screenshotDir = ensureDir(path.join(workOrder.options.artifactDir, "screenshots"));
-      const screenshotPath = path.join(screenshotDir, `${safeSegment(project.name)}-${safeSegment(checkName)}-${index + 1}-${safeSegment(runtime.name)}.png`);
-      await runtime.page.screenshot({ path: screenshotPath, fullPage: true });
-      runtime.screenshots.push(screenshotPath);
-    } catch (error: any) {
+    const finalRefs = await writePlaywrightEvidenceScreenshot({
+      page: runtime.page,
+      artifactDir: workOrder.options.artifactDir,
+      projectName: project.name,
+      checkName: `${checkName}-${runtime.name}`,
+      index,
+      stepName: failedStep?.name || `${checkName}-${runtime.name}`,
+      phase: "final",
+      kind: failedStep ? "failure" : "capture",
+    });
+    if (!finalRefs.length) {
       steps.push(prefixBrowserSessionStep(runtime.name, {
         kind: "assertion",
         name: "assert:screenshot",
         status: "failed",
-        error: redactBrowserSensitiveText(error.message || String(error), runtime.secretBindings),
+        error: "Playwright could not capture the required final screenshot.",
       }));
+    } else {
+      const finalPath = finalRefs[0].path;
+      runtime.screenshots.push(finalPath);
+      const assertionSteps = steps.filter(item => item.kind === "assertion" && item.name.startsWith(`session:${runtime.name}:`));
+      runtime.screenshotRefs = [
+        ...(runtime.screenshotRefs || []),
+        ...(assertionSteps.length
+          ? assertionSteps.map(item => ({ stepName: item.name, path: finalPath, kind: item.status === "failed" ? "failure" as const : "capture" as const }))
+          : finalRefs),
+      ];
     }
   }
   if (runtime.popupCapturePromises.length) await Promise.all(runtime.popupCapturePromises).catch(() => []);
@@ -3384,7 +3445,7 @@ async function runMultiSessionBrowserCheck(browser: any, context: BrowserProvide
   const timeout = Number(check.timeoutMs || check.timeout_ms || context.workOrder.options.browserTimeoutMs);
   const viewport = browserCheckViewport(check);
   const contextOptions = browserCheckContextOptions(check);
-  const normalScreenshotRequested = check.screenshot !== false || hasRequiredCheck(context.workOrder.requiredChecks, /screenshot/i);
+  const normalScreenshotRequested = check.screenshot !== false || requiredCheckEnabled(context.workOrder.requiredChecks, "screenshots");
   const steps: BrowserStepResult[] = [];
   const runtimes: PlaywrightMultiSessionRuntime[] = [];
   const browserSessions: BrowserSessionResult[] = [];
@@ -3658,7 +3719,7 @@ export const PlaywrightBrowserProvider: BrowserProvider = {
     try {
       playwright = require("playwright");
     } catch (error: any) {
-      return [blockedBrowserResult("playwright", "Load Playwright", `Playwright is unavailable: ${error.message || String(error)}`)];
+      return [blockedBrowserResult("playwright", "Load Playwright", `Playwright is unavailable: ${error.message || String(error)}. Install the package and then run: npx playwright install chromium`)];
     }
 
     const results: BrowserCheckResult[] = [];
@@ -3682,7 +3743,7 @@ export const PlaywrightBrowserProvider: BrowserProvider = {
         },
       };
     } catch (error: any) {
-      return [blockedBrowserResult("playwright", "Launch browser", error.message || String(error))];
+      return [blockedBrowserResult("playwright", "Launch browser", `${error.message || String(error)}. ${PLAYWRIGHT_BROWSER_INSTALL_HINT}`)];
     }
     try {
       for (const project of context.workOrder.projects) {

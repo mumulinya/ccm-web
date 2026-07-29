@@ -60,6 +60,7 @@ const handlePaste = (task, event) => {
         <TaskAttachmentPicker
           :files="task.files || []"
           :existing="[]"
+          :text="[task.businessGoal, task.scope, task.documents, task.acceptance, task.constraints].filter(Boolean).join('\n')"
           @update:files="updateField('files', $event)"
         />
       </div>

@@ -1,5 +1,6 @@
 // collaboration-runtime-coordinator-review.ts — merged from 2 part files (behavior-freeze merge).
 
+import { buildReworkExhaustedUpdate } from "./rework-policy";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -13,10 +14,16 @@ import {
   collectRequestBuffer,
   getMultipartBoundary,
   parseMultipart,
+  getWorkDirForProject,
   UPLOAD_DIR,
   SHARED_DIR,
   CCM_DIR,
 } from "../../core/utils";
+import {
+  canonicalWorkspaceMutationLane,
+  getUnifiedTaskSchedulerStatus,
+  withUnifiedWorkspaceMutationLane,
+} from "../../system/unified-task-scheduler";
 import {
   ingestRequirementSources,
   requirementToIntakeDraft,
@@ -65,6 +72,7 @@ import {
 import {
   buildProjectCodeReadOnlySnapshot as buildProjectCodeReadOnlySnapshotBase,
   buildGroupProjectAnalysisContext as buildGroupProjectAnalysisContextBase,
+  buildModelDrivenGroupPlanningSourceContext as buildGroupMainPlanningSourceContext,
 } from "./project-analysis";
 import {
   appendWorkerLedger,
@@ -539,8 +547,10 @@ import {
   applyTestAgentRecheckBudget,
   buildCoordinatorReworkFollowUp,
   filterCoordinatorLlmFollowUpsAgainstHardRoutes,
+  getTestAgentRecheckSubjectKey,
   scheduleTestAgentRecheckAfterFollowUps,
 } from "./collaboration-runtime-test-agent-handoff";
+import { isTestAgentEnabled } from "../system/test-agent-settings";
 import {
   CollabCtx,
   buildAgentToolContext,
@@ -593,15 +603,100 @@ export async function runCoordinatorReviewLoop(input: {
   const maxReviewRounds = COORDINATOR_REVIEW_MAX_ROUNDS;
   if (allOutputs.length === 0) return null;
 
+  if (!isTestAgentEnabled()) {
+    if (input.taskId) {
+      updateTask(input.taskId, {
+        test_agent_enabled: false,
+        acceptance_mode: "main_agent_self_verification",
+        acceptance_state: "main_agent_self_verifying",
+        status_detail: "TestAgent 已关闭，群聊主 Agent 正在执行一次自验",
+      });
+      appendTaskTimelineEvent(input.taskId, {
+        type: "group_main_self_verification_started",
+        title: "群聊主 Agent 开始自验",
+        detail: "TestAgent 已关闭，本轮不产生独立验收结论",
+        status: "active",
+        phase: "reviewing",
+        agent: coordinator.project,
+      });
+    }
+    let review: any = await runLlmCoordinatorReview(
+      input.group,
+      input.userMessage,
+      input.coordinatorOutput,
+      allOutputs,
+      { allowFollowUps: false, round: 1, maxRounds: 1, taskId: input.taskId || "", executionId: input.taskId || "", groupSessionId: input.groupSessionId || "" },
+    );
+    if (!review) review = buildCodedCoordinatorReview(input.group, allOutputs, { allowFollowUps: false, round: 1, maxRounds: 1 });
+    review = {
+      ...(review || {}),
+      mode: "main_agent_self_verification",
+      followUps: [],
+      follow_ups: [],
+      status: String(review?.status || "") === "complete" ? "complete" : "needs_user",
+    };
+    const content = [
+      "主 Agent 自验结果（TestAgent 已关闭）：",
+      String(review?.content || review?.summary || "已核对子 Agent 结果和现有验证证据。"),
+      "本结论不是独立 TestAgent 验收。",
+    ].join("\n\n");
+    review.content = content;
+    await appendCoordinatorMessage(input.groupId, coordinator.project, content, input.streamRes, "selfverify", {
+      runtime: "main-agent-self-verification",
+      workflow: buildWorkflowMeta(review.status === "complete" ? "complete" : "needs_user", "主 Agent 单轮自验"),
+    });
+    if (input.taskId) {
+      updateTask(input.taskId, {
+        main_agent_self_verification: review,
+        acceptance_state: review.status === "complete" ? "main_agent_self_verified" : "main_agent_self_verification_failed",
+      });
+      appendTaskTimelineEvent(input.taskId, {
+        type: "group_main_self_verification_finished",
+        title: review.status === "complete" ? "群聊主 Agent 自验通过" : "群聊主 Agent 自验未通过",
+        detail: String(review?.summary || review?.content || ""),
+        status: review.status === "complete" ? "ok" : "warn",
+        phase: "reviewing",
+        agent: coordinator.project,
+        data: { review },
+      });
+    }
+    updateGroupMemory(input.groupId, {
+      currentPhase: review.status === "complete" ? "complete" : "needs_user",
+      decision: review.status === "complete" ? "主 Agent 单轮自验通过" : "主 Agent 单轮自验需要用户处理",
+      reason: compactMemoryText(review.content, 300),
+      nextAction: review.status === "complete" ? "进入最终交付" : "等待用户确认或补充证据",
+    });
+    input.crossOutputs.splice(0, input.crossOutputs.length, ...allOutputs);
+    return review;
+  }
+
+  if (input.taskId) updateTask(input.taskId, { test_agent_enabled: true, acceptance_mode: "test_agent" });
+
   let lastReview: any = null;
 
   for (let round = 1; round <= maxReviewRounds; round++) {
+    // 用户取消后不再烧验收轮次：不再调用 LLM 复盘、不再派发返工。终态由取消路由负责写入。
+    if (input.taskId && isTaskCancellationRequested(input.taskId)) {
+      addTaskLog(input.taskId, "warning", `任务已被取消，主 Agent 验收循环在第 ${round} 轮前停止`);
+      appendTaskTimelineEvent(input.taskId, {
+        type: "review_loop_cancelled",
+        title: "取消后停止验收循环",
+        detail: `用户已取消任务，第 ${round}/${maxReviewRounds} 轮验收不再执行`,
+        status: "warn",
+        phase: "reviewing",
+        agent: coordinator.project,
+      });
+      return lastReview;
+    }
     const allowFollowUps = round < maxReviewRounds;
-    const scheduledBudget = applyTestAgentRecheckBudget(
-      pendingTestAgentRechecks.splice(0, pendingTestAgentRechecks.length),
-      testAgentRecheckCountsBySubject,
-    );
+    const pendingRechecksForRound = pendingTestAgentRechecks.splice(0, pendingTestAgentRechecks.length);
+    // 末轮不再派发任何 follow-up，因此这里不能消耗复验预算（否则预算被永远用不上的复验吃掉），
+    // 未执行的复验必须原样保留下来，走下面的"未执行复验"路径显式暴露给用户，禁止静默丢弃。
+    const scheduledBudget = allowFollowUps
+      ? applyTestAgentRecheckBudget(pendingRechecksForRound, testAgentRecheckCountsBySubject)
+      : { kept: [] as any[], blocked: [] as any[], counts: testAgentRecheckCountsBySubject };
     const scheduledTestAgentRechecks = scheduledBudget.kept;
+    const skippedTestAgentRechecks = allowFollowUps ? [] : pendingRechecksForRound;
     if (scheduledBudget.blocked.length && input.streamRes) {
       writeSse(input.streamRes, {
         type: "status",
@@ -721,14 +816,45 @@ export async function runCoordinatorReviewLoop(input: {
         }
       }
     }
-    const gateReasons = [...gateFollowUps, ...failedIndependentReviewFollowUps, ...postReviewSpotCheckFollowUps, ...independentReviewGateFollowUps]
-      .map((item: any) => String(item.reason || "").trim())
-      .filter(Boolean);
+    // 末轮未执行的 TestAgent 复验必须转成显式门禁原因：这些复验是"返工已完成、等待独立复验"的凭据，
+    // 丢掉它们而不留痕会让主 Agent 看起来完成了验收，实际上最后一次改动从未被独立复核过。
+    const skippedRecheckReasons = skippedTestAgentRechecks.map((item: any) => {
+      const subject = getTestAgentRecheckSubjectKey(item) || "test-agent";
+      return `已达验收轮次上限（${maxReviewRounds} 轮），${subject} 返工后的 TestAgent 复验未执行，需人工确认后再验收`;
+    });
+    if (skippedRecheckReasons.length) {
+      (review as any).skipped_test_agent_rechecks = skippedTestAgentRechecks.map((item: any) => ({
+        subject: getTestAgentRecheckSubjectKey(item) || "test-agent",
+        reason: item?.reason || "",
+        rework_kind: item?.rework_kind || "",
+      }));
+    }
+    const gateReasons = [
+      ...[...gateFollowUps, ...failedIndependentReviewFollowUps, ...postReviewSpotCheckFollowUps, ...independentReviewGateFollowUps]
+        .map((item: any) => String(item.reason || "").trim()),
+      ...skippedRecheckReasons,
+      ...(scheduledBudget.blocked || []).map((item: any) => String(item?.reason || "").trim()),
+    ].filter(Boolean);
     if (blockedVerifierFollowUps.length && dispatchableReworkFollowUps.length === 0) {
       (review as any).status = "needs_user";
     }
     if (!allowFollowUps && gateReasons.length) {
       (review as any).status = "needs_user";
+      // 与项目直派路径统一：返工轮次耗尽写入同一个结构化终态标记。
+      if (input.taskId) {
+        updateTask(input.taskId, buildReworkExhaustedUpdate(gateReasons.join("；"), { path: "group_review" }));
+      }
+    }
+    if (skippedRecheckReasons.length && input.taskId) {
+      appendTaskTimelineEvent(input.taskId, {
+        type: "test_agent_recheck_skipped",
+        title: "TestAgent 复验未执行",
+        detail: skippedRecheckReasons.join("；"),
+        status: "warn",
+        phase: "reviewing",
+        agent: coordinator.project,
+        data: { round, max_rounds: maxReviewRounds, skipped: (review as any).skipped_test_agent_rechecks },
+      });
     }
     let reviewContent = gateReasons.length
       ? `${review.content}\n\n系统验收门禁：${gateReasons.join("；")}${allowFollowUps ? "" : "\n已达到自动返工上限，需要用户确认是否继续派发或人工介入。"}`
@@ -911,6 +1037,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
     buildChildAgentWorktreeNotice,
     buildCoordinatorSharedFilesContext,
     buildGroupContextPacket,
+    buildGroupMainPlanningSourceContext,
     buildProjectVerificationHints,
     buildQueuedGroupTaskMessage,
     buildTaskProviderSwitchRequests,
@@ -1044,7 +1171,7 @@ export function finalizeTaskKernel(task: any, execution: any, deliverySummary: a
 }
 
 // 队列处理
-export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
+export async function processTargetQueue(targetKey: string, ctx: CollabCtx, testHooks: { acquireTaskLease?: typeof acquireTaskLease; executeTask?: typeof executeTask } = {}) {
   if (runningTasks.has(targetKey)) {
     console.log(`[任务队列] [${targetKey}] 正在执行任务，等待中...`);
     return;
@@ -1056,9 +1183,11 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
   runningTasks.set(targetKey, true);
   console.log(`[任务队列] [${targetKey}] 开始处理队列，剩余任务: ${queue.length}`);
 
+  try {
   while (queue.length > 0) {
     const taskId = queue.shift();
     if (!taskId) continue;
+    queue.forEach((queuedId, index) => updateTask(queuedId, { queue_position: index + 1, queue_state: "queued" }));
     const tasks = loadTasks();
     const task = tasks.find(t => t.id === taskId);
 
@@ -1072,7 +1201,40 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
     }
 
     const traceId = ensureTraceId(task.trace_id, "task");
-    const leaseResult = acquireTaskLease(taskId, traceId, 45_000);
+    let leaseResult: any;
+    try {
+      leaseResult = (testHooks.acquireTaskLease || acquireTaskLease)(taskId, traceId, 45_000);
+    } catch (error: any) {
+      const recoveryAttempts = Number(task.queue_runtime_recovery_attempts || 0) + 1;
+      const detail = `任务租约获取失败：${String(error?.message || error).slice(0, 300)}`;
+      if (recoveryAttempts >= 3) {
+        const blockedTask = updateTask(taskId, {
+          status: "blocked",
+          acceptance_state: "blocked",
+          auto_execute: false,
+          is_paused: true,
+          paused: true,
+          status_detail: `${detail}；已停止自动重试，请检查任务存储后继续`,
+          queue_runtime_recovery_attempts: recoveryAttempts,
+          queue_runtime_last_error_at: new Date().toISOString(),
+          collaboration_state: { ...(task.collaboration_state || {}), phase: "needs_user", needs_user: true, updated_at: new Date().toISOString() },
+        }) || task;
+        appendTaskTimelineEvent(taskId, { type: "queue_recovery_exhausted", title: "队列恢复已停止", detail: blockedTask.status_detail, status: "fail", phase: "needs_user", data: { target_key: targetKey, attempts: recoveryAttempts } });
+        addTaskLog(taskId, "error", blockedTask.status_detail);
+        await ctx.onTaskStatusChange?.(blockedTask, "blocked", blockedTask.status_detail);
+        continue;
+      }
+      updateTask(taskId, {
+        status: "pending",
+        status_detail: `${detail}；队列将在短暂等待后自动重试`,
+        queue_runtime_recovery_attempts: recoveryAttempts,
+        queue_runtime_last_error_at: new Date().toISOString(),
+      });
+      queue.unshift(taskId);
+      appendTaskTimelineEvent(taskId, { type: "queue_recovery_scheduled", title: "队列准备自动恢复", detail, status: "warn", phase: "queued", data: { target_key: targetKey, attempts: recoveryAttempts } });
+      addTaskLog(taskId, "warning", `${detail}；已保留队首位置`);
+      throw error;
+    }
     if (!leaseResult.acquired) {
       addTaskLog(taskId, "warning", `任务已有存活 Worker 租约，本实例跳过重复执行（owner=${leaseResult.lease?.owner_id || "unknown"}）`);
       appendTraceEvent(traceId, { type: "task.duplicate_execution_suppressed", status: "warning", task_id: taskId, group_id: task.group_id || "", message: "检测到有效执行租约，阻止重复执行" });
@@ -1090,7 +1252,7 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
       ensureTaskKernelExecution(task);
       transitionExecution(taskId, "spawning", "任务队列正在启动开发执行内核");
       const reasoningLoop = buildTaskPreflightReasoning(task, "主 Agent 执行前重新核对目标、当前状态和验收条件", Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery);
-      const startedTask = updateTask(taskId, { status: "in_progress", trace_id: traceId, started_at: new Date().toISOString(), reasoning_loop: reasoningLoop, execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count } }) || task;
+      const startedTask = updateTask(taskId, { status: "in_progress", trace_id: traceId, started_at: new Date().toISOString(), queue_position: 0, queue_state: "running", reasoning_loop: reasoningLoop, execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count } }) || task;
       appendTaskTimelineEvent(taskId, { type: "reasoning_preflight", title: "我已复核目标与验收", detail: `计划版本 v${reasoningLoop.plan_version} · 待证明 ${reasoningLoop.assertions.filter(item => item.status !== "passed").length} 项`, status: "ok", phase: "planning", data: { plan_version: reasoningLoop.plan_version, fact_hash: reasoningLoop.fact_snapshots[reasoningLoop.fact_snapshots.length - 1]?.hash || "", recovery: Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery } });
       updateGroupTaskInlineStatus(startedTask, "in_progress", "我已开始协调执行");
       addTaskLog(taskId, "info", `任务状态更新为: 进行中`);
@@ -1098,7 +1260,13 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
       await ctx.onTaskStatusChange?.(startedTask, "in_progress");
 
       addTaskLog(taskId, "info", `调用 Agent 执行任务...`);
-      const execution: any = await executeTask(startedTask, ctx);
+      const executeCurrentTask = () => (testHooks.executeTask || executeTask)(startedTask, ctx);
+      const execution: any = taskRequiresCodeChanges(startedTask)
+        ? await withUnifiedWorkspaceMutationLane(
+            canonicalWorkspaceMutationLane(getWorkDirForProject(startedTask.target_project), `workspace:project:${startedTask.target_project || "unknown"}`),
+            executeCurrentTask,
+          )
+        : await executeCurrentTask();
       const result = execution.result || execution.report || "";
       const latestWithFollowups = loadTasks().find((item: any) => item.id === taskId) || startedTask;
       const resumeAfterGoalRevisionInterruption = isTaskCancellationRequested(taskId)
@@ -1255,22 +1423,35 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
         continue;
       }
 
-      if (checkTaskFailure(result)) {
-        throw new Error(result.substring(0, 500));
-      }
-
       const isCompleted = execution.status === "done";
 
       if (isCompleted) {
         const deliverySummary = buildDeliverySummary(task, execution, "waiting");
         appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: deliverySummary.acceptance_gate_passed ? "验收通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
         if (!deliverySummary.acceptance_gate_passed) {
-          const detail = `验收检查未通过：${deliverySummary.acceptance_gate?.failed_count || 1} 项缺口，任务保持进行中`;
-          const waitingTask = updateTask(taskId, { status: "in_progress", result: result.substring(0, 500), final_report: execution.report || result, status_detail: detail, receipt: execution.receipt || null, review: execution.review || null, file_changes: execution.fileChanges || null, delivery_summary: deliverySummary, reasoning_loop: deliverySummary.reasoning_loop }) || task;
-          updateGroupTaskInlineStatus(waitingTask, "in_progress", detail);
-          finalizeTaskKernel(task, execution, deliverySummary, "reviewing", detail);
+          const detail = `验收检查未通过：${deliverySummary.acceptance_gate?.failed_count || 1} 项缺口；自动返工已收口，等待用户检查后继续`;
+          const blockedTask = updateTask(taskId, {
+            status: "blocked",
+            acceptance_state: "blocked",
+            auto_execute: false,
+            is_paused: true,
+            paused: true,
+            result: result.substring(0, 500),
+            final_report: execution.report || result,
+            status_detail: detail,
+            receipt: execution.receipt || null,
+            review: execution.review || null,
+            file_changes: execution.fileChanges || null,
+            delivery_summary: deliverySummary,
+            reasoning_loop: deliverySummary.reasoning_loop,
+            ...buildReworkExhaustedUpdate(detail, { path: "group_review" }),
+          }) || task;
+          updateGroupTaskInlineStatus(blockedTask, "failed", detail);
+          finalizeTaskKernel(task, execution, deliverySummary, "failed", detail);
           addTaskLog(taskId, "warning", detail);
-          await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
+          syncTaskBacklogStatus(blockedTask, "blocked", detail);
+          await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+          appendTaskGroupReport(blockedTask, "waiting", detail);
           continue;
         }
         const closedSessions = closeTaskAgentSessions({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
@@ -1278,11 +1459,28 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
         const finalizedDeliverySummary = buildDeliverySummary(task, finalizedExecution, "done");
         if (!finalizedDeliverySummary.acceptance_gate_passed) {
           const detail = `最终收尾门禁未通过：${finalizedDeliverySummary.acceptance_gate?.failed_checks?.map((item: any) => item.label).join("、") || "团队仍未完全收尾"}`;
-          const waitingTask = updateTask(taskId, { status: "in_progress", result: result.substring(0, 500), final_report: execution.report || result, status_detail: detail, receipt: execution.receipt || null, review: execution.review || null, file_changes: execution.fileChanges || null, delivery_summary: finalizedDeliverySummary, reasoning_loop: finalizedDeliverySummary.reasoning_loop }) || task;
-          updateGroupTaskInlineStatus(waitingTask, "in_progress", detail);
-          finalizeTaskKernel(task, finalizedExecution, finalizedDeliverySummary, "reviewing", detail);
+          const blockedTask = updateTask(taskId, {
+            status: "blocked",
+            acceptance_state: "blocked",
+            auto_execute: false,
+            is_paused: true,
+            paused: true,
+            result: result.substring(0, 500),
+            final_report: execution.report || result,
+            status_detail: detail,
+            receipt: execution.receipt || null,
+            review: execution.review || null,
+            file_changes: execution.fileChanges || null,
+            delivery_summary: finalizedDeliverySummary,
+            reasoning_loop: finalizedDeliverySummary.reasoning_loop,
+            ...buildReworkExhaustedUpdate(detail, { path: "group_review" }),
+          }) || task;
+          updateGroupTaskInlineStatus(blockedTask, "failed", detail);
+          finalizeTaskKernel(task, finalizedExecution, finalizedDeliverySummary, "failed", detail);
           addTaskLog(taskId, "warning", detail);
-          await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
+          syncTaskBacklogStatus(blockedTask, "blocked", detail);
+          await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+          appendTaskGroupReport(blockedTask, "waiting", detail);
           continue;
         }
         const completedTask = updateTask(taskId, {
@@ -1324,11 +1522,28 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
           const finalizedPromotedSummary = buildDeliverySummary(task, finalizedPromotedExecution, "done");
           if (!finalizedPromotedSummary.acceptance_gate_passed) {
             const detail = `最终收尾门禁未通过：${finalizedPromotedSummary.acceptance_gate?.failed_checks?.map((item: any) => item.label).join("、") || "团队仍未完全收尾"}`;
-            const waitingTask = updateTask(taskId, { status: "in_progress", result: result.substring(0, 500), final_report: execution.report || result, status_detail: detail, receipt: execution.receipt || null, review: execution.review || null, file_changes: execution.fileChanges || null, delivery_summary: finalizedPromotedSummary, reasoning_loop: finalizedPromotedSummary.reasoning_loop }) || task;
-            updateGroupTaskInlineStatus(waitingTask, "in_progress", detail);
-            finalizeTaskKernel(task, finalizedPromotedExecution, finalizedPromotedSummary, "reviewing", detail);
+            const blockedTask = updateTask(taskId, {
+              status: "blocked",
+              acceptance_state: "blocked",
+              auto_execute: false,
+              is_paused: true,
+              paused: true,
+              result: result.substring(0, 500),
+              final_report: execution.report || result,
+              status_detail: detail,
+              receipt: execution.receipt || null,
+              review: execution.review || null,
+              file_changes: execution.fileChanges || null,
+              delivery_summary: finalizedPromotedSummary,
+              reasoning_loop: finalizedPromotedSummary.reasoning_loop,
+              ...buildReworkExhaustedUpdate(detail, { path: "group_review" }),
+            }) || task;
+            updateGroupTaskInlineStatus(blockedTask, "failed", detail);
+            finalizeTaskKernel(task, finalizedPromotedExecution, finalizedPromotedSummary, "failed", detail);
             addTaskLog(taskId, "warning", detail);
-            await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
+            syncTaskBacklogStatus(blockedTask, "blocked", detail);
+            await ctx.onTaskStatusChange?.(blockedTask, "blocked", detail);
+            appendTaskGroupReport(blockedTask, "waiting", detail);
             continue;
           }
           const completedTask = updateTask(taskId, {
@@ -1357,7 +1572,11 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
         } else {
           const shouldRequeue = execution.requeue === true;
           const waitingTask = updateTask(taskId, {
-            status: shouldRequeue ? "pending" : "in_progress",
+            status: shouldRequeue ? "pending" : "blocked",
+            acceptance_state: shouldRequeue ? (task.acceptance_state || "pending") : "blocked",
+            auto_execute: shouldRequeue ? task.auto_execute !== false : false,
+            is_paused: shouldRequeue ? false : true,
+            paused: shouldRequeue ? false : true,
             result: result.substring(0, 500),
             final_report: execution.report || result,
             status_detail: execution.detail || "等待补充信息或返工",
@@ -1366,13 +1585,17 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
             file_changes: execution.fileChanges || null,
             delivery_summary: deliverySummary,
             reasoning_loop: deliverySummary.reasoning_loop,
-          }) || { ...task, status: "in_progress", result: result.substring(0, 500) };
-          updateGroupTaskInlineStatus(waitingTask, shouldRequeue ? "pending" : "in_progress", execution.detail || "等待补充信息或返工");
-          finalizeTaskKernel(task, execution, deliverySummary, "reviewing", execution.detail || "等待补充信息或返工");
+            collaboration_state: shouldRequeue
+              ? { ...(task.collaboration_state || {}), phase: "reworking", needs_user: false, updated_at: new Date().toISOString() }
+              : { ...(task.collaboration_state || {}), phase: "needs_user", needs_user: true, updated_at: new Date().toISOString() },
+          }) || { ...task, status: shouldRequeue ? "pending" : "blocked", result: result.substring(0, 500) };
+          updateGroupTaskInlineStatus(waitingTask, shouldRequeue ? "pending" : "failed", execution.detail || "等待补充信息或返工");
+          finalizeTaskKernel(task, execution, deliverySummary, shouldRequeue ? "reviewing" : "failed", execution.detail || "等待补充信息或返工");
           addTaskLog(taskId, "warning", `任务仍需继续：${execution.detail || "验收未完成"}`);
           syncTaskBacklogStatus(waitingTask, shouldRequeue ? "queued" : "blocked", execution.detail || result.substring(0, 500));
           await ctx.onTaskStatusChange?.(waitingTask, "waiting", result.substring(0, 500));
           appendTaskGroupReport(waitingTask, "waiting", execution.detail || result.substring(0, 500));
+          if (!shouldRequeue) appendTaskTimelineEvent(taskId, { type: "queue_task_blocked", title: "任务已暂停并释放队列", detail: execution.detail || "等待用户补充信息后继续", status: "warn", phase: "needs_user", data: { target_key: targetKey, queue_released: true } });
           if (shouldRequeue) enqueueFollowupAfterRound = true;
         }
       }
@@ -1453,9 +1676,10 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
 
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-
-  runningTasks.delete(targetKey);
-  console.log(`[任务队列] [${targetKey}] 队列处理完成`);
+  } finally {
+    runningTasks.delete(targetKey);
+    console.log(`[任务队列] [${targetKey}] 队列处理完成`);
+  }
 }
 
 export function enqueueTask(taskId: string, ctx: CollabCtx) {
@@ -1497,6 +1721,7 @@ export function getQueueStatus(taskSnapshot?: any[]) {
   }
 
   const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : loadTasks();
+  const unifiedScheduler = getUnifiedTaskSchedulerStatus();
   return {
     total_queued: totalQueued,
     running_targets: runningTasks.size,
@@ -1504,7 +1729,11 @@ export function getQueueStatus(taskSnapshot?: any[]) {
     pending_tasks: tasks.filter(t => t.status === "pending").length,
     in_progress_tasks: tasks.filter(t => t.status === "in_progress").length,
     failed_tasks: tasks.filter(t => t.status === "failed").length,
-    running_task_ids: Array.from(runningTaskIds)
+    running_task_ids: Array.from(runningTaskIds),
+    unified_scheduler: unifiedScheduler,
+    unified_queued: unifiedScheduler.queued,
+    unified_running_lanes: unifiedScheduler.running_lanes.length,
+    workspace_mutation_lanes: unifiedScheduler.workspace_lanes,
   };
 }
 

@@ -45,6 +45,10 @@ export declare function runRequirementEpicSelfTest(): {
         group_logs_cleared: number;
     };
     epic_acceptance_gate: {
+        missionEvidenceContractModulePasses: boolean;
+        reviewFreshnessModulePasses: boolean;
+        contractStrongChildPassesWithoutText: boolean;
+        contractOverridesMisleadingText: boolean;
         globalMissionWeakAcceptanceGateRejected: boolean;
         globalMissionWeakAcceptanceMarkedWeak: boolean;
         globalMissionWeakAcceptanceParentStaysInProgress: boolean;

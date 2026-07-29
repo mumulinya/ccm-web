@@ -25,6 +25,17 @@ CCM 的 MCP 与 Skill 配置按 Agent 作用域隔离，不以“已安装”代
 
 全局 Agent通过 `invoke_skill` 调用授权 Skill，通过 `invoke_mcp` 调用授权 MCP。Skill 本身只提供受控工作方法，由模型继续执行；MCP 可能包含外部副作用，因此全局入口统一经过写操作授权门禁。
 
+## 群聊与项目主 Agent
+
+- 群聊主 Agent使用当前群聊授权，项目主 Agent使用当前项目授权。
+- 两者均可通过`invoke_skill`读取授权Skill，并只开放只读MCP。
+- 最多两轮补充工具读取、每轮最多两个调用；重复调用、超8K Token结果和完整上下文超限均fail closed。
+- 项目计划、同任务计划修订和项目分析使用同一项目工具上下文。
+
+## 项目子 Agent继承
+
+子 Agent运行时快照分离用户配置授权与任务内部角色Skill。群聊任务合并“群聊+项目”，项目任务只读取项目；Runner从持久任务重新计算内部Skill并验证签名、精确会话、项目、群聊、generation和运行时。完整流程见[Agent MCP与Skill注册继承流程](../confirmed-business-processes/AGENT-MCP-SKILL-INHERITANCE.md)。
+
 ## 失败策略
 
 - 未授权的 MCP 或 Skill 直接拒绝。
@@ -39,6 +50,7 @@ CCM 的 MCP 与 Skill 配置按 Agent 作用域隔离，不以“已安装”代
 - 项目配置：`GET/POST /api/projects/tools`
 - 全局授权文件：`~/.cc-connect/global-agent-tool-authorization.json`
 - 授权变更审计：复用 `agent-runner/tool-authorization-changes.jsonl`
+- 统一授权清单：`GET /api/tools/authorization-inventory`
 
 原始 MCP、Skill 安装配置仍由工具中心管理；作用域授权文件只保存允许列表，不复制工具实现或密钥。
 

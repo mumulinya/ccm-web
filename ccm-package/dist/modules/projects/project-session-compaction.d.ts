@@ -6,6 +6,19 @@ export declare function getProjectSessionCompactionActivity(project: string, pro
     startedAt: string;
     updatedAt: string;
 };
+export declare function appendProjectSessionExecutionEvent(projectInput: string, projectSessionIdInput: string, event: any): {
+    id: string;
+    toolCallId: string;
+    hidden: true;
+    type: import("../../system/session-execution-ledger").SessionExecutionEventType;
+    toolName: string;
+    timestamp: string;
+    runId: string;
+    traceId: string;
+    anchorMessageId: string;
+    status: "error" | "ok" | "running";
+    payload: any;
+};
 export declare function recordProjectSessionProviderUsage(project: string, projectSessionId: string, input?: any): import("../../system/session-compaction-core").SessionProviderUsageBaseline;
 export declare function scheduleProjectSessionMemoryExtraction(project: string, projectSessionId: string, options?: {
     modelCall?: (request: any) => Promise<any>;
@@ -61,59 +74,12 @@ export declare function compactProjectSessionWithModel(project: string, projectS
     context_components?: any;
     provider?: string;
     model?: string;
+    modelVisiblePayload?: any;
 }): Promise<any>;
 export declare function buildProjectSessionPostCompactContext(project: string, projectSessionId: string, targetAgentType?: string, options?: {
     currentRequest?: any;
 }): string;
 export declare function buildProjectSessionModelContextProjection(project: string, projectSessionId: string, options?: {
     currentRequest?: any;
-}): {
-    schema: string;
-    project: string;
-    projectSessionId: string;
-    mode: string;
-    canonicalSummary: boolean;
-    summary: any;
-    summarySource: string;
-    summaryChecksum: string;
-    boundaryGeneration: number;
-    lastCompactedIndex: number;
-    currentRequestDeduplicated: boolean;
-    historyMessageCount: any;
-    visibleMessages: {
-        id: any;
-        role: any;
-        content: string;
-    }[];
-    archiveMessages: {
-        id: any;
-        role: any;
-        content: string;
-    }[];
-    visibleMessageTokens: number;
-    recentWindow: {
-        schema: string;
-        strategy: string;
-        startIndex: number;
-        floorIndex: number;
-        preservedMessageCount: number;
-        preservedTextMessageCount: number;
-        preservedTokenCount: number;
-        minTokens: number;
-        minTextMessages: number;
-        maxTokens: number;
-        lastSummarizedMessageId: string;
-        lastSummarizedMessageIndex: number;
-        cursorValid: boolean;
-        tokenSelectedStartIndex: number;
-        expandedForConversationTurn: boolean;
-        maxExceededForAtomicBoundary: boolean;
-        minimumSatisfied: boolean;
-    } | {
-        startIndex: number;
-        preservedTokenCount: any;
-        preservedMessageCount: number;
-        preservedTextMessageCount: number;
-    };
-    transcriptChecksum: string;
-};
+    persistMicroCompactReceipt?: boolean;
+}): any;

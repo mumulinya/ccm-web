@@ -110,11 +110,18 @@ function httpCandidate(result) {
 }
 function browserCandidate(result) {
     const steps = result.steps.map(step => `${step.status} ${step.name} ${step.detail || ""} ${step.error || ""}`).join("\n");
+    const contextCriteria = [
+        ...(result.context?.acceptanceCriteria || []),
+        ...(result.context?.acceptance_criteria || []),
+        ...(result.context?.coversAcceptanceCriteria || []),
+        ...(result.context?.covers_acceptance_criteria || []),
+    ].map(item => String(item || "").trim()).filter(Boolean);
     return candidate(`${result.project}: ${result.adversarial ? "adversarial " : ""}browser ${result.name}`, result.status, result.error || `${result.url}; final=${result.finalUrl || ""}; title=${result.title || ""}; provider=${result.provider || "unknown"}; screenshots=${result.screenshots.length}; probe=${result.probeType || ""}`, [
         steps,
         result.finalUrl || "",
         result.title || "",
         result.pageTextPreview || "",
+        contextCriteria.join("\n"),
         result.context ? JSON.stringify(result.context) : "",
         (result.consoleMessages || []).join("\n"),
         result.consoleLogPath || "",

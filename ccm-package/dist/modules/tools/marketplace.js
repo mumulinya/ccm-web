@@ -1368,13 +1368,12 @@ function localMarketplaceItems() {
             version: "1.1.0",
         }, source),
         normalizeMarketplaceItem({
+            ...(0, internal_mcp_registry_1.buildBundledFetchWebMcpTool)({ enabled: true }),
             name: "fetch-web-mcp",
             type: "mcp",
             description: "Fetch public web content and convert it into model-friendly text.",
-            command: "npx",
-            args: ["-y", "@modelcontextprotocol/server-fetch"],
-            author: "Model Context Protocol",
-            version: "1.0.0",
+            author: "CCM",
+            version: "2.0.0",
         }, source),
         normalizeMarketplaceItem({
             name: "code-safety-auditor",

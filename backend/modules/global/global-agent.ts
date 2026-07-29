@@ -119,6 +119,7 @@ import {
 import {
   buildGlobalAgentMemoryPacket,
   buildGlobalAgentSessionContinuation,
+  appendGlobalAgentExecutionEvent,
   compactGlobalAgentSessionWithModel,
   getGlobalAgentMemoryPolicy,
   ingestGlobalAgentConversation,
@@ -152,10 +153,12 @@ import {
   loadGlobalAgentHooks,
   loadGlobalAgentPermissionRules,
   recordGlobalAgentRuntimeOutput,
+  registerGlobalAgentExecutionEventSink,
   runGlobalAgentRuntimeSelfTest,
   saveGlobalAgentHook,
   saveGlobalAgentPermissionRule,
 } from "../../agents/global/runtime";
+
 import {
   buildGlobalControlCenterSnapshot,
   buildGlobalDispatchStrategy,
@@ -163,6 +166,14 @@ import {
   classifyGlobalControlIntent,
   runGlobalControlCenterSelfTest,
 } from "../../agents/global/control-center";
+
+registerGlobalAgentExecutionEventSink((run, event) => {
+  appendGlobalAgentExecutionEvent(String(run.session_id || ""), {
+    ...event,
+    runId: run.id,
+    traceId: run.trace_id,
+  });
+});
 
 
 

@@ -225,13 +225,42 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
     visible: boolean;
     presentation: string;
     task_id: any;
+    task_thread_id: any;
     title: any;
     goal: any;
     phase: string;
     phase_label: any;
+    runtime_status: {
+        schema: string;
+        phase: string;
+        phase_label: string;
+        terminal: boolean;
+        active: boolean;
+        waiting: boolean;
+        blocker_kind: string;
+        status_detail: string;
+        next_action: string;
+        started_at: string;
+        last_activity_at: string;
+        completed_at: string;
+        queue_position: number;
+        review_round: number;
+        max_review_rounds: number;
+        provider_retry: {
+            state: any;
+            attempts: number;
+            retry_after: any;
+        };
+        recovery_count: number;
+    };
+    status_detail: any;
     status: any;
+    usage_summary: any;
     progress: any;
     active_agents: string[];
+    responsible_projects: string[];
+    responsibleProjects: string[];
+    requires_confirmation: boolean;
     agents: {
         name: string;
         status: any;
@@ -6229,11 +6258,21 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
             projects: any;
             multi_agent: boolean;
         };
+        architecture_plan: {
+            goal: string;
+            boundaries: any;
+            data_relationships: any;
+            dependency_steps: any;
+            source_snapshot_checksum: any;
+        };
         read_only_exploration: {
             summary: string;
             projects: any;
             knowledge_used: boolean;
             code_snapshot_used: boolean;
+            source_ready: boolean;
+            source_snapshot_checksum: any;
+            source_evidence: any;
         };
         acceptance: any;
         clarification_questions: any;

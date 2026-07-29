@@ -33,8 +33,8 @@ const checks = {
     && !listItem.includes('🗑️ 删除')
     && manager.includes('确定归档此任务？')
     && manager.includes("archive: '归档'"),
-  technicalBlockersFoldedByDefault: listItem.includes('<details v-if="executionBlockedText || executionFixActions.length"')
-    && listItem.includes('<summary>技术详情</summary>')
+  technicalBlockersFoldedByDefault: listItem.includes('v-if="executionBlockedText || executionFixActions.length"')
+    && listItem.includes('<summary>排障信息</summary>')
     && listItem.includes('<details v-if="task.execution_kernel"'),
   dailyDevelopmentAttachments: dailyDevModal.includes("import TaskAttachmentPicker")
     && dailyDevModal.includes('<TaskAttachmentPicker')

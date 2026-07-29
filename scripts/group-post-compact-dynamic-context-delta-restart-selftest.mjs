@@ -10,6 +10,13 @@ const file = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(file), "..");
 const resultPrefix = "PHASE325_RESULT=";
 
+function mockModelSummary({ user }) {
+  const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+  const start = user.indexOf(marker) + marker.length;
+  const ends = [user.indexOf("\n用户本次 /compact 的附加要求", start), user.indexOf("\n\n本次被压缩区间内的全部用户消息", start)].filter(index => index >= 0);
+  return { summary: JSON.parse(user.slice(start, Math.min(...ends))), provider: "mock", model: "mock-dynamic-context" };
+}
+
 function modules() {
   const require = createRequire(import.meta.url);
   const dist = (...parts) => path.join(root, "ccm-package", "dist", ...parts);
@@ -206,7 +213,9 @@ async function childCreate(fixtureFile) {
       minKeepMessages: 2,
       minKeepTokens: 1,
       maxKeepTokens: 500,
-      memoryCompactionUseModel: false,
+      memoryCompactionUseModel: true,
+      memoryCompactionMode: "model-required",
+      compactionModelCall: mockModelSummary,
       postCompactDynamicContextCatalog: catalogB(suffix),
     },
   });
@@ -237,7 +246,7 @@ async function childCreate(fixtureFile) {
     done_criteria: [], verification: {}, ack_gate: {},
   });
   const centerProjection = center.getMemoryCenterScope("group", `${groupId}::${groupSessionId}`).postCompactUsage?.postCompactDynamicContextDelta || {};
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "PostCompactRecoveryPanel.vue"), "utf8");
   const checks = {
     ...direct.checks,
     partialCompactPathUsesPreservedDelta: partialCompactionPlan.dynamicContextDeltaReceipt?.scan_mode === "partial"
@@ -255,8 +264,8 @@ async function childCreate(fixtureFile) {
     rawTranscriptUntouched: JSON.stringify(storage.getGroupMessages(groupId, groupSessionId)) === originalTranscript,
     memoryCenterBodyFree: centerProjection.status === "applied" && centerProjection.receiptValid === true
       && centerProjection.receipt?.body_free === true && !JSON.stringify(centerProjection).includes(`DOCS_${suffix}_INSTRUCTIONS`),
-    memoryCenterPanelPresent: uiSource.includes("Post-compact Dynamic Context Delta")
-      && uiSource.includes("postCompactDynamicContextDeltaCards"),
+    memoryCenterPanelPresent: uiSource.includes("MCP 与动态工具恢复")
+      && uiSource.includes("postCompactDynamicContextDelta"),
   };
   fs.writeFileSync(fixtureFile, JSON.stringify({
     groupId, groupSessionId, siblingSessionId, suffix, originalTranscript,

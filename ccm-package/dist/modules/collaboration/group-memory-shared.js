@@ -499,9 +499,13 @@ function buildFactAnchor(message, index, type, text) {
 function mergeFactAnchorList(existing = [], incoming = [], limit = 300) {
     const merged = new Map();
     for (const item of [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])]) {
-        if (!item?.id || !item?.text)
+        const text = String(item?.text || "").trim();
+        if (!text)
             continue;
-        merged.set(String(item.id), item);
+        const type = String(item?.type || "legacy_memory");
+        const sourceId = String(item?.messageId || item?.source?.messageId || item?.source?.sessionId || "legacy");
+        const id = String(item?.id || `${sourceId}:${type}:${anchorChecksum(type, text)}`);
+        merged.set(id, { ...item, id, text });
     }
     return [...merged.values()].slice(-limit);
 }

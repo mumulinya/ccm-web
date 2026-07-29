@@ -8,6 +8,7 @@ import {
   isTextFileName,
 } from "../../core/utils";
 import { loadRagMetadata, saveRagMetadata } from "../../core/db";
+import { deleteCredential, isCredentialReference, protectCredential, resolveCredential } from "../../core/credential-store";
 import { ingestRequirementSources } from "../requirements/source-ingestion";
 
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "C:/Users/admin";
@@ -17,6 +18,9 @@ export const KNOWLEDGE_DIR = path.join(CCM_HOME, "knowledge");
 export const KNOWLEDGE_VERSIONS_DIR = path.join(CCM_HOME, "knowledge-versions");
 export const RAG_EMBEDDING_CONFIG_FILE = path.join(CCM_HOME, "rag-embedding-config.json");
 export const RAG_INDEX_CACHE_FILE = path.join(CCM_HOME, "knowledge-index-cache-v2.json");
+export const RAG_INDEX_V3_DIR = path.join(CCM_HOME, "knowledge-index-v3");
+export const RAG_INDEX_V3_POINTER_FILE = path.join(RAG_INDEX_V3_DIR, "active.json");
+export const KNOWLEDGE_MODEL_DIR = path.join(CCM_HOME, "models", "embedding");
 export const MAX_KNOWLEDGE_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_KNOWLEDGE_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const MAX_KNOWLEDGE_UPLOAD_FILES = 20;
@@ -58,6 +62,24 @@ export type ParsedKnowledgeDocument = {
   parser: string;
   status: "ready" | "partial" | "failed";
   error: string;
+};
+
+export type KnowledgeEmbeddingMode = "auto" | "local" | "remote" | "lexical";
+
+export type KnowledgeEmbeddingConfigV3 = {
+  version: 3;
+  mode: KnowledgeEmbeddingMode;
+  enabled: boolean;
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+  batchSize: number;
+  localModel: string;
+  localRevision: string;
+  localDtype: "q8";
+  mirrorUrl: string;
+  updated_at?: string;
 };
 
 function ensureKnowledgeDirectories() {
@@ -145,32 +167,109 @@ function atomicWriteJson(filePath: string, value: any) {
   }
 }
 
-export function loadRagEmbeddingConfig() {
-  const fallback = { enabled: false, apiUrl: "https://api.openai.com/v1", apiKey: "", model: "text-embedding-3-small" };
+const EMBEDDING_CONFIG_DEFAULTS: KnowledgeEmbeddingConfigV3 = {
+  version: 3,
+  mode: "auto",
+  enabled: false,
+  apiUrl: "https://api.openai.com/v1",
+  apiKey: "",
+  model: "text-embedding-3-small",
+  timeoutMs: 60_000,
+  batchSize: 32,
+  localModel: "Xenova/multilingual-e5-small",
+  localRevision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+  localDtype: "q8",
+  mirrorUrl: "",
+};
+
+function rawEmbeddingConfig() {
   try {
-    if (!fs.existsSync(RAG_EMBEDDING_CONFIG_FILE)) return fallback;
-    return { ...fallback, ...JSON.parse(fs.readFileSync(RAG_EMBEDDING_CONFIG_FILE, "utf-8")) };
+    if (!fs.existsSync(RAG_EMBEDDING_CONFIG_FILE)) return { ...EMBEDDING_CONFIG_DEFAULTS };
+    return { ...EMBEDDING_CONFIG_DEFAULTS, ...JSON.parse(fs.readFileSync(RAG_EMBEDDING_CONFIG_FILE, "utf-8")) } as KnowledgeEmbeddingConfigV3;
   } catch {
-    return fallback;
+    return { ...EMBEDDING_CONFIG_DEFAULTS };
   }
+}
+
+function normalizeEmbeddingMode(value: any, legacyEnabled = false): KnowledgeEmbeddingMode {
+  const mode = String(value || "").trim().toLowerCase();
+  if (["auto", "local", "remote", "lexical"].includes(mode)) return mode as KnowledgeEmbeddingMode;
+  return legacyEnabled ? "remote" : "auto";
+}
+
+function normalizeEmbeddingEndpoint(value: any, fallback: string) {
+  const raw = String(value || "").trim() || fallback;
+  const url = new URL(raw);
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new Error("Embedding地址必须是无内联凭据的HTTP/HTTPS地址");
+  url.hash = "";
+  for (const key of Array.from(url.searchParams.keys())) {
+    if (/(?:key|token|secret|signature|credential|password)/i.test(key)) url.searchParams.delete(key);
+  }
+  return url.toString().replace(/\/$/, "");
+}
+
+export function loadRagEmbeddingConfig(): KnowledgeEmbeddingConfigV3 {
+  const raw: any = rawEmbeddingConfig();
+  const mode = normalizeEmbeddingMode(raw.mode, raw.enabled === true);
+  let storedKey = String(raw.apiKey || "").trim();
+  let persistedChanged = false;
+  if (storedKey && !isCredentialReference(storedKey)) {
+    storedKey = protectCredential("knowledge-embedding", "api_key", storedKey);
+    persistedChanged = true;
+  }
+  let apiUrl = String(raw.apiUrl || EMBEDDING_CONFIG_DEFAULTS.apiUrl);
+  try {
+    const normalized = normalizeEmbeddingEndpoint(apiUrl, EMBEDDING_CONFIG_DEFAULTS.apiUrl);
+    if (normalized !== apiUrl) persistedChanged = true;
+    apiUrl = normalized;
+  } catch { apiUrl = EMBEDDING_CONFIG_DEFAULTS.apiUrl; persistedChanged = true; }
+  if (persistedChanged) atomicWriteJson(RAG_EMBEDDING_CONFIG_FILE, { ...raw, version: 3, mode, apiKey: storedKey, apiUrl });
+  let apiKey = "";
+  try { apiKey = storedKey ? resolveCredential(storedKey) : ""; } catch { apiKey = ""; }
+  return {
+    ...EMBEDDING_CONFIG_DEFAULTS,
+    ...raw,
+    version: 3,
+    mode,
+    apiUrl,
+    enabled: mode === "remote" || (mode === "auto" && !!apiKey && !!String(raw.model || "").trim()),
+    apiKey,
+    timeoutMs: Math.max(10_000, Math.min(180_000, Number(raw.timeoutMs) || 60_000)),
+    batchSize: Math.max(1, Math.min(32, Number(raw.batchSize) || 32)),
+    localDtype: "q8",
+  };
 }
 
 export function saveRagEmbeddingConfig(updates: any = {}) {
   const current = loadRagEmbeddingConfig();
-  const next: any = { ...current };
-  if (updates.enabled !== undefined) next.enabled = !!updates.enabled;
-  if (updates.apiUrl !== undefined) next.apiUrl = String(updates.apiUrl || "").trim() || "https://api.openai.com/v1";
+  const raw: any = rawEmbeddingConfig();
+  const next: any = { ...raw, version: 3 };
+  next.mode = normalizeEmbeddingMode(updates.mode, updates.enabled !== undefined ? !!updates.enabled : current.enabled);
+  if (updates.enabled !== undefined && updates.mode === undefined) next.mode = updates.enabled ? "remote" : "auto";
+  next.enabled = next.mode === "remote";
+  if (updates.apiUrl !== undefined) next.apiUrl = normalizeEmbeddingEndpoint(updates.apiUrl, "https://api.openai.com/v1");
   if (updates.model !== undefined) next.model = String(updates.model || "").trim();
-  if (updates.apiKey !== undefined && String(updates.apiKey || "").trim()) next.apiKey = String(updates.apiKey).trim();
-  if (updates.clearApiKey === true) next.apiKey = "";
+  if (updates.timeoutMs !== undefined) next.timeoutMs = Math.max(10_000, Math.min(180_000, Number(updates.timeoutMs) || 60_000));
+  if (updates.batchSize !== undefined) next.batchSize = Math.max(1, Math.min(32, Number(updates.batchSize) || 32));
+  if (updates.mirrorUrl !== undefined) next.mirrorUrl = updates.mirrorUrl ? normalizeEmbeddingEndpoint(updates.mirrorUrl, "") : "";
+  if (updates.apiKey !== undefined && String(updates.apiKey || "").trim()) {
+    if (isCredentialReference(raw.apiKey)) deleteCredential(raw.apiKey);
+    next.apiKey = protectCredential("knowledge-embedding", "api_key", String(updates.apiKey).trim());
+  }
+  if (updates.clearApiKey === true) {
+    if (isCredentialReference(raw.apiKey)) deleteCredential(raw.apiKey);
+    next.apiKey = "";
+  }
   next.updated_at = new Date().toISOString();
   atomicWriteJson(RAG_EMBEDDING_CONFIG_FILE, next);
-  return next;
+  return loadRagEmbeddingConfig();
 }
 
 export function publicRagEmbeddingConfig(config = loadRagEmbeddingConfig()) {
   const { apiKey, ...safe } = config;
-  return { ...safe, hasKey: !!apiKey };
+  let apiUrl = "";
+  try { apiUrl = normalizeEmbeddingEndpoint(config.apiUrl, "https://api.openai.com/v1"); } catch { apiUrl = "invalid-endpoint"; }
+  return { ...safe, apiUrl, hasKey: !!apiKey, enabled: config.mode === "remote" || (config.mode === "auto" && !!apiKey) };
 }
 
 export function updateKnowledgeMetadata(name: string, updates: any = {}) {

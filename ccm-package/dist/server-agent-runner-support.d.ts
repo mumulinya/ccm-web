@@ -4,7 +4,7 @@ export declare function createAgentRunnerSupport(deps: any): {
         skill: any;
     };
     hasToolSelection: (tools?: any) => boolean;
-    buildAgentRunnerRuntimeToolPayload: (allowedTools?: any, mcpConfigPath?: string, executionInfo?: any) => {
+    buildAgentRunnerRuntimeToolPayload: (projectName: string, agentType: string, allowedTools?: any, mcpConfigPath?: string, executionInfo?: any) => {
         runtimeToolSnapshot: any;
         runtimeToolDispatchGate: any;
         runtimeToolSnapshotPath: any;
@@ -69,12 +69,29 @@ export declare function createAgentRunnerSupport(deps: any): {
     findRuntimeToolSnapshotPath: (mcpConfigPath?: string) => any;
     readJsonFileSafe: (file?: string) => any;
     runtimeToolSnapshotFromAudit: (audit?: any, allowedTools?: any) => {
+        schema: string;
         snapshotId: string;
         snapshotPath: string;
         mcpConfigPath: string;
         runtime: any;
-        allowedTools: any;
-        requested: any;
+        allowedTools: {
+            mcp: any;
+            skill: any;
+        };
+        requested: {
+            mcp: any;
+            skill: any;
+        };
+        configuredTools: {
+            mcp: any;
+            skill: any;
+        };
+        executionRoleSkills: unknown[];
+        enforceExecutionRoleSkills: boolean;
+        effectiveTools: {
+            mcp: any;
+            skill: any;
+        };
         permissionRules: any;
         permission_rules: any;
         authorizationReadiness: any;
@@ -100,12 +117,29 @@ export declare function createAgentRunnerSupport(deps: any): {
         };
         dispatchGate: any;
         runtimeToolSnapshot: {
+            schema: string;
             snapshotId: string;
             snapshotPath: string;
             mcpConfigPath: string;
             runtime: any;
-            allowedTools: any;
-            requested: any;
+            allowedTools: {
+                mcp: any;
+                skill: any;
+            };
+            requested: {
+                mcp: any;
+                skill: any;
+            };
+            configuredTools: {
+                mcp: any;
+                skill: any;
+            };
+            executionRoleSkills: unknown[];
+            enforceExecutionRoleSkills: boolean;
+            effectiveTools: {
+                mcp: any;
+                skill: any;
+            };
             permissionRules: any;
             permission_rules: any;
             authorizationReadiness: any;

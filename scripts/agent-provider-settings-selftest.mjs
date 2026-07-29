@@ -7,6 +7,7 @@ const root = path.resolve(import.meta.dirname, '..')
 const outputDir = path.join(root, 'scratch', 'agent-provider-settings-selftest')
 const testHome = path.join(outputDir, 'home')
 const binDir = path.join(outputDir, 'bin')
+const geminiCliRoot = path.join(outputDir, 'gemini-cli')
 fs.mkdirSync(outputDir, { recursive: true })
 if (path.resolve(testHome).startsWith(path.resolve(outputDir) + path.sep)) {
   fs.rmSync(testHome, { recursive: true, force: true })
@@ -15,8 +16,19 @@ fs.mkdirSync(testHome, { recursive: true })
 fs.mkdirSync(binDir, { recursive: true })
 process.env.USERPROFILE = testHome
 process.env.HOME = testHome
+process.env.CCM_GEMINI_CLI_PACKAGE_ROOT = geminiCliRoot
+fs.mkdirSync(path.join(geminiCliRoot, 'bundle'), { recursive: true })
+fs.writeFileSync(path.join(geminiCliRoot, 'package.json'), JSON.stringify({ name: '@google/gemini-cli', version: 'test', bin: { gemini: 'bundle/gemini.js' } }))
+fs.writeFileSync(path.join(geminiCliRoot, 'bundle', 'gemini.js'), 'await import("./gemini-test.js");\n')
+fs.writeFileSync(path.join(geminiCliRoot, 'bundle', 'gemini-test.js'), 'import { DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_FLASH_MODEL, DEFAULT_GEMINI_FLASH_LITE_MODEL } from "./chunk-models.js";\n')
+fs.writeFileSync(path.join(geminiCliRoot, 'bundle', 'chunk-models.js'), [
+  'var DEFAULT_GEMINI_MODEL = "gemini-selftest-pro";',
+  'var DEFAULT_GEMINI_FLASH_MODEL = "gemini-selftest-flash";',
+  'var DEFAULT_GEMINI_FLASH_LITE_MODEL = "gemini-selftest-flash-lite";',
+].join('\n'))
 if (process.platform === 'win32') {
   fs.writeFileSync(path.join(binDir, 'codex.cmd'), '@echo off\r\nif "%1"=="--version" (echo codex-selftest 1.0.0& exit /b 0)\r\necho CCM_AGENT_OK\r\nexit /b 0\r\n')
+  fs.writeFileSync(path.join(binDir, 'cursor-agent.cmd'), '@echo off\r\nif "%1"=="--version" (echo cursor-selftest 1.0.0& exit /b 0)\r\nif "%1"=="models" (echo cursor-model - Cursor Model& exit /b 0)\r\nif "%1"=="update" exit /b 0\r\necho CCM_AGENT_OK\r\nexit /b 0\r\n')
   const fakeCodexEntry = path.join(binDir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
   fs.mkdirSync(path.dirname(fakeCodexEntry), { recursive: true })
   fs.writeFileSync(fakeCodexEntry, '#!/usr/bin/env node\nif (process.argv.includes("--version")) console.log("codex-selftest 1.0.0"); else console.log("CCM_AGENT_OK");\n')
@@ -24,6 +36,9 @@ if (process.platform === 'win32') {
   const command = path.join(binDir, 'codex')
   fs.writeFileSync(command, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-selftest 1.0.0"; exit 0; fi\necho CCM_AGENT_OK\n')
   fs.chmodSync(command, 0o755)
+  const cursorCommand = path.join(binDir, 'cursor-agent')
+  fs.writeFileSync(cursorCommand, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "cursor-selftest 1.0.0"; exit 0; fi\nif [ "$1" = "models" ]; then echo "cursor-model - Cursor Model"; exit 0; fi\nexit 0\n')
+  fs.chmodSync(cursorCommand, 0o755)
 }
 process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH || ''}`
 
@@ -89,6 +104,19 @@ try {
   assert.equal(cursorLoggedIn.loggedIn, true)
   assert.equal(cursorFailed.loggedIn, false)
   checks.push({ name: 'Cursor status requires positive CLI evidence and never treats Not logged in as authenticated', pass: true })
+
+  const cursorCommand = settings.resolveCursorAgentCommand()
+  const cursorUpdate = settings.buildAgentProviderInstallSpec('cursor', true)
+  if (process.platform === 'win32') {
+    assert.match(cursorCommand, /cursor-agent\.cmd$/i)
+    assert.equal(path.isAbsolute(cursorCommand), true)
+    assert.equal(cursorUpdate.shell, true)
+  } else {
+    assert.equal(cursorCommand, 'cursor-agent')
+    assert.equal(cursorUpdate.shell, undefined)
+  }
+  assert.deepEqual(cursorUpdate.args, ['update'])
+  checks.push({ name: 'Cursor update resolves the real platform command and launches Windows command wrappers through a shell', pass: true })
 
   assert.equal(settings.getAgentProviderAccountIdentity('codex'), 'codex-user@example.test')
   assert.equal(settings.getAgentProviderAccountIdentity('cursor'), 'cursor-user@example.test')
@@ -173,6 +201,14 @@ try {
   assert.equal(codexModels.models.some(item => item.id === 'gpt-5.3-codex'), false)
   checks.push({ name: 'Codex model catalog comes from the current account cache instead of a hard-coded list', pass: true })
 
+  const geminiModels = await settings.getAgentProviderModels('gemini')
+  assert.equal(geminiModels.source, 'cli_catalog')
+  assert.equal(geminiModels.models.some(item => item.id === 'gemini-selftest-pro'), true)
+  assert.equal(geminiModels.models.some(item => item.id === 'gemini-selftest-flash'), true)
+  assert.equal(geminiModels.models.some(item => item.id === 'gemini-selftest-flash-lite'), true)
+  assert.doesNotMatch(JSON.stringify(geminiModels), /never-expose-me/)
+  checks.push({ name: 'Gemini OAuth sessions use the installed CLI model catalog without exposing or reusing stale access tokens', pass: true })
+
   const decodeProbeArgs = spec => JSON.parse(Buffer.from(spec.args.at(-1), 'base64').toString('utf-8'))
   const codexProbeArgs = decodeProbeArgs(settings.buildAgentProviderTestSpec('codex', 'account-codex-model'))
   const cursorProbeArgs = decodeProbeArgs(settings.buildAgentProviderTestSpec('cursor', 'cursor-model'))
@@ -226,6 +262,9 @@ try {
   assert.match(uiSource, /网页登录已启动/)
   assert.match(uiSource, /网页授权码/)
   assert.match(uiSource, /provider !== 'claudecode'[\s\S]+authState !== 'logged_in'/)
+  assert.match(uiSource, /installPollTimers = new Map/)
+  assert.match(uiSource, /installCompletionReceipts/)
+  assert.doesNotMatch(uiSource, /installPollTimer = window\.setInterval/)
   assert.match(uiSource, /agent-provider-auth-detail/)
   assert.match(apiSource, /startAgentProviderLogin/)
   assert.match(apiSource, /agent-providers[\s\S]+testAgentProvider/)

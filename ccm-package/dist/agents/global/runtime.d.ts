@@ -56,6 +56,7 @@ interface RuntimeRunState {
     compaction_boundaries: any[];
     updated_at: string;
 }
+export declare function registerGlobalAgentExecutionEventSink(sink: ((run: GlobalAgentRun, event: any) => void) | null): void;
 export declare function buildGlobalAgentToolDefinitions(specs: GlobalAgentToolSpec[]): GlobalAgentToolDefinition[];
 export declare function loadGlobalAgentPermissionRules(): GlobalAgentPermissionRule[];
 export declare function saveGlobalAgentPermissionRule(input: Partial<GlobalAgentPermissionRule>): GlobalAgentPermissionRule;

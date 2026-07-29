@@ -334,6 +334,7 @@
           <TaskAttachmentPicker
             :files="newJob.files"
             :existing="newJob.existingAttachments"
+            :text="newJob.prompt"
             @update:files="newJob.files = $event"
             @remove-existing="removeExistingCronAttachment"
           />

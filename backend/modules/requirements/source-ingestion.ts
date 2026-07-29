@@ -286,7 +286,7 @@ function decodeHtml(text: string) {
     .replace(/&([a-z]+);/gi, (all, name) => htmlEntities[String(name).toLowerCase()] ?? all);
 }
 
-function htmlToText(html: string) {
+export function htmlToText(html: string) {
   return decodeHtml(String(html || "")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style|noscript|svg|canvas|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
@@ -491,7 +491,7 @@ function isPrivateIp(ip: string) {
   return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") || value.startsWith("feb") || value.startsWith("::ffff:127.") || value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.");
 }
 
-async function assertPublicUrl(value: string) {
+export async function assertPublicUrl(value: string) {
   const url = new URL(value);
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("只支持 http/https 在线文档");
   const host = url.hostname.toLowerCase();
@@ -501,7 +501,7 @@ async function assertPublicUrl(value: string) {
   return url;
 }
 
-async function fetchPublicDocument(urlValue: string) {
+export async function fetchPublicDocument(urlValue: string) {
   let current = urlValue;
   for (let redirect = 0; redirect < 5; redirect++) {
     const checked = await assertPublicUrl(current);
@@ -511,7 +511,10 @@ async function fetchPublicDocument(urlValue: string) {
       const response = await fetchWithNodeHttpFallback(checked, {
         method: "GET",
         redirect: "manual",
-        headers: { "User-Agent": "CCM-Requirement-Ingestion/1.0", "Accept": "text/html,text/plain,application/pdf,application/json;q=0.9,*/*;q=0.5" },
+        headers: {
+          "User-Agent": "CCM-Requirement-Ingestion/1.0",
+          "Accept": "text/html,text/plain,application/pdf,application/json;q=0.9,*/*;q=0.5",
+        },
         signal: controller.signal,
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -538,9 +541,21 @@ function looksLikeAuthorizationPage(text: string, url: string) {
     || /docs\.qq\.com/i.test(url) && /(?:登录|login).{0,40}(?:腾讯文档|Tencent Docs)/i.test(sample) && sample.length < 3000;
 }
 
+function onlineDocumentProviderForUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "docs.qq.com" || hostname.endsWith(".docs.qq.com")
+      ? "tencent_docs"
+      : "generic";
+  } catch {
+    return "generic";
+  }
+}
+
 async function parseOnlineDocument(urlValue: string, fetcher: (url: string) => Promise<any> = fetchPublicDocument): Promise<RequirementSourceRecord> {
   const name = (() => { try { return new URL(urlValue).hostname; } catch { return "在线文档"; } })();
-  const base = { id: sourceId("url", urlValue), source_type: "online_document" as const, name, kind: /docs\.qq\.com/i.test(urlValue) ? "tencent_document" : "online_document", url: urlValue };
+  const provider = onlineDocumentProviderForUrl(urlValue);
+  const base = { id: sourceId("url", urlValue), source_type: "online_document" as const, name, kind: provider === "tencent_docs" ? "tencent_document" : "online_document", url: urlValue };
   try {
     const { response, buffer, finalUrl } = await fetcher(urlValue);
     if (response.status === 401 || response.status === 403) {
@@ -558,7 +573,16 @@ async function parseOnlineDocument(urlValue: string, fetcher: (url: string) => P
       content = htmlToText(html);
       parser = /docs\.qq\.com/i.test(finalUrl) ? "tencent-docs-public-page" : "public-url-html";
       if (looksLikeAuthorizationPage(content, finalUrl)) {
-        return { ...base, url: finalUrl, status: "needs_authorization", parser, readable: false, content: "", summary: "腾讯文档需要公开分享或授权后才能读取", error: "页面要求登录或访问授权" };
+        return {
+          ...base,
+          url: finalUrl,
+          status: "needs_authorization",
+          parser,
+          readable: false,
+          content: "",
+          summary: "腾讯文档需要设置为公开分享后才能读取",
+          error: "页面要求登录或访问授权",
+        };
       }
     } else if (contentType.includes("text/") || contentType.includes("json") || contentType.includes("xml")) {
       content = buffer.toString("utf-8").trim();
@@ -582,7 +606,15 @@ async function parseOnlineDocument(urlValue: string, fetcher: (url: string) => P
       truncated,
     };
   } catch (error: any) {
-    return { ...base, status: "failed", parser: "public-url-fetch", readable: false, content: "", summary: "在线文档读取失败", error: compact(error?.message || error, 300) };
+    return {
+      ...base,
+      status: "failed",
+      parser: "public-url-fetch",
+      readable: false,
+      content: "",
+      summary: "在线文档读取失败",
+      error: compact(error?.message || error, 300),
+    };
   }
 }
 
@@ -852,6 +884,9 @@ export async function ingestRequirementSources(input: {
       content_hash: contentHash,
       warnings,
       sources: attachments,
+      online_document_access_mode: sources.some(source => source.kind === "tencent_document")
+        ? "public_link_only"
+        : "public_url",
     },
   };
 }

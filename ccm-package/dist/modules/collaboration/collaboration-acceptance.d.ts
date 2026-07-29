@@ -125,6 +125,8 @@ export declare function buildIndependentReviewGate(task: any, actualFileChanges?
     pass: boolean;
     status: string;
     reason: any;
+    stale_evidence_count: any;
+    reviewed_change_fingerprint: any;
     decision_detail: any;
     decisionDetail: any;
     trigger_reasons: any;
@@ -133,17 +135,17 @@ export declare function buildIndependentReviewGate(task: any, actualFileChanges?
     skipReasons: any;
     file_change_count: any;
     high_risk_files: any;
-    evidence_count: number;
-    passed_count: number;
-    failed_count: number;
-    needs_recheck_count: number;
-    needs_environment_count: number;
-    needs_user_count: number;
-    evidence: any[];
-    failed_evidence: any[];
-    recheck_evidence: any[];
-    environment_evidence: any[];
-    needs_user_evidence: any[];
+    evidence_count: any;
+    passed_count: any;
+    failed_count: any;
+    needs_recheck_count: any;
+    needs_environment_count: any;
+    needs_user_count: any;
+    evidence: any;
+    failed_evidence: any;
+    recheck_evidence: any;
+    environment_evidence: any;
+    needs_user_evidence: any;
 };
 export declare function buildAcceptanceGate(task: any, execution: any, summary: any, finalStatus: string): {
     pass: boolean;

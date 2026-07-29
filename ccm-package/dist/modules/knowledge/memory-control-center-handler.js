@@ -41,6 +41,9 @@ const utils_1 = require("../../core/utils");
 const memory_control_center_types_1 = require("./memory-control-center-types");
 const memory_control_center_api_1 = require("./memory-control-center-api");
 const memory_control_center_controls_1 = require("./memory-control-center-controls");
+const group_memory_auto_compact_circuit_breaker_1 = require("../collaboration/group-memory-auto-compact-circuit-breaker");
+const typed_memory_promotion_1 = require("../collaboration/typed-memory-promotion");
+const typed_memory_conflict_1 = require("../collaboration/typed-memory-conflict");
 const group_session_memory_model_extraction_1 = require("../collaboration/group-session-memory-model-extraction");
 function projectSummaries() {
     const longTerm = (0, memory_control_center_api_1.listJsonFiles)(memory_control_center_types_1.PROJECT_MEMORY_DIR).flatMap(file => {
@@ -125,8 +128,23 @@ function buildMemoryCenterOverview() {
     const globals = globalSummaries();
     const tasks = taskAgentSummaries();
     const scopes = [...globals, ...groups, ...projects, ...tasks];
+    // 顺带收集每个 scope 的存活 itemId，供孤儿控制项回收使用。
+    // 读取失败的 scope 不进入这张表，宁可少回收也不能误删用户的置顶/屏蔽。
+    const liveIdsByScope = new Map();
     const alerts = scopes.flatMap(summary => {
-        const detail = (0, memory_control_center_api_1.getMemoryCenterScope)(summary.scope, summary.id);
+        let detail = null;
+        try {
+            detail = (0, memory_control_center_api_1.getMemoryCenterScope)(summary.scope, summary.id);
+        }
+        catch {
+            return [];
+        }
+        const live = new Set();
+        for (const group of detail.itemGroups || []) {
+            for (const item of group.items || [])
+                live.add(String(item.itemId || ""));
+        }
+        liveIdsByScope.set(`${summary.scope}::${summary.id}`, live);
         return (0, memory_control_center_api_1.healthAlerts)(summary.scope, summary.id, detail.rawMemory).map(alert => ({
             ...alert,
             scope: summary.scope,
@@ -134,6 +152,11 @@ function buildMemoryCenterOverview() {
             label: summary.label,
         }));
     });
+    let controlGc = { pruned: 0, orphans: [] };
+    try {
+        controlGc = (0, memory_control_center_controls_1.pruneMemoryControls)(liveIdsByScope, { actor: "memory-center-overview" });
+    }
+    catch { }
     return {
         generatedAt: (0, memory_control_center_types_1.now)(),
         groups,
@@ -141,6 +164,7 @@ function buildMemoryCenterOverview() {
         globals,
         tasks,
         alerts,
+        controlGc: { pruned: Number(controlGc.pruned || 0) },
         totals: {
             scopes: scopes.length,
             groupSessions: groups.length,
@@ -213,6 +237,120 @@ function handleMemoryCenterApi(pathname, req, res, parsed) {
                     actor: data.actor || "memory-center",
                 });
                 (0, utils_1.sendJson)(res, { success: true, ...result });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/memory-center/compact-circuit" && req.method === "GET") {
+        try {
+            const { groupId, sessionId } = (0, memory_control_center_api_1.memoryCenterExactGroupSessionScope)(query.scopeId || query.scope_id || query.id);
+            (0, utils_1.sendJson)(res, { success: true, admission: (0, group_memory_auto_compact_circuit_breaker_1.readGroupMemoryAutoCompactCircuitAdmission)(groupId, sessionId) });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/memory-center/compact-circuit-reset" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                const { groupId, sessionId } = (0, memory_control_center_api_1.memoryCenterExactGroupSessionScope)(data.scopeId || data.scope_id || data.id);
+                const reason = String(data.reason || "").trim();
+                if (!reason)
+                    throw new Error("重置压缩熔断必须填写原因");
+                const actor = String(data.actor || "memory-center");
+                const ledger = (0, group_memory_auto_compact_circuit_breaker_1.resetGroupMemoryAutoCompactCircuitBreaker)(groupId, sessionId, { reason, actor });
+                const audit = (0, memory_control_center_api_1.recordMemoryOperation)({
+                    action: "compact_circuit_reset",
+                    scope: "group",
+                    scopeId: `${groupId}::${sessionId}`,
+                    actor,
+                    reason,
+                    previousState: ledger.previousState,
+                });
+                (0, utils_1.sendJson)(res, { success: true, ledger, audit });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/memory-center/conflicts" && req.method === "GET") {
+        try {
+            const { typedScopeId } = (0, memory_control_center_api_1.memoryCenterExactGroupSessionScope)(query.scopeId || query.scope_id || query.id);
+            const ledger = (0, typed_memory_conflict_1.readTypedMemoryConflictLedger)(typedScopeId);
+            (0, utils_1.sendJson)(res, {
+                success: true,
+                scopeId: typedScopeId,
+                file: ledger.file,
+                pairs: ledger.pairs,
+                pendingCount: ledger.pairs.filter((pair) => String(pair?.status || "pending") === "pending").length,
+            });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/memory-center/conflict-resolve" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                const { typedScopeId } = (0, memory_control_center_api_1.memoryCenterExactGroupSessionScope)(data.scopeId || data.scope_id || data.id);
+                const result = (0, typed_memory_conflict_1.resolveTypedMemoryConflict)(typedScopeId, String(data.pairId || data.pair_id || ""), {
+                    resolution: data.resolution,
+                    reason: data.reason,
+                    actor: data.actor || "memory-center",
+                });
+                const audit = (0, memory_control_center_api_1.recordMemoryOperation)({
+                    action: "memory_conflict_resolve",
+                    scope: "group",
+                    scopeId: typedScopeId,
+                    actor: String(data.actor || "memory-center"),
+                    reason: String(data.reason || ""),
+                    pairId: result.pair?.pairId || "",
+                    resolution: result.pair?.resolution || "",
+                });
+                (0, utils_1.sendJson)(res, { success: true, ...result, audit });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/memory-center/promoted" && req.method === "GET") {
+        try {
+            const store = (0, typed_memory_promotion_1.readPromotedMemoryStore)(String(query.project || query.projectId || "unassigned"));
+            (0, utils_1.sendJson)(res, {
+                success: true,
+                project: store.project,
+                file: store.file,
+                entries: store.entries,
+                activeCount: store.entries.filter((entry) => String(entry?.status || "active") === "active").length,
+            });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/memory-center/promoted-revoke" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                const result = (0, typed_memory_promotion_1.revokePromotedMemory)(String(data.project || data.projectId || "unassigned"), String(data.promotionId || data.promotion_id || ""), { reason: data.reason, actor: data.actor || "memory-center", restore: data.restore === true });
+                const audit = (0, memory_control_center_api_1.recordMemoryOperation)({
+                    action: data.restore === true ? "promoted_memory_restore" : "promoted_memory_revoke",
+                    scope: "project",
+                    scopeId: result.project,
+                    actor: String(data.actor || "memory-center"),
+                    reason: String(data.reason || ""),
+                    promotionId: result.entry?.promotionId || "",
+                });
+                (0, utils_1.sendJson)(res, { success: true, ...result, audit });
             }
             catch (error) {
                 (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);

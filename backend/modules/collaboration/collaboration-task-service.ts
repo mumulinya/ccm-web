@@ -10,6 +10,8 @@ import { spawnSync } from "child_process";
 
 import * as os from "os";
 
+import { withFileLock } from "../../core/atomic-json-file";
+
 import {
   sendJson,
   calculateTokensAndCost,
@@ -255,6 +257,8 @@ import {
   saveGroups,
 } from "./storage";
 
+import { ensureProjectAutomationSession } from "../projects/sessions";
+
 import {
   buildDailyDevTaskDescription,
   claimReadyDailyDevBacklog,
@@ -461,13 +465,74 @@ import {
   updateGroupTaskInlineStatus,
 } from "./collaboration";
 
-export function createTask(task: any) {
-  const tasks = loadTasks();
-  const idempotencyKey = String(task.idempotency_key || task.idempotencyKey || "").trim();
-  if (idempotencyKey) {
-    const existing = tasks.find((item: any) => String(item.idempotency_key || "") === idempotencyKey);
-    if (existing) return existing;
+export interface TaskIntakeIdentityV2 {
+  schema: "ccm-task-intake-identity-v2";
+  source_channel: string;
+  target_scope: "group_session" | "project_session" | "global";
+  target_id: string;
+  exact_session_id: string;
+  client_message_id: string;
+  content_checksum: string;
+  workflow_type: string;
+  checksum: string;
+}
+
+function taskIdentityPart(value: any, fallback = "") {
+  return compactFormText(value, fallback).toLowerCase().replace(/\s+/g, " ");
+}
+
+export function buildTaskIntakeIdentityV2(task: any): TaskIntakeIdentityV2 | null {
+  const clientMessageId = compactFormText(task.client_message_id || task.clientMessageId || task.workflow_meta?.intake?.client_message_id, "");
+  if (!clientMessageId) return null;
+  const groupId = compactFormText(task.group_id || task.groupId, "");
+  const groupSessionId = compactFormText(task.group_session_id || task.groupSessionId, "");
+  const projectId = compactFormText(task.target_project || task.targetProject, "");
+  const projectSessionId = compactFormText(task.project_session_id || task.projectSessionId, "");
+  const requestedScope = taskIdentityPart(task.target_scope || task.targetScope || task.orchestration_scope || task.orchestrationScope, "");
+  const assignType = taskIdentityPart(task.assign_type || task.assignType, "");
+  const targetScope: TaskIntakeIdentityV2["target_scope"] = requestedScope === "group_session" || assignType === "group" || groupId
+    ? "group_session"
+    : requestedScope === "project_session" || assignType === "project" || projectSessionId
+      ? "project_session"
+      : "global";
+  const sourceChannel = taskIdentityPart(task.source_channel || task.sourceChannel || task.request_origin || task.requestOrigin || task.workflow_meta?.intake?.source, "usability-intake");
+  const targetId = taskIdentityPart(task.target_id || task.targetId || (targetScope === "group_session" ? groupId : targetScope === "project_session" ? projectId : "global"), "global");
+  const exactSessionId = taskIdentityPart(task.exact_session_id || task.exactSessionId || (targetScope === "group_session" ? groupSessionId : targetScope === "project_session" ? projectSessionId : task.origin_session_id || task.originSessionId), targetScope === "global" ? "global" : "");
+  const contentChecksum = taskIdentityPart(task.requirement_content_hash || task.requirementContentHash || task.content_checksum || task.contentChecksum, "");
+  const workflowType = taskIdentityPart(task.workflow_type || task.workflowType, "general");
+  const base = {
+    schema: "ccm-task-intake-identity-v2" as const,
+    source_channel: sourceChannel,
+    target_scope: targetScope,
+    target_id: targetId,
+    exact_session_id: exactSessionId,
+    client_message_id: clientMessageId,
+    content_checksum: contentChecksum,
+    workflow_type: workflowType,
+  };
+  return {
+    ...base,
+    checksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex"),
+  };
+}
+
+function sameTaskIdempotencyScope(existing: any, incoming: any) {
+  const existingIdentity = existing?.intake_identity;
+  const incomingIdentity = incoming?.intake_identity;
+  if (existingIdentity?.schema === "ccm-task-intake-identity-v2" && incomingIdentity?.schema === "ccm-task-intake-identity-v2") {
+    return existingIdentity.checksum === incomingIdentity.checksum;
   }
+  return taskIdentityPart(existing?.workflow_type, "general") === taskIdentityPart(incoming?.workflow_type, "general")
+    && taskIdentityPart(existing?.group_id) === taskIdentityPart(incoming?.group_id)
+    && taskIdentityPart(existing?.group_session_id) === taskIdentityPart(incoming?.group_session_id)
+    && taskIdentityPart(existing?.target_project) === taskIdentityPart(incoming?.target_project)
+    && taskIdentityPart(existing?.project_session_id) === taskIdentityPart(incoming?.project_session_id)
+    && taskIdentityPart(existing?.orchestration_scope) === taskIdentityPart(incoming?.orchestration_scope);
+}
+
+function createTaskWithScopedIdentity(task: any) {
+  const tasks = loadTasks();
+  const explicitIdempotencyKey = String(task.idempotency_key || task.idempotencyKey || "").trim();
   const taskGroupId = String(task.group_id || task.groupId || "").trim();
   const taskGroupSession = taskGroupId
     ? resolveWritableGroupChatSession(taskGroupId, task.group_session_id || task.groupSessionId || "", {
@@ -475,17 +540,47 @@ export function createTask(task: any) {
     })
     : null;
   const taskGroupSessionId = String(taskGroupSession?.id || "");
-  const semanticGoal = compactFormText(task.business_goal || task.businessGoal || task.description || task.title, "").toLowerCase().replace(/\s+/g, " ");
-  const semanticTarget = [taskGroupId, taskGroupSessionId, task.project_session_id || task.projectSessionId || "", task.orchestration_scope || task.orchestrationScope || "", task.target_project || task.targetProject || "", task.workflow_type || task.workflowType || "general"].join("|").toLowerCase();
-  if (semanticGoal && task.allow_duplicate !== true && task.allowDuplicate !== true) {
-    const duplicate = [...tasks].reverse().find((item: any) => {
-      if (item.archived || item.deleted_at || ["done", "cancelled", "archived", "failed"].includes(String(item.status || ""))) return false;
-      if (Date.now() - Date.parse(item.created_at || "") > 5 * 60 * 1000) return false;
-      const itemGoal = compactFormText(item.business_goal || item.description || item.title, "").toLowerCase().replace(/\s+/g, " ");
-      const itemTarget = [item.group_id || "", item.group_session_id || item.groupSessionId || "", item.project_session_id || item.projectSessionId || "", item.orchestration_scope || item.orchestrationScope || "", item.target_project || "", item.workflow_type || "general"].join("|").toLowerCase();
-      return itemGoal === semanticGoal && itemTarget === semanticTarget;
-    });
-    if (duplicate) return { ...duplicate, deduplicated: true, duplicate_reason: "5 分钟内已存在相同目标与执行范围的活动任务" };
+  const requestedProject = String(task.target_project || task.targetProject || "").trim();
+  const projectTask = !taskGroupId
+    && String(task.assign_type || task.assignType || "project").trim().toLowerCase() === "project"
+    && getConfigs().some((config: any) => String(config?.name || "") === requestedProject);
+  const requestedProjectSessionId = String(task.project_session_id || task.projectSessionId || "").trim();
+  const projectSession = projectTask && !requestedProjectSessionId
+    ? ensureProjectAutomationSession(
+        requestedProject,
+        "",
+        compactMemoryText(task.title || "自动开发任务", 80),
+      )
+    : null;
+  // Public production routes validate supplied session ids before task creation. Preserve
+  // existing persisted/internal ids here so historical tasks can still be recovered.
+  const taskProjectSessionId = String(projectSession?.sessionId || requestedProjectSessionId || "");
+  const suppliedClientMessageId = compactFormText(task.client_message_id || task.clientMessageId || task.workflow_meta?.intake?.client_message_id, "");
+  const clientMessageId = suppliedClientMessageId
+    || (explicitIdempotencyKey
+      ? `legacy_${crypto.createHash("sha256").update(explicitIdempotencyKey).digest("hex").slice(0, 24)}`
+      : `server_${crypto.randomUUID()}`);
+  const suppliedContentChecksum = compactFormText(task.requirement_content_hash || task.requirementContentHash || task.content_checksum || task.contentChecksum, "");
+  const contentChecksum = suppliedContentChecksum || crypto.createHash("sha256").update(JSON.stringify({
+    title: task.title || "",
+    description: task.description || "",
+    business_goal: task.business_goal || task.businessGoal || "",
+    acceptance_criteria: task.acceptance_criteria || task.acceptanceCriteria || "",
+  })).digest("hex");
+  const identityInput = {
+    ...task,
+    group_id: taskGroupId || null,
+    group_session_id: taskGroupSessionId || null,
+    project_session_id: taskProjectSessionId || null,
+    client_message_id: clientMessageId,
+    content_checksum: contentChecksum,
+  };
+  const intakeIdentity = buildTaskIntakeIdentityV2(identityInput);
+  const idempotencyKey = intakeIdentity ? `task-intake-v2:${intakeIdentity.checksum}` : explicitIdempotencyKey;
+  if (idempotencyKey) {
+    const existing = tasks.find((item: any) => String(item.idempotency_key || "") === idempotencyKey
+      && sameTaskIdempotencyScope(item, { ...identityInput, intake_identity: intakeIdentity }));
+    if (existing) return { ...existing, deduplicated: true, duplicate_reason: "同一次提交已在当前精确会话创建任务" };
   }
   const traceId = ensureTraceId(task.trace_id || task.traceId, "task");
   const newTask: any = {
@@ -499,7 +594,7 @@ export function createTask(task: any) {
     status: "pending",
     priority: task.priority || "normal",
     auto_execute: !!(task.auto_execute || task.autoExecute),
-    queue_scope: task.queue_scope || task.queueScope || "",
+    queue_scope: task.queue_scope || task.queueScope || (taskGroupSessionId || taskProjectSessionId ? "conversation_serial" : ""),
     child_agent_isolation: task.child_agent_isolation || task.childAgentIsolation || "",
     branch_policy: task.branch_policy || task.branchPolicy || "",
     commit_policy: task.commit_policy || task.commitPolicy || "",
@@ -532,13 +627,17 @@ export function createTask(task: any) {
     workflow_decision: task.workflow_decision || task.workflowDecision || task.intake_draft?.workflow_decision || task.intakeDraft?.workflowDecision || null,
     workflow_meta: task.workflow_meta || task.workflowMeta || null,
     orchestration_scope: task.orchestration_scope || task.orchestrationScope || "",
-    project_session_id: task.project_session_id || task.projectSessionId || null,
+    project_session_id: taskProjectSessionId || null,
     project_main_run_id: task.project_main_run_id || task.projectMainRunId || null,
     request_origin: task.request_origin || task.requestOrigin || task.workflow_meta?.intake?.source || "task-dispatch",
     origin_session_id: task.origin_session_id || task.originSessionId || taskGroupSessionId || task.project_session_id || task.projectSessionId || null,
     parent_work_item_id: task.parent_work_item_id || task.parentWorkItemId || null,
     acceptance_state: task.acceptance_state || task.acceptanceState || "pending",
     parent_task_id: task.parent_task_id || task.parentTaskId || null,
+    root_task_id: task.root_task_id || task.rootTaskId || null,
+    retry_of_task_id: task.retry_of_task_id || task.retryOfTaskId || null,
+    source_task_id: task.source_task_id || task.sourceTaskId || null,
+    task_thread_id: task.task_thread_id || task.taskThreadId || task.root_task_id || task.rootTaskId || task.retry_of_task_id || task.retryOfTaskId || task.source_task_id || task.sourceTaskId || null,
     global_mission_id: task.global_mission_id || task.globalMissionId || null,
     mission_target: task.mission_target || task.missionTarget || null,
     mission_handoff: task.mission_handoff || task.missionHandoff || null,
@@ -554,6 +653,13 @@ export function createTask(task: any) {
     cron_trigger: task.cron_trigger || null,
     trace_id: traceId,
     idempotency_key: idempotencyKey || null,
+    intake_identity: intakeIdentity,
+    client_message_id: intakeIdentity?.client_message_id || task.client_message_id || task.clientMessageId || null,
+    source_channel: intakeIdentity?.source_channel || task.source_channel || task.sourceChannel || null,
+    target_scope: intakeIdentity?.target_scope || task.target_scope || task.targetScope || null,
+    target_id: intakeIdentity?.target_id || task.target_id || task.targetId || null,
+    exact_session_id: intakeIdentity?.exact_session_id || task.exact_session_id || task.exactSessionId || null,
+    intake_identity_checksum: intakeIdentity?.checksum || null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -561,8 +667,15 @@ export function createTask(task: any) {
   newTask.work_item_summary = buildMainAgentWorkItemSummary(newTask.work_items);
   tasks.push(newTask);
   saveTasks(tasks);
-  appendTraceEvent(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent" } });
+  appendTraceEvent(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent", intake_identity_checksum: intakeIdentity?.checksum || "", source_channel: intakeIdentity?.source_channel || "", target_scope: intakeIdentity?.target_scope || "" } });
   return newTask;
+}
+
+export function createTask(task: any) {
+  return withFileLock(path.join(CCM_DIR, "task-create-identity-v2"), () => createTaskWithScopedIdentity(task), {
+    timeoutMs: 10_000,
+    staleMs: 60_000,
+  });
 }
 
 function requirementEpicTaskId(prefix = "task") {
@@ -673,6 +786,10 @@ function buildRequirementEpicTaskRecord(input: any, id: string, traceId: string,
     request_origin: input.request_origin || input.requestOrigin || input.workflow_meta?.intake?.source || "task-dispatch",
     origin_session_id: input.origin_session_id || input.originSessionId || input.group_session_id || input.groupSessionId || input.project_session_id || input.projectSessionId || null,
     parent_task_id: input.parent_task_id || input.parentTaskId || null,
+    root_task_id: input.root_task_id || input.rootTaskId || null,
+    retry_of_task_id: input.retry_of_task_id || input.retryOfTaskId || null,
+    source_task_id: input.source_task_id || input.sourceTaskId || null,
+    task_thread_id: input.task_thread_id || input.taskThreadId || input.root_task_id || input.rootTaskId || input.retry_of_task_id || input.retryOfTaskId || input.source_task_id || input.sourceTaskId || null,
     global_mission_id: input.global_mission_id || input.globalMissionId || null,
     requirement_epic_id: input.requirement_epic_id || input.requirementEpicId || null,
     mission_target: input.mission_target || input.missionTarget || null,
@@ -685,6 +802,13 @@ function buildRequirementEpicTaskRecord(input: any, id: string, traceId: string,
     intake_draft: input.intake_draft || input.intakeDraft || null,
     trace_id: traceId,
     idempotency_key: String(input.idempotency_key || input.idempotencyKey || "").trim() || null,
+    intake_identity: input.intake_identity || input.intakeIdentity || null,
+    client_message_id: input.client_message_id || input.clientMessageId || null,
+    source_channel: input.source_channel || input.sourceChannel || null,
+    target_scope: input.target_scope || input.targetScope || null,
+    target_id: input.target_id || input.targetId || null,
+    exact_session_id: input.exact_session_id || input.exactSessionId || null,
+    intake_identity_checksum: input.intake_identity_checksum || input.intakeIdentityChecksum || input.intake_identity?.checksum || input.intakeIdentity?.checksum || null,
     created_at: now,
     updated_at: now,
   };
@@ -770,6 +894,13 @@ export function createRequirementEpicWithChildren(payload: any) {
     requirement_content_hash: plan.content_hash,
     requirement_version: plan.version,
     trace_id: traceId,
+    intake_identity: payload.intake_identity || payload.intakeIdentity || null,
+    client_message_id: clientMessageId,
+    source_channel: payload.source_channel || payload.sourceChannel || channel,
+    target_scope: payload.target_scope || payload.targetScope || (payload.group_id || payload.groupId ? "group_session" : "project_session"),
+    target_id: payload.target_id || payload.targetId || payload.group_id || payload.groupId || payload.target_project || payload.targetProject || "",
+    exact_session_id: payload.exact_session_id || payload.exactSessionId || payload.group_session_id || payload.groupSessionId || payload.project_session_id || payload.projectSessionId || "",
+    intake_identity_checksum: payload.intake_identity_checksum || payload.intakeIdentityChecksum || payload.intake_identity?.checksum || payload.intakeIdentity?.checksum || null,
   };
   const parent = buildRequirementEpicTaskRecord({
     ...shared,
@@ -1105,6 +1236,60 @@ export function looksLikeTaskContinuation(message: string) {
   return false;
 }
 
+const AUTOMATED_TERMINAL_WORKFLOWS = new Set([
+  "daily_dev",
+  "project_main_agent",
+  "requirement_epic",
+  "global_mission",
+  "agent_coordination_dependency",
+]);
+
+export function hasStructuredTaskAcceptanceEvidence(task: any, updates: any = {}) {
+  const summary = updates.delivery_summary || task?.delivery_summary || {};
+  const coordination = updates.coordination_acceptance || task?.coordination_acceptance || {};
+  const report = summary.delivery_report || task?.delivery_report || {};
+  return summary.acceptance_gate_passed === true
+    || summary.acceptance_gate?.pass === true
+    || summary.accepted === true
+    || summary.evidence_contract?.acceptance_gate_passed === true
+    || report.acceptance_gate_passed === true
+    || coordination.accepted === true
+    || updates.global_mission_gate_passed === true
+    || task?.global_mission_gate_passed === true
+    || updates.terminal_decision?.gate_passed === true;
+}
+
+export function validateTaskTerminalTransition(task: any, updates: any = {}) {
+  const requestedStatus = String(updates.status || "").trim().toLowerCase();
+  if (requestedStatus !== "done" || String(task?.status || "") === "done") return null;
+  const workflowType = String(task?.workflow_type || "general").trim().toLowerCase();
+  if (!AUTOMATED_TERMINAL_WORKFLOWS.has(workflowType)) return null;
+  if (hasStructuredTaskAcceptanceEvidence(task, updates)) return null;
+  return `自动开发任务 ${task?.id || ""} 缺少结构化最终验收证据，不能进入 done + accepted`;
+}
+
+export function buildTaskTerminalDecisionV2(task: any, updates: any = {}) {
+  const status = String(updates.status || "").trim().toLowerCase();
+  const acceptanceState: Record<string, string> = { done: "accepted", failed: "rejected", blocked: "blocked", cancelled: "cancelled" };
+  const base = {
+    schema: "ccm-task-terminal-decision-v2",
+    task_id: String(task?.id || ""),
+    status,
+    acceptance_state: acceptanceState[status] || String(updates.acceptance_state || task?.acceptance_state || "pending"),
+    actor: compactFormText(updates.terminal_actor || updates.terminalActor || updates.acceptance_decision?.actor, "task-runtime"),
+    gate_passed: status === "done" ? hasStructuredTaskAcceptanceEvidence(task, updates) : true,
+    evidence_checksum: crypto.createHash("sha256").update(JSON.stringify({
+      delivery_summary: updates.delivery_summary || task?.delivery_summary || null,
+      receipt: updates.receipt || task?.receipt || null,
+      review: updates.review || task?.review || null,
+      coordination_acceptance: updates.coordination_acceptance || task?.coordination_acceptance || null,
+    })).digest("hex"),
+    reason: compactFormText(updates.status_detail || updates.result, status),
+    decided_at: new Date().toISOString(),
+  };
+  return { ...base, checksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex") };
+}
+
 export function updateTask(id: string, updates: any) {
   const tasks = loadTasks();
   const idx = tasks.findIndex(t => t.id === id);
@@ -1114,10 +1299,71 @@ export function updateTask(id: string, updates: any) {
   const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
   const previousCollaborationState = tasks[idx].collaboration_state || {};
   tasks[idx].trace_id = ensureTraceId(tasks[idx].trace_id || updates.trace_id || updates.traceId, "task");
+  const requestedStatus = String(updates.status || "").toLowerCase();
+  const terminalValidationError = validateTaskTerminalTransition(tasks[idx], updates);
+  if (terminalValidationError) throw new Error(terminalValidationError);
+  const terminalAcceptance: Record<string, string> = {
+    done: "accepted",
+    failed: "rejected",
+    blocked: "blocked",
+    cancelled: "cancelled",
+  };
+  if (terminalAcceptance[requestedStatus]) {
+    const terminalDecision = buildTaskTerminalDecisionV2(tasks[idx], updates);
+    const settledAt = String(updates.completed_at || updates.failed_at || updates.cancelled_at || new Date().toISOString());
+    const evidenceChecksum = crypto.createHash("sha256").update(JSON.stringify({
+      delivery_summary: updates.delivery_summary || tasks[idx].delivery_summary || null,
+      receipt: updates.receipt || tasks[idx].receipt || null,
+      review: updates.review || tasks[idx].review || null,
+    })).digest("hex");
+    const receiptBase = {
+      schema: "ccm-task-terminal-state-receipt-v1",
+      task_id: id,
+      status: requestedStatus,
+      acceptance_state: terminalAcceptance[requestedStatus],
+      queue_state: requestedStatus,
+      queue_position: 0,
+      settled_at: settledAt,
+      actor: terminalDecision.actor,
+      reason: compactFormText(updates.status_detail || updates.result, requestedStatus),
+      evidence_checksum: evidenceChecksum,
+    };
+    updates = {
+      ...updates,
+      acceptance_state: terminalAcceptance[requestedStatus],
+      terminal_state_receipt: {
+        ...receiptBase,
+        checksum: crypto.createHash("sha256").update(JSON.stringify(receiptBase)).digest("hex"),
+      },
+      terminal_decision: terminalDecision,
+      terminal_gate: {
+        passed: terminalDecision.gate_passed,
+        evidence_checksum: terminalDecision.evidence_checksum,
+        decision_checksum: terminalDecision.checksum,
+      },
+      ...(requestedStatus === "done" ? { completed_at: settledAt } : {}),
+      ...(requestedStatus === "failed" ? { failed_at: settledAt } : {}),
+      ...(requestedStatus === "cancelled" ? { cancelled_at: settledAt } : {}),
+    };
+  }
   if (updates.receipt) {
     updates.receipt_idempotency_key = crypto.createHash("sha256").update(JSON.stringify(updates.receipt)).digest("hex");
   }
   Object.assign(tasks[idx], updates, { updated_at: new Date().toISOString() });
+  if (terminalAcceptance[requestedStatus] && previousStatus !== requestedStatus) {
+    const terminalEvent = {
+      id: `tl_terminal_${requestedStatus}_${tasks[idx].terminal_state_receipt?.checksum || Date.now().toString(36)}`,
+      at: tasks[idx].terminal_state_receipt?.settled_at || tasks[idx].updated_at,
+      type: "terminal_state_normalized",
+      title: requestedStatus === "done" ? "任务已通过最终验收" : requestedStatus === "blocked" ? "任务已阻塞" : requestedStatus === "cancelled" ? "任务已取消" : "任务执行失败",
+      detail: tasks[idx].terminal_state_receipt?.reason || tasks[idx].status_detail || requestedStatus,
+      status: requestedStatus === "done" ? "ok" : requestedStatus === "failed" ? "fail" : "warn",
+      phase: requestedStatus === "done" ? "completion" : requestedStatus === "blocked" ? "needs_user" : requestedStatus,
+      agent: tasks[idx].terminal_state_receipt?.actor || "task-runtime",
+      data: { terminal_state_receipt: tasks[idx].terminal_state_receipt },
+    };
+    tasks[idx].workflow_timeline = [...(Array.isArray(tasks[idx].workflow_timeline) ? tasks[idx].workflow_timeline : []), terminalEvent].slice(-160);
+  }
   if (updates.delivery_summary && typeof updates.delivery_summary === "object") {
     tasks[idx].collaboration_state = reconcileTaskCollaborationState(tasks[idx], previousCollaborationState);
   } else if (updates.status === "done" || updates.status === "cancelled") {
@@ -1144,6 +1390,18 @@ export function updateTask(id: string, updates: any) {
   if (updates.status && updates.status !== previousStatus) {
     appendTraceEvent(tasks[idx].trace_id, { id: `task:${id}:status:${updates.status}:${tasks[idx].updated_at}`, type: "task.status_changed", status: updates.status === "failed" ? "error" : updates.status === "done" ? "ok" : "info", task_id: id, group_id: tasks[idx].group_id || "", agent: tasks[idx].target_project || "", message: `${previousStatus || "unknown"} → ${updates.status}`, data: { from: previousStatus || "", to: updates.status, detail: String(updates.status_detail || updates.result || "").slice(0, 500) } });
   }
+  if (terminalAcceptance[requestedStatus] && previousStatus !== requestedStatus) {
+    appendTraceEvent(tasks[idx].trace_id, {
+      id: `task:${id}:terminal:${requestedStatus}:${tasks[idx].terminal_state_receipt?.checksum || tasks[idx].updated_at}`,
+      type: "task.terminal_state_normalized",
+      status: requestedStatus === "done" ? "ok" : requestedStatus === "failed" ? "error" : "warning",
+      task_id: id,
+      group_id: tasks[idx].group_id || "",
+      agent: tasks[idx].target_project || "",
+      message: `${requestedStatus} + ${terminalAcceptance[requestedStatus]}`,
+      data: { terminal_state_receipt: tasks[idx].terminal_state_receipt },
+    });
+  }
   if (updates.receipt && updates.receipt_idempotency_key !== previousReceiptKey) {
     appendTraceEvent(tasks[idx].trace_id, { id: `task:${id}:receipt:${updates.receipt_idempotency_key}`, type: "worker.receipt_persisted", status: updates.receipt.status === "done" ? "ok" : updates.receipt.status === "failed" ? "error" : "warning", task_id: id, group_id: tasks[idx].group_id || "", agent: updates.receipt.agent || tasks[idx].target_project || "", message: updates.receipt.summary || `回执状态 ${updates.receipt.status || "unknown"}`, data: { receipt_status: updates.receipt.status || "", filesChanged: updates.receipt.filesChanged || [], verification: updates.receipt.verification || [] } });
   }
@@ -1152,15 +1410,41 @@ export function updateTask(id: string, updates: any) {
   const doneNewly = updates.status === "done" && previousStatus !== "done";
   if (tasks[idx].parent_task_id && gatePassed && (gateNewlyPassed || doneNewly)) {
     try {
-      require("./collaboration-task-runtime").scheduleRequirementEpicDependencyUnlock(
+      const unlock = require("./collaboration-task-runtime").scheduleRequirementEpicDependencyUnlock(
         tasks[idx].parent_task_id,
         gateNewlyPassed ? "child_gate_newly_passed" : "child_done_gate_passed",
       );
+      if (unlock?.scheduled === false && unlock?.reason === "collab_ctx_unbound") {
+        console.warn(`[Epic 依赖解锁] ${tasks[idx].parent_task_id} 运行时 ctx 未绑定，事件化解锁降级为监工轮询`);
+      }
     } catch (error: any) {
       console.warn(`[Epic 依赖解锁] 调度失败 ${tasks[idx].parent_task_id}:`, error?.message || error);
     }
   }
   return tasks[idx];
+}
+
+export function normalizeTaskTerminalStateView(task: any) {
+  if (!task || typeof task !== "object") return task;
+  const status = String(task.status || "").toLowerCase();
+  const acceptanceByStatus: Record<string, string> = { done: "accepted", failed: "rejected", blocked: "blocked", cancelled: "cancelled" };
+  if (!acceptanceByStatus[status]) return task;
+  return {
+    ...task,
+    acceptance_state: acceptanceByStatus[status],
+    terminal_state_receipt: task.terminal_state_receipt || {
+      schema: "ccm-task-terminal-state-receipt-v1-derived",
+      task_id: String(task.id || ""),
+      status,
+      acceptance_state: acceptanceByStatus[status],
+      settled_at: task.completed_at || task.failed_at || task.cancelled_at || task.updated_at || "",
+      actor: "legacy-state-projection",
+      reason: task.status_detail || task.result || status,
+      evidence_checksum: "",
+      checksum: "",
+      derived: true,
+    },
+  };
 }
 
 export function removeTaskFromQueues(taskId: string) {
@@ -1248,6 +1532,18 @@ export function retryTask(id: string, ctx: CollabCtx, reason = "", autoExecute =
   const current = loadTasks().find(t => t.id === id);
   if (!current) return { success: false, status: 404, error: "任务不存在" };
   if (current.status === "done") return { success: false, status: 409, error: "已完成任务不能重试" };
+  const providerCircuitGate = require("./provider-task-circuit-breaker").getTaskProviderCircuitGate(current);
+  if (providerCircuitGate.blocked) {
+    const message = require("./provider-task-circuit-breaker").formatTaskProviderCircuitMessage(providerCircuitGate.circuit);
+    return {
+      success: false,
+      status: 429,
+      error: message,
+      reason: "provider_circuit_open",
+      retry_after: providerCircuitGate.circuit?.retryAfter || "",
+      remaining_ms: providerCircuitGate.remainingMs,
+    };
+  }
 
   const retryCount = Number(current.retry_count || 0) + 1;
   clearTaskCancellation(id);
@@ -1283,6 +1579,8 @@ export function retryTask(id: string, ctx: CollabCtx, reason = "", autoExecute =
     retry_count: retryCount,
     last_retry_at: new Date().toISOString(),
     last_retry_reason: retryReason,
+    // 重试开启新的返工周期：本周期验收轮次清零，否则上一周期用满 3 轮的任务会零返工机会直接 blocked。
+    ...require("./rework-policy").buildReviewCycleResetUpdate(current, `第 ${retryCount} 次重试：${retryReason}`),
   });
   if (task) updateGroupTaskInlineStatus(task, "pending", `第 ${retryCount} 次重试，等待主 Agent 重新执行`);
   addTaskLog(id, "info", `任务重新入队重试：${retryReason}`);

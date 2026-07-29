@@ -55,6 +55,7 @@ try {
   assert.match(springProfile.label, /Spring Boot/)
   assert.equal(springProfile.runCommand, 'mvn -f spring-services/orders/pom.xml spring-boot:run')
   assert.doesNotMatch(springProfile.runCommand, /-am\s+spring-boot:run/)
+  assert.doesNotMatch(springProfile.runCommand, /java(?:\.exe)?\s+-jar/i)
   const springParent = detected.find(item => item.environment === 'spring-services')
   assert.ok(springParent && !springParent.runCommand, 'aggregator pom must remain build-only')
 
@@ -68,6 +69,7 @@ try {
   const configured = runtime.saveProjectRuntimeConfig(project, { profiles })
   assert.equal(configured.selected_profile_id, 'runtime_one')
   assert.equal(runtime.projectDisplayName(project), '运行工作台自测')
+  assert.throws(() => runtime.saveProjectRuntimeConfig(project, { profiles: [{ ...profiles[0], runCommand: 'java -jar target/app.jar' }] }), /必须运行源码/)
 
   const streamedLogEvents = []
   const unsubscribeLogs = runtime.subscribeProjectRuntimeLogs(project, 'runtime_one', 'run', event => streamedLogEvents.push(event))
@@ -103,8 +105,9 @@ try {
 
   runtime.stopProjectRuntime(project, 'runtime_one')
   await sleep(150)
-  const shutdownResult = runtime.stopManagedProjectRuntimesForShutdown()
-  assert.equal(shutdownResult.stoppedProcesses, 1)
+  const disconnectResult = runtime.stopAllProjectRuntimes(project)
+  assert.equal(disconnectResult.success, true)
+  assert.equal(disconnectResult.stoppedProcesses, 1)
   snapshot = runtime.getProjectRuntimeSnapshot(project)
   assert.equal(snapshot.processes.find(item => item.profileId === 'runtime_two').status, 'stopped')
   assert.equal(snapshot.processes.find(item => item.profileId === 'runtime_two').stopReason, 'user')
@@ -122,6 +125,10 @@ try {
   assert.match(recoveryLogs, /Maven reactor 依赖准备完成/)
   assert.match(recoveryLogs, /spring-service-ready/)
   runtime.stopProjectRuntime(project, 'runtime_recovery')
+  runtime.saveProjectRuntimeConfig(project, { profiles: profiles.filter(item => item.id !== 'runtime_one') })
+  assert.match(runtime.getProjectRuntimeLogs(project, 'runtime_one', 'run', 100).logs, /runtime-stream-ready/)
+  const unsubscribeHistoricalLogs = runtime.subscribeProjectRuntimeLogs(project, 'runtime_one', 'run', () => {})
+  unsubscribeHistoricalLogs()
   const apiSource = fs.readFileSync(path.join(process.cwd(), 'frontend/src/api/index.js'), 'utf8')
   const templateSource = fs.readFileSync(path.join(process.cwd(), 'frontend/src/components/projects/ProjectManager.template.html'), 'utf8')
   const headerSource = fs.readFileSync(path.join(process.cwd(), 'frontend/src/components/projects/ProjectWorkspaceHeader.vue'), 'utf8')
@@ -129,6 +136,7 @@ try {
   const projectRoutesSource = fs.readFileSync(path.join(process.cwd(), 'backend/modules/projects/projects.ts'), 'utf8')
   const cliSource = fs.readFileSync(path.join(process.cwd(), 'ccm-package/bin/ccm.js'), 'utf8')
   const consoleSource = fs.readFileSync(path.join(process.cwd(), 'frontend/src/components/projects/ProjectRunConsole.vue'), 'utf8')
+  const projectManagerSource = fs.readFileSync(path.join(process.cwd(), 'frontend/src/components/projects/useProjectManager.js'), 'utf8')
   const slashSource = fs.readFileSync(path.join(process.cwd(), 'backend/modules/tools/slash-commands.ts'), 'utf8')
   assert.match(apiSource, /runtimeAction:[\s\S]*\/api\/projects\/runtime\/action/)
   assert.match(templateSource, /<ProjectRuntimeBar/)
@@ -140,6 +148,10 @@ try {
   assert.match(consoleSource, /new Terminal\(/)
   assert.match(consoleSource, /new EventSource\(/)
   assert.match(consoleSource, /\/api\/projects\/runtime\/logs/)
+  assert.match(consoleSource, /startFallbackPolling/)
+  assert.match(consoleSource, /setInterval\([\s\S]*loadSnapshot/)
+  assert.match(projectManagerSource, /const targetProfileId = selectedRuntimeProfileId\.value/)
+  assert.match(projectManagerSource, /runtimeAction\(currentProject\.value, targetProfileId, action\)/)
   assert.match(consoleSource, /position:fixed/)
   assert.match(consoleSource, /safe-area-inset-bottom/)
   assert.match(slashSource, /project-restart/)
@@ -150,7 +162,7 @@ try {
   assert.equal(utils.verificationCommandInvocation('mvn spring-boot:run').requiresShell, process.platform === 'win32')
   if (previousJavaHome === undefined) delete process.env.JAVA_HOME
   else process.env.JAVA_HOME = previousJavaHome
-  console.log(JSON.stringify({ success: true, checks: { environmentPairing: true, childModuleDetection: true, inheritedSpringBootDetection: true, aggregatorRemainsBuildOnly: true, runnableProfileSelectedByDefault: true, javaToolchainEnvironmentInherited: true, windowsMavenShellCompatibility: true, mavenReactorAutoRecovery: true, liveLogResetAndChunk: true, userStopIsNotFailure: true, ideaStyleRunConsole: true, stableDisplayName: true, parallelProcesses: true, duplicateStartBlocked: true, exactStop: true, restartUsesNewPid: true, realBuildArtifact: true, runtimeApiWired: true, runtimeUiWired: true, agentConnectionSeparated: true, globalAndFeishuStructuredActions: true, slashCommandsUpdated: true } }, null, 2))
+  console.log(JSON.stringify({ success: true, checks: { environmentPairing: true, childModuleDetection: true, inheritedSpringBootDetection: true, springBootRunsSourceNotJar: true, aggregatorRemainsBuildOnly: true, runnableProfileSelectedByDefault: true, javaToolchainEnvironmentInherited: true, windowsMavenShellCompatibility: true, mavenReactorAutoRecovery: true, liveLogResetAndChunk: true, staleProfileLogsRemainReadable: true, disconnectedStreamUsesSnapshotFallback: true, runtimeActionKeepsExactProfileBinding: true, userStopIsNotFailure: true, projectDisconnectStopsAllRuntimes: true, ideaStyleRunConsole: true, stableDisplayName: true, parallelProcesses: true, duplicateStartBlocked: true, exactStop: true, restartUsesNewPid: true, realBuildArtifact: true, runtimeApiWired: true, runtimeUiWired: true, agentConnectionSeparated: true, globalAndFeishuStructuredActions: true, slashCommandsUpdated: true } }, null, 2))
 } finally {
   try {
     const runtime = await import('../ccm-package/dist/modules/projects/project-runtime.js')

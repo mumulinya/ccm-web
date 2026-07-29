@@ -61,6 +61,7 @@ import {
 } from "./group-orchestrator";
 
 import { buildMainAgentDisplayStream, sanitizeMainAgentUserText } from "./display";
+import { deriveTestAgentReviewPolicy } from "./test-agent-review-policy";
 
 import {
   buildProjectCodeReadOnlySnapshot as buildProjectCodeReadOnlySnapshotBase,
@@ -699,17 +700,29 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
   const verificationCommands = collectCoordinatorVerificationCommands(originalTarget, runtime.workDir, previous);
   const acceptanceCriteria = buildCoordinatorTestAgentAcceptanceCriteria(task, verificationCommands);
   const testAgentReviewConfig = collectConfiguredTestAgentReviewConfig(originalTarget);
+  const workflowDecision = task.workflow_decision || task.workflowDecision || task.intake_draft?.workflow_decision || {};
+  const reviewPolicy = deriveTestAgentReviewPolicy({
+    profile: task.test_agent_verification_profile || task.verification_profile || null,
+    workflowDecision,
+    evidencePlan: Array.isArray(task.acceptance_evidence_plan) ? task.acceptance_evidence_plan : [],
+    hasTestTarget: testAgentReviewConfig.hasExecutableSurface,
+  });
   const completedTasks = uniqueStrings([
     previous.summary ? `${originalTarget} 上一轮结果：${previous.summary}` : "",
     ...(Array.isArray(previous.actions) ? previous.actions : []),
     item?.message || item?.task || "",
   ].filter((value: any) => !isCoordinatorReviewInstruction(value))).slice(0, 10);
   const requiredChecks = uniqueStrings(
+    reviewPolicy.requiredChecks,
     verificationCommands.length || !testAgentReviewConfig.hasExecutableSurface ? ["commands"] : [],
     testAgentReviewConfig.requiredChecks,
   ).slice(0, 20);
   const requiresConfiguredAdversarialProbe = requiredChecks.includes("adversarial")
+    || reviewPolicy.requireAdversarialProbe
     || testAgentReviewConfig.options.requireAdversarialProbe === true;
+  const requiresBrowser = reviewPolicy.browserEnabled
+    || requiredChecks.some(check => ["browser", "browser_e2e", "screenshots", "console_errors", "visual"].includes(check))
+    || (Array.isArray(testAgentReviewConfig.project?.browserChecks) && testAgentReviewConfig.project.browserChecks.length > 0);
   const commandOnlyAdversarialPolicy = !testAgentReviewConfig.hasExecutableSurface && !requiresConfiguredAdversarialProbe
     ? {
         requireAdversarialProbe: false,
@@ -746,9 +759,10 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
       verificationOnly: true,
       browserProvider: input.forcePlaywrightProvider === true || input.providerGapReroute === true
         ? "playwright"
-        : "auto",
-      autoDiscoverVerificationCommands: true,
-      collectBrowserArtifacts: true,
+        : requiresBrowser ? "auto" : "none",
+      autoDiscoverVerificationCommands: reviewPolicy.autoDiscoverVerificationCommands || verificationCommands.length > 0,
+      collectBrowserArtifacts: requiresBrowser,
+      requireAdversarialProbe: requiresConfiguredAdversarialProbe,
       ...commandOnlyAdversarialPolicy,
       ...testAgentReviewConfig.options,
       ...(input.forcePlaywrightProvider === true || input.providerGapReroute === true
@@ -761,6 +775,12 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
       reviewSubject: originalTarget,
       verifier: targetName,
       previousLedger: previous,
+      reviewPolicy: {
+        ...reviewPolicy,
+        browserEnabled: requiresBrowser,
+        requireAdversarialProbe: requiresConfiguredAdversarialProbe,
+        requiredChecks,
+      },
       coordinatorOutputPreview: compactMemoryText(input.coordinatorOutput || "", 1000),
       projectRuntimeSource: runtime.source,
       reviewInstructions: [
@@ -890,6 +910,11 @@ export function buildNativeTestAgentReceipt(targetName: string, report: TestAgen
       workOrderId: report.workOrderId,
       reportId: report.id,
       artifactDir: report.artifactDir,
+      // 盖新鲜度戳：记录本次复核实际覆盖的变更集合，门禁据此发现"复核后代码又改了"。
+      ...require("./review-freshness").buildReviewFreshnessStamp([
+        ...reviewedFiles,
+        ...((handoff?.projects || []).flatMap((project: any) => (project?.changedFiles || []).map((file: any) => ({ path: file, project: project?.name })))),
+      ]),
     }],
     reviewer: targetName || "test-agent",
     role: "independent_verifier",

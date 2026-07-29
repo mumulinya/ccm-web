@@ -55,6 +55,8 @@ export interface TestAgentRunnerRecord {
   sourceBefore: TestAgentSourceBinding;
   sourceAfter?: TestAgentSourceBinding;
   sourceStable?: boolean;
+  attemptScope?: string;
+  runtimeEnvFingerprint?: string;
   result?: any;
 }
 
@@ -65,6 +67,7 @@ export interface RunTestAgentJobInput {
   groupId?: string;
   timeoutMs?: number;
   idempotencyKey?: string;
+  attemptScope?: string;
   allowedWorkDirs?: string[];
   runtimeEnv?: Record<string, string>;
 }
@@ -87,6 +90,28 @@ const purgedRunIds = new Set<string>();
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function runtimeEnvironmentFingerprint(runtimeEnv?: Record<string, string>) {
+  const entries = Object.entries(runtimeEnv || {})
+    .filter(([name]) => /^[A-Z_][A-Z0-9_]*$/.test(name))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => [name, hash(String(value))]);
+  return entries.length ? hash(entries) : "";
+}
+
+export function buildTestAgentRunnerJobKey(input: RunTestAgentJobInput, sourceFingerprint?: string) {
+  const source = sourceFingerprint || captureTestAgentSourceBinding(input.handoff).fingerprint;
+  return hash({
+    mode: input.mode,
+    taskId: input.taskId || input.handoff?.taskId || input.handoff?.task_id || "",
+    groupId: input.groupId || input.handoff?.groupId || input.handoff?.group_id || "",
+    handoff: input.handoff,
+    source,
+    idempotencyKey: input.idempotencyKey || "",
+    attemptScope: String(input.attemptScope || ""),
+    runtimeEnvFingerprint: runtimeEnvironmentFingerprint(input.runtimeEnv),
+  });
 }
 
 function ensureDirs() {
@@ -458,6 +483,8 @@ async function startJob(input: RunTestAgentJobInput, key: string): Promise<TestA
     cancelledReason: "",
     recoveredAfterRestart: false,
     sourceBefore,
+    attemptScope: String(input.attemptScope || ""),
+    runtimeEnvFingerprint: runtimeEnvironmentFingerprint(input.runtimeEnv),
   };
   saveRecord(record);
 
@@ -526,14 +553,7 @@ async function startJob(input: RunTestAgentJobInput, key: string): Promise<TestA
 
 export async function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<TestAgentRunnerResult> {
   const source = captureTestAgentSourceBinding(input.handoff);
-  const key = hash({
-    mode: input.mode,
-    taskId: input.taskId || input.handoff?.taskId || input.handoff?.task_id || "",
-    groupId: input.groupId || input.handoff?.groupId || input.handoff?.group_id || "",
-    handoff: input.handoff,
-    source: source.fingerprint,
-    idempotencyKey: input.idempotencyKey || "",
-  });
+  const key = buildTestAgentRunnerJobKey(input, source.fingerprint);
   const active = activeByKey.get(key);
   if (active) return active;
 

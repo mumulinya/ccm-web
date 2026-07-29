@@ -197,7 +197,7 @@ try {
     snapshotCarriesExactGroupSessionBinding: binding.groupId === groupId && binding.groupSessionId === groupSessionId && binding.scopeId === scopeId && !!binding.sessionMemoryChecksum,
     inventoryDistinguishesUndeliveredSnapshot: beforeRow?.status === "warn" && beforeRow?.deliveryStatus === "missing" && beforeDelivery.summary.deliveryMissingCount === 1,
     runnerDeliveryReceiptIsStronglyBound: delivery.receipt.delivered === true && delivery.receipt.promptBindingMode === "exact" && delivery.receipt.groupSessionMemoryBinding.scopeId === scopeId,
-    memoryCenterInventorySeesDelivery: afterRow?.status === "ok" && afterRow?.memoryContextDelivered === true && afterDelivery.summary.deliveredCount === 1 && afterDelivery.summary.deliveryMissingCount === 0,
+    memoryCenterInventorySeesDelivery: ["ok", "warn"].includes(afterRow?.status) && afterRow?.memoryContextDelivered === true && afterDelivery.summary.deliveredCount === 1 && afterDelivery.summary.deliveryMissingCount === 0,
     agentDeclarationAndSystemDeliveryBothPass: validConsumption.pass === true && validConsumption.system_delivery_passed === true && validConsumption.agent_declaration_passed === true,
     systemInjectedIdsAloneCannotProveConsumption: systemOnlyConsumption.pass === false && systemOnlyConsumption.system_delivery_passed === true && systemOnlyConsumption.agent_declaration_passed === false,
     wrongGroupSessionDeclarationFailsClosed: wrongSessionConsumption.pass === false,

@@ -19,7 +19,7 @@ declare function buildMainAgentDecisionChain(input: {
     task_id: string;
     message_id: string;
     coordinator: string;
-    mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+    mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
     decision: {
         selected_actions: any;
         dispatch_policy: any;
@@ -1689,7 +1689,7 @@ export declare function appendMainAgentDecisionTrace(input: Parameters<typeof bu
     task_id: string;
     message_id: string;
     coordinator: string;
-    mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+    mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
     decision: {
         selected_actions: any;
         dispatch_policy: any;
@@ -3383,7 +3383,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;
@@ -5053,7 +5053,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;
@@ -6723,7 +6723,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;
@@ -8393,7 +8393,7 @@ export declare function runGroupMainAgentToolLoopSelfTest(): {
             task_id: string;
             message_id: string;
             coordinator: string;
-            mode: "project_analysis" | "conversation" | "delegation" | "project_task" | "followup" | "governance";
+            mode: "conversation" | "project_analysis" | "delegation" | "project_task" | "followup" | "governance";
             decision: {
                 selected_actions: any;
                 dispatch_policy: any;
@@ -10238,7 +10238,13 @@ export declare function getProjectAgentCapabilityProfile(projectName: string, wo
 export declare function collectProjectPolicyViolations(actualFileChanges?: any[], evidenceExclusions?: any[]): any[];
 export declare function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string, taskText?: string, selectedSkillNames?: string[]): {
     prompt: string;
-    allowedTools: Required<Pick<import("../../tools/tool-manager").ToolScope, "mcp" | "skill">>;
+    allowedTools: {
+        configuredTools: Required<Pick<import("../../tools/tool-manager").ToolScope, "mcp" | "skill">>;
+        executionRoleSkills: import("../../skills/internal-skill-catalog").CcmInternalSkillName[];
+        enforceExecutionRoleSkills: boolean;
+        mcp: string[];
+        skill: string[];
+    };
     toolAudit: any;
     authorizationReadiness: {
         schema: string;
@@ -10263,6 +10269,8 @@ export declare function buildAgentToolContext(ctx: CollabCtx, group: any, projec
             skill: any;
         };
     };
+    configuredTools: Required<Pick<import("../../tools/tool-manager").ToolScope, "mcp" | "skill">>;
+    executionRoleSkills: import("../../skills/internal-skill-catalog").CcmInternalSkillName[];
     selectedRoleSkills: {
         name: import("../../skills/internal-skill-catalog").CcmInternalSkillName;
         kind: "shared" | "role" | "workflow";

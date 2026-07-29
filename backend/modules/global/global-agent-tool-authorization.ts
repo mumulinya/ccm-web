@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { toolManager, type ToolScope } from "../../tools/tool-manager";
+import { buildMainAgentToolRuntimeContext } from "../../tools/main-agent-tool-runtime";
 import {
   buildFreshToolAuthorizationPayload,
   buildToolAuthorizationPayload,
@@ -95,8 +96,10 @@ export async function saveGlobalAgentToolAuthorization(input: any = {}) {
 
 export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["auditContext"] = {}) {
   const authorization = getGlobalAgentToolAuthorizationPayload();
-  const scope: ToolScope = {
-    ...authorization.tools,
+  const shared = buildMainAgentToolRuntimeContext({
+    configuredTools: authorization.tools,
+    mcpPolicy: "all",
+    label: "全局 Agent",
     auditContext: {
       runtime: "global-agent",
       project: "",
@@ -105,9 +108,8 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
       executionId: String(auditContext?.executionId || ""),
       source: String(auditContext?.source || "global-agent"),
     },
-  };
-  const catalog = toolManager.getScopedToolCatalog(scope);
-  const checksum = crypto.createHash("sha256").update(JSON.stringify({ tools: authorization.tools, catalog })).digest("hex");
+  });
+  const catalog = { tools: shared.catalog.mcp, skills: shared.catalog.skills };
   return {
     schema: "ccm-global-agent-tool-runtime-context-v1",
     tools: authorization.tools,
@@ -117,8 +119,8 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
     catalog,
     counts: { mcp: catalog.tools.length, skill: catalog.skills.length },
     configured_counts: { mcp: authorization.tools.mcp.length, skill: authorization.tools.skill.length },
-    checksum,
-    scope,
+    checksum: shared.checksum,
+    scope: shared.scope,
     updated_at: authorization.updated_at,
     updated_by: authorization.updated_by,
   };

@@ -48,6 +48,7 @@ export declare function looksLikeTaskContinuation(message: string): any;
 export declare function getGlobalMissionChildDeliveryEvidence(task: any): {
     strong_acceptance_passed: any;
     acceptance_evidence_status: "missing" | "strong" | "weak";
+    acceptance_evidence_source: string;
     acceptance_evidence_detail: string;
     execution_count: number;
     execution_states: {
@@ -79,6 +80,7 @@ export declare function appendGlobalDirectDispatchContinuationToHistory(task: an
 export declare function appendGlobalDirectDispatchCompletionToHistory(task: any, previousStatus?: string): boolean;
 export declare function appendGlobalDirectDispatchRollbackToHistory(task: any, previousStatus?: string): boolean;
 export declare function updateTask(id: string, updates: any): any;
+export declare function normalizeTaskTerminalStateView(task: any): any;
 export declare function refreshGlobalDevelopmentMissions(): any;
 export declare function getGlobalDevelopmentMission(id: string): any;
 export declare function getMissionDependencyRefs(task: any): string[];
@@ -128,7 +130,7 @@ export declare function reconcileTaskDeliveryEvidence(taskId: string): {
     status?: undefined;
     error?: undefined;
 };
-export declare function validateTaskManualStatusUpdate(current: any, updates: any): string;
+export declare function validateTaskManualStatusUpdate(current: any, updates: any): any;
 export declare function buildTaskGapContinuationDraft(task: any): any;
 export declare function buildTargetedReworkContinuationDraft(task: any, payload?: any): string;
 export declare function getTaskGapItems(task: any): any;
@@ -150,6 +152,20 @@ export declare function buildExecutionDashboard(limit?: number): {
         in_progress_tasks: number;
         failed_tasks: number;
         running_task_ids: string[];
+        unified_scheduler: {
+            schema: string;
+            queued: number;
+            running_lanes: string[];
+            running_task_ids: string[];
+            workspace_lanes: string[];
+            queues: {
+                queue_key: string;
+                task_ids: string[];
+            }[];
+        };
+        unified_queued: number;
+        unified_running_lanes: number;
+        workspace_mutation_lanes: string[];
     };
     summary: {
         total: number;

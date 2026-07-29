@@ -17,6 +17,21 @@ export declare function saveSkill(skill: any): void;
 export declare function deleteSkill(name: string): void;
 export declare function applyMetricToStore(value: any, agent: string, data?: any, now?: Date | string | number): any;
 export declare function loadMetrics(): any;
+export declare function queryMetricEvents(value: any, filters?: any): {
+    events: any;
+    total: any;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    status: string;
+    statusCounts: any;
+    retentionLimit: number;
+    range: {
+        days: number;
+        fromDate: string;
+        toDate: string;
+    };
+};
 export declare function saveMetrics(metrics: any): void;
 export declare function recordMetric(agent: string, data: any): boolean;
 export declare function runMetricsAggregationSelfTest(): {
@@ -59,8 +74,8 @@ export declare function loadDevWeeklyReports(): any[];
 export declare function saveDevWeeklyReports(reports: any[]): void;
 export declare function loadAutoDevNotifyConfig(): any;
 export declare function saveAutoDevNotifyConfig(config: any): void;
-export declare function loadRagWatchPaths(): string[];
-export declare function saveRagWatchPaths(paths: string[]): void;
+export declare function loadRagWatchPaths(): any[];
+export declare function saveRagWatchPaths(paths: any[]): void;
 export declare function loadRagMetadata(): Record<string, {
     tags: string[];
 }>;

@@ -113,6 +113,10 @@ export type GroupOrchestratorInput = {
     auto_worker_context_compact_retry?: boolean;
     workerContextRetryOptions?: any;
     worker_context_retry_options?: any;
+    workflowDecision?: WorkflowDecision | null;
+    workflow_decision?: WorkflowDecision | null;
+    projectSourceEvidence?: any;
+    project_source_evidence?: any;
     onDelta?: (delta: string) => void;
 };
 export declare function measureGroupMainAgentPayload(input: any): {
@@ -275,6 +279,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     };
     content: string;
     coordinationPlan?: undefined;
+    projectSourceEvidence?: undefined;
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
 } | {
@@ -296,14 +301,8 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     assignments: any[];
     analysis: any;
     workflowDecision: WorkflowDecision;
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
+    coordinationPlan: any;
+    projectSourceEvidence: any;
     dispatchPolicy: {
         action: string;
         reason: string;
@@ -340,6 +339,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         responsibility: string;
     };
     content: string;
+    providerFailure?: undefined;
     usage?: undefined;
     contextRecovery?: undefined;
 } | {
@@ -347,7 +347,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     contextRecovery: {
         type: string;
         originalChars: number;
-        recoveredChars: number;
+        recoveredChars: any;
         ownership: any;
     };
     mainAgentToolUsage: {
@@ -390,14 +390,16 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     };
     content: string;
     coordinationPlan?: undefined;
+    projectSourceEvidence?: undefined;
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
+    providerFailure?: undefined;
 } | {
     usage: LlmTokenUsage;
     contextRecovery: {
         type: string;
         originalChars: number;
-        recoveredChars: number;
+        recoveredChars: any;
         ownership: any;
     };
     mainAgentToolUsage: {
@@ -417,14 +419,8 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     assignments: any[];
     analysis: any;
     workflowDecision: WorkflowDecision;
-    coordinationPlan: {
-        mode: string;
-        strategy: string;
-        executionOrder: string;
-        phases: string[];
-        targets: any[];
-        missingInfo: any;
-    };
+    coordinationPlan: any;
+    projectSourceEvidence: any;
     dispatchPolicy: {
         action: string;
         reason: string;
@@ -449,11 +445,21 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     executionOrder: string;
     coordinationStrategy: string;
     content: string;
+    providerFailure?: undefined;
 } | {
     agent: any;
     delegated: any[];
     assignments: any[];
     runtime: string;
+    providerFailure: {
+        code: string;
+        retryExhausted: boolean;
+        attempts: number;
+        maxAttempts: number;
+        elapsedMs: number;
+        attemptTimeoutMs: number;
+        totalTimeoutMs: number;
+    };
     usage: any;
     contextRecovery: {
         type: string;

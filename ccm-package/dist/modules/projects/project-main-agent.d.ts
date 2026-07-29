@@ -1,3 +1,4 @@
+import { type TestAgentAcceptanceEvidence, type TestAgentVerificationProfile } from "../collaboration/test-agent-review-policy";
 import type { WorkflowDecision } from "../../agents/workflow-decision";
 export type ProjectMainWorkItem = {
     id: string;
@@ -18,6 +19,8 @@ export type ProjectMainPlan = {
     projectSessionId: string;
     requiresConfirmation: boolean;
     acceptanceCriteria: string[];
+    acceptanceEvidencePlan: TestAgentAcceptanceEvidence[];
+    verificationProfile: TestAgentVerificationProfile;
     permissionBoundaries: string[];
     sourceEvidence: {
         manifestChecksum: string;
@@ -46,6 +49,17 @@ export type ProjectMainPlan = {
     workItems: ProjectMainWorkItem[];
     createdAt: string;
 };
+export type ProjectMainPlanRevisionV1 = {
+    schema: "ccm-project-main-plan-revision-v1";
+    revision: number;
+    feedback: string;
+    client_message_id: string;
+    previous_plan_checksum: string;
+    revised_plan_checksum: string;
+    source_snapshot_checksum: string;
+    requested_at: string;
+    completed_at: string;
+};
 export type ProjectMainWorkerResult = {
     success: boolean;
     output: string;
@@ -64,6 +78,12 @@ export type ProjectMainExecutionResult = {
     risks: string[];
     testAgent: any;
 };
+export declare function reconcileInterruptedProjectMainTasks(): {
+    checked: number;
+    interrupted: number;
+    active_elsewhere: number;
+    results: any[];
+};
 export declare function planProjectMainTask(input: {
     project: string;
     projectSessionId: string;
@@ -78,6 +98,8 @@ export declare function planProjectMainTask(input: {
     projectSessionId: string;
     requiresConfirmation: boolean;
     acceptanceCriteria: string[];
+    acceptanceEvidencePlan: TestAgentAcceptanceEvidence[];
+    verificationProfile: TestAgentVerificationProfile;
     permissionBoundaries: string[];
     sourceEvidence: {
         manifestChecksum: string;
@@ -128,6 +150,19 @@ export declare function getProjectMainTask(taskId: string): any;
 export declare function confirmProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string): any;
 export declare function cancelProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string, reason?: string): any;
 export declare function cancelProjectMainTasksForSession(projectInput: string, projectSessionIdInput: string, reason: string): any[];
+export declare function reviseProjectMainTask(input: {
+    taskId: string;
+    project: string;
+    projectSessionId: string;
+    feedback: string;
+    clientMessageId: string;
+    context?: string;
+    planBuilder?: typeof planProjectMainTask;
+}): Promise<{
+    task: any;
+    revision: any;
+    duplicate: boolean;
+}>;
 export declare function executeProjectMainTask(input: {
     task: any;
     plan: ProjectMainPlan;
@@ -146,17 +181,67 @@ export declare function projectMainTaskPublic(task: any): {
     project_main_run_id: any;
     orchestration_scope: string;
     status: any;
+    usage_summary: any;
     phase: string;
+    phase_label: string;
+    runtime_status: {
+        schema: string;
+        phase: string;
+        phase_label: string;
+        terminal: boolean;
+        active: boolean;
+        waiting: boolean;
+        blocker_kind: string;
+        status_detail: string;
+        next_action: string;
+        started_at: string;
+        last_activity_at: string;
+        completed_at: string;
+        queue_position: number;
+        review_round: number;
+        max_review_rounds: number;
+        provider_retry: {
+            state: any;
+            attempts: number;
+            retry_after: any;
+        };
+        recovery_count: number;
+    };
+    status_detail: any;
+    next_action: any;
+    created_at: any;
+    started_at: any;
+    updated_at: any;
+    completed_at: any;
     acceptance_state: any;
+    queue_scope: any;
+    queue_target_key: any;
+    queue_position: number;
+    queue_state: any;
+    scheduler_state: any;
+    workspace_lane: any;
+    terminal_decision: any;
+    terminal_gate: any;
+    acceptance_mode: any;
+    test_agent_enabled: boolean;
+    message_id: string;
+    acceptance_evidence_plan: any;
+    test_agent_review_policy: any;
+    test_agent_failure_route: any;
     title: any;
     goal: any;
     plan_mode: any;
+    source_evidence: any;
     work_items: any;
     verification: any;
     risks: any;
     file_changes: any;
     final_summary: any;
     test_agent: any;
+    main_agent_self_verification: any;
+    plan_revision_count: any;
+    plan_revisions: any;
+    plan_revision_pending: any;
     actions: {
         id: string;
         kind: string;

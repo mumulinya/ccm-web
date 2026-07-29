@@ -688,6 +688,9 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                     ? (0, sessions_1.ensureProjectAutomationSession)(targetProject, requestedProjectSessionId, (0, collaboration_1.compactFormText)(payload.title || requirement, "自动开发任务").slice(0, 80))
                     : null;
                 const requestedGroupSessionId = (0, collaboration_1.compactFormText)(payload.group_session_id || payload.groupSessionId, "");
+                const clientMessageId = (0, collaboration_1.compactFormText)(payload.client_message_id || payload.clientMessageId, "")
+                    || `intake_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
+                const requestOrigin = (0, collaboration_1.compactFormText)(payload.source || payload.request_origin || payload.requestOrigin, "usability-intake");
                 const workflowDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
                     message: requirement,
                     scope: group ? "group" : "project",
@@ -752,13 +755,19 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                     requirement_content_hash: sourceIngestion.content_hash,
                     source_ingestion: sourceIngestion.technical,
                     target_project: targetProject,
+                    priority: payload.priority || "normal",
                     group_id: group?.id || null,
                     group_session_id: requestedGroupSessionId || null,
                     project_session_id: projectSession?.sessionId || null,
                     assign_type: group ? "group" : "project",
                     orchestration_scope: group ? "group_session" : "project_session",
                     queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
-                    request_origin: payload.source || payload.request_origin || payload.requestOrigin || "usability-intake",
+                    request_origin: requestOrigin,
+                    source_channel: payload.source_channel || payload.sourceChannel || requestOrigin,
+                    target_scope: group ? "group_session" : "project_session",
+                    target_id: group?.id || targetProject,
+                    exact_session_id: requestedGroupSessionId || projectSession?.sessionId || "",
+                    client_message_id: clientMessageId,
                     workflow_type: "requirement_epic",
                     requires_code_changes: typeof payload.requires_code_changes === "boolean" ? payload.requires_code_changes : workflowDecision.requiresCodeChanges,
                     requires_verification: Array.isArray(workflowDecision.verificationModes) && workflowDecision.verificationModes.length > 0,
@@ -768,11 +777,11 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                     workflow_decision: workflowDecision,
                     workflow_meta: {
                         intake: {
-                            source: payload.source || payload.request_origin || payload.requestOrigin || "usability-intake",
+                            source: requestOrigin,
                             channel: payload.channel || "web",
                             project_session_id: projectSession?.sessionId || "",
                             group_session_id: requestedGroupSessionId,
-                            client_message_id: payload.client_message_id || payload.clientMessageId || "",
+                            client_message_id: clientMessageId,
                             source_ingestion: sourceIngestion.technical,
                         },
                         requirement_epic: {
@@ -781,7 +790,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                         },
                     },
                     trace_id: payload.trace_id || payload.traceId,
-                    idempotency_key: payload.idempotency_key || payload.idempotencyKey || `requirement-epic-preview:${payload.client_message_id || payload.clientMessageId || sourceIngestion.content_hash}`,
+                    idempotency_key: payload.idempotency_key || payload.idempotencyKey || "",
                 });
                 const updated = (0, collaboration_1.updateTask)(task.id, { status: "pending", auto_execute: false, intake_state: "awaiting_confirmation", intake_draft: intakeDraft, status_detail: "执行计划已准备好，等待你确认" }) || task;
                 (0, reliability_ledger_1.appendTraceEvent)(updated.trace_id, { type: "intake.previewed", status: "ok", task_id: updated.id, group_id: updated.group_id || "", agent: targetProject, message: "已生成执行前确认卡，尚未开始执行", data: intakeDraft });
@@ -837,12 +846,31 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                 if (current.intake_state !== "awaiting_confirmation")
                     return (0, utils_1.sendJson)(res, { error: "这张确认卡已经失效" }, 409);
                 const confirmedAt = new Date().toISOString();
-                if (current.workflow_type === "requirement_epic" && (current.decomposition_plan || current.requirement_decomposition)) {
+                const submittedPlan = payload.decomposition_plan || payload.decompositionPlan || null;
+                const confirmedPlan = submittedPlan
+                    ? (0, source_ingestion_1.validateRequirementDecomposition)(submittedPlan, {
+                        contentHash: current.requirement_content_hash || submittedPlan.content_hash,
+                        requirement: current.requirement_extraction,
+                        extractionMethod: submittedPlan.extraction_method,
+                    })
+                    : (current.decomposition_plan || current.requirement_decomposition);
+                if (submittedPlan) {
+                    (0, logs_1.appendTaskTimelineEvent)(current.id, {
+                        type: "requirement_plan_edited",
+                        title: "用户调整了任务拆分",
+                        detail: `确认前保留 ${confirmedPlan?.items?.length || 0} 个可执行任务，依赖关系已重新校验`,
+                        status: "completed",
+                        phase: "planning",
+                        agent: "user",
+                        data: { decomposition_plan: confirmedPlan },
+                    });
+                }
+                if (current.workflow_type === "requirement_epic" && confirmedPlan) {
                     const versionOfEpicId = String(current.workflow_meta?.requirement_epic?.version_of_epic_id || "").trim();
                     if (versionOfEpicId) {
                         const versionResult = (0, collaboration_1.updateRequirementEpicFromPlan)({
                             epic_id: versionOfEpicId,
-                            decomposition_plan: current.decomposition_plan || current.requirement_decomposition,
+                            decomposition_plan: confirmedPlan,
                             requirement_extraction: current.requirement_extraction,
                             requirement_content_hash: current.requirement_content_hash,
                             source_documents: current.source_documents,
@@ -886,7 +914,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                     }
                     const epicResult = (0, collaboration_1.createRequirementEpicWithChildren)({
                         draft_task_id: current.id,
-                        decomposition_plan: current.decomposition_plan || current.requirement_decomposition,
+                        decomposition_plan: confirmedPlan,
                         requirement_extraction: current.requirement_extraction,
                         requirement_content_hash: current.requirement_content_hash,
                         source_documents: current.source_documents,
@@ -905,11 +933,17 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                         channel: current.workflow_meta?.intake?.channel || "web",
                         conversation_id: current.group_session_id || current.project_session_id || current.group_id || current.target_project || "global",
                         client_message_id: current.workflow_meta?.intake?.client_message_id || current.id,
+                        intake_identity: current.intake_identity || null,
+                        intake_identity_checksum: current.intake_identity_checksum || "",
+                        source_channel: current.source_channel || current.request_origin || "usability-intake",
+                        target_scope: current.target_scope || current.orchestration_scope || (current.group_id ? "group_session" : "project_session"),
+                        target_id: current.target_id || current.group_id || current.target_project || "",
+                        exact_session_id: current.exact_session_id || current.group_session_id || current.project_session_id || "",
                         trace_id: current.trace_id,
                         idempotency_key: current.idempotency_key,
                         owner_agent: current.target_project || "global-agent",
                         confirmed: true,
-                        clarifications_resolved: !(current.decomposition_plan || current.requirement_decomposition)?.clarification_questions?.length || !!acceptFeedback,
+                        clarifications_resolved: !confirmedPlan?.clarification_questions?.length || !!acceptFeedback,
                         auto_execute: true,
                         requires_independent_review: true,
                     });
@@ -1211,6 +1245,22 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                         source_ingestion: attachments.technical,
                     };
                 }
+                const autoExecute = taskPayload.auto_execute === true || taskPayload.autoExecute === true;
+                const assignType = String(taskPayload.assign_type || taskPayload.assignType || "project").trim().toLowerCase();
+                if (autoExecute) {
+                    const targetScope = assignType === "group" ? "group_session" : "project_session";
+                    taskPayload = {
+                        ...taskPayload,
+                        orchestration_scope: taskPayload.orchestration_scope || taskPayload.orchestrationScope || targetScope,
+                        queue_scope: taskPayload.queue_scope || taskPayload.queueScope || "conversation_serial",
+                        request_origin: taskPayload.request_origin || taskPayload.requestOrigin || "task-dispatch",
+                        source_channel: taskPayload.source_channel || taskPayload.sourceChannel || "task-dispatch",
+                        target_scope: taskPayload.target_scope || taskPayload.targetScope || targetScope,
+                        target_id: taskPayload.target_id || taskPayload.targetId || (assignType === "group" ? taskPayload.group_id || taskPayload.groupId : taskPayload.target_project || taskPayload.targetProject),
+                        exact_session_id: taskPayload.exact_session_id || taskPayload.exactSessionId || (assignType === "group" ? taskPayload.group_session_id || taskPayload.groupSessionId : taskPayload.project_session_id || taskPayload.projectSessionId) || "",
+                        client_message_id: taskPayload.client_message_id || taskPayload.clientMessageId || `standard_${crypto.randomUUID()}`,
+                    };
+                }
                 const task = (0, collaboration_1.createTask)(taskPayload);
                 persistedTask = task;
                 if (task?.deduplicated === true)
@@ -1256,11 +1306,13 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
             let operationKey = "";
             let keepUploadedFiles = false;
             try {
-                operationKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
+                const clientMessageId = String(payload.client_message_id || payload.clientMessageId || payload.idempotency_key || payload.idempotencyKey || "").trim()
+                    || `daily_${crypto.randomUUID()}`;
                 const traceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "daily-dev");
                 const groupId = payload.group_id || payload.groupId;
                 if (!groupId)
                     return (0, utils_1.sendJson)(res, { error: "请选择目标开发群聊" }, 400);
+                operationKey = `${groupId}:${payload.group_session_id || payload.groupSessionId || "automation"}:${clientMessageId}`;
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === groupId);
                 if (!group)
@@ -1312,7 +1364,16 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                     description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)(taskPayload),
                     target_project: groupReadiness.coordinator.project,
                     group_id: groupId,
+                    group_session_id: payload.group_session_id || payload.groupSessionId || null,
                     assign_type: "group",
+                    orchestration_scope: "group_session",
+                    queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
+                    request_origin: payload.request_origin || payload.requestOrigin || "task-dispatch-daily-dev",
+                    source_channel: payload.source_channel || payload.sourceChannel || "task-dispatch-daily-dev",
+                    target_scope: "group_session",
+                    target_id: groupId,
+                    exact_session_id: payload.group_session_id || payload.groupSessionId || "",
+                    client_message_id: clientMessageId,
                     priority: payload.priority || "normal",
                     auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
                     workflow_type: "daily_dev",
@@ -1404,11 +1465,21 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
     if (pathname === "/api/tasks/daily-dev-backlog" && req.method === "GET") {
         const groupId = String(parsed.query.group_id || parsed.query.groupId || "");
         const items = (0, daily_dev_backlog_1.listDailyDevBacklogs)(groupId);
+        const collections = (0, daily_dev_backlog_1.listRequirementBacklogCollections)(groupId);
         const counts = items.reduce((acc, item) => {
             acc[item.status] = Number(acc[item.status] || 0) + 1;
             return acc;
         }, {});
-        (0, utils_1.sendJson)(res, { success: true, items, counts });
+        (0, utils_1.sendJson)(res, {
+            success: true,
+            items,
+            collections,
+            counts,
+            collection_counts: collections.reduce((acc, item) => {
+                acc[item.state] = Number(acc[item.state] || 0) + 1;
+                return acc;
+            }, {}),
+        });
         return true;
     }
     if (pathname === "/api/tasks/daily-dev-backlog/status" && req.method === "POST") {
@@ -1573,6 +1644,24 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                         };
                     });
                     const approvedAt = new Date().toISOString();
+                    const acceptanceDecisionBase = {
+                        schema: "ccm-epic-acceptance-decision-v1",
+                        task_id: epic.id,
+                        mode: "explicit_user_approval",
+                        status: "approved",
+                        actor: payload.reviewer || "user",
+                        risk_level: String(epic.workflow_decision?.riskLevel || epic.workflow_decision?.risk_level || epic.intake_draft?.risk?.level || "unknown"),
+                        gate_passed: true,
+                        source_evidence_ready: true,
+                        pending_permission_count: 0,
+                        blockers: [],
+                        evidence_checksum: crypto.createHash("sha256").update(JSON.stringify(evidenceMatrix)).digest("hex"),
+                        decided_at: approvedAt,
+                    };
+                    const acceptanceDecision = {
+                        ...acceptanceDecisionBase,
+                        checksum: crypto.createHash("sha256").update(JSON.stringify(acceptanceDecisionBase)).digest("hex"),
+                    };
                     const epicDeliverySummary = {
                         ...(epic.delivery_summary || {}),
                         headline: "需求 Epic 已通过整批变更审阅并完成交付",
@@ -1590,6 +1679,8 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                         status: "done",
                         status_detail: "用户已审阅整批变更并批准需求 Epic 交付",
                         completed_at: approvedAt,
+                        acceptance_decision: acceptanceDecision,
+                        terminal_actor: payload.reviewer || "user",
                         epic_review: {
                             status: "approved",
                             approved_at: approvedAt,
@@ -1713,6 +1804,51 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
 // ===== merged from collaboration-routes-part-03.ts =====
 // Extracted functional module. The original entry remains a compatibility facade.
 function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, ctx) {
+    if (pathname === "/api/tasks/acceptance" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const taskId = String(payload.task_id || payload.taskId || payload.id || "").trim();
+                const current = (0, db_1.loadTasks)().find((task) => String(task.id) === taskId);
+                if (!current)
+                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                const decidedAt = new Date().toISOString();
+                const updates = {
+                    status: "done",
+                    status_detail: (0, collaboration_1.compactFormText)(payload.reason, "用户已核对现有结构化验收证据并批准交付"),
+                    terminal_actor: "user",
+                    acceptance_decision: {
+                        schema: "ccm-user-task-acceptance-decision-v1",
+                        actor: "user",
+                        status: "approved",
+                        decided_at: decidedAt,
+                        reason: (0, collaboration_1.compactFormText)(payload.reason, "用户批准"),
+                    },
+                };
+                const validationError = (0, collaboration_1.validateTaskManualStatusUpdate)(current, updates);
+                if (validationError)
+                    return (0, utils_1.sendJson)(res, { error: validationError }, 409);
+                const task = (0, collaboration_1.updateTask)(taskId, updates);
+                (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                    type: "user_final_acceptance",
+                    title: "用户已批准最终交付",
+                    detail: updates.status_detail,
+                    status: "ok",
+                    phase: "completion",
+                    agent: "user",
+                    data: { terminal_decision: task?.terminal_decision || null },
+                });
+                (0, collaboration_1.updateGroupTaskInlineStatus)(task, "done", updates.status_detail);
+                (0, utils_1.sendJson)(res, { success: true, task, terminal_decision: task?.terminal_decision || null });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
     if (pathname === "/api/tasks/update" && req.method === "POST") {
         const handleUpdate = async (payload, files = [], multipart = false) => {
             try {
@@ -1740,6 +1876,8 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                         source_ingestion: attachments.technical || current.source_ingestion || null,
                     };
                 }
+                if (updates.status === "done")
+                    updates = { ...updates, terminal_actor: "user" };
                 const validationError = (0, collaboration_1.validateTaskManualStatusUpdate)(current, updates);
                 if (validationError)
                     return (0, utils_1.sendJson)(res, { error: validationError }, 409);
@@ -2430,7 +2568,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     }
                 }
                 if (autoAssignInvocationEdge) {
-                    const autoAssignFailed = !autoAssignSucceeded || (0, agent_receipts_1.checkTaskFailure)(taskResult);
+                    const autoAssignFailed = !autoAssignSucceeded;
                     autoAssignInvocationEdge = (0, task_agent_invocation_lineage_1.completeTaskAgentInvocationEdge)(autoAssignInvocationEdge, {
                         success: !autoAssignFailed,
                         nativeSessionId: autoAssignNativeSessionId || autoAssignTaskSession?.nativeSessionId || "",

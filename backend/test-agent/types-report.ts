@@ -206,5 +206,9 @@ export interface TestAgentReport {
   risks: string[];
   blockedReasons: string[];
   issues: WorkOrderIssue[];
+  semanticPlan?: Record<string, any> | null;
+  criterionCoverage?: Array<Record<string, any>>;
+  unplannedCriteria?: Array<Record<string, any>>;
+  semanticDecisionReceipt?: Record<string, any> | null;
   metadata: Record<string, any>;
 }

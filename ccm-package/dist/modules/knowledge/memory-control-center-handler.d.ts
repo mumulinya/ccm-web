@@ -5,6 +5,9 @@ export declare function buildMemoryCenterOverview(): {
     globals: any[];
     tasks: any;
     alerts: any[];
+    controlGc: {
+        pruned: number;
+    };
     totals: {
         scopes: number;
         groupSessions: number;

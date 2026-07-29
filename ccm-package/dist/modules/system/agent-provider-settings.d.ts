@@ -23,6 +23,7 @@ type StoredAgentProviderSettings = {
 };
 type InstallState = {
     status: "idle" | "running" | "succeeded" | "failed";
+    operation?: "install" | "update";
     startedAt?: string;
     completedAt?: string;
     output?: string;
@@ -164,6 +165,15 @@ export declare function parseCursorAuthStatus(rawOutput: string, exitCode: numbe
 };
 export declare function refreshAgentProviderStatusesAsync(): Promise<any>;
 export declare function getAgentProviderStatuses(force?: boolean): any;
+export declare function buildAgentProviderInstallSpec(provider: DevelopmentAgentProvider, installed: boolean): {
+    command: string;
+    args: string[];
+    shell?: undefined;
+} | {
+    command: string;
+    args: string[];
+    shell: boolean;
+};
 export declare function startAgentProviderInstall(providerValue: string): {
     provider: DevelopmentAgentProvider;
     launched: boolean;
@@ -179,6 +189,10 @@ export declare function parseAgentProviderTestOutput(rawOutput: string, selected
     model: string;
 };
 export declare function testAgentProvider(providerValue: string, modelValue?: string): Promise<any>;
+export declare function parseGeminiCliDefaultModels(source: string): {
+    id: string;
+    label: string;
+}[];
 export declare function getAgentProviderModels(providerValue: string): Promise<{
     provider: "codex";
     selected: string;
@@ -189,6 +203,7 @@ export declare function getAgentProviderModels(providerValue: string): Promise<{
     allowsCustom: boolean;
     source: string;
     error: string;
+    detail?: undefined;
 } | {
     provider: "cursor";
     selected: string;
@@ -196,6 +211,7 @@ export declare function getAgentProviderModels(providerValue: string): Promise<{
     allowsCustom: boolean;
     error: string;
     source?: undefined;
+    detail?: undefined;
 } | {
     provider: "cursor";
     selected: string;
@@ -206,12 +222,25 @@ export declare function getAgentProviderModels(providerValue: string): Promise<{
     allowsCustom: boolean;
     source: string;
     error: string;
+    detail?: undefined;
 } | {
     provider: "claudecode";
     selected: string;
     models: any;
     allowsCustom: boolean;
     source: string;
+    error: string;
+    detail?: undefined;
+} | {
+    provider: "gemini";
+    selected: string;
+    models: {
+        id: string;
+        label: string;
+    }[];
+    allowsCustom: boolean;
+    source: string;
+    detail: string;
     error: string;
 } | {
     provider: "gemini";
@@ -220,6 +249,7 @@ export declare function getAgentProviderModels(providerValue: string): Promise<{
     allowsCustom: boolean;
     source: string;
     error: string;
+    detail?: undefined;
 } | {
     provider: "opencode";
     selected: string;
@@ -230,6 +260,7 @@ export declare function getAgentProviderModels(providerValue: string): Promise<{
     allowsCustom: boolean;
     source: string;
     error: string;
+    detail?: undefined;
 }>;
 export declare function parseAgentProviderLoginProgress(providerValue: string, rawOutput: string): {
     authUrl: any;

@@ -23,6 +23,7 @@ async function classifyProjectChatIntentWithModel(message, uploadedFiles = [], o
             sourceCount: Array.isArray(uploadedFiles) ? uploadedFiles.length : 0,
             context: {
                 project: String(options.project || ""),
+                project_session_id: String(options.sessionId || ""),
                 attachments: (uploadedFiles || []).map((file) => ({
                     name: String(file?.filename || file?.name || ""),
                     type: String(file?.type || ""),

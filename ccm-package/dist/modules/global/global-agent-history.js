@@ -7,6 +7,7 @@ exports.createGlobalAgentHistoryRuntime = createGlobalAgentHistoryRuntime;
 const fs_1 = __importDefault(require("fs"));
 const crypto_1 = __importDefault(require("crypto"));
 const global_agent_attachments_1 = require("./global-agent-attachments");
+const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 // Persistent Web/Feishu conversation history and session routing.
 function createGlobalAgentHistoryRuntime(deps) {
     const { GLOBAL_AGENT_HISTORY_FILE, GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_AGENT_SESSION_LIMIT, buildGlobalVisibleReplyContent, ingestGlobalAgentConversation, writeGlobalJsonAtomic } = deps;
@@ -383,7 +384,16 @@ function createGlobalAgentHistoryRuntime(deps) {
             store.current_session_id = (store.sessions || []).find((item) => String(item.source || "web") === "web")?.id || "";
         }
         saveGlobalAgentHistoryStore(store);
-        return { deleted: true, session };
+        let contextCacheCleanup = null;
+        try {
+            contextCacheCleanup = (0, provider_neutral_context_cache_1.invalidateProviderNeutralContextCacheState)({
+                scope: "global",
+                scopeId: id,
+                sessionId: id,
+            }, "global_session_deleted");
+        }
+        catch { }
+        return { deleted: true, session, context_cache_invalidated: contextCacheCleanup?.success === true };
     }
     function getBaseGlobalAgentMessages(store) {
         const sessions = Array.isArray(store.sessions) ? store.sessions : [];

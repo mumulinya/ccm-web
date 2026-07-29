@@ -354,7 +354,9 @@ async function runMcpCheck(context, tools, project, check, index) {
             catch (error) {
                 if ((0, tool_call_timeout_1.isBrowserToolCallTimeout)(error))
                     throw error;
-                screenshots.push(`screenshot failed: ${error.message || String(error)}`);
+                const message = `screenshot failed: ${error.message || String(error)}`;
+                pageErrors.push(message);
+                steps.push({ kind: "assertion", name: `${adapter.id}:screenshot`, status: "failed", error: message });
             }
         }
         const failedStep = steps.find(step => step.status === "failed");

@@ -124,7 +124,7 @@ const openSource = source => emit('open-source', { filename: source.filename, ch
       <div v-else-if="mode === 'query' && sources.length" class="debug-results">
         <div class="debug-summary"><strong>找到 {{ sources.length }} 个匹配分片</strong><span>{{ elapsedMs }} ms</span></div>
         <button v-for="source in sources" :key="source.citation" type="button" class="debug-item" @click="openSource(source)">
-          <div class="debug-line"><strong>{{ source.filename }}</strong><span>{{ source.heading || `分片 ${Number(source.chunkIndex) + 1}` }}</span><code>{{ score(source.score) }}</code></div>
+          <div class="debug-line"><strong>{{ source.filename }}</strong><span>{{ source.heading || `分片 ${Number(source.chunkIndex) + 1}` }}</span><code>{{ source.retrievalMode || 'lexical' }} · {{ score(source.score) }}</code></div>
           <div class="score-track"><span :style="{ width: percent(source.score) }"></span></div>
           <p>{{ source.text }}</p>
         </button>
@@ -137,9 +137,11 @@ const openSource = source => emit('open-source', { filename: source.filename, ch
       <summary>技术详情</summary>
       <dl>
         <div><dt>检索模式</dt><dd>{{ retrieval.mode }}</dd></div>
-        <div><dt>检索引擎</dt><dd>{{ retrieval.embedding === 'hashing' ? '本地混合检索' : retrieval.embedding?.includes('fallback') ? '远程失败，已切换本地' : retrieval.embedding }}</dd></div>
-        <div><dt>本地检索</dt><dd>{{ retrieval.fallback ? '正在使用' : '作为基础排序' }}</dd></div>
+        <div><dt>检索引擎</dt><dd>{{ retrieval.embedding === 'lexical' ? '仅词面检索' : retrieval.embedding?.includes('fallback') ? '语义不可用，已切换词面检索' : retrieval.embedding }}</dd></div>
+        <div><dt>降级状态</dt><dd>{{ retrieval.fallback ? (retrieval.fallbackReason || '正在使用词面降级') : '未降级' }}</dd></div>
         <div><dt>排序策略</dt><dd>{{ retrieval.rerank }}</dd></div>
+        <div><dt>索引代次</dt><dd>{{ retrieval.indexGeneration || '未记录' }}</dd></div>
+        <div><dt>索引数据</dt><dd>{{ retrieval.staleServed ? '正在使用上一份可用索引' : '当前代次' }}</dd></div>
         <div><dt>耗时</dt><dd>{{ elapsedMs }} ms</dd></div>
         <div><dt>引用数量</dt><dd>{{ retrieval.citations?.length || 0 }}</dd></div>
       </dl>

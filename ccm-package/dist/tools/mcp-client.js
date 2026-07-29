@@ -23,6 +23,13 @@ class McpClient {
         this.args = args;
         this.env = env;
     }
+    safeErrorDetail(value) {
+        return String(value || "")
+            .replace(/((?:api[_ -]?key|token|secret|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]")
+            .replace(/[\0\r]+/g, " ")
+            .trim()
+            .slice(-1200);
+    }
     parseCommand() {
         if (this.args.length > 0) {
             return { cmd: this.command, args: this.args };
@@ -75,7 +82,9 @@ class McpClient {
             return true;
         }
         catch (e) {
-            this.lastError = e.message || "MCP connect failed";
+            const primary = e.message || "MCP connect failed";
+            const stderr = this.safeErrorDetail(this.stderrBuffer);
+            this.lastError = this.safeErrorDetail(stderr && !stderr.includes(primary) ? `${primary}: ${stderr}` : primary);
             console.error(`[MCP] 连接失败: ${this.command}`, this.lastError, this.stderrBuffer);
             this.connected = false;
             this.disconnect();

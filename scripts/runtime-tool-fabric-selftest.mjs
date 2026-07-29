@@ -18,6 +18,8 @@ const projectManagerSource = fs.readFileSync(new URL("../frontend/src/components
 const projectToolsModalSource = fs.readFileSync(new URL("../frontend/src/components/projects/ProjectToolsModal.vue", import.meta.url), "utf-8");
 const agentToolsModalSource = fs.readFileSync(new URL("../frontend/src/components/common/AgentToolsModal.vue", import.meta.url), "utf-8");
 const toolsConfigSource = fs.readFileSync(new URL("../frontend/src/components/tools/ToolsConfig.vue", import.meta.url), "utf-8");
+const toolsConfigPanelSource = fs.readFileSync(new URL("../frontend/src/components/tools/ToolsConfigPanel.vue", import.meta.url), "utf-8");
+const toolsConfigTemplateSource = fs.readFileSync(new URL("../frontend/src/components/tools/ToolsConfig.template.html", import.meta.url), "utf-8");
 const appSource = fs.readFileSync(new URL("../frontend/src/App.vue", import.meta.url), "utf-8");
 const mcpEditorSource = fs.readFileSync(new URL("../frontend/src/components/tools/McpServerEditor.vue", import.meta.url), "utf-8");
 const skillMarkdownSource = fs.readFileSync(new URL("../frontend/src/components/tools/SkillMarkdownViewer.vue", import.meta.url), "utf-8");
@@ -31,10 +33,10 @@ const projectToolUiChecks = {
   projectDeliveryContractStateDeclared: /const projectDeliveryContract = ref\(''\)/.test(projectManagerSource),
   projectToolOverlayAboveMobileNavigation: /<AgentToolsModal/.test(projectToolsModalSource)
     && /\.agent-tools-overlay\{[^}]*z-index:12000/.test(agentToolsModalSource),
-  incompleteScopeActionNavigatesToBusinessSurface: /action\?\.kind === 'open_scope_real_task'[\s\S]*?emit\('navigate', \{ tab: 'groups', groupId: scopeId \}\)[\s\S]*?emit\('navigate', \{ tab: 'projects', project: scopeId \}\)/.test(toolsConfigSource),
-  incompleteScopeActionDoesNotRunGenericMatrix: !/action\?\.kind === 'run_child_agent_e2e'[\s\S]*?runRealCliMatrix\(\)/.test(toolsConfigSource),
+  incompleteScopeActionNavigatesToBusinessSurface: /action\?\.kind === 'open_scope_real_task'[\s\S]*?emit\('navigate', \{ tab: 'groups', groupId: scopeId \}\)[\s\S]*?emit\('navigate', \{ tab: 'projects', project: scopeId \}\)/.test(toolsConfigPanelSource),
+  incompleteScopeActionDoesNotRunGenericMatrix: !/action\?\.kind === 'run_child_agent_e2e'[\s\S]*?runRealCliMatrix\(\)/.test(toolsConfigPanelSource),
   toolsNavigationUsesWorkspaceRouter: /<ToolsConfig @navigate="applyPetNavigationTarget" \/>/.test(appSource),
-  operationalOverviewIsDefault: /const currentFilter = ref\('overview'\)/.test(toolsConfigSource) && /<ToolControlOverview/.test(toolsConfigSource),
+  operationalOverviewIsDefault: /const currentFilter = ref\('overview'\)/.test(toolsConfigPanelSource) && /<ToolControlOverview/.test(toolsConfigTemplateSource),
   mcpEditorSupportsPreSaveTest: /catalogImpact/.test(mcpEditorSource) && /保存前测试/.test(mcpEditorSource),
   skillMarkdownAllowsOnlyWebLinks: /\['http:', 'https:'\]/.test(skillMarkdownSource) && /rel="noopener noreferrer"/.test(skillMarkdownSource),
   mcpListIsRedactedForBrowser: /loadMcpTools\(\)\.filter\(tool => !isInternalMcpName\(tool\?\.name\)\)\.map\(redactMcpToolForDisplay\)/.test(toolsBackendSource),

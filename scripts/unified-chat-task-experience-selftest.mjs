@@ -5,6 +5,12 @@ import {
   projectExecutionTaskCard,
   taskPhasePresentation,
 } from '../frontend/src/utils/taskExperience.js'
+import { sanitizeUserFacingAgentText } from '../frontend/src/utils/agentDisplay.js'
+import {
+  getTaskCard,
+  isPrimaryTaskMessage,
+  shouldShowGroupMessage,
+} from '../frontend/src/components/collaboration/groupChatHelpers.js'
 import { __globalAgentSessionTestHooks } from '../frontend/src/composables/useGlobalAgentSessions.js'
 
 const checks = {}
@@ -552,6 +558,41 @@ checks.projectDoneWithoutVerificationHandoffUsesNeutralGapCopy = weakProjectDone
   && !weakProjectDoneCard?.user_handoff?.headline?.includes('需要处理')
 
 checks.naturalPhaseLabels = taskPhasePresentation('waiting_confirmation').label === '需要你确认'
+checks.visibleRepliesPreserveParagraphBreaks = sanitizeUserFacingAgentText('第一段\n- 第一项\n- 第二项\n\n\n最后一段', '', 500)
+  === '第一段\n- 第一项\n- 第二项\n\n最后一段'
+
+const retryThreadMessages = [
+  {
+    id: 'old-card',
+    role: 'assistant',
+    task_id: 'task-old',
+    task_thread_id: 'request-1',
+    taskRuntime: { taskCard: { visible: true, presentation: 'delivery', task_id: 'task-old', title: '旧执行轮', phase: 'failed' } },
+  },
+  {
+    id: 'old-diagnostic',
+    role: 'assistant',
+    task_id: 'task-old',
+    task_thread_id: 'request-1',
+    content: 'llm-error retry details',
+  },
+  {
+    id: 'latest-card',
+    role: 'assistant',
+    task_id: 'task-new',
+    task_thread_id: 'request-1',
+    queue: { queued: true, position: 2 },
+    taskRuntime: { taskCard: { visible: true, presentation: 'delivery', task_id: 'task-new', title: '当前执行轮', phase: 'executing' } },
+  },
+]
+checks.retryThreadKeepsOneLatestTaskCard = !isPrimaryTaskMessage(retryThreadMessages, retryThreadMessages[0], 0)
+  && isPrimaryTaskMessage(retryThreadMessages, retryThreadMessages[2], 2)
+  && !shouldShowGroupMessage(retryThreadMessages, retryThreadMessages[1], 1)
+checks.taskCardCarriesRealQueuePosition = getTaskCard(retryThreadMessages[2])?.queue?.position === 2
+const friendlyTechnicalFailure = sanitizeUserFacingAgentText('llm-error: Provider failed in Agent Runner', '', 500)
+checks.technicalFailureTermsUseUserLanguage = friendlyTechnicalFailure.includes('模型服务调用失败')
+  && friendlyTechnicalFailure.includes('执行环境')
+  && !/llm-error|Provider|Runner/i.test(friendlyTechnicalFailure)
 
 assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify(checks, null, 2))
 console.log(JSON.stringify({ success: true, checks }, null, 2))

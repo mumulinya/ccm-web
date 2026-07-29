@@ -734,6 +734,10 @@ export type GroupOrchestratorInput = {
   auto_worker_context_compact_retry?: boolean;
   workerContextRetryOptions?: any;
   worker_context_retry_options?: any;
+  workflowDecision?: WorkflowDecision | null;
+  workflow_decision?: WorkflowDecision | null;
+  projectSourceEvidence?: any;
+  project_source_evidence?: any;
   onDelta?: (delta: string) => void;
 };
 
@@ -1021,6 +1025,15 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
       delegated: [],
       assignments: [],
       runtime: "llm-error",
+      providerFailure: {
+        code: String(error?.code || "CCM_MODEL_CALL_FAILED"),
+        retryExhausted: String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED",
+        attempts: Math.max(0, Number(error?.attempts) || 0),
+        maxAttempts: Math.max(0, Number(error?.maxAttempts) || 0),
+        elapsedMs: Math.max(0, Number(error?.elapsedMs) || 0),
+        attemptTimeoutMs: Math.max(0, Number(error?.attemptTimeoutMs) || 0),
+        totalTimeoutMs: Math.max(0, Number(error?.totalTimeoutMs) || 0),
+      },
       usage: error?.usage || null,
       contextRecovery: reactiveCompactOwnership ? { type: "reactive-compact-not-retried", ownership: reactiveCompactOwnership } : undefined,
       agentBoundary: buildGroupMainAgentBoundary("llm-error"),
@@ -1057,6 +1070,7 @@ export function summarizeGroupOrchestratorProviderError(error: any) {
 export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
   const startedAt = Date.now();
   const group = normalizeGroupOrchestrator(input.group);
+  const groupSessionId = String((input as any).groupSessionId || (input as any).group_session_id || "");
   const coordinator = getCoordinatorMember(group);
   try {
     let result: any = await runGroupOrchestratorCore(input);
@@ -1092,6 +1106,7 @@ export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
                   input.onDelta?.(delta);
                 },
                 onUsage: usage => { visibleUsage = usage; },
+                promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_visible_reply" },
               })
             : await callOpenAiCompatibleChat(config, {
                 messages,
@@ -1106,6 +1121,7 @@ export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
                   input.onDelta?.(delta);
                 },
                 onUsage: usage => { visibleUsage = usage; },
+                promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_visible_reply" },
               });
           if (String(rendered || "").trim()) {
             result = {

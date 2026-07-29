@@ -16,6 +16,7 @@ exports.stopAgentRecoveryMonitor = stopAgentRecoveryMonitor;
 exports.startTaskWatchdog = startTaskWatchdog;
 exports.stopTaskWatchdog = stopTaskWatchdog;
 const db_1 = require("../../core/db");
+const provider_task_circuit_breaker_1 = require("./provider-task-circuit-breaker");
 const agent_qa_service_1 = require("./agent-qa-service");
 const logs_1 = require("./logs");
 const startup_task_recovery_1 = require("./startup-task-recovery");
@@ -66,6 +67,29 @@ function enqueueTask(taskId, ctx) {
     if ((0, collaboration_1.isTaskPaused)(task)) {
         (0, logs_1.addTaskLog)(taskId, "info", "任务已暂停，跳过入队");
         return { queued: false, message: "任务已暂停，跳过入队" };
+    }
+    const providerCircuitGate = (0, provider_task_circuit_breaker_1.getTaskProviderCircuitGate)(task);
+    if (providerCircuitGate.blocked) {
+        const message = (0, provider_task_circuit_breaker_1.formatTaskProviderCircuitMessage)(providerCircuitGate.circuit);
+        const lastBlockedAt = Date.parse(String(task.last_provider_circuit_queue_blocked_at || ""));
+        const recentlyRecorded = Number.isFinite(lastBlockedAt) && Date.now() - lastBlockedAt < 60_000;
+        if (!recentlyRecorded) {
+            (0, collaboration_1.updateTask)(taskId, {
+                status: task.status === "in_progress" ? task.status : "failed",
+                status_detail: message,
+                last_provider_circuit_queue_blocked_at: new Date().toISOString(),
+            });
+            (0, logs_1.addTaskLog)(taskId, "warning", `任务级 Provider 熔断阻止重新入队：${message}`);
+        }
+        return {
+            queued: false,
+            blocked: true,
+            reason: "provider_circuit_open",
+            retry_after: providerCircuitGate.circuit?.retryAfter || "",
+            remaining_ms: providerCircuitGate.remainingMs,
+            duplicate_block_suppressed: recentlyRecorded,
+            message,
+        };
     }
     const dependencyIds = Array.isArray(task.mission_dependencies) ? task.mission_dependencies.map(String).filter(Boolean) : [];
     const blockedDependencies = dependencyIds.filter((dependencyId) => {
@@ -126,10 +150,31 @@ function enqueueTask(taskId, ctx) {
     }
     queue.splice(insertIndex, 0, taskId);
     console.log(`[任务队列] 任务 ${taskId} (${task.priority}) 已加入队列 [${targetKey}]，位置: ${insertIndex + 1}/${queue.length}`);
-    (0, collaboration_1.updateTask)(taskId, { queued_at: new Date().toISOString() });
+    queue.forEach((queuedId, index) => (0, collaboration_1.updateTask)(queuedId, {
+        queued_at: queuedId === taskId ? new Date().toISOString() : undefined,
+        queue_target_key: targetKey,
+        queue_position: index + 1,
+        queue_state: "queued",
+    }));
     (0, logs_1.addTaskLog)(taskId, "info", `任务已加入队列 [${targetKey}]，位置 ${insertIndex + 1}/${queue.length}`);
-    (0, collaboration_1.processTargetQueue)(targetKey, ctx);
+    launchTargetQueueProcessor(targetKey, ctx);
     return { queued: true, message: "任务已加入队列", targetKey, position: insertIndex + 1 };
+}
+function launchTargetQueueProcessor(targetKey, ctx, recoveryAttempt = 0) {
+    void (0, collaboration_1.processTargetQueue)(targetKey, ctx).catch((error) => {
+        const detail = String(error?.message || error || "队列处理异常").slice(0, 500);
+        console.error(`[任务队列] [${targetKey}] 处理器异常:`, detail);
+        const queue = collaboration_1.taskQueues.get(targetKey) || [];
+        const nextTaskId = queue[0];
+        if (nextTaskId) {
+            (0, logs_1.addTaskLog)(nextTaskId, "error", `队列处理器异常：${detail}`);
+            (0, logs_1.appendTaskTimelineEvent)(nextTaskId, { type: "queue_processor_error", title: "队列处理器正在恢复", detail, status: "warn", phase: "queued", data: { target_key: targetKey, recovery_attempt: recoveryAttempt + 1 } });
+        }
+        if (queue.length > 0 && recoveryAttempt < 2) {
+            const delayMs = 1_000 * (recoveryAttempt + 1);
+            setTimeout(() => launchTargetQueueProcessor(targetKey, ctx, recoveryAttempt + 1), delayMs);
+        }
+    });
 }
 function createAndQueueTask(task, ctx) {
     const newTask = (0, collaboration_1.createTask)({ ...task, auto_execute: true });
@@ -346,7 +391,7 @@ function resumeTaskQueues(ctx, options = {}) {
         queue_status: (0, collaboration_1.getQueueStatus)(),
     };
 }
-function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS, gapCooldownMs = collaboration_1.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = collaboration_1.TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot) {
+function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS, gapCooldownMs = collaboration_1.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = collaboration_1.TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot, recoveryMaxCount = collaboration_1.TASK_WATCHDOG_RECOVERY_MAX) {
     const now = Date.now();
     const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : (0, db_1.loadTasks)();
     const stalePending = [];
@@ -355,8 +400,11 @@ function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS,
     const runtimeFailed = [];
     const gapRework = [];
     const workItemStalled = [];
+    const recoveryExhausted = [];
     for (const task of tasks) {
-        if (!task?.auto_execute || task.status === "done" || (0, collaboration_1.isTaskPaused)(task))
+        if (!task?.auto_execute
+            || ["done", "blocked", "needs_user", "failed", "cancelled", "archived"].includes(String(task.status || ""))
+            || (0, collaboration_1.isTaskPaused)(task))
             continue;
         const ageMs = (0, collaboration_1.getTaskAgeMs)(task, now);
         const base = {
@@ -412,10 +460,20 @@ function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS,
             });
         }
         else if (task.status === "pending" && !(0, collaboration_1.isTaskQueuedInMemory)(task.id) && ageMs >= staleMs) {
-            stalePending.push(base);
+            if (Number(task.watchdog_recoveries || 0) >= recoveryMaxCount) {
+                recoveryExhausted.push({ ...base, recoveries: Number(task.watchdog_recoveries || 0) });
+            }
+            else {
+                stalePending.push(base);
+            }
         }
         else if (task.status === "in_progress" && !collaboration_1.runningTaskIds.has(task.id) && ageMs >= staleMs) {
-            stalledInProgress.push(base);
+            if (Number(task.watchdog_recoveries || 0) >= recoveryMaxCount) {
+                recoveryExhausted.push({ ...base, recoveries: Number(task.watchdog_recoveries || 0) });
+            }
+            else {
+                stalledInProgress.push(base);
+            }
         }
         else if (task.status === "in_progress" && collaboration_1.runningTaskIds.has(task.id) && ageMs >= staleMs) {
             runningLong.push(base);
@@ -430,6 +488,7 @@ function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS,
         runtime_failed: runtimeFailed,
         gap_rework: gapRework,
         work_item_stalled: workItemStalled,
+        recovery_exhausted: recoveryExhausted,
         queue_status: (0, collaboration_1.getQueueStatus)(tasks),
     };
 }
@@ -437,8 +496,9 @@ function runTaskWatchdog(ctx, options = {}) {
     const staleMs = Number(options.staleMs || options.stale_ms || collaboration_1.TASK_WATCHDOG_STALE_MS);
     const gapCooldownMs = Number(options.gapCooldownMs || options.gap_cooldown_ms || collaboration_1.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS);
     const gapMaxCount = Math.max(1, Math.min(20, Number(options.gapMaxCount || options.gap_max_count || collaboration_1.TASK_WATCHDOG_GAP_REWORK_MAX)));
+    const recoveryMaxCount = Math.max(1, Math.min(20, Number(options.recoveryMaxCount || options.recovery_max_count || collaboration_1.TASK_WATCHDOG_RECOVERY_MAX)));
     const taskSnapshot = (0, db_1.loadTasks)();
-    const status = getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount, taskSnapshot);
+    const status = getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount, taskSnapshot, recoveryMaxCount);
     const recoverable = [...status.stale_pending, ...status.stalled_in_progress];
     const results = [];
     const gapResults = [];
@@ -452,6 +512,33 @@ function runTaskWatchdog(ctx, options = {}) {
     const canAutoContinueGaps = executionReadiness.ready === true;
     let blockedRecovery = null;
     let runtimeRetry = null;
+    for (const item of status.recovery_exhausted) {
+        const task = taskSnapshot.find(t => t.id === item.id);
+        if (!task || (0, collaboration_1.isTaskPaused)(task))
+            continue;
+        const detail = `任务自动恢复已达到 ${recoveryMaxCount} 次上限，已停止自动重试，请检查执行记录后手动继续`;
+        const blockedTask = (0, collaboration_1.updateTask)(task.id, {
+            status: "needs_user",
+            acceptance_state: task.acceptance_state || "recovery_required",
+            status_detail: detail,
+            auto_execute: false,
+            is_paused: true,
+            paused: true,
+            recovery_pending: true,
+            watchdog_recovery_exhausted_at: new Date().toISOString(),
+        }) || task;
+        (0, logs_1.addTaskLog)(task.id, "warning", detail);
+        (0, logs_1.appendTaskTimelineEvent)(task.id, {
+            type: "watchdog_recovery_exhausted",
+            title: "自动恢复已停止",
+            detail,
+            status: "warn",
+            phase: "needs_user",
+            data: { recoveries: Number(task.watchdog_recoveries || 0), max_recoveries: recoveryMaxCount },
+        });
+        (0, collaboration_1.syncTaskBacklogStatus)(blockedTask, "blocked", detail);
+        results.push({ task_id: task.id, queued: false, blocked: true, recovery_exhausted: true, message: detail });
+    }
     for (const item of recoverable) {
         const task = taskSnapshot.find(t => t.id === item.id);
         if (!task || task.status === "done" || (0, collaboration_1.isTaskPaused)(task) || collaboration_1.runningTaskIds.has(task.id))
@@ -551,6 +638,7 @@ function runTaskWatchdog(ctx, options = {}) {
         total_recoverable: recoverable.length + Number(blockedRecovery?.total_blocked || 0),
         stale_recovered: results.filter(item => item.queued).length,
         stale_recoverable: recoverable.length,
+        recovery_exhausted: status.recovery_exhausted.length,
         work_item_stalled_total: status.work_item_stalled.length,
         work_item_requeued: workItemResults.reduce((sum, item) => sum + Number(item.requeued || 0), 0),
         work_item_results: workItemResults,

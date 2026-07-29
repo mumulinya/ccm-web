@@ -53,6 +53,7 @@ exports.appendLimited = appendLimited;
 exports.isUnsafeVerificationCommand = isUnsafeVerificationCommand;
 exports.resolveUrl = resolveUrl;
 exports.hasRequiredCheck = hasRequiredCheck;
+exports.requiredCheckEnabled = requiredCheckEnabled;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -310,5 +311,9 @@ function resolveUrl(baseUrl, maybeUrl) {
 }
 function hasRequiredCheck(requiredChecks, pattern) {
     return requiredChecks.some(item => pattern.test(String(item || "")));
+}
+function requiredCheckEnabled(requiredChecks, ...allowed) {
+    const accepted = new Set(allowed.map(item => String(item || "").trim().toLowerCase()).filter(Boolean));
+    return requiredChecks.some(item => accepted.has(String(item || "").trim().toLowerCase()));
 }
 //# sourceMappingURL=utils.js.map

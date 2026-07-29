@@ -822,7 +822,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         return !["false", "0", "no", "off"].includes(String(value).trim().toLowerCase());
                     };
                     (0, logs_1.addGroupLog)(group_id, "info", "project_task_preflight", "正在生成执行前计划");
-                    const planModePreflight = buildGroupPlanModePreflight({
+                    const planModePreflight = await buildGroupPlanModePreflight({
                         group,
                         message: [businessGoal, ...(extractedRequirement?.scope || []).map((item) => `范围：${item}`)].join("\n") || taskTitle,
                         ctx,
@@ -914,7 +914,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         requires_verification: flagEnabled(payload.requires_verification ?? payload.requiresVerification, Array.isArray(taskIntent?.workflowDecision?.verificationModes) && taskIntent.workflowDecision.verificationModes.length > 0),
                         requires_independent_review: flagEnabled(payload.requires_independent_review ?? payload.requiresIndependentReview, taskIntent?.workflowDecision?.requiresIndependentReview === true),
                         requires_agent_qa: requiresAgentQa,
-                        workflow_decision: taskIntent?.workflowDecision || null,
+                        workflow_decision: planModePreflight.workflow_decision || taskIntent?.workflowDecision || null,
                         business_goal: businessGoal,
                         acceptance_criteria: acceptanceCriteria,
                         source_documents: sourceDocuments,
@@ -1392,7 +1392,8 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { group_id, requirement, group_session_id, groupSessionId: groupSessionIdCamel } = JSON.parse(body);
+                const payload = JSON.parse(body);
+                const { group_id, requirement, group_session_id, groupSessionId: groupSessionIdCamel } = payload;
                 let groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
@@ -1411,15 +1412,31 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                 const memberList = members.map((m) => `${m.project}(${m.agent})`).join(", ");
                 const tasks = await (0, group_orchestrator_1.decomposeRequirementWithModelCoordinator)(group, requirement);
                 const output = JSON.stringify({ coordinator: coordinator.project, members: memberList, tasks }, null, 2);
-                const createdTasks = tasks.map(t => createTask({
+                const requestId = String(payload.client_message_id || payload.clientMessageId || `legacy_decompose_${crypto.randomUUID()}`);
+                const createdTasks = tasks.map((t, index) => createTask({
                     title: t.title,
                     description: t.description || "",
+                    business_goal: t.description || t.title,
+                    acceptance_criteria: Array.isArray(t.acceptance_criteria) ? t.acceptance_criteria.join("；") : String(t.acceptance_criteria || ""),
                     target_project: t.target_project || coordinator.project,
                     group_id,
                     group_session_id: groupSessionId || undefined,
                     assign_type: "group",
-                    priority: t.priority || "normal"
+                    orchestration_scope: "group_session",
+                    queue_scope: "conversation_serial",
+                    request_origin: "legacy-group-decompose",
+                    source_channel: "legacy-group-decompose",
+                    target_scope: "group_session",
+                    target_id: group_id,
+                    exact_session_id: groupSessionId,
+                    client_message_id: `${requestId}:${index + 1}`,
+                    workflow_type: "daily_dev",
+                    requires_code_changes: t.requires_code_changes !== false,
+                    requires_verification: t.requires_verification !== false,
+                    priority: t.priority || "normal",
+                    auto_execute: payload.auto_execute !== false,
                 }));
+                const queueResults = createdTasks.map(task => task.auto_execute ? enqueueTask(task.id, ctx) : { queued: false, message: "等待手动启动" });
                 (0, storage_1.appendGroupMessage)(group_id, {
                     id: "m" + Date.now().toString(36) + "decompose",
                     role: "assistant",
@@ -1428,7 +1445,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     timestamp: new Date().toISOString(),
                     ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
                 });
-                (0, utils_1.sendJson)(res, { success: true, tasks: createdTasks, raw_output: output });
+                (0, utils_1.sendJson)(res, { success: true, tasks: createdTasks, queue_results: queueResults, raw_output: output, compatibility_route: true });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 500);

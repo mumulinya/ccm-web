@@ -18,6 +18,24 @@ function modules() {
   };
 }
 
+function mockModelSummary({ user }) {
+  const marker = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+  const start = user.indexOf(marker) + marker.length;
+  const ends = [
+    user.indexOf("\n用户本次 /compact 的附加要求", start),
+    user.indexOf("\n\n本次被压缩区间内的全部用户消息", start),
+  ].filter(index => index >= 0);
+  return { summary: JSON.parse(user.slice(start, Math.min(...ends))), provider: "mock", model: "mock-message-order" };
+}
+
+const modelRequiredConfig = {
+  memoryCompactionUseModel: true,
+  memoryCompactionMode: "model-required",
+  compactionModelCall: mockModelSummary,
+  modelContextWindow: 32_000,
+  modelAutoCompactTokenLimit: 18_000,
+};
+
 function reinjectionPlan() {
   return {
     schema: "ccm-post-compact-reinjection-v1",
@@ -176,7 +194,7 @@ async function verifyCompactionPaths() {
     groupSessionId: fullSessionId,
     messages: makeMessages(40, "full"),
     memory: { goal: "phase327 full" },
-    config: { memoryCompactionUseModel: false },
+    config: modelRequiredConfig,
     transcriptPath: "phase327-full.json",
     force: true,
   });
@@ -190,7 +208,7 @@ async function verifyCompactionPaths() {
     groupSessionId: partialSessionId,
     messages: makeMessages(40, "partial"),
     memory: { goal: "phase327 partial" },
-    config: { memoryCompactionUseModel: false },
+    config: modelRequiredConfig,
     transcriptPath: "phase327-partial.json",
     partialCompact: { direction: "up_to", messageId: "partial-20", reason: "phase327 ordering" },
   });
@@ -199,17 +217,22 @@ async function verifyCompactionPaths() {
 
   const reactiveGroupId = "phase327-reactive";
   const reactiveSessionId = "gcs_phase327_reactive";
-  const reactive = await compact.compactGroupConversationMemory({
-    groupId: reactiveGroupId,
-    groupSessionId: reactiveSessionId,
-    messages: makeMessages(130, "reactive"),
-    memory: { goal: "phase327 reactive" },
-    config: { memoryCompactionUseModel: false },
-    transcriptPath: "phase327-reactive.json",
-  });
-  assert.equal(reactive.compacted, true);
-  assert.equal(reactive.boundary?.type, "auto");
-  verifyStored(reactive, reactiveGroupId, reactiveSessionId);
+  let reactiveError = null;
+  try {
+    await compact.compactGroupConversationMemory({
+      groupId: reactiveGroupId,
+      groupSessionId: reactiveSessionId,
+      messages: makeMessages(130, "reactive"),
+      memory: { goal: "phase327 reactive" },
+      config: modelRequiredConfig,
+      transcriptPath: "phase327-reactive.json",
+    });
+  } catch (error) {
+    reactiveError = error;
+  }
+  assert.equal(reactiveError?.code, "GROUP_POST_COMPACT_THRESHOLD_EXCEEDED");
+  assert.equal(reactiveError?.postCompactPayloadGate?.shared_gate?.providerCallAllowed, false);
+  assert.equal(reactiveError?.postCompactPayloadGate?.status, "recompact_required");
   return 13;
 }
 

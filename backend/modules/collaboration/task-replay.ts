@@ -1,5 +1,3 @@
-import * as crypto from "crypto";
-import * as path from "path";
 import { loadTasks } from "../../core/db";
 import { listExecutions } from "../../agents/execution-kernel";
 import { listGlobalAgentRuns } from "../../agents/global/loop";
@@ -14,10 +12,13 @@ import {
 } from "../../test-agent/artifact-retention";
 import { getTaskLogs, getTaskTimeline } from "./logs";
 import { getGroupMessages, loadGroups } from "./storage";
+import { buildTaskReplayDeliveryView, runTaskReplayDeliverySelfTest } from "./task-replay-delivery";
+import { buildTaskReplayPlanView, buildTaskReplayWorkItemRows, runTaskReplayPlanSelfTest } from "./task-replay-plan";
+import { iso, normalizeStatus, publicFile, safeText, stableId, stringList, type TaskReplayStatus } from "./task-replay-shared";
 import { listTestAgentRunnerRecords } from "./test-agent-runner";
 
 export type TaskReplayStage = "intake" | "planning" | "dispatch" | "execution" | "change" | "test" | "rework" | "review" | "completion" | "system";
-export type TaskReplayStatus = "info" | "running" | "passed" | "warning" | "failed" | "blocked" | "cancelled";
+export type { TaskReplayStatus } from "./task-replay-shared";
 
 export interface TaskReplayEvent {
   id: string;
@@ -25,6 +26,7 @@ export interface TaskReplayEvent {
   stage: TaskReplayStage;
   category: string;
   status: TaskReplayStatus;
+  audience: "user" | "technical";
   title: string;
   summary: string;
   actor: { type: "user" | "global_agent" | "group_agent" | "project_agent" | "test_agent" | "system"; label: string };
@@ -66,34 +68,6 @@ export interface TaskReplayIndexOptions {
 const STAGE_ORDER: TaskReplayStage[] = ["intake", "planning", "dispatch", "execution", "change", "test", "rework", "review", "completion", "system"];
 const TERMINAL = new Set(["done", "completed", "failed", "cancelled", "reverted"]);
 
-function stableId(prefix: string, value: any) {
-  return `${prefix}_${crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value || {})).digest("hex").slice(0, 22)}`;
-}
-
-function iso(value: any, fallback = "") {
-  const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
-}
-
-function safeText(value: any, max = 1200) {
-  let text = typeof value === "string" ? value : value == null ? "" : JSON.stringify(value);
-  text = text
-    .replace(/CCM_AGENT_RECEIPT[\s\S]*?(?=\n\S|$)/gi, "[内部回执已收起]")
-    .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret)\s*[=:]\s*[^\s,;]+/gi, "$1=[已隐藏]")
-    .replace(/\b(?:sk|xox[baprs]|gh[pousr])[-_][A-Za-z0-9_-]{12,}\b/g, "[密钥已隐藏]")
-    .replace(/[A-Za-z]:\\Users\\[^\s"']+/gi, "[本机路径]")
-    .replace(/\/(?:home|Users)\/[^\s"']+/g, "[本机路径]")
-    .replace(/\r\n/g, "\n")
-    .trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
-function publicFile(value: any) {
-  const raw = String(value?.path || value?.file || value || "").trim();
-  if (!raw) return "";
-  return path.isAbsolute(raw) ? path.basename(raw) : raw.replace(/\\/g, "/").replace(/^\.\//, "").slice(0, 260);
-}
-
 function safeTechnical(value: any, depth = 0): any {
   if (depth > 5 || value == null) return value == null ? value : "[详情已收起]";
   if (Array.isArray(value)) return value.slice(0, 60).map(item => safeTechnical(item, depth + 1));
@@ -106,10 +80,6 @@ function safeTechnical(value: any, depth = 0): any {
     result[key] = safeTechnical(item, depth + 1);
   }
   return result;
-}
-
-function stringList(values: any, max = 100) {
-  return [...new Set((Array.isArray(values) ? values : values ? [values] : []).map(publicFile).filter(Boolean))].slice(0, max);
 }
 
 function safeDiffText(value: any, max = 220_000) {
@@ -211,17 +181,6 @@ function replayTaskChanges(task: any) {
   return [...byFile.values()].slice(0, 200);
 }
 
-function normalizeStatus(value: any): TaskReplayStatus {
-  const text = String(value || "").toLowerCase();
-  if (/cancel|revert/.test(text)) return "cancelled";
-  if (/fail|error|reject|invalid/.test(text)) return "failed";
-  if (/block|waiting_user|needs_user/.test(text)) return "blocked";
-  if (/warn|partial|attention|needs_review/.test(text)) return "warning";
-  if (/running|progress|reviewing|executing|queued|monitoring|supervising/.test(text)) return "running";
-  if (/pass|success|succeed|complete|done|ok|accept/.test(text)) return "passed";
-  return "info";
-}
-
 function inferStage(value: any): TaskReplayStage {
   const text = String(value || "").toLowerCase();
   if (/rework|retry|repair|fix|返工|修复/.test(text)) return "rework";
@@ -236,6 +195,19 @@ function inferStage(value: any): TaskReplayStage {
   return "system";
 }
 
+// 回放的意义在于让用户看懂发生了什么，所以默认按"是否是人话"而不是按来源整类隐藏：
+// 只要事件带有叙述性文字（或本身是问题），就归为 user，默认展示；只有纯机器标识（agent.run 这类）才归 technical。
+const LOW_LEVEL_SOURCES = new Set(["trace", "journal", "task_log", "execution"]);
+const NARRATIVE_TEXT = /[一-龥]/;
+
+function eventAudience(input: { source: string; status: TaskReplayStatus; title: string; summary: string }): "user" | "technical" {
+  if (["failed", "blocked", "warning"].includes(input.status)) return "user";
+  if (!LOW_LEVEL_SOURCES.has(input.source)) return "user";
+  // task_log 的标题是统一套壳文案，只有正文能反映是否人话；其余低层来源标题可能就是子 Agent 的原话。
+  const narrative = (input.source === "task_log" ? input.summary : `${input.title} ${input.summary}`).trim();
+  return narrative.length >= 6 && NARRATIVE_TEXT.test(narrative) ? "user" : "technical";
+}
+
 function actor(type: TaskReplayEvent["actor"]["type"], label: string) {
   const defaults = { user: "用户", global_agent: "全局主 Agent", group_agent: "群聊主 Agent", project_agent: "项目子 Agent", test_agent: "TestAgent", system: "系统" };
   return { type, label: safeText(label || defaults[type], 80) || defaults[type] };
@@ -244,14 +216,20 @@ function actor(type: TaskReplayEvent["actor"]["type"], label: string) {
 function event(input: Partial<TaskReplayEvent> & Pick<TaskReplayEvent, "title">): TaskReplayEvent {
   const source = String(input.source || "task");
   const at = iso(input.at, new Date(0).toISOString());
+  const status = input.status || "info";
+  const title = safeText(input.title, 180) || "任务记录";
+  const rawSummary = safeText(input.summary, 1200);
+  // 摘要和标题一字不差时重复渲染两遍纯属噪音（journal 来源大量如此），只保留标题。
+  const summary = rawSummary === title ? "" : rawSummary;
   return {
     id: String(input.id || stableId("tre", { source, at, title: input.title, task: input.task_id })),
     at,
     stage: input.stage || inferStage(`${source} ${input.category || ""} ${input.title}`),
     category: String(input.category || "event"),
-    status: input.status || "info",
-    title: safeText(input.title, 180) || "任务记录",
-    summary: safeText(input.summary, 1200),
+    status,
+    audience: input.audience || eventAudience({ source, status, title, summary }),
+    title,
+    summary,
     actor: input.actor || actor("system", "系统"),
     task_id: String(input.task_id || ""),
     parent_task_id: String(input.parent_task_id || ""),
@@ -313,14 +291,79 @@ function taskOwnerActor(task: any) {
   return actor("group_agent", "群聊主 Agent");
 }
 
+// 门禁/检查类时间线事件常只带"N 项未通过"的计数文本，明细在 data.failed_checks / data.checks 里；
+// 把未通过项拼进摘要、完整清单放进技术详情，用户才能看懂到底是哪些没过。
+function failedCheckLines(data: any) {
+  const rows = Array.isArray(data?.failed_checks) && data.failed_checks.length
+    ? data.failed_checks
+    : Array.isArray(data?.checks) ? data.checks.filter((row: any) => row && row.ok === false) : [];
+  return rows.map((row: any) => {
+    const label = safeText(row?.label || row?.id, 80);
+    const detail = safeText(row?.detail || row?.reason, 160);
+    return label ? (detail && detail !== "通过" && detail !== label ? `${label}（${detail}）` : label) : detail;
+  }).filter(Boolean).slice(0, 10);
+}
+
+function timelineSummary(item: any) {
+  const base = safeText(item?.detail || item?.message, 600);
+  const data = item?.data && typeof item.data === "object" ? item.data : null;
+  if (!data) return base;
+  const failed = failedCheckLines(data);
+  if (failed.length) return `${base || `${failed.length} 项未通过`}：${failed.join("；")}`;
+  return base || safeText(data.user_detail || data.userDetail || data.headline || data.reason || data.summary, 600);
+}
+
+function timelineTechnical(item: any) {
+  const data = item?.data && typeof item.data === "object" ? item.data : null;
+  if (!data) return undefined;
+  const checks = Array.isArray(data.checks)
+    ? data.checks.slice(0, 30).map((row: any) => ({ label: safeText(row?.label || row?.id, 80), ok: row?.ok === true, detail: safeText(row?.detail, 160) }))
+    : [];
+  const semanticReceipt = data.semantic_decision_receipt || data.semanticDecisionReceipt || null;
+  const routeDecision = data.route_decision || data.routeDecision || null;
+  return {
+    phase: item.phase || "",
+    files: stringList(data.files || data.files_changed, 30),
+    ...(checks.length ? { passed_count: checks.filter(row => row.ok).length, failed_count: checks.filter(row => !row.ok).length, checks } : {}),
+    ...(semanticReceipt ? {
+      semantic_decision: {
+        type: semanticReceipt.decisionKind || semanticReceipt.decision_kind || "",
+        status: semanticReceipt.status || "",
+        model: semanticReceipt.model || "",
+        confidence: semanticReceipt.confidence,
+        checksum: semanticReceipt.checksum || "",
+        input_checksum: semanticReceipt.inputChecksum || semanticReceipt.input_checksum || "",
+        result_checksum: semanticReceipt.resultChecksum || semanticReceipt.result_checksum || "",
+      },
+    } : {}),
+    ...(routeDecision ? {
+      semantic_reason: safeText(routeDecision.reason, 600),
+      semantic_action: routeDecision.action || "",
+      semantic_target: routeDecision.targetProject || routeDecision.target_project || "",
+    } : {}),
+  };
+}
+
 function buildTaskEvents(tasks: any[]) {
   const events: TaskReplayEvent[] = [];
   for (const task of tasks) {
     const taskId = String(task.id || "");
     const owner = taskOwnerActor(task);
-    events.push(event({ id: `task:${taskId}:created`, at: task.created_at, stage: "intake", category: "task", status: "info", title: task.parent_task_id ? `${owner.label}创建分派任务` : "任务已创建", summary: taskLabel(task), actor: task.parent_task_id ? owner : actor("user", "用户"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: task.target_project, source: "task", technical: { request_origin: task.request_origin || "", origin_session_id: task.origin_session_id || "", queue_scope: task.queue_scope || "" } }));
+    const semanticReceipt = task.semantic_decision_receipt || task.workflow_decision?.semantic_decision_receipt || null;
+    events.push(event({ id: `task:${taskId}:created`, at: task.created_at, stage: "intake", category: "task", status: "info", title: task.parent_task_id ? `${owner.label}创建分派任务` : "任务已创建", summary: taskLabel(task), actor: task.parent_task_id ? owner : actor("user", "用户"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: task.target_project, source: "task", technical: {
+      request_origin: task.request_origin || "",
+      origin_session_id: task.origin_session_id || "",
+      queue_scope: task.queue_scope || "",
+      ...(semanticReceipt ? { semantic_decision: {
+        type: semanticReceipt.decisionKind || semanticReceipt.decision_kind || "",
+        status: semanticReceipt.status || "",
+        model: semanticReceipt.model || "",
+        confidence: semanticReceipt.confidence,
+        checksum: semanticReceipt.checksum || "",
+      } } : {}),
+    } }));
     for (const item of getTaskTimeline(task)) {
-      events.push(event({ id: `timeline:${taskId}:${item.id || stableId("row", item)}`, at: item.at, category: String(item.type || "timeline"), status: normalizeStatus(item.status), title: item.title || item.type || "任务进展", summary: item.detail || item.message, actor: item.agent ? actor(/test.?agent/i.test(item.agent) ? "test_agent" : "project_agent", item.agent) : actor("group_agent", "群聊主 Agent"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: item.agent || task.target_project, source: "timeline", technical: item.data && typeof item.data === "object" ? { phase: item.phase || "", files: stringList(item.data.files || item.data.files_changed, 30) } : undefined }));
+      events.push(event({ id: `timeline:${taskId}:${item.id || stableId("row", item)}`, at: item.at, category: String(item.type || "timeline"), status: normalizeStatus(item.status), title: item.title || item.type || "任务进展", summary: timelineSummary(item), actor: item.agent ? actor(/test.?agent/i.test(item.agent) ? "test_agent" : "project_agent", item.agent) : actor("group_agent", "群聊主 Agent"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: item.agent || task.target_project, source: "timeline", technical: timelineTechnical(item) }));
     }
     for (const [index, item] of getTaskLogs(taskId, 100).entries()) {
       events.push(event({ id: `task-log:${taskId}:${index}:${item.timestamp}`, at: item.timestamp, category: "task_log", status: normalizeStatus(item.level), title: item.level === "error" ? "任务运行异常" : item.level === "warning" ? "任务运行提示" : "任务运行记录", summary: item.message, actor: actor("system", "任务运行器"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, source: "task_log" }));
@@ -331,6 +374,54 @@ function buildTaskEvents(tasks: any[]) {
     }
   }
   return events;
+}
+
+// 执行期实时计划不持久化在任务记录上，挂在群消息的 main_agent_decision.todo_plan；取该任务最近一条。
+function latestGroupTodoPlan(task: any) {
+  if (!task?.group_id) return null;
+  try {
+    const sessionId = String(task.group_session_id || task.groupSessionId || "default");
+    const messages = getGroupMessages(task.group_id, sessionId);
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message: any = messages[index];
+      if (String(message?.task_id || message?.task?.id || message?.taskExperience?.task_id || "") !== String(task.id || "")) continue;
+      const decision = message?.mainAgentDecision || message?.main_agent_decision;
+      const todo = decision?.todo_plan || decision?.todoPlan;
+      if (todo && Array.isArray(todo.steps) && todo.steps.length) return todo;
+    }
+  } catch {}
+  return null;
+}
+
+// 计划书与工作单：结构化数据块 + 让"计划/派发"阶段可读的合成事件。
+function buildPlanAndWorkItemData(tasks: any[]) {
+  const plans: any[] = [];
+  const workItems: any[] = [];
+  const events: TaskReplayEvent[] = [];
+  for (const task of tasks) {
+    const taskId = String(task.id || "");
+    const owner = taskOwnerActor(task);
+    const base = { task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: task.target_project };
+    const plan = buildTaskReplayPlanView(task, { fallbackTodo: latestGroupTodoPlan(task) });
+    if (plan) {
+      plans.push(plan);
+      if (plan.source === "plan_mode") {
+        events.push(event({ ...base, id: `plan:${taskId}:generated`, at: plan.generated_at, stage: "planning", category: "plan_mode", status: "passed", title: `${owner.label}生成${plan.title}（${plan.step_count} 步）`, summary: plan.steps.slice(0, 6).map(step => step.title).join("；"), actor: owner, source: "plan", technical: { plan_source: plan.source, step_count: plan.step_count, impact_projects: plan.impact_projects, acceptance: plan.acceptance } }));
+        for (const revision of plan.revisions) {
+          if (!revision.at) continue;
+          events.push(event({ ...base, id: `plan:${taskId}:revision:${revision.count}`, at: revision.at, stage: "planning", category: "plan_revision", status: "info", title: `计划书完成第 ${revision.count} 次修订`, summary: revision.feedback, actor: actor("user", "用户"), source: "plan" }));
+        }
+        if (plan.confirmed && plan.confirmed_at) {
+          events.push(event({ ...base, id: `plan:${taskId}:confirmed`, at: plan.confirmed_at, stage: "planning", category: "plan_confirmed", status: "passed", title: "执行前计划已确认", summary: plan.next_step || "计划确认后进入派发。", actor: actor("user", "用户"), source: "plan" }));
+        }
+      }
+    }
+    for (const row of buildTaskReplayWorkItemRows(task, listExecutions({ taskId: task.id }))) {
+      workItems.push(row);
+      events.push(event({ ...base, id: `work-item:${taskId}:${row.id}`, at: row.created_at || iso(task.created_at), stage: "dispatch", category: "work_item", status: normalizeStatus(row.status), title: `${owner.label}派发工作单给 ${row.target || row.owner || "执行成员"}`, summary: [row.subject, row.receipt_summary].filter(Boolean).join(" — "), actor: owner, project: row.target || task.target_project, source: "work_item", technical: { work_item_id: row.id, status: row.status, attempt: row.attempt, files_changed: row.files_changed.slice(0, 10), verification: row.verification.slice(0, 6), blocked_by: row.blocked_by } }));
+    }
+  }
+  return { plans, workItems, events };
 }
 
 function buildMessageEvents(tasks: any[]) {
@@ -359,16 +450,33 @@ function buildMessageEvents(tasks: any[]) {
   return events;
 }
 
+// 执行记录里的 state 是机器词（queued/running/done…），直接显示用户读不懂，统一换成中文说法。
+const EXECUTION_STATE_TEXT: Record<string, string> = {
+  queued: "已排队等待执行", pending: "已排队等待执行", spawning: "正在启动工作会话", ready: "已就绪",
+  running: "正在执行", executing: "正在执行", reviewing: "正在等待验收",
+  done: "已完成执行", completed: "已完成执行", succeeded: "已完成执行",
+  failed: "执行失败", error: "执行失败", cancelled: "执行已取消", canceled: "执行已取消",
+};
+
+function executionStateText(state: any) {
+  return EXECUTION_STATE_TEXT[String(state || "").toLowerCase()] || "";
+}
+
 function buildExecutionEvents(tasks: any[]) {
   const events: TaskReplayEvent[] = [];
   for (const task of tasks) {
     for (const executionRecord of listExecutions({ taskId: task.id })) {
       const execution: any = executionRecord;
+      const agentName = execution.project || execution.agent || "项目子 Agent";
       const rows = Array.isArray(execution.events) ? execution.events : [];
       for (const [index, row] of rows.entries()) {
-        events.push(event({ id: `execution:${execution.id}:${row.id || index}`, at: row.at || row.timestamp, category: row.name || row.type || "execution", status: normalizeStatus(row.status || row.state), title: safeText(row.message || row.name || `项目子 Agent ${execution.state}`, 180), summary: row.message || row.detail, actor: actor("project_agent", execution.project || execution.agent || "项目子 Agent"), task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: execution.project, source: "execution", technical: { execution_id: execution.id, runtime: execution.runtime || execution.packet?.agentType || "", state: row.state || execution.state || "", failure_class: row.failureClass || execution.failure?.class || "" } }));
+        const rowStateText = executionStateText(row.state || row.status);
+        events.push(event({ id: `execution:${execution.id}:${row.id || index}`, at: row.at || row.timestamp, category: row.name || row.type || "execution", status: normalizeStatus(row.status || row.state), title: safeText(row.message || row.name || (rowStateText ? `${agentName} ${rowStateText}` : `${agentName} 执行记录`), 180), summary: safeText(row.message || row.detail, 1200) || (rowStateText ? `${agentName} ${rowStateText}。` : ""), actor: actor("project_agent", agentName), task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: execution.project, source: "execution", technical: { execution_id: execution.id, runtime: execution.runtime || execution.packet?.agentType || "", state: row.state || execution.state || "", failure_class: row.failureClass || execution.failure?.class || "" } }));
       }
-      if (!rows.length) events.push(event({ id: `execution:${execution.id}`, at: execution.updatedAt || execution.createdAt, stage: "execution", category: "execution", status: normalizeStatus(execution.state), title: `${execution.project || "项目子 Agent"} ${execution.state || "执行"}`, summary: execution.failure?.message || "", actor: actor("project_agent", execution.project || execution.agent || "项目子 Agent"), task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: execution.project, source: "execution", technical: { execution_id: execution.id, runtime: execution.runtime || execution.packet?.agentType || "" } }));
+      if (!rows.length) {
+        const stateText = executionStateText(execution.state) || "执行";
+        events.push(event({ id: `execution:${execution.id}`, at: execution.updatedAt || execution.createdAt, stage: "execution", category: "execution", status: normalizeStatus(execution.state), title: `${agentName} ${stateText}`, summary: safeText(execution.failure?.message, 1200) || `${agentName} ${stateText}。`, actor: actor("project_agent", agentName), task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: execution.project, source: "execution", technical: { execution_id: execution.id, runtime: execution.runtime || execution.packet?.agentType || "" } }));
+      }
     }
     for (const session of listTaskAgentSessions({ taskId: task.id })) {
       events.push(event({ id: `session:${session.id}`, at: session.createdAt || session.openedAt || session.lastUsedAt, stage: "execution", category: "agent_session", status: normalizeStatus(session.status), title: `${session.project || "项目子 Agent"} 工作会话${session.status === "open" ? "已建立" : "已结束"}`, summary: session.lastError || `已执行 ${Number(session.turnCount || 0)} 轮`, actor: actor("project_agent", session.project || session.agentType || "项目子 Agent"), task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: session.project, source: "agent_session", technical: { session_id: session.id, executor: session.agentType || "", continuity: getTaskAgentSessionContinuity(session) } }));
@@ -433,7 +541,27 @@ function buildTestAgentEvents(taskIds: string[], artifactRuns: ReturnType<typeof
     const report = invocation.report || {};
     const title = record.mode === "plan" ? "TestAgent 生成独立测试计划" : record.status === "completed" ? "TestAgent 完成独立验证" : "TestAgent 验证未通过";
     const summary = record.error || report.summary || invocation.error || (record.mode === "plan" ? "测试范围与验证步骤已生成" : `结论：${invocation.recommendation || invocation.outcome || record.status}`);
-    events.push(event({ id: `test-agent-run:${record.id}`, at: record.finishedAt || record.startedAt || record.createdAt, stage: record.mode === "plan" ? "planning" : "test", category: record.mode === "plan" ? "test_plan" : "test_run", status: normalizeStatus(record.status === "completed" && invocation.canAccept !== false ? "passed" : record.status), title, summary, actor: actor("test_agent", "TestAgent"), task_id: record.taskId, source: "test_agent_runner", technical: { run_id: record.id, mode: record.mode, duration_ms: Math.max(0, Date.parse(record.finishedAt || record.heartbeatAt) - Date.parse(record.startedAt || record.createdAt)), outcome: invocation.outcome || "", recommendation: invocation.recommendation || "", can_accept: invocation.canAccept === true, source_stable: record.sourceStable !== false, recovered_after_restart: record.recoveredAfterRestart === true } }));
+    const semanticReceipt = report.semanticDecisionReceipt || report.semantic_decision_receipt || invocation.semanticDecisionReceipt || invocation.semantic_decision_receipt || null;
+    const criterionCoverage = report.criterionCoverage || report.criterion_coverage || [];
+    events.push(event({ id: `test-agent-run:${record.id}`, at: record.finishedAt || record.startedAt || record.createdAt, stage: record.mode === "plan" ? "planning" : "test", category: record.mode === "plan" ? "test_plan" : "test_run", status: normalizeStatus(record.status === "completed" && invocation.canAccept !== false ? "passed" : record.status), title, summary, actor: actor("test_agent", "TestAgent"), task_id: record.taskId, source: "test_agent_runner", technical: {
+      run_id: record.id,
+      mode: record.mode,
+      duration_ms: Math.max(0, Date.parse(record.finishedAt || record.heartbeatAt) - Date.parse(record.startedAt || record.createdAt)),
+      outcome: invocation.outcome || "",
+      recommendation: invocation.recommendation || "",
+      can_accept: invocation.canAccept === true,
+      source_stable: record.sourceStable !== false,
+      recovered_after_restart: record.recoveredAfterRestart === true,
+      criterion_coverage: Array.isArray(criterionCoverage) ? criterionCoverage.slice(0, 60) : [],
+      unplanned_criteria: Array.isArray(report.unplannedCriteria || report.unplanned_criteria) ? (report.unplannedCriteria || report.unplanned_criteria).slice(0, 60) : [],
+      ...(semanticReceipt ? { semantic_decision: {
+        type: semanticReceipt.decisionKind || semanticReceipt.decision_kind || "test_agent_plan",
+        status: semanticReceipt.status || "",
+        model: semanticReceipt.model || "",
+        confidence: semanticReceipt.confidence,
+        checksum: semanticReceipt.checksum || "",
+      } } : {}),
+    } }));
   }
   for (const run of artifactRuns) {
     const evidenceIds = run.artifacts.map(item => item.id);
@@ -474,22 +602,53 @@ function taskEvidence(tasks: any[], artifactRuns: ReturnType<typeof listTestAgen
   return evidence;
 }
 
+// 同一件事会被 timeline / journal / trace 各记一遍（标题措辞不同、正文相同），逐条展示等于让用户读三遍。
+// 归并键取"任务 + 分钟 + 正文语义"，正文为空时退回标题；保留叙述性最强的来源，其余并入 merged_sources。
+const SOURCE_PRIORITY = ["task", "plan", "work_item", "group_message", "project_message", "global_agent", "mission_supervisor", "test_agent_runner", "test_agent_artifacts", "timeline", "agent_session", "execution", "journal", "trace", "task_log"];
+
+function sourceRank(source: string) {
+  const index = SOURCE_PRIORITY.indexOf(source);
+  return index < 0 ? SOURCE_PRIORITY.length : index;
+}
+
+function mergeKey(item: TaskReplayEvent) {
+  const semantic = (item.summary || item.title).replace(/[\s。，、；：!！?？.,;:—\-]/g, "").slice(0, 80);
+  return `${item.task_id}|${item.at.slice(0, 16)}|${item.status}|${semantic}`;
+}
+
 function dedupeAndSort(events: TaskReplayEvent[]) {
-  const seen = new Set<string>();
-  return events.filter(item => {
-    const key = `${item.at}|${item.task_id}|${item.category}|${item.title}|${item.summary.slice(0, 160)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).sort((a, b) => a.at.localeCompare(b.at) || STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage) || a.id.localeCompare(b.id));
+  const exact = new Set<string>();
+  const merged = new Map<string, TaskReplayEvent & { merged_sources?: string[] }>();
+  for (const item of events) {
+    const exactKey = `${item.at}|${item.task_id}|${item.category}|${item.title}|${item.summary.slice(0, 160)}`;
+    if (exact.has(exactKey)) continue;
+    exact.add(exactKey);
+    const key = mergeKey(item);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, item);
+      continue;
+    }
+    const keep = sourceRank(item.source) < sourceRank(current.source) ? item : current;
+    const drop = keep === item ? current : item;
+    merged.set(key, {
+      ...keep,
+      evidence_ids: [...new Set([...keep.evidence_ids, ...drop.evidence_ids])],
+      merged_sources: [...new Set([...(current.merged_sources || [current.source]), drop.source, keep.source])],
+    });
+  }
+  return [...merged.values()]
+    .map(item => item.merged_sources && item.merged_sources.length > 1
+      ? { ...item, technical: { ...(item.technical || {}), merged_from: item.merged_sources.join("、"), merged_count: item.merged_sources.length } }
+      : item)
+    .sort((a, b) => a.at.localeCompare(b.at) || STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage) || a.id.localeCompare(b.id));
 }
 
 export function paginateReplayEventsForView(allEvents: TaskReplayEvent[], options: TaskReplayEventPageOptions = {}) {
   const eventQuery = String(options.query || "").trim().toLowerCase();
   const hasEventViewOptions = Object.keys(options).length > 0;
   const filteredEvents = hasEventViewOptions ? allEvents.filter(item => {
-    const lowLevelSource = ["trace", "journal", "task_log", "execution"].includes(item.source);
-    if (!options.includeSystemEvents && lowLevelSource && !["failed", "blocked", "warning"].includes(item.status)) return false;
+    if (!options.includeSystemEvents && item.audience === "technical") return false;
     if (options.stage && options.stage !== "all" && item.stage !== options.stage) return false;
     if (options.status && options.status !== "all" && item.status !== options.status) return false;
     if (options.actor && options.actor !== "all" && item.actor?.type !== options.actor) return false;
@@ -543,7 +702,8 @@ export function paginateReplayEventsForView(allEvents: TaskReplayEvent[], option
 }
 
 function taskPublicRow(task: any, rootId: string) {
-  return { id: String(task.id || ""), parent_task_id: String(task.parent_task_id || ""), root_task_id: rootId, title: taskLabel(task), goal: safeText(task.business_goal || task.description, 500), project: safeText(task.target_project, 100), group_id: String(task.group_id || ""), group_session_id: String(task.group_session_id || ""), project_session_id: String(task.project_session_id || ""), request_origin: String(task.request_origin || ""), queue_scope: String(task.queue_scope || ""), trace_id: String(task.trace_id || ""), status: String(task.status || "pending"), created_at: iso(task.created_at), updated_at: iso(task.updated_at), is_root: String(task.id) === rootId };
+  const normalized = require("./collaboration-task-service").normalizeTaskTerminalStateView(task);
+  return { id: String(normalized.id || ""), parent_task_id: String(normalized.parent_task_id || ""), root_task_id: rootId, title: taskLabel(normalized), goal: safeText(normalized.business_goal || normalized.description, 500), project: safeText(normalized.target_project, 100), group_id: String(normalized.group_id || ""), group_session_id: String(normalized.group_session_id || ""), project_session_id: String(normalized.project_session_id || ""), request_origin: String(normalized.request_origin || ""), queue_scope: String(normalized.queue_scope || ""), queue_target_key: String(normalized.queue_target_key || ""), queue_position: Math.max(0, Number(normalized.queue_position || 0)), queue_state: String(normalized.queue_state || ""), scheduler_state: normalized.scheduler_state || null, workspace_lane: String(normalized.scheduler_state?.workspace_lane || normalized.workspace_lane || ""), trace_id: String(normalized.trace_id || ""), status: String(normalized.status || "pending"), acceptance_state: String(normalized.acceptance_state || "pending"), intake_identity_checksum: String(normalized.intake_identity_checksum || ""), terminal_state_receipt: normalized.terminal_state_receipt || null, terminal_decision: normalized.terminal_decision || null, terminal_gate: normalized.terminal_gate || null, legacy_status_unverified: normalized.legacy_status_unverified === true || (TERMINAL.has(String(normalized.status || "").toLowerCase()) && !normalized.terminal_decision), semantic_decision_receipt: normalized.semantic_decision_receipt || normalized.workflow_decision?.semantic_decision_receipt || null, route_decision: normalized.route_decision || null, created_at: iso(normalized.created_at), updated_at: iso(normalized.updated_at), is_root: String(normalized.id) === rootId };
 }
 
 export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEventPageOptions = {}) {
@@ -553,8 +713,11 @@ export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEvent
   const globalRecords = relatedGlobalRecords(family.ids);
   const artifactRuns = listTestAgentArtifactCatalogForTasks(ids);
   const extraTraceIds = [...globalRecords.runs.map(run => run.trace_id), ...globalRecords.supervisors.map(record => record.trace_id)].filter(Boolean);
+  const planData = buildPlanAndWorkItemData(family.tasks);
+  const deliveries = family.tasks.map((task: any) => buildTaskReplayDeliveryView(task)).filter(Boolean);
   const allEvents = dedupeAndSort([
     ...buildTaskEvents(family.tasks),
+    ...planData.events,
     ...buildMessageEvents(family.tasks),
     ...buildExecutionEvents(family.tasks),
     ...buildGlobalEvents(globalRecords, family.root),
@@ -563,6 +726,20 @@ export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEvent
     ...buildTraceEvents(family.tasks, extraTraceIds),
   ]);
   const evidence = taskEvidence(family.tasks, artifactRuns);
+  // 文件改动与验证命令的明细由证据面板唯一承载，工作单只留计数并挂上跳转用的 evidence_ids，避免同一批数据两处各列一遍。
+  const evidenceByTaskProject = new Map<string, string>();
+  for (const item of evidence) {
+    if (!["code_changes", "verification"].includes(item.type)) continue;
+    evidenceByTaskProject.set(`${item.task_id}|${item.type}|${String(item.project || "").toLowerCase()}`, item.id);
+  }
+  const workItems = planData.workItems.map((row: any) => {
+    const project = String(row.target || row.owner || "").toLowerCase();
+    const ids = [
+      evidenceByTaskProject.get(`${row.task_id}|code_changes|${project}`) || evidenceByTaskProject.get(`${row.task_id}|code_changes|`),
+      evidenceByTaskProject.get(`${row.task_id}|verification|${project}`) || evidenceByTaskProject.get(`${row.task_id}|verification|`),
+    ].filter(Boolean);
+    return { ...row, verification_count: row.verification.length, evidence_ids: [...new Set(ids)] };
+  });
   const issueEvents = allEvents.filter(item => ["failed", "blocked", "warning"].includes(item.status));
   const phases = STAGE_ORDER.map(stage => {
     const rows = allEvents.filter(item => item.stage === stage);
@@ -570,7 +747,27 @@ export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEvent
     return { id: stage, status, event_count: rows.length, started_at: rows[0]?.at || "", finished_at: rows.at(-1)?.at || "" };
   }).filter(row => row.event_count > 0);
   const { events, eventPage } = paginateReplayEventsForView(allEvents, options);
-  const rootStatus = String(family.root.status || "pending");
+  const normalizedRoot = require("./collaboration-task-service").normalizeTaskTerminalStateView(family.root);
+  const rootStatus = String(normalizedRoot.status || "pending");
+  const usageSources = [...family.tasks, ...globalRecords.runs];
+  const recordedUsage = (source: any, keys: string[]) => {
+    for (const key of keys) {
+      const value = key.split(".").reduce((current: any, part: string) => current?.[part], source);
+      if (value !== undefined && value !== null && Number.isFinite(Number(value))) return Math.max(0, Math.floor(Number(value)));
+    }
+    return null;
+  };
+  const sumRecordedUsage = (keys: string[]) => {
+    const rows = usageSources.map((source: any) => recordedUsage(source, keys)).filter((value: any) => value !== null);
+    return rows.length ? rows.reduce((sum: number, value: number) => sum + value, 0) : null;
+  };
+  const replayInputTokens = sumRecordedUsage(["input_tokens", "inputTokens", "usage.inputTokens", "usage.input_tokens"]);
+  const replayOutputTokens = sumRecordedUsage(["output_tokens", "outputTokens", "usage.outputTokens", "usage.output_tokens"]);
+  const replayModelCalls = sumRecordedUsage(["model_calls", "modelCalls", "usage.modelCalls", "usage.model_calls"]);
+  const replayRetryCount = sumRecordedUsage(["retry_count", "retryCount", "provider_retry_count", "providerRetryCount"]);
+  const replayTokenCount = replayInputTokens !== null || replayOutputTokens !== null
+    ? Number(replayInputTokens || 0) + Number(replayOutputTokens || 0)
+    : null;
   return {
     schema: "ccm-complete-task-replay-v1",
     generated_at: new Date().toISOString(),
@@ -579,6 +776,12 @@ export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEvent
     title: taskLabel(family.root),
     goal: safeText(family.root.business_goal || family.root.description, 700),
     status: rootStatus,
+    acceptance_state: String(normalizedRoot.acceptance_state || "pending"),
+    acceptance_decision: normalizedRoot.acceptance_decision || normalizedRoot.epic_acceptance_decision || null,
+    terminal_state_receipt: normalizedRoot.terminal_state_receipt || null,
+    terminal_decision: normalizedRoot.terminal_decision || null,
+    terminal_gate: normalizedRoot.terminal_gate || null,
+    scheduler_state: normalizedRoot.scheduler_state || null,
     completed: TERMINAL.has(rootStatus.toLowerCase()),
     started_at: iso(family.root.started_at || family.root.created_at),
     finished_at: iso(family.root.completed_at || (TERMINAL.has(rootStatus.toLowerCase()) ? family.root.updated_at : "")),
@@ -589,8 +792,11 @@ export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEvent
       { id: "project_agent", label: "项目子 Agent", present: family.tasks.some(task => listExecutions({ taskId: task.id }).length > 0) },
       { id: "test_agent", label: "TestAgent", present: artifactRuns.length > 0 || listTestAgentRunnerRecords({ taskIds: ids, limit: 1 }).length > 0 },
     ],
-    summary: { event_count: allEvents.length, issue_count: issueEvents.length, failed_count: issueEvents.filter(item => item.status === "failed").length, task_count: family.tasks.length, evidence_count: evidence.length, test_run_count: artifactRuns.length },
+    summary: { event_count: allEvents.length, issue_count: issueEvents.length, failed_count: issueEvents.filter(item => item.status === "failed").length, task_count: family.tasks.length, evidence_count: evidence.length, test_run_count: artifactRuns.length, plan_count: planData.plans.length, work_item_count: workItems.length, user_event_count: allEvents.filter(item => item.audience === "user").length, technical_event_count: allEvents.filter(item => item.audience === "technical").length, delivery_count: deliveries.length, model_call_count: replayModelCalls, provider_retry_count: replayRetryCount, input_token_count: replayInputTokens, output_token_count: replayOutputTokens, token_count: replayTokenCount },
     phases,
+    plans: planData.plans,
+    work_items: workItems,
+    deliveries,
     events,
     event_page: eventPage,
     evidence,
@@ -599,7 +805,7 @@ export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEvent
       trace: { status: "available", policy: "完整任务日志保留到任务删除；快速 Trace 保留最近 1200 条" },
       test_agent: { status: artifactRuns.some(run => run.retention_status === "available") ? "available" : artifactRuns.length ? "expired" : "not_created", policy: "默认保留 14 天，且受 200 次运行和 2GB 上限约束", earliest_expiry: artifactRuns.map(run => run.retained_until).filter(Boolean).sort()[0] || "" },
     },
-    replay_capabilities: { chronological: true, filters: ["stage", "status", "actor", "task", "search"], event_pagination: true, incremental_cursor: true, failure_navigation: true, evidence_preview: true, historical_line_diff: true, raw_machine_paths_exposed: false },
+    replay_capabilities: { chronological: true, filters: ["stage", "status", "actor", "task", "search"], event_pagination: true, incremental_cursor: true, failure_navigation: true, evidence_preview: true, historical_line_diff: true, plan_visibility: true, work_item_visibility: true, delivery_visibility: true, duplicate_event_merging: true, raw_machine_paths_exposed: false },
   };
 }
 
@@ -708,6 +914,20 @@ export function runTaskReplayContractSelfTest() {
   });
   const unavailableChange = normalizeReplayChange({ path: "src/legacy.ts", additions: 2 }, "web");
   const journal = runTaskReplayJournalSelfTest();
+  const planSelfTest = runTaskReplayPlanSelfTest();
+  const deliverySelfTest = runTaskReplayDeliverySelfTest();
+  const mergeSample = dedupeAndSort([
+    event({ id: "m1", at: "2026-07-20T01:00:05.000Z", task_id: "t", status: "passed", title: "计划版本 v0 · 待证明 4 项", summary: "计划版本 v0 · 待证明 4 项", source: "journal" }),
+    event({ id: "m2", at: "2026-07-20T01:00:40.000Z", task_id: "t", status: "passed", title: "我已复核目标与验收", summary: "计划版本 v0 · 待证明 4 项", source: "timeline" }),
+    event({ id: "m3", at: "2026-07-20T01:00:50.000Z", task_id: "t", status: "passed", title: "另一件事", summary: "子 Agent 已提交结果说明", source: "timeline" }),
+  ]);
+  const gateSummary = timelineSummary({
+    detail: "2 项未通过",
+    data: { failed_checks: [
+      { id: "verification", label: "已执行验证", ok: false, detail: "已执行 0 条" },
+      { label: "真实文件变更", ok: false, detail: "变更 0 个文件" },
+    ] },
+  });
   const checks = {
     secrets_redacted: secret.includes("[已隐藏]"),
     paths_redacted: secret.includes("[本机路径]"),
@@ -716,10 +936,27 @@ export function runTaskReplayContractSelfTest() {
     complete_journal: journal.pass,
     historical_line_diff_preserved: change?.diff?.available === true && change.diff.diff.includes("@@ -4,1 +4,1 @@"),
     missing_historical_diff_explained: unavailableChange?.diff?.available === false && /无法还原逐行代码内容/.test(unavailableChange.diff.reason),
+    plan_and_work_items_visible: planSelfTest.pass,
+    acceptance_gate_failures_detailed: gateSummary.includes("已执行验证（已执行 0 条）") && gateSummary.includes("真实文件变更（变更 0 个文件）"),
+    // 用户看得懂的执行进展默认可见，只有机器标识才收进底层开关。
+    readable_execution_event_visible: eventAudience({ source: "execution", status: "info", title: "web 正在修改登录状态恢复逻辑", summary: "读取会话存储与路由守卫" }) === "user",
+    machine_trace_event_hidden: eventAudience({ source: "trace", status: "info", title: "agent.run", summary: "" }) === "technical",
+    problem_event_always_visible: eventAudience({ source: "trace", status: "failed", title: "agent.run", summary: "" }) === "user",
+    narrative_event_always_visible: eventAudience({ source: "task", status: "info", title: "任务已创建", summary: "" }) === "user",
+    execution_state_readable: executionStateText("running") === "正在执行" && executionStateText("done") === "已完成执行" && executionStateText("weird-state") === "",
+    delivery_anchors_visible: deliverySelfTest.pass,
+    // journal 与 timeline 记录的同一件事被归并成一条，并保留来源痕迹；无关事件不受影响。
+    duplicate_events_merged: mergeSample.length === 2
+      && mergeSample.some(item => item.source === "timeline" && item.title === "我已复核目标与验收" && String(item.technical?.merged_from || "").includes("journal"))
+      && mergeSample.some(item => item.title === "另一件事"),
+    // 摘要与标题完全相同的事件不再渲染两遍。
+    redundant_summary_dropped: event({ title: "任务执行租约已获取", summary: "任务执行租约已获取", source: "journal" }).summary === "",
   };
   return {
     schema: "ccm-task-replay-contract-selftest-v1",
     pass: Object.values(checks).every(Boolean),
     checks,
+    plan_checks: planSelfTest.checks,
+    delivery_checks: deliverySelfTest.checks,
   };
 }

@@ -64,11 +64,13 @@ CCM 中需要理解自然语言含义的选择统一交给模型。关键词、�
 
 ## 验证证据
 
-- `node scripts/model-semantic-routing-audit.mjs`：21 项生产链路静态门禁通过。
-- `npm run test:quick -- --no-build`：13/13 通过。
+- `node scripts/model-semantic-routing-audit.mjs`：19 项生产调用链静态门禁通过。
+- `npm run test:quick`：23/23 通过，后端测试构建使用独立临时目录。
 - `node scripts/project-chat-presentation-selftest.mjs`：项目同步关键词分类 fail closed。
 - `node scripts/role-skills-selftest.mjs`：Claude Code、Cursor、Codex 使用模型选定 Skill 快照。
 - `node scripts/music-semantic-playback-selftest.mjs`：7 次本地 mock 模型调用覆盖歌曲、歌手、心情、曲风和随机策略。
 - backend/frontend production build 通过；测试付费 Provider 调用为 0。
 
 2026-07-24 的独立调用链复查及修复记录见 [模型语义路由独立自检](../model-semantic-routing-self-audit-2026-07-24/README.md)。
+
+2026-07-29 的统一语义运行时、跨Agent路由、TestAgent覆盖、模型记忆准入、结构化验收与失败回执收口见 [全链路模型语义路由完整业务流程](../../../confirmed-business-processes/MODEL-SEMANTIC-ROUTING-END-TO-END.md)。

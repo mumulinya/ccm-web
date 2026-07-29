@@ -51,6 +51,11 @@ export function useGlobalMissionTracking(options = {}) {
       + section('修改文件', report.files_modified, '无')
       + section('验证结果', report.verification_results, '无已执行验证证据')
       + section('合并结果', report.merge_commits, '无需独立 worktree 合并')
+      + section(
+        '发布状态',
+        report.deployment_results || report.release_results || report.publish_results,
+        '未记录部署或发布结果，不能视为已经上线',
+      )
       + section('风险', report.risks, '未发现已知风险')
       + section('遗留项', report.remaining_items, '无')
   }

@@ -531,8 +531,7 @@ function extractBlockedTaskSignals(messages) {
         const content = messageContent(message);
         const status = String(message?.receipt?.status || message?.delivery_summary?.status || message?.status || "").toLowerCase();
         const taskId = String(message?.task_id || message?.taskId || message?.receipt?.taskId || message?.delivery_summary?.task_id || "").trim();
-        const corpus = `${status}\n${content}`;
-        if (taskId && /(失败|阻塞|未完成|超时|异常|需要|error|failed|blocked|timeout|needs_info|need info)/i.test(corpus)) {
+        if (taskId && ["failed", "blocked", "timed_out", "timeout", "needs_info", "needs_user", "rejected"].includes(status)) {
             signals.push({ taskId, text: compactText(content || status, 220) });
         }
     }
@@ -615,9 +614,7 @@ function evaluateGroupMemorySummaryQuality(summary, fallback, messages, memory =
         detail: blockedGaps.length === 0 ? "带 task id 的失败/阻塞信号仍在摘要问题域中可见。" : "部分失败/阻塞任务在摘要问题域中不可见，可能被完成态覆盖。",
         gaps: blockedGaps,
     });
-    const completionText = normalizedSummary.completedWork.join("\n");
     const sweepingCompletionClaims = normalizedSummary.completedWork
-        .filter(item => /(全部完成|全部处理|已上线|上线生产|完全完成|all done|completed all|fully complete|released to production)/i.test(String(item || "")))
         .filter(item => !isGroundedInSource(item, sourceText))
         .map(item => compactText(item, 180))
         .slice(0, 12);
@@ -647,13 +644,8 @@ function evaluateGroupMemorySummaryQuality(summary, fallback, messages, memory =
         severity: "medium",
         detail: !sourceHasText || summaryHasSignal ? "压缩区间有可用摘要信号。" : "压缩区间有内容，但摘要几乎为空。",
     });
-    const sourceHasBlocked = /(失败|阻塞|未完成|超时|异常|error|failed|blocked|timeout|needs_info)/i.test(sourceText);
-    const summaryKeepsBlocked = /(失败|阻塞|未完成|超时|异常|error|failed|blocked|timeout|needs_info)/i.test(summaryConcernText);
-    const sourceHasSweepingCompletion = /(全部完成|全部处理|已上线|上线生产|all done|completed all|released to production)/i.test(sourceText);
-    const completionOverBlocked = sourceHasBlocked
-        && !summaryKeepsBlocked
-        && !sourceHasSweepingCompletion
-        && /(全部完成|全部处理|已上线|上线生产|all done|completed all|released to production)/i.test(completionText);
+    const summarizedTaskState = [normalizedSummary.taskStates, normalizedSummary.pendingTasks, normalizedSummary.errorsAndFixes].flat().join("\n");
+    const completionOverBlocked = blockedSignals.some(signal => !summarizedTaskState.includes(signal.taskId));
     addQualityCheck(checks, {
         id: "no_completion_over_blockers",
         label: "阻塞事实不被全量完成覆盖",
@@ -713,8 +705,33 @@ function mergeFactAnchors(existing = [], incoming = []) {
     return [...result.values()].slice(-group_compaction_receipts_1.GROUP_FACT_ANCHOR_LIMIT);
 }
 function extractPersistentRequirements(messages) {
-    return extractFactAnchors(messages).filter(item => item.type === "user_requirement"
-        && /(必须|不要|不得|禁止|始终|只能|不能|务必|验收|约束|must\b|never\b|always\b|do not\b|required?\b)/i.test(item.text));
+    const rows = [];
+    for (let index = 0; index < (messages || []).length; index += 1) {
+        const message = messages[index];
+        const facts = [
+            ...(Array.isArray(message?.semantic_memory_facts) ? message.semantic_memory_facts : []),
+            ...(Array.isArray(message?.semanticMemoryFacts) ? message.semanticMemoryFacts : []),
+            ...(Array.isArray(message?.workflowDecision?.persistentRequirements) ? message.workflowDecision.persistentRequirements : []),
+            ...(Array.isArray(message?.workflow_decision?.persistent_requirements) ? message.workflow_decision.persistent_requirements : []),
+        ];
+        for (const [factIndex, fact] of facts.entries()) {
+            const type = String(fact?.type || "");
+            const status = String(fact?.semanticStatus || fact?.semantic_status || "confirmed");
+            const text = compactText(fact?.text || fact?.value, 2000);
+            if (!text || status !== "confirmed" || !["constraint", "requirement", "authorization", "decision", "unresolved"].includes(type))
+                continue;
+            const messageId = messageIdentity(message, index);
+            rows.push({
+                id: `${messageId}:semantic:${factIndex}`,
+                type: "user_requirement",
+                messageId,
+                text,
+                timestamp: String(message?.timestamp || message?.time || ""),
+                checksum: crypto.createHash("sha256").update(`${type}\n${text}`).digest("hex").slice(0, 16),
+            });
+        }
+    }
+    return rows;
 }
 function mergePersistentRequirements(existing = [], incoming = []) {
     const result = new Map();
@@ -4436,8 +4453,9 @@ function buildDeterministicConversationSummary(messages, memory, previous = {}) 
             users.push(`#${id} ${compactText(content, 900)}`);
         files.push(...extractFiles(message));
         runtimeFacts.push(...extractRuntimeSkillFacts(message));
-        if (/(错误|失败|异常|阻塞|超时|拒绝|error|failed|timeout|blocked)/i.test(content))
-            errors.push(`${actor}: ${compactText(content, 600)}`);
+        const structuredStatus = String(message?.receipt?.status || message?.delivery_summary?.status || message?.status || "").toLowerCase();
+        if (["failed", "blocked", "timed_out", "timeout", "rejected", "needs_user", "needs_info"].includes(structuredStatus))
+            errors.push(`${actor}: ${compactText(content || structuredStatus, 600)}`);
         if (message?.dispatchPolicy?.action || Array.isArray(message?.assignments) && message.assignments.length) {
             decisions.push(`${actor}: ${message?.dispatchPolicy?.action || "delegate"}；${compactText(message?.dispatchPolicy?.reason || content, 500)}`);
             for (const assignment of message.assignments || []) {

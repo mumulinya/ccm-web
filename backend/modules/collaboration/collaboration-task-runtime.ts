@@ -61,6 +61,10 @@ import {
 } from "./group-orchestrator";
 
 import { buildMainAgentDisplayStream, sanitizeMainAgentUserText } from "./display";
+import {
+  formatTaskProviderCircuitMessage,
+  getTaskProviderCircuitGate,
+} from "./provider-task-circuit-breaker";
 
 import {
   buildProjectCodeReadOnlySnapshot as buildProjectCodeReadOnlySnapshotBase,
@@ -442,6 +446,7 @@ import {
   TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS,
   TASK_WATCHDOG_GAP_REWORK_MAX,
   TASK_WATCHDOG_INTERVAL_MS,
+  TASK_WATCHDOG_RECOVERY_MAX,
   TASK_WATCHDOG_STALE_MS,
   agentRecoveryMonitorTimer,
   agentRecoveryProbeInFlight,
@@ -484,6 +489,7 @@ import {
   taskQueues,
   taskWatchdogTimer,
   setTaskWatchdogTimer,
+  syncTaskBacklogStatus,
   updateTask,
 } from "./collaboration";
 
@@ -528,6 +534,29 @@ export function enqueueTask(taskId: string, ctx: CollabCtx) {
   if (isTaskPaused(task)) {
     addTaskLog(taskId, "info", "任务已暂停，跳过入队");
     return { queued: false, message: "任务已暂停，跳过入队" };
+  }
+  const providerCircuitGate = getTaskProviderCircuitGate(task);
+  if (providerCircuitGate.blocked) {
+    const message = formatTaskProviderCircuitMessage(providerCircuitGate.circuit);
+    const lastBlockedAt = Date.parse(String(task.last_provider_circuit_queue_blocked_at || ""));
+    const recentlyRecorded = Number.isFinite(lastBlockedAt) && Date.now() - lastBlockedAt < 60_000;
+    if (!recentlyRecorded) {
+      updateTask(taskId, {
+        status: task.status === "in_progress" ? task.status : "failed",
+        status_detail: message,
+        last_provider_circuit_queue_blocked_at: new Date().toISOString(),
+      });
+      addTaskLog(taskId, "warning", `任务级 Provider 熔断阻止重新入队：${message}`);
+    }
+    return {
+      queued: false,
+      blocked: true,
+      reason: "provider_circuit_open",
+      retry_after: providerCircuitGate.circuit?.retryAfter || "",
+      remaining_ms: providerCircuitGate.remainingMs,
+      duplicate_block_suppressed: recentlyRecorded,
+      message,
+    };
   }
   const dependencyIds = Array.isArray(task.mission_dependencies) ? task.mission_dependencies.map(String).filter(Boolean) : [];
   const blockedDependencies = dependencyIds.filter((dependencyId: string) => {
@@ -594,11 +623,33 @@ export function enqueueTask(taskId: string, ctx: CollabCtx) {
 
   queue.splice(insertIndex, 0, taskId);
   console.log(`[任务队列] 任务 ${taskId} (${task.priority}) 已加入队列 [${targetKey}]，位置: ${insertIndex + 1}/${queue.length}`);
-  updateTask(taskId, { queued_at: new Date().toISOString() });
+  queue.forEach((queuedId, index) => updateTask(queuedId, {
+    queued_at: queuedId === taskId ? new Date().toISOString() : undefined,
+    queue_target_key: targetKey,
+    queue_position: index + 1,
+    queue_state: "queued",
+  }));
   addTaskLog(taskId, "info", `任务已加入队列 [${targetKey}]，位置 ${insertIndex + 1}/${queue.length}`);
 
-  processTargetQueue(targetKey, ctx);
+  launchTargetQueueProcessor(targetKey, ctx);
   return { queued: true, message: "任务已加入队列", targetKey, position: insertIndex + 1 };
+}
+
+function launchTargetQueueProcessor(targetKey: string, ctx: CollabCtx, recoveryAttempt = 0) {
+  void processTargetQueue(targetKey, ctx).catch((error: any) => {
+    const detail = String(error?.message || error || "队列处理异常").slice(0, 500);
+    console.error(`[任务队列] [${targetKey}] 处理器异常:`, detail);
+    const queue = taskQueues.get(targetKey) || [];
+    const nextTaskId = queue[0];
+    if (nextTaskId) {
+      addTaskLog(nextTaskId, "error", `队列处理器异常：${detail}`);
+      appendTaskTimelineEvent(nextTaskId, { type: "queue_processor_error", title: "队列处理器正在恢复", detail, status: "warn", phase: "queued", data: { target_key: targetKey, recovery_attempt: recoveryAttempt + 1 } });
+    }
+    if (queue.length > 0 && recoveryAttempt < 2) {
+      const delayMs = 1_000 * (recoveryAttempt + 1);
+      setTimeout(() => launchTargetQueueProcessor(targetKey, ctx, recoveryAttempt + 1), delayMs);
+    }
+  });
 }
 
 export function createAndQueueTask(task: any, ctx: CollabCtx) {
@@ -818,7 +869,7 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
   };
 }
 
-export function getTaskWatchdogStatus(staleMs = TASK_WATCHDOG_STALE_MS, gapCooldownMs = TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot?: any[]) {
+export function getTaskWatchdogStatus(staleMs = TASK_WATCHDOG_STALE_MS, gapCooldownMs = TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS, gapMaxCount = TASK_WATCHDOG_GAP_REWORK_MAX, taskSnapshot?: any[], recoveryMaxCount = TASK_WATCHDOG_RECOVERY_MAX) {
   const now = Date.now();
   const tasks = Array.isArray(taskSnapshot) ? taskSnapshot : loadTasks();
   const stalePending: any[] = [];
@@ -827,9 +878,14 @@ export function getTaskWatchdogStatus(staleMs = TASK_WATCHDOG_STALE_MS, gapCoold
   const runtimeFailed: any[] = [];
   const gapRework: any[] = [];
   const workItemStalled: any[] = [];
+  const recoveryExhausted: any[] = [];
 
   for (const task of tasks) {
-    if (!task?.auto_execute || task.status === "done" || isTaskPaused(task)) continue;
+    if (
+      !task?.auto_execute
+      || ["done", "blocked", "needs_user", "failed", "cancelled", "archived"].includes(String(task.status || ""))
+      || isTaskPaused(task)
+    ) continue;
     const ageMs = getTaskAgeMs(task, now);
     const base = {
       id: task.id,
@@ -881,9 +937,17 @@ export function getTaskWatchdogStatus(staleMs = TASK_WATCHDOG_STALE_MS, gapCoold
         auto_gap_continue_count: Number(task.auto_gap_continue_count || 0),
       });
     } else if (task.status === "pending" && !isTaskQueuedInMemory(task.id) && ageMs >= staleMs) {
-      stalePending.push(base);
+      if (Number(task.watchdog_recoveries || 0) >= recoveryMaxCount) {
+        recoveryExhausted.push({ ...base, recoveries: Number(task.watchdog_recoveries || 0) });
+      } else {
+        stalePending.push(base);
+      }
     } else if (task.status === "in_progress" && !runningTaskIds.has(task.id) && ageMs >= staleMs) {
-      stalledInProgress.push(base);
+      if (Number(task.watchdog_recoveries || 0) >= recoveryMaxCount) {
+        recoveryExhausted.push({ ...base, recoveries: Number(task.watchdog_recoveries || 0) });
+      } else {
+        stalledInProgress.push(base);
+      }
     } else if (task.status === "in_progress" && runningTaskIds.has(task.id) && ageMs >= staleMs) {
       runningLong.push(base);
     }
@@ -898,6 +962,7 @@ export function getTaskWatchdogStatus(staleMs = TASK_WATCHDOG_STALE_MS, gapCoold
     runtime_failed: runtimeFailed,
     gap_rework: gapRework,
     work_item_stalled: workItemStalled,
+    recovery_exhausted: recoveryExhausted,
     queue_status: getQueueStatus(tasks),
   };
 }
@@ -906,8 +971,9 @@ export function runTaskWatchdog(ctx: CollabCtx, options: any = {}) {
   const staleMs = Number(options.staleMs || options.stale_ms || TASK_WATCHDOG_STALE_MS);
   const gapCooldownMs = Number(options.gapCooldownMs || options.gap_cooldown_ms || TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS);
   const gapMaxCount = Math.max(1, Math.min(20, Number(options.gapMaxCount || options.gap_max_count || TASK_WATCHDOG_GAP_REWORK_MAX)));
+  const recoveryMaxCount = Math.max(1, Math.min(20, Number(options.recoveryMaxCount || options.recovery_max_count || TASK_WATCHDOG_RECOVERY_MAX)));
   const taskSnapshot = loadTasks();
-  const status = getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount, taskSnapshot);
+  const status = getTaskWatchdogStatus(staleMs, gapCooldownMs, gapMaxCount, taskSnapshot, recoveryMaxCount);
   const recoverable = [...status.stale_pending, ...status.stalled_in_progress];
   const results: any[] = [];
   const gapResults: any[] = [];
@@ -921,6 +987,33 @@ export function runTaskWatchdog(ctx: CollabCtx, options: any = {}) {
   const canAutoContinueGaps = executionReadiness.ready === true;
   let blockedRecovery: any = null;
   let runtimeRetry: any = null;
+
+  for (const item of status.recovery_exhausted) {
+    const task = taskSnapshot.find(t => t.id === item.id);
+    if (!task || isTaskPaused(task)) continue;
+    const detail = `任务自动恢复已达到 ${recoveryMaxCount} 次上限，已停止自动重试，请检查执行记录后手动继续`;
+    const blockedTask = updateTask(task.id, {
+      status: "needs_user",
+      acceptance_state: task.acceptance_state || "recovery_required",
+      status_detail: detail,
+      auto_execute: false,
+      is_paused: true,
+      paused: true,
+      recovery_pending: true,
+      watchdog_recovery_exhausted_at: new Date().toISOString(),
+    }) || task;
+    addTaskLog(task.id, "warning", detail);
+    appendTaskTimelineEvent(task.id, {
+      type: "watchdog_recovery_exhausted",
+      title: "自动恢复已停止",
+      detail,
+      status: "warn",
+      phase: "needs_user",
+      data: { recoveries: Number(task.watchdog_recoveries || 0), max_recoveries: recoveryMaxCount },
+    });
+    syncTaskBacklogStatus(blockedTask, "blocked", detail);
+    results.push({ task_id: task.id, queued: false, blocked: true, recovery_exhausted: true, message: detail });
+  }
 
   for (const item of recoverable) {
     const task = taskSnapshot.find(t => t.id === item.id);
@@ -1028,6 +1121,7 @@ export function runTaskWatchdog(ctx: CollabCtx, options: any = {}) {
     total_recoverable: recoverable.length + Number(blockedRecovery?.total_blocked || 0),
     stale_recovered: results.filter(item => item.queued).length,
     stale_recoverable: recoverable.length,
+    recovery_exhausted: status.recovery_exhausted.length,
     work_item_stalled_total: status.work_item_stalled.length,
     work_item_requeued: workItemResults.reduce((sum: number, item: any) => sum + Number(item.requeued || 0), 0),
     work_item_results: workItemResults,

@@ -46,14 +46,11 @@ import {
   readGroupSessionLifecycleJournal,
   verifyGroupSessionLifecycleHead,
 } from "../collaboration/group-session-lifecycle-head";
-import { MemoryScope, MemoryAction, CONTROL_FILE, now, writeJsonAtomic, hash, cleanId, getControlsState, appendAudit } from "./memory-control-center-types";
+import { MemoryScope, MemoryAction, CONTROL_FILE, now, writeJsonAtomic, withMemoryCenterFileLock, hash, cleanId, getControlsState, appendAudit } from "./memory-control-center-types";
+import { collectOrphanMemoryControls, memoryItemStableId, resolveMemoryItemControl } from "./memory-control-center-identity";
 
 export function getMemoryItemId(itemType: string, item: any, index = 0) {
-  const explicit = item?.id || item?.messageId;
-  if (explicit) return `${cleanId(itemType)}:${cleanId(explicit)}`;
-  const identity = [item?.archiveId, item?.taskId, item?.groupId, item?.time, item?.timestamp, item?.decision, item?.summary, item?.text, item?.reason, item?.question, item?.action];
-  if (!identity.some(Boolean)) identity.push(index);
-  return `${cleanId(itemType)}:${hash(identity)}`;
+  return memoryItemStableId(itemType, item, index);
 }
 
 
@@ -85,8 +82,10 @@ export function scopeControls(scope: MemoryScope, scopeId: string) {
 export function applyListControls(scope: MemoryScope, scopeId: string, itemType: string, source: any[]) {
   const controls = scopeControls(scope, scopeId).filter((item: any) => item.itemType === itemType);
   const mapped = (Array.isArray(source) ? source : []).map((original: any, index: number) => {
-    const id = getMemoryItemId(itemType, original, index);
-    const control = controls.find((item: any) => item.itemId === id);
+    // 稳定 id 命中不了时回退到旧式 id，保证历史 pin/deprecate 不因正文改写而失效。
+    const resolved = resolveMemoryItemControl(controls, itemType, original, index);
+    const id = resolved.itemId;
+    const control = resolved.control;
     let value: any = typeof original === "string" ? original : { ...original };
     if (control?.editedText !== undefined) {
       const field = editableField(itemType, original);
@@ -118,6 +117,34 @@ export function applyMemoryControls(scope: MemoryScope, scopeId: string, source:
 }
 
 
+/**
+ * 回收孤儿控制项：itemId 匹配不上任何现存记忆条目、且超过保留期的控制项。
+ * 调用方负责给出「本轮确实扫描过的 scope → 存活 itemId 集合」，未扫描到的 scope
+ * 一律跳过，避免因为某个 scope 读取失败就误删用户的置顶/屏蔽设置。
+ */
+export function pruneMemoryControls(liveIdsByScope: Map<string, Set<string>>, options: any = {}) {
+  return withMemoryCenterFileLock(CONTROL_FILE, () => {
+    const state = getControlsState();
+    const controls = Array.isArray(state.controls) ? state.controls : [];
+    const orphans = collectOrphanMemoryControls(controls, liveIdsByScope, options);
+    if (!orphans.length) return { pruned: 0, orphans: [] };
+    const orphanKey = (entry: any) => `${entry?.scope}::${entry?.scopeId}::${entry?.itemType}::${entry?.itemId}`;
+    const dropped = new Set(orphans.map(orphanKey));
+    const next = controls.filter((entry: any) => !dropped.has(orphanKey(entry)));
+    writeJsonAtomic(CONTROL_FILE, { version: 1, controls: next, updatedAt: now() });
+    appendAudit({
+      type: "memory_control_gc",
+      action: "prune_orphans",
+      actor: String(options.actor || "memory-center"),
+      reason: `orphan controls older than ${Number(options.retentionDays || 60)} days`,
+      prunedCount: orphans.length,
+      scopes: [...new Set(orphans.map((entry: any) => `${entry.scope}::${entry.scopeId}`))].slice(0, 40),
+    });
+    return { pruned: orphans.length, orphans };
+  });
+}
+
+
 export function updateMemoryControl(input: {
   scope: MemoryScope; scopeId: string; itemType: string; itemId: string; action: MemoryAction;
   text?: string; reason?: string; actor?: string;
@@ -132,25 +159,28 @@ export function updateMemoryControl(input: {
   if ((action === "edit" || action === "deprecate" || action === "delete") && !String(input.reason || "").trim()) throw new Error("修改或删除记忆时必须填写原因");
   if (action === "edit" && !String(input.text || "").trim()) throw new Error("修改后的记忆不能为空");
 
-  const state = getControlsState();
-  const controls = Array.isArray(state.controls) ? state.controls : [];
-  const index = controls.findIndex((item: any) => item.scope === scope && item.scopeId === scopeId && item.itemType === itemType && item.itemId === itemId);
-  const before = index >= 0 ? controls[index] : null;
-  const current = { scope, scopeId, itemType, itemId, pinned: false, deprecated: false, ...(before || {}) };
-  if (action === "pin" || action === "lock") current.pinned = true;
-  if (action === "unpin" || action === "unlock") current.pinned = false;
-  if (action === "edit") current.editedText = String(input.text || "").trim();
-  if (action === "deprecate" || action === "delete") current.deprecated = true;
-  if (action === "restore") {
-    current.deprecated = false;
-    delete current.editedText;
-  }
-  current.reason = String(input.reason || current.reason || "").trim();
-  current.updatedAt = now();
-  current.updatedBy = String(input.actor || "local-user");
-  if (index >= 0) controls[index] = current; else controls.push(current);
-  const next = { version: 1, controls, updatedAt: current.updatedAt };
-  writeJsonAtomic(CONTROL_FILE, next);
+  // 读改写必须在锁内完成，否则并发的 pin/edit/deprecate 会互相覆盖。
+  const { current, before } = withMemoryCenterFileLock(CONTROL_FILE, () => {
+    const state = getControlsState();
+    const controls = Array.isArray(state.controls) ? state.controls : [];
+    const index = controls.findIndex((item: any) => item.scope === scope && item.scopeId === scopeId && item.itemType === itemType && item.itemId === itemId);
+    const previous = index >= 0 ? controls[index] : null;
+    const entry: any = { scope, scopeId, itemType, itemId, pinned: false, deprecated: false, ...(previous || {}) };
+    if (action === "pin" || action === "lock") entry.pinned = true;
+    if (action === "unpin" || action === "unlock") entry.pinned = false;
+    if (action === "edit") entry.editedText = String(input.text || "").trim();
+    if (action === "deprecate" || action === "delete") entry.deprecated = true;
+    if (action === "restore") {
+      entry.deprecated = false;
+      delete entry.editedText;
+    }
+    entry.reason = String(input.reason || entry.reason || "").trim();
+    entry.updatedAt = now();
+    entry.updatedBy = String(input.actor || "local-user");
+    if (index >= 0) controls[index] = entry; else controls.push(entry);
+    writeJsonAtomic(CONTROL_FILE, { version: 1, controls, updatedAt: entry.updatedAt });
+    return { current: entry, before: previous };
+  });
   const audit = appendAudit({
     type: "memory_control", action, scope, scopeId, itemType, itemId,
     actor: current.updatedBy, reason: current.reason,

@@ -13,12 +13,29 @@ export declare function createAgentRunnerRuntime(deps: any): {
         };
         dispatchGate: any;
         runtimeToolSnapshot: {
+            schema: string;
             snapshotId: string;
             snapshotPath: string;
             mcpConfigPath: string;
             runtime: any;
-            allowedTools: any;
-            requested: any;
+            allowedTools: {
+                mcp: any;
+                skill: any;
+            };
+            requested: {
+                mcp: any;
+                skill: any;
+            };
+            configuredTools: {
+                mcp: any;
+                skill: any;
+            };
+            executionRoleSkills: unknown[];
+            enforceExecutionRoleSkills: boolean;
+            effectiveTools: {
+                mcp: any;
+                skill: any;
+            };
             permissionRules: any;
             permission_rules: any;
             authorizationReadiness: any;

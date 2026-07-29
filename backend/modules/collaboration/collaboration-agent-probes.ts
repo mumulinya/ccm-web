@@ -577,7 +577,7 @@ export function getAgentProbeOutputFailure(output: any) {
       error: "empty_output",
     };
   }
-  if (checkTaskFailure(text) || /Agent Runner 错误|Agent 错误|响应超时|ConnectionRefused|Unable to connect to API|ECONNREFUSED/i.test(text)) {
+  if (/Agent Runner 错误|Agent 错误|响应超时|ConnectionRefused|Unable to connect to API|ECONNREFUSED/i.test(text)) {
     return {
       message: `Agent CLI 探针失败：${compactMemoryText(text, 500)}`,
       error: compactMemoryText(text, 1000),

@@ -46,6 +46,7 @@ exports.saveSkill = saveSkill;
 exports.deleteSkill = deleteSkill;
 exports.applyMetricToStore = applyMetricToStore;
 exports.loadMetrics = loadMetrics;
+exports.queryMetricEvents = queryMetricEvents;
 exports.saveMetrics = saveMetrics;
 exports.recordMetric = recordMetric;
 exports.runMetricsAggregationSelfTest = runMetricsAggregationSelfTest;
@@ -237,6 +238,12 @@ function loadMcpTools() {
                 return null;
             }
         }).filter(Boolean);
+        const storedFetchIndex = storedTools.findIndex(tool => String(tool?.name || "") === "fetch-web-mcp");
+        if (storedFetchIndex >= 0 && (0, internal_mcp_registry_1.isLegacyFetchWebMcpDefinition)(storedTools[storedFetchIndex])) {
+            const migrated = (0, internal_mcp_registry_1.buildBundledFetchWebMcpTool)(storedTools[storedFetchIndex]);
+            saveMcpTool(migrated);
+            storedTools[storedFetchIndex] = { ...migrated, filename: "fetch-web-mcp.json" };
+        }
         const storedFeishu = storedTools.find(tool => String(tool?.name || "") === "mcp-feishu") || null;
         const bundledFeishu = (0, internal_mcp_registry_1.buildBundledFeishuMcpTool)(loadFeishuConfig(), storedFeishu || {});
         return bundledFeishu
@@ -337,7 +344,7 @@ function deleteSkill(name) {
         fs.unlinkSync(filePath);
 }
 // === Metrics ===
-const METRICS_EVENT_LIMIT = 1200;
+const METRICS_EVENT_LIMIT = 10_000;
 const METRICS_DURATION_SAMPLE_LIMIT = 240;
 function emptyMetricsStore() {
     return { version: 2, agents: {}, daily: {}, scopes: {}, events: [], updatedAt: null };
@@ -346,6 +353,17 @@ function localDateKey(value = new Date()) {
     const date = value instanceof Date ? value : new Date(value);
     const pad = (part) => String(part).padStart(2, "0");
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+function normalizeMetricDateFilter(value) {
+    const text = String(value || "").trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (!match)
+        return "";
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? text : "";
 }
 function finiteMetricNumber(value) {
     const number = Number(value || 0);
@@ -491,6 +509,63 @@ function applyMetricToStore(value, agent, data = {}, now = new Date()) {
 }
 function loadMetrics() {
     return normalizeMetricsStore((0, atomic_json_file_1.readJsonWithBackup)(METRICS_FILE, emptyMetricsStore()));
+}
+function queryMetricEvents(value, filters = {}) {
+    const metrics = normalizeMetricsStore(value);
+    const scopeType = String(filters.scopeType || filters.scope_type || "").trim().toLowerCase();
+    const scopeId = String(filters.scopeId || filters.scope_id || "").trim();
+    const status = String(filters.status || "all").trim().toLowerCase();
+    const days = Math.max(0, Math.floor(Number(filters.days) || 0));
+    const pageSize = Math.max(5, Math.min(100, Math.floor(Number(filters.pageSize || filters.page_size) || 20)));
+    const requestedPage = Math.max(1, Math.floor(Number(filters.page) || 1));
+    let fromDate = normalizeMetricDateFilter(filters.fromDate || filters.from_date);
+    const toDate = normalizeMetricDateFilter(filters.toDate || filters.to_date);
+    if (!fromDate && days > 0) {
+        const date = new Date();
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() - days + 1);
+        fromDate = localDateKey(date);
+    }
+    const scoped = metrics.events
+        .filter((event) => !scopeType || String(event?.scopeType || "").toLowerCase() === scopeType)
+        .filter((event) => !scopeId || String(event?.scopeId || "") === scopeId || String(event?.groupId || "") === scopeId)
+        .filter((event) => {
+        const date = String(event?.date || event?.at || "").slice(0, 10);
+        return (!fromDate || date >= fromDate) && (!toDate || date <= toDate);
+    })
+        .map((event) => {
+        const explicit = String(event?.status || "").trim().toLowerCase();
+        const resolvedStatus = ["completed", "failed", "cancelled"].includes(explicit)
+            ? explicit
+            : event?.success === true
+                ? "completed"
+                : (/cancell?ed/i.test(String(event?.error || "")) ? "cancelled" : "failed");
+        return { ...event, resolvedStatus };
+    })
+        .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+    const statusCounts = scoped.reduce((result, event) => {
+        result.all += 1;
+        result[event.resolvedStatus] = Number(result[event.resolvedStatus] || 0) + 1;
+        return result;
+    }, { all: 0, completed: 0, failed: 0, cancelled: 0 });
+    const filtered = ["completed", "failed", "cancelled"].includes(status)
+        ? scoped.filter((event) => event.resolvedStatus === status)
+        : scoped;
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const offset = (page - 1) * pageSize;
+    return {
+        events: filtered.slice(offset, offset + pageSize),
+        total,
+        page,
+        pageSize,
+        totalPages,
+        status: ["completed", "failed", "cancelled"].includes(status) ? status : "all",
+        statusCounts,
+        retentionLimit: METRICS_EVENT_LIMIT,
+        range: { days, fromDate: fromDate || null, toDate: toDate || null },
+    };
 }
 function saveMetrics(metrics) {
     (0, atomic_json_file_1.writeJsonAtomic)(METRICS_FILE, normalizeMetricsStore(metrics));

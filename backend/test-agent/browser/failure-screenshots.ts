@@ -30,3 +30,28 @@ export async function writePlaywrightFailureScreenshot(input: {
     return [];
   }
 }
+
+export async function writePlaywrightEvidenceScreenshot(input: {
+  page: any;
+  artifactDir: string;
+  projectName: string;
+  checkName: string;
+  index: number;
+  stepName: string;
+  phase: "before" | "after" | "final";
+  kind?: BrowserScreenshotRef["kind"];
+}): Promise<BrowserScreenshotRef[]> {
+  if (!input.page) return [];
+  const screenshotDir = ensureDir(path.join(input.artifactDir, "screenshots"));
+  const stepName = String(input.stepName || input.checkName || "browser-evidence").trim();
+  const screenshotPath = path.join(
+    screenshotDir,
+    `${safeSegment(input.projectName)}-${safeSegment(input.checkName)}-${input.index + 1}-${safeSegment(stepName)}.${input.phase}.png`,
+  );
+  try {
+    await input.page.screenshot({ path: screenshotPath, fullPage: true });
+    return [{ stepName: `${input.phase}:${stepName}`, path: screenshotPath, kind: input.kind || "capture" }];
+  } catch {
+    return [];
+  }
+}

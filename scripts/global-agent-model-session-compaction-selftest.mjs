@@ -15,6 +15,7 @@ const {
   ingestGlobalAgentConversation,
   loadGlobalAgentMemory,
   loadGlobalAgentTranscript,
+  recordGlobalStructuredMemoryFact,
 } = memoryModule;
 
 const makeMessages = (prefix, count) => Array.from({ length: count }, (_, index) => ({
@@ -74,6 +75,13 @@ try {
   assert.equal(loadGlobalAgentMemory().archives.some(archive => archive.sessionId === siblingId), false);
 
   ingestGlobalAgentConversation({ sessionId: failureId, source: "selftest", messages: failureMessages, compact: false });
+  recordGlobalStructuredMemoryFact({
+    type: "authorization",
+    text: "以后修改生产配置必须先获得明确授权",
+    sessionId: failureId,
+    messageId: failureMessages[2].id,
+    source: "selftest-structured-permission",
+  });
   await assert.rejects(
     compactGlobalAgentSessionWithModel(failureId, {
       force: true,

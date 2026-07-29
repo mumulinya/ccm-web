@@ -18,6 +18,8 @@ import {
   Trash2,
 } from '@lucide/vue'
 import { toast } from '../../utils/toast.js'
+import MicroCompactStatusPanel from './MicroCompactStatusPanel.vue'
+import PostCompactRecoveryPanel from './PostCompactRecoveryPanel.vue'
 
 const presets = [
   { id: 'default', label: '自动', window: 0, threshold: 0 },
@@ -42,6 +44,7 @@ const config = ref({
   memoryContextPreset: 'default',
   modelContextWindow: 0,
   modelAutoCompactTokenLimit: 0,
+  providerContextCacheMode: 'auto',
   typedMemoryDeliveryMaxDocuments: 5,
   typedMemoryDeliveryMaxTokens: 5000,
   sessionMemoryCompactMaxSectionTokens: 2000,
@@ -49,6 +52,9 @@ const config = ref({
   groupSessionRetentionDays: 30,
   groupSessionMaxArchived: 20,
   groupSessionAutoPruneEnabled: false,
+  timeBasedMicrocompactEnabled: false,
+  timeBasedMicrocompactGapMinutes: 60,
+  timeBasedMicrocompactKeepRecent: 5,
 })
 const capacity = ref(null)
 const capabilities = ref([])
@@ -124,6 +130,14 @@ const selectedSummary = computed(() => {
 })
 const isSessionDetail = computed(() => ['group', 'global_session', 'project_session', 'task_agent'].includes(selectedScope.value)
   && !(selectedScope.value === 'group' && !String(selectedId.value).includes('::')))
+const microCompactState = computed(() => detail.value?.postCompactUsage?.timeBasedToolResultMicrocompact
+  || detail.value?.summary?.microCompact
+  || null)
+const postCompactUsage = computed(() => detail.value?.postCompactUsage || null)
+const providerContextCacheState = computed(() => detail.value?.providerContextCache || detail.value?.summary?.providerContextCache || null)
+const contextEngineTrends = computed(() => detail.value?.summary?.contextEngineTrends || null)
+const contextEngineRecovery = computed(() => detail.value?.summary?.contextEngineRecovery || null)
+const recoveryDrilling = ref(false)
 
 const typeLabels = {
   persistentRequirements: '长期要求', factAnchors: '事实', decisions: '决策', completed: '已完成',
@@ -136,7 +150,36 @@ const typeLabels = {
 
 const formatNumber = value => Number(value || 0).toLocaleString('zh-CN')
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN') : '未记录'
+const providerCacheModeLabel = state => {
+  const adapter = String(state?.adapterKind || '')
+  if (adapter === 'openai_prompt_cache') return 'OpenAI 原生 Prompt Cache'
+  if (adapter === 'gemini_implicit_cache') return 'Gemini 原生隐式缓存'
+  if (adapter === 'anthropic_context_management') return 'Anthropic 原生上下文编辑'
+  if (adapter === 'stable_prefix') return '稳定前缀缓存'
+  return state?.providerNative ? 'Provider 原生' : 'CCM 受控投影'
+}
+const providerCapabilityLabel = state => ({
+  confirmed: '已确认', unsupported: '不支持', unproven: '尚未证明', degraded: '临时降级',
+}[state?.capability?.evidence?.status || state?.capability?.status] || '尚未证明')
+const materializationCacheLabel = state => ({
+  memory_hot_cache: '内存热缓存',
+  shared_state: '共享状态复用',
+  computed: '本轮重新构造',
+}[state?.materializationCache?.source] || '未记录')
+const cacheRecommendationLabel = recommendation => ({
+  use_ccm_controlled_projection: '保持 CCM 受控投影',
+  prefer_24h_retention: '建议改用 24 小时 Provider 缓存',
+  keep_provider_default: '保持 Provider 当前配置',
+}[recommendation?.action] || '等待更多真实 usage')
+const formatUsd = value => `$${Number(value || 0).toFixed(6)}`
 const summarySourceLabel = value => ({ model: '模型摘要', session_memory: '模型 Session Memory', 'session-memory': '模型 Session Memory' }[value] || '尚未生成')
+// 只有精确的 group::gcs_* 会话有独立熔断台账，可被重置。
+const isGroupSessionScope = computed(() => selectedScope.value === 'group' && String(selectedId.value).includes('::gcs_'))
+const circuitFailureModeLabel = value => ({
+  transient: '可重试故障',
+  structural: '结构性故障',
+  cancelled: '已取消',
+}[String(value || '')] || '未知原因')
 const sessionMemoryStatusLabel = value => ({
   ready: '模型记忆已就绪',
   waiting_model: '等待模型抽取',
@@ -219,6 +262,46 @@ async function toggleAudit() {
   if (showAudit.value) await loadAudit()
 }
 
+async function resetCompactCircuit() {
+  const reason = window.prompt('重置自动压缩熔断的原因（必填，将写入审计）')
+  if (!reason || !reason.trim()) return
+  try {
+    await requestJson('/api/memory-center/compact-circuit-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scopeId: selectedId.value, reason: reason.trim(), actor: 'memory-center' }),
+    })
+    await loadOverview(true)
+    toast.success('自动压缩熔断已重置')
+  } catch (error) {
+    toast.error(error.message || '重置压缩熔断失败')
+  }
+}
+
+async function drillLatestRecovery() {
+  const latest = contextEngineRecovery.value?.latest
+  if (!latest?.recoveryId) return
+  recoveryDrilling.value = true
+  try {
+    const data = await requestJson('/api/context-engine/recovery/drill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: latest.scope,
+        scopeId: latest.scopeId,
+        sessionId: latest.sessionId,
+        recoveryId: latest.recoveryId,
+      }),
+    })
+    if (!data.result?.passed) throw new Error('恢复点完整性校验未通过')
+    toast.success('恢复演练通过，当前会话未被修改')
+  } catch (error) {
+    toast.error(error.message || '恢复演练失败')
+  } finally {
+    recoveryDrilling.value = false
+  }
+}
+
 async function controlItem(item, action, extra = {}) {
   try {
     await requestJson('/api/memory-center/control', {
@@ -266,6 +349,7 @@ async function loadSettings() {
       memoryContextPreset: current.memoryContextPreset || 'default',
       modelContextWindow: Number(current.modelContextWindow || 0),
       modelAutoCompactTokenLimit: Number(current.modelAutoCompactTokenLimit || 0),
+      providerContextCacheMode: current.providerContextCacheMode || 'auto',
       typedMemoryDeliveryMaxDocuments: Number(current.typedMemoryDeliveryMaxDocuments || 5),
       typedMemoryDeliveryMaxTokens: Number(current.typedMemoryDeliveryMaxTokens || 5000),
       sessionMemoryCompactMaxSectionTokens: Number(current.sessionMemoryCompactMaxSectionTokens || 2000),
@@ -273,6 +357,9 @@ async function loadSettings() {
       groupSessionRetentionDays: Number(current.groupSessionRetentionDays || 30),
       groupSessionMaxArchived: Number(current.groupSessionMaxArchived || 20),
       groupSessionAutoPruneEnabled: current.groupSessionAutoPruneEnabled === true,
+      timeBasedMicrocompactEnabled: current.timeBasedMicrocompactEnabled === true,
+      timeBasedMicrocompactGapMinutes: Number(current.timeBasedMicrocompactGapMinutes || 60),
+      timeBasedMicrocompactKeepRecent: Number(current.timeBasedMicrocompactKeepRecent || 5),
     }
     capacity.value = capacityData
     capabilities.value = capabilityData.entries || []
@@ -470,8 +557,49 @@ onMounted(() => loadOverview(false))
           <p v-if="selectedScope !== 'project' && (selectedSummary.summarySource || selectedSummary.sessionMemory || selectedSummary.consecutiveFailures)" class="compact-history">
             正式摘要 {{ summarySourceLabel(selectedSummary.summarySource) }} · 近期原文 {{ formatNumber(selectedSummary.preservedRecentTokens) }} tokens / {{ selectedSummary.preservedRecentMessages || 0 }} 条 · Session Memory {{ sessionMemoryStatusLabel(selectedSummary.sessionMemory?.status) }} · 连续失败 {{ selectedSummary.consecutiveFailures || 0 }}
           </p>
+          <p v-if="selectedSummary.circuitOpen" class="compact-circuit-alert">
+            <AlertTriangle :size="16" />
+            自动压缩已熔断（{{ circuitFailureModeLabel(selectedSummary.circuitFailureMode) }}，连续失败 {{ selectedSummary.circuitConsecutiveFailures || 0 }} 次）。
+            <template v-if="selectedSummary.circuitAutoRetryAt">将在 {{ formatTime(selectedSummary.circuitAutoRetryAt) }} 自动试探恢复。</template>
+            <template v-else>重试无法自愈，需人工确认后重置。</template>
+            <button v-if="isGroupSessionScope" class="text-btn" @click="resetCompactCircuit">立即重置</button>
+          </p>
+          <p v-else-if="selectedSummary.summaryDegraded" class="compact-history">
+            压缩正常，但最近 {{ selectedSummary.summaryFallbackFailures || 0 }} 次模型摘要失败并回退到确定性摘要，摘要质量已降级。
+          </p>
           <p v-if="selectedScope !== 'project' && (selectedSummary.postCompactGate || selectedSummary.resolvedModelCapacity || selectedSummary.ptlRecoveryAttempts)" class="compact-history">
             门禁 {{ selectedSummary.postCompactGate?.status || '未采样' }} · 模型容量 {{ formatNumber(selectedSummary.effectiveContextWindow) }} · 当前请求 {{ formatNumber(selectedSummary.pendingRequestTokens) }} · 恢复 {{ formatNumber(selectedSummary.recoveryContextTokens) }} · Hooks {{ formatNumber(selectedSummary.hookResultTokens) }} · PTL {{ selectedSummary.ptlRecoveryAttempts || 0 }} 次
+          </p>
+          <MicroCompactStatusPanel v-if="isSessionDetail && microCompactState?.applicable" :state="microCompactState" />
+          <PostCompactRecoveryPanel v-if="isSessionDetail" :usage="postCompactUsage" />
+          <p v-if="isSessionDetail && providerContextCacheState?.applicable" class="compact-history">
+            Context Engine {{ providerContextCacheState.contextEngineVersion === 2 ? 'V2' : '兼容 V1' }}：<strong>{{ providerContextCacheState.status === 'recorded' ? providerCacheModeLabel(providerContextCacheState) : '尚未产生请求回执' }}</strong>
+            · 能力 {{ providerCapabilityLabel(providerContextCacheState) }}
+            <template v-if="providerContextCacheState.status === 'recorded'"> · {{ providerContextCacheState.blockCount || 0 }} 个不可变块 · 复用 {{ providerContextCacheState.reusedBlockCount || 0 }} · 变化 {{ providerContextCacheState.changedBlockCount || 0 }} · 投影 {{ formatNumber(providerContextCacheState.totalTokens) }} tokens<template v-if="providerContextCacheState.providerInputTokens"> · 直接输入 {{ formatNumber(providerContextCacheState.providerInputTokens) }}</template><template v-if="providerContextCacheState.cacheCreationInputTokens"> · 缓存创建 {{ formatNumber(providerContextCacheState.cacheCreationInputTokens) }}</template><template v-if="providerContextCacheState.cacheReadInputTokens"> · 缓存读取 {{ formatNumber(providerContextCacheState.cacheReadInputTokens) }}</template><template v-if="providerContextCacheState.cacheHitRate"> · 命中率 {{ (providerContextCacheState.cacheHitRate * 100).toFixed(1) }}%</template><template v-if="providerContextCacheState.cacheDeletedInputTokens"> · 原生缓存清理 {{ formatNumber(providerContextCacheState.cacheDeletedInputTokens) }}</template></template>
+          </p>
+          <p v-if="isSessionDetail && providerContextCacheState?.status === 'recorded'" class="compact-history">
+            上下文准备：<strong>{{ materializationCacheLabel(providerContextCacheState) }}</strong>
+            · 稳定前缀 {{ providerContextCacheState.adaptiveStablePrefix?.stablePrefixBlockCount || providerContextCacheState.stablePrefixBlockCount || 0 }} 块
+            <template v-if="providerContextCacheState.adaptiveStablePrefix?.reordered"> · 已自适应调整</template>
+            · CCM 投影 {{ Number(providerContextCacheState.projectionDurationMs || 0).toFixed(1) }} ms
+            <template v-if="providerContextCacheState.providerLatencyMs"> · Provider {{ Number(providerContextCacheState.providerLatencyMs).toFixed(1) }} ms</template>
+            <template v-if="providerContextCacheState.reportedCostUsd || providerContextCacheState.estimatedInputCostUsd"> · 本轮成本 {{ formatUsd(providerContextCacheState.reportedCostUsd || providerContextCacheState.estimatedInputCostUsd) }}</template>
+            · 建议 {{ cacheRecommendationLabel(providerContextCacheState.cacheRecommendation) }}
+          </p>
+          <p v-if="isSessionDetail && selectedSummary.summaryQuality" class="compact-history">
+            摘要质量 <strong>{{ selectedSummary.summaryQuality.score || 0 }} / 100</strong> · 锚点 {{ selectedSummary.summaryQuality.anchorCount || 0 }} · 缺失 {{ selectedSummary.summaryQuality.missingAnchorCount || 0 }}
+            · 独立抽检 {{ selectedSummary.secondaryReview?.selected ? (selectedSummary.secondaryReview?.passed ? '已通过' : '未通过') : '本轮未抽中' }}
+          </p>
+          <p v-if="isSessionDetail && contextEngineTrends" class="compact-history">
+            最近 {{ contextEngineTrends.summary?.eventCount || 0 }} 条上下文事件 · 平均缓存命中 {{ ((contextEngineTrends.summary?.averageCacheHitRate || 0) * 100).toFixed(1) }}% · 压缩 {{ contextEngineTrends.summary?.compactionCount || 0 }} 次
+            <template v-if="contextEngineTrends.summary?.averageProjectionDurationMs"> · 平均投影 {{ Number(contextEngineTrends.summary.averageProjectionDurationMs).toFixed(1) }} ms</template>
+            <template v-if="contextEngineTrends.summary?.averageProviderLatencyMs"> · 平均 Provider {{ Number(contextEngineTrends.summary.averageProviderLatencyMs).toFixed(1) }} ms</template>
+            <template v-if="contextEngineTrends.summary?.totalEstimatedCostUsd"> · 估算成本 {{ formatUsd(contextEngineTrends.summary.totalEstimatedCostUsd) }}</template>
+            <template v-if="contextEngineTrends.alerts?.length"> · <strong>{{ contextEngineTrends.alerts.length }} 项健康提醒</strong></template>
+          </p>
+          <p v-if="isSessionDetail && contextEngineRecovery?.count" class="compact-history">
+            已保留 {{ contextEngineRecovery.count }} 个会话恢复点 · 最近创建于 {{ formatTime(contextEngineRecovery.latest?.createdAt) }}
+            <button class="text-btn" :disabled="recoveryDrilling" @click="drillLatestRecovery">{{ recoveryDrilling ? '校验中' : '校验最近恢复点' }}</button>
           </p>
 
           <template v-if="!showAudit">
@@ -483,7 +611,15 @@ onMounted(() => loadOverview(false))
             <section v-for="group in itemGroups" :key="group.type" class="memory-section">
               <h4>{{ typeLabels[group.type] || group.type }} <span>{{ group.items.length }}</span></h4>
               <article v-for="item in group.items" :key="item.itemId" :class="['memory-row', { deprecated: item.deprecated }]">
-                <div class="memory-copy"><p>{{ item.text || '空记录' }}</p><small>{{ formatTime(item.evidence?.time || item.updatedAt) }}<template v-if="item.reason"> · {{ item.reason }}</template></small></div>
+                <div class="memory-copy">
+                  <p>{{ item.text || '空记录' }}</p>
+                  <small>
+                    {{ formatTime(item.evidence?.time || item.updatedAt) }}
+                    <template v-if="item.reason"> · {{ item.reason }}</template>
+                    <template v-if="item.legacy_unverified"> · 历史数据，语义状态未核验</template>
+                    <template v-else-if="item.extraction_source"> · {{ item.extraction_source === 'model_semantic' ? '模型语义提取' : item.extraction_source === 'structured_event' ? '结构化事实' : item.extraction_source }}</template>
+                  </small>
+                </div>
                 <div v-if="!item.readOnly" class="row-actions">
                   <button class="icon-btn" :title="item.pinned ? '取消固定' : '固定记忆'" @click="controlItem(item, item.pinned ? 'unpin' : 'pin')"><PinOff v-if="item.pinned" :size="16" /><Pin v-else :size="16" /></button>
                   <button class="icon-btn" title="修改" @click="openEdit(item, 'edit')"><Pencil :size="16" /></button>
@@ -510,15 +646,19 @@ onMounted(() => loadOverview(false))
         <div class="field-grid">
           <label><span>上下文窗口</span><input v-model.number="config.modelContextWindow" type="number" min="0" step="1000" :disabled="config.memoryContextPreset !== 'custom'" /></label>
           <label><span>自动压缩阈值</span><input v-model.number="config.modelAutoCompactTokenLimit" type="number" min="0" step="1000" :disabled="config.memoryContextPreset !== 'custom'" /></label>
+          <label><span>Provider 上下文缓存</span><select v-model="config.providerContextCacheMode"><option value="auto">自动选择</option><option value="native">优先原生</option><option value="controlled">CCM 受控投影</option><option value="off">关闭</option></select></label>
           <label><span>每轮记忆文件</span><input v-model.number="config.typedMemoryDeliveryMaxDocuments" type="number" min="1" max="5" /></label>
           <label><span>记忆注入预算</span><input v-model.number="config.typedMemoryDeliveryMaxTokens" type="number" min="500" max="20000" step="100" /></label>
           <label><span>单章节预算</span><input v-model.number="config.sessionMemoryCompactMaxSectionTokens" type="number" min="250" max="20000" step="100" /></label>
           <label><span>会话记忆总预算</span><input v-model.number="config.sessionMemoryCompactMaxTotalTokens" type="number" min="1000" max="100000" step="500" /></label>
           <label><span>归档保留天数</span><input v-model.number="config.groupSessionRetentionDays" type="number" min="1" max="3650" /></label>
           <label><span>每群最大归档</span><input v-model.number="config.groupSessionMaxArchived" type="number" min="1" max="1000" /></label>
+          <label><span>空闲触发间隔（分钟）</span><input v-model.number="config.timeBasedMicrocompactGapMinutes" type="number" min="5" max="1440" /></label>
+          <label><span>保留近期工具结果</span><input v-model.number="config.timeBasedMicrocompactKeepRecent" type="number" min="1" max="50" /></label>
         </div>
         <label class="toggle-row"><input v-model="config.groupSessionAutoPruneEnabled" type="checkbox" /><span>自动清理过期归档会话</span></label>
-        <div v-if="capacity" class="runtime-strip"><span>摘要方式 <strong>模型</strong></span><span>模型窗口 <strong>{{ formatNumber(capacity.capacity?.contextWindow) }}</strong></span><span>有效窗口 <strong>{{ formatNumber(capacity.capacity?.effectiveContextWindow) }}</strong></span><span>当前触发线 <strong>{{ formatNumber(capacity.effectiveAutoCompactThreshold) }}</strong></span></div>
+        <label class="toggle-row"><input v-model="config.timeBasedMicrocompactEnabled" type="checkbox" /><span>启用旧工具结果空闲整理（Time-based Tool Result Microcompact）</span></label>
+        <div v-if="capacity" class="runtime-strip"><span>摘要方式 <strong>模型</strong></span><span>上下文缓存 <strong>{{ config.providerContextCacheMode === 'native' ? '优先原生' : config.providerContextCacheMode === 'controlled' ? 'CCM 受控' : config.providerContextCacheMode === 'off' ? '关闭' : '自动' }}</strong></span><span>模型窗口 <strong>{{ formatNumber(capacity.capacity?.contextWindow) }}</strong></span><span>有效窗口 <strong>{{ formatNumber(capacity.capacity?.effectiveContextWindow) }}</strong></span><span>当前触发线 <strong>{{ formatNumber(capacity.effectiveAutoCompactThreshold) }}</strong></span></div>
       </section>
 
       <section class="settings-section">
@@ -600,6 +740,8 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .summary-strip > span, .runtime-strip > span { padding: 12px 14px; border-right: 1px solid var(--border-color); }.summary-strip > span:last-child, .runtime-strip > span:last-child { border-right: 0; }
 .summary-strip small, .summary-strip strong { display: block; }.summary-strip small { color: #748079; font-size: 10px; }.summary-strip strong { margin-top: 4px; font-size: 15px; }.summary-strip strong.healthy { color: #0e6b4f; display: flex; align-items: center; gap: 5px; }.summary-strip strong.warning, .summary-strip strong.critical { color: #a15d16; }
 .compact-history { margin: -10px 0 18px; color: #6f7c75; font-size: 11px; }
+.compact-circuit-alert { max-width: 720px; margin: -6px 0 16px; padding: 9px 11px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-left: 3px solid #dc2626; background: color-mix(in srgb, var(--surface, #fff) 92%, #ef4444 8%); color: #b91c1c; font-size: 12px; }
+.compact-circuit-alert .text-btn { margin-left: auto; }
 .continuity-state { max-width: 720px; margin: 0 0 14px; padding: 9px 11px; border-left: 3px solid var(--border-strong); background: var(--surface-subtle); color: var(--text-secondary); font-size: 12px; }
 .alert-list { margin-bottom: 14px; }.alert-list p { margin: 0 0 6px; padding: 9px 11px; display: flex; gap: 8px; align-items: center; background: var(--warning-soft); color: var(--accent-yellow); border-left: 3px solid var(--accent-yellow); font-size: 12px; }
 .search-box { max-width: 420px; height: 38px; padding: 0 11px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-color); background: var(--control-bg); }.search-box input { width: 100%; border: 0; outline: 0; background: transparent; }

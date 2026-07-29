@@ -64,7 +64,7 @@ const textOnly = computed(() => !(
         {{ status.label }}
       </span>
     </div>
-    <div v-if="displayContent || msg.content" class="agent-message-content" v-html="highlightMentions(displayContent || msg.content)"></div>
+    <div v-if="(displayContent || msg.content) && !primaryTaskCard" class="agent-message-content" v-html="highlightMentions(displayContent || msg.content)"></div>
     <div v-if="clarificationSummary()" class="clarification-summary" :class="clarificationSummary().status">
       <div class="clarification-head">
         <strong>{{ clarificationSummary().title || '需要你补充信息' }}</strong>
@@ -82,7 +82,7 @@ const textOnly = computed(() => !(
       <small v-if="clarificationSummary().next_action" class="clarification-next">下一步：{{ clarificationSummary().next_action }}</small>
     </div>
     <MainAgentDecisionCard
-      v-if="mainAgentDecision"
+      v-if="mainAgentDecision && !primaryTaskCard"
       :decision="mainAgentDecision"
       compact
       @step-action="emit('step-action', $event)"

@@ -36,6 +36,7 @@ const STATUS_CACHE_TTL_MS = 60_000;
 const INSTALL_OUTPUT_LIMIT = 12_000;
 type InstallState = {
   status: "idle" | "running" | "succeeded" | "failed";
+  operation?: "install" | "update";
   startedAt?: string;
   completedAt?: string;
   output?: string;
@@ -262,9 +263,31 @@ function commandExists(command: string) {
   } catch { return false; }
 }
 
+function resolveWindowsCommandPath(command: string) {
+  if (process.platform !== "win32") return command;
+  if (/[\\/]/.test(command)) return command;
+  try {
+    const probe = spawnSync("where.exe", [command], {
+      windowsHide: true,
+      encoding: "utf-8",
+      timeout: 5_000,
+    });
+    if (probe.status !== 0) return command;
+    const candidates = String(probe.stdout || "")
+      .split(/\r?\n/)
+      .map(value => value.trim())
+      .filter(Boolean);
+    return candidates.find(candidate => /\.(?:exe|com|cmd|bat)$/i.test(candidate))
+      || candidates[0]
+      || command;
+  } catch {
+    return command;
+  }
+}
+
 export function resolveCursorAgentCommand() {
-  if (commandExists("cursor-agent")) return "cursor-agent";
-  if (commandExists("agent")) return "agent";
+  if (commandExists("cursor-agent")) return resolveWindowsCommandPath("cursor-agent");
+  if (commandExists("agent")) return resolveWindowsCommandPath("agent");
   if (process.platform === "win32") {
     const localAppData = String(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"));
     for (const name of ["cursor-agent.cmd", "agent.cmd"]) {
@@ -520,8 +543,8 @@ async function commandVersionAsync(command: string, installed?: boolean) {
 }
 
 async function resolveCursorAgentCommandAsync() {
-  if (await commandExistsAsync("cursor-agent")) return "cursor-agent";
-  if (await commandExistsAsync("agent")) return "agent";
+  if (await commandExistsAsync("cursor-agent")) return resolveWindowsCommandPath("cursor-agent");
+  if (await commandExistsAsync("agent")) return resolveWindowsCommandPath("agent");
   if (process.platform === "win32") {
     const localAppData = String(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"));
     for (const name of ["cursor-agent.cmd", "agent.cmd"]) {
@@ -762,7 +785,7 @@ function appendInstallOutput(provider: DevelopmentAgentProvider, chunk: any) {
   INSTALL_STATES.set(provider, { ...current, output: combined.slice(-INSTALL_OUTPUT_LIMIT) });
 }
 
-function installSpec(provider: DevelopmentAgentProvider, installed: boolean) {
+export function buildAgentProviderInstallSpec(provider: DevelopmentAgentProvider, installed: boolean) {
   if (provider === "codex") {
     return process.platform === "win32"
       ? { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", "npm install --global @openai/codex@latest"] }
@@ -785,7 +808,11 @@ function installSpec(provider: DevelopmentAgentProvider, installed: boolean) {
   }
   if (installed) {
     const command = resolveCursorAgentCommand();
-    return { command, args: ["update"] };
+    return {
+      command,
+      args: ["update"],
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+    };
   }
   if (process.platform === "win32") {
     return {
@@ -803,21 +830,48 @@ function installSpec(provider: DevelopmentAgentProvider, installed: boolean) {
   return { command: "sh", args: ["-lc", "curl https://cursor.com/install -fsS | bash"] };
 }
 
+function formatInstallProcessError(
+  provider: DevelopmentAgentProvider,
+  operation: "install" | "update",
+  spec: { command: string; args: string[] },
+  error: any,
+) {
+  const providerLabel = ({
+    codex: "Codex CLI",
+    cursor: "Cursor Agent",
+    gemini: "Gemini CLI",
+    opencode: "OpenCode",
+    claudecode: "Claude Code",
+  } as Record<DevelopmentAgentProvider, string>)[provider];
+  const actionLabel = operation === "update" ? "更新" : "安装";
+  const code = String(error?.code || "");
+  const errno = Number(error?.errno);
+  if (code === "ENOENT" || errno === -4058) {
+    return `${providerLabel}${actionLabel}程序无法启动：系统未找到 ${path.basename(spec.command)}。请刷新 Agent 状态后重试，并确认该命令位于 CCM 服务的 PATH 中。`;
+  }
+  return `${providerLabel}${actionLabel}程序启动失败：${String(error?.message || "未知错误").slice(0, 360)}`;
+}
+
 export function startAgentProviderInstall(providerValue: string) {
   const provider = String(providerValue || "").trim().toLowerCase() as DevelopmentAgentProvider;
   if (!["codex", "cursor", "gemini", "opencode", "claudecode"].includes(provider)) throw new Error("不支持的开发 Agent 安装目标");
   const current = installState(provider);
   if (current.status === "running") throw new Error("该 Agent 正在安装或更新");
-  // installSpec 只有 cursor 分支消费 installed（决定全新安装还是 update），
+  // install spec 只有 cursor 分支消费 installed（决定全新安装还是 update），
   // 用实时的轻量探测代替可能过期的缓存快照
-  const spec = installSpec(provider, provider === "cursor" && commandExists(resolveCursorAgentCommand()));
+  const installed = provider === "cursor"
+    ? commandExists(resolveCursorAgentCommand())
+    : commandExists(provider === "claudecode" ? "claude" : provider);
+  const operation: "install" | "update" = installed ? "update" : "install";
+  const spec = buildAgentProviderInstallSpec(provider, installed);
   const startedAt = new Date().toISOString();
   const child = spawn(spec.command, spec.args, {
+    shell: spec.shell === true,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env },
   });
-  INSTALL_STATES.set(provider, { status: "running", startedAt, output: "", pid: Number(child.pid || 0) });
+  INSTALL_STATES.set(provider, { status: "running", operation, startedAt, output: "", pid: Number(child.pid || 0) });
   child.stdout?.on("data", chunk => appendInstallOutput(provider, chunk));
   child.stderr?.on("data", chunk => appendInstallOutput(provider, chunk));
   child.once("error", error => {
@@ -825,18 +879,28 @@ export function startAgentProviderInstall(providerValue: string) {
       ...installState(provider),
       status: "failed",
       completedAt: new Date().toISOString(),
-      error: String(error?.message || "安装进程启动失败").slice(0, 500),
+      error: formatInstallProcessError(provider, operation, spec, error),
+      pid: undefined,
     });
     markAgentProviderStatusesStale();
   });
   child.once("close", code => {
     const previous = installState(provider);
+    if (previous.status === "failed" && previous.error) {
+      INSTALL_STATES.set(provider, { ...previous, pid: undefined });
+      markAgentProviderStatusesStale();
+      return;
+    }
     const succeeded = code === 0;
+    const actionLabel = operation === "update" ? "更新" : "安装";
+    const outputTail = String(previous.output || "").trim().slice(-1_200);
     INSTALL_STATES.set(provider, {
       ...previous,
       status: succeeded ? "succeeded" : "failed",
       completedAt: new Date().toISOString(),
-      error: succeeded ? "" : `安装进程退出码 ${code ?? "unknown"}`,
+      error: succeeded
+        ? ""
+        : `${actionLabel}失败，进程退出码 ${code ?? "unknown"}${outputTail ? `\n${outputTail}` : ""}`,
       pid: undefined,
     });
     markAgentProviderStatusesStale();
@@ -1010,6 +1074,93 @@ function codexAccountModels() {
   return [];
 }
 
+const GEMINI_CLI_MODEL_EXPORTS = [
+  { name: "DEFAULT_GEMINI_MODEL", label: "Gemini Pro" },
+  { name: "DEFAULT_GEMINI_FLASH_MODEL", label: "Gemini Flash" },
+  { name: "DEFAULT_GEMINI_FLASH_LITE_MODEL", label: "Gemini Flash Lite" },
+] as const;
+
+export function parseGeminiCliDefaultModels(source: string) {
+  const models: Array<{ id: string; label: string }> = [];
+  const seen = new Set<string>();
+  for (const item of GEMINI_CLI_MODEL_EXPORTS) {
+    const match = String(source || "").match(new RegExp(`(?:var|const)\\s+${item.name}\\s*=\\s*["']([^"']+)["']`));
+    const id = safeIdentity(match?.[1]);
+    if (!id || id === "none" || seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id, label: `${item.label} (${id})` });
+  }
+  return models;
+}
+
+let geminiCliModelCache: { key: string; models: Array<{ id: string; label: string }> } | null = null;
+
+function geminiCliPackageRoot() {
+  const candidates: string[] = [];
+  const configured = String(process.env.CCM_GEMINI_CLI_PACKAGE_ROOT || "").trim();
+  if (configured) candidates.push(configured);
+  try {
+    const npmRoot = spawnSync("npm", ["root", "--global"], {
+      shell: process.platform === "win32",
+      windowsHide: true,
+      encoding: "utf-8",
+      timeout: 8_000,
+    });
+    const root = String(npmRoot.stdout || "").trim().split(/\r?\n/)[0];
+    if (root) candidates.push(path.join(root, "@google", "gemini-cli"));
+  } catch {}
+  try {
+    const command = resolveWindowsCommandPath("gemini");
+    const realCommand = fs.realpathSync(command);
+    candidates.push(
+      path.join(path.dirname(realCommand), "node_modules", "@google", "gemini-cli"),
+      path.resolve(path.dirname(realCommand), "..", "lib", "node_modules", "@google", "gemini-cli"),
+    );
+    const marker = `${path.sep}@google${path.sep}gemini-cli${path.sep}`;
+    const markerIndex = realCommand.indexOf(marker);
+    if (markerIndex >= 0) candidates.push(realCommand.slice(0, markerIndex + marker.length - 1));
+  } catch {}
+  return candidates.find(candidate => {
+    const manifest = readJsonFile(path.join(candidate, "package.json"));
+    return manifest?.name === "@google/gemini-cli";
+  }) || "";
+}
+
+function geminiCliAccountModels() {
+  const packageRoot = geminiCliPackageRoot();
+  if (!packageRoot) return [];
+  const manifest = readJsonFile(path.join(packageRoot, "package.json"));
+  const entryRelative = safeIdentity(manifest?.bin?.gemini || "bundle/gemini.js");
+  const entryFile = path.resolve(packageRoot, entryRelative);
+  const cacheKey = `${packageRoot}:${safeIdentity(manifest?.version)}:${entryFile}`;
+  if (geminiCliModelCache?.key === cacheKey) return geminiCliModelCache.models;
+  const sources: string[] = [];
+  try {
+    const entrySource = fs.readFileSync(entryFile, "utf-8");
+    sources.push(entrySource);
+    const mainRelative = entrySource.match(/import\(["']\.\/([^"']+\.js)["']\)/)?.[1];
+    if (mainRelative) {
+      const mainFile = path.resolve(path.dirname(entryFile), mainRelative);
+      const mainSource = fs.readFileSync(mainFile, "utf-8");
+      sources.push(mainSource);
+      const importPattern = /import\s*\{([\s\S]*?)\}\s*from\s*["']\.\/([^"']+\.js)["'];/g;
+      for (const match of mainSource.matchAll(importPattern)) {
+        if (!GEMINI_CLI_MODEL_EXPORTS.some(item => String(match[1] || "").includes(item.name))) continue;
+        const importedFile = path.resolve(path.dirname(mainFile), match[2]);
+        sources.push(fs.readFileSync(importedFile, "utf-8"));
+      }
+    }
+  } catch {}
+  let models: Array<{ id: string; label: string }> = [];
+  for (const source of sources) {
+    const parsed = parseGeminiCliDefaultModels(source);
+    if (parsed.length > models.length) models = parsed;
+    if (models.length === GEMINI_CLI_MODEL_EXPORTS.length) break;
+  }
+  geminiCliModelCache = { key: cacheKey, models };
+  return models;
+}
+
 function currentGeminiAccess() {
   const apiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
   if (apiKey) return { apiKey, accessToken: "" };
@@ -1090,13 +1241,7 @@ export async function getAgentProviderModels(providerValue: string) {
   if (provider === "cursor") {
     const command = resolveCursorAgentCommand();
     if (!commandExists(command)) return { provider, selected: settings.cursor.model, models: [], allowsCustom: true, error: "Cursor Agent 尚未安装" };
-    const result = spawnSync(command, ["models"], {
-      shell: process.platform === "win32",
-      windowsHide: true,
-      encoding: "utf-8",
-      timeout: 20_000,
-      maxBuffer: 1024 * 1024,
-    });
+    const result = await runCommandCaptureAsync(command, ["models"], { shell: process.platform === "win32", timeoutMs: 20_000 });
     const models = parseCursorModels(String(result.stdout || result.stderr || ""));
     return {
       provider,
@@ -1124,6 +1269,19 @@ export async function getAgentProviderModels(providerValue: string) {
     }
   }
   if (provider === "gemini") {
+    const cliModels = geminiCliAccountModels();
+    const auth = currentGeminiAccess();
+    if (!auth.apiKey && cliModels.length) {
+      return {
+        provider,
+        selected: settings.gemini.model,
+        models: [{ id: "", label: "自动（由 Gemini CLI 选择）" }, ...cliModels],
+        allowsCustom: true,
+        source: "cli_catalog",
+        detail: `已读取本机 Gemini CLI 提供的 ${cliModels.length} 个默认模型；账号专属预览模型仍可手动填写并通过测试按钮核验。`,
+        error: "",
+      };
+    }
     try {
       const models = await fetchGeminiAccountModels();
       return {
@@ -1135,6 +1293,17 @@ export async function getAgentProviderModels(providerValue: string) {
         error: models.length ? "" : "Gemini 当前账号没有返回可用模型",
       };
     } catch (error: any) {
+      if (cliModels.length) {
+        return {
+          provider,
+          selected: settings.gemini.model,
+          models: [{ id: "", label: "自动（由 Gemini CLI 选择）" }, ...cliModels],
+          allowsCustom: true,
+          source: "cli_catalog",
+          detail: `账号模型接口暂不可用，已改用本机 Gemini CLI 的 ${cliModels.length} 个默认模型。`,
+          error: "",
+        };
+      }
       return {
         provider,
         selected: settings.gemini.model,
@@ -1147,13 +1316,7 @@ export async function getAgentProviderModels(providerValue: string) {
   }
   if (provider === "opencode") {
     if (!commandExists("opencode")) return { provider, selected: settings.opencode.model, models: [], allowsCustom: true, source: "unavailable", error: "OpenCode 尚未安装" };
-    const result = spawnSync("opencode", ["models"], {
-      shell: process.platform === "win32",
-      windowsHide: true,
-      encoding: "utf-8",
-      timeout: 25_000,
-      maxBuffer: 2 * 1024 * 1024,
-    });
+    const result = await runCommandCaptureAsync("opencode", ["models"], { shell: process.platform === "win32", timeoutMs: 25_000 });
     const models = parseLineModels(String(result.stdout || result.stderr || ""));
     return {
       provider,

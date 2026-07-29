@@ -350,6 +350,8 @@ export async function checkGlobalMissionSupervisorNow(id: string, runtime: Globa
           blockers: missionRow.blockers || [],
           retry_count: child.retry_count || 0,
           gap_rework_count: child.auto_gap_continue_count || 0,
+          acceptance_state: child.acceptance_state || "",
+          rework_exhausted: child.rework_exhausted || null,
         };
       }),
     };

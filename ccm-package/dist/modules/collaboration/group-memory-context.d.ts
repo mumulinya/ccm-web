@@ -120,6 +120,7 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     groupId?: undefined;
     sessionId?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     delayMs?: undefined;
 } | {
     scheduled: boolean;
@@ -127,6 +128,7 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     groupId: string;
     sessionId: string;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     delayMs?: undefined;
 } | {
     scheduled: boolean;
@@ -134,6 +136,18 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     groupId: string;
     sessionId: string;
     circuitBreaker: any;
+    circuitAdmission: {
+        ledger: any;
+        schema: string;
+        allowed: boolean;
+        effectiveState: string;
+        probe: boolean;
+        failureMode: import("./group-memory-auto-compact-circuit-policy").AutoCompactFailureMode;
+        reason: string;
+        cooldownMs: number;
+        elapsedMs: number;
+        retryAt: string;
+    };
     delayMs?: undefined;
 } | {
     scheduled: boolean;
@@ -142,6 +156,7 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     delayMs: number;
     reason?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
 };
 export declare function runGroupMemoryAutoCompactionNow(groupId: string, options?: any): Promise<{
     success: boolean;
@@ -151,6 +166,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     sessionId?: undefined;
     skipped?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     scheduled?: undefined;
     error?: undefined;
     lifecycleValidation?: undefined;
@@ -168,6 +184,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     sessionId: string;
     skipped?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     scheduled?: undefined;
     error?: undefined;
     lifecycleValidation?: undefined;
@@ -185,6 +202,18 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     groupId: string;
     sessionId: string;
     circuitBreaker: any;
+    circuitAdmission: {
+        ledger: any;
+        schema: string;
+        allowed: boolean;
+        effectiveState: string;
+        probe: boolean;
+        failureMode: import("./group-memory-auto-compact-circuit-policy").AutoCompactFailureMode;
+        reason: string;
+        cooldownMs: number;
+        elapsedMs: number;
+        retryAt: string;
+    };
     scheduled?: undefined;
     error?: undefined;
     lifecycleValidation?: undefined;
@@ -203,6 +232,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     sessionId?: undefined;
     skipped?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     error?: undefined;
     lifecycleValidation?: undefined;
     compactionActivity?: undefined;
@@ -245,6 +275,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     sessionId?: undefined;
     skipped?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     scheduled?: undefined;
     compactionActivity?: undefined;
     cancelled?: undefined;
@@ -356,6 +387,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     sessionId?: undefined;
     skipped?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     error?: undefined;
     cancelled?: undefined;
     cancelRequestId?: undefined;
@@ -420,6 +452,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     groupId?: undefined;
     sessionId?: undefined;
     skipped?: undefined;
+    circuitAdmission?: undefined;
     scheduled?: undefined;
     error?: undefined;
     cancelled?: undefined;
@@ -451,6 +484,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     sessionId?: undefined;
     skipped?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     scheduled?: undefined;
     error?: undefined;
     lifecycleValidation?: undefined;
@@ -481,6 +515,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     sessionId?: undefined;
     skipped?: undefined;
     circuitBreaker?: undefined;
+    circuitAdmission?: undefined;
     scheduled?: undefined;
     cancelled?: undefined;
     cancelRequestId?: undefined;
@@ -526,6 +561,7 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     groupId?: undefined;
     sessionId?: undefined;
     skipped?: undefined;
+    circuitAdmission?: undefined;
     scheduled?: undefined;
     lifecycleValidation?: undefined;
     cancelled?: undefined;

@@ -1,5 +1,6 @@
 export declare const WEB_SESSIONS_DIR: string;
 export declare function getProjectSessionDir(projectName: string): string;
+export declare function getSessionFilePath(projectName: string, sessionId: string): string;
 export declare function findCcSessionFile(projectName: string): string;
 export declare function getProjectFeishuSessionTargets(projectName: string): any[];
 export declare function resolveProjectFeishuTargetForAcpSession(projectName: string, acpSessionId: string): {
@@ -56,6 +57,7 @@ export declare function ensureProjectAutomationSession(projectName: string, requ
     created: boolean;
 };
 export declare function appendProjectSessionTaskMessage(projectName: string, sessionId: string, message: any): any;
+export declare function upsertProjectSessionTaskMessage(projectName: string, sessionId: string, message: any): any;
 export declare function scheduleProjectSessionAutoTitle(project: string, sessionId: string, options?: {
     modelCall?: (request: any) => Promise<any>;
     turn?: {

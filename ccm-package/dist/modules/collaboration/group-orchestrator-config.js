@@ -45,6 +45,9 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const credential_store_1 = require("../../core/credential-store");
 const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client");
+const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const provider_context_cache_adapters_1 = require("../../system/provider-context-cache-adapters");
+const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
 exports.COORDINATOR_PROJECT = "coordinator";
 exports.DEFAULT_GROUP_ORCHESTRATOR = {
     enabled: true,
@@ -70,6 +73,14 @@ function defaultOrchestratorConfig() {
         memoryContextPreset: "default",
         modelContextWindow: 0,
         modelAutoCompactTokenLimit: 0,
+        providerContextCacheMode: "auto",
+        providerPromptCacheRetention: "in_memory",
+        providerNativeCacheEnabled: false,
+        providerNativeCacheFamily: "auto",
+        providerNativeCacheFamilyManual: false,
+        anthropicCacheReferenceEnabled: false,
+        inferenceBackendKind: "remote_api",
+        metricsPath: "",
         timeBasedMicrocompactEnabled: false,
         timeBasedThinkingClearEnabled: false,
         timeBasedMicrocompactGapMinutes: 60,
@@ -89,6 +100,13 @@ function defaultOrchestratorConfig() {
         groupSessionArtifactHotExecutions: 50,
         groupSessionArtifactMaxHotMb: 64,
         groupSessionArtifactMaxAgeDays: 30,
+        summaryReviewerEnabled: false,
+        summaryReviewerFormat: "openai-compatible",
+        summaryReviewerApiUrl: "",
+        summaryReviewerApiKey: "",
+        summaryReviewerModel: "",
+        summaryReviewerSampleRate: 0.1,
+        summaryReviewerTimeoutMs: 30000,
     };
 }
 function writeStoredOrchestratorConfig(stored) {
@@ -110,12 +128,21 @@ function loadOrchestratorConfig() {
             catch { }
             stored.apiKey = protectedApiKey;
         }
+        if (stored.summaryReviewerApiKey && !(0, credential_store_1.isCredentialReference)(stored.summaryReviewerApiKey)) {
+            const protectedReviewerKey = (0, credential_store_1.protectCredential)("summary-reviewer", "apiKey", stored.summaryReviewerApiKey);
+            try {
+                writeStoredOrchestratorConfig({ ...stored, summaryReviewerApiKey: protectedReviewerKey });
+            }
+            catch { }
+            stored.summaryReviewerApiKey = protectedReviewerKey;
+        }
         return {
             ...defaultOrchestratorConfig(),
             ...stored,
             memoryCompactionUseModel: true,
             memoryCompactionMode: "model-required",
             apiKey: stored.apiKey ? (0, credential_store_1.resolveCredential)(stored.apiKey) : "",
+            summaryReviewerApiKey: stored.summaryReviewerApiKey ? (0, credential_store_1.resolveCredential)(stored.summaryReviewerApiKey) : "",
         };
     }
     catch {
@@ -126,6 +153,7 @@ function persistOrchestratorConfig(config) {
     const stored = {
         ...config,
         apiKey: config.apiKey ? (0, credential_store_1.protectCredential)("unified-model", "apiKey", config.apiKey) : "",
+        summaryReviewerApiKey: config.summaryReviewerApiKey ? (0, credential_store_1.protectCredential)("summary-reviewer", "apiKey", config.summaryReviewerApiKey) : "",
     };
     writeStoredOrchestratorConfig(stored);
 }
@@ -136,7 +164,7 @@ function saveOrchestratorConfig(updates) {
         next.enabled = !!updates.enabled;
     if (updates.format !== undefined) {
         const format = String(updates.format || "openai-compatible").trim();
-        if (!["auto", "openai-compatible", "anthropic-compatible"].includes(format))
+        if (!["auto", "openai-compatible", "anthropic-compatible", "gemini-compatible"].includes(format))
             throw new Error("不支持的大模型接口协议");
         next.format = format;
     }
@@ -183,6 +211,7 @@ function saveOrchestratorConfig(updates) {
     const memoryContextPreset = updates.memoryContextPreset ?? updates.memory_context_preset;
     const modelContextWindow = updates.modelContextWindow ?? updates.model_context_window;
     const modelAutoCompactTokenLimit = updates.modelAutoCompactTokenLimit ?? updates.model_auto_compact_token_limit;
+    const providerContextCacheMode = updates.providerContextCacheMode ?? updates.provider_context_cache_mode;
     const typedMemoryDeliveryLimits = [
         ["typedMemoryDeliveryMaxDocuments", "typed_memory_delivery_max_documents", 1, 5, "记忆投递文件数必须介于 1 和 5"],
         ["typedMemoryDeliveryMaxBytesPerDocument", "typed_memory_delivery_max_bytes_per_document", 512, 4096, "单份记忆投递容量必须介于 512 和 4096 bytes"],
@@ -211,6 +240,59 @@ function saveOrchestratorConfig(updates) {
         if (!Number.isFinite(value) || value < 0 || value > 3_980_000)
             throw new Error("自动压缩阈值必须介于 0 和 3,980,000 token");
         next.modelAutoCompactTokenLimit = Math.floor(value);
+    }
+    if (providerContextCacheMode !== undefined) {
+        const value = String(providerContextCacheMode || "auto").trim().toLowerCase();
+        if (!["auto", "native", "controlled", "off"].includes(value))
+            throw new Error("上下文缓存模式必须是 auto、native、controlled 或 off");
+        next.providerContextCacheMode = value;
+    }
+    const providerPromptCacheRetention = updates.providerPromptCacheRetention ?? updates.provider_prompt_cache_retention;
+    if (providerPromptCacheRetention !== undefined) {
+        const value = String(providerPromptCacheRetention || "in_memory").trim().toLowerCase();
+        if (!["in_memory", "24h"].includes(value))
+            throw new Error("Provider Prompt Cache 保留策略必须是 in_memory 或 24h");
+        next.providerPromptCacheRetention = value;
+    }
+    const providerNativeCacheEnabled = updates.providerNativeCacheEnabled ?? updates.provider_native_cache_enabled;
+    if (providerNativeCacheEnabled !== undefined)
+        next.providerNativeCacheEnabled = providerNativeCacheEnabled === true;
+    const providerNativeCacheFamily = updates.providerNativeCacheFamily ?? updates.provider_native_cache_family;
+    const providerNativeCacheFamilyManual = updates.providerNativeCacheFamilyManual ?? updates.provider_native_cache_family_manual;
+    if (providerNativeCacheFamilyManual !== undefined)
+        next.providerNativeCacheFamilyManual = providerNativeCacheFamilyManual === true;
+    if (providerNativeCacheFamily !== undefined) {
+        const value = String(providerNativeCacheFamily || "auto").trim().toLowerCase();
+        if (!["auto", "openai", "anthropic", "gemini", "compatible"].includes(value))
+            throw new Error("原生缓存 Provider 类型不受支持");
+        next.providerNativeCacheFamily = value;
+        if (value === "auto" && providerNativeCacheFamilyManual === undefined)
+            next.providerNativeCacheFamilyManual = false;
+    }
+    if (next.providerNativeCacheFamilyManual !== true && (updates.format !== undefined || providerNativeCacheFamilyManual === false || providerNativeCacheFamily === "auto")) {
+        next.providerNativeCacheFamily = {
+            "openai-compatible": "openai",
+            "anthropic-compatible": "anthropic",
+            "gemini-compatible": "gemini",
+        }[String(next.format || "")] || "auto";
+    }
+    const anthropicCacheReferenceEnabled = updates.anthropicCacheReferenceEnabled ?? updates.anthropic_cache_reference_enabled;
+    if (anthropicCacheReferenceEnabled !== undefined)
+        next.anthropicCacheReferenceEnabled = anthropicCacheReferenceEnabled === true;
+    const inferenceBackendKind = updates.inferenceBackendKind ?? updates.inference_backend_kind;
+    if (inferenceBackendKind !== undefined) {
+        const value = String(inferenceBackendKind || "remote_api").trim().toLowerCase();
+        if (!["remote_api", "vllm", "sglang"].includes(value))
+            throw new Error("推理后端类型必须是 remote_api、vllm 或 sglang");
+        next.inferenceBackendKind = value;
+    }
+    const metricsPath = updates.metricsPath ?? updates.metrics_path;
+    if (metricsPath !== undefined) {
+        const value = String(metricsPath || "").trim();
+        if (value && (!value.startsWith("/") || value.startsWith("//") || /[?#@\r\n]/.test(value) || value.length > 300)) {
+            throw new Error("指标地址只能填写同源绝对路径，例如 /metrics，不能包含查询参数或凭据");
+        }
+        next.metricsPath = value;
     }
     const timeBasedMicrocompactEnabled = updates.timeBasedMicrocompactEnabled ?? updates.time_based_microcompact_enabled;
     const timeBasedThinkingClearEnabled = updates.timeBasedThinkingClearEnabled ?? updates.time_based_thinking_clear_enabled;
@@ -314,16 +396,49 @@ function saveOrchestratorConfig(updates) {
     if (updates.apiKey !== undefined && String(updates.apiKey || "").trim()) {
         next.apiKey = String(updates.apiKey).trim();
     }
+    if (updates.summaryReviewerEnabled !== undefined)
+        next.summaryReviewerEnabled = updates.summaryReviewerEnabled === true;
+    if (updates.summaryReviewerFormat !== undefined) {
+        const value = String(updates.summaryReviewerFormat || "openai-compatible");
+        if (!["openai-compatible", "anthropic-compatible", "gemini-compatible"].includes(value))
+            throw new Error("摘要复核模型接口协议无效");
+        next.summaryReviewerFormat = value;
+    }
+    if (updates.summaryReviewerApiUrl !== undefined) {
+        const value = String(updates.summaryReviewerApiUrl || "").trim();
+        if (value && !/^https?:\/\//i.test(value))
+            throw new Error("摘要复核 API 地址必须以 http:// 或 https:// 开头");
+        next.summaryReviewerApiUrl = value;
+    }
+    if (updates.summaryReviewerModel !== undefined)
+        next.summaryReviewerModel = String(updates.summaryReviewerModel || "").trim();
+    if (updates.summaryReviewerApiKey !== undefined && String(updates.summaryReviewerApiKey || "").trim())
+        next.summaryReviewerApiKey = String(updates.summaryReviewerApiKey).trim();
+    if (updates.summaryReviewerSampleRate !== undefined) {
+        const value = Number(updates.summaryReviewerSampleRate);
+        if (!Number.isFinite(value) || value < 0 || value > 1)
+            throw new Error("摘要复核抽样比例必须介于 0 和 1");
+        next.summaryReviewerSampleRate = value;
+    }
+    if (updates.summaryReviewerTimeoutMs !== undefined) {
+        const value = Number(updates.summaryReviewerTimeoutMs);
+        if (!Number.isFinite(value) || value < 5000 || value > 120000)
+            throw new Error("摘要复核超时必须介于 5,000 和 120,000 毫秒");
+        next.summaryReviewerTimeoutMs = Math.floor(value);
+    }
     persistOrchestratorConfig(next);
     return next;
 }
 function publicOrchestratorConfig(config = loadOrchestratorConfig()) {
-    const { apiKey, ...safe } = config;
+    const { apiKey, summaryReviewerApiKey, ...safe } = config;
     return {
         ...safe,
+        providerContextCache: (0, provider_neutral_context_cache_1.providerNeutralContextCacheCapability)(config),
+        providerCacheCapability: (0, provider_cache_capability_registry_1.readProviderCacheCapabilityState)(config),
         hasKey: !!apiKey,
         credentialProtected: !!apiKey,
-        consumers: ["global-agent", "group-main-agent", "music-agent"],
+        summaryReviewerHasKey: !!summaryReviewerApiKey,
+        consumers: ["global-agent", "group-main-agent", "project-main-agent", "music-agent"],
         boundary: buildGroupMainAgentBoundary("config"),
     };
 }
@@ -347,8 +462,9 @@ function friendlyUnifiedModelError(error) {
 }
 async function testUnifiedModelConnection() {
     const config = loadOrchestratorConfig();
+    const contextCacheAdapter = (0, provider_context_cache_adapters_1.providerCacheAdapterPublicSummary)(config);
     const startedAt = Date.now();
-    const provider = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config) ? "anthropic-compatible" : "openai-compatible";
+    const provider = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config) ? "anthropic-compatible" : (0, group_orchestrator_llm_client_1.shouldUseGemini)(config) ? "gemini-compatible" : "openai-compatible";
     const consumers = [
         { id: "global-agent", label: "全局 Agent" },
         { id: "group-main-agent", label: "群聊主 Agent" },
@@ -388,6 +504,7 @@ async function testUnifiedModelConnection() {
             provider,
             model: config.model,
             message: `连接正常，响应耗时 ${latencyMs} ms`,
+            contextCacheAdapter,
             consumers: consumers.map(item => ({ ...item, ready: true })),
         };
     }
@@ -399,6 +516,7 @@ async function testUnifiedModelConnection() {
             provider,
             model: config.model || "",
             message: friendlyUnifiedModelError(error),
+            contextCacheAdapter,
             consumers: consumers.map(item => ({ ...item, ready: false })),
         };
     }

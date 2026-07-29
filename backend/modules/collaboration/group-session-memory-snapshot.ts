@@ -701,6 +701,32 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
   );
   const modelSummaryRequired = options.modelSummaryRequired === true
     || String(options.config?.memoryCompactionMode || options.config?.memory_compaction_mode || "").toLowerCase() === "model-required";
+  const currentTasks = loadTasks();
+  const postCompactTaskStatusProjection = buildGroupPostCompactTaskStatusProjection(currentTasks, {
+    groupId,
+    groupSessionId,
+    taskStatusBudget: options.postCompactReinject?.taskStatusBudget || options.postCompactReinject?.task_status_budget,
+    completedMaxAgeMs: options.postCompactReinject?.completedMaxAgeMs || options.postCompactReinject?.completed_max_age_ms,
+  });
+  const reinjectionSourceMessages = messagesToSummarize.length ? messagesToSummarize : messages;
+  const recoveredMicroCompact = buildGroupMicroCompactPlan(reinjectionSourceMessages);
+  const recoveredPostCompactReinject = buildPostCompactReinjectionPlan(reinjectionSourceMessages, recoveredMicroCompact, {
+    groupId,
+    groupSessionId,
+    sessionMessages: messages,
+    preservedMessages: messagesToSummarize.length ? keptMessages : [],
+    taskStatuses: postCompactTaskStatusProjection.tasks,
+    tasks: currentTasks,
+    currentTaskId: options.currentTaskId || options.current_task_id,
+    dynamicContextCatalog: buildGroupPostCompactDynamicContextCatalog(groupId, memory, options),
+    dynamicContextScanMode: "full",
+  });
+  const storedPostCompactReinject = memory?.compaction?.postCompactReinject
+    || memory?.compactBoundary?.post_compact_restore?.reinjectionPlan
+    || {};
+  const postCompactReinject = Object.keys(storedPostCompactReinject).length
+    ? { ...recoveredPostCompactReinject, ...storedPostCompactReinject }
+    : recoveredPostCompactReinject;
 
   if (!messagesToSummarize.length || modelSummaryRequired) {
     const now = new Date().toISOString();
@@ -755,6 +781,8 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
         compactWarning: currentPressureWarning,
         compactStrategyDecision,
         apiMicroCompactEditPlan,
+        postCompactReinject,
+        postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
         lastPressureSampleAt: now,
       },
       factAnchors: mergeFactAnchorList(memory?.factAnchors || [], extractGroupFactAnchors(messages), 300),
@@ -785,16 +813,8 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
     memory?.conversationSummary || {}
   );
   const now = new Date().toISOString();
-  const currentTasks = loadTasks();
-  const postCompactTaskStatusProjection = buildGroupPostCompactTaskStatusProjection(currentTasks, {
-    groupId,
-    groupSessionId,
-    taskStatusBudget: options.postCompactReinject?.taskStatusBudget || options.postCompactReinject?.task_status_budget,
-    completedMaxAgeMs: options.postCompactReinject?.completedMaxAgeMs || options.postCompactReinject?.completed_max_age_ms,
-    now,
-  });
   const microCompact = buildGroupMicroCompactPlan(messagesToSummarize);
-  const postCompactReinject = buildPostCompactReinjectionPlan(messagesToSummarize, microCompact, {
+  const freshPostCompactReinject = buildPostCompactReinjectionPlan(messagesToSummarize, microCompact, {
     groupId,
     groupSessionId,
     sessionMessages: messages,
@@ -826,7 +846,7 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
         tokensFreed: microCompact.tokensFreed,
         records: (microCompact.records || []).slice(-12),
       },
-      postCompactReinject,
+      postCompactReinject: freshPostCompactReinject,
       keptRecent: keptMessages.map((message: any) => getMemoryMessageContent(message)),
     },
     maxChars: 48_000,
@@ -931,7 +951,7 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
       apiMicroCompactEditPlan,
       transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
       microCompact,
-      reinjectionPlan: postCompactReinject,
+      reinjectionPlan: freshPostCompactReinject,
       postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
       ptlRecovery,
       recoveryAudit: null as any,
@@ -971,7 +991,7 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
     summaryChecksum,
     transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
     preservedSegment,
-    postCompactReinject,
+    postCompactReinject: freshPostCompactReinject,
     microCompact,
     contextPressureWarning: postCompactWarning,
     contextBudget: effectiveContextBudget,
@@ -987,7 +1007,7 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
     apiMicroCompactEditPlan,
     postCompactRecoveryAudit,
     microCompact,
-    postCompactReinject,
+    postCompactReinject: freshPostCompactReinject,
     postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
     preservedSegment,
     transcriptPath: getGroupMessagesFileHint(groupId, groupSessionId),
@@ -1017,7 +1037,7 @@ export function refreshGroupConversationMemorySnapshot(groupId: string, allMessa
         : postCompactTokenCount < preCompactTokenCount ? "healthy" : "watch",
     context_budget: boundary.context_budget,
     microCompact,
-    postCompactReinject,
+    postCompactReinject: freshPostCompactReinject,
     postCompactTaskStatusProjection: postCompactTaskStatusProjection.receipt,
     ptlEmergency: activePtlEmergency,
     ptlRecovery,

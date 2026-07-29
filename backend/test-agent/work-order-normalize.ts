@@ -81,6 +81,12 @@ function normalizeProject(raw: TestAgentProjectTarget, index: number, globalStar
     browserChecks: asArray(raw?.browserChecks || raw?.browser_checks)
       .map((check, checkIndex) => normalizeBrowserCheck(check, issues, name, checkIndex))
       .filter(Boolean) as BrowserCheckSpec[],
+    // 主 Agent 用自然语言描述要验证的浏览器场景，由智能规划层翻译成真实动作与断言。
+    browserScenarios: asArray((raw as any)?.browserScenarios || (raw as any)?.browser_scenarios)
+      .map(String)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .slice(0, 12),
     agentSummary: text(raw?.agentSummary || raw?.agent_summary),
     risks: asArray(raw?.risks).map(String).filter(Boolean),
   };

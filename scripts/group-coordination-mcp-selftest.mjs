@@ -9,6 +9,8 @@ const scratch = path.join(root, 'scratch', 'group-coordination-mcp-selftest')
 if (!scratch.startsWith(path.join(root, 'scratch') + path.sep)) throw new Error('unsafe scratch path')
 fs.rmSync(scratch, { recursive:true, force:true })
 fs.mkdirSync(scratch, { recursive:true })
+process.env.HOME = scratch
+process.env.USERPROFILE = scratch
 const storeFile = path.join(scratch, 'group-coordination-requests.json')
 const workDir = path.join(scratch, 'work')
 const runtimeRoot = path.join(scratch, 'runtime')
@@ -20,15 +22,36 @@ const integration = require(path.join(root, 'ccm-package', 'dist', 'integrations
 const store = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-coordination-store.js'))
 const { McpClient } = require(path.join(root, 'ccm-package', 'dist', 'tools', 'mcp-client.js'))
 const runtimeTools = require(path.join(root, 'ccm-package', 'dist', 'tools', 'runtime-tool-sync.js'))
+const internalRuntime = require(path.join(root, 'ccm-package', 'dist', 'integrations', 'internal-mcp-runtime.js'))
+const db = require(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))
+const sessions = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'agent-sessions.js'))
+
+const task = {
+  id: 'task-mcp-selftest',
+  group_id: 'group-mcp-selftest',
+  group_session_id: 'gcs-mcp-selftest',
+  target_project: 'frontend-agent',
+  title: '协作 MCP 安全绑定测试',
+  status: 'in_progress',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+}
+db.saveTasks([task])
+fs.writeFileSync(path.join(scratch, '.cc-connect', 'groups.json'), JSON.stringify([{
+  id: task.group_id,
+  name: '协作 MCP 自测群',
+  members: [{ project: 'coordinator', role: 'coordinator' }, { project: task.target_project, agent: 'claudecode' }],
+}], null, 2))
+const taskSession = sessions.openTaskAgentSession({ scopeId: task.id, taskId: task.id, groupId: task.group_id, project: task.target_project, agentType: 'claudecode' })
 
 const context = {
-  groupId: 'group-mcp-selftest',
-  taskId: 'task-mcp-selftest',
-  groupSessionId: 'gcs-mcp-selftest',
-  sourceProject: 'frontend-agent',
+  groupId: task.group_id,
+  taskId: task.id,
+  groupSessionId: task.group_session_id,
+  sourceProject: task.target_project,
   sourceAgentType: 'claudecode',
-  sourceTaskAgentSessionId: 'tas-mcp-selftest',
-  sourceNativeSessionId: 'native-mcp-selftest',
+  sourceTaskAgentSessionId: taskSession.id,
+  sourceNativeSessionId: taskSession.nativeSessionId,
   sourceWorkDir: workDir,
 }
 const server = integration.buildGroupCoordinationMcpServerConfig(context)
@@ -78,6 +101,37 @@ const status = await client.callTool('get_coordination_status', {})
 assert.equal(JSON.parse(status.content[0].text).requests.length, 3)
 client.disconnect()
 
+const wrongSessionServer = integration.buildGroupCoordinationMcpServerConfig({ ...context, groupSessionId: 'gcs-other-session' })
+const wrongSessionClient = new McpClient(wrongSessionServer.command, wrongSessionServer.args, { ...wrongSessionServer.env, CCM_GROUP_COORDINATION_FILE: storeFile })
+assert.equal(await wrongSessionClient.connect(), true)
+const wrongSessionResult = await wrongSessionClient.callTool('get_coordination_status', {})
+assert.equal(wrongSessionResult.isError, true)
+assert.match(wrongSessionResult.content[0].text, /精确群聊会话已失效/)
+wrongSessionClient.disconnect()
+
+db.saveTasks([{ ...task, status: 'completed', updated_at: new Date().toISOString() }])
+const terminalTaskClient = new McpClient(server.command, server.args, { ...server.env, CCM_GROUP_COORDINATION_FILE: storeFile })
+assert.equal(await terminalTaskClient.connect(), true)
+const terminalTaskResult = await terminalTaskClient.callTool('get_coordination_status', {})
+assert.equal(terminalTaskResult.isError, true)
+assert.match(terminalTaskResult.content[0].text, /任务已结束/)
+terminalTaskClient.disconnect()
+db.saveTasks([task])
+
+const signedToken = server.env.CCM_INTERNAL_MCP_CONTEXT
+const separator = signedToken.lastIndexOf('.')
+const signature = signedToken.slice(separator + 1)
+const tamperedToken = `${signedToken.slice(0, separator + 1)}${signature[0] === 'a' ? 'b' : 'a'}${signature.slice(1)}`
+const tamperedClient = new McpClient(server.command, server.args, { ...server.env, CCM_INTERNAL_MCP_CONTEXT: tamperedToken, CCM_GROUP_COORDINATION_FILE: storeFile })
+assert.equal(await tamperedClient.connect(), false, 'tampered collaboration context must fail closed')
+tamperedClient.disconnect()
+
+const signedPayload = JSON.parse(Buffer.from(signedToken.slice(0, separator), 'base64url').toString('utf8'))
+const expiredToken = internalRuntime.sealInternalMcpTaskContext({ ...signedPayload, issuedAt: '2020-01-01T00:00:00.000Z', expiresAt: '2020-01-01T00:01:00.000Z' })
+const expiredClient = new McpClient(server.command, server.args, { ...server.env, CCM_INTERNAL_MCP_CONTEXT: expiredToken, CCM_GROUP_COORDINATION_FILE: storeFile })
+assert.equal(await expiredClient.connect(), false, 'expired collaboration context must fail closed')
+expiredClient.disconnect()
+
 const submitted = store.listGroupCoordinationRequests(context)
 assert.equal(submitted.length, 3)
 const implementationRequest = submitted.find(row => row.kind === 'implementation')
@@ -86,6 +140,7 @@ assert.equal(implementationRequest.status, 'submitted')
 assert.equal(implementationRequest.source_task_agent_session_id, context.sourceTaskAgentSessionId)
 assert.equal(submitted.some(row => row.kind === 'review'), true)
 assert.equal(submitted.some(row => row.kind === 'risk'), true)
+assert.equal(store.claimSubmittedGroupCoordinationRequests({ ...context, groupSessionId: 'gcs-other-session' }, 'wrong-session-claim').length, 0)
 const claimed = store.claimSubmittedGroupCoordinationRequests(context, 'group-main-selftest')
 assert.equal(claimed.length, 3)
 assert.equal(claimed.every(row => row.status === 'triaged'), true)
@@ -103,7 +158,7 @@ assert.equal(restartProbe.status, 0, restartProbe.stderr || 'restart persistence
 assert.equal(restartProbe.stdout.trim(), implementationRequest.id)
 
 const runtimeResults = {}
-for (const runtime of ['claudecode', 'cursor', 'codex', 'gemini', 'qoder']) {
+for (const runtime of ['claudecode', 'cursor', 'codex', 'gemini', 'opencode', 'qoder']) {
   const audit = runtimeTools.syncRuntimeToolsWithCatalog(workDir, runtime, { mcp: [], skill: [] }, {
     runtimeStorageRoot: runtimeRoot,
     codexGateway: { apiUrl:'https://gateway.example.invalid/v1', apiKey:'selftest-only', model:'selftest-model', linkAuth:false },
@@ -116,7 +171,8 @@ for (const runtime of ['claudecode', 'cursor', 'codex', 'gemini', 'qoder']) {
   assert.equal(audit.internal_mcp?.[0]?.state, 'synced', `${runtime} should report internal MCP synced`)
   const configText = fs.readFileSync(audit.mcpConfigPath, 'utf8')
   assert.match(configText, /ccm__group_coordinator/)
-  assert.match(configText, /CCM_GROUP_COORDINATION_CONTEXT/)
+  assert.match(configText, /CCM_INTERNAL_MCP_CONTEXT/)
+  assert.doesNotMatch(configText, /CCM_GROUP_COORDINATION_CONTEXT/)
   runtimeResults[runtime] = { snapshot: audit.snapshotId, config: path.relative(root, audit.mcpConfigPath), isolation: audit.isolation }
 }
 
@@ -127,6 +183,13 @@ const report = {
   idempotency: true,
   restart_persistence: true,
   task_session_bound: true,
+  signed_context: true,
+  exact_group_session_rejected: true,
+  terminal_task_rejected: true,
+  exact_group_session_claim_isolated: true,
+  tampered_context_rejected: true,
+  expired_context_rejected: true,
+  invocation_audited: fs.readFileSync(path.join(scratch, '.cc-connect', 'tools', 'internal-mcp-invocations.jsonl'), 'utf8').includes('ccm__group_coordinator'),
   protected_runtime_injection: runtimeResults,
   request_id: implementationRequest.id,
   store: path.relative(root, storeFile),

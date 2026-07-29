@@ -21,7 +21,8 @@ const {
   dashboardFilterOptions, filteredDashboardItems, setDashboardFilter, isDashboardItemExpanded, toggleDashboardItem, phaseLabel,
   phaseTone, actionClass, findTaskByDashboardItem, compactDashboardText, actionVisible, workflowAgentPreview,
   receiptStatusText, workflowStatusTone, loadExecutionDashboard, loadActiveAgentRuns, stopAgentRun, previewRuntimeDebtCleanup,
-  cleanupRuntimeDebt, runDashboardProbe, showBacklog, dailyDevBacklogs, backlogCounts, backlogBulkDispatchLoading,
+  cleanupRuntimeDebt, runDashboardProbe, showBacklog, dailyDevBacklogs, requirementCollections, backlogCounts,
+  requirementCollectionCounts, backlogBulkDispatchLoading,
   backlogBulkDispatchResult, backlogImportLoading, backlogImportResult, backlogStatusLabel, formatBacklogTime, backlogState,
   backlogCount, backlogQualityText, backlogLatestHistory, backlogCanDispatch, backlogCanRestoreReady, loadDailyDevBacklogs,
   openBacklog, updateBacklogStatus, dispatchBacklog, dispatchReadyBacklogs, importSharedDocsToBacklog, newTask,
@@ -41,7 +42,8 @@ const {
   visibleTaskTitle, visibleTaskStatusDetail, visibleRequiredVerification, visibleDeliveryBlockers, visibleUserDeliveryReport, loadTaskTrace,
   viewReport, cancelTask, rollbackExecution, mergeExecution, cleanupExecution, openContinueTask,
   continueFromReport, submitContinuationPayload, submitTaskContinuation, autoContinueFromReport, resendTask, priorityLabel,
-  visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission, openTaskReplay, changeTaskPriority
+  visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission, openTaskReplay,
+  openRequirementIntake, openRequirementCollection, changeTaskPriority
 } = useTaskManager(props, emit)
 </script>
 

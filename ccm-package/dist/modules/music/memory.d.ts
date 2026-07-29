@@ -332,7 +332,6 @@ export declare function compactMusicAgentMemoryWithModel(options?: {
     modelCall?: (request: any) => Promise<any>;
     threshold?: number;
 }): Promise<any>;
-declare function shouldExtractLongTerm(userMessage: string): boolean;
 declare function mergeLongTerm(existing: any, candidate: any, sourceMessageIds: string[]): {
     preferences: string[];
     dislikes: string[];
@@ -345,6 +344,7 @@ declare function mergeLongTerm(existing: any, candidate: any, sourceMessageIds: 
     extractionSource: string;
     schema: string;
 };
+declare function shouldExtractLongTerm(_userMessage: string): boolean;
 export declare function scheduleMusicLongTermMemoryExtraction(userMessage: string, assistantMessage: string, sourceMessageIds?: string[]): {
     scheduled: boolean;
     reason: string;

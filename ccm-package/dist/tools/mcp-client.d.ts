@@ -34,6 +34,7 @@ export declare class McpClient {
     private elicitationRequired;
     private elicitationMessage;
     constructor(command: string, args?: string[], env?: Record<string, string>);
+    private safeErrorDetail;
     private parseCommand;
     connect(): Promise<boolean>;
     private processBuffer;

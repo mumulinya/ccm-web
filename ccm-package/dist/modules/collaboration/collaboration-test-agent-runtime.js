@@ -55,6 +55,7 @@ const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("./group-orchestrator");
 const display_1 = require("./display");
+const test_agent_review_policy_1 = require("./test-agent-review-policy");
 const memory_1 = require("./memory");
 const test_agent_review_bridge_1 = require("../../agents/test-agent-review-bridge");
 const post_review_spot_check_1 = require("../../agents/post-review-spot-check");
@@ -206,14 +207,25 @@ function buildCoordinatorTestAgentHandoff(item, input) {
     const verificationCommands = (0, collaboration_1.collectCoordinatorVerificationCommands)(originalTarget, runtime.workDir, previous);
     const acceptanceCriteria = (0, collaboration_1.buildCoordinatorTestAgentAcceptanceCriteria)(task, verificationCommands);
     const testAgentReviewConfig = (0, collaboration_1.collectConfiguredTestAgentReviewConfig)(originalTarget);
+    const workflowDecision = task.workflow_decision || task.workflowDecision || task.intake_draft?.workflow_decision || {};
+    const reviewPolicy = (0, test_agent_review_policy_1.deriveTestAgentReviewPolicy)({
+        profile: task.test_agent_verification_profile || task.verification_profile || null,
+        workflowDecision,
+        evidencePlan: Array.isArray(task.acceptance_evidence_plan) ? task.acceptance_evidence_plan : [],
+        hasTestTarget: testAgentReviewConfig.hasExecutableSurface,
+    });
     const completedTasks = (0, collaboration_1.uniqueStrings)([
         previous.summary ? `${originalTarget} 上一轮结果：${previous.summary}` : "",
         ...(Array.isArray(previous.actions) ? previous.actions : []),
         item?.message || item?.task || "",
     ].filter((value) => !(0, collaboration_1.isCoordinatorReviewInstruction)(value))).slice(0, 10);
-    const requiredChecks = (0, collaboration_1.uniqueStrings)(verificationCommands.length || !testAgentReviewConfig.hasExecutableSurface ? ["commands"] : [], testAgentReviewConfig.requiredChecks).slice(0, 20);
+    const requiredChecks = (0, collaboration_1.uniqueStrings)(reviewPolicy.requiredChecks, verificationCommands.length || !testAgentReviewConfig.hasExecutableSurface ? ["commands"] : [], testAgentReviewConfig.requiredChecks).slice(0, 20);
     const requiresConfiguredAdversarialProbe = requiredChecks.includes("adversarial")
+        || reviewPolicy.requireAdversarialProbe
         || testAgentReviewConfig.options.requireAdversarialProbe === true;
+    const requiresBrowser = reviewPolicy.browserEnabled
+        || requiredChecks.some(check => ["browser", "browser_e2e", "screenshots", "console_errors", "visual"].includes(check))
+        || (Array.isArray(testAgentReviewConfig.project?.browserChecks) && testAgentReviewConfig.project.browserChecks.length > 0);
     const commandOnlyAdversarialPolicy = !testAgentReviewConfig.hasExecutableSurface && !requiresConfiguredAdversarialProbe
         ? {
             requireAdversarialProbe: false,
@@ -250,9 +262,10 @@ function buildCoordinatorTestAgentHandoff(item, input) {
             verificationOnly: true,
             browserProvider: input.forcePlaywrightProvider === true || input.providerGapReroute === true
                 ? "playwright"
-                : "auto",
-            autoDiscoverVerificationCommands: true,
-            collectBrowserArtifacts: true,
+                : requiresBrowser ? "auto" : "none",
+            autoDiscoverVerificationCommands: reviewPolicy.autoDiscoverVerificationCommands || verificationCommands.length > 0,
+            collectBrowserArtifacts: requiresBrowser,
+            requireAdversarialProbe: requiresConfiguredAdversarialProbe,
             ...commandOnlyAdversarialPolicy,
             ...testAgentReviewConfig.options,
             ...(input.forcePlaywrightProvider === true || input.providerGapReroute === true
@@ -265,6 +278,12 @@ function buildCoordinatorTestAgentHandoff(item, input) {
             reviewSubject: originalTarget,
             verifier: targetName,
             previousLedger: previous,
+            reviewPolicy: {
+                ...reviewPolicy,
+                browserEnabled: requiresBrowser,
+                requireAdversarialProbe: requiresConfiguredAdversarialProbe,
+                requiredChecks,
+            },
             coordinatorOutputPreview: (0, memory_1.compactMemoryText)(input.coordinatorOutput || "", 1000),
             projectRuntimeSource: runtime.source,
             reviewInstructions: [
@@ -392,6 +411,11 @@ function buildNativeTestAgentReceipt(targetName, report, handoff = null, workOrd
                 workOrderId: report.workOrderId,
                 reportId: report.id,
                 artifactDir: report.artifactDir,
+                // 盖新鲜度戳：记录本次复核实际覆盖的变更集合，门禁据此发现"复核后代码又改了"。
+                ...require("./review-freshness").buildReviewFreshnessStamp([
+                    ...reviewedFiles,
+                    ...((handoff?.projects || []).flatMap((project) => (project?.changedFiles || []).map((file) => ({ path: file, project: project?.name })))),
+                ]),
             }],
         reviewer: targetName || "test-agent",
         role: "independent_verifier",

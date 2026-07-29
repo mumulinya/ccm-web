@@ -56,7 +56,8 @@ const globalActionRoutes = {
 }
 
 const checks = {}
-const groupChatSource = readFileSync(join(process.cwd(), 'frontend/src/components/collaboration/GroupChat.vue'), 'utf-8')
+const groupChatTemplateSource = readFileSync(join(process.cwd(), 'frontend/src/components/collaboration/GroupChat.template.html'), 'utf-8')
+const groupChatHelpersSource = readFileSync(join(process.cwd(), 'frontend/src/components/collaboration/groupChatHelpers.js'), 'utf-8')
 const agentExecutionSource = readFileSync(join(process.cwd(), 'frontend/src/components/agents/AgentExecutionMessage.vue'), 'utf-8')
 const agentDisplaySource = readFileSync(join(process.cwd(), 'frontend/src/utils/agentDisplay.js'), 'utf-8')
 
@@ -96,13 +97,13 @@ const groupCard = {
 checks.groupCardNaturalAndMultiAgent = groupCard.kicker === 'AI 编程任务' && groupCard.agents.length === 2 && groupCard.phase_label === '正在运行测试'
 checks.groupCardActionsMapped = ['view_changes', 'continue', 'cancel', 'retry', 'rollback'].every(kind => Boolean(groupActionRoutes[kind]))
 checks.groupCardHidesProtocolByDefault = noProtocolNoise(groupCard)
-checks.groupDirectAnswerHidesOrchestrationPanel = groupChatSource.includes('const shouldShowOrchestrationPlan')
-  && groupChatSource.includes("action === 'delegate'")
-  && groupChatSource.includes(':show-orchestration-plan="shouldShowOrchestrationPlan(msg)"')
+checks.groupDirectAnswerHidesOrchestrationPanel = groupChatHelpersSource.includes('export const shouldShowOrchestrationPlan')
+  && groupChatHelpersSource.includes("action === 'delegate'")
+  && groupChatTemplateSource.includes(':show-orchestration-plan="shouldShowOrchestrationPlan(msg)"')
   && agentExecutionSource.includes('v-if="showOrchestrationPlan"')
-checks.groupWorkPanelSanitizesInternalProtocol = groupChatSource.includes('isInternalProtocolMessage')
-  && groupChatSource.includes('shouldShowGroupMessage')
-  && groupChatSource.includes('CCM_AGENT_RECEIPT')
+checks.groupWorkPanelSanitizesInternalProtocol = groupChatHelpersSource.includes('isInternalProtocolMessage')
+  && groupChatHelpersSource.includes('shouldShowGroupMessage')
+  && groupChatHelpersSource.includes('CCM_AGENT_RECEIPT')
   && agentDisplaySource.includes('INTERNAL_TEXT_PATTERN')
   && agentDisplaySource.includes('sanitizeUserFacingAgentText')
 
@@ -142,7 +143,11 @@ const projectCard = projectExecutionTaskCard({
   workEvents: [{ kind: 'done', text: '项目 Agent 已完成' }],
   fileChanges: { count: 1, files: [{ path: 'src/pages/OrderDetail.vue', statusText: '修改' }] },
 }, 'demo-project')
-checks.projectCardSingleProject = projectCard?.kicker === undefined && projectCard?.agents?.length === 1 && projectCard?.active_agents?.length === 0
+checks.projectCardSingleProject = projectCard?.kicker === undefined
+  && projectCard?.agents?.some(agent => agent.name === '项目主 Agent')
+  && projectCard?.agents?.some(agent => agent.name.includes('项目开发 Agent'))
+  && projectCard?.agents?.some(agent => agent.name === 'TestAgent')
+  && projectCard?.active_agents?.length === 0
 checks.projectCardIdentityContinuation = projectCard?.technical?.run_id === 'pchat_second'
   && projectCard?.technical?.parent_run_id === 'pchat_first'
   && projectCard?.technical?.session_ids?.includes('tas_project')

@@ -33,7 +33,9 @@ const checks = {
   priorityJumpReordersLiveQueue: taskRoutes.includes('task_queue_reprioritized') && taskRoutes.includes('removeTaskFromQueues(id)') && taskRoutes.includes('enqueueTask(id, ctx)'),
   projectDirectTaskRunsTestAgent: taskExecutor.includes('runProjectTaskTestAgentReview({') && taskExecutor.includes('project_test_agent_finished'),
   failedReviewAutomaticallyRequeues: taskExecutor.includes('requeue: true') && queueProcessor.includes('if (shouldRequeue) enqueueFollowupAfterRound = true'),
-  threeReviewRoundsFailClosed: taskExecutor.includes('Math.min(3') && taskExecutor.includes('三轮 TestAgent 验收后仍未通过'),
+  threeReviewRoundsFailClosed: taskExecutor.includes('reviewRound < AUTO_REWORK_MAX_ROUNDS')
+    && taskExecutor.includes('status: "blocked"')
+    && taskExecutor.includes('buildReworkExhaustedUpdate'),
   replayAggregatesAcceptanceEvidence: replay.includes('buildTestAgentEvents') && replay.includes('project_message') && replay.includes('request_origin'),
   taskDispatchLinksReplay: taskList.includes("emit('replay', task)") && taskList.includes('任务回放'),
   projectSessionReceivesFormalTaskMessages: projectSessions.includes('appendProjectSessionTaskMessage') && intakeRoutes.includes('task_dispatch_queued') && globalMissions.includes('global_task_dispatch_queued'),

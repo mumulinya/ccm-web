@@ -123,7 +123,7 @@ const emit = defineEmits([
           <strong>执行通道暂时不可用</strong>
           <span>可以到“运行管理”复检通道，或恢复执行失败的任务。</span>
           <details v-if="executionBlockedText || executionFixActions.length" class="task-technical-details">
-            <summary>技术详情</summary>
+            <summary>排障信息</summary>
             <p v-if="executionBlockedText">{{ executionBlockedText }}</p>
             <ul v-if="executionFixActions.length" class="execution-fix-list">
               <li v-for="action in executionFixActions" :key="action">{{ action }}</li>

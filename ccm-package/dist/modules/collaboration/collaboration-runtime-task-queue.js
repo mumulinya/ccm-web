@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PRIORITY_WEIGHT = exports.agentRecoveryProbeInFlight = exports.agentRecoveryMonitorTimer = exports.taskWatchdogTimer = exports.AGENT_PROBE_TARGET_STATUS_DIR = exports.AGENT_PROBE_STATUS_FILE = exports.AGENT_RUNNER_DIR = exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = exports.AGENT_PROBE_FAILURE_BLOCK_MS = exports.AGENT_PROBE_SUCCESS_FRESH_MS = exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = exports.TASK_WATCHDOG_GAP_REWORK_MAX = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = exports.TASK_WATCHDOG_STALE_MS = exports.TASK_WATCHDOG_INTERVAL_MS = exports.coordinationSettlementInFlight = exports.runningTaskIds = exports.runningTasks = exports.taskQueues = exports.markDailyDevBacklogStatus = exports.importSharedDocsToDailyDevBacklog = exports.claimReadyDailyDevBacklog = exports.runGroupMemoryStorageRecoverySelfTest = exports.loadGroups = exports.sendFeishuReportMessage = exports.FEISHU_SCOPES = void 0;
+exports.PRIORITY_WEIGHT = exports.agentRecoveryProbeInFlight = exports.agentRecoveryMonitorTimer = exports.taskWatchdogTimer = exports.AGENT_PROBE_TARGET_STATUS_DIR = exports.AGENT_PROBE_STATUS_FILE = exports.AGENT_RUNNER_DIR = exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = exports.AGENT_PROBE_FAILURE_BLOCK_MS = exports.AGENT_PROBE_SUCCESS_FRESH_MS = exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = exports.TASK_WATCHDOG_RECOVERY_MAX = exports.TASK_WATCHDOG_GAP_REWORK_MAX = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = exports.TASK_WATCHDOG_STALE_MS = exports.TASK_WATCHDOG_INTERVAL_MS = exports.coordinationSettlementInFlight = exports.runningTaskIds = exports.runningTasks = exports.taskQueues = exports.markDailyDevBacklogStatus = exports.importSharedDocsToDailyDevBacklog = exports.claimReadyDailyDevBacklog = exports.runGroupMemoryStorageRecoverySelfTest = exports.loadGroups = exports.sendFeishuReportMessage = exports.FEISHU_SCOPES = void 0;
 exports.setTaskWatchdogTimer = setTaskWatchdogTimer;
 exports.setAgentRecoveryMonitorTimer = setAgentRecoveryMonitorTimer;
 exports.setAgentRecoveryProbeInFlight = setAgentRecoveryProbeInFlight;
@@ -186,6 +186,7 @@ exports.TASK_WATCHDOG_INTERVAL_MS = 60 * 1000;
 exports.TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
 exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = 60 * 1000;
 exports.TASK_WATCHDOG_GAP_REWORK_MAX = 3;
+exports.TASK_WATCHDOG_RECOVERY_MAX = 3;
 exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = 5 * 60 * 1000;
 exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = 45 * 1000;
 exports.AGENT_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
@@ -884,7 +885,7 @@ function classifyPlanModeRisk(message, group, taskIntent = {}, attachmentCount =
 function buildPlanModeClarificationQuestions(message, risk = {}, selectedProjects = []) {
     return require("./collaboration-task-intake").buildPlanModeClarificationQuestions(message, risk, selectedProjects);
 }
-function buildGroupPlanModePreflight(input) {
+async function buildGroupPlanModePreflight(input) {
     return require("./collaboration-task-intake").buildGroupPlanModePreflight(input);
 }
 function buildGroupProjectAnalysisContext(group, message, ctx, configs = (0, db_1.getConfigs)()) {

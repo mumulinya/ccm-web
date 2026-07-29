@@ -8,6 +8,7 @@ export declare function createThirdPartyMemorySnapshot(input: any): any;
 export declare function loadThirdPartyMemorySnapshot(snapshotId: string, expectedChecksum?: string): any;
 export declare function getThirdPartyMemoryManifest(context: any): {
     schema: string;
+    version: number;
     snapshotId: any;
     snapshotChecksum: any;
     mode: any;
@@ -18,6 +19,14 @@ export declare function getThirdPartyMemoryManifest(context: any): {
     nativeGeneration: any;
     requiredHydrationTokens: any;
     messageCursor: any;
+    previousAcknowledgedCursor: any;
+    confirmationCursor: any;
+    contextPlanChecksum: any;
+    contextIdentityChecksum: any;
+    contextPlanBlockChanges: any;
+    context_plan_checksum: any;
+    block_changes: any;
+    confirmation_cursor: any;
     requiredSegmentIds: any;
     requiredMemoryItemIds: any;
     sessionSegments: any;

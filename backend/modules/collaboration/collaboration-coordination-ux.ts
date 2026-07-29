@@ -750,11 +750,25 @@ export function compactRuntimeToolAudit(audit: any = {}) {
 }
 
 export function runtimeToolSnapshotFromAudit(audit: any = {}, allowedTools: any = {}) {
+  const normalize = (value: any = {}) => ({
+    mcp: uniqueStrings(Array.isArray(value?.mcp) ? value.mcp : []),
+    skill: uniqueStrings(Array.isArray(value?.skill) ? value.skill : []),
+  });
+  const configuredTools = normalize(allowedTools?.configuredTools || allowedTools?.configured_tools || allowedTools);
+  const executionRoleSkills = uniqueStrings(
+    allowedTools?.executionRoleSkills || allowedTools?.execution_role_skills || [],
+  );
+  const effectiveTools = normalize(allowedTools || audit.requested || {});
   return {
+    schema: "ccm-runtime-tool-authorization-snapshot-v2",
     snapshotId: audit.snapshotId || "",
     snapshotPath: audit.snapshotPath || "",
     mcpConfigPath: audit.mcpConfigPath || "",
-    allowedTools: allowedTools || audit.requested || { mcp: [], skill: [] },
+    allowedTools: effectiveTools,
+    configuredTools,
+    executionRoleSkills,
+    enforceExecutionRoleSkills: allowedTools?.enforceExecutionRoleSkills === true || allowedTools?.enforce_execution_role_skills === true,
+    effectiveTools,
     permissionRules: Array.isArray(audit.permission_rules) ? audit.permission_rules : [],
     authorizationReadiness: audit.authorization_readiness || null,
     dispatchGate: audit.dispatch_gate || null,
@@ -1720,11 +1734,42 @@ export function buildUserReceiptReworkSummary(task: any, summary: any = {}, agen
   };
 }
 
-export function buildUserCoordinationAcknowledgement(task: any, assignments: any[] = []) {
-  const projects = uniqueStrings((assignments || []).map((item: any) => item.project).filter(Boolean));
-  const scope = projects.length ? `预计由 ${projects.join("、")} 处理` : "我正在确认涉及的项目";
-  const goal = compactMemoryText(task?.business_goal || task?.title || "这项需求", 180).replace(/[。！？!?；;，,]+$/u, "");
-  return `我明白了：${goal}。${scope}，后续进度会持续更新在这张任务卡中。`;
+function coordinationUserGoal(task: any) {
+  const source = compactMemoryText(
+    task?.user_goal || task?.userGoal || task?.business_goal || task?.businessGoal || task?.title || "这项需求",
+    1200,
+  );
+  const explicitGoal = source.match(/(?:用户目标|业务目标|需求目标|目标)\s*[：:]\s*([^\r\n]+)/i)?.[1] || "";
+  const value = explicitGoal || source;
+  return compactMemoryText(value
+    .replace(/【(?:全局|群聊|项目)?主\s*Agent[^】]*】/gi, " ")
+    .replace(/请按(?:这个|以下)?链路[\s\S]*$/i, " ")
+    .replace(/(?:回执|派发|工作单|内部约束|技术要求)\s*[：:][\s\S]*$/i, " ")
+    .replace(/\s+/g, " ")
+    .trim(), 180).replace(/[。！？!?；;，,]+$/u, "") || "这项需求";
+}
+
+export function buildUserCoordinationAcknowledgement(task: any, assignments: any[] = [], options: any = {}) {
+  const projects = uniqueStrings([
+    ...(assignments || []).map((item: any) => item.project),
+    ...(Array.isArray(options.projects) ? options.projects : []),
+  ].filter(Boolean));
+  const dispatchPolicy = options.dispatchPolicy || task?.dispatch_policy || task?.dispatchPolicy || {};
+  const requiresConfirmation = dispatchPolicy.requiresConfirmation === true
+    || dispatchPolicy.requires_confirmation === true
+    || ["ask_user", "await_confirmation", "needs_confirmation"].includes(String(dispatchPolicy.action || ""));
+  const queue = options.queue || task?.queue || {};
+  const queuePosition = Math.max(0, Number(queue.position || task?.queue_position || task?.queuePosition || 0));
+  const rows = [
+    "已接管这项开发需求。",
+    `目标：${coordinationUserGoal(task)}`,
+    `负责范围：${projects.length ? projects.join("、") : "正在确认涉及的项目"}`,
+    "执行流程：确认范围 → 开发修改 → 运行验证 → TestAgent（独立验收） → 最终交付",
+    `确认状态：${requiresConfirmation ? "需要你确认计划后再执行" : "当前无需额外确认"}`,
+    queuePosition > 0 ? `队列状态：第 ${queuePosition} 位` : "当前状态：正在制定执行计划",
+    "后续只更新同一张任务卡；遇到阻塞或完成时再通知你。",
+  ];
+  return rows.join("\n");
 }
 
 export function sanitizeDispatchLaunchText(value: any, fallback = "", max = 220) {

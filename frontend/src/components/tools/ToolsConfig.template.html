@@ -165,11 +165,11 @@
               </button>
             </div>
             <div class="authorization-status-strip" :class="{ warn: (authorizationSummary.needsAttention || 0) > 0 }">
-              <span>项目 {{ authorizationSummary.projects || 0 }} · 群聊 {{ authorizationSummary.groups || 0 }} · 已配置 {{ authorizationSummary.configuredScopes || 0 }} · 空授权 {{ authorizationSummary.emptyScopes || 0 }}</span>
+              <span>全局 {{ authorizationSummary.globals || 0 }} · 项目 {{ authorizationSummary.projects || 0 }} · 群聊 {{ authorizationSummary.groups || 0 }} · 已配置 {{ authorizationSummary.configuredScopes || 0 }} · 空授权 {{ authorizationSummary.emptyScopes || 0 }}</span>
               <span>{{ authorizationMissingText({ audit_summary: { missing_mcp_servers: authorizationSummary.missingMcpServers, missing_mcp_tools: authorizationSummary.missingMcpTools, missing_skills: authorizationSummary.missingSkills, invalid_mcp_grants: authorizationSummary.invalidMcpGrants } }) }}</span>
               <span>运行时覆盖 {{ authorizationSummary.scopesWithRuntime || 0 }}/{{ authorizationSummary.totalScopes || 0 }} · stale {{ authorizationSummary.runtimeCatalogStale || 0 }} · blocked {{ authorizationSummary.runtimeDispatchBlocked || 0 }}</span>
             </div>
-            <EmptyState v-if="authorizationScopes.length === 0" icon="◈" title="暂无项目或群聊授权配置" />
+            <EmptyState v-if="authorizationScopes.length === 0" icon="◈" title="暂无 Agent 工具授权配置" />
             <div v-for="scope in authorizationScopes" :key="`${scope.scope}:${scope.id}`" class="tool-card authorization-card">
               <div class="runtime-card-head">
                 <div>
@@ -201,6 +201,13 @@
                   <span>Skill</span>
                   <code v-if="authorizationGrantPreview(scope, 'skill').length" :title="authorizationGrantTitle(scope, 'skill')">{{ authorizationGrantPreview(scope, 'skill').join(', ') }}</code>
                   <code v-else>未授权</code>
+                </div>
+              </div>
+              <div v-if="scope.agent_coverage?.length" class="authorization-runtime-list">
+                <div v-for="agent in scope.agent_coverage" :key="`${scope.scope}:${scope.id}:${agent.agent}`" :class="agent.ready ? 'ready' : 'warning'">
+                  <span>{{ authorizationAgentLabel(agent.agent) }}</span>
+                  <code>{{ authorizationAgentModeLabel(agent.mode) }}</code>
+                  <small>{{ agent.ready ? '可用' : '待处理' }}</small>
                 </div>
               </div>
               <div v-if="authorizationUnavailableRows(scope).length" class="authorization-missing-list">

@@ -14,6 +14,25 @@ function normalizeReceiptStringArray(value) {
         return [];
     return value.map((item) => String(item || "").trim()).filter(Boolean);
 }
+function normalizeVerificationResults(value) {
+    return (Array.isArray(value) ? value : [])
+        .filter((item) => item && typeof item === "object")
+        .map((item) => {
+        const status = String(item.status || item.verdict || "").trim().toLowerCase();
+        if (!["passed", "failed", "blocked", "skipped", "not_run"].includes(status))
+            return null;
+        return {
+            name: (0, memory_1.compactMemoryText)(item.name || item.command || item.check || "verification", 240),
+            command: (0, memory_1.compactMemoryText)(item.command || "", 500),
+            status,
+            exitCode: item.exitCode ?? item.exit_code ?? null,
+            source: (0, memory_1.compactMemoryText)(item.source || item.executor || "agent_receipt", 80),
+            evidence: normalizeReceiptStringArray(item.evidence || item.artifacts || item.output).slice(0, 12),
+        };
+    })
+        .filter(Boolean)
+        .slice(0, 40);
+}
 function normalizeIndependentReviewEntries(value) {
     const rawItems = Array.isArray(value) ? value : (value ? [value] : []);
     return rawItems.map((raw) => {
@@ -170,6 +189,11 @@ function mergeRunnerVerificationIntoReceipt(receipt, raw) {
     return {
         ...receipt,
         verification: uniqueReceiptStrings(receipt.verification || [], passed, failed),
+        verificationResults: [
+            ...(Array.isArray(receipt.verificationResults) ? receipt.verificationResults : []),
+            ...passed.map((name) => ({ name, command: "", status: "passed", exitCode: 0, source: "ccm_runner_verification", evidence: [] })),
+            ...failed.map((name) => ({ name, command: "", status: "failed", exitCode: 1, source: "ccm_runner_verification", evidence: [] })),
+        ],
         blockers: failed.length ? uniqueReceiptStrings(receipt.blockers || [], failed) : (receipt.blockers || []),
     };
 }
@@ -263,8 +287,10 @@ function normalizeAgentReceipt(raw, agent) {
         actions: normalizeReceiptStringArray(raw.actions),
         filesChanged: normalizeReceiptStringArray(raw.filesChanged || raw.files_changed || raw.files),
         verification: normalizeReceiptStringArray(raw.verification || raw.tests),
+        verificationResults: normalizeVerificationResults(raw.verificationResults || raw.verification_results),
         blockers: normalizeReceiptStringArray(raw.blockers),
         needs: normalizeReceiptStringArray(raw.needs || raw.followUps || raw.follow_ups),
+        advisoryNeeds: normalizeReceiptStringArray(raw.advisoryNeeds || raw.advisory_needs),
         ack,
         contractChanges,
         projectMemory,
@@ -303,6 +329,9 @@ function extractAgentReceipt(response, agent) {
     return null;
 }
 function getReceiptAssignmentStatus(response, receipt) {
+    void response;
+    if (!receipt)
+        return { status: "missing_receipt", text: "缺少结构化结果说明" };
     if (receipt?.status === "failed")
         return { status: "failed", text: "失败" };
     if (receipt?.status === "blocked")
@@ -311,8 +340,6 @@ function getReceiptAssignmentStatus(response, receipt) {
         return { status: "needs_info", text: "需补充信息" };
     if (receipt?.status === "partial")
         return { status: "partial", text: "部分完成" };
-    if (checkTaskFailure(response))
-        return { status: "failed", text: "执行失败" };
     return { status: "done", text: "已完成" };
 }
 function formatAgentReceiptForReview(receipt) {

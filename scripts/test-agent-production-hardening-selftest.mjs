@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const {
   cancelTestAgentRunsForTask,
+  buildTestAgentRunnerJobKey,
   purgeTestAgentRunnerRecordsForTask,
   runTestAgentCliJob,
   upsertTestAgentRunnerRecordForSelfTest,
@@ -328,6 +329,17 @@ async function run() {
       browserChecks: [{ name: "Click button", url: "https://app.example.com", actions: [{ type: "click", text: "Delete" }] }],
     }],
   });
+  const cacheKeyBase = {
+    mode: "invocation",
+    handoff: normal,
+    taskId: normal.taskId,
+    groupId: normal.groupId,
+    idempotencyKey: "cache-key-contract",
+  };
+  const sameCycleKey = buildTestAgentRunnerJobKey({ ...cacheKeyBase, attemptScope: "cycle-a", runtimeEnv: { TEST_PASSWORD: "secret-a" } }, "source-contract");
+  const repeatedSameCycleKey = buildTestAgentRunnerJobKey({ ...cacheKeyBase, attemptScope: "cycle-a", runtimeEnv: { TEST_PASSWORD: "secret-a" } }, "source-contract");
+  const nextCycleKey = buildTestAgentRunnerJobKey({ ...cacheKeyBase, attemptScope: "cycle-b", runtimeEnv: { TEST_PASSWORD: "secret-a" } }, "source-contract");
+  const changedEnvironmentKey = buildTestAgentRunnerJobKey({ ...cacheKeyBase, attemptScope: "cycle-a", runtimeEnv: { TEST_PASSWORD: "secret-b" } }, "source-contract");
   const checks = {
     eventLoopResponsive,
     invocationContractConsumed: first.invocation?.schema === "ccm-test-agent-invocation-result-v1"
@@ -358,6 +370,10 @@ async function run() {
     runningPurgeCannotResurrectRecord: purgeWhileRunning.removedRecords === 1
       && purgedRun.record.status === "cancelled"
       && purgeAfterClose.removedRecords === 0,
+    sameReviewCycleKeepsIdempotency: sameCycleKey === repeatedSameCycleKey,
+    newReviewCycleInvalidatesCache: sameCycleKey !== nextCycleKey,
+    changedRuntimeEnvironmentInvalidatesCache: sameCycleKey !== changedEnvironmentKey,
+    runnerKeyDoesNotExposeSecrets: !sameCycleKey.includes("secret-a"),
     ...urlBoundaryChecks,
   };
   console.log(JSON.stringify({ pass: Object.values(checks).every(Boolean), checks }, null, 2));

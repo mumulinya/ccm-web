@@ -1,0 +1,44 @@
+import { KnowledgeEmbeddingConfigV3 } from "./knowledge-files";
+export type KnowledgeEmbeddingBackend = "remote" | "local" | "lexical";
+export type KnowledgeVectorResult = {
+    state: "ready" | "failed" | "pending";
+    backend: KnowledgeEmbeddingBackend;
+    model: string;
+    revision: string;
+    dimension: number;
+    checksum: string;
+    vector?: number[];
+    error?: string;
+};
+export type LocalKnowledgeModelStatus = {
+    state: "idle" | "downloading" | "ready" | "failed";
+    model: string;
+    revision: string;
+    dtype: string;
+    cacheDir: string;
+    expectedBytes: number;
+    expectedSha256: string;
+    file: string;
+    progress: number;
+    loadedBytes: number;
+    totalBytes: number;
+    speedBytesPerSecond: number;
+    startedAt: string;
+    completedAt: string;
+    error: string;
+};
+declare let testAdapter: null | ((texts: string[], backend: KnowledgeEmbeddingBackend, kind: "query" | "passage") => Promise<number[][]>);
+export declare function embedRemoteKnowledgeTexts(texts: string[], kind: "query" | "passage", config?: KnowledgeEmbeddingConfigV3): Promise<KnowledgeVectorResult[]>;
+export declare function verifyKnowledgeEmbeddingModelArtifact(file: string, expectedBytes?: number, expectedSha256?: string): Promise<{
+    ready: boolean;
+    error: string;
+    checksum: string;
+    bytes: number;
+}>;
+export declare function getLocalKnowledgeModelStatus(): LocalKnowledgeModelStatus;
+export declare function prepareLocalKnowledgeModel(force?: boolean): Promise<LocalKnowledgeModelStatus>;
+export declare function embedLocalKnowledgeTexts(texts: string[], kind: "query" | "passage", config?: KnowledgeEmbeddingConfigV3): Promise<KnowledgeVectorResult[]>;
+export declare function preferredKnowledgeEmbeddingBackend(config?: KnowledgeEmbeddingConfigV3): KnowledgeEmbeddingBackend;
+export declare function removeLocalKnowledgeModel(): Promise<LocalKnowledgeModelStatus>;
+export declare function setKnowledgeEmbeddingTestAdapter(adapter: typeof testAdapter): void;
+export {};

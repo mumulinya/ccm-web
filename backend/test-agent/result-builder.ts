@@ -261,7 +261,7 @@ export function buildTestAgentReport(input: {
   const browserActionEffectSummary = buildBrowserActionEffectSummary(browserResults);
   const httpConcurrencySummary = buildHttpConcurrencySummary(httpResults);
   const adversarialRequired = workOrder.options.requireAdversarialProbe
-    || workOrder.requiredChecks.some(check => /adversarial|boundary|orphan|idempot|concurr|race/i.test(String(check || "")));
+    || workOrder.requiredChecks.some(check => String(check || "").trim().toLowerCase() === "adversarial");
   const adversarialEvidenceSummary = buildAdversarialEvidenceSummary({
     required: adversarialRequired,
     waiverReason: adversarialRequired ? "" : workOrder.options.adversarialProbeWaiver,
@@ -445,6 +445,10 @@ export function buildTestAgentReport(input: {
     risks,
     blockedReasons,
     issues,
+    semanticPlan: workOrder.metadata?.semanticPlan || null,
+    criterionCoverage: workOrder.metadata?.criterionCoverage || [],
+    unplannedCriteria: workOrder.metadata?.unplannedCriteria || [],
+    semanticDecisionReceipt: workOrder.metadata?.semanticDecisionReceipt || null,
     metadata: workOrder.metadata,
   };
 }

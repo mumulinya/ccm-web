@@ -79,19 +79,19 @@ function firstScript(scripts, names) {
 }
 function candidateGroups(requiredChecks) {
     const groups = [];
-    if ((0, utils_1.hasRequiredCheck)(requiredChecks, /(^|[_:-])build($|[_:-])|build/i)) {
+    if ((0, utils_1.requiredCheckEnabled)(requiredChecks, "build")) {
         groups.push({ reason: "build", scripts: ["build"] });
     }
-    if ((0, utils_1.hasRequiredCheck)(requiredChecks, /unit[_:-]?tests?|tests?|test[_:-]?suite/i)) {
+    if ((0, utils_1.requiredCheckEnabled)(requiredChecks, "unit_tests")) {
         groups.push({ reason: "unit_tests", scripts: ["test:unit", "unit", "test"] });
     }
-    if ((0, utils_1.hasRequiredCheck)(requiredChecks, /type[_:-]?check|typescript|tsc|types/i)) {
+    if ((0, utils_1.requiredCheckEnabled)(requiredChecks, "type_check")) {
         groups.push({ reason: "typecheck", scripts: ["typecheck", "type-check", "check:types", "types", "tsc"] });
     }
-    if ((0, utils_1.hasRequiredCheck)(requiredChecks, /lint|eslint/i)) {
+    if ((0, utils_1.requiredCheckEnabled)(requiredChecks, "lint")) {
         groups.push({ reason: "lint", scripts: ["lint", "eslint"] });
     }
-    if ((0, utils_1.hasRequiredCheck)(requiredChecks, /browser[_:-]?e2e|(^|[_:-])e2e($|[_:-])|playwright|cypress/i)) {
+    if ((0, utils_1.requiredCheckEnabled)(requiredChecks, "browser_e2e")) {
         groups.push({ reason: "browser_e2e", scripts: ["test:e2e", "e2e", "playwright", "test:playwright", "cypress"] });
     }
     const seen = new Set();

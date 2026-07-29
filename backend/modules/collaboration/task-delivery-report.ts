@@ -66,7 +66,7 @@ function formatReportLines(items: any, formatter: (item: any) => string = (item)
 }
 
 export function buildUserDeliveryReport(task: any, summary: any, status: DeliveryStatus, detail = "") {
-  return buildTaskDeliveryReport(task, summary, status, detail).markdown;
+  return buildTaskDeliveryReport(task, summary, status, detail).user_text;
 }
 
 export function buildTaskDeliveryReport(task: any, summary: any, status: DeliveryStatus, detail = "") {

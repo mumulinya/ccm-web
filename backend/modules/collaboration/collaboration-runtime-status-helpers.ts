@@ -919,28 +919,23 @@ export function isAdvisoryNeed(value: any, task: any = null) {
 }
 
 export function receiptHasOpenNeeds(receipt: any, task: any = null) {
+  void task;
   const blockers = splitEvidenceList(receipt?.blockers || []);
-  const needs = splitEvidenceList(receipt?.needs || []).filter((item: string) => {
-    const text = String(item || "").trim();
-    return !isAdvisoryNeed(text, task);
-  });
+  const needs = splitEvidenceList(receipt?.needs || []);
   return blockers.length > 0 || needs.length > 0;
 }
 export function getVerificationEvidenceGate(receipts: any[] = []) {
   const executed: string[] = [];
   const suggested: string[] = [];
   const failed: string[] = [];
-  const values = uniqueStrings(...(receipts || []).map((receipt: any) => receipt?.verification || []));
-  for (const item of values) {
-    if (isFailedVerification(item)) {
-      failed.push(item);
-      continue;
+  for (const receipt of receipts || []) {
+    for (const result of Array.isArray(receipt?.verificationResults || receipt?.verification_results) ? (receipt.verificationResults || receipt.verification_results) : []) {
+      const label = String(result?.name || result?.command || "verification").trim();
+      const status = String(result?.status || "").toLowerCase();
+      if (status === "passed") executed.push(label);
+      else if (["failed", "blocked"].includes(status)) failed.push(label);
+      else if (["skipped", "not_run"].includes(status)) suggested.push(label);
     }
-    if (isSuggestedOnlyVerification(item)) {
-      suggested.push(item);
-      continue;
-    }
-    executed.push(item);
   }
   return {
     pass: executed.length > 0 && failed.length === 0,
@@ -959,9 +954,7 @@ function normalizeVerificationMatchText(value: any) {
 }
 
 function isManualVerificationEvidence(value: any) {
-  const text = String(value || "").trim();
-  if (!text || isSuggestedOnlyVerification(text) || isFailedVerification(text)) return false;
-  return /人工核验|手动核验|人工检查|手动检查|manual\s+(check|verification|verified)|checked\s+manually/i.test(text);
+  return !!value && typeof value === "object" && String(value.source || "").toLowerCase() === "manual" && String(value.status || "").toLowerCase() === "passed";
 }
 
 function verificationTextMatchesCommand(text: string, command: string) {
@@ -980,11 +973,11 @@ export function getRequiredVerificationCoverage(receipts: any[] = []) {
     if (!agent) continue;
     const commands = getConfiguredProjectVerificationCommands(agent);
     if (!commands.length) continue;
-    const verification = splitEvidenceList(receipt?.verification || []);
-    const executed = verification.filter(item => !isSuggestedOnlyVerification(item) && !isFailedVerification(item));
-    const externalRunner = executed.filter(item => /passed by external runner\s*\(exit 0\)/i.test(item));
+    const results = Array.isArray(receipt?.verificationResults || receipt?.verification_results) ? (receipt.verificationResults || receipt.verification_results) : [];
+    const executed = results.filter((item: any) => String(item?.status || "").toLowerCase() === "passed");
+    const externalRunner = executed.filter((item: any) => ["ccm_runner", "ccm_runner_verification", "external_runner"].includes(String(item?.source || "").toLowerCase()) && (item.exitCode == null || Number(item.exitCode) === 0));
     const manual = executed.some(isManualVerificationEvidence);
-    const matched = commands.filter(command => externalRunner.some(item => verificationTextMatchesCommand(item, command)));
+    const matched = commands.filter(command => externalRunner.some((item: any) => verificationTextMatchesCommand(String(item.command || item.name || ""), command)));
     const item = {
       agent,
       required: commands.slice(0, 6),
@@ -1463,10 +1456,14 @@ function normalizeIndependentReviewEntry(raw: any, fallback: any = {}) {
   const reviewSubject = String(item.reviewSubject || item.review_subject || item.subject || fallback.reviewSubject || fallback.review_subject || "").trim();
   if (!reviewer && !verdict && !summary && evidence.length === 0) return null;
   const state = independentReviewVerdictState(verdict);
+  const reviewedChangeFingerprint = String(item.reviewedChangeFingerprint || item.reviewed_change_fingerprint || "").trim();
+  const reviewedAt = String(item.reviewedAt || item.reviewed_at || "").trim();
   return {
     reviewer,
     requester,
     reviewSubject,
+    ...(reviewedChangeFingerprint ? { reviewedChangeFingerprint, reviewed_change_fingerprint: reviewedChangeFingerprint } : {}),
+    ...(reviewedAt ? { reviewedAt, reviewed_at: reviewedAt } : {}),
     verdict: verdict || state,
     status: state,
     summary: compactMemoryText(summary || evidence.join("；") || "独立复核已记录", 700),
@@ -1619,7 +1616,7 @@ export function getGroupTaskExecutionStatus(review: any, coordinatorResult: any,
     ...details,
   });
 
-  if (/llm-error|llm-not-configured/.test(runtime) || checkTaskFailure(outputText)) {
+  if (/llm-error|llm-not-configured/.test(runtime)) {
     return buildGroupResult("failed", {
       review,
       detail: runtime ? `主 Agent 运行失败：${runtime}` : "协作输出包含失败标记",
@@ -1744,7 +1741,7 @@ export function getGroupTaskExecutionStatus(review: any, coordinatorResult: any,
     });
   }
 
-  if (isDailyDev) {
+  if (isDailyDev && task?.test_agent_enabled !== false) {
     const agentQaForTask = task?.group_id
       ? getAgentQaItemsForGroup(String(task.group_id), 120).filter((item: any) => !task?.id || !item.task_id || item.task_id === task.id)
       : [];

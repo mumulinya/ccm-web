@@ -2659,11 +2659,26 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
             const taskId = String(message?.task_id || message?.task?.id || "");
             const task = taskMap.get(taskId);
             const { taskRuntime: _storedTaskRuntime, task_runtime: _storedTaskRuntimeSnake, taskCard: _storedTaskCard, task_card: _storedTaskCardSnake, ...messageWithoutStoredRuntime } = message || {};
+            const taskThreadId = String(messageWithoutStoredRuntime.task_thread_id
+                || messageWithoutStoredRuntime.taskThreadId
+                || task?.task_thread_id
+                || task?.taskThreadId
+                || task?.root_task_id
+                || task?.rootTaskId
+                || task?.retry_of_task_id
+                || task?.retryOfTaskId
+                || task?.source_task_id
+                || task?.sourceTaskId
+                || taskId
+                || "");
+            const enrichedMessage = taskThreadId
+                ? { ...messageWithoutStoredRuntime, task_thread_id: taskThreadId }
+                : messageWithoutStoredRuntime;
             if (!task || runtimeAttachedTaskIds.has(taskId))
-                return messageWithoutStoredRuntime;
+                return enrichedMessage;
             runtimeAttachedTaskIds.add(taskId);
             const runtime = getRuntime(task);
-            return { ...messageWithoutStoredRuntime, taskRuntime: runtime };
+            return { ...enrichedMessage, taskRuntime: runtime };
         });
         const memory = deps.loadGroupMemory(groupIdText, sessionId);
         const sessionTaskIds = new Set(sessionTasks.map((task) => String(task.id || "")));

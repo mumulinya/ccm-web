@@ -45,6 +45,8 @@ export interface TestAgentRunnerRecord {
     sourceBefore: TestAgentSourceBinding;
     sourceAfter?: TestAgentSourceBinding;
     sourceStable?: boolean;
+    attemptScope?: string;
+    runtimeEnvFingerprint?: string;
     result?: any;
 }
 export interface RunTestAgentJobInput {
@@ -54,6 +56,7 @@ export interface RunTestAgentJobInput {
     groupId?: string;
     timeoutMs?: number;
     idempotencyKey?: string;
+    attemptScope?: string;
     allowedWorkDirs?: string[];
     runtimeEnv?: Record<string, string>;
 }
@@ -66,6 +69,7 @@ export interface TestAgentRunnerResult {
     stderr: string;
     reused: boolean;
 }
+export declare function buildTestAgentRunnerJobKey(input: RunTestAgentJobInput, sourceFingerprint?: string): string;
 export declare function listTestAgentRunnerRecords(options?: {
     taskIds?: string[];
     limit?: number;

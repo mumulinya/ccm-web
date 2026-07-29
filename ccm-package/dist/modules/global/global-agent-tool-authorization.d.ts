@@ -59,26 +59,8 @@ export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolSc
     authorization_readiness: any;
     connection_preflight: any;
     catalog: {
-        tools: {
-            name: string;
-            canonicalName: string;
-            description: string;
-            server: string;
-            inputSchema: any;
-            annotations: {
-                [key: string]: any;
-                readOnlyHint?: boolean;
-                destructiveHint?: boolean;
-                idempotentHint?: boolean;
-                openWorldHint?: boolean;
-            };
-        }[];
-        skills: {
-            name: string;
-            description: string;
-            contentHash: string;
-            toolName: string;
-        }[];
+        tools: any[];
+        skills: any[];
     };
     counts: {
         mcp: number;

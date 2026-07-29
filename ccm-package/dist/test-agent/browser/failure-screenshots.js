@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.writePlaywrightFailureScreenshot = writePlaywrightFailureScreenshot;
+exports.writePlaywrightEvidenceScreenshot = writePlaywrightEvidenceScreenshot;
 const path = __importStar(require("path"));
 const utils_1 = require("../utils");
 async function writePlaywrightFailureScreenshot(input) {
@@ -45,6 +46,20 @@ async function writePlaywrightFailureScreenshot(input) {
     try {
         await input.page.screenshot({ path: screenshotPath, fullPage: true });
         return [{ stepName, path: screenshotPath, kind: "failure" }];
+    }
+    catch {
+        return [];
+    }
+}
+async function writePlaywrightEvidenceScreenshot(input) {
+    if (!input.page)
+        return [];
+    const screenshotDir = (0, utils_1.ensureDir)(path.join(input.artifactDir, "screenshots"));
+    const stepName = String(input.stepName || input.checkName || "browser-evidence").trim();
+    const screenshotPath = path.join(screenshotDir, `${(0, utils_1.safeSegment)(input.projectName)}-${(0, utils_1.safeSegment)(input.checkName)}-${input.index + 1}-${(0, utils_1.safeSegment)(stepName)}.${input.phase}.png`);
+    try {
+        await input.page.screenshot({ path: screenshotPath, fullPage: true });
+        return [{ stepName: `${input.phase}:${stepName}`, path: screenshotPath, kind: input.kind || "capture" }];
     }
     catch {
         return [];

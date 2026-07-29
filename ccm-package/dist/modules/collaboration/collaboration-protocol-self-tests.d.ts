@@ -4,7 +4,7 @@ export declare function runCollaborationProtocolSelfTest(): {
     agentCollaborationProtocol: {
         pass: boolean;
         checks: {
-            capabilityRouting: boolean;
+            automaticRoutingRequiresModel: boolean;
             taskAndExecutionBound: boolean;
             permissionDoesNotExpand: boolean;
             admissionPasses: boolean;
@@ -15,7 +15,7 @@ export declare function runCollaborationProtocolSelfTest(): {
             sideEffectDetected: boolean;
         };
         route: {
-            targetName: any;
+            targetName: string;
             strategy: string;
             candidates: any;
         };

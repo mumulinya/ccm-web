@@ -204,6 +204,22 @@ for (let attempt = 0; attempt < 3; attempt += 1) {
 }
 assert.deepEqual(ptlMessages.map(message => message.id), ["ptl-6", "ptl-7"]);
 
+const apiRoundMessages = [
+  { id: "api-user", role: "user", content: "one user request" },
+  { id: "api-assistant-1a", role: "assistant", response_id: "response-1", content: "tool call" },
+  { id: "api-result-1", role: "user", type: "tool_result", content: "result one" },
+  { id: "api-assistant-1b", role: "assistant", response_id: "response-1", content: "same response tail" },
+  { id: "api-assistant-2", role: "assistant", response_id: "response-2", content: "next API round" },
+  { id: "api-result-2", role: "user", type: "tool_result", content: "result two" },
+];
+const apiRounds = windowing.buildApiConversationRounds(apiRoundMessages);
+assert.equal(apiRounds.length, 3, "CC API-round grouping keeps the user preamble and starts each assistant response as a new round");
+assert.deepEqual(apiRounds[0].map(message => message.id), ["api-user"]);
+assert.deepEqual(apiRounds[1].map(message => message.id), ["api-assistant-1a", "api-result-1", "api-assistant-1b"]);
+const apiPeeled = windowing.peelOldestApiConversationRound(apiRoundMessages);
+assert.equal(apiPeeled.peeled, true);
+assert.deepEqual(apiPeeled.messages.map(message => message.id), ["api-assistant-1a", "api-result-1", "api-assistant-1b", "api-assistant-2", "api-result-2"]);
+
 let extractionCommitted = null;
 const scheduled = core.scheduleSessionMemoryExtraction({
   scope: "global",

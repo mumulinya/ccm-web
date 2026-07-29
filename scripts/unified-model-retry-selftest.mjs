@@ -36,6 +36,13 @@ function response(status, body) {
 try {
   const utilityResult = await retry.runModelCallRetrySelfTest();
   assert.equal(utilityResult.pass, true, JSON.stringify(utilityResult.checks));
+  const longRequestBudget = client.resolveLlmRetryOptions(
+    { timeoutMs: 120_000 },
+    { messages: [{ role: "user", content: "budget selftest" }] },
+    "budget selftest",
+  );
+  assert.equal(longRequestBudget.attemptTimeoutMs, 120_000, "configured provider request timeout must not be clamped to 30 seconds");
+  assert.equal(longRequestBudget.totalTimeoutMs, 360_000, "long model requests must have a bounded six minute total budget");
 
   let transientCalls = 0;
   globalThis.fetch = async () => {
@@ -79,7 +86,9 @@ try {
   };
   await assert.rejects(
     () => client.callOpenAiCompatibleChat(config, callOptions),
-    error => /已完成 5 次尝试/.test(String(error?.message || error)),
+    error => /已完成 5 次尝试/.test(String(error?.message || error))
+      && error?.code === "CCM_MODEL_RETRY_EXHAUSTED"
+      && error?.attempts === 5,
   );
   assert.equal(exhaustedCalls, 5);
 
@@ -126,6 +135,9 @@ try {
       exhausted_error_reports_attempt_count: true,
       session_compaction_uses_five_attempts: true,
       global_group_project_music_share_client: true,
+      configured_120_second_timeout_is_respected: true,
+      long_request_total_budget_is_bounded: true,
+      exhausted_error_has_machine_readable_metadata: true,
       paid_provider_calls: 0,
     },
   }, null, 2));

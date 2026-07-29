@@ -257,7 +257,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             }) : "",
             global_knowledge: options.knowledgeContext || options.knowledge_context || "",
             session_continuity: sessionId && options.includeSessionContinuity !== false && options.include_session_continuity !== false
-                ? buildGlobalAgentSessionContinuation(sessionId)
+                ? buildGlobalAgentSessionContinuation(sessionId, { persistMicroCompactReceipt: true })
                 : null,
             memory_context_boundary: {
                 schema: "ccm-global-agent-memory-boundary-v1",
@@ -527,7 +527,56 @@ function createGlobalAgentAgenticRuntime(deps) {
         run.post_review_spot_check = event.technical?.post_review_spot_check || event.post_review_spot_check || event.postReviewSpotCheck || null;
         run.postReviewSpotCheck = event.postReviewSpotCheck || event.post_review_spot_check || event.technical?.post_review_spot_check || null;
     }
+    function unresolvedRequiredSources(run) {
+        const rows = Array.isArray(run.requirement_sources)
+            ? run.requirement_sources
+            : Array.isArray(run.source_ingestion?.sources)
+                ? run.source_ingestion.sources
+                : Array.isArray(run.source_attachments)
+                    ? run.source_attachments
+                    : [];
+        return rows.filter((source) => {
+            if (source?.required === false)
+                return false;
+            const status = String(source?.status || "").toLowerCase();
+            return source?.readable !== true && !["parsed", "partial"].includes(status);
+        });
+    }
+    function sourceExecutionGate(run, toolName, args) {
+        const spec = GLOBAL_AGENT_TOOL_SPECS.find((item) => item.name === toolName);
+        const risk = typeof spec?.risk === "function" ? spec.risk(args || {}) : spec?.risk;
+        if (!["write", "high"].includes(String(risk || "")))
+            return null;
+        if (run.source_execution_waiver?.scope === "current_run")
+            return null;
+        const unresolved = unresolvedRequiredSources(run);
+        if (!unresolved.length)
+            return null;
+        const names = unresolved.slice(0, 4).map((source) => compactPetText(source?.name || source?.url || source?.path || "任务资料", 80));
+        return {
+            success: false,
+            accepted: false,
+            completed: false,
+            needs_clarification: true,
+            clarification_questions: [
+                `以下关键资料尚未完整读取：${names.join("、")}。请完成授权、重新上传可读取版本，或明确允许忽略这些资料后再继续。`,
+            ],
+            source_coverage: {
+                total: Array.isArray(run.requirement_sources) ? run.requirement_sources.length : unresolved.length,
+                unresolved: unresolved.map((source) => ({
+                    id: source?.id || "",
+                    name: source?.name || source?.url || source?.path || "任务资料",
+                    status: source?.status || "failed",
+                    reason: source?.error || source?.summary || "未读取正文",
+                })),
+            },
+            error: "关键任务资料尚未完整读取，已阻止执行操作",
+        };
+    }
     async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent) {
+        const sourceGate = sourceExecutionGate(run, name, args);
+        if (sourceGate)
+            return sourceGate;
         const signature = crypto.createHash("sha256").update(`${name}:${JSON.stringify(args || {})}`).digest("hex").slice(0, 24);
         const operationKey = `${run.id}:${signature}`;
         const operation = acquireIdempotency({
@@ -986,7 +1035,19 @@ function createGlobalAgentAgenticRuntime(deps) {
                 const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
                 const invoke = (providerMessages) => {
                     run.latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""));
+                    const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
                     return callGlobalModelWithRetry(config, providerMessages, {
+                        providerContextCache: {
+                            scope: "global",
+                            scopeId: String(run.session_id || ""),
+                            sessionId: String(run.session_id || ""),
+                            generation: Number(run.generation || 0),
+                            boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
+                            source: "global_main_agent",
+                        },
+                        onProviderContextCache: (receipt) => {
+                            run.latest_provider_context_cache = receipt;
+                        },
                         onUsage: (usage) => {
                             run.latest_context_usage = usage;
                             accumulateGlobalAgentRunUsage(run, usage);
@@ -1027,6 +1088,7 @@ function createGlobalAgentAgenticRuntime(deps) {
     }
     async function runAgenticGlobalRequest(baseUrl, ctx, input) {
         const sessionId = input.sessionId || "default";
+        const visibleUserMessage = input.originalMessage || input.message;
         let deferredTerminalEvent = null;
         const runtimeEventSink = input.onEvent
             ? (event) => {
@@ -1046,7 +1108,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         }
         const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: runtimeEventSink, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
         if (!/feishu/i.test(input.source || "")) {
-            ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: input.message, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
+            ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: visibleUserMessage, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
         }
         const compactionFixedContext = buildAgenticContext(input.message, sessionId, {
             includeSessionContinuity: false,
@@ -1096,6 +1158,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             })
             : await startGlobalAgentRun({
                 message: input.message,
+                originalMessage: input.originalMessage || input.message,
                 history: input.history || [],
                 sessionId,
                 source: input.source || "web",
@@ -1119,12 +1182,24 @@ function createGlobalAgentAgenticRuntime(deps) {
                         },
                         {
                             role: "user",
-                            content: JSON.stringify({ user_request: input.message, official_reply: canonicalReply }),
+                            content: JSON.stringify({ user_request: visibleUserMessage, official_reply: canonicalReply }),
                         },
                     ];
                     run.latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(renderMessages, String(run.session_id || ""));
                     const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
+                    const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
                     const renderedReply = await callGlobalModelWithRetry(config, renderMessages, {
+                        providerContextCache: {
+                            scope: "global",
+                            scopeId: String(run.session_id || ""),
+                            sessionId: String(run.session_id || ""),
+                            generation: Number(run.generation || 0),
+                            boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
+                            source: "global_final_reply",
+                        },
+                        onProviderContextCache: (receipt) => {
+                            run.latest_provider_context_cache = receipt;
+                        },
                         onDelta: (delta) => {
                             if (!delta)
                                 return;

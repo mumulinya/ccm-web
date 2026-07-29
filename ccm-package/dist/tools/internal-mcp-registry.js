@@ -33,17 +33,20 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FEISHU_INTERNAL_MCP = exports.GROUP_COORDINATOR_INTERNAL_MCP = void 0;
+exports.FETCH_WEB_BUNDLED_MCP = exports.FEISHU_INTERNAL_MCP = exports.GROUP_COORDINATOR_INTERNAL_MCP = void 0;
 exports.findCcmPackageRoot = findCcmPackageRoot;
 exports.discoverBundledInternalMcpManifests = discoverBundledInternalMcpManifests;
 exports.isInternalMcpName = isInternalMcpName;
 exports.buildBundledFeishuMcpTool = buildBundledFeishuMcpTool;
+exports.isLegacyFetchWebMcpDefinition = isLegacyFetchWebMcpDefinition;
+exports.buildBundledFetchWebMcpTool = buildBundledFetchWebMcpTool;
 exports.buildInternalMcpCatalog = buildInternalMcpCatalog;
 exports.runInternalMcpRegistrySelfTest = runInternalMcpRegistrySelfTest;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 exports.GROUP_COORDINATOR_INTERNAL_MCP = "ccm__group_coordinator";
 exports.FEISHU_INTERNAL_MCP = "mcp-feishu";
+exports.FETCH_WEB_BUNDLED_MCP = "fetch-web-mcp";
 function packageRootCandidates() {
     return Array.from(new Set([
         path.resolve(__dirname, "../.."),
@@ -150,6 +153,36 @@ function buildBundledFeishuMcpTool(config = {}, fallback = {}) {
         configuration: "feishu_settings",
     };
 }
+function isLegacyFetchWebMcpDefinition(value = {}) {
+    if (String(value?.name || "") !== exports.FETCH_WEB_BUNDLED_MCP)
+        return false;
+    const command = String(value?.command || "").trim().toLowerCase();
+    const args = Array.isArray(value?.args) ? value.args.map((item) => String(item || "").trim().toLowerCase()) : [];
+    return command === "uvx mcp-server-fetch"
+        || command === "mcp-server-fetch"
+        || command === "uvx" && args.includes("mcp-server-fetch")
+        || command === "npx" && args.includes("@modelcontextprotocol/server-fetch");
+}
+function buildBundledFetchWebMcpTool(fallback = {}) {
+    const candidates = [
+        path.resolve(__dirname, "../integrations/fetch-web-mcp.js"),
+        path.resolve(process.cwd(), "ccm-package", "dist", "integrations", "fetch-web-mcp.js"),
+    ];
+    const entryPath = candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
+    return {
+        ...fallback,
+        name: exports.FETCH_WEB_BUNDLED_MCP,
+        description: "安全读取公开HTTP/HTTPS网页并转换为适合模型使用的文本。",
+        command: process.execPath,
+        args: [entryPath],
+        env: {},
+        enabled: fallback?.enabled !== false && fs.existsSync(entryPath),
+        version: "2.0.0",
+        author: "CCM",
+        origin: "builtin",
+        bundled: true,
+    };
+}
 function runtimeStateFor(name, runtimeServers) {
     const row = runtimeServers.find((item) => String(item?.name || "") === name) || null;
     return row ? { state: String(row.state || (row.connected ? "connected" : "disconnected")), connected: row.connected === true, tools_count: Number(row.toolsCount || 0), error: String(row.error || "") } : null;
@@ -235,15 +268,15 @@ function runInternalMcpRegistrySelfTest(packageRoot = findCcmPackageRoot()) {
     const workflowMcps = new Map([
         ["ccm__task_runtime", 5],
         ["ccm__knowledge_context", 10],
-        ["ccm__test_acceptance", 6],
+        ["ccm__test_acceptance", 7],
         ["ccm__delivery_workspace", 6],
-        ["ccm__task_evidence", 4],
+        ["ccm__task_evidence", 5],
     ]);
     const workflowItems = [...workflowMcps].map(([name, tools]) => ({ item: configured.items.find((row) => row.name === name), name, tools }));
     const permissionBroker = configured.items.find((item) => item.name === "ccm__permission_broker");
     const hiddenSecrets = !JSON.stringify(configured).includes("secret") && !JSON.stringify(configured).includes("cli_test");
     const checks = {
-        bundledCatalogDiscovered: configured.items.length === 8 && configured.summary.tools === 42,
+        bundledCatalogDiscovered: configured.items.length === 8 && configured.summary.tools === 44,
         coordinatorProtectedAndReady: coordinator?.protected === true && coordinator?.state === "ready" && coordinator?.tools?.length === 4,
         feishuBundledAndReady: feishu?.bundled === true && feishu?.state === "ready" && feishu?.tools?.length === 4,
         workflowMcpsProtectedAndReady: workflowItems.every(({ item, tools }) => item?.bundled === true && item?.protected === true && item?.immutable === true && item?.state === "ready" && item?.lifecycle === "task_scoped" && item?.tools?.length === tools),

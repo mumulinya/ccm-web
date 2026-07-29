@@ -67,7 +67,7 @@ function formatReportLines(items, formatter = (item) => String(item || ""), limi
     return values.slice(0, limit).map(item => `- ${item}`).join("\n");
 }
 function buildUserDeliveryReport(task, summary, status, detail = "") {
-    return buildTaskDeliveryReport(task, summary, status, detail).markdown;
+    return buildTaskDeliveryReport(task, summary, status, detail).user_text;
 }
 function buildTaskDeliveryReport(task, summary, status, detail = "") {
     return (0, delivery_report_1.buildMainAgentDeliveryReport)({

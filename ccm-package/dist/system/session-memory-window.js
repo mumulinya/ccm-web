@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SESSION_MEMORY_MAX_KEEP_TOKENS = exports.SESSION_MEMORY_MIN_TEXT_MESSAGES = exports.SESSION_MEMORY_MIN_KEEP_TOKENS = void 0;
 exports.adjustSessionWindowForApiInvariants = adjustSessionWindowForApiInvariants;
 exports.buildCompleteConversationRounds = buildCompleteConversationRounds;
+exports.buildApiConversationRounds = buildApiConversationRounds;
+exports.peelOldestApiConversationRound = peelOldestApiConversationRound;
 exports.peelOldestCompleteConversationRound = peelOldestCompleteConversationRound;
 exports.calculateSessionMemoryKeepWindow = calculateSessionMemoryKeepWindow;
 const context_budget_1 = require("./context-budget");
@@ -31,10 +33,18 @@ function contentBlocks(message) {
     const content = message?.content ?? message?.message?.content;
     return Array.isArray(content) ? content : [];
 }
+function isToolResultMessage(message) {
+    if (["tool_result", "web_search_tool_result"].includes(String(message?.type || "")))
+        return true;
+    return contentBlocks(message).some((block) => ["tool_result", "web_search_tool_result"].includes(String(block?.type || "")));
+}
 function toolResultIds(message) {
     const ids = contentBlocks(message)
         .filter((block) => ["tool_result", "web_search_tool_result"].includes(String(block?.type || "")))
         .map((block) => String(block?.tool_use_id || block?.toolUseId || block?.id || ""));
+    if (["tool_result", "web_search_tool_result"].includes(String(message?.type || ""))) {
+        ids.push(String(message?.tool_call_id || message?.toolCallId || message?.tool_use_id || ""));
+    }
     for (const result of Array.isArray(message?.tool_results || message?.toolResults) ? (message.tool_results || message.toolResults) : []) {
         ids.push(String(result?.tool_use_id || result?.toolUseId || result?.id || ""));
     }
@@ -44,17 +54,20 @@ function toolUseIds(message) {
     const ids = contentBlocks(message)
         .filter((block) => ["tool_use", "server_tool_use", "tool_call", "function_call"].includes(String(block?.type || "")))
         .map((block) => String(block?.id || block?.tool_use_id || block?.toolUseId || ""));
+    if (["tool_use", "server_tool_use", "tool_call", "function_call"].includes(String(message?.type || ""))) {
+        ids.push(String(message?.tool_call_id || message?.toolCallId || message?.tool_use_id || message?.id || ""));
+    }
     for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : [])
         ids.push(String(call?.id || call?.tool_use_id || ""));
     return ids.filter(Boolean);
 }
 function adjustToConversationTurnStart(messages, startIndex, floorIndex) {
-    if (startIndex >= messages.length || messageRole(messages[startIndex]) === "user")
+    if (startIndex >= messages.length || (messageRole(messages[startIndex]) === "user" && !isToolResultMessage(messages[startIndex])))
         return startIndex;
     let adjustedIndex = startIndex;
     while (adjustedIndex > floorIndex) {
         adjustedIndex -= 1;
-        if (messageRole(messages[adjustedIndex]) === "user")
+        if (messageRole(messages[adjustedIndex]) === "user" && !isToolResultMessage(messages[adjustedIndex]))
             return adjustedIndex;
     }
     return adjustedIndex;
@@ -92,11 +105,43 @@ function buildCompleteConversationRounds(messagesInput) {
     const messages = Array.isArray(messagesInput) ? messagesInput : [];
     const rounds = [];
     for (const message of messages) {
-        if (!rounds.length || messageRole(message) === "user")
+        if (!rounds.length || (messageRole(message) === "user" && !isToolResultMessage(message)))
             rounds.push([]);
         rounds.at(-1).push(message);
     }
     return rounds.filter(round => round.length > 0);
+}
+function buildApiConversationRounds(messagesInput) {
+    const messages = Array.isArray(messagesInput) ? messagesInput : [];
+    const rounds = [];
+    let current = [];
+    let lastAssistantId = "";
+    for (let index = 0; index < messages.length; index += 1) {
+        const message = messages[index];
+        const assistant = messageRole(message) === "assistant";
+        const assistantId = assistant
+            ? assistantResponseId(message) || messageId(message) || `assistant-${index}`
+            : "";
+        if (assistant && assistantId !== lastAssistantId && current.length > 0) {
+            rounds.push(current);
+            current = [message];
+        }
+        else {
+            current.push(message);
+        }
+        if (assistant)
+            lastAssistantId = assistantId;
+    }
+    if (current.length > 0)
+        rounds.push(current);
+    return rounds;
+}
+function peelOldestApiConversationRound(messagesInput) {
+    const rounds = buildApiConversationRounds(messagesInput);
+    if (rounds.length <= 1)
+        return { peeled: false, messages: Array.isArray(messagesInput) ? [...messagesInput] : [], removed: [] };
+    const removed = rounds.shift() || [];
+    return { peeled: true, messages: rounds.flat(), removed };
 }
 function peelOldestCompleteConversationRound(messagesInput) {
     const rounds = buildCompleteConversationRounds(messagesInput);

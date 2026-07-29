@@ -145,7 +145,19 @@ async function askGroupMainAgent(context, request) {
         deterministicRisk: request.risk,
     });
     try {
-        const options = { messages: [{ role: "system", content: system }, { role: "user", content: user }], system, temperature: 0, maxTokens: 300, defaultTimeoutMs: 20000 };
+        const options = {
+            messages: [{ role: "system", content: system }, { role: "user", content: user }],
+            system,
+            temperature: 0,
+            maxTokens: 300,
+            defaultTimeoutMs: 20000,
+            providerContextCache: {
+                scope: context.bindingKind === "project_session" ? "project" : "group",
+                scopeId: context.bindingKind === "project_session" ? context.project : context.groupId,
+                sessionId: context.bindingKind === "project_session" ? context.projectSessionId : context.groupSessionId,
+                source: "main_agent_permission_review",
+            },
+        };
         const parsed = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
             ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, options)
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, options);

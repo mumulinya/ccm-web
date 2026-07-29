@@ -31,6 +31,11 @@ export declare function createGlobalAgentHistoryRuntime(deps: any): {
     deleteGlobalAgentConversationSession: (sessionId: string, expectedSource?: string) => {
         deleted: boolean;
         session: any;
+        context_cache_invalidated?: undefined;
+    } | {
+        deleted: boolean;
+        session: any;
+        context_cache_invalidated: boolean;
     };
     getGlobalAgentConversationMessages: (sessionId: string) => any[];
     appendGlobalAgentConversationMessage: (sessionId: string, role: "user" | "assistant", content: string, source?: string) => void;

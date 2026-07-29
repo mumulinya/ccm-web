@@ -37,10 +37,17 @@ import {
   getParsedKnowledgeDocument,
   queryKnowledgeBase,
   queryKnowledgeBaseScoped,
+  pruneKnowledgeIndexGenerations,
   rebuildKnowledgeIndex,
   searchKnowledgeBase,
 } from "./knowledge-index";
 import { knowledgeDirectoryWatcher } from "./knowledge-watcher";
+import {
+  getLocalKnowledgeModelStatus,
+  prepareLocalKnowledgeModel,
+  removeLocalKnowledgeModel,
+} from "./knowledge-embedding";
+import { inspectKnowledgeIndexLease } from "./knowledge-index-lease";
 
 export { queryKnowledgeBase, queryKnowledgeBaseScoped, rebuildKnowledgeIndex };
 
@@ -130,6 +137,9 @@ function debugChunk(item: any, fullText = false) {
     score: item.score,
     keywordScore: item.keywordScore,
     vectorScore: item.vectorScore,
+    lexicalScore: item.keywordScore,
+    semanticScore: item.semanticScore || item.vectorScore || 0,
+    retrievalMode: item.retrievalMode || item.embeddingMode || "lexical",
     coverage: item.coverage,
     source: meta.source,
   };
@@ -139,9 +149,14 @@ function retrievalSummary(search: any, citations: string[] = []) {
   return {
     mode: "hybrid",
     embedding: search.embeddingMode,
-    fallback: search.embeddingMode === "hashing" || search.embeddingMode.includes("fallback"),
+    fallback: search.embeddingMode === "lexical" || search.embeddingMode.includes("fallback"),
     error: search.embeddingError || "",
-    rerank: "keyword+vector+coverage",
+    fallbackReason: search.fallbackReason || "",
+    indexGeneration: search.indexGeneration || "",
+    staleServed: search.staleServed === true,
+    scopeChecksum: search.scopeChecksum || "",
+    candidateCounts: search.candidateCounts || {},
+    rerank: "independent-lexical+semantic+coverage",
     citations,
   };
 }
@@ -242,9 +257,10 @@ async function handleKnowledgeChat(payload: any, res: any) {
   const debugChunks = search.results.map(item => debugChunk(item, true));
   const citations = debugChunks.map(chunk => chunk.citation);
   if (!debugChunks.length) {
+    const indexBuilding = search.fallbackReason === "index_building";
     return sendJson(res, {
       success: true,
-      reply: "知识库中暂时没有找到与这个问题相关的资料。可以换一种问法，或先导入对应文档。",
+      reply: indexBuilding ? "知识索引正在准备中，请稍后再试；系统不会把尚未完成的索引当成没有资料。" : "知识库中暂时没有找到与这个问题相关的资料。可以换一种问法，或先导入对应文档。",
       debugChunks: [],
       citations: [],
       retrieval: retrievalSummary(search),
@@ -293,11 +309,13 @@ export function handleRagApi(pathname: string, req: any, res: any, parsed: any):
       embedding,
       watchPaths: knowledgeDirectoryWatcher.listPaths(),
       retrieval: {
-        semanticEnabled: embedding.enabled && embedding.hasKey && !!embedding.model,
-        mode: embedding.enabled && embedding.hasKey ? `hybrid:${embedding.model}` : "hybrid:hashing",
+        semanticEnabled: getKnowledgeIndexStatus().semanticReady > 0,
+        mode: embedding.mode,
         localFallbackEnabled: true,
-        localFallbackDescription: "未配置 Embedding 或远程调用失败时，自动使用本地关键词、中文切词与 hashing 向量混合检索",
+        localFallbackDescription: "外部Embedding不可用时优先使用本地多语言语义模型；模型未就绪时明确降级为词面检索",
       },
+      localModel: getLocalKnowledgeModelStatus(),
+      buildLease: inspectKnowledgeIndexLease(),
     });
   }
 
@@ -312,6 +330,35 @@ export function handleRagApi(pathname: string, req: any, res: any, parsed: any):
       sendJson(res, { success: status.state === "ready", config: publicRagEmbeddingConfig(config), chunksCount: status.chunks, status });
     }).catch(error => sendJson(res, { error: error.message }, 400));
     return true;
+  }
+
+  if (pathname === "/api/rag/local-model/prepare" && req.method === "POST") {
+    void prepareLocalKnowledgeModel(true).then(localModel => {
+      if (localModel.state === "ready") void rebuildKnowledgeIndex("local-model-prepare");
+    }).catch(error => console.warn(`[RAG] 本地模型准备失败：${error?.message || error}`));
+    return sendJson(res, { success: true, accepted: true, localModel: getLocalKnowledgeModelStatus(), status: getKnowledgeIndexStatus() }, 202);
+  }
+
+  if (pathname === "/api/rag/local-model" && req.method === "DELETE") {
+    void removeLocalKnowledgeModel().then(async localModel => {
+      const current = loadRagEmbeddingConfig();
+      if (current.mode === "local" || (current.mode === "auto" && !current.apiKey)) saveRagEmbeddingConfig({ mode: "lexical" });
+      const status = await rebuildKnowledgeIndex("local-model-delete");
+      sendJson(res, { success: true, localModel, status });
+    }).catch(error => sendJson(res, { error: error.message }, 500));
+    return true;
+  }
+
+  if (pathname === "/api/rag/repair-vectors" && req.method === "POST") {
+    void rebuildKnowledgeIndex("repair-missing-vectors").then(status => {
+      sendJson(res, { success: status.state === "ready", status }, status.state === "ready" ? 200 : 500);
+    });
+    return true;
+  }
+
+  if (pathname === "/api/rag/index-cache" && req.method === "DELETE") {
+    try { return sendJson(res, { success: true, cleanup: pruneKnowledgeIndexGenerations(), status: getKnowledgeIndexStatus() }); }
+    catch (error: any) { return sendJson(res, { error: error.message }, 500); }
   }
 
   if (pathname === "/api/rag/capture" && req.method === "POST") {
@@ -464,7 +511,7 @@ export function handleRagApi(pathname: string, req: any, res: any, parsed: any):
     if (req.method === "GET") return sendJson(res, { success: true, paths: knowledgeDirectoryWatcher.listPaths() });
     if (req.method === "POST") {
       void readJsonBody(req).then(payload => {
-        const paths = knowledgeDirectoryWatcher.addPath(payload.path);
+        const paths = knowledgeDirectoryWatcher.addPath(payload);
         sendJson(res, { success: true, paths, message: "目录已开始监控，首次同步正在后台进行" });
       }).catch(error => sendJson(res, { error: error.message }, 400));
       return true;

@@ -41,6 +41,33 @@ export declare function claimReadyDailyDevBacklog(groupId: string, claim?: any):
 };
 export declare function markDailyDevBacklogStatus(groupId: string, fileName: string, status: string, meta?: any): any;
 export declare function listDailyDevBacklogs(groupId?: string): any[];
+export declare function listRequirementBacklogCollections(groupId?: string): {
+    id: any;
+    trace_id: any;
+    title: any;
+    business_goal: any;
+    state: string;
+    state_label: any;
+    priority: any;
+    intake_state: any;
+    group_id: any;
+    group_name: any;
+    target_labels: unknown[];
+    child_task_ids: any;
+    progress: {
+        total: any;
+        done: number;
+        running: number;
+        failed: number;
+        blocked: any;
+        waiting: number;
+    };
+    source_count: number;
+    content_hash: any;
+    version: number;
+    updated_at: any;
+    created_at: any;
+}[];
 export declare function dispatchDailyDevBacklog(groupId: string, fileName: string, ctx: any, options?: any): {
     success: boolean;
     status: number;

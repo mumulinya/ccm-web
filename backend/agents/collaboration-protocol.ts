@@ -39,32 +39,10 @@ export function selectCollaborationTarget(input: {
   if (explicit && explicit.toLowerCase() !== "auto" && members.includes(explicit)) {
     return { targetName: explicit, strategy: "explicit", candidates: [{ project: explicit, score: 100, load: 0 }] };
   }
-
-  const required = list(input.request?.required_capabilities || input.request?.requiredCapabilities);
-  const query = `${text(input.request?.question)} ${text(input.request?.reason)} ${required.join(" ")}`.toLowerCase();
-  const candidates = members.map((project: string) => {
-    const profile = input.profiles?.[project] || {};
-    const terms = [...list(profile.capabilities), text(profile.responsibility, 1000), project].filter(Boolean);
-    let score = 0;
-    for (const term of terms) {
-      const normalized = term.toLowerCase();
-      if (normalized && query.includes(normalized)) score += normalized === project.toLowerCase() ? 3 : 12;
-      for (const token of normalized.split(/[\s/\\:_\-]+/).filter((item: string) => item.length >= 2)) {
-        if (query.includes(token)) score += 2;
-      }
-    }
-    for (const capability of required) {
-      if (terms.some(term => term.toLowerCase().includes(capability.toLowerCase()))) score += 20;
-    }
-    const load = (input.openItems || []).filter((item: any) => item?.to_agent === project && ["waiting", "asking", "queued"].includes(String(item?.status || ""))).length;
-    score -= load * 5;
-    return { project, score, load, capabilities: list(profile.capabilities).slice(0, 12) };
-  }).sort((a: any, b: any) => b.score - a.score || a.load - b.load || a.project.localeCompare(b.project));
-
   return {
-    targetName: candidates[0]?.project || "",
-    strategy: "capability_and_load",
-    candidates: candidates.slice(0, 8),
+    targetName: "",
+    strategy: "model_required",
+    candidates: members.slice(0, 8).map((project: string) => ({ project, load: 0 })),
   };
 }
 
@@ -192,7 +170,7 @@ export function runAgentCollaborationProtocolSelfTest() {
   const opposing = evaluateCollaborationAnswer({ answer: "该接口不能返回 approved 字段，证据见 docs/legacy.md。", evidence: ["docs/legacy.md"] }, contract, [{ id: "qa-positive", acceptance: answer }]);
   const timeout = evaluateCollaborationTimeout({ ...contract, deadline_at: "2026-01-01T00:00:00.000Z" }, "2026-01-01T00:00:01.000Z");
   const checks = {
-    capabilityRouting: route.targetName === "backend" && route.strategy === "capability_and_load",
+    automaticRoutingRequiresModel: route.targetName === "" && route.strategy === "model_required",
     taskAndExecutionBound: contract.task_id === "t1" && contract.execution_id === "e1" && !!contract.question_id,
     permissionDoesNotExpand: contract.permission_contract.write_scope_expanded === false && contract.permission_contract.mcp_scope_expanded === false,
     admissionPasses: admission.allowed === true,

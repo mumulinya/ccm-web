@@ -637,24 +637,26 @@ export function collectConfiguredTestAgentReviewConfig(projectName: string) {
   const httpChecks = configObjectArray(nestedConfig.httpChecks, nestedConfig.http_checks, nestedConfig.apiChecks, nestedConfig.api_checks, baseConfig.test_agent_http_checks, baseConfig.testAgentHttpChecks);
   const adversarialHttpChecks = configObjectArray(nestedConfig.adversarialHttpChecks, nestedConfig.adversarial_http_checks, nestedConfig.adversarialApiChecks, nestedConfig.adversarial_api_checks, baseConfig.test_agent_adversarial_http_checks, baseConfig.testAgentAdversarialHttpChecks);
   const browserChecks = configObjectArray(nestedConfig.browserChecks, nestedConfig.browser_checks, baseConfig.test_agent_browser_checks, baseConfig.testAgentBrowserChecks);
+  const browserScenarios = normalizeProjectConfigList(nestedConfig.browserScenarios || nestedConfig.browser_scenarios || baseConfig.test_agent_browser_scenarios || baseConfig.testAgentBrowserScenarios).slice(0, 12);
   const adversarialBrowserChecks = configObjectArray(nestedConfig.adversarialBrowserChecks, nestedConfig.adversarial_browser_checks, baseConfig.test_agent_adversarial_browser_checks, baseConfig.testAgentAdversarialBrowserChecks);
   const adversarialBrowserProbeTemplates = configObjectArray(nestedConfig.adversarialBrowserProbeTemplates, nestedConfig.adversarial_browser_probe_templates, baseConfig.test_agent_browser_probe_templates, baseConfig.testAgentBrowserProbeTemplates);
   const hasMultiSessionBrowserCheck = hasConfiguredTestAgentMultiSessionBrowserCheck(browserChecks, adversarialBrowserChecks);
   if (httpChecks.length) project.httpChecks = httpChecks;
   if (adversarialHttpChecks.length) project.adversarialHttpChecks = adversarialHttpChecks;
   if (browserChecks.length) project.browserChecks = browserChecks;
+  if (browserScenarios.length) project.browserScenarios = browserScenarios;
   if (adversarialBrowserChecks.length) project.adversarialBrowserChecks = adversarialBrowserChecks;
   if (adversarialBrowserProbeTemplates.length) project.adversarialBrowserProbeTemplates = adversarialBrowserProbeTemplates;
   const requiredChecks = uniqueStrings(
     normalizeProjectConfigList(nestedConfig.requiredChecks || nestedConfig.required_checks || baseConfig.test_agent_required_checks || baseConfig.testAgentRequiredChecks),
     targetUrl || startupUrl || httpChecks.length || adversarialHttpChecks.length ? ["http"] : [],
-    targetUrl || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_e2e", "screenshots", "console_errors", "browser_snapshots", "browser_console_logs", "browser_network_logs"] : [],
-    targetUrl || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_trace", "browser_har"] : [],
+    targetUrl || browserChecks.length || browserScenarios.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_e2e", "screenshots", "console_errors", "browser_snapshots", "browser_console_logs", "browser_network_logs"] : [],
+    targetUrl || browserChecks.length || browserScenarios.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["browser_trace", "browser_har"] : [],
     hasMultiSessionBrowserCheck ? ["browser_multi_session"] : [],
     adversarialHttpChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length ? ["adversarial"] : [],
   ).slice(0, 16);
   const options = configRecord(nestedConfig.options || baseConfig.test_agent_options || baseConfig.testAgentOptions);
-  const hasExecutableSurface = !!(project.targetUrl || project.startupUrl || httpChecks.length || adversarialHttpChecks.length || browserChecks.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length);
+  const hasExecutableSurface = !!(project.targetUrl || project.startupUrl || httpChecks.length || adversarialHttpChecks.length || browserChecks.length || browserScenarios.length || adversarialBrowserChecks.length || adversarialBrowserProbeTemplates.length);
   return { project, requiredChecks, options, hasExecutableSurface };
 }
 

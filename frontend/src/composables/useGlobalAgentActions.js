@@ -215,9 +215,24 @@ const handleGlobalTaskAction = async (msg, action) => {
     }
     if (action.kind === 'view_trace') {
       const replayTaskId = action.task_id || action.taskId || card?.task_id || card?.taskId || card?.technical?.task_id || ''
-      localStorage.setItem('trace-replay-target', JSON.stringify({ scope: 'global', task_id: replayTaskId, trace_id: action.trace_id || card?.technical?.trace_id || '', at: Date.now() }))
+      const replayTarget = {
+        scope: 'global',
+        task_id: replayTaskId,
+        trace_id: action.trace_id || card?.technical?.trace_id || '',
+        preset: action.preset || 'all',
+        event_status: action.event_status || action.eventStatus || '',
+        event_query: action.event_query || action.eventQuery || '',
+        event_id: action.event_id || action.eventId || '',
+        evidence_id: action.evidence_id || action.evidenceId || '',
+        at: Date.now(),
+      }
+      localStorage.setItem('trace-replay-target', JSON.stringify(replayTarget))
       emit('switch-tab', 'trace-replay')
-      window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: 'global', task_id: replayTaskId, trace_id: action.trace_id || card?.technical?.trace_id || '' } }))
+      window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: replayTarget }))
+      return
+    }
+    if (action.kind === 'open_project_settings') {
+      emit('switch-tab', 'projects')
       return
     }
     if (action.kind === 'approve_epic') {

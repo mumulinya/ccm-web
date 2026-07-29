@@ -1,4 +1,5 @@
 import { type KnowledgeScope } from "./knowledge-files";
+import { KnowledgeVectorResult } from "./knowledge-embedding";
 export type KnowledgeChunk = {
     id: string;
     filename: string;
@@ -11,6 +12,7 @@ export type KnowledgeChunk = {
     tf: Record<string, number>;
     embedding: number[];
     semanticEmbedding?: number[];
+    semantic?: Omit<KnowledgeVectorResult, "vector">;
     charStart: number;
     charEnd: number;
 };
@@ -38,6 +40,16 @@ export type KnowledgeIndexStatus = {
     cacheHits: number;
     semanticReady: number;
     semanticFailed: number;
+    semanticPending: number;
+    localVectors: number;
+    remoteVectors: number;
+    lexicalChunks: number;
+    activeGeneration: string;
+    lastGoodGeneration: string;
+    staleServed: boolean;
+    fallbackReason: string;
+    buildLease: any;
+    localModel: any;
     parseFailures: Array<{
         filename: string;
         error: string;
@@ -51,9 +63,15 @@ export declare function formatAwareChunkText(content: string, extension?: string
     charStart: number;
     charEnd: number;
 }[];
+export declare function loadActiveKnowledgeIndex(): boolean;
 export declare function rebuildKnowledgeIndex(reason?: string): Promise<KnowledgeIndexStatus>;
 export declare function waitForKnowledgeIndex(reason?: string): Promise<KnowledgeIndexStatus>;
 export declare function getKnowledgeIndexStatus(): KnowledgeIndexStatus;
+export declare function pruneKnowledgeIndexGenerations(): {
+    removed: number;
+    retained: string[];
+    activeGeneration: string;
+};
 export declare function getKnowledgeDocumentChunks(filename: string): {
     id: string;
     index: number;
@@ -71,16 +89,19 @@ export declare function getParsedKnowledgeDocument(filename: string): {
     error: string;
 };
 export declare function searchKnowledgeBase(query: string, options?: KnowledgeSearchOptions): Promise<{
-    results: {
-        vectorScore: number;
-        score: number;
-        embeddingMode: string;
-        chunk: KnowledgeChunk;
-        keywordScore: number;
-        coverage: number;
-    }[];
+    results: any[];
     embeddingMode: string;
     embeddingError: string;
+    fallbackReason: string;
+    indexGeneration: string;
+    staleServed: boolean;
+    scopeChecksum: string;
+    candidateCounts: {
+        eligible: number;
+        lexical: number;
+        semantic: number;
+        merged: number;
+    };
 }>;
 export declare function queryKnowledgeBase(query: string, limit?: number, filterTags?: string[]): string;
 export declare function queryKnowledgeBaseScoped(query: string, options?: KnowledgeSearchOptions): string;

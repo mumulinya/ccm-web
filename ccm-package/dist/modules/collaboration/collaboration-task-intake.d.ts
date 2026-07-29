@@ -83,7 +83,7 @@ export declare function buildGroupPlanModePreflight(input: {
     taskIntent?: any;
     attachmentCount?: number;
     coordinatorProject?: string;
-}): {
+}): Promise<{
     title: string;
     mode: string;
     source: string;
@@ -96,6 +96,17 @@ export declare function buildGroupPlanModePreflight(input: {
         projects: any;
         knowledge_used: boolean;
         code_snapshot_used: boolean;
+        source_snapshot_checksum: string;
+        model_planning_receipt: import("./project-analysis").ModelDrivenSourcePlanningReceiptV1;
+        source_evidence: {
+            project: string;
+            status: "ready" | "unavailable" | "empty";
+            manifest_checksum: string;
+            selected_paths: string[];
+            issue: string;
+        }[];
+        source_ready: boolean;
+        source_issues: string[];
     };
     steps: ({
         id: string;
@@ -144,7 +155,7 @@ export declare function buildGroupPlanModePreflight(input: {
     auto_continue: boolean;
     next_step: string;
     generated_at: string;
-};
+}>;
 export declare function buildProjectCodeReadOnlySnapshot(project: string, workDir: string, message: string): string;
 export declare function buildChildAgentWorkerHandoff(targetProject: string, taskText?: string, options?: any): {
     schema: string;

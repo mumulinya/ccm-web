@@ -139,7 +139,7 @@ function normalizeWorkItem(raw = {}, context = {}) {
         blockedBy: normalizeRefList(raw.blockedBy || raw.blocked_by || raw.dependsOn || raw.depends_on || raw.depends || []),
         attempt: Math.max(1, Number(raw.attempt || raw.retry_count || 1) || 1),
         source: compactText(raw.source || context.source || "main-agent", 80),
-        createdAt: String(raw.createdAt || raw.created_at || now),
+        createdAt: String(raw.createdAt || raw.created_at || raw.timestamp || now),
         updatedAt: String(raw.updatedAt || raw.updated_at || now),
         startedAt: String(raw.startedAt || raw.started_at || ""),
         completedAt: String(raw.completedAt || raw.completed_at || ""),
@@ -152,7 +152,7 @@ function normalizeWorkItem(raw = {}, context = {}) {
         requeueReason: compactText(raw.requeueReason || raw.requeue_reason || "", 200),
     };
 }
-function assignmentToWorkItem(assignment, task, index) {
+function assignmentToWorkItem(assignment, task, index, now) {
     return normalizeWorkItem({
         ...assignment,
         source: assignment.source || "assignment_evidence",
@@ -165,9 +165,10 @@ function assignmentToWorkItem(assignment, task, index) {
         scopeId: task.group_id || task.global_mission_id || task.id,
         index,
         source: "assignment_evidence",
+        now,
     });
 }
-function missionTargetToWorkItem(target, task, index) {
+function missionTargetToWorkItem(target, task, index, now) {
     return normalizeWorkItem({
         source: "mission_plan",
         subject: target.task || target.reason || task.business_goal || task.title,
@@ -181,9 +182,10 @@ function missionTargetToWorkItem(target, task, index) {
         scopeId: task.group_id || task.global_mission_id || task.id,
         index,
         source: "mission_plan",
+        now,
     });
 }
-function fallbackTaskWorkItem(task) {
+function fallbackTaskWorkItem(task, now) {
     const target = task.target_project || task.mission_target?.name || task.mission_target?.project || "";
     const executable = !!target || ["daily_dev", "project_task"].includes(String(task.workflow_type || ""));
     if (!executable)
@@ -200,6 +202,7 @@ function fallbackTaskWorkItem(task) {
         scopeId: task.group_id || task.global_mission_id || task.id,
         index: 0,
         source: "task_target",
+        now,
     });
 }
 function applyReceiptAndExecution(item, task, receipts, executions, now) {
@@ -394,17 +397,17 @@ function buildMainAgentWorkItems(task = {}, options = {}) {
             : [];
     const explicitItems = explicit.map((item, index) => normalizeWorkItem(item, { taskId: task.id, scopeId: task.group_id || task.global_mission_id || task.id, index, now, source: item.source || "task_work_items" }));
     const derivedItems = [
-        ...assignments.map((assignment, index) => assignmentToWorkItem(assignment, task, index)),
-        ...(!assignments.length ? missionTargets.map((target, index) => missionTargetToWorkItem(target, task, index)) : []),
+        ...assignments.map((assignment, index) => assignmentToWorkItem(assignment, task, index, now)),
+        ...(!assignments.length ? missionTargets.map((target, index) => missionTargetToWorkItem(target, task, index, now)) : []),
         ...(!assignments.length && !missionTargets.length
             ? rehearsalPlan.map((assignment, index) => assignmentToWorkItem({
                 ...assignment,
                 source: assignment.source || "sandbox_rehearsal_plan",
                 targetName: assignment.targetName || assignment.project,
-            }, task, index))
+            }, task, index, now))
             : []),
     ];
-    const fallback = !derivedItems.length ? fallbackTaskWorkItem(task) : null;
+    const fallback = !derivedItems.length ? fallbackTaskWorkItem(task, now) : null;
     const filteredExplicit = derivedItems.length
         ? explicitItems.filter(item => item.source !== "task_target")
         : explicitItems;

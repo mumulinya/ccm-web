@@ -5,7 +5,7 @@ import { compactPetText } from "./global-agent-test-agent-display";
 export async function callLlm(
   config: any,
   messages: any[],
-  options: { onUsage?: (usage: any) => void; onDelta?: (delta: string) => void } = {},
+  options: { onUsage?: (usage: any) => void; onDelta?: (delta: string) => void; providerContextCache?: any; onProviderContextCache?: (receipt: any) => void } = {},
 ): Promise<string> {
   const requestBytes = Buffer.byteLength(JSON.stringify(messages));
   const maxRequestBytes = 512 * 1024;
@@ -31,6 +31,8 @@ export async function callLlm(
       onUsage: options.onUsage,
       stream: typeof options.onDelta === "function",
       onDelta: options.onDelta,
+      providerContextCache: options.providerContextCache,
+      onProviderContextCache: options.onProviderContextCache,
     });
   }
 
@@ -42,6 +44,8 @@ export async function callLlm(
     onUsage: options.onUsage,
     stream: typeof options.onDelta === "function",
     onDelta: options.onDelta,
+    providerContextCache: options.providerContextCache,
+    onProviderContextCache: options.onProviderContextCache,
   });
 }
 
@@ -54,9 +58,16 @@ export async function callGlobalModelWithRetry(config: any, messages: any[], opt
   delayMs?: number;
   onUsage?: (usage: any) => void;
   onDelta?: (delta: string) => void;
+  providerContextCache?: any;
+  onProviderContextCache?: (receipt: any) => void;
   call?: (config: any, messages: any[]) => Promise<string>;
 } = {}) {
-  if (!options.call) return callLlm(config, messages, { onUsage: options.onUsage, onDelta: options.onDelta });
+  if (!options.call) return callLlm(config, messages, {
+    onUsage: options.onUsage,
+    onDelta: options.onDelta,
+    providerContextCache: options.providerContextCache,
+    onProviderContextCache: options.onProviderContextCache,
+  });
   const attempts = Math.max(1, Math.min(5, Number(options.attempts || 5)));
   const delayMs = Math.max(0, Math.min(5_000, Number(options.delayMs ?? 500)));
   const call = options.call;
