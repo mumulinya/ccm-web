@@ -116,7 +116,7 @@ assert.equal(afterFailure.plan_revision_pending, null, 'failed revision must cle
 const publicTask = main.projectMainTaskPublic(afterFailure)
 assert.equal(publicTask.message_id, `project-main-task:${created.id}`, 'public task must expose a stable message id')
 assert.equal(publicTask.plan_revision_count, 1, 'public task must expose revision count for recovery')
-assert.equal(publicTask.acceptance_mode, 'test_agent', 'public task must preserve the configured acceptance role')
+assert.equal(publicTask.acceptance_mode, created.acceptance_mode, 'public task must preserve the configured acceptance role')
 
 taskStore.closeSqliteTaskStore?.()
 for (let attempt = 0; attempt < 5; attempt += 1) {

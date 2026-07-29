@@ -55,6 +55,14 @@ export declare function getCleanupSummary(): {
             count: number;
             bytes: number;
         }[];
+        uploads: {
+            id: any;
+            title: any;
+            type: string;
+            count: any;
+            bytes: any;
+            updated_at: any;
+        }[];
     };
     actions: {
         target_count: number;

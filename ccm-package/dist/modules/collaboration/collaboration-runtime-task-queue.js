@@ -152,8 +152,6 @@ const db_1 = require("../../core/db");
 const display_1 = require("./display");
 const project_analysis_1 = require("./project-analysis");
 const memory_1 = require("./memory");
-const feishu_1 = require("./feishu");
-const feishu_channel_1 = require("./feishu-channel");
 const group_coordination_mcp_1 = require("../../integrations/group-coordination-mcp");
 const task_delivery_report_1 = require("./task-delivery-report");
 const logs_1 = require("./logs");
@@ -166,9 +164,9 @@ const work_items_1 = require("../../agents/work-items");
 const collaboration_runtime_plan_tools_1 = require("./collaboration-runtime-plan-tools");
 const collaboration_runtime_runtime_tools_1 = require("./collaboration-runtime-runtime-tools");
 // ===== merged from collaboration-runtime-task-queue-part-01.ts =====
-var feishu_2 = require("./feishu");
-Object.defineProperty(exports, "FEISHU_SCOPES", { enumerable: true, get: function () { return feishu_2.FEISHU_SCOPES; } });
-Object.defineProperty(exports, "sendFeishuReportMessage", { enumerable: true, get: function () { return feishu_2.sendFeishuReportMessage; } });
+var feishu_1 = require("./feishu");
+Object.defineProperty(exports, "FEISHU_SCOPES", { enumerable: true, get: function () { return feishu_1.FEISHU_SCOPES; } });
+Object.defineProperty(exports, "sendFeishuReportMessage", { enumerable: true, get: function () { return feishu_1.sendFeishuReportMessage; } });
 var storage_2 = require("./storage");
 Object.defineProperty(exports, "loadGroups", { enumerable: true, get: function () { return storage_2.loadGroups; } });
 var memory_3 = require("./memory");
@@ -993,7 +991,7 @@ function getTaskById(taskId) {
 function buildChildAgentTaskText(childTaskText, task = null) {
     if (!task)
         return childTaskText;
-    const attachmentContext = (0, memory_1.compactMemoryText)(task.source_attachment_context || task.sourceAttachmentContext || "", 50_000);
+    const attachmentContext = String(task.source_attachment_context || task.sourceAttachmentContext || "");
     if (task.workflow_type !== "daily_dev") {
         return [
             childTaskText,
@@ -1094,53 +1092,14 @@ function updateGroupMessageAssignmentStatus(groupId, messageId, project, status,
     return workflow;
 }
 async function sendTaskCompletionNotification(task, result) {
-    // Tasks bound to Feishu are already delivered to their originating chat by
-    // the task status hook. Preserve the fixed webhook as a legacy fallback.
-    if ((0, feishu_channel_1.hasFeishuTaskBinding)({ taskId: task?.id, missionId: task?.parent_task_id || task?.root_task_id }))
-        return;
-    const summary = task?.delivery_summary || {};
-    const sourceReport = String(summary.user_report || result || "");
-    const resultSummary = sourceReport.substring(0, 900) + (sourceReport.length > 900 ? "..." : "");
-    const fileCount = summary.actual_file_change_count ?? summary.files_changed?.length ?? 0;
-    const verificationCount = summary.verification?.length || 0;
-    const missingVerificationCount = summary.verification_required_missing?.length || 0;
-    const reviewStatus = summary.has_final_review ? (summary.review_status || "complete") : "无";
-    const priority = task.priority === "high" ? "高" : task.priority === "normal" ? "中" : "低";
-    const markdown = [
-        `**任务标题**：${task.title || "未命名任务"}`,
-        `**目标项目**：${task.target_project || "群聊"}`,
-        `**优先级**：${priority}`,
-        `**完成时间**：${new Date().toLocaleString("zh-CN")}`,
-        `**实际文件变更**：${fileCount} 个`,
-        `**验证记录**：${verificationCount} 条`,
-        `**缺命令验证**：${missingVerificationCount} 项`,
-        `**主 Agent 复盘**：${reviewStatus}`,
-        "",
-        `**用户交付报告**：\n${resultSummary || "无"}`,
-    ].join("\n");
-    const notification = await (0, feishu_1.sendFeishuReportMessage)({
-        title: "任务完成通知",
-        markdown,
-    });
-    if (!notification.success)
-        console.warn("[飞书通知] 任务完成通知发送失败:", notification.error || "未知错误");
+    // Exact Feishu-origin tasks are delivered by the bound task status hook.
+    // Web and standalone group tasks must never fall back to the generic webhook.
+    void task;
+    void result;
 }
 async function sendTaskFailureNotification(task, errorMsg) {
-    if ((0, feishu_channel_1.hasFeishuTaskBinding)({ taskId: task?.id, missionId: task?.parent_task_id || task?.root_task_id }))
-        return;
-    const markdown = [
-        `**任务标题**：${task.title || "未命名任务"}`,
-        `**目标项目**：${task.target_project || "群聊"}`,
-        `**失败时间**：${new Date().toLocaleString("zh-CN")}`,
-        "",
-        `**错误信息**：\n${String(errorMsg || "未知错误").substring(0, 900)}`,
-    ].join("\n");
-    const notification = await (0, feishu_1.sendFeishuReportMessage)({
-        title: "任务执行失败",
-        markdown,
-    });
-    if (!notification.success)
-        console.warn("[飞书通知] 任务失败通知发送失败:", notification.error || "未知错误");
+    void task;
+    void errorMsg;
 }
 function appendTaskGroupReport(task, status, detail = "") {
     if (!task?.group_id)

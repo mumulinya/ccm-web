@@ -3,6 +3,14 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { appendTraceEvent, ensureTraceId } from "../../system/reliability-ledger";
+import {
+  createGlobalRunTerminalReceipt,
+  drainGlobalTerminalDeliveries,
+  ensureGlobalTerminalDeliveries,
+  listGlobalTerminalDeliveries,
+  type GlobalRunTerminalReceiptV2,
+  type GlobalTerminalDeliveryV1,
+} from "./global-terminal-delivery";
 
 export type GlobalMissionSupervisorStatus = "monitoring" | "paused" | "waiting_user" | "completed" | "failed" | "cancelled" | "manual_takeover";
 
@@ -33,6 +41,8 @@ export interface GlobalMissionSupervisorRecord {
   last_continuation?: any;
   final_report?: any;
   final_notification_sent_at?: string;
+  terminal_receipt?: GlobalRunTerminalReceiptV2 | null;
+  terminal_delivery_state?: string;
   error?: string;
 }
 
@@ -43,6 +53,7 @@ export interface GlobalMissionSupervisorRuntime {
   onCompleted?: (record: GlobalMissionSupervisorRecord, report: any) => Promise<void> | void;
   onProgress?: (record: GlobalMissionSupervisorRecord, event: any) => Promise<void> | void;
   onTerminal?: (record: GlobalMissionSupervisorRecord, outcome: "failed" | "cancelled", report: any) => Promise<void> | void;
+  deliverTerminal?: (record: GlobalMissionSupervisorRecord, receipt: GlobalRunTerminalReceiptV2, delivery: GlobalTerminalDeliveryV1) => Promise<void> | void;
   now?: () => number;
 }
 
@@ -132,8 +143,49 @@ function normalizeRecord(value: any): GlobalMissionSupervisorRecord {
     last_continuation: value?.last_continuation || null,
     final_report: value?.final_report || null,
     final_notification_sent_at: value?.final_notification_sent_at,
+    terminal_receipt: value?.terminal_receipt || value?.terminalReceipt || null,
+    terminal_delivery_state: String(value?.terminal_delivery_state || value?.terminalDeliveryState || ""),
     error: String(value?.error || ""),
   };
+}
+
+async function drainSupervisorTerminal(record: GlobalMissionSupervisorRecord, runtime: GlobalMissionSupervisorRuntime) {
+  const receipt = record.terminal_receipt;
+  if (!receipt) return { total: 0, results: [] };
+  const result = await drainGlobalTerminalDeliveries({
+    supervisorId: record.id,
+    deliver: async (delivery) => {
+      if (runtime.deliverTerminal) {
+        await runtime.deliverTerminal(record, receipt, delivery);
+        return;
+      }
+      if (delivery.kind !== "run") return;
+      if (receipt.outcome === "completed") await runtime.onCompleted?.(record, record.final_report || {});
+      else await runtime.onTerminal?.(record, receipt.outcome, record.final_report || {});
+    },
+  });
+  const all = listGlobalTerminalDeliveries({ supervisorId: record.id });
+  record.terminal_delivery_state = all.some((item) => item.state === "delivery_failed")
+    ? "delivery_failed"
+    : all.length > 0 && all.every((item) => item.state === "delivered")
+      ? "delivered"
+      : "pending";
+  if (record.terminal_delivery_state === "delivered") record.final_notification_sent_at = record.final_notification_sent_at || nowIso(runtime);
+  saveRecord(record);
+  return result;
+}
+
+function commitSupervisorTerminal(record: GlobalMissionSupervisorRecord, outcome: "completed" | "failed" | "cancelled", report: any, at: string) {
+  record.status = outcome;
+  record.phase = outcome === "completed" ? "delivered" : outcome;
+  record.updated_at = at;
+  record.completed_at = at;
+  record.final_report = report || {};
+  record.terminal_receipt = createGlobalRunTerminalReceipt({ ...record, outcome, report, settled_at: at });
+  record.terminal_delivery_state = "pending";
+  ensureGlobalTerminalDeliveries(record, record.terminal_receipt);
+  saveRecord(record);
+  return record;
 }
 
 function loadStore(): GlobalMissionSupervisorRecord[] {
@@ -306,16 +358,8 @@ export async function checkGlobalMissionSupervisorNow(id: string, runtime: Globa
     const before = await runtime.inspectMission(record.mission_id);
     if (!before?.mission) throw new Error("全局任务不存在或已被删除");
     if (before.mission.status === "cancelled") {
-      record.status = "cancelled";
-      record.phase = "cancelled";
-      record.updated_at = checkedAt;
-      record.completed_at = checkedAt;
-      saveRecord(record);
-      if (!record.final_notification_sent_at) {
-        await runtime.onTerminal?.(record, "cancelled", { summary: "全局任务已取消。", remaining_items: [], risks: [] });
-        record.final_notification_sent_at = nowIso(runtime);
-        saveRecord(record);
-      }
+      commitSupervisorTerminal(record, "cancelled", { summary: "全局任务已取消。", remaining_items: [], risks: [] }, checkedAt);
+      await drainSupervisorTerminal(record, runtime);
       return record;
     }
     const result = await runtime.advanceMission(record.mission_id, { max_attempts: record.max_attempts, source: "global-mission-supervisor" });
@@ -361,17 +405,9 @@ export async function checkGlobalMissionSupervisorNow(id: string, runtime: Globa
       await runtime.onProgress?.(record, { type: "actions", actions });
     }
     if (report.completed) {
-      record.status = "completed";
-      record.phase = "delivered";
-      record.completed_at = checkedAt;
-      record.final_report = report;
-      saveRecord(record);
+      commitSupervisorTerminal(record, "completed", report, checkedAt);
       appendTraceEvent(record.trace_id, { id: `${record.id}:completed`, type: "mission.supervisor_completed", status: "ok", task_id: record.mission_id, message: report.summary, data: report });
-      if (!record.final_notification_sent_at) {
-        await runtime.onCompleted?.(record, report);
-        record.final_notification_sent_at = nowIso(runtime);
-        saveRecord(record);
-      }
+      await drainSupervisorTerminal(record, runtime);
       return record;
     }
     const waiting = Array.isArray(result?.waiting_user) ? result.waiting_user : [];
@@ -531,8 +567,24 @@ export function startGlobalMissionSupervisorScheduler(runtime: GlobalMissionSupe
   const tick = () => {
     const now = runtime.now ? runtime.now() : Date.now();
     for (const record of loadStore()) {
-      if (!shouldScheduleGlobalMissionSupervisor(record, now)) continue;
-      void checkGlobalMissionSupervisorNow(record.id, runtime);
+      if (["completed", "failed", "cancelled"].includes(record.status)
+        && !record.terminal_receipt
+        && !record.final_notification_sent_at) {
+        commitSupervisorTerminal(record, record.status as "completed" | "failed" | "cancelled", record.final_report || { summary: record.error || `历史全局任务已${record.status}` }, record.completed_at || record.updated_at || new Date(now).toISOString());
+      }
+      if (shouldScheduleGlobalMissionSupervisor(record, now)) {
+        void checkGlobalMissionSupervisorNow(record.id, runtime).catch((error) => {
+          console.warn(`[全局任务监督] 检查失败：${error?.message || error}`);
+        });
+        continue;
+      }
+      if (["completed", "failed", "cancelled"].includes(record.status)
+        && record.terminal_receipt
+        && record.terminal_delivery_state !== "delivered") {
+        void drainSupervisorTerminal(record, runtime).catch((error) => {
+          console.warn(`[全局任务监督] 终态补投失败：${error?.message || error}`);
+        });
+      }
     }
   };
   scheduler = setInterval(tick, Math.max(1_000, intervalMs));

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ArrowUpRight, Check, ChevronDown, Eye, EyeOff, KeyRound, LockKeyhole, LogIn, Palette, ShieldCheck, UserPlus, UserRound } from '@lucide/vue'
 import { AUTH_THEMES, normalizeAuthTheme, readLocalAuthTheme, saveLocalAuthTheme } from '../../utils/authAppearance.js'
 
@@ -10,17 +10,17 @@ const props = defineProps({
 })
 const emit = defineEmits(['authenticated'])
 
-const mode = ref('login')
+const mode = ref(props.firstInstall ? 'register' : 'login')
 const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const setupCode = ref('')
 const revealPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
 const themeOpen = ref(false)
 const currentTheme = ref(readLocalAuthTheme() || normalizeAuthTheme(props.defaultTheme))
 const capsLock = ref(false)
-const isOnline = ref(typeof navigator === 'undefined' ? true : navigator.onLine)
 
 const isRegister = computed(() => mode.value === 'register')
 const activeTheme = computed(() => AUTH_THEMES.find(theme => theme.id === currentTheme.value) || AUTH_THEMES[0])
@@ -47,7 +47,6 @@ const selectTheme = value => {
   themeOpen.value = false
 }
 const updateCapsLock = event => { capsLock.value = event.getModifierState?.('CapsLock') === true }
-const updateOnlineState = () => { isOnline.value = navigator.onLine }
 
 const switchMode = next => {
   if (next === 'register' && !props.registrationEnabled && !props.firstInstall) return
@@ -59,10 +58,6 @@ const switchMode = next => {
 
 const submit = async () => {
   error.value = ''
-  if (!isOnline.value) {
-    error.value = '当前网络不可用，请恢复连接后重试'
-    return
-  }
   if (!username.value.trim() || !password.value) {
     error.value = '请输入用户名和密码'
     return
@@ -71,17 +66,21 @@ const submit = async () => {
     error.value = '两次输入的密码不一致'
     return
   }
+  if (isRegister.value && props.firstInstall && !setupCode.value.trim()) {
+    error.value = '请输入 ccm setup-code 显示的一次性安装码'
+    return
+  }
   loading.value = true
   try {
     const endpoint = isRegister.value ? '/api/auth/register' : '/api/auth/login'
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.value.trim(), password: password.value }),
+      body: JSON.stringify({ username: username.value.trim(), password: password.value, ...(props.firstInstall ? { setup_code: setupCode.value.trim() } : {}) }),
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok || !data.success) throw new Error(data.error || (isRegister.value ? '注册失败' : '登录失败'))
-    emit('authenticated', { user: data.user, registration_enabled: data.registration_enabled, first_install: data.first_install, login_theme: data.login_theme })
+    emit('authenticated', { user: data.user, registration_enabled: data.registration_enabled, first_install: data.first_install, login_theme: data.login_theme, csrf: data.csrf || data.session?.csrf, capabilities: data.capabilities || [] })
   } catch (cause) {
     error.value = cause?.message || '暂时无法连接 CCM 服务'
   } finally {
@@ -89,14 +88,6 @@ const submit = async () => {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('online', updateOnlineState)
-  window.addEventListener('offline', updateOnlineState)
-})
-onUnmounted(() => {
-  window.removeEventListener('online', updateOnlineState)
-  window.removeEventListener('offline', updateOnlineState)
-})
 </script>
 
 <template>
@@ -135,16 +126,19 @@ onUnmounted(() => {
             <span class="auth-kicker">WELCOME BACK</span>
             <h2 id="auth-title">{{ isRegister ? '创建本地账户' : '欢迎回来' }}</h2>
             <p>{{ isRegister ? '创建账户后即可开始使用 CCM。' : '登录你的 CCM 工作区，继续智能协作。' }}</p>
-            <div v-if="firstInstall" class="auth-first-install"><span>首次安装</span><small>可使用初始管理员登录，或创建普通账户。</small></div>
-            <div v-if="!isOnline" class="auth-offline"><ShieldCheck :size="14" /><span>当前网络不可用，登录暂时不可用。</span></div>
+            <div v-if="firstInstall" class="auth-first-install"><span>首次安装</span><small>运行 <code>ccm setup-code</code> 获取一次性安装码并创建首个管理员。</small></div>
           </div>
 
           <div v-if="registrationEnabled || firstInstall" class="auth-modes" role="tablist" aria-label="账户操作">
-            <button type="button" :class="{ active: mode === 'login' }" role="tab" :aria-selected="mode === 'login'" @click="switchMode('login')"><LogIn :size="15" />账户登录</button>
+            <button v-if="!firstInstall" type="button" :class="{ active: mode === 'login' }" role="tab" :aria-selected="mode === 'login'" @click="switchMode('login')"><LogIn :size="15" />账户登录</button>
             <button type="button" :class="{ active: mode === 'register' }" role="tab" :aria-selected="mode === 'register'" @click="switchMode('register')"><UserPlus :size="15" />注册账户</button>
           </div>
 
           <form class="auth-form" @submit.prevent="submit">
+            <label v-if="isRegister && firstInstall">
+              <span>一次性安装码</span>
+              <div class="auth-input-wrap"><ShieldCheck :size="16" /><input v-model="setupCode" name="setup-code" autocomplete="one-time-code" maxlength="32" placeholder="输入服务器安装码" /></div>
+            </label>
             <label>
               <span>用户名 / 账户</span>
               <div class="auth-input-wrap"><UserRound :size="16" /><input v-model="username" name="username" autocomplete="username" maxlength="32" autofocus placeholder="请输入用户名" /></div>
@@ -166,7 +160,7 @@ onUnmounted(() => {
               <div class="auth-input-wrap"><KeyRound :size="16" /><input v-model="confirmPassword" name="confirm-password" :type="revealPassword ? 'text' : 'password'" autocomplete="new-password" maxlength="128" placeholder="请再次输入密码" /></div>
             </label>
             <p v-if="error" class="auth-error" role="alert"><ShieldCheck :size="15" />{{ error }}</p>
-            <button class="auth-submit" type="submit" :disabled="loading || !isOnline">
+            <button class="auth-submit" type="submit" :disabled="loading">
               <component :is="isRegister ? UserPlus : LogIn" :size="17" />
               {{ loading ? '正在连接' : (isRegister ? '创建账户' : '登录工作区') }}
               <ArrowUpRight class="auth-submit-arrow" :size="16" />

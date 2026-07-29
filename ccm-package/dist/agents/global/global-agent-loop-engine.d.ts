@@ -499,6 +499,10 @@ export declare function startGlobalAgentRun(input: {
     traceId?: string;
     maxSteps?: number;
     timeoutMs?: number;
+    turnId?: string;
+    queueScope?: string;
+    writeAuthorizationReceipt?: any;
+    authorizationMessage?: string;
 }, runtime: GlobalAgentLoopRuntime): Promise<GlobalAgentRun>;
 export declare function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoopRuntime, options?: {
     approved?: boolean;
@@ -510,12 +514,15 @@ export declare function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoo
 }): Promise<GlobalAgentRun>;
 export declare function continueGlobalAgentRunWithClarification(id: string, answer: string, runtime: GlobalAgentLoopRuntime, options?: {
     explicitWriteAuthorization?: boolean;
+    writeAuthorizationReceipt?: any;
+    turnId?: string;
 }): Promise<GlobalAgentRun>;
 export declare function pauseGlobalAgentRun(id: string): GlobalAgentRun;
 export declare function cancelGlobalAgentRun(id: string): GlobalAgentRun;
 export declare function recoverInterruptedGlobalAgentRuns(runtime: GlobalAgentLoopRuntime): Promise<{
     total: number;
     resumed: number;
+    blocked: number;
     results: any[];
 }>;
 export declare const runGlobalAgentLoopSelfTest: () => Promise<{

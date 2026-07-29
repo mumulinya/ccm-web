@@ -275,8 +275,6 @@ async function waitForIdempotencyResult(scope: string, key: string, timeoutMs = 
   return getIdempotencyRecord(scope, key);
 }
 
-const processedFeishuMessageIds = new Set<string>();
-
 const GLOBAL_MANAGEMENT_ACTIONS: Record<string, any> = {
   manage_cron: { label: "定时任务管理", operations: ["list", "create", "update", "enable", "disable", "run", "delete"], destructive: ["delete"] },
   manage_group: { label: "群聊与成员管理", operations: ["list", "create", "rename", "add_member", "remove_member", "delete"], destructive: ["delete"] },
@@ -495,6 +493,7 @@ const globalAgentAgenticRuntime = createGlobalAgentAgenticRuntime({
   GLOBAL_PET_AGENT_NAME,
   acquireIdempotency,
   annotateGlobalAction,
+  applyGlobalAgentSupervisionSteer,
   attachGlobalAgentRunSupervision,
   bindFeishuIdentifiersFromValue,
   bindFeishuTaskContext,
@@ -506,6 +505,7 @@ const globalAgentAgenticRuntime = createGlobalAgentAgenticRuntime({
   compactPetText,
   completeGlobalAgentSupervision,
   completeIdempotency,
+  conversationTurnControl,
   continueGlobalAgentRunWithClarification,
   controlGlobalDevelopmentMission,
   controlGlobalMissionSupervisor,
@@ -625,6 +625,13 @@ function publicGlobalAgentRun(run: GlobalAgentRun | null, includeObservations = 
     phase: run.phase,
     presentation: (run as any).presentation || null,
     explicit_write_authorization: run.explicit_write_authorization,
+    turn_id: (run as any).turn_id || "",
+    queue_scope: (run as any).queue_scope || "",
+    authorization_receipt: (run as any).write_authorization_receipt || null,
+    retryable: (run as any).retryable === true,
+    degraded: (run as any).degraded === true,
+    failure_category: (run as any).failure_category || "",
+    terminal_receipt: (run as any).terminal_receipt || null,
     created_at: run.created_at,
     updated_at: run.updated_at,
     completed_at: run.completed_at,
@@ -834,6 +841,7 @@ const globalAgentApi = createGlobalAgentApi({
   compactGlobalAgentSessionWithModel,
   completeGlobalAgentSupervision,
   completeIdempotency,
+  conversationTurnControl,
   controlGlobalMissionSupervisor,
   createAgenticRuntime,
   createGlobalAgentConversationSession,
@@ -881,7 +889,6 @@ const globalAgentApi = createGlobalAgentApi({
   normalizeFeishuEventPayload,
   parseMultipart,
   pauseGlobalAgentRun,
-  processedFeishuMessageIds,
   processFeishuControlledMessage,
   processFeishuCardAction,
   publicGlobalAgentRun,
@@ -919,6 +926,8 @@ const globalAgentApi = createGlobalAgentApi({
 export function handleGlobalAgentApi(pathname: string, req: any, res: any, parsed: any, ctx: CollabCtx): boolean {
   return globalAgentApi.handleGlobalAgentApi(pathname, req, res, parsed, ctx)
 }
+export function startGlobalWebTurnRecoveryForServer(baseUrl: string, ctx: CollabCtx) { return globalAgentApi.startGlobalWebTurnRecoveryForServer(baseUrl, ctx) }
+export function stopGlobalWebTurnRecoveryForServer() { return globalAgentApi.stopGlobalWebTurnRecoveryForServer() }
 
 export const runGlobalAgentIntentSelfTest = createGlobalAgentIntentSelfTest({ GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_DIRECT_DISPATCH_INTERNAL_PATTERN, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalDirectDispatchHandoff, buildGlobalSingleProjectMissionPayload, compactGlobalTestAgentReviewRelayEvent, createActionBlockSafeStreamer, formatGlobalDevelopmentDispatchVisibleResult, formatGlobalTaskDispatchVisibleResult, formatMissionStatus, hasExplicitGlobalWriteAuthorization, inferLocalGlobalAction, isGlobalProgressStatusRequest, localActionToAgenticDecision, mergeGlobalAgentMessages, renderGlobalDirectGroupDispatchAcceptedSummary, renderGlobalDirectGroupWorkOrder, renderGlobalDirectProjectWorkOrder });
 

@@ -155,7 +155,7 @@ export declare function buildGroupTaskIntakeSummary(input: {
         hide_internal_protocols: boolean;
     };
 };
-export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedFiles: any[], ctx: any, deps: GroupLiveRoutesDeps, res: any): Promise<{
+export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedFiles: any[], ctx: any, deps: GroupLiveRoutesDeps, res: any, readOnly?: boolean): Promise<{
     done: true;
     payload?: undefined;
     uploadedFiles?: undefined;

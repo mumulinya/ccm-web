@@ -11,7 +11,8 @@ import SettingsSecurityPanel from './SettingsSecurityPanel.vue'
 import SettingsTestAgentPanel from './SettingsTestAgentPanel.vue'
 import './settings.css'
 
-const activeSection = ref('channels')
+const authRole = window.__CCM_AUTH__?.user?.role || 'viewer'
+const activeSection = ref(authRole === 'admin' ? 'channels' : 'security')
 const systemStatus = ref(null)
 
 const loadSystemStatus = async () => {
@@ -45,16 +46,17 @@ onMounted(loadSystemStatus)
       <SettingsSidebar
         v-model:active-section="activeSection"
         :version="systemStatus?.version || ''"
+        :role="authRole"
       />
       <main class="settings-content">
-        <SettingsFeishuPanel v-if="activeSection === 'channels'" />
+        <SettingsFeishuPanel v-if="activeSection === 'channels' && authRole === 'admin'" />
         <SettingsModelPanel v-else-if="activeSection === 'models'" />
         <SettingsAgentProvidersPanel v-else-if="activeSection === 'agent-providers'" />
         <SettingsTestAgentPanel v-else-if="activeSection === 'test-agent'" />
         <SettingsExperiencePanel v-else-if="activeSection === 'experience'" />
         <SettingsSecurityPanel v-else-if="activeSection === 'security'" />
         <SettingsSystemPanel
-          v-else
+          v-else-if="authRole === 'admin'"
           :initial-status="systemStatus"
           @status="systemStatus = $event"
         />

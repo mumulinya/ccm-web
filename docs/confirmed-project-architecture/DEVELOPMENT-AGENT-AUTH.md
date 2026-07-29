@@ -2,39 +2,39 @@
 
 ## 适用范围
 
-本流程同时适用于独立项目 Agent 和群聊主 Agent 派发的项目子 Agent。项目选择 `codex`、`cursor` 或 `claudecode` 后，后续任务只读取对应 Provider 的认证，不复用全局 Agent、群聊主 Agent或音乐 Agent 的统一对话模型密钥。
+独立项目开发 Agent和群聊项目子 Agent统一支持 Codex、Cursor、Gemini CLI、OpenCode和Claude Code。开发 Agent认证与主 Agent对话模型配置分离，凭据不能跨Provider回退或串用。
 
-## Codex 与 Cursor
+## 状态模型
 
-- 设置中心可以直接安装或更新 Codex 与 Cursor CLI，并实时查看安装结果；安装命令由服务端白名单固定，浏览器不能传入任意命令。
-- Codex 使用本机 `codex login` 的账号状态；设置中心可以打开设备登录窗口、检查凭据和执行退出登录。
-- CCM 给每次 Codex 工具授权生成隔离 `CODEX_HOME`，只同步本机 `~/.codex/auth.json`，不把原始密钥写入项目目录。
-- 从设置中心退出 Codex 时，同时移除本机认证文件和所有 CCM 隔离运行时中的认证副本。
-- Cursor 使用本机 `cursor-agent login` 或 `agent login` 的账号状态；设置中心展示安装版本、登录账号和登录状态。
-- Cursor 登录后，设置中心从当前账号动态读取可用模型；Codex 和 Cursor 选择的模型会以 `--model` 显式传给后续任务。
-- Cursor 的任务仍使用 CCM 生成的隔离 HOME 和会话插件，认证由 Cursor 自己的本机凭据读取，MCP 与 Skill 权限不会因此放宽。
+- `未安装`：本机没有可用CLI。
+- `未登录`：没有发现认证来源。
+- `待验证`：发现凭据或外部配置，但尚未证明当前账号、模型和CLI版本可以完成真实调用。
+- `已登录/可使用`：原生状态或随机challenge测试生成了有效认证证据。
+- `测试失败`：最近证据明确失败；任务派发失败关闭。
 
-## Claude Code
+凭据文件存在不等于可用。认证证据绑定Provider、账号指纹、模型、CLI版本、时间和checksum，不保存Token、Prompt或原始模型回复。
 
-- 设置中心可以直接安装或更新 Claude Code CLI；CLI 与第三方 API 配置必须同时可用。
-- Claude Code 不读取 CCM 中的 Claude 账号登录态，直接使用设置中心保存的 Anthropic 兼容第三方 API。
-- 配置包含 Base URL、模型名称、凭据类型和 API Key。
-- 凭据类型可选 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN`，模型通过 `ANTHROPIC_MODEL` 和 CLI `--model` 注入。
-- 密钥由 CCM 本机 AES-256-GCM 凭据仓库保存；配置 JSON 只保存 `ccm-secret://` 引用，GET API 和浏览器永远拿不到明文。
+## Provider
 
-## 派发流程
+- Codex：使用本机Codex账号，任务在隔离`CODEX_HOME`中运行，并显式传递用户选择的模型。
+- Cursor：使用Cursor Agent原生登录状态和账号模型目录；原生status可以形成验证证据。
+- Gemini CLI：识别OAuth、环境API Key、Service Account和gcloud ADC；退出后若仍有其他来源，页面显示部分退出而非谎报未登录。
+- OpenCode：登录时由用户选择Provider和认证方式，不固定为OpenAI；模型目录和任务配置绑定当前Provider身份。
+- Claude Code：使用加密保存的Anthropic兼容API配置、模型和凭据类型；远程Base URL必须为HTTPS，本机loopback可使用HTTP。
 
-1. 用户在设置中心完成目标 Provider 的登录或 API 配置。
-2. 项目或群聊工作单选择对应的开发 Agent。
-3. CCM 解析精确 Provider，构建受控 MCP、Skill、记忆快照和项目工作目录。
-4. CCM 只注入该 Provider 的认证来源，并在隔离运行时中启动第三方 Agent。
-5. Agent 原始输出、记忆回执和验收继续沿用现有项目或群聊受控写回流程。
+## 安装、测试与派发
 
-Codex/Cursor 未登录、Claude Code API 未完整配置或 CLI 未安装时，该 Provider 在可用性选择中视为不可用，不会作为自动回退目标。
+1. 设置页通过服务端白名单命令安装或更新CLI，安装任务持久化并可在服务重启后识别中断状态。
+2. 登录只暴露允许的浏览器URL、设备码或授权码，不把CLI原始输出直接返回浏览器。
+3. 测试使用一次性随机challenge和结构化最终助手消息；Prompt回显、日志回显和普通stdout不能伪造成功。
+4. 动态模型目录按账号、版本和认证证据缓存，并用Singleflight合并并发读取；旧响应不能覆盖新选择。
+5. 派发前再次核验安装、认证证据、模型、工具授权快照和项目作用域。
 
 ## 安全边界
 
-- 三个 Provider 的凭据不互相回退或串用。
-- 登录状态不进入任务 Prompt、记忆快照、日志和文档。
-- 设置只影响后续新任务和新原生运行世代；正在执行的子进程不热替换认证。
-- MCP 签名作用域、项目路径限制、记忆读取门禁和验收写回规则保持不变。
+- API Key进入AES-256-GCM凭据仓库，公开接口只返回脱敏状态。
+- 设置变更只影响新任务和新generation，不热替换正在运行的进程。
+- 超时会终止完整进程树；Windows使用进程树终止，POSIX使用独立进程组。
+- Agent认证不会放宽MCP、Skill、项目路径、记忆或权限门禁。
+
+完整认证状态和验证流程见[开发Agent认证与可用性V2](../confirmed-business-processes/DEVELOPMENT-AGENT-AUTHENTICATION-V2.md)。

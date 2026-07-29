@@ -1,14 +1,16 @@
 <script setup>
+import { computed } from 'vue'
 import { Bell, Bot, FlaskConical, Info, Palette, ShieldCheck, Terminal } from '@lucide/vue'
 
-defineProps({
+const props = defineProps({
   activeSection: { type: String, default: 'channels' },
-  version: { type: String, default: '' }
+  version: { type: String, default: '' },
+  role: { type: String, default: 'viewer' }
 })
 
 const emit = defineEmits(['update:activeSection'])
 
-const sections = [
+const allSections = [
   { key: 'channels', icon: Bell, label: '通知与渠道', description: '飞书通知和任务会话' },
   { key: 'models', icon: Bot, label: '统一大模型', description: '全局、群聊与音乐 Agent' },
   { key: 'agent-providers', icon: Terminal, label: '开发 Agent', description: 'Claude、Codex、Cursor、Gemini 与 OpenCode' },
@@ -17,6 +19,7 @@ const sections = [
   { key: 'security', icon: ShieldCheck, label: '账户与安全', description: '登录、注册和密码' },
   { key: 'system', icon: Info, label: '系统与重置', description: '运行信息和本地偏好' }
 ]
+const sections = computed(() => props.role === 'admin' ? allSections : allSections.filter(section => ['experience', 'security'].includes(section.key)))
 </script>
 
 <template>

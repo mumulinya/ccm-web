@@ -1,10 +1,26 @@
 # CCM 当前状态
 
+- 全局Agent运行体系已升级为V2：Web、兼容聊天接口和飞书统一进入服务端权威精确会话队列；普通写操作使用绑定用户、来源、会话、消息、目标和工具范围的单轮授权回执，高风险始终等待用户确认。超大上下文按完整轮次执行正式模型分段压缩，任一失败不推进边界；Mission终态先持久化，再由发件箱向Web、飞书、回放和长期记忆分别投递并支持跨重启重试。完整流程见[全局Agent运行体系V2](./confirmed-business-processes/GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md)。
+
 本文只记录当前可依赖的产品结构。详细协议和业务边界以 [确认项目结构](./confirmed-project-architecture/README.md) 为准，历史实现过程从 [归档索引](./archive/README.md) 查找。
 
 ## 核心工作链
 
-- 知识库召回与本地Embedding V3已实现：未配置外部接口时首次使用准备约118MB多语言INT8模型；词面和语义候选独立召回，权限过滤先于打分，知识分片按真实Token预算完整注入。索引使用跨进程租约和generation切换，失败向量必须重试，构建失败继续服务last-good；Embedding Key迁入AES-256-GCM凭据仓库。完整流程见[知识库召回与本地Embedding V3](./confirmed-business-processes/KNOWLEDGE-RETRIEVAL-EMBEDDING-V3.md)。
+- 需求池、文档、图片与附件摄取已升级为V2：Multipart按流执行64 MB请求、10文件、单文件25 MB和合计60 MB门禁；公网文档固定已核验IP并逐次校验重定向；正文按真实Token生成完整分片，图片保存视觉checksum回执。需求与计划必须引用当前任务的来源checksum和分片，必需资料未完整覆盖时禁止确认与派发。需求池使用revision、租约和fencing token原子认领，在线快照仅在用户显式刷新时更新；清理中心只删除24小时以上且无任务引用的孤立上传。完整流程见[需求资料摄取完整流程V2](./confirmed-business-processes/REQUIREMENT-INGESTION-END-TO-END-V2.md)。
+
+- 本地认证与访问安全已升级为V2：新安装使用24小时一次性安装码原子创建首个Admin，不再自动生成随机管理员；旧`user`惰性迁移为Viewer。全部API经过中央Viewer/Operator/Admin能力门禁，浏览器修改请求使用CSRF和客户端指纹会话，内部Agent、飞书和CLI改用30秒HMAC与一次性nonce，旧无Cookie loopback和ACP头旁路已删除。登录限流跨重启持久化，Host/CSP等安全头覆盖静态与API响应。完整流程见[本地认证、RBAC与访问安全](./confirmed-project-architecture/LOCAL-AUTH-AND-SECURITY.md)。
+
+- 已完成生产代码、前端页面、API、CLI和测试域的全量确认文档盘点，并补齐本地认证、全局Agent、需求资料摄取、定时开发、Git代码工作区、终端、可靠性监控与清理、会话搜索与回放、模板/命令/共享文件、工具市场、桌面宠物、工作台导航、CLI生命周期和音乐媒体平台等缺失业务域。完整索引见[项目结构与业务流程覆盖矩阵](./confirmed-project-architecture/PROJECT-COVERAGE-MATRIX.md)。
+
+- 开发Agent认证已升级为V2：凭据文件仅表示“待验证”，结构化随机challenge或Provider原生status通过后才生成可执行证据；OpenCode支持选择Provider，Gemini退出会报告剩余凭据来源，Claude远程API强制HTTPS，模型目录使用Singleflight与请求generation。完整流程见[开发Agent认证与可用性V2](./confirmed-business-processes/DEVELOPMENT-AGENT-AUTHENTICATION-V2.md)。
+
+- 飞书双向会话已收口为全局Agent和项目主Agent两个正式入口：WebSocket/ACP与事件回调共享V2精确身份和持久幂等，同群不同话题隔离，排队消息保存原消息与话题上下文，业务回复只回原会话并最多重试五次。项目飞书在后台任务占用会话时不再返回409，而是进入精确项目会话FIFO，租约释放或服务重启后自动恢复。群聊不再建立飞书会话或绑定；全局飞书分派给群聊的任务仍沿原全局来源回执返回。完整流程见[飞书全局与项目Agent双向会话V2](./confirmed-business-processes/FEISHU-GLOBAL-PROJECT-BIDIRECTIONAL-V2.md)。
+
+- TestAgent验收模式已完成任务级生产化收口：任务创建时固定独立TestAgent或主Agent自验模式，运行中修改设置不会改变已有计划；关闭TestAgent后，群聊、项目会话和直接项目任务共用同一自验运行时，实际执行项目已配置的安全验证命令，模型只能引用服务端真实证据ID，不能用`accepted=true`或开发Agent自报文字绕过门禁。模型失败、命令失败、文件证据不足和回执不匹配全部失败关闭；`done + accepted`必须同时具备模式匹配验收回执和主Agent最终验收。完整流程见[TestAgent独立验收与主Agent自验](./confirmed-business-processes/TEST-AGENT-AND-MAIN-AGENT-SELF-VERIFICATION.md)。
+
+- 音乐意图与播放器链路已升级为V2：全局网页、飞书和音乐助手复用统一模型语义决定，服务端候选选择、助手回复和实际播放绑定同一首歌；持久队列采用latest-wins、peek后claim、15秒租约、5秒心跳和用户手势回执，旧下载完成后不能抢回播放权。模型不可用时文本点歌失败关闭，直接点击与播放器控制仍可使用。完整流程见[音乐意图识别与统一播放器V2](./confirmed-business-processes/MUSIC-INTENT-UNIFIED-PLAYBACK-V2.md)。
+
+- 知识库召回与本地Embedding V3已实现：未配置外部接口时，首次运行`ccm start`会在服务就绪后后台下载并校验约118MB多语言INT8模型，不阻塞启动；准备完成后自动重建语义索引。词面和语义候选独立召回，权限过滤先于打分，知识分片按真实Token预算完整注入。索引使用跨进程租约和generation切换，失败向量必须重试，构建失败继续服务last-good；Embedding Key迁入AES-256-GCM凭据仓库。完整流程见[知识库召回与本地Embedding V3](./confirmed-business-processes/KNOWLEDGE-RETRIEVAL-EMBEDDING-V3.md)。
 
 - 自动开发统一任务系统V2已收口：所有新任务绑定精确来源、目标、会话和客户端消息身份；项目主Agent、群聊任务及旧拆分入口进入同一持久任务链。精确会话严格串行，不同会话修改同一源码目录时继续经过共享工作区互斥；高优先级只调整等待顺序，不打断当前任务。自动开发任务不能再通过通用状态接口直接完成，自由文本不能推断终态，最终状态必须通过结构化验收门禁。完整流程见 [自动开发统一任务系统V2](./confirmed-business-processes/AUTOMATIC-DEVELOPMENT-UNIFIED-TASK-SYSTEM-V2.md)。
 

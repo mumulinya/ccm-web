@@ -18,6 +18,8 @@ const cronSource = read('backend/modules/scheduling/cron.ts')
 const cronRuntimeSource = read('backend/modules/scheduling/cron.ts')
 const reportsSource = read('backend/modules/scheduling/cron-dev-reports.ts')
 const acpSource = read('backend/integrations/control-bot-acp.ts')
+const inboundV2Source = read('backend/modules/collaboration/feishu-conversation-v2.ts')
+const globalApiSource = read('backend/modules/global/global-agent-api.ts')
 
 const compiledChannel = path.join(root, 'ccm-package/dist/modules/collaboration/feishu-channel.js')
 assert.ok(fs.existsSync(compiledChannel), '请先运行 npm run build:backend')
@@ -41,14 +43,22 @@ const checks = {
     && channelSource.includes('stage: "execution"')
     && channelSource.includes('stage: "completion"')
     && globalAgentSource.includes('notifyFeishuTaskStage')
-    && (globalAgentSource.includes('mission:${record.mission_id}:completed') || globalAgentRuntimeSource.includes('mission:${record.mission_id}:completed'))
+    && (
+      globalAgentSource.includes('mission:${record.mission_id}:completed')
+      || globalAgentRuntimeSource.includes('mission:${record.mission_id}:completed')
+      || globalAgentRuntimeSource.includes('mission:${record.mission_id}:terminal:${receipt.checksum}')
+    )
     && (globalAgentSource.includes('mission:${record.mission_id}:actions:') || globalAgentRuntimeSource.includes('mission:${record.mission_id}:actions:')),
   test_agent_stays_group_owned:
     (globalAgentSource.includes('relayGlobalTestAgentEventFromGroup') || globalAgentRelaySource.includes('relayGlobalTestAgentEventFromGroup'))
     && (globalAgentSource.includes('test_agent_review_ready') || globalAgentRelaySource.includes('test_agent_review_ready')),
   duplicate_webhook_is_suppressed:
-    (collaborationSource.includes('hasFeishuTaskBinding({ taskId: task?.id') || collaborationQueueSource.includes('hasFeishuTaskBinding({ taskId: task?.id'))
-    && (collaborationSource.includes('legacy fallback') || collaborationQueueSource.includes('legacy fallback')),
+    inboundV2Source.includes('ccm-feishu-inbound-receipt-v2')
+    && globalApiSource.includes('feishu-global-inbound-v2')
+    && !globalApiSource.includes('processedFeishuMessageIds'),
+  unbound_tasks_never_fall_back_to_generic_webhook:
+    collaborationQueueSource.includes('must never fall back to the generic webhook')
+    && !collaborationQueueSource.includes('title: "任务完成通知"'),
   config_credentials_are_masked:
     routesSource.includes('webhook_url: config.webhook_url ? "******" : ""')
     && routesSource.includes('updates.webhook_url !== "******"')

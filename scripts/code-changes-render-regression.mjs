@@ -11,6 +11,13 @@ fs.mkdirSync(outputDir, { recursive: true })
 const executablePath = ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'].find(fs.existsSync)
 const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) })
 const report = { pass: false, generatedAt: new Date().toISOString(), checks: [], screenshots: [], errors: [] }
+const adminSession = {
+  success: true,
+  authenticated: true,
+  user: { username: 'selftest', role: 'admin' },
+  csrf: 'code-changes-render-csrf',
+  capabilities: ['read', 'chat.read_only', 'task.execute', 'project.runtime', 'project.git', 'attachment.manage', 'project.define', 'terminal.manage', 'agent.credentials', 'tools.manage', 'cleanup.permanent', 'permission.high_risk', 'security.manage'],
+}
 
 const files = [
   { path: 'frontend/src/components/tools/CodeChanges.vue', status: 'M', statusCode: ' M', statusText: '已修改', statusColor: '#2563eb', staged: false, unstaged: true, untracked: false, conflict: false, additions: 86, deletions: 31, workingAdditions: 86, workingDeletions: 31 },
@@ -36,7 +43,8 @@ const prepare = async page => {
     if (response.status() >= 400) report.errors.push(`http ${response.status()}: ${response.url()}`)
   })
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
-  await page.route('**/api/auth/session', route => route.fulfill(json({ success: true, authenticated: true, user: { username: 'selftest' } })))
+  await page.route('**/api/auth/session', route => route.fulfill(json(adminSession)))
+  await page.route('**/api/music/playback/commands/head', route => route.fulfill(json({ success: true, command: null })))
   await page.route('**/api/pets/agents', route => route.fulfill(json({ success: true, agents: [] })))
   await page.route('**/api/status/stream**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
   await page.route('**/api/runtime/events**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))

@@ -444,20 +444,19 @@ export async function deliverPendingTaskPermissionNotifications(ctx: any, depend
         ctx.broadcastPetSpeech(request.notificationAgent || "global-agent", { role: "attention", text, source: "permission-approval", mode: "replace" });
         petSent = true;
       } catch {}
-      let feishuSent = request.notificationFeishuSent === true;
-      if (!feishuSent) try {
+      const channel = require("./feishu-channel");
+      const hasExactFeishuBinding = dependencies.hasFeishuTaskBinding || channel.hasFeishuTaskBinding;
+      const feishuEligible = ["global", "project"].includes(request.originType)
+        && !!request.originSessionId
+        && hasExactFeishuBinding({ runId: request.globalRunId, missionId: request.globalMissionId, taskId: request.taskId.startsWith("project-session:") ? "" : request.taskId, sessionId: request.originSessionId });
+      let feishuSent = !feishuEligible || request.notificationFeishuSent === true;
+      if (feishuEligible && !feishuSent) try {
         const approvalHint = `可以直接点击卡片按钮审批；全局 Agent 来源也可以回复“批准权限 ${request.id}”或“拒绝权限 ${request.id}”。`;
         const markdown = [`**来源**：${originLabel}`, `**项目**：${request.project}`, `**请求操作**：${request.operation}`, `**风险**：${request.risk}`, `**原因**：${request.reason}`, `**申请 ID**：${request.id}`, "", approvalHint].join("\n");
-        const channel = require("./feishu-channel");
         const notifyFeishuTaskStage = dependencies.notifyFeishuTaskStage || channel.notifyFeishuTaskStage;
         const actions = (dependencies.createFeishuPermissionActions || channel.createFeishuPermissionActions)(request);
         const bound = await notifyFeishuTaskStage({ stage: "permission_approval", title, markdown, actions, forceNewMessage: true, dedupeKey: `permission:${request.id}`, runId: request.globalRunId, missionId: request.globalMissionId, taskId: request.taskId.startsWith("project-session:") ? "" : request.taskId, sessionId: request.originSessionId });
         if (bound?.success || bound?.queued) feishuSent = true;
-        else {
-          const sendFeishuReportMessage = dependencies.sendFeishuReportMessage || require("./feishu").sendFeishuReportMessage;
-          const fallback = await sendFeishuReportMessage({ title, markdown });
-          feishuSent = fallback?.success === true;
-        }
       } catch {}
       const attempts = Number(request.notificationAttempts || 0) + 1;
       const complete = (petSent || !petAvailable) && feishuSent;

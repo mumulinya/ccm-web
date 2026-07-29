@@ -73,6 +73,10 @@ export declare function runFeishuConversationTurnCommandSelfTest(): {
     };
 };
 export declare function handleGlobalAgentApi(pathname: string, req: any, res: any, parsed: any, ctx: CollabCtx): boolean;
+export declare function startGlobalWebTurnRecoveryForServer(baseUrl: string, ctx: CollabCtx): {
+    started: boolean;
+};
+export declare function stopGlobalWebTurnRecoveryForServer(): void;
 export declare const runGlobalAgentIntentSelfTest: () => {
     passed: boolean;
     results: ({

@@ -3,7 +3,9 @@ import * as path from "path";
 import * as dns from "dns/promises";
 import * as net from "net";
 import * as crypto from "crypto";
-import { describeFileFromPath, truncateInlineContent } from "../../core/utils";
+import * as http from "http";
+import * as https from "https";
+import { describeFileFromPath } from "../../core/utils";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator";
 import {
   callAnthropicCompatibleJson,
@@ -13,14 +15,22 @@ import {
   normalizeChatCompletionsUrl,
   shouldUseAnthropic,
 } from "../collaboration/group-orchestrator-llm-client";
+import {
+  attachSourceManifests,
+  assertRequirementPlanEvidence,
+  buildRequirementCoverageReceipt,
+  chunkRequirementSource,
+  evidenceForSource,
+  sourceHash,
+  validateSourceEvidence,
+  type RequirementSourceEvidenceV2,
+} from "./source-evidence-v2";
 
 const pdfParse = require("pdf-parse");
 
-export const REQUIREMENT_SOURCE_SCHEMA = "ccm-requirement-source-ingestion-v1";
+export const REQUIREMENT_SOURCE_SCHEMA = "ccm-requirement-source-ingestion-v2";
 export const REQUIREMENT_EXTRACTION_SCHEMA = "ccm-business-requirement-extraction-v1";
 export const REQUIREMENT_DECOMPOSITION_SCHEMA = "ccm-requirement-decomposition-v1";
-export const MAX_REQUIREMENT_SOURCE_CHARS = 20_000;
-export const MAX_REQUIREMENT_TOTAL_CHARS = 60_000;
 export const MAX_REQUIREMENT_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_VISION_IMAGE_BYTES = 12 * 1024 * 1024;
 export const MAX_ONLINE_DOCUMENT_BYTES = 12 * 1024 * 1024;
@@ -31,6 +41,7 @@ type UploadedFile = {
   savedPath?: string;
   path?: string;
   size?: number;
+  required?: boolean;
 };
 
 export type RequirementSourceRecord = {
@@ -49,6 +60,12 @@ export type RequirementSourceRecord = {
   mime_type?: string;
   truncated?: boolean;
   error?: string;
+  checksum?: string;
+  required?: boolean;
+  snapshot_at?: string;
+  manifest?: any;
+  evidence_v2?: RequirementSourceEvidenceV2;
+  vision_receipt?: any;
 };
 
 export type BusinessRequirementExtraction = {
@@ -61,6 +78,7 @@ export type BusinessRequirementExtraction = {
   risks: string[];
   clarification_questions: string[];
   source_evidence: string[];
+  source_evidence_v2?: RequirementSourceEvidenceV2[];
   extraction_method: "model" | "deterministic_fallback";
 };
 
@@ -77,6 +95,7 @@ export type RequirementDecompositionItem = {
   suggested_agent_capabilities: string[];
   parallelizable: boolean;
   source_evidence: string[];
+  source_evidence_v2?: RequirementSourceEvidenceV2[];
 };
 
 export type RequirementDecompositionPlan = {
@@ -88,6 +107,7 @@ export type RequirementDecompositionPlan = {
   clarification_questions: string[];
   risks: string[];
   source_evidence: string[];
+  source_evidence_v2?: RequirementSourceEvidenceV2[];
   execution_order: "dag";
   content_hash: string;
   version: number;
@@ -108,6 +128,8 @@ export type RequirementIngestionResult = {
   decomposition: RequirementDecompositionPlan | null;
   content_hash: string;
   technical: any;
+  manifest?: any[];
+  coverage_receipt?: any;
 };
 
 const htmlEntities: Record<string, string> = {
@@ -179,6 +201,9 @@ export function validateRequirementDecomposition(value: any, options: {
       suggested_agent_capabilities: normalizeStringList(item?.suggested_agent_capabilities || item?.suggestedAgentCapabilities || hint.capabilities, 12, 100),
       parallelizable: item?.parallelizable !== false,
       source_evidence: normalizeStringList(item?.source_evidence || item?.sourceEvidence || requirement?.source_evidence || [], 16, 300),
+      source_evidence_v2: Array.isArray(item?.source_evidence_v2 || item?.sourceEvidenceV2)
+        ? (item.source_evidence_v2 || item.sourceEvidenceV2)
+        : requirement?.source_evidence_v2 || [],
     };
   });
   if (items.length > 1 && !items.some(item => item.item_key === "epic-integration-acceptance")) {
@@ -200,6 +225,9 @@ export function validateRequirementDecomposition(value: any, options: {
       suggested_agent_capabilities: ["integration-test", "test", "qa"],
       parallelizable: false,
       source_evidence: normalizeStringList(value?.source_evidence || value?.sourceEvidence || requirement?.source_evidence || [], 20, 300),
+      source_evidence_v2: Array.isArray(value?.source_evidence_v2 || value?.sourceEvidenceV2)
+        ? (value.source_evidence_v2 || value.sourceEvidenceV2)
+        : requirement?.source_evidence_v2 || [],
     });
   }
   const keys = new Set(items.map(item => item.item_key));
@@ -232,6 +260,9 @@ export function validateRequirementDecomposition(value: any, options: {
     clarification_questions: normalizeStringList(value?.clarification_questions || value?.clarificationQuestions || requirement?.clarification_questions || [], 12, 600),
     risks: normalizeStringList(value?.risks || requirement?.risks || [], 16, 600),
     source_evidence: normalizeStringList(value?.source_evidence || value?.sourceEvidence || requirement?.source_evidence || [], 20, 300),
+    source_evidence_v2: Array.isArray(value?.source_evidence_v2 || value?.sourceEvidenceV2)
+      ? (value.source_evidence_v2 || value.sourceEvidenceV2)
+      : requirement?.source_evidence_v2 || [],
     execution_order: "dag",
     content_hash: options.contentHash || compact(value?.content_hash || value?.contentHash || "", 80),
     version: Math.max(1, Number(value?.version || 1)),
@@ -331,65 +362,30 @@ async function analyzeImageWithConfiguredModel(filePath: string, name: string, c
   if (mediaType === "application/octet-stream") throw new Error("视觉模型暂不支持这个图片格式");
   const data = fs.readFileSync(filePath).toString("base64");
   const prompt = "请读取这张业务需求相关图片。只返回 JSON：{summary:string, visible_text:string, requirements:string[], acceptance:string[], risks:string[], uncertain:string[]}。准确转写可见文字，描述界面、表格、流程或标注中的业务含义；看不清的内容放进 uncertain，禁止猜测。";
-  let result: any;
-  if (shouldUseAnthropic(config)) {
-    const endpoint = normalizeAnthropicMessagesUrl(config.apiUrl);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.max(10_000, Number(config.timeoutMs) || 120_000));
-    try {
-      const response = await fetchWithNodeHttpFallback(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": config.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: config.model,
-          max_tokens: 2200,
-          temperature: 0,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data } },
-            { type: "text", text: prompt },
-          ] }],
-        }),
-        signal: controller.signal,
-      });
-      const text = await response.text();
-      if (!response.ok) throw new Error(`视觉模型 HTTP ${response.status}: ${compact(text, 240)}`);
-      const payload = JSON.parse(text);
-      const content = (payload?.content || []).map((part: any) => part?.type === "text" ? part.text : "").join("");
-      result = parseJsonObject(content);
-    } finally {
-      clearTimeout(timeout);
-    }
-  } else {
-    const endpoint = normalizeChatCompletionsUrl(config.apiUrl);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.max(10_000, Number(config.timeoutMs) || 120_000));
-    try {
-      const response = await fetchWithNodeHttpFallback(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${config.apiKey}` },
-        body: JSON.stringify({
-          model: config.model,
-          temperature: 0,
-          messages: [{ role: "user", content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:${mediaType};base64,${data}` } },
-          ] }],
-        }),
-        signal: controller.signal,
-      });
-      const text = await response.text();
-      if (!response.ok) throw new Error(`视觉模型 HTTP ${response.status}: ${compact(text, 240)}`);
-      result = parseJsonObject(JSON.parse(text)?.choices?.[0]?.message?.content || "");
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
+  const timeoutMs = Math.max(10_000, Number(config.timeoutMs) || 120_000);
+  const options = {
+    temperature: 0,
+    maxTokens: 2200,
+    defaultTimeoutMs: timeoutMs,
+    retryAttempts: 5,
+    retryScope: `requirement-vision:${sourceHash(data).slice(0, 16)}`,
+    httpErrorPrefix: "视觉模型",
+    invalidJsonMessage: "视觉模型没有返回可解析的识别结果",
+    messages: shouldUseAnthropic(config)
+      ? [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: mediaType, data } },
+          { type: "text", text: prompt },
+        ] }]
+      : [{ role: "user", content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: `data:${mediaType};base64,${data}` } },
+        ] }],
+  };
+  const result: any = shouldUseAnthropic(config)
+    ? await callAnthropicCompatibleJson(config, options)
+    : await callOpenAiCompatibleJson(config, options);
   if (!result) throw new Error("视觉模型没有返回可解析的识别结果");
-  return [
+  const content = [
     result.summary ? `图片摘要：${result.summary}` : "",
     result.visible_text ? `可见文字：\n${result.visible_text}` : "",
     Array.isArray(result.requirements) && result.requirements.length ? `需求：\n${result.requirements.map((item: any) => `- ${item}`).join("\n")}` : "",
@@ -397,6 +393,20 @@ async function analyzeImageWithConfiguredModel(filePath: string, name: string, c
     Array.isArray(result.risks) && result.risks.length ? `风险：\n${result.risks.map((item: any) => `- ${item}`).join("\n")}` : "",
     Array.isArray(result.uncertain) && result.uncertain.length ? `未确认内容：\n${result.uncertain.map((item: any) => `- ${item}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
+  const receiptBase = {
+    schema: "ccm-vision-extraction-receipt-v1",
+    version: 1,
+    image_checksum: sourceHash(fs.readFileSync(filePath)),
+    provider: shouldUseAnthropic(config) ? "anthropic-compatible" : String(config.format || "openai-compatible"),
+    model: String(config.model || ""),
+    visible_text_present: !!String(result.visible_text || "").trim(),
+    requirement_count: Array.isArray(result.requirements) ? result.requirements.length : 0,
+    acceptance_count: Array.isArray(result.acceptance) ? result.acceptance.length : 0,
+    uncertain_count: Array.isArray(result.uncertain) ? result.uncertain.length : 0,
+    generated_at: new Date().toISOString(),
+    result_checksum: sourceHash(content),
+  };
+  return { content, receipt: { ...receiptBase, checksum: sourceHash(receiptBase) } };
 }
 
 function parseJsonObject(text: string) {
@@ -421,6 +431,7 @@ async function parseUploadedFile(file: UploadedFile, options: { visionConfig?: a
     kind,
     path: filePath,
     size: Number(file.size || 0),
+    required: file.required !== false,
   };
   if (!filePath || !fs.existsSync(filePath)) {
     return { ...base, status: "failed", parser: "filesystem", readable: false, content: "", summary: "附件保存失败", error: "附件文件不存在" };
@@ -438,26 +449,27 @@ async function parseUploadedFile(file: UploadedFile, options: { visionConfig?: a
       content = String(parsed?.text || "").trim();
       parser = "pdf-parse";
     } else if (kind === "image") {
-      content = await analyzeImageWithConfiguredModel(filePath, name, options.visionConfig);
+      const vision = await analyzeImageWithConfiguredModel(filePath, name, options.visionConfig);
+      content = vision.content;
+      (base as any).vision_receipt = vision.receipt;
       parser = "configured-vision-model";
     } else {
-      const described = describeFileFromPath(filePath, name, MAX_REQUIREMENT_SOURCE_CHARS);
+      const described = describeFileFromPath(filePath, name, Number.MAX_SAFE_INTEGER);
       content = String(described?.content || "").trim();
       parser = ["docx", "pptx", "xlsx"].includes(kind) ? "ooxml-text-extractor" : "utf8-text";
     }
     if (!content) {
       return { ...base, status: "unsupported", parser: parser || "none", readable: false, content: "", summary: `${name} 没有提取到可读内容`, error: kind === "image" ? "图片未能识别" : "文件格式不支持或正文为空" };
     }
-    const truncated = content.length > MAX_REQUIREMENT_SOURCE_CHARS;
-    const safeContent = truncateInlineContent(content, MAX_REQUIREMENT_SOURCE_CHARS);
     return {
       ...base,
-      status: truncated ? "partial" : "parsed",
+      status: "parsed",
       parser,
       readable: true,
-      content: safeContent,
-      summary: kind === "image" ? compact(content, 180) : `已读取 ${name}，提取 ${Math.min(content.length, MAX_REQUIREMENT_SOURCE_CHARS)} 个字符`,
-      truncated,
+      content,
+      summary: kind === "image" ? compact(content, 180) : `已完整读取 ${name}，提取 ${content.length} 个字符`,
+      truncated: false,
+      snapshot_at: new Date().toISOString(),
       mime_type: kind === "image" ? mimeForImage(name) : undefined,
     };
   } catch (error: any) {
@@ -479,16 +491,36 @@ function isPrivateIpv4(ip: string) {
   return parts[0] === 10
     || parts[0] === 127
     || parts[0] === 0
+    || parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127
     || parts[0] === 169 && parts[1] === 254
     || parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31
-    || parts[0] === 192 && parts[1] === 168
+    || parts[0] === 192 && (parts[1] === 168 || parts[1] === 0 || parts[1] === 88 && parts[2] === 99)
+    || parts[0] === 198 && (parts[1] === 18 || parts[1] === 19 || parts[1] === 51 && parts[2] === 100)
+    || parts[0] === 203 && parts[1] === 0 && parts[2] === 113
     || parts[0] >= 224;
 }
 
 function isPrivateIp(ip: string) {
   if (net.isIPv4(ip)) return isPrivateIpv4(ip);
-  const value = ip.toLowerCase();
-  return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") || value.startsWith("feb") || value.startsWith("::ffff:127.") || value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.");
+  const value = ip.toLowerCase().split("%")[0];
+  if (value.startsWith("::ffff:")) {
+    const tail = value.slice(7);
+    if (net.isIPv4(tail)) return isPrivateIpv4(tail);
+    const words = tail.split(":");
+    if (words.length === 2 && words.every(word => /^[0-9a-f]{1,4}$/.test(word))) {
+      const numeric = (parseInt(words[0], 16) * 0x10000) + parseInt(words[1], 16);
+      return isPrivateIpv4(`${numeric >>> 24}.${numeric >>> 16 & 255}.${numeric >>> 8 & 255}.${numeric & 255}`);
+    }
+    return true;
+  }
+  const first = parseInt(value.split(":")[0] || "0", 16);
+  return value === "::1" || value === "::"
+    || (first & 0xfe00) === 0xfc00
+    || (first & 0xffc0) === 0xfe80
+    || (first & 0xff00) === 0xff00
+    || value.startsWith("2001:db8:")
+    || value.startsWith("2001:10:")
+    || value.startsWith("64:ff9b:");
 }
 
 export async function assertPublicUrl(value: string) {
@@ -496,41 +528,83 @@ export async function assertPublicUrl(value: string) {
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("只支持 http/https 在线文档");
   const host = url.hostname.toLowerCase();
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) throw new Error("不允许读取本机或局域网地址");
-  const addresses = await dns.lookup(host, { all: true });
+  if (url.username || url.password) throw new Error("在线文档地址不能包含访问凭据");
+  if (url.port && !["80", "443"].includes(url.port)) throw new Error("在线文档只允许标准 HTTP/HTTPS 端口");
+  const addresses = net.isIP(host) ? [{ address: host, family: net.isIPv4(host) ? 4 : 6 }] : await dns.lookup(host, { all: true, verbatim: true });
   if (!addresses.length || addresses.some(item => isPrivateIp(item.address))) throw new Error("不允许读取本机或局域网地址");
-  return url;
+  return { url, addresses };
+}
+
+async function requestPinnedPublicDocument(checked: Awaited<ReturnType<typeof assertPublicUrl>>) {
+  const target = checked.url;
+  const selected = checked.addresses[0];
+  const transport = target.protocol === "https:" ? https : http;
+  return await new Promise<{ response: any; buffer: Buffer }>((resolve, reject) => {
+    const request = transport.request({
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (target.protocol === "https:" ? 443 : 80),
+      path: `${target.pathname}${target.search}`,
+      method: "GET",
+      headers: {
+        "User-Agent": "CCM-Requirement-Ingestion/2.0",
+        "Accept": "text/html,text/plain,application/pdf,application/json;q=0.9,*/*;q=0.5",
+        "Accept-Encoding": "identity",
+      },
+      servername: target.protocol === "https:" ? target.hostname : undefined,
+      lookup: (_hostname: string, _options: any, callback: any) => callback(null, selected.address, selected.family),
+    } as any, response => {
+      const contentEncoding = String(response.headers["content-encoding"] || "identity").toLowerCase();
+      if (contentEncoding !== "identity") {
+        response.resume();
+        reject(new Error("在线文档返回了未允许的压缩编码"));
+        return;
+      }
+      const declared = Number(response.headers["content-length"] || 0);
+      if (declared > MAX_ONLINE_DOCUMENT_BYTES) {
+        response.resume();
+        reject(new Error("在线文档超过 12 MB"));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_ONLINE_DOCUMENT_BYTES) {
+          request.destroy(new Error("在线文档超过 12 MB"));
+          return;
+        }
+        chunks.push(Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        const headers = new Headers();
+        for (const [key, raw] of Object.entries(response.headers)) {
+          if (raw !== undefined) headers.set(key, Array.isArray(raw) ? raw.join(", ") : String(raw));
+        }
+        resolve({
+          response: { status: response.statusCode || 0, ok: Number(response.statusCode || 0) >= 200 && Number(response.statusCode || 0) < 300, headers },
+          buffer: Buffer.concat(chunks),
+        });
+      });
+    });
+    request.setTimeout(20_000, () => request.destroy(new Error("在线文档读取超时")));
+    request.on("error", reject);
+    request.end();
+  });
 }
 
 export async function fetchPublicDocument(urlValue: string) {
   let current = urlValue;
   for (let redirect = 0; redirect < 5; redirect++) {
     const checked = await assertPublicUrl(current);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
-    try {
-      const response = await fetchWithNodeHttpFallback(checked, {
-        method: "GET",
-        redirect: "manual",
-        headers: {
-          "User-Agent": "CCM-Requirement-Ingestion/1.0",
-          "Accept": "text/html,text/plain,application/pdf,application/json;q=0.9,*/*;q=0.5",
-        },
-        signal: controller.signal,
-      });
+    const { response, buffer } = await requestPinnedPublicDocument(checked);
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
         if (!location) throw new Error("在线文档重定向缺少目标地址");
-        current = new URL(location, checked).toString();
+        current = new URL(location, checked.url).toString();
         continue;
       }
-      const length = Number(response.headers.get("content-length") || 0);
-      if (length > MAX_ONLINE_DOCUMENT_BYTES) throw new Error("在线文档超过 12 MB");
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.length > MAX_ONLINE_DOCUMENT_BYTES) throw new Error("在线文档超过 12 MB");
-      return { response, buffer, finalUrl: checked.toString() };
-    } finally {
-      clearTimeout(timeout);
-    }
+      return { response, buffer, finalUrl: checked.url.toString(), resolvedAddress: checked.addresses[0].address, redirectCount: redirect };
   }
   throw new Error("在线文档重定向次数过多");
 }
@@ -592,18 +666,19 @@ async function parseOnlineDocument(urlValue: string, fetcher: (url: string) => P
     if (!content || content.length < 20) {
       return { ...base, url: finalUrl, status: "failed", parser, readable: false, content: "", summary: "在线文档没有提取到正文", error: "页面可能需要登录、动态加载或导出权限" };
     }
-    const truncated = content.length > MAX_REQUIREMENT_SOURCE_CHARS;
     return {
       ...base,
       url: finalUrl,
-      status: truncated ? "partial" : "parsed",
+      status: "parsed",
       parser,
       readable: true,
-      content: truncateInlineContent(content, MAX_REQUIREMENT_SOURCE_CHARS),
-      summary: `已读取在线文档，提取 ${Math.min(content.length, MAX_REQUIREMENT_SOURCE_CHARS)} 个字符`,
+      content,
+      summary: `已完整读取在线文档，提取 ${content.length} 个字符`,
       size: buffer.length,
       mime_type: contentType,
-      truncated,
+      truncated: false,
+      checksum: sourceHash(content),
+      snapshot_at: new Date().toISOString(),
     };
   } catch (error: any) {
     return {
@@ -638,20 +713,66 @@ function renderSourcesForAgent(sources: RequirementSourceRecord[]) {
 async function extractRequirementWithModel(userText: string, sources: RequirementSourceRecord[], configOverride?: any) {
   const config = configOverride || loadOrchestratorConfig();
   if (!config.enabled || !config.apiKey || !config.apiUrl || !config.model) throw new Error("主 Agent 模型未配置");
-  const readable = sources.filter(item => item.readable && item.content).map(item => `【${item.name}】\n${item.content}`).join("\n\n").slice(0, MAX_REQUIREMENT_TOTAL_CHARS);
   const failed = sources.filter(item => !item.readable).map(item => `${item.name}: ${item.error || item.summary}`).join("\n");
-  const prompt = `请从用户文字和已读取资料中提取可执行的业务需求。只返回 JSON，不要输出 Markdown。\n字段：title(string，48字内)、business_goal(string)、scope(string[])、acceptance_criteria(string[])、dependencies(string[])、risks(string[])、clarification_questions(string[])、source_evidence(string[])。\n规则：不得根据未读取资料猜测；目标、范围和验收标准必须让项目 Agent 可执行；资料冲突或缺失时放入 clarification_questions。\n\n用户文字：\n${userText || "（用户仅提交了资料）"}\n\n已读取资料：\n${readable || "（无）"}\n\n未读取资料：\n${failed || "（无）"}`;
-  const options = {
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0,
-    maxTokens: 2200,
-    defaultTimeoutMs: Math.max(10_000, Number(config.timeoutMs) || 120_000),
-    httpErrorPrefix: "需求提取模型",
-    invalidJsonMessage: "需求提取模型未返回有效 JSON",
+  const chunks = sources.flatMap(source => source.readable && source.content
+    ? chunkRequirementSource(source.content, source.id).map(chunk => ({
+        ...chunk,
+        source_id: source.id,
+        source_name: source.name,
+        source_checksum: source.manifest?.source_checksum || source.checksum || sourceHash(source.content),
+      }))
+    : []);
+  const maxInputTokens = Math.max(12_000, Math.min(80_000, Number(config.modelContextWindow || config.model_context_window || 128_000) - 10_000));
+  const batches: any[][] = [];
+  let batch: any[] = [];
+  let batchTokens = 0;
+  for (const chunk of chunks) {
+    if (batch.length && batchTokens + chunk.token_count > maxInputTokens) {
+      batches.push(batch);
+      batch = [];
+      batchTokens = 0;
+    }
+    batch.push(chunk);
+    batchTokens += chunk.token_count;
+  }
+  if (batch.length) batches.push(batch);
+  if (!batches.length) batches.push([]);
+
+  const callExtraction = async (rows: any[], index: number) => {
+    const readable = rows.map(row => `【source_id=${row.source_id}; source_checksum=${row.source_checksum}; chunk_id=${row.id}; name=${row.source_name}】\n${row.content}`).join("\n\n");
+    const prompt = `请从用户文字和已读取资料分片中提取可执行的业务需求。只返回 JSON，不要输出 Markdown。\n字段：title(string，48字内)、business_goal(string)、scope(string[])、acceptance_criteria(string[])、dependencies(string[])、risks(string[])、clarification_questions(string[])、source_evidence_v2([{source_id:string,source_checksum:string,chunk_ids:string[]}])。\n规则：不得根据未读取资料猜测；每条结论必须引用实际chunk_id；目标、范围和验收标准必须可执行；资料冲突或缺失时放入clarification_questions。\n\n用户文字：\n${userText || "（用户仅提交了资料）"}\n\n已读取资料分片：\n${readable || "（无）"}\n\n未读取资料：\n${failed || "（无）"}`;
+    const options = {
+      messages: [{ role: "user", content: prompt }], temperature: 0, maxTokens: 2200,
+      defaultTimeoutMs: Math.max(10_000, Number(config.timeoutMs) || 120_000), retryAttempts: 5,
+      retryScope: `requirement-extraction:${index + 1}/${batches.length}`,
+      httpErrorPrefix: "需求提取模型", invalidJsonMessage: "需求提取模型未返回有效 JSON",
+    };
+    return shouldUseAnthropic(config) ? callAnthropicCompatibleJson(config, options) : callOpenAiCompatibleJson(config, options);
   };
-  const value: any = shouldUseAnthropic(config)
-    ? await callAnthropicCompatibleJson(config, options)
-    : await callOpenAiCompatibleJson(config, options);
+  const partials: any[] = [];
+  for (let index = 0; index < batches.length; index += 1) partials.push(await callExtraction(batches[index], index));
+  let value: any = partials[0];
+  if (partials.length > 1) {
+    const mergePrompt = `合并以下逐分片需求提取结果，只返回同一JSON结构。不得丢失任何分片中的约束、验收、风险、依赖、澄清问题和source_evidence_v2，不得新增没有证据的结论。\n${JSON.stringify(partials)}`;
+    const options = {
+      messages: [{ role: "user", content: mergePrompt }], temperature: 0, maxTokens: 4000,
+      defaultTimeoutMs: Math.max(10_000, Number(config.timeoutMs) || 120_000), retryAttempts: 5,
+      retryScope: "requirement-extraction:merge", httpErrorPrefix: "需求提取合并模型", invalidJsonMessage: "需求提取合并模型未返回有效 JSON",
+    };
+    value = shouldUseAnthropic(config) ? await callAnthropicCompatibleJson(config, options) : await callOpenAiCompatibleJson(config, options);
+  }
+  const submittedEvidence = value.source_evidence_v2 || value.sourceEvidenceV2 || [];
+  const checkedEvidence = validateSourceEvidence(submittedEvidence, sources);
+  const requiredSourceIds = new Set(sources.filter(item => item.required !== false).map(item => item.id));
+  const coveredSourceIds = new Set(checkedEvidence.valid.map(item => item.source_id));
+  const missingRequiredEvidence = [...requiredSourceIds].filter(id => !coveredSourceIds.has(id));
+  if (sources.length && (checkedEvidence.errors.length || missingRequiredEvidence.length)) {
+    throw new Error([
+      ...checkedEvidence.errors,
+      missingRequiredEvidence.length ? `模型没有引用全部必需资料：${missingRequiredEvidence.join("、")}` : "",
+    ].filter(Boolean).join("；"));
+  }
+  const evidenceV2 = checkedEvidence.valid;
   return {
     schema: REQUIREMENT_EXTRACTION_SCHEMA,
     title: compact(value.title || userText || "处理提交的业务需求", 48),
@@ -662,6 +783,7 @@ async function extractRequirementWithModel(userText: string, sources: Requiremen
     risks: unique(value.risks || [], 12),
     clarification_questions: unique(value.clarification_questions || value.clarificationQuestions || [], 8),
     source_evidence: unique(value.source_evidence || value.sourceEvidence || sources.filter(item => item.readable).map(item => item.name), 12),
+    source_evidence_v2: evidenceV2,
     extraction_method: "model" as const,
   };
 }
@@ -675,11 +797,13 @@ async function extractRequirementDecompositionWithModel(input: {
 }) {
   const config = input.configOverride || loadOrchestratorConfig();
   if (!config.enabled || !config.apiKey || !config.apiUrl || !config.model) throw new Error("主 Agent 模型未配置");
-  const readable = input.sources
-    .filter(item => item.readable && item.content)
-    .map(item => `【${item.name}】\n${item.content}`)
-    .join("\n\n")
-    .slice(0, MAX_REQUIREMENT_TOTAL_CHARS);
+  const sourceManifestSummary = input.sources.map(item => ({
+    source_id: item.id,
+    name: item.name,
+    status: item.status,
+    source_checksum: item.manifest?.source_checksum || item.checksum || "",
+    chunk_ids: item.manifest?.chunks?.map((chunk: any) => chunk.id) || [],
+  }));
   const availableTargets = (input.availableTargets || []).slice(0, 80).map((target: any) => ({
     type: target?.type || target?.target_type || (target?.group_id || target?.groupId ? "group" : "project"),
     id: target?.id || target?.target_id || target?.group_id || target?.groupId || target?.project || target?.name || "",
@@ -724,8 +848,8 @@ ${JSON.stringify(input.requirement)}
 可用目标：
 ${JSON.stringify(availableTargets)}
 
-资料正文：
-${readable || "（无可读正文）"}`;
+来源清单（具体事实已经进入结构化需求，计划必须引用这些真实来源）：
+${JSON.stringify(sourceManifestSummary)}`;
   const options = {
     messages: [{ role: "user", content: prompt }],
     temperature: 0,
@@ -737,11 +861,16 @@ ${readable || "（无可读正文）"}`;
   const value: any = shouldUseAnthropic(config)
     ? await callAnthropicCompatibleJson(config, options)
     : await callOpenAiCompatibleJson(config, options);
-  return validateRequirementDecomposition(value, {
+  const plan = validateRequirementDecomposition(value, {
     contentHash: input.contentHash,
     requirement: input.requirement,
     extractionMethod: "model",
   });
+  const evidence = input.requirement.source_evidence_v2 || input.sources.filter(item => item.readable).map(evidenceForSource);
+  plan.source_evidence_v2 = evidence;
+  for (const item of plan.items) item.source_evidence_v2 = evidence;
+  assertRequirementPlanEvidence(plan, input.sources.map(item => item.manifest), buildRequirementCoverageReceipt(input.sources));
+  return plan;
 }
 
 /**
@@ -788,12 +917,17 @@ export async function ingestRequirementSources(input: {
   requirementConfig?: any;
   decomposeRequirement?: boolean;
   availableTargets?: any[];
+  sourceRequirements?: Record<string, boolean>;
 } = {}): Promise<RequirementIngestionResult> {
   const files = (input.files || []).slice(0, 10);
   const urls = unique([...(input.urls || []), ...extractOnlineDocumentUrls(input.userText || "")], 3);
   const fileSources = await Promise.all(files.map(file => parseUploadedFile(file, { visionConfig: input.visionConfig })));
-  const urlSources = await Promise.all(urls.map(url => parseOnlineDocument(url, input.onlineDocumentFetcher || fetchPublicDocument)));
-  const sources = [...fileSources, ...urlSources];
+  const urlSources = await Promise.all(urls.map(async url => {
+    const source = await parseOnlineDocument(url, input.onlineDocumentFetcher || fetchPublicDocument);
+    source.required = input.sourceRequirements?.[source.id] !== false && input.sourceRequirements?.[url] !== false;
+    return source;
+  }));
+  const sources = attachSourceManifests([...fileSources, ...urlSources]) as RequirementSourceRecord[];
   const contentHash = stableHash({
     user_text: String(input.userText || "").trim(),
     sources: sources.map(source => ({
@@ -804,7 +938,7 @@ export async function ingestRequirementSources(input: {
       size: source.size || 0,
     })),
   });
-  const sourceWarnings = sources.filter(item => !item.readable).map(item => `${item.name}：${item.error || item.summary}`);
+  const sourceWarnings = sources.filter(item => !item.readable || item.status === "partial").map(item => `${item.name}：${item.error || item.summary}`);
   const warnings = [...sourceWarnings];
   const context = renderSourcesForAgent(sources);
   let requirement: BusinessRequirementExtraction | null = null;
@@ -836,11 +970,14 @@ export async function ingestRequirementSources(input: {
     }
   }
   const readableCount = sources.filter(item => item.readable).length;
+  const coverageReceipt = buildRequirementCoverageReceipt(sources);
   const userSummary = !sources.length
     ? ""
     : sourceWarnings.length
       ? `已读取 ${readableCount}/${sources.length} 份资料；${sourceWarnings.length} 份需要补充格式或授权。`
-      : `已读取 ${sources.length} 份资料，并整理为可执行需求。`;
+      : coverageReceipt.complete
+        ? `已完整读取 ${sources.length} 份资料，并整理为可执行需求。`
+        : `已读取 ${readableCount}/${sources.length} 份资料，但仍有必需内容未完整覆盖。`;
   const attachments = sources.map(source => ({
     id: source.id,
     name: source.name,
@@ -854,6 +991,13 @@ export async function ingestRequirementSources(input: {
     summary: source.summary,
     error: source.error || "",
     truncated: source.truncated === true,
+    checksum: source.checksum || source.manifest?.source_checksum || "",
+    required: source.required !== false,
+    snapshot_at: source.snapshot_at || source.manifest?.snapshot_at || "",
+    parse_generation: 2,
+    coverage_state: source.manifest?.coverage_state || (source.readable ? "complete" : "blocked"),
+    reference_count: 1,
+    vision_receipt: source.vision_receipt || null,
   }));
   return {
     schema: REQUIREMENT_SOURCE_SCHEMA,
@@ -867,6 +1011,8 @@ export async function ingestRequirementSources(input: {
     requirement,
     decomposition,
     content_hash: contentHash,
+    manifest: sources.map(source => source.manifest),
+    coverage_receipt: coverageReceipt,
     technical: {
       schema: REQUIREMENT_SOURCE_SCHEMA,
       source_count: sources.length,
@@ -883,6 +1029,12 @@ export async function ingestRequirementSources(input: {
       decomposition_item_count: decomposition?.items.length || 0,
       content_hash: contentHash,
       warnings,
+      manifest: sources.map(source => source.manifest),
+      coverage_receipt: coverageReceipt,
+      required_source_count: coverageReceipt.required_source_count,
+      covered_source_count: coverageReceipt.covered_source_count,
+      blocking_sources: coverageReceipt.blocking_sources,
+      retryable: coverageReceipt.complete !== true || !!extractionError || !!decompositionError,
       sources: attachments,
       online_document_access_mode: sources.some(source => source.kind === "tencent_document")
         ? "public_link_only"
@@ -903,6 +1055,7 @@ export function requirementToIntakeDraft(requirement: BusinessRequirementExtract
     risks: requirement?.risks?.length ? requirement.risks : fallback.risks || [],
     clarification_questions: requirement?.clarification_questions || [],
     source_evidence: requirement?.source_evidence || [],
+    source_evidence_v2: requirement?.source_evidence_v2 || [],
     extraction_method: requirement?.extraction_method || "not_available",
     generated_at: new Date().toISOString(),
   };

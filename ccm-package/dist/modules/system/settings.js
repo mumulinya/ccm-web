@@ -103,6 +103,10 @@ function handleSystemSettingsApi(pathname, req, res) {
             .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "刷新 Agent 状态失败" }, 500));
         return true;
     }
+    if (pathname === "/api/system/agent-providers/install-jobs" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, jobs: (0, agent_provider_settings_1.getAgentProviderInstallJobs)() });
+        return true;
+    }
     const modelsMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/models$/);
     if (modelsMatch && req.method === "GET") {
         (0, agent_provider_settings_1.getAgentProviderModels)(modelsMatch[1])
@@ -148,15 +152,12 @@ function handleSystemSettingsApi(pathname, req, res) {
     }
     const actionMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/(login|logout)$/);
     if (actionMatch && req.method === "POST") {
-        try {
+        readJsonBody(req, 16 * 1024).then(payload => {
             const result = actionMatch[2] === "login"
-                ? (0, agent_provider_settings_1.startAgentProviderLogin)(actionMatch[1])
+                ? (0, agent_provider_settings_1.startAgentProviderLogin)(actionMatch[1], { providerId: payload?.provider_id, methodId: payload?.method_id })
                 : (0, agent_provider_settings_1.logoutAgentProvider)(actionMatch[1]);
             (0, utils_1.sendJson)(res, { success: true, ...result });
-        }
-        catch (error) {
-            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "Agent 认证操作失败" }, 400);
-        }
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "Agent 认证操作失败" }, 400));
         return true;
     }
     const installMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/install$/);

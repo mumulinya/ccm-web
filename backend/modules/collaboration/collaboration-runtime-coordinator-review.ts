@@ -1,6 +1,8 @@
 // collaboration-runtime-coordinator-review.ts — merged from 2 part files (behavior-freeze merge).
 
 import { buildReworkExhaustedUpdate } from "./rework-policy";
+import { runMainAgentSelfVerification } from "./main-agent-self-verification";
+import { resolveTaskAcceptancePolicy } from "./task-acceptance-policy";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -550,7 +552,6 @@ import {
   getTestAgentRecheckSubjectKey,
   scheduleTestAgentRecheckAfterFollowUps,
 } from "./collaboration-runtime-test-agent-handoff";
-import { isTestAgentEnabled } from "../system/test-agent-settings";
 import {
   CollabCtx,
   buildAgentToolContext,
@@ -592,6 +593,7 @@ export async function runCoordinatorReviewLoop(input: {
   executionOrder?: string;
   taskId?: string;
   groupSessionId?: string;
+  acceptancePolicy?: any;
 }) {
   const coordinator = getCoordinatorMember(input.group);
   const seenMentions = new Set<string>();
@@ -603,7 +605,9 @@ export async function runCoordinatorReviewLoop(input: {
   const maxReviewRounds = COORDINATOR_REVIEW_MAX_ROUNDS;
   if (allOutputs.length === 0) return null;
 
-  if (!isTestAgentEnabled()) {
+  const independentTestAgentEnabled = input.acceptancePolicy?.mode === "test_agent";
+  if (!input.acceptancePolicy || input.acceptancePolicy?.checksum === "") throw new Error("群聊验收缺少任务级策略快照");
+  if (!independentTestAgentEnabled) {
     if (input.taskId) {
       updateTask(input.taskId, {
         test_agent_enabled: false,
@@ -620,20 +624,40 @@ export async function runCoordinatorReviewLoop(input: {
         agent: coordinator.project,
       });
     }
-    let review: any = await runLlmCoordinatorReview(
-      input.group,
-      input.userMessage,
-      input.coordinatorOutput,
-      allOutputs,
-      { allowFollowUps: false, round: 1, maxRounds: 1, taskId: input.taskId || "", executionId: input.taskId || "", groupSessionId: input.groupSessionId || "" },
-    );
-    if (!review) review = buildCodedCoordinatorReview(input.group, allOutputs, { allowFollowUps: false, round: 1, maxRounds: 1 });
-    review = {
-      ...(review || {}),
+    const currentTask = input.taskId ? loadTasks().find((item: any) => item.id === input.taskId) : null;
+    if (!currentTask) throw new Error("群聊主 Agent 自验缺少权威任务记录");
+    const actualFileChanges = require("./collaboration-runtime-status-helpers").collectTaskActualFileChanges(currentTask, {});
+    const projectConfigs = loadProjectConfigs() || {};
+    const projectNames = [...new Set([
+      ...actualFileChanges.map((item: any) => String(item?.project || "").trim()),
+      ...(Array.isArray(input.group?.members) ? input.group.members.map((item: any) => String(item?.project || item?.name || "").trim()) : []),
+    ].filter(Boolean))];
+    const verificationProjects = projectNames.map(name => {
+      const config = input.configs.find((item: any) => item.name === name);
+      const projectInfo = config ? getConfigInfo(config.path).find((item: any) => item.name === name) || getConfigInfo(config.path)[0] : null;
+      return {
+        name,
+        workDir: String(projectInfo?.workDir || ""),
+        verificationCommands: Array.isArray(projectConfigs?.[name]?.verification_commands) ? projectConfigs[name].verification_commands : [],
+      };
+    }).filter(item => item.workDir);
+    const selfReceipt = await runMainAgentSelfVerification({
+      task: currentTask,
+      policy: input.acceptancePolicy,
+      acceptanceCriteria: String(currentTask.acceptance_criteria || "").split(/\r?\n|；/).filter(Boolean),
+      changedFiles: actualFileChanges,
+      projects: verificationProjects,
+      workerOutputs: allOutputs,
+      sourceSnapshotChecksum: String(currentTask?.planning_source_evidence?.checksum || ""),
+    });
+    const review: any = {
+      ...selfReceipt,
       mode: "main_agent_self_verification",
       followUps: [],
       follow_ups: [],
-      status: String(review?.status || "") === "complete" ? "complete" : "needs_user",
+      status: selfReceipt.canAccept ? "complete" : "needs_user",
+      content: selfReceipt.report.summary,
+      summary: selfReceipt.report.summary,
     };
     const content = [
       "主 Agent 自验结果（TestAgent 已关闭）：",
@@ -647,7 +671,15 @@ export async function runCoordinatorReviewLoop(input: {
     });
     if (input.taskId) {
       updateTask(input.taskId, {
-        main_agent_self_verification: review,
+        main_agent_self_verification: selfReceipt,
+        main_agent_final_acceptance: {
+          schema: "ccm-main-agent-final-acceptance-v1",
+          accepted: review.status === "complete",
+          mode: "main_agent_self_verification",
+          acceptance_policy_checksum: input.acceptancePolicy.checksum,
+          review_checksum: selfReceipt.checksum,
+          decided_at: new Date().toISOString(),
+        },
         acceptance_state: review.status === "complete" ? "main_agent_self_verified" : "main_agent_self_verification_failed",
       });
       appendTaskTimelineEvent(input.taskId, {
@@ -670,7 +702,7 @@ export async function runCoordinatorReviewLoop(input: {
     return review;
   }
 
-  if (input.taskId) updateTask(input.taskId, { test_agent_enabled: true, acceptance_mode: "test_agent" });
+  if (input.taskId && input.acceptancePolicy.mode !== "test_agent") throw new Error("群聊任务验收策略与独立 TestAgent 链路不一致");
 
   let lastReview: any = null;
 
@@ -928,6 +960,18 @@ export async function runCoordinatorReviewLoop(input: {
     });
 
     if (dispatchableReworkFollowUps.length === 0) {
+      if (input.taskId && String((review as any).status || "") === "complete") {
+        updateTask(input.taskId, {
+          main_agent_final_acceptance: {
+            schema: "ccm-main-agent-final-acceptance-v1",
+            accepted: true,
+            mode: "test_agent",
+            acceptance_policy_checksum: input.acceptancePolicy.checksum,
+            review_checksum: crypto.createHash("sha256").update(JSON.stringify({ review: (review as any).structured_review || review, round })).digest("hex"),
+            decided_at: new Date().toISOString(),
+          },
+        });
+      }
       input.crossOutputs.splice(0, input.crossOutputs.length, ...allOutputs);
       return review;
     }

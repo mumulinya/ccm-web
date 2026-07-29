@@ -15,6 +15,7 @@ const project = 'office-project'
 const port = 31993
 const baseUrl = `http://127.0.0.1:${port}`
 let child
+let authSession = null
 
 const git = (cwd, args) => {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
@@ -23,14 +24,17 @@ const git = (cwd, args) => {
 }
 
 const request = async (pathname, options = {}) => {
-  const response = await fetch(`${baseUrl}${pathname}`, options)
+  const headers = { 'User-Agent': 'CCM-Git-Workspace-Selftest/1', 'Accept-Language': 'zh-CN', Origin: baseUrl, Referer: `${baseUrl}/`, ...(options.headers || {}) }
+  if (authSession?.cookie) headers.Cookie = authSession.cookie
+  if (authSession?.csrf && !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method || 'GET').toUpperCase())) headers['X-CCM-CSRF'] = authSession.csrf
+  const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers })
   return { response, data: await response.json().catch(() => ({})) }
 }
 const post = (pathname, body) => request(pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
 const waitForServer = async () => {
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    try { if ((await request('/api/projects')).response.ok) return } catch {}
+    try { if ((await request('/api/auth/session')).response.ok) return } catch {}
     await new Promise(resolve => setTimeout(resolve, 150))
   }
   throw new Error('isolated server did not start')
@@ -62,6 +66,10 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   await waitForServer()
+  const setupCode = fs.readFileSync(path.join(ccmDir, 'auth', 'setup-code.txt'), 'utf8').trim()
+  const registration = await request('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'git-admin', password: 'Git-Admin-123!', setup_code: setupCode }) })
+  assert.equal(registration.response.status, 201)
+  authSession = { cookie: (registration.response.headers.get('set-cookie') || '').split(';')[0], csrf: registration.data.csrf || registration.data.session?.csrf }
 
   const createdFolder = await post('/api/filesystem/directory', { parent: workspaceParent, name: 'new-client-project' })
   assert.equal(createdFolder.response.ok, true)

@@ -12,7 +12,7 @@ import { deleteCredential, isCredentialReference, protectCredential, resolveCred
 import { ingestRequirementSources } from "../requirements/source-ingestion";
 
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "C:/Users/admin";
-const CCM_HOME = path.join(USER_HOME, ".cc-connect");
+const CCM_HOME = path.resolve(process.env.CCM_TASK_STORE_DIR || path.join(USER_HOME, ".cc-connect"));
 
 export const KNOWLEDGE_DIR = path.join(CCM_HOME, "knowledge");
 export const KNOWLEDGE_VERSIONS_DIR = path.join(CCM_HOME, "knowledge-versions");

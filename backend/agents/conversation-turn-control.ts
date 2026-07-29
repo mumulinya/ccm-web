@@ -29,16 +29,21 @@ export type ConversationTurnRecord = {
   updated_at: string;
   claimed_at: string;
   settled_at: string;
+  lease_id: string;
+  lease_expires_at: string;
+  run_id: string;
+  checkpoint: string;
+  semantic_decision_receipt: any;
 };
 
 type ConversationTurnStoreFile = {
-  schema: "ccm-conversation-turn-control-v1";
+  schema: "ccm-conversation-turn-control-v2";
   generation: number;
   updated_at: string;
   turns: ConversationTurnRecord[];
 };
 
-const STORE_FILE = path.join(CCM_DIR, "conversation-turn-control.json");
+const STORE_FILE = process.env.CCM_CONVERSATION_TURN_FILE || path.join(CCM_DIR, "conversation-turn-control.json");
 const MAX_RECORDS = 800;
 const TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const ACTIVE_STATUSES = new Set<ConversationTurnStatus>(["queued", "sending"]);
@@ -61,7 +66,7 @@ function normalizeMode(value: any): ConversationTurnMode {
 }
 
 function emptyStore(): ConversationTurnStoreFile {
-  return { schema: "ccm-conversation-turn-control-v1", generation: 0, updated_at: nowIso(), turns: [] };
+  return { schema: "ccm-conversation-turn-control-v2", generation: 0, updated_at: nowIso(), turns: [] };
 }
 
 function normalizeRecord(input: any): ConversationTurnRecord | null {
@@ -90,6 +95,11 @@ function normalizeRecord(input: any): ConversationTurnRecord | null {
       updated_at: String(input?.updated_at || input?.updatedAt || input?.created_at || nowIso()),
       claimed_at: String(input?.claimed_at || input?.claimedAt || ""),
       settled_at: String(input?.settled_at || input?.settledAt || ""),
+      lease_id: String(input?.lease_id || input?.leaseId || ""),
+      lease_expires_at: String(input?.lease_expires_at || input?.leaseExpiresAt || ""),
+      run_id: String(input?.run_id || input?.runId || input?.active_run_id || input?.activeRunId || ""),
+      checkpoint: String(input?.checkpoint || "queued"),
+      semantic_decision_receipt: input?.semantic_decision_receipt || input?.semanticDecisionReceipt || null,
     };
   } catch {
     return null;
@@ -119,7 +129,7 @@ export class ConversationTurnControlStore {
   private read(): ConversationTurnStoreFile {
     const raw = readJsonWithBackup<any>(this.file, emptyStore());
     return {
-      schema: "ccm-conversation-turn-control-v1",
+      schema: "ccm-conversation-turn-control-v2",
       generation: Math.max(0, Number(raw?.generation || 0)),
       updated_at: String(raw?.updated_at || nowIso()),
       turns: (Array.isArray(raw?.turns) ? raw.turns : []).map(normalizeRecord).filter(Boolean) as ConversationTurnRecord[],
@@ -152,6 +162,9 @@ export class ConversationTurnControlStore {
           error: "服务重启后已恢复到待发送队列",
           updated_at: at,
           claimed_at: "",
+          lease_id: "",
+          lease_expires_at: "",
+          checkpoint: "recovered",
         };
       });
       return store.turns;
@@ -193,6 +206,11 @@ export class ConversationTurnControlStore {
         updated_at: at,
         claimed_at: "",
         settled_at: "",
+        lease_id: "",
+        lease_expires_at: "",
+        run_id: "",
+        checkpoint: "queued",
+        semantic_decision_receipt: input?.semantic_decision_receipt || input?.semanticDecisionReceipt || null,
       };
       store.turns.push(turn);
       return { turn, duplicate: false };
@@ -227,6 +245,22 @@ export class ConversationTurnControlStore {
     const conversationId = String(input?.conversation_id || input?.conversationId || "").trim();
     if (!conversationId) throw new Error("缺少会话 ID");
     return this.mutate((store) => {
+      const atMs = Date.now();
+      for (const item of store.turns) {
+        if (item.scope !== scope || item.conversation_id !== conversationId || item.status !== "sending") continue;
+        if (item.lease_expires_at && Date.parse(item.lease_expires_at) <= atMs) {
+          item.status = "queued";
+          item.recovery_count += 1;
+          item.error = "执行租约过期，已恢复到原队列";
+          item.claimed_at = "";
+          item.lease_id = "";
+          item.lease_expires_at = "";
+          item.checkpoint = "lease_recovered";
+          item.updated_at = nowIso();
+        }
+      }
+      const active = store.turns.find((item) => item.scope === scope && item.conversation_id === conversationId && item.status === "sending");
+      if (active) return null;
       const requestedId = String(input?.id || "").trim();
       const turn = store.turns.find((item) => item.scope === scope
         && item.conversation_id === conversationId
@@ -237,6 +271,9 @@ export class ConversationTurnControlStore {
       turn.active_run_id = String(input?.active_run_id || input?.activeRunId || turn.active_run_id || "");
       turn.claimed_at = nowIso();
       turn.updated_at = turn.claimed_at;
+      turn.lease_id = `lease_${crypto.randomBytes(12).toString("hex")}`;
+      turn.lease_expires_at = new Date(Date.now() + Math.max(15_000, Math.min(15 * 60_000, Number(input?.lease_ms || input?.leaseMs || 13 * 60_000)))).toISOString();
+      turn.checkpoint = "claimed";
       turn.error = "";
       return turn;
     });
@@ -256,8 +293,29 @@ export class ConversationTurnControlStore {
       turn.error = String(input?.error || "");
       turn.result = input?.result ?? turn.result;
       turn.active_run_id = String(input?.active_run_id || input?.activeRunId || turn.active_run_id || "");
+      turn.run_id = String(input?.run_id || input?.runId || turn.run_id || turn.active_run_id || "");
+      turn.checkpoint = String(input?.checkpoint || status);
+      if (input?.semantic_decision_receipt || input?.semanticDecisionReceipt) turn.semantic_decision_receipt = input.semantic_decision_receipt || input.semanticDecisionReceipt;
       turn.updated_at = at;
       turn.settled_at = at;
+      turn.lease_id = "";
+      turn.lease_expires_at = "";
+      return turn;
+    });
+  }
+
+  defer(id: string, reason = "当前会话仍在执行，已保留到原队列") {
+    return this.mutate((store) => {
+      const turn = store.turns.find((item) => item.id === String(id || ""));
+      if (!turn) throw new Error("队列消息不存在");
+      if (turn.status !== "sending") throw new Error("只有已领取的消息可以退回队列");
+      turn.status = "queued";
+      turn.error = String(reason || "");
+      turn.updated_at = nowIso();
+      turn.claimed_at = "";
+      turn.lease_id = "";
+      turn.lease_expires_at = "";
+      turn.checkpoint = "deferred";
       return turn;
     });
   }
@@ -298,6 +356,27 @@ export class ConversationTurnControlStore {
       turn.updated_at = nowIso();
       turn.claimed_at = "";
       turn.settled_at = "";
+      turn.lease_id = "";
+      turn.lease_expires_at = "";
+      turn.checkpoint = "retried";
+      return turn;
+    });
+  }
+
+  heartbeat(input: any) {
+    const id = String(input?.id || "").trim();
+    const leaseId = String(input?.lease_id || input?.leaseId || "").trim();
+    if (!id || !leaseId) throw new Error("缺少队列消息或租约 ID");
+    return this.mutate((store) => {
+      const turn = store.turns.find((item) => item.id === id);
+      if (!turn || turn.status !== "sending" || turn.lease_id !== leaseId) throw new Error("队列执行租约已失效");
+      turn.lease_expires_at = new Date(Date.now() + Math.max(15_000, Math.min(15 * 60_000, Number(input?.lease_ms || input?.leaseMs || 13 * 60_000)))).toISOString();
+      turn.updated_at = nowIso();
+      turn.checkpoint = String(input?.checkpoint || turn.checkpoint || "running");
+      if (input?.run_id || input?.runId) {
+        turn.run_id = String(input.run_id || input.runId);
+        turn.active_run_id = turn.run_id;
+      }
       return turn;
     });
   }
@@ -331,6 +410,8 @@ export function handleConversationTurnControlApi(pathname: string, req: Incoming
     "/api/conversation-turns/enqueue": (payload) => conversationTurnControl.enqueue(payload),
     "/api/conversation-turns/claim": (payload) => ({ turn: conversationTurnControl.claim(payload) }),
     "/api/conversation-turns/settle": (payload) => ({ turn: conversationTurnControl.settle(payload) }),
+    "/api/conversation-turns/heartbeat": (payload) => ({ turn: conversationTurnControl.heartbeat(payload) }),
+    "/api/conversation-turns/defer": (payload) => ({ turn: conversationTurnControl.defer(String(payload?.id || ""), payload?.reason) }),
     "/api/conversation-turns/cancel": (payload) => ({ turn: conversationTurnControl.cancel(String(payload?.id || ""), payload?.reason) }),
     "/api/conversation-turns/guide": (payload) => ({ turn: conversationTurnControl.guide(String(payload?.id || "")) }),
     "/api/conversation-turns/retry": (payload) => ({ turn: conversationTurnControl.retry(String(payload?.id || "")) }),
@@ -372,7 +453,7 @@ export function runConversationTurnControlSelfTest() {
       terminalStates: rows.find((item) => item.id === first.turn.id)?.status === "completed"
         && rows.find((item) => item.id === third.turn.id)?.status === "completed"
         && rows.find((item) => item.id === second.turn.id)?.status === "cancelled",
-      persistedSchema: readJsonWithBackup<any>(file, null)?.schema === "ccm-conversation-turn-control-v1",
+      persistedSchema: readJsonWithBackup<any>(file, null)?.schema === "ccm-conversation-turn-control-v2",
     };
     return { pass: Object.values(checks).every(Boolean), checks };
   } finally {

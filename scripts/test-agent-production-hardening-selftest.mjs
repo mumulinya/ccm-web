@@ -272,9 +272,9 @@ async function run() {
 
   const drift = handoff("source-drift", {
     name: "drift.cjs",
-    source: "require('fs').writeFileSync('marker.txt', 'changed'); console.log('changed source marker');\n",
+    source: "setTimeout(() => console.log('source drift observation window complete'), 900);\n",
   }, { files: { "marker.txt": "before" }, changedFiles: ["marker.txt"] });
-  const drifted = await runTestAgentCliJob({
+  const driftPromise = runTestAgentCliJob({
     mode: "invocation",
     handoff: drift,
     taskId: drift.taskId,
@@ -282,6 +282,9 @@ async function run() {
     allowedWorkDirs: [drift.projects[0].workDir],
     idempotencyKey: "drift-request",
   });
+  await new Promise(resolve => setTimeout(resolve, 250));
+  write(path.join(drift.projects[0].workDir, "marker.txt"), "changed outside TestAgent while verification was running");
+  const drifted = await driftPromise;
 
   const purgeRace = handoff("purge-race", {
     name: "purge-race.cjs",

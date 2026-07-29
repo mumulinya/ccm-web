@@ -93,7 +93,7 @@ export function normalizeCronTimezone(value: any) {
   }
 }
 
-function zonedDateParts(date: Date, timezone: string) {
+export function zonedDateParts(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: normalizeCronTimezone(timezone), year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short",
@@ -101,6 +101,25 @@ function zonedDateParts(date: Date, timezone: string) {
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   const weekday = ({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>)[values.weekday] ?? 0;
   return { year: Number(values.year), month: Number(values.month), day: Number(values.day), hour: Number(values.hour), minute: Number(values.minute), weekday };
+}
+
+export function dateKeyInTimezone(date = new Date(), timezone = DEFAULT_CRON_TIMEZONE) {
+  const parts = zonedDateParts(date, timezone);
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+
+export function zonedDateTimeToDate(input: { year: number; month: number; day: number; hour?: number; minute?: number }, timezone = DEFAULT_CRON_TIMEZONE) {
+  const normalizedTimezone = normalizeCronTimezone(timezone);
+  const targetUtc = Date.UTC(input.year, input.month - 1, input.day, input.hour || 0, input.minute || 0, 0, 0);
+  let candidate = targetUtc;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const actual = zonedDateParts(new Date(candidate), normalizedTimezone);
+    const actualUtc = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, 0, 0);
+    const adjustment = targetUtc - actualUtc;
+    if (adjustment === 0) break;
+    candidate += adjustment;
+  }
+  return new Date(candidate);
 }
 
 export function minuteKey(date: Date, timezone = DEFAULT_CRON_TIMEZONE) {

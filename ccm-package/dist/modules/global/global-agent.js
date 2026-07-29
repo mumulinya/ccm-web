@@ -48,6 +48,8 @@ exports.startFeishuConversationTurnRecoveryForServer = startFeishuConversationTu
 exports.stopFeishuConversationTurnRecoveryForServer = stopFeishuConversationTurnRecoveryForServer;
 exports.runFeishuConversationTurnCommandSelfTest = runFeishuConversationTurnCommandSelfTest;
 exports.handleGlobalAgentApi = handleGlobalAgentApi;
+exports.startGlobalWebTurnRecoveryForServer = startGlobalWebTurnRecoveryForServer;
+exports.stopGlobalWebTurnRecoveryForServer = stopGlobalWebTurnRecoveryForServer;
 const globalAgentTestAgentDisplay = __importStar(require("./global-agent-test-agent-display"));
 const globalAgentLocalIntent = __importStar(require("./global-agent-local-intent"));
 const globalAgentBridge = __importStar(require("./global-agent-bridge"));
@@ -184,7 +186,6 @@ async function waitForIdempotencyResult(scope, key, timeoutMs = 10 * 60 * 1000) 
     }
     return (0, reliability_ledger_1.getIdempotencyRecord)(scope, key);
 }
-const processedFeishuMessageIds = new Set();
 const GLOBAL_MANAGEMENT_ACTIONS = {
     manage_cron: { label: "定时任务管理", operations: ["list", "create", "update", "enable", "disable", "run", "delete"], destructive: ["delete"] },
     manage_group: { label: "群聊与成员管理", operations: ["list", "create", "rename", "add_member", "remove_member", "delete"], destructive: ["delete"] },
@@ -386,6 +387,7 @@ const globalAgentAgenticRuntime = (0, global_agent_agentic_runtime_1.createGloba
     GLOBAL_PET_AGENT_NAME,
     acquireIdempotency: reliability_ledger_1.acquireIdempotency,
     annotateGlobalAction,
+    applyGlobalAgentSupervisionSteer: loop_1.applyGlobalAgentSupervisionSteer,
     attachGlobalAgentRunSupervision: loop_1.attachGlobalAgentRunSupervision,
     bindFeishuIdentifiersFromValue: feishu_channel_1.bindFeishuIdentifiersFromValue,
     bindFeishuTaskContext: feishu_channel_1.bindFeishuTaskContext,
@@ -397,6 +399,7 @@ const globalAgentAgenticRuntime = (0, global_agent_agentic_runtime_1.createGloba
     compactPetText,
     completeGlobalAgentSupervision: loop_1.completeGlobalAgentSupervision,
     completeIdempotency: reliability_ledger_1.completeIdempotency,
+    conversationTurnControl: conversation_turn_control_1.conversationTurnControl,
     continueGlobalAgentRunWithClarification: loop_1.continueGlobalAgentRunWithClarification,
     controlGlobalDevelopmentMission: collaboration_1.controlGlobalDevelopmentMission,
     controlGlobalMissionSupervisor: mission_supervisor_1.controlGlobalMissionSupervisor,
@@ -523,6 +526,13 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         phase: run.phase,
         presentation: run.presentation || null,
         explicit_write_authorization: run.explicit_write_authorization,
+        turn_id: run.turn_id || "",
+        queue_scope: run.queue_scope || "",
+        authorization_receipt: run.write_authorization_receipt || null,
+        retryable: run.retryable === true,
+        degraded: run.degraded === true,
+        failure_category: run.failure_category || "",
+        terminal_receipt: run.terminal_receipt || null,
         created_at: run.created_at,
         updated_at: run.updated_at,
         completed_at: run.completed_at,
@@ -728,6 +738,7 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
     compactGlobalAgentSessionWithModel: memory_2.compactGlobalAgentSessionWithModel,
     completeGlobalAgentSupervision: loop_1.completeGlobalAgentSupervision,
     completeIdempotency: reliability_ledger_1.completeIdempotency,
+    conversationTurnControl: conversation_turn_control_1.conversationTurnControl,
     controlGlobalMissionSupervisor: mission_supervisor_1.controlGlobalMissionSupervisor,
     createAgenticRuntime,
     createGlobalAgentConversationSession,
@@ -775,7 +786,6 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
     normalizeFeishuEventPayload,
     parseMultipart: utils_1.parseMultipart,
     pauseGlobalAgentRun: loop_1.pauseGlobalAgentRun,
-    processedFeishuMessageIds,
     processFeishuControlledMessage,
     processFeishuCardAction,
     publicGlobalAgentRun,
@@ -813,6 +823,8 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
 function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
     return globalAgentApi.handleGlobalAgentApi(pathname, req, res, parsed, ctx);
 }
+function startGlobalWebTurnRecoveryForServer(baseUrl, ctx) { return globalAgentApi.startGlobalWebTurnRecoveryForServer(baseUrl, ctx); }
+function stopGlobalWebTurnRecoveryForServer() { return globalAgentApi.stopGlobalWebTurnRecoveryForServer(); }
 exports.runGlobalAgentIntentSelfTest = (0, global_agent_self_tests_1.createGlobalAgentIntentSelfTest)({ GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_DIRECT_DISPATCH_INTERNAL_PATTERN, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalDirectDispatchHandoff, buildGlobalSingleProjectMissionPayload, compactGlobalTestAgentReviewRelayEvent, createActionBlockSafeStreamer, formatGlobalDevelopmentDispatchVisibleResult, formatGlobalTaskDispatchVisibleResult, formatMissionStatus, hasExplicitGlobalWriteAuthorization, inferLocalGlobalAction, isGlobalProgressStatusRequest, localActionToAgenticDecision, mergeGlobalAgentMessages, renderGlobalDirectGroupDispatchAcceptedSummary, renderGlobalDirectGroupWorkOrder, renderGlobalDirectProjectWorkOrder });
 var global_agent_local_intent_1 = require("./global-agent-local-intent");
 Object.defineProperty(exports, "inferLocalGlobalAction", { enumerable: true, get: function () { return global_agent_local_intent_1.inferLocalGlobalAction; } });

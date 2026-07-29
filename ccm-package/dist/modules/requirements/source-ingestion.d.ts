@@ -1,8 +1,7 @@
-export declare const REQUIREMENT_SOURCE_SCHEMA = "ccm-requirement-source-ingestion-v1";
+import { type RequirementSourceEvidenceV2 } from "./source-evidence-v2";
+export declare const REQUIREMENT_SOURCE_SCHEMA = "ccm-requirement-source-ingestion-v2";
 export declare const REQUIREMENT_EXTRACTION_SCHEMA = "ccm-business-requirement-extraction-v1";
 export declare const REQUIREMENT_DECOMPOSITION_SCHEMA = "ccm-requirement-decomposition-v1";
-export declare const MAX_REQUIREMENT_SOURCE_CHARS = 20000;
-export declare const MAX_REQUIREMENT_TOTAL_CHARS = 60000;
 export declare const MAX_REQUIREMENT_FILE_BYTES: number;
 export declare const MAX_VISION_IMAGE_BYTES: number;
 export declare const MAX_ONLINE_DOCUMENT_BYTES: number;
@@ -12,6 +11,7 @@ type UploadedFile = {
     savedPath?: string;
     path?: string;
     size?: number;
+    required?: boolean;
 };
 export type RequirementSourceRecord = {
     id: string;
@@ -29,6 +29,12 @@ export type RequirementSourceRecord = {
     mime_type?: string;
     truncated?: boolean;
     error?: string;
+    checksum?: string;
+    required?: boolean;
+    snapshot_at?: string;
+    manifest?: any;
+    evidence_v2?: RequirementSourceEvidenceV2;
+    vision_receipt?: any;
 };
 export type BusinessRequirementExtraction = {
     schema: string;
@@ -40,6 +46,7 @@ export type BusinessRequirementExtraction = {
     risks: string[];
     clarification_questions: string[];
     source_evidence: string[];
+    source_evidence_v2?: RequirementSourceEvidenceV2[];
     extraction_method: "model" | "deterministic_fallback";
 };
 export type RequirementDecompositionItem = {
@@ -55,6 +62,7 @@ export type RequirementDecompositionItem = {
     suggested_agent_capabilities: string[];
     parallelizable: boolean;
     source_evidence: string[];
+    source_evidence_v2?: RequirementSourceEvidenceV2[];
 };
 export type RequirementDecompositionPlan = {
     schema: typeof REQUIREMENT_DECOMPOSITION_SCHEMA;
@@ -65,6 +73,7 @@ export type RequirementDecompositionPlan = {
     clarification_questions: string[];
     risks: string[];
     source_evidence: string[];
+    source_evidence_v2?: RequirementSourceEvidenceV2[];
     execution_order: "dag";
     content_hash: string;
     version: number;
@@ -84,6 +93,8 @@ export type RequirementIngestionResult = {
     decomposition: RequirementDecompositionPlan | null;
     content_hash: string;
     technical: any;
+    manifest?: any[];
+    coverage_receipt?: any;
 };
 export declare function validateRequirementDecomposition(value: any, options?: {
     contentHash?: string;
@@ -103,11 +114,19 @@ export declare function diffRequirementDecompositionPlans(previous: RequirementD
     has_changes: boolean;
 };
 export declare function htmlToText(html: string): string;
-export declare function assertPublicUrl(value: string): Promise<import("node:url").URL>;
+export declare function assertPublicUrl(value: string): Promise<{
+    url: import("node:url").URL;
+    addresses: {
+        address: string;
+        family: number;
+    }[];
+}>;
 export declare function fetchPublicDocument(urlValue: string): Promise<{
     response: any;
-    buffer: Buffer<any>;
+    buffer: Buffer<ArrayBufferLike>;
     finalUrl: string;
+    resolvedAddress: string;
+    redirectCount: number;
 }>;
 export declare function extractOnlineDocumentUrls(text: string): string[];
 /**
@@ -139,6 +158,7 @@ export declare function ingestRequirementSources(input?: {
     requirementConfig?: any;
     decomposeRequirement?: boolean;
     availableTargets?: any[];
+    sourceRequirements?: Record<string, boolean>;
 }): Promise<RequirementIngestionResult>;
 export declare function requirementToIntakeDraft(requirement: BusinessRequirementExtraction | null, fallback?: any): {
     requirement: any;
@@ -151,6 +171,7 @@ export declare function requirementToIntakeDraft(requirement: BusinessRequiremen
     risks: any;
     clarification_questions: string[];
     source_evidence: string[];
+    source_evidence_v2: RequirementSourceEvidenceV2[];
     extraction_method: string;
     generated_at: string;
 };

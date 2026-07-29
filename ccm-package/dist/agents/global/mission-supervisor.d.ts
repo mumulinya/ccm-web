@@ -1,3 +1,4 @@
+import { type GlobalRunTerminalReceiptV2, type GlobalTerminalDeliveryV1 } from "./global-terminal-delivery";
 export type GlobalMissionSupervisorStatus = "monitoring" | "paused" | "waiting_user" | "completed" | "failed" | "cancelled" | "manual_takeover";
 export interface GlobalMissionSupervisorRecord {
     version: 1;
@@ -26,6 +27,8 @@ export interface GlobalMissionSupervisorRecord {
     last_continuation?: any;
     final_report?: any;
     final_notification_sent_at?: string;
+    terminal_receipt?: GlobalRunTerminalReceiptV2 | null;
+    terminal_delivery_state?: string;
     error?: string;
 }
 export interface GlobalMissionSupervisorRuntime {
@@ -35,6 +38,7 @@ export interface GlobalMissionSupervisorRuntime {
     onCompleted?: (record: GlobalMissionSupervisorRecord, report: any) => Promise<void> | void;
     onProgress?: (record: GlobalMissionSupervisorRecord, event: any) => Promise<void> | void;
     onTerminal?: (record: GlobalMissionSupervisorRecord, outcome: "failed" | "cancelled", report: any) => Promise<void> | void;
+    deliverTerminal?: (record: GlobalMissionSupervisorRecord, receipt: GlobalRunTerminalReceiptV2, delivery: GlobalTerminalDeliveryV1) => Promise<void> | void;
     now?: () => number;
 }
 export declare function mergeGlobalMissionWaitingUserIncidents(existing?: any[], incoming?: any[], at?: string): any[];

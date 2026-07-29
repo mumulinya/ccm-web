@@ -178,7 +178,6 @@ const {
   seekTo,
   sendAgentMessage,
   sendToClaudeAgent,
-  sendToSimpleAgent,
   setAgentMessageContent,
   setAgentMessageResults,
   hasStreamingAgentMessage,

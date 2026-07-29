@@ -269,8 +269,8 @@ export function handleFeishuReactionFeedbackApi(pathname: string, req: any, res:
       : "";
   if (!action) return false;
   if (req.method !== "POST") return sendJson(res, { success: false, error: "Method Not Allowed" }, 405);
-  if (String(req.headers["x-ccm-acp"] || "") !== "1" || !isLoopbackAddress(req.socket?.remoteAddress)) {
-    return sendJson(res, { success: false, error: "仅允许本机 ACP 调用" }, 403);
+  if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "feishu-acp") {
+    return sendJson(res, { success: false, error: "仅允许签名飞书 ACP 调用" }, 403);
   }
   void readBoundedJson(req).then(payload => {
     const rawScope = String(payload.scope || "").trim();

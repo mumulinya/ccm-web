@@ -131,10 +131,22 @@ try {
 
   const guardedTask = collaboration.createTask({ title: '终态门禁', target_project: 'source-project', project_session_id: 'ps_guarded', workflow_type: 'project_main_agent', queue_scope: 'conversation_serial' })
   assert.throws(() => collaboration.updateTask(guardedTask.id, { status: 'done', status_detail: '直接完成' }), /缺少结构化最终验收证据/)
+  assert.throws(() => collaboration.updateTask(guardedTask.id, {
+    status: 'done',
+    status_detail: '仅通用摘要声称通过',
+    delivery_summary: { accepted: true, acceptance_gate_passed: true },
+  }), /缺少结构化最终验收证据/)
   const acceptedGuardedTask = collaboration.updateTask(guardedTask.id, {
     status: 'done',
-    status_detail: '结构化验收通过',
-    delivery_summary: { accepted: true, acceptance_gate_passed: true },
+    status_detail: '主 Agent最终验收通过',
+    main_agent_final_acceptance: {
+      schema: 'ccm-main-agent-final-acceptance-v1',
+      accepted: true,
+      mode: guardedTask.acceptance_policy_snapshot.mode,
+      acceptance_policy_checksum: guardedTask.acceptance_policy_snapshot.checksum,
+      review_checksum: 'not-required',
+      decided_at: new Date().toISOString(),
+    },
   })
   assert.equal(acceptedGuardedTask.acceptance_state, 'accepted')
   assert.equal(acceptedGuardedTask.terminal_decision.gate_passed, true)

@@ -332,8 +332,6 @@ const {
   })
 })
 
-const GLOBAL_SUPERVISION_CONTINUATION_PATTERN = /^(?:再)?(?:补充|继续(?:当前|这个|刚才|上面)?|接着(?:处理)?|目标调整|调整目标|改成|改为|换成|不要再|不再|先别|停止当前|忽略之前|重新规划|(?:这个任务|刚才的任务|上面的任务).{0,12}(?:继续|补充|调整|改|加|删|不要|停止|保留|只做))/i
-
 const currentSupervisedRunMessage = computed(() => {
   const rows = Array.isArray(messages.value) ? messages.value : []
   return [...rows].reverse().find(message => {
@@ -347,11 +345,9 @@ const currentSupervisedRunMessage = computed(() => {
   }) || null
 })
 
-const isExplicitSupervisionContinuation = (value = '') => GLOBAL_SUPERVISION_CONTINUATION_PATTERN.test(String(value || '').trim())
 const isSupervisionContinuationInput = computed(() => {
   return !isSending.value
-    && (Boolean(pendingGlobalMissionInput.value)
-      || (!!currentSupervisedRunMessage.value && isExplicitSupervisionContinuation(chatInput.value)))
+    && Boolean(pendingGlobalMissionInput.value)
 })
 
 const activeGlobalExecutionConfirmed = ref(false)
@@ -807,7 +803,7 @@ const {
   applyGlobalMissionPayload: (msg, payload) => applyGlobalMissionPayload(msg, payload),
   appendGlobalStreamEvent, saveHistory, scrollToBottom, globalTurnBusy, stoppingGlobalTurn,
   globalActiveRunId, globalStreamController, currentSessionId, globalTurnControl, currentSupervisedRunMessage,
-  activeGlobalRunMessage, activeGlobalExecutionConfirmed, isExplicitSupervisionContinuation,
+  activeGlobalRunMessage, activeGlobalExecutionConfirmed,
   pendingGlobalMissionInput, selectedFiles,
   chatInputElement, postJson: (url, body) => postJson(url, body), visibleGlobalText, isSending,
   pendingGlobalClarificationInput, createNewSession, pendingGlobalRequestRetry, globalRequestRetrySignature,
@@ -952,11 +948,36 @@ onMounted(() => {
   loadHistory()
   void loadFeishuSessionState()
   void loadGlobalTools(false)
-  unsubscribeFeishuSessionEvents = subscribeRuntimeEvents(['feishu'], event => {
+  unsubscribeFeishuSessionEvents = subscribeRuntimeEvents(['feishu', 'music'], event => {
     if (event?.type === 'feishu.session_binding_changed'
       || event?.type === 'feishu.session_title_changed'
       || event?.type === 'feishu.inbound') {
       void loadFeishuSessionState()
+    }
+    if (event?.topic === 'music' && String(event?.type || '').startsWith('music.playback.')) {
+      const commandId = String(event?.data?.commandId || event?.data?.command_id || '')
+      const sessionId = String(event?.data?.sessionId || event?.data?.session_id || '')
+      if (!commandId || !sessionId) return
+      const session = sessions.value.find(item => item.id === sessionId)
+      const message = [...(session?.messages || [])].reverse().find(item =>
+        (item?.agenticRun?.client_effects || []).some(effect =>
+          effect?.type === 'play_music' && String(effect?.params?.command_id || '') === commandId))
+      if (!message) return
+      const status = String(event?.data?.status || '')
+      const title = String(event?.data?.title || '音乐')
+      message.content = status === 'completed'
+        ? `正在播放：${title}`
+        : status === 'needs_user_gesture'
+          ? `已准备好：${title}。浏览器需要你点击一次播放按钮。`
+          : status === 'superseded'
+            ? `原点歌请求已被更新的播放请求替代：${title}`
+            : status === 'cancelled'
+              ? `已取消播放：${title}`
+              : status === 'failed'
+                ? `播放失败：${event?.data?.reason || title}`
+                : message.content
+      message.updatedAt = event.at || new Date().toISOString()
+      saveHistory()
     }
   })
   loadQualitySnapshot()

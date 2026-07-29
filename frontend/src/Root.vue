@@ -10,10 +10,29 @@ const registrationEnabled = ref(false)
 const firstInstall = ref(false)
 const loginTheme = ref('command')
 const user = ref(null)
+let csrfToken = ''
+let capabilities = []
 const authSlow = ref(false)
 let authSlowTimer = null
 const LOGIN_PATH = '/login'
 const RETURN_TO_KEY = 'ccm:auth:return-to'
+
+const nativeFetch = window.fetch.bind(window)
+if (!window.__CCM_SECURE_FETCH_INSTALLED__) {
+  window.__CCM_SECURE_FETCH_INSTALLED__ = true
+  window.fetch = async (input, init = {}) => {
+    const request = input instanceof Request ? input : null
+    const method = String(init.method || request?.method || 'GET').toUpperCase()
+    const rawUrl = request?.url || String(input || '')
+    const target = new URL(rawUrl, window.location.origin)
+    const headers = new Headers(request?.headers || {})
+    new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value))
+    if (target.origin === window.location.origin && !['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('X-CCM-CSRF', csrfToken)
+    const response = await nativeFetch(input, { ...init, headers })
+    if (target.origin === window.location.origin && response.status === 401 && !target.pathname.startsWith('/api/auth/')) window.dispatchEvent(new CustomEvent('ccm-auth-expired'))
+    return response
+  }
+}
 
 const applyStoredThemeBeforeAuth = () => {
   const preset = localStorage.getItem('theme-preset') || 'default'
@@ -62,6 +81,11 @@ const applySession = data => {
   firstInstall.value = data?.first_install === true
   loginTheme.value = data?.login_theme || 'command'
   user.value = data?.user || null
+  csrfToken = String(data?.csrf || data?.session?.csrf || '')
+  capabilities = Array.isArray(data?.capabilities) ? data.capabilities : []
+  window.__CCM_AUTH__ = { user: user.value, capabilities, csrf: csrfToken }
+  document.documentElement.setAttribute('data-auth-role', user.value?.role || 'anonymous')
+  window.dispatchEvent(new CustomEvent('ccm-auth-changed', { detail: window.__CCM_AUTH__ }))
 }
 
 const loadSession = async () => {
@@ -87,7 +111,7 @@ const loadSession = async () => {
 }
 
 const handleAuthenticated = data => {
-  applySession({ authenticated: true, registration_enabled: data.registration_enabled, first_install: data.first_install, login_theme: data.login_theme, user: data.user })
+  applySession({ authenticated: true, registration_enabled: data.registration_enabled, first_install: data.first_install, login_theme: data.login_theme, user: data.user, csrf: data.csrf, capabilities: data.capabilities })
   restoreAuthenticatedRoute()
 }
 

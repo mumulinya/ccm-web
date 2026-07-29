@@ -4,6 +4,8 @@
 
 TestAgent 是独立验收 Agent，不是第二个开发 Agent。它可以像开发 Agent 一样读取当前源码、选择检查、运行命令和使用 Playwright，但不能编辑业务代码、测试代码、配置或依赖，也不能为了让结果通过而降低断言。
 
+全局开关只在任务创建时读取一次，并固化为带checksum的任务级验收策略。关闭后不会启动TestAgent，而是由群聊或项目主Agent执行一次结构化自验：只运行项目已配置的安全验证命令，模型只能分析真实证据ID，最终通过由确定性门禁计算。完整流程见[TestAgent独立验收与主Agent自验](../confirmed-business-processes/TEST-AGENT-AND-MAIN-AGENT-SELF-VERIFICATION.md)。
+
 ## 执行流程
 
 1. 群聊主 Agent或项目主 Agent将用户目标、验收标准、变更文件和受控交付工作区交给 TestAgent。
@@ -13,7 +15,7 @@ TestAgent 是独立验收 Agent，不是第二个开发 Agent。它可以像开�
 5. 现有确定性执行器实际运行命令、HTTP 和浏览器检查，收集退出码、输出、动作前后截图、断言截图引用、控制台、网络及工具调用证据。
 6. 出现失败、阻断或没有证据时，模型可以基于真实结果补充一轮聚焦命令和浏览器检查；已执行检查不得重复，补充检查只作为诊断证据，不能篡改首轮冻结计划。
 7. 现有证据门禁计算通过、返工或需要人工判断。模型没有最终裁决权。
-8. 智能模型不可用或规划失败时，TestAgent 自动回退到原有确定性检查计划，不伪造验证结果。
+8. 智能模型不可用、规划失败或验收标准未被完整覆盖时，TestAgent 整体进入阻塞；只执行用户已明确配置的结构化测试目标，不用正则或关键词生成替代计划。
 
 ## 风险分级与失败路由
 
@@ -51,9 +53,9 @@ TestAgent 是独立验收 Agent，不是第二个开发 Agent。它可以像开�
 
 - 可以：读取当前代码、识别变更范围、选择已有测试/构建命令、设计 Playwright 操作与断言、检查 HTTP、截图、控制台和网络错误。
 - 不可以：修改任何项目文件、安装依赖、提交代码、执行写入型 Git 命令、访问未授权生产 URL、绕过证据门禁。
-- 所有任务默认保留原始 TestAgent 报告、Verdict 和 artifact manifest，可供群聊主 Agent 抽查。
+- 使用独立TestAgent模式的任务保留原始报告、Verdict 和 artifact manifest，可供对应主 Agent抽查；关闭TestAgent的任务只保存主 Agent自验证据，不伪造TestAgent报告。
 - 主 Agent通过签名 `get_test_evidence` MCP工具按 task、run和 artifact ID读取截图或文本证据；MCP不能跨任务读取，也不能修改证据。
-- 浏览器验收工单支持显式 `browser_scenarios`；生产执行会从验收标准生成具体交互流程，并保持每条标准与动作、断言、截图的来源关系。
+- 浏览器验收工单支持显式 `browser_scenarios`；自然语言验收标准必须先由模型生成结构化交互流程，并保持每条标准与动作、断言、截图的来源关系。
 
 该智能模式由群聊和项目主 Agent的正式 TestAgent验收工作单默认启用；测试脚本和低层直接调用只有显式设置 `agenticPlanning: true` 才启用，避免测试套件意外调用付费模型。
 

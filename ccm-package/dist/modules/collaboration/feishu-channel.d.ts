@@ -1,3 +1,4 @@
+import { type FeishuAgentTargetType } from "./feishu-conversation-v2";
 type FeishuDestination = {
     chat_id: string;
     open_id: string;
@@ -8,6 +9,10 @@ type FeishuDestination = {
     message_id: string;
     root_message_id: string;
     thread_id: string;
+    conversation_key_v2?: string;
+    app_fingerprint?: string;
+    target_type?: FeishuAgentTargetType;
+    project_id?: string;
 };
 type FeishuChannelAlertHandler = (payload: {
     role: string;
@@ -24,6 +29,9 @@ export declare function bindFeishuTaskContext(input: {
     missionIds?: any[];
     taskIds?: any[];
     source?: string;
+    targetType?: FeishuAgentTargetType | "group" | "group_session";
+    projectId?: string;
+    originReceipt?: any;
 }): {
     id: any;
     session_ids: string[];
@@ -39,6 +47,11 @@ export declare function bindFeishuTaskContext(input: {
     latest_message_id: any;
     root_message_id: any;
     thread_id: any;
+    conversation_key_v2: any;
+    app_fingerprint: any;
+    target_type: string;
+    project_id: string;
+    origin_receipt: any;
     active_card_key: any;
     active_session_id: any;
     source: any;
@@ -69,6 +82,11 @@ export declare function bindFeishuIdentifiersFromValue(sessionId: string, value:
     latest_message_id: any;
     root_message_id: any;
     thread_id: any;
+    conversation_key_v2: any;
+    app_fingerprint: any;
+    target_type: string;
+    project_id: string;
+    origin_receipt: any;
     active_card_key: any;
     active_session_id: any;
     source: any;

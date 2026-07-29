@@ -27,6 +27,7 @@ const env = {
   CCM_TASK_STORE_DIR: dataDir,
   CCM_SERVER_LOCK_FILE: lockFile,
   CCM_DISABLE_NODE_PTY: '1',
+  CCM_DISABLE_LOCAL_EMBEDDING_STARTUP_PREPARE: '1',
   NO_COLOR: '1',
 }
 const run = args => execFileSync(process.execPath, [cli, ...args], {
@@ -42,14 +43,17 @@ try {
   assert.equal(pty.degraded, true)
 
   assert.match(run(['start', '--background', '--port', String(port)]), /STARTED/)
+  assert.equal((await fetch(`http://127.0.0.1:${port}/api/auth/session`)).status, 200)
+  const setupCode = fs.readFileSync(path.join(dataDir, 'auth', 'setup-code.txt'), 'utf8').trim()
   const registration = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `fallback_${Date.now().toString(36)}`, password: `Fallback-${Date.now()}-Safe` }),
+    body: JSON.stringify({ username: `fallback_${Date.now().toString(36)}`, password: `Fallback-${Date.now()}-Safe`, setup_code: setupCode }),
   })
   assert.equal(registration.status, 201)
+  const registrationData = await registration.json()
   const cookie = String(registration.headers.get('set-cookie') || '').split(';')[0]
   const request = (pathname, options = {}) => fetch(`http://127.0.0.1:${port}${pathname}`, {
-    ...options, headers: { ...(options.headers || {}), Cookie: cookie },
+    ...options, headers: { ...(options.headers || {}), Cookie: cookie, ...(!['GET', 'HEAD', 'OPTIONS'].includes(String(options.method || 'GET').toUpperCase()) ? { 'X-CCM-CSRF': registrationData.csrf || registrationData.session?.csrf } : {}) },
   })
 
   const shells = await request('/api/terminal/shells').then(response => response.json())

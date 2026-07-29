@@ -12,7 +12,6 @@ export function useGlobalAgentMessaging(context) {
     applyGlobalMissionPayload, appendGlobalStreamEvent, saveHistory, scrollToBottom, globalTurnBusy,
     stoppingGlobalTurn, globalActiveRunId, globalStreamController, currentSessionId, globalTurnControl,
     currentSupervisedRunMessage, activeGlobalRunMessage, activeGlobalExecutionConfirmed,
-    isExplicitSupervisionContinuation,
     pendingGlobalMissionInput, selectedFiles, chatInputElement, postJson, visibleGlobalText, isSending,
     pendingGlobalClarificationInput, createNewSession, materializeCurrentSession, pendingGlobalRequestRetry, globalRequestRetrySignature,
     ensureGlobalStreamMessage, sanitizeGlobalVisibleStreamText, GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN,
@@ -322,18 +321,6 @@ const sendMessage = async (options = {}) => {
   if (globalTurnBusy.value && !queuedTurn && !pendingGlobalMissionInput.value && !pendingGlobalClarificationInput.value) return submitGlobalMessageWhileBusy()
   if (!queuedTurn && !chatInput.value.trim() && selectedFiles.value.length === 0) return
   if (pendingGlobalMissionInput.value) return sendGlobalMissionInput()
-  const supervisionTarget = currentSupervisedRunMessage.value
-  if (
-    selectedFiles.value.length === 0
-    && supervisionTarget?.agenticRun?.id
-    && isExplicitSupervisionContinuation(chatInput.value)
-  ) {
-    return sendGlobalRunSteer({
-      runId: supervisionTarget.agenticRun.id,
-      agentMsg: supervisionTarget,
-      supervision: true,
-    })
-  }
   if (!currentSession.value) {
     createNewSession()
   }
@@ -475,6 +462,15 @@ const sendMessage = async (options = {}) => {
             agentMsg.content += sanitizeGlobalVisibleStreamText(chunkText)
           }
           scrollToBottom()
+        } else if (data.type === 'queued') {
+          globalResultReceived = true
+          ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
+          agentMsg.content = `当前会话已有一轮正在处理，这条消息已排在第 ${Number(data.queue_position || 1)} 位，完成后会自动继续。`
+          agentMsg.streaming = false
+          agentMsg.type = 'global_agent_queued'
+          agentMsg.turnId = data.turn_id || ''
+          agentMsg.queueScope = data.queue_scope || ''
+          agentMsg.queuePosition = Number(data.queue_position || 1)
         } else if (data.type === 'result') {
           globalResultReceived = true
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)

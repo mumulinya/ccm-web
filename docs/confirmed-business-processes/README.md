@@ -6,6 +6,9 @@
 
 ## 已确认流程
 
+- [本地认证、RBAC与访问安全](./LOCAL-AUTH-RBAC-ACCESS-SECURITY.md)
+- [开发 Agent 认证与可用性 V2](./DEVELOPMENT-AGENT-AUTHENTICATION-V2.md)
+
 | 业务流程 | 当前状态 | 文档 |
 | --- | --- | --- |
 | 群聊项目子 Agent 跨项目协作 | 已实现、已启用签名与精确会话门禁 | [项目子 Agent 协作流程](./PROJECT-CHILD-AGENT-COLLABORATION.md) |
@@ -15,6 +18,11 @@
 | Agent MCP/Skill注册与继承 | 已实现全局、群聊、项目主Agent工具调用，以及项目子Agent签名快照、原生注册和精确作用域复验 | [Agent MCP与Skill注册继承流程](./AGENT-MCP-SKILL-INHERITANCE.md) |
 | 全链路模型语义路由 | 已实现统一模型决策、跨Agent选人、TestAgent语义计划、模型记忆提取、结构化验收与失败回执 | [全链路模型语义路由完整业务流程](./MODEL-SEMANTIC-ROUTING-END-TO-END.md) |
 | 知识库召回与本地Embedding V3 | 已实现真实本地/远程语义候选、generation索引、作用域门禁、Token预算和加密凭据 | [知识库召回与本地Embedding V3](./KNOWLEDGE-RETRIEVAL-EMBEDDING-V3.md) |
+| 音乐意图识别与统一播放器V2 | 已实现模型语义意图、唯一播放决定、latest-wins持久队列、浏览器原子领取和精确来源回执 | [音乐意图识别与统一播放器V2](./MUSIC-INTENT-UNIFIED-PLAYBACK-V2.md) |
+| TestAgent独立验收与主Agent自验 | 已实现任务级不可变模式快照、真实自验证据、失败关闭和模式匹配终态门禁 | [TestAgent独立验收与主Agent自验](./TEST-AGENT-AND-MAIN-AGENT-SELF-VERIFICATION.md) |
+| 飞书全局与项目Agent双向会话V2 | 已实现双入口、精确话题身份、跨传输幂等、原消息队列恢复和原路投递；群聊不再直连飞书 | [飞书全局与项目Agent双向会话V2](./FEISHU-GLOBAL-PROJECT-BIDIRECTIONAL-V2.md) |
+| 全局Agent运行体系V2 | 已实现服务端权威精确会话队列、单轮写授权、完整轮次正式压缩、Mission监督和终态持久投递 | [全局Agent运行体系V2](./GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md) |
+| 需求池、文档、图片与附件摄取V2 | 已实现流式上传、固定IP公网读取、完整Token分片、来源证据门禁、需求池原子认领和孤立附件清理 | [需求资料摄取完整流程V2](./REQUIREMENT-INGESTION-END-TO-END-V2.md) |
 
 ## 收录规则
 

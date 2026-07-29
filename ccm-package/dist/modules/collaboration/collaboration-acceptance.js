@@ -669,14 +669,22 @@ function buildDeliverySummary(task, execution, finalStatus) {
     const agents = (0, collaboration_1.uniqueStrings)(receipts.map((receipt) => receipt.agent), workerNotifications.map((item) => item.task_id), assignmentEvidence.map((item) => item.project));
     const actualFilePaths = (0, collaboration_1.uniqueStrings)(actualFileChanges.map((file) => file.path));
     const filesChanged = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.filesChanged), actualFilePaths);
-    const verification = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.verification));
+    const verification = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.verification), ...(Array.isArray(task?.main_agent_self_verification?.verification_results)
+        ? task.main_agent_self_verification.verification_results
+            .filter((item) => item?.status === "passed" && Number(item?.exit_code ?? 0) === 0)
+            .map((item) => item.command || item.id)
+        : []));
     const verificationGate = (0, collaboration_1.getVerificationEvidenceGate)(receipts);
     const requiredVerificationCoverage = (0, collaboration_1.getRequiredVerificationCoverage)(receipts);
+    const selfVerificationReceipt = task?.main_agent_self_verification || execution?.mainAgentSelfVerification || execution?.main_agent_self_verification || null;
+    const selfVerificationCommands = (Array.isArray(selfVerificationReceipt?.verification_results) ? selfVerificationReceipt.verification_results : [])
+        .filter((item) => item?.status === "passed" && Number(item?.exit_code ?? 0) === 0)
+        .map((item) => item.command || item.id);
     const externalRunnerVerification = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => (Array.isArray(receipt.verificationResults || receipt.verification_results) ? (receipt.verificationResults || receipt.verification_results) : [])
         .filter((item) => String(item?.status || "").toLowerCase() === "passed"
         && ["ccm_runner", "ccm_runner_verification", "external_runner"].includes(String(item?.source || "").toLowerCase())
         && (item.exitCode == null || Number(item.exitCode) === 0))
-        .map((item) => item.command || item.name)));
+        .map((item) => item.command || item.name)), selfVerificationCommands);
     const projectAgentProfiles = agents
         .map((agent) => (0, collaboration_1.getProjectAgentCapabilityProfile)(agent))
         .filter((profile) => profile.configured);
@@ -1013,7 +1021,13 @@ function buildDeliverySummary(task, execution, finalStatus) {
     const acceptedAgentQa = taskAgentQa.filter((item) => item.acceptance?.accepted === true);
     const resumedAgentQa = taskAgentQa.filter((item) => item.status === "resumed" || item.resumed_at);
     const agentQaRequired = (0, collaboration_1.taskRequiresAgentQa)(task);
-    const independentReviewGate = buildIndependentReviewGate(task, actualFileChanges, receiptEvidence, taskAgentQa);
+    const selfVerificationMode = String(task?.acceptance_policy_snapshot?.mode || task?.acceptance_mode || "") === "main_agent_self_verification";
+    const selfVerificationGatePassed = selfVerificationMode
+        && task?.main_agent_self_verification?.canAccept === true
+        && task?.main_agent_self_verification?.deterministic_gate?.pass === true;
+    const independentReviewGate = selfVerificationMode
+        ? { required: false, pass: true, status: "not_required", reason: "当前任务按固定策略使用主 Agent 自验", evidence: [] }
+        : buildIndependentReviewGate(task, actualFileChanges, receiptEvidence, taskAgentQa);
     const postReviewSpotCheckGate = (0, post_review_spot_check_1.buildPostReviewSpotCheckGate)({
         required: independentReviewGate.required && independentReviewGate.pass,
         receipts: receiptEvidence,
@@ -1184,7 +1198,7 @@ function buildDeliverySummary(task, execution, finalStatus) {
         actual_file_change_count: actualFileChanges.length,
         has_actual_file_changes: actualFileChanges.length > 0,
         verification,
-        verification_executed: verificationGate.executed,
+        verification_executed: (0, collaboration_1.uniqueStrings)(verificationGate.executed, selfVerificationCommands),
         verification_suggested: verificationGate.suggested,
         verification_failed: verificationGate.failed,
         verification_required: requiredVerificationCoverage.required,
@@ -1199,10 +1213,11 @@ function buildDeliverySummary(task, execution, finalStatus) {
         ],
         verification_source_gate_passed: !(0, collaboration_1.taskRequiresVerification)(task)
             || externalRunnerVerification.length > 0
-            || independentVerificationSourcePassed,
-        has_executed_verification: verificationGate.executed.length > 0,
-        verification_required_gate_passed: requiredVerificationCoverage.pass,
-        verification_gate_passed: verificationGate.pass && requiredVerificationCoverage.pass,
+            || independentVerificationSourcePassed
+            || selfVerificationGatePassed,
+        has_executed_verification: verificationGate.executed.length > 0 || selfVerificationCommands.length > 0,
+        verification_required_gate_passed: selfVerificationMode ? selfVerificationGatePassed : requiredVerificationCoverage.pass,
+        verification_gate_passed: selfVerificationMode ? selfVerificationGatePassed : verificationGate.pass && requiredVerificationCoverage.pass,
         independent_review_required: independentReviewGate.required,
         independent_review_gate: independentReviewGate,
         independent_review_gate_passed: independentReviewGate.pass,

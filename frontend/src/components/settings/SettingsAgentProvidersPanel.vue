@@ -18,6 +18,8 @@ const modelOptions = ref({ codex: [], cursor: [], gemini: [], opencode: [], clau
 const modelMetadata = ref({ codex: {}, cursor: {}, gemini: {}, opencode: {}, claudecode: {} })
 const modelLoading = ref({ codex: false, cursor: false, gemini: false, opencode: false, claudecode: false })
 const customModelMode = ref({ codex: false, cursor: false, gemini: false, opencode: false, claudecode: false })
+const modelRequestGeneration = { codex: 0, cursor: 0, gemini: 0, opencode: 0, claudecode: 0 }
+const openCodeLoginProvider = ref('openai')
 const installPollTimers = new Map()
 const installCompletionReceipts = new Set()
 const loginPollTimers = new Map()
@@ -51,10 +53,12 @@ const stateLabel = status => {
   if (!status?.installed) return '未安装'
   if (status.authState === 'logged_in') return '已登录'
   if (status.authState === 'configured') return '已配置'
+  if (status.authState === 'credential_detected') return '待验证'
   return '待认证'
 }
 
 const isReady = status => status?.installed && ['logged_in', 'configured'].includes(status?.authState)
+const canTest = status => status?.installed && ['logged_in', 'configured', 'credential_detected'].includes(status?.authState)
 const isLoginActive = provider => ['starting', 'awaiting_browser', 'awaiting_code', 'exchanging'].includes(loginSessions.value[provider]?.status)
 
 const providerLabel = provider => providerCatalog.value.find(item => item.id === provider)?.label || provider
@@ -198,7 +202,9 @@ const copyLoginCode = async provider => {
 }
 
 const loadProviderModels = async provider => {
+  const generation = ++modelRequestGeneration[provider]
   if (provider !== 'claudecode' && statuses.value[provider]?.authState !== 'logged_in') {
+    if (generation !== modelRequestGeneration[provider]) return
     modelOptions.value[provider] = []
     modelMetadata.value[provider] = { source: 'unavailable', error: '完成登录后才能读取当前账号的可用模型' }
     modelLoading.value[provider] = false
@@ -210,10 +216,12 @@ const loadProviderModels = async provider => {
     const response = await fetch(`/api/system/agent-providers/${provider}/models`)
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '读取模型失败')
+    if (generation !== modelRequestGeneration[provider]) return
     modelOptions.value[provider] = data.models || []
     modelMetadata.value[provider] = { source: data.source || 'unavailable', error: data.error || '', detail: data.detail || '', allowsCustom: data.allowsCustom !== false }
     syncCustomModelMode(provider)
   } catch (error) {
+    if (generation !== modelRequestGeneration[provider]) return
     modelOptions.value[provider] = []
     modelMetadata.value[provider] = { source: 'unavailable', error: error?.message || '读取模型列表失败' }
     syncCustomModelMode(provider)
@@ -222,7 +230,7 @@ const loadProviderModels = async provider => {
   }
 }
 
-const load = async (force = false, quiet = false) => {
+const load = async (force = false, quiet = false, loadModels = true) => {
   if (force && !quiet) checking.value = true
   else if (!force) loading.value = true
   try {
@@ -249,7 +257,7 @@ const load = async (force = false, quiet = false) => {
         manualCommands.value = next
       }
     }
-    void Promise.all(['codex', 'cursor', 'gemini', 'opencode', 'claudecode'].map(loadProviderModels))
+    if (loadModels) void Promise.all(['codex', 'cursor', 'gemini', 'opencode', 'claudecode'].map(loadProviderModels))
     if (force && !quiet) toast.success('Agent 状态已更新')
   } catch (error) {
     toast.error(error?.message || '读取开发 Agent 配置失败')
@@ -363,7 +371,10 @@ const testProvider = async provider => {
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || 'Agent 可用性测试失败')
     testResults.value = { ...testResults.value, [provider]: data.test }
-    if (data.test?.usable) toast.success(`${providerLabel(provider)} 可以正常使用`)
+    if (data.test?.usable) {
+      toast.success(`${providerLabel(provider)} 可以正常使用`)
+      await load(true, true, true)
+    }
     else toast.error(data.test?.detail || `${providerLabel(provider)} 当前不可用`)
   } catch (error) {
     testResults.value = { ...testResults.value, [provider]: { usable: false, detail: error?.message || 'Agent 可用性测试失败', checkedAt: new Date().toISOString() } }
@@ -393,7 +404,11 @@ const login = async provider => {
   const popup = createLoginPopup(provider)
   actionProvider.value = provider
   try {
-    const response = await fetch(`/api/system/agent-providers/${provider}/login`, { method: 'POST' })
+    const response = await fetch(`/api/system/agent-providers/${provider}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(provider === 'opencode' ? { provider_id: openCodeLoginProvider.value } : {})
+    })
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '无法启动登录')
     updateLoginSession(provider, data)
@@ -444,7 +459,10 @@ const logout = async provider => {
     const response = await fetch(`/api/system/agent-providers/${provider}/logout`, { method: 'POST' })
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '退出登录失败')
-    if (data.manual) {
+    if (data.partial) {
+      toast.error(`${label} 已退出当前凭据，但仍检测到：${(data.remainingCredentialSources || []).join('、')}`)
+      await load(true)
+    } else if (data.manual) {
       await rememberManualCommand(provider, data.command)
       toast.success(`服务器退出命令已显示并尝试复制，请在 SSH 终端执行`)
     } else if (data.interactive) toast.success(`已打开 ${label} 认证管理窗口，完成后点击“重新检查”`)
@@ -481,13 +499,13 @@ const clearClaudeKey = async () => {
 }
 
 onMounted(async () => {
-  await load()
+  await load(false, false, false)
   for (const [provider, status] of Object.entries(statuses.value)) {
     if (status?.install?.status === 'running') pollInstallStatus(provider)
   }
   // 首屏用缓存秒开后，静默做一次强制复检：外部终端里的 CLI 登录/登出
   // 不会触发服务端缓存失效，这里主动等一轮真实探测纠正过期状态
-  void load(true, true)
+  void load(true, true, true)
 })
 onBeforeUnmount(() => {
   for (const provider of installPollTimers.keys()) stopInstallPolling(provider)
@@ -561,6 +579,18 @@ onBeforeUnmount(() => {
             >
             <span v-if="hasModelCatalog(provider.id)" class="settings-field-hint model-catalog-ok">{{ modelMetadata[provider.id]?.detail || `当前账号返回 ${modelOptions[provider.id].filter(model => model.id).length} 个可用模型，修改后应用于后续任务。` }}</span>
             <span v-else class="settings-field-hint">{{ modelLoading[provider.id] ? '正在读取当前账号与本机 CLI 的模型目录...' : (modelMetadata[provider.id]?.error || '当前 Agent 无法枚举模型，可留空使用自动模式或手动填写模型 ID。') }}</span>
+            <template v-if="provider.id === 'opencode' && statuses.opencode?.authState !== 'logged_in'">
+              <label for="opencode-login-provider">登录 Provider</label>
+              <select id="opencode-login-provider" v-model="openCodeLoginProvider" class="settings-input">
+                <option value="">由 OpenCode 交互选择</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="google">Google</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="github-copilot">GitHub Copilot</option>
+              </select>
+              <span class="settings-field-hint">登录只作用于所选OpenCode Provider，不会清除其他Provider。</span>
+            </template>
           </div>
           <div class="agent-provider-controls">
             <label class="settings-switch" :aria-label="`启用 ${provider.label}`">
@@ -579,7 +609,7 @@ onBeforeUnmount(() => {
             <button v-else type="button" class="settings-button" :disabled="actionProvider === provider.id || testingProvider === provider.id" @click="logout(provider.id)">
               <LogOut :size="15" /> 退出
             </button>
-            <button v-if="isReady(statuses[provider.id])" type="button" class="settings-button provider-test-button" :disabled="testingProvider === provider.id || actionProvider === provider.id" :title="`使用当前模型测试 ${provider.label}，可能产生少量 Provider 用量`" @click="testProvider(provider.id)">
+            <button v-if="canTest(statuses[provider.id])" type="button" class="settings-button provider-test-button" :disabled="testingProvider === provider.id || actionProvider === provider.id" :title="`使用当前模型测试 ${provider.label}，可能产生少量 Provider 用量`" @click="testProvider(provider.id)">
               <RefreshCw v-if="testingProvider === provider.id" :size="15" class="provider-spin" />
               <FlaskConical v-else :size="15" /> {{ testingProvider === provider.id ? '测试中' : '测试' }}
             </button>
@@ -693,7 +723,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="settings-panel-actions provider-form-actions">
             <button v-if="config.claudecode.credentialProtected" type="button" class="settings-button danger" :disabled="saving" @click="clearClaudeKey"><LogOut :size="15" /> 移除密钥</button>
-            <button v-if="isReady(statuses.claudecode)" type="button" class="settings-button" :disabled="testingProvider === 'claudecode'" title="使用当前模型测试 Claude Code API，可能产生少量 Provider 用量" @click="testProvider('claudecode')">
+            <button v-if="canTest(statuses.claudecode)" type="button" class="settings-button" :disabled="testingProvider === 'claudecode'" title="使用当前模型测试 Claude Code API，可能产生少量 Provider 用量" @click="testProvider('claudecode')">
               <RefreshCw v-if="testingProvider === 'claudecode'" :size="15" class="provider-spin" />
               <FlaskConical v-else :size="15" /> {{ testingProvider === 'claudecode' ? '测试中' : '测试 Agent' }}
             </button>

@@ -47309,13 +47309,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
-    outcome?: "failed" | "passed" | "blocked" | "partial";
+    outcome?: "failed" | "passed" | "partial" | "blocked";
     recommendation?: "accept" | "rework" | "need_human";
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "failed" | "passed" | "blocked" | "partial";
+        status?: "failed" | "passed" | "partial" | "blocked";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         risks?: string[];
@@ -47331,6 +47331,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
+        canAccept?: boolean;
         requiredCheckSummary?: {
             unknown?: z.objectOutputType<{
                 check: z.ZodString;
@@ -47412,7 +47413,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
-        canAccept?: boolean;
         browserEvidenceTemporalIntegrity?: {
             status?: "invalid" | "complete";
             items?: {
@@ -47933,7 +47933,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            status?: "failed" | "missing" | "verified" | "blocked" | "unlinked" | "waived";
             failed?: number;
             passed?: number;
             blocked?: number;
@@ -47967,7 +47967,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         acceptanceEvidenceGateSummary?: {
-            status?: "failed" | "not_applicable" | "verified" | "incomplete" | "weak";
+            status?: "failed" | "verified" | "not_applicable" | "incomplete" | "weak";
             unknown?: number;
             none?: number;
             verified?: number;
@@ -47975,8 +47975,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            notVerified?: number;
             canAccept?: boolean;
+            notVerified?: number;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -48147,10 +48147,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     } & {
         [k: string]: unknown;
     };
+    canAccept?: boolean;
     report?: Record<string, any>;
     finishedAt?: string;
     durationMs?: number;
-    canAccept?: boolean;
     invocationId?: string;
     inputValidation?: {
         valid?: boolean;
@@ -48214,13 +48214,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
-    outcome?: "failed" | "passed" | "blocked" | "partial";
+    outcome?: "failed" | "passed" | "partial" | "blocked";
     recommendation?: "accept" | "rework" | "need_human";
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "failed" | "passed" | "blocked" | "partial";
+        status?: "failed" | "passed" | "partial" | "blocked";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         risks?: string[];
@@ -48236,6 +48236,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
+        canAccept?: boolean;
         requiredCheckSummary?: {
             unknown?: z.objectInputType<{
                 check: z.ZodString;
@@ -48317,7 +48318,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
-        canAccept?: boolean;
         browserEvidenceTemporalIntegrity?: {
             status?: "invalid" | "complete";
             items?: {
@@ -48838,7 +48838,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            status?: "failed" | "missing" | "verified" | "blocked" | "unlinked" | "waived";
             failed?: number;
             passed?: number;
             blocked?: number;
@@ -48872,7 +48872,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         acceptanceEvidenceGateSummary?: {
-            status?: "failed" | "not_applicable" | "verified" | "incomplete" | "weak";
+            status?: "failed" | "verified" | "not_applicable" | "incomplete" | "weak";
             unknown?: number;
             none?: number;
             verified?: number;
@@ -48880,8 +48880,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            notVerified?: number;
             canAccept?: boolean;
+            notVerified?: number;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -49052,10 +49052,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     } & {
         [k: string]: unknown;
     };
+    canAccept?: boolean;
     report?: Record<string, any>;
     finishedAt?: string;
     durationMs?: number;
-    canAccept?: boolean;
     invocationId?: string;
     inputValidation?: {
         valid?: boolean;
@@ -49119,13 +49119,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
-    outcome?: "failed" | "passed" | "blocked" | "partial";
+    outcome?: "failed" | "passed" | "partial" | "blocked";
     recommendation?: "accept" | "rework" | "need_human";
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "failed" | "passed" | "blocked" | "partial";
+        status?: "failed" | "passed" | "partial" | "blocked";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         risks?: string[];
@@ -49141,6 +49141,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
+        canAccept?: boolean;
         requiredCheckSummary?: {
             unknown?: z.objectOutputType<{
                 check: z.ZodString;
@@ -49222,7 +49223,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
-        canAccept?: boolean;
         browserEvidenceTemporalIntegrity?: {
             status?: "invalid" | "complete";
             items?: {
@@ -49743,7 +49743,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            status?: "failed" | "missing" | "verified" | "blocked" | "unlinked" | "waived";
             failed?: number;
             passed?: number;
             blocked?: number;
@@ -49777,7 +49777,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         acceptanceEvidenceGateSummary?: {
-            status?: "failed" | "not_applicable" | "verified" | "incomplete" | "weak";
+            status?: "failed" | "verified" | "not_applicable" | "incomplete" | "weak";
             unknown?: number;
             none?: number;
             verified?: number;
@@ -49785,8 +49785,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            notVerified?: number;
             canAccept?: boolean;
+            notVerified?: number;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -49957,10 +49957,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     } & {
         [k: string]: unknown;
     };
+    canAccept?: boolean;
     report?: Record<string, any>;
     finishedAt?: string;
     durationMs?: number;
-    canAccept?: boolean;
     invocationId?: string;
     inputValidation?: {
         valid?: boolean;
@@ -50024,13 +50024,13 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     error?: string;
     schema?: "ccm-test-agent-invocation-result-v1";
     startedAt?: string;
-    outcome?: "failed" | "passed" | "blocked" | "partial";
+    outcome?: "failed" | "passed" | "partial" | "blocked";
     recommendation?: "accept" | "rework" | "need_human";
     verdict?: {
         agent?: "test-agent";
         taskId?: string;
         groupId?: string;
-        status?: "failed" | "passed" | "blocked" | "partial";
+        status?: "failed" | "passed" | "partial" | "blocked";
         schema?: "ccm-test-agent-verdict-v1";
         summary?: string;
         risks?: string[];
@@ -50046,6 +50046,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
+        canAccept?: boolean;
         requiredCheckSummary?: {
             unknown?: z.objectInputType<{
                 check: z.ZodString;
@@ -50127,7 +50128,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         } & {
             [k: string]: unknown;
         };
-        canAccept?: boolean;
         browserEvidenceTemporalIntegrity?: {
             status?: "invalid" | "complete";
             items?: {
@@ -50648,7 +50648,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         adversarialEvidenceSummary?: {
-            status?: "failed" | "missing" | "blocked" | "verified" | "unlinked" | "waived";
+            status?: "failed" | "missing" | "verified" | "blocked" | "unlinked" | "waived";
             failed?: number;
             passed?: number;
             blocked?: number;
@@ -50682,7 +50682,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             [k: string]: unknown;
         };
         acceptanceEvidenceGateSummary?: {
-            status?: "failed" | "not_applicable" | "verified" | "incomplete" | "weak";
+            status?: "failed" | "verified" | "not_applicable" | "incomplete" | "weak";
             unknown?: number;
             none?: number;
             verified?: number;
@@ -50690,8 +50690,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             fallback?: number;
             token?: number;
             direct?: number;
-            notVerified?: number;
             canAccept?: boolean;
+            notVerified?: number;
             matchedEvidence?: number;
             fallbackEvidence?: number;
             missingEvidence?: number;
@@ -50862,10 +50862,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
     } & {
         [k: string]: unknown;
     };
+    canAccept?: boolean;
     report?: Record<string, any>;
     finishedAt?: string;
     durationMs?: number;
-    canAccept?: boolean;
     invocationId?: string;
     inputValidation?: {
         valid?: boolean;

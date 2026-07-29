@@ -64,6 +64,7 @@ const project_session_agent_binding_1 = require("./project-session-agent-binding
 const project_main_agent_1 = require("./project-main-agent");
 const runtime_events_1 = require("../../system/runtime-events");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 exports.WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
 function getProjectSessionDir(projectName) {
     return (0, project_validation_1.resolveContainedPath)(exports.WEB_SESSIONS_DIR, (0, project_validation_1.validateProjectName)(projectName));
@@ -100,7 +101,7 @@ function findCcSessionFile(projectName) {
 function isFeishuPlatformSessionKey(value) {
     return /^(?:feishu|lark):/i.test(String(value || "").trim());
 }
-function projectFeishuTargetsFromStore(store) {
+function projectFeishuTargetsFromStore(store, projectName = "selftest-project") {
     const active = store?.active_session && typeof store.active_session === "object" ? store.active_session : {};
     const users = store?.user_sessions && typeof store.user_sessions === "object" ? store.user_sessions : {};
     const metadata = store?.user_meta && typeof store.user_meta === "object" ? store.user_meta : {};
@@ -115,6 +116,15 @@ function projectFeishuTargetsFromStore(store) {
         const sessionIds = [...new Set([...(Array.isArray(users[platformKey]) ? users[platformKey] : []), active[platformKey]]
                 .map((value) => String(value || "").trim()).filter(Boolean))];
         const baseLabel = String(meta.name || meta.display_name || meta.chat_name || meta.user_name || chatId || openId || "飞书会话");
+        let identity = null;
+        try {
+            identity = (0, feishu_conversation_v2_1.buildFeishuConversationIdentityV2)({
+                payload: { platform_session_key: platformKey, chat_id: chatId, open_id: openId, thread_id: threadId, root_id: threadId, project: projectName },
+                targetType: "project_agent",
+                projectId: projectName,
+            });
+        }
+        catch { }
         return {
             id: platformKey,
             platform_session_key: platformKey,
@@ -126,6 +136,10 @@ function projectFeishuTargetsFromStore(store) {
             latest_message_id: threadId,
             active_session_id: String(active[platformKey] || ""),
             session_ids: sessionIds,
+            target_type: "project_agent",
+            project_id: projectName,
+            conversation_key_v2: identity?.conversation_key_v2 || "",
+            thread_scope: threadId || "main",
         };
     });
 }
@@ -135,7 +149,7 @@ function loadProjectCcSessionStore(projectName) {
         return { file: "", store: null, targets: [] };
     try {
         const store = JSON.parse(fs.readFileSync(file, "utf-8"));
-        return { file, store, targets: projectFeishuTargetsFromStore(store) };
+        return { file, store, targets: projectFeishuTargetsFromStore(store, projectName) };
     }
     catch {
         return { file, store: null, targets: [] };
@@ -166,9 +180,7 @@ function resolveProjectFeishuTargetFromStore(store, targets, acpSessionId) {
     if (exact.length > 1)
         throw new Error("ACP 会话同时映射到多个飞书目标，已拒绝路由");
     const bound = targets.filter((target) => String(target.active_session_id || "").trim());
-    if (bound.length === 1)
-        return { target: bound[0], resolution: "single_bound_target" };
-    throw new Error(bound.length ? "尚未建立 ACP 会话与飞书目标的精确映射" : "当前项目没有已绑定的飞书会话");
+    throw new Error(bound.length ? "尚未建立 ACP 会话与飞书目标的精确映射，请重新绑定当前项目飞书会话" : "当前项目没有已绑定的飞书会话");
 }
 function resolveProjectFeishuTargetForAcpSession(projectName, acpSessionId) {
     const project = requireActiveProject(projectName).project;
@@ -178,8 +190,6 @@ function resolveProjectFeishuTargetForAcpSession(projectName, acpSessionId) {
     const { store, targets } = loadProjectCcSessionStore(project);
     if (!store)
         throw new Error("项目 cc-connect 会话存储不存在");
-    // cc-connect 首次创建 ACP 会话后可能尚未完成快照落盘。仅当项目只有
-    // 一个已绑定目标时允许无歧义兜底；多个目标必须等待精确映射。
     return resolveProjectFeishuTargetFromStore(store, targets, safeAcpSessionId);
 }
 function runProjectFeishuSessionSourceSelfTest() {
@@ -191,13 +201,19 @@ function runProjectFeishuSessionSourceSelfTest() {
         user_sessions: { [groupKey]: ["s1", "s2"], [threadKey]: ["s3"] },
         user_meta: { [groupKey]: { chat_name: "项目协作群" }, [threadKey]: { chat_name: "需求线程" } },
     };
-    const targets = projectFeishuTargetsFromStore(store);
+    const targets = projectFeishuTargetsFromStore(store, "project-selftest");
     const exactAcp = resolveProjectFeishuTargetFromStore(store, targets, "acp-project-s2");
-    const singleFallback = resolveProjectFeishuTargetFromStore({ ...store, sessions: {} }, targets, "acp-not-flushed");
+    let missingExactMappingRejected = false;
+    try {
+        resolveProjectFeishuTargetFromStore({ ...store, sessions: {} }, targets, "acp-not-flushed");
+    }
+    catch {
+        missingExactMappingRejected = true;
+    }
     let ambiguousMappingRejected = false;
     try {
         const ambiguousStore = { ...store, sessions: {}, active_session: { [groupKey]: "s2", [threadKey]: "s3" } };
-        resolveProjectFeishuTargetFromStore(ambiguousStore, projectFeishuTargetsFromStore(ambiguousStore), "acp-unknown");
+        resolveProjectFeishuTargetFromStore(ambiguousStore, projectFeishuTargetsFromStore(ambiguousStore, "project-selftest"), "acp-unknown");
     }
     catch {
         ambiguousMappingRejected = true;
@@ -212,7 +228,7 @@ function runProjectFeishuSessionSourceSelfTest() {
         explicit_web_beats_historical_mapping: projectSessionSource("s1", { source: "web" }, targets) === "web",
         preserves_explicit_unbound_feishu_session: projectSessionSource("s8", { source: "feishu" }, targets) === "feishu",
         resolves_real_acp_session_to_exact_project_session: exactAcp.target?.active_session_id === "s2" && exactAcp.resolution === "cc_connect_agent_session",
-        allows_only_unambiguous_first_turn_fallback: singleFallback.target?.active_session_id === "s2" && singleFallback.resolution === "single_bound_target",
+        rejects_unproven_first_turn_fallback: missingExactMappingRejected,
         rejects_ambiguous_acp_target_mapping: ambiguousMappingRejected,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
@@ -224,7 +240,7 @@ function syncFromCcToFilesystem(projectName) {
         return;
     try {
         const data = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-        const targets = projectFeishuTargetsFromStore(data);
+        const targets = projectFeishuTargetsFromStore(data, projectName);
         const dir = ensureWebSessionDir(projectName);
         for (const [sid, session] of Object.entries(data.sessions || {})) {
             const rawSession = session;

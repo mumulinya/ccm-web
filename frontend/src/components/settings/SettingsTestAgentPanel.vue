@@ -70,7 +70,7 @@ onMounted(load)
         <FlaskConical :size="20" />
         <div>
           <h2>TestAgent 验收</h2>
-          <p>控制群聊与项目自动开发是否使用独立测试 Agent。设置只影响新进入验收阶段的任务。</p>
+          <p>控制群聊与项目自动开发是否使用独立测试 Agent。设置只影响保存后新创建的任务，进行中的任务保持原验收方式。</p>
         </div>
       </div>
     </header>

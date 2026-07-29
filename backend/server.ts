@@ -76,6 +76,7 @@ import {
   handleConversationTurnControlApi,
   runConversationTurnControlSelfTest,
 } from "./agents/conversation-turn-control";
+import { parseSecureMultipartRequest } from "./system/secure-multipart";
 
 // 导入底座与持久层
 import {
@@ -178,6 +179,7 @@ import { startTaskPermissionNotificationScheduler, stopTaskPermissionNotificatio
 import { reconcileGroupSessionLifecycleAgentCancellations } from "./modules/collaboration/storage";
 import { bootstrapGroupSessionLifecycleJournals } from "./modules/collaboration/group-session-lifecycle-head";
 import { bindFeishuTaskContext, notifyFeishuTaskStage, notifyFeishuTaskStatus, recordFeishuInbound, setFeishuChannelAlertHandler } from "./modules/collaboration/feishu-channel";
+import { buildFeishuInboundEnvelopeV2, buildFeishuOriginReceiptV2 } from "./modules/collaboration/feishu-conversation-v2";
 import { startGroupSessionRetentionMaintenanceScheduler, stopGroupSessionRetentionMaintenanceScheduler } from "./modules/collaboration/group-session-maintenance";
 import { recoverChildTypedMemoryDispatchWal } from "./modules/collaboration/memory";
 import { recoverGroupTypedMemoryArtifactTransactionsFleet } from "./modules/collaboration/group-memory-index";
@@ -189,8 +191,9 @@ import { initializeProcessLifecycle, installProcessLifecycleFaultHandlers, markP
 import { handleRuntimeEventsApi } from "./system/runtime-events";
 import { initializeBuiltInSessionCompactionHooks } from "./system/session-compaction-hooks";
 import { estimateTextTokens } from "./system/context-budget";
-import { bootstrapGlobalAgentMemoryForServer, handleGlobalAgentApi, resumeGlobalAgentLoopsForServer, startFeishuConversationTurnRecoveryForServer, startGlobalMissionSupervisionForServer, stopFeishuConversationTurnRecoveryForServer, stopGlobalMissionSupervisionForServer } from "./modules/global/global-agent";
+import { bootstrapGlobalAgentMemoryForServer, handleGlobalAgentApi, resumeGlobalAgentLoopsForServer, startFeishuConversationTurnRecoveryForServer, startGlobalMissionSupervisionForServer, startGlobalWebTurnRecoveryForServer, stopFeishuConversationTurnRecoveryForServer, stopGlobalMissionSupervisionForServer, stopGlobalWebTurnRecoveryForServer } from "./modules/global/global-agent";
 import { handleRagApi } from "./modules/knowledge/rag";
+import { scheduleLocalKnowledgeModelStartupPreparation } from "./modules/knowledge/knowledge-model-startup";
 import { ingestRequirementSources } from "./modules/requirements/source-ingestion";
 import { searchAgentKnowledge } from "./modules/knowledge/knowledge-access";
 import { handleSlashCommandsApi } from "./modules/tools/slash-commands";
@@ -199,7 +202,8 @@ import { handleFeishuReactionFeedbackApi } from "./integrations/feishu-reaction-
 import { handleUsabilityApi, startUsabilityArchiveScheduler, stopUsabilityArchiveScheduler } from "./modules/system/usability";
 import { handleSystemSettingsApi } from "./modules/system/settings";
 import { refreshAgentProviderStatusesAsync } from "./modules/system/agent-provider-settings";
-import { browserApiAccessAllowed, handleLocalAuthApi } from "./modules/system/local-auth";
+import { handleLocalAuthApi } from "./modules/system/local-auth";
+import { applySecurityHeaders, authorizeApiRequest, requestIsReadOnly, validateRequestHost } from "./modules/system/api-access-control";
 import { buildSelectedSkillUsageDirective, ensureRoleSkillsInstalled, selectRoleSkills } from "./skills/role-skills";
 import {
   PROJECT_CHAT_RUNS_FILE,
@@ -222,8 +226,15 @@ import {
   acquireProjectSessionAgentDispatch,
   bindProjectSessionAgentExecution,
   getProjectSessionAgentBinding,
+  isProjectSessionAgentDispatchActive,
   releaseProjectSessionAgentDispatch,
 } from "./modules/projects/project-session-agent-binding";
+import {
+  drainProjectFeishuTurns,
+  enqueueProjectFeishuTurn,
+  startProjectFeishuTurnRecoveryForServer,
+  stopProjectFeishuTurnRecoveryForServer,
+} from "./modules/projects/project-feishu-turn-queue";
 import {
   buildProjectSessionModelContextProjection,
   buildProjectSessionPostCompactContext,
@@ -388,6 +399,9 @@ function handleRequest(req: any, res: any) {
   const parsed = url.parse(req.url, true);
   const pathname = parsed.pathname || "/";
 
+  applySecurityHeaders(res);
+  if (!validateRequestHost(req, res)) return;
+
   // Browser requests stay same-origin. Local Node/Agent clients do not need CORS headers.
   const requestOrigin = String(req.headers.origin || "").trim();
   if (requestOrigin) {
@@ -398,23 +412,18 @@ function handleRequest(req: any, res: any) {
       }
     } catch {}
   }
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-CCM-CSRF");
   if (req.method === "OPTIONS") {
     res.writeHead(204);
     res.end();
     return;
   }
 
-  // cc-connect ACP runs as a local child process. This route has its own
-  // loopback + ACP signature gate and must be reachable before browser auth.
-  if (handleFeishuReactionFeedbackApi(pathname, req, res)) return;
-
   if (handleLocalAuthApi(pathname, req, res)) return;
-  if (pathname.startsWith("/api/") && !browserApiAccessAllowed(req)) {
-    sendJson(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
-    return;
-  }
+  if (pathname.startsWith("/api/") && !authorizeApiRequest(req, res, String(req.url || pathname))) return;
+
+  if (handleFeishuReactionFeedbackApi(pathname, req, res)) return;
 
   if (handleRuntimeEventsApi(pathname, req, res, parsed)) return;
 
@@ -843,6 +852,26 @@ function handleRequest(req: any, res: any) {
   if (pathname === "/api/send-stream" && req.method === "POST") {
     const contentType = req.headers["content-type"] || "";
     const handleStreamSend = async (project: string, message: string, files: any[] = [], parentRunId = "", projectSessionId = "", source = "web", platformContext: any = {}) => {
+      let projectFeishuEnvelope: any = null;
+      if (source === "feishu") {
+        if (String(platformContext?.target_type || "project_agent") !== "project_agent") {
+          return sendJson(res, { error: "飞书项目入口只允许调用项目主 Agent" }, 403);
+        }
+        try {
+          projectFeishuEnvelope = platformContext?.feishu_inbound_envelope || buildFeishuInboundEnvelopeV2({
+            payload: { ...platformContext, project, target_type: "project_agent" },
+            targetType: "project_agent",
+            projectId: project,
+            transport: "acp",
+            messageId: platformContext?.platform_message_id || platformContext?.message_id,
+          });
+          if (projectFeishuEnvelope.target_type !== "project_agent" || projectFeishuEnvelope.project_id !== project) {
+            throw new Error("飞书入站回执与当前项目不匹配");
+          }
+        } catch (error: any) {
+          return sendJson(res, { error: `项目飞书身份校验失败：${error?.message || error}` }, 403);
+        }
+      }
       let sourceIngestion: any = null;
       try {
         sourceIngestion = await ingestRequirementSources({
@@ -866,6 +895,54 @@ function handleRequest(req: any, res: any) {
       const exactProjectSessionId = String(projectSessionId || "").trim();
       if (exactProjectSessionId && !getSessionDetail(project, exactProjectSessionId)) {
         return sendJson(res, { error: "项目会话不存在" }, 404);
+      }
+      let projectFeishuDestination: any = null;
+      let projectFeishuOriginReceipt: any = null;
+      const enqueueCurrentProjectFeishuTurn = () => {
+        const requestId = String(projectFeishuEnvelope?.message_id || projectFeishuEnvelope?.checksum || platformContext?.platform_message_id || "").trim();
+        const queued = enqueueProjectFeishuTurn({
+          project,
+          projectSessionId: exactProjectSessionId,
+          message,
+          files,
+          platformContext: {
+            ...platformContext,
+            target_type: "project_agent",
+            feishu_inbound_envelope: projectFeishuEnvelope,
+            feishu_origin_receipt: projectFeishuOriginReceipt,
+          },
+          requestId,
+        });
+        const reply = `当前项目会话仍在执行上一项工作，这条消息已排在第 ${queued.position} 位。上一项结束后会自动处理，并把结果回复到当前飞书话题。`;
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+          "X-Accel-Buffering": "no",
+        });
+        writeSse(res, { type: "presentation", message_mode: "queued", show_task_card: false, main_agent: "project" });
+        writeSse(res, { type: "chunk", text: reply, agent: "project-main-agent" });
+        writeSse(res, { type: "done", queued: true, queue_position: queued.position, turn_id: queued.turn.id });
+        res.end();
+      };
+      if (source === "feishu") {
+        projectFeishuDestination = recordFeishuInbound({
+          payload: platformContext,
+          sessionId: exactProjectSessionId,
+          messageId: String(platformContext?.platform_message_id || platformContext?.message_id || ""),
+        });
+        projectFeishuOriginReceipt = platformContext?.feishu_origin_receipt
+          || buildFeishuOriginReceiptV2({ envelope: projectFeishuEnvelope, sessionId: exactProjectSessionId });
+        bindFeishuTaskContext({
+          sessionId: exactProjectSessionId,
+          destination: projectFeishuDestination,
+          source: "project-main-agent-feishu",
+          targetType: "project_agent",
+          projectId: project,
+          originReceipt: projectFeishuOriginReceipt,
+        });
+        if (isProjectSessionAgentDispatchActive(project, exactProjectSessionId)) return enqueueCurrentProjectFeishuTurn();
       }
       const scheduleFeishuSessionTitle = (assistantMessage: string) => {
         if (source !== "feishu" || !exactProjectSessionId || !String(assistantMessage || "").trim()) return;
@@ -1069,7 +1146,11 @@ function handleRequest(req: any, res: any) {
       const dispatchLease = exactProjectSessionId ? acquireProjectSessionAgentDispatch(project, exactProjectSessionId) : { acquired: true, scopeId: "" };
       const dispatchScope = dispatchLease.scopeId;
       if (!dispatchLease.acquired) {
+        if (source === "feishu") return enqueueCurrentProjectFeishuTurn();
         return sendJson(res, { error: "当前项目会话已有 Agent 工作正在执行，请排队或等待本轮完成" }, 409);
+      }
+      if (requestIsReadOnly(req) && chatIntent.mode === "task") {
+        return sendJson(res, { success: false, error: "当前 Viewer 账户仅允许项目只读问答；这条需求需要执行开发任务，请联系 Operator 或 Admin", code: "VIEWER_EXECUTION_FORBIDDEN" }, 403);
       }
       let released = false;
       let retainDispatchAfterResponse = false;
@@ -1077,6 +1158,9 @@ function handleRequest(req: any, res: any) {
         if (retainDispatchAfterResponse || released || !dispatchScope) return;
         released = true;
         releaseProjectSessionAgentDispatch(dispatchScope);
+        if (source === "feishu" && exactProjectSessionId) {
+          setImmediate(() => void drainProjectFeishuTurns(`http://127.0.0.1:${PORT}`, project, exactProjectSessionId));
+        }
       };
       res.once?.("finish", releaseDispatch);
       res.once?.("close", releaseDispatch);
@@ -1162,17 +1246,15 @@ function handleRequest(req: any, res: any) {
         saveProjectChatRuns();
         const feishuTask = source === "feishu";
         if (feishuTask) {
-          const destination = recordFeishuInbound({
-            payload: platformContext,
-            sessionId: exactProjectSessionId,
-            messageId: String(platformContext?.platform_message_id || platformContext?.message_id || ""),
-          });
           bindFeishuTaskContext({
             sessionId: exactProjectSessionId,
-            destination,
+            destination: projectFeishuDestination,
             runIds: [projectRun.id],
             taskIds: [task.id],
             source: "project-main-agent-feishu",
+            targetType: "project_agent",
+            projectId: project,
+            originReceipt: projectFeishuOriginReceipt,
           });
         }
         const taskSnapshot = () => projectMainTaskPublic(getProjectMainTask(task.id) || task);
@@ -1444,11 +1526,8 @@ function handleRequest(req: any, res: any) {
     };
 
     if (contentType.includes("multipart/form-data")) {
-      collectRequestBuffer(req).then((buffer) => {
+      parseSecureMultipartRequest(req).then(({ files, fields }) => {
         try {
-          const boundary = getMultipartBoundary(contentType);
-          if (!boundary) return sendJson(res, { error: "无效请求" }, 400);
-          const { files, fields } = parseMultipart(buffer, boundary);
           void handleStreamSend(
             (fields as any).project,
             (fields as any).message,
@@ -1469,8 +1548,8 @@ function handleRequest(req: any, res: any) {
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { project, message, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext } = JSON.parse(body);
-        void handleStreamSend(project, message, [], String(parent_run_id || parentRunId || ""), String(session_id || sessionId || ""), String(source || "web"), platform_context || platformContext || {});
+        const { project, message, files, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext } = JSON.parse(body);
+        void handleStreamSend(project, message, Array.isArray(files) ? files : [], String(parent_run_id || parentRunId || ""), String(session_id || sessionId || ""), String(source || "web"), platform_context || platformContext || {});
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -1526,19 +1605,13 @@ function handleRequest(req: any, res: any) {
     };
 
     if (contentType.includes("multipart/form-data")) {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      req.on("end", async () => {
+      parseSecureMultipartRequest(req).then(async ({ files, fields }) => {
         try {
-          const buffer = Buffer.concat(chunks);
-          const boundary = getMultipartBoundary(contentType);
-          if (!boundary) return sendJson(res, { error: "无效请求" }, 400);
-          const { files, fields } = parseMultipart(buffer, boundary);
           await handleSend((fields as any).project, (fields as any).message, files);
         } catch (e: any) {
           sendJson(res, { error: e.message }, 400);
         }
-      });
+      }).catch((e: any) => sendJson(res, { error: e.message }, 400));
       return;
     }
 
@@ -1660,7 +1733,9 @@ function startServer(port: number, host = process.env.CCM_HOST || "127.0.0.1") {
     stopTaskWatchdog();
     stopAgentRecoveryMonitor();
     stopGlobalMissionSupervisionForServer();
+    stopGlobalWebTurnRecoveryForServer();
     stopFeishuConversationTurnRecoveryForServer();
+    stopProjectFeishuTurnRecoveryForServer();
     stopReliabilityDrillScheduler();
     stopUsabilityArchiveScheduler();
     stopGroupSessionRetentionMaintenanceScheduler();
@@ -1683,6 +1758,8 @@ function startServer(port: number, host = process.env.CCM_HOST || "127.0.0.1") {
     startRuntimeToolRealCliMatrixScheduler();
     // 预热提供商状态缓存：让首个请求也走缓存路径，避免同步 spawnSync 探测冻结事件循环
     void refreshAgentProviderStatusesAsync().catch(() => {});
+    const localEmbeddingStartup = scheduleLocalKnowledgeModelStartupPreparation();
+    if (localEmbeddingStartup.scheduled) console.log("[知识库] 本地语义模型将在后台下载或校验，不阻塞 CCM 启动");
     console.log("");
     console.log(`CCM Workspace  v${CCM_RUNTIME_VERSION}`);
     console.log("------------------------------------------------------");
@@ -1698,7 +1775,11 @@ function startServer(port: number, host = process.env.CCM_HOST || "127.0.0.1") {
         if (result.total > 0) console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`);
       })
       .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`))
-      .finally(() => startFeishuConversationTurnRecoveryForServer(`http://127.0.0.1:${port}`, startupCollabCtx));
+      .finally(() => {
+        startGlobalWebTurnRecoveryForServer(`http://127.0.0.1:${port}`, startupCollabCtx);
+        startFeishuConversationTurnRecoveryForServer(`http://127.0.0.1:${port}`, startupCollabCtx);
+      });
+    startProjectFeishuTurnRecoveryForServer(`http://127.0.0.1:${port}`);
     try {
       const feishuConfig = loadFeishuConfig();
       const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));

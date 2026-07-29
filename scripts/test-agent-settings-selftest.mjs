@@ -32,9 +32,9 @@ const checks = {
   settingsUiExplainsModes: settingsUi.includes('它负责什么') && settingsUi.includes('开启后') && settingsUi.includes('关闭后') && settingsUi.includes('不产生独立验收结论'),
   settingsNavigationVisible: settingsSidebar.includes("key: 'test-agent'") && settingsSidebar.includes("label: 'TestAgent'"),
   projectMainSupportsSingleSelfVerification: projectMain.includes('runProjectMainAgentSelfVerification') && projectMain.includes('main_agent_self_verifying') && projectMain.includes('max_rounds: 1'),
-  groupMainSupportsSingleSelfVerification: groupReview.includes('group_main_self_verification_started') && groupReview.includes('allowFollowUps: false') && groupReview.includes('maxRounds: 1'),
-  directProjectSupportsSelfVerification: directExecutor.includes('buildDirectMainAgentSelfVerification') && directExecutor.includes('mainAgentSelfVerification'),
-  independentGateUsesTaskSnapshot: groupStatus.includes('isDailyDev && task?.test_agent_enabled !== false'),
+  groupMainSupportsSingleSelfVerification: groupReview.includes('group_main_self_verification_started') && groupReview.includes('runMainAgentSelfVerification') && groupReview.includes('acceptancePolicy'),
+  directProjectSupportsSelfVerification: directExecutor.includes('runMainAgentSelfVerification') && directExecutor.includes('mainAgentSelfVerification'),
+  independentGateUsesTaskSnapshot: directExecutor.includes('resolveTaskAcceptancePolicy(task') && groupStatus.includes('task?.test_agent_enabled !== false'),
   publicTencentDocsRemainSupported: sourceIngestion.includes('tencent-docs-public-page') && sourceIngestion.includes('public_link_only'),
   privateAuthorizationCodeRemoved: !fs.existsSync(path.join(root, 'backend/modules/requirements/online-document-authorization.ts'))
     && !fs.existsSync(path.join(root, 'backend/modules/requirements/tencent-docs-oauth-relay.ts'))

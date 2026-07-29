@@ -167,13 +167,13 @@ try {
     broadcastPetSpeech: (agent, payload) => petNotifications.push({ agent, payload }),
   }, {
     notifyFeishuTaskStage: async payload => { feishuNotifications.push(payload); return { success: true } },
-    sendFeishuReportMessage: async () => ({ success: true }),
+    hasFeishuTaskBinding: input => input.sessionId === 'global-session-selftest',
   })
   const notificationIds = new Set([outside.id, globalRequest.id])
-  check('user-required requests notify both the pet and Feishu with exact origin bindings', () => {
+  check('only exact global or project Feishu origins receive permission cards', () => {
     assert.equal(notificationResult.sent, 2)
     assert.equal(petNotifications.length, 2)
-    assert.equal(feishuNotifications.length, 2)
+    assert.equal(feishuNotifications.length, 1)
     const globalNotification = feishuNotifications.find(item => item.sessionId === 'global-session-selftest')
     assert.match(globalNotification?.markdown || '', new RegExp(`批准权限 ${globalRequest.id}`))
     assert.match(globalNotification?.markdown || '', new RegExp(`拒绝权限 ${globalRequest.id}`))
@@ -190,7 +190,7 @@ try {
   })
   check('successful notification channels are not sent twice', () => {
     assert.equal(petNotifications.length, 2)
-    assert.equal(feishuNotifications.length, 2)
+    assert.equal(feishuNotifications.length, 1)
   })
 
   const listed = broker.listTaskPermissionRequests({ taskId: task.id })

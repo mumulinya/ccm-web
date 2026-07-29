@@ -1,5 +1,7 @@
 # MCP 与 Skill 作用域授权
 
+工具从市场安装到目录revision、权限影响和运行时重同步的流程见[MCP/Skill工具市场与目录生命周期](./TOOL-MARKETPLACE-AND-CATALOG.md)。
+
 ## 已确认结构
 
 CCM 的 MCP 与 Skill 配置按 Agent 作用域隔离，不以“已安装”代替“已授权”：

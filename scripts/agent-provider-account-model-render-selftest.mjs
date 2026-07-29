@@ -100,7 +100,7 @@ const prepare = async page => {
     const pathname = new URL(route.request().url()).pathname
     if (!pathname.startsWith('/api/')) return route.continue()
     if (pathname === '/api/runtime/events' || pathname.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' })
-    if (pathname === '/api/auth/session') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, authenticated: true, user: { username: 'selftest' } }) })
+    if (pathname === '/api/auth/session') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, authenticated: true, user: { username: 'selftest', role: 'admin' }, capabilities: ['read', 'security.manage', 'agent.credentials', 'tools.manage'], csrf: 'selftest-csrf' }) })
     if (pathname === '/api/system/agent-providers' || pathname === '/api/system/agent-providers/status') {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, config, statuses, providers }) })
     }

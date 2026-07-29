@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.scoreMusicCandidate = scoreMusicCandidate;
 exports.pickBestCandidateByScore = pickBestCandidateByScore;
 exports.selectMusicTrack = selectMusicTrack;
-const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const state_1 = require("./state");
+const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
 const MUSIC_MATCH_MIN_SCORE = 80;
 function normalizeTrackSearchText(value) {
     return String(value || "")
@@ -114,30 +114,6 @@ function pickBestCandidateByScore(keyword, candidates = []) {
     }
     return { index: bestIndex, score: bestScore, reason: `规则打分选中第 ${bestIndex + 1} 首（${bestScore}）` };
 }
-function extractJsonObject(text) {
-    const raw = String(text || "").trim();
-    try {
-        return JSON.parse(raw);
-    }
-    catch { }
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced)
-        try {
-            return JSON.parse(fenced[1].trim());
-        }
-        catch { }
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start >= 0 && end > start)
-        try {
-            return JSON.parse(raw.slice(start, end + 1));
-        }
-        catch { }
-    return null;
-}
-function shouldUseAnthropicMusicApi(config) {
-    return String(config?.format || "").trim().toLowerCase() === "anthropic" || (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config);
-}
 /**
  * Pick the best track for a keyword from candidates.
  * Semantic selection is model-only; lexical scoring only validates an exact-song result.
@@ -178,11 +154,6 @@ async function selectMusicTrack(input = {}) {
     const toOriginalIndex = (index) => candidateEntries[index]?.index ?? index;
     if (canCallModel) {
         try {
-            const listText = candidates.map((item, index) => {
-                const title = String(item?.title || item?.name || "未知标题").slice(0, 120);
-                const artist = String(item?.artist || item?.author || item?.singer || "未知歌手").slice(0, 80);
-                return `${index}. 《${title}》 - ${artist}`;
-            }).join("\n");
             const system = strictMatch
                 ? `你是音乐点歌选曲器。根据用户要点的歌，从候选列表中选出最匹配的一首。
 只输出 JSON，不要 Markdown。
@@ -199,25 +170,42 @@ async function selectMusicTrack(input = {}) {
                     : `你是音乐推荐选曲器。根据用户的心情、场景或曲风，从搜索结果中选一首合适的歌。
 只输出 JSON，不要 Markdown。不要要求歌名精确匹配；候选整体合理时必须选择。index 从 0 开始。
 返回格式：{"index":0,"reject":false,"reason":"一句话依据"}`;
-            const user = `用户原始请求：${String(input.originalRequest || keyword).slice(0, 500)}\n搜索主题：${keyword}\n\n候选列表：\n${listText}`;
-            const requestConfig = { ...cfg, timeoutMs: Math.min(8_000, Math.max(5_000, Number(cfg.timeoutMs) || 8_000)) };
-            const content = shouldUseAnthropicMusicApi(requestConfig)
-                ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(requestConfig, {
-                    system,
-                    messages: [{ role: "user", content: user }],
-                    maxTokens: 180,
-                    temperature: 0,
-                    defaultTimeoutMs: 8_000,
-                    httpErrorPrefix: "点歌选曲失败",
-                })
-                : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(requestConfig, {
-                    messages: [{ role: "system", content: system }, { role: "user", content: user }],
-                    maxTokens: 180,
-                    temperature: 0,
-                    defaultTimeoutMs: 8_000,
-                    httpErrorPrefix: "点歌选曲失败",
-                });
-            const parsed = extractJsonObject(content) || {};
+            const selection = await (0, semantic_decision_runtime_1.runSemanticDecision)({
+                kind: "music_selection",
+                identity: {
+                    scope: "music",
+                    scopeId: "music-player",
+                    sessionId: "music-singleton",
+                },
+                system: `${system}\nreply 必须简短说明实际选择的歌曲，不得提及候选索引或内部协议。`,
+                input: {
+                    originalRequest: String(input.originalRequest || keyword).slice(0, 500),
+                    searchTopic: keyword,
+                    selectionMode,
+                    candidates: candidates.map((item, index) => ({
+                        index,
+                        title: String(item?.title || item?.name || "未知标题").slice(0, 120),
+                        artist: String(item?.artist || item?.author || item?.singer || "未知歌手").slice(0, 80),
+                    })),
+                },
+                config: cfg,
+                maxTokens: 300,
+                validate: (value) => {
+                    const rejected = value?.reject === true || String(value?.reject).toLowerCase() === "true";
+                    const index = Number(value?.index);
+                    if (!rejected && (!Number.isInteger(index) || index < 0 || index >= candidates.length))
+                        throw new Error("模型返回了无效候选索引");
+                    return {
+                        index: rejected ? -1 : index,
+                        reject: rejected,
+                        reason: String(value?.reason || "").trim().slice(0, 300),
+                        reply: String(value?.reply || "").trim().slice(0, 500),
+                        confidence: Math.max(0, Math.min(1, Number(value?.confidence ?? 1))),
+                    };
+                },
+                confidence: value => value.confidence,
+            });
+            const parsed = selection.value;
             const rejected = parsed.reject === true || String(parsed.reject).toLowerCase() === "true";
             const index = Number(parsed.index);
             const reason = String(parsed.reason || "").trim().slice(0, 300);
@@ -228,6 +216,7 @@ async function selectMusicTrack(input = {}) {
                     source: "reject",
                     reason: reason || "模型认为没有足够匹配的歌曲",
                     rejected: true,
+                    semanticDecisionReceipt: selection.receipt,
                 };
             }
             if (!strictMatch) {
@@ -236,8 +225,10 @@ async function selectMusicTrack(input = {}) {
                     index: toOriginalIndex(index),
                     source: selectionMode === "artist_random" ? "model-artist-selection" : "model-recommendation",
                     reason: reason || `模型推荐第 ${index + 1} 首`,
+                    reply: parsed.reply || `已选择《${String(candidates[index]?.title || candidates[index]?.name || "歌曲")}》。`,
                     rejected: false,
                     candidate: candidates[index],
+                    semanticDecisionReceipt: selection.receipt,
                 };
             }
             // 精确点歌仍要过规则分：点了歌手时不能接受「歌名撞车、歌手不对」的结果
@@ -249,6 +240,7 @@ async function selectMusicTrack(input = {}) {
                     source: "reject",
                     reason: reason || `模型候选匹配不足（${modelScore}）`,
                     rejected: true,
+                    semanticDecisionReceipt: selection.receipt,
                 };
             }
             return {
@@ -256,8 +248,10 @@ async function selectMusicTrack(input = {}) {
                 index: toOriginalIndex(index),
                 source: "model",
                 reason: reason || `模型选中第 ${index + 1} 首`,
+                reply: parsed.reply || `已选择《${String(candidates[index]?.title || candidates[index]?.name || "歌曲")}》。`,
                 rejected: false,
                 candidate: candidates[index],
+                semanticDecisionReceipt: selection.receipt,
             };
         }
         catch (error) {

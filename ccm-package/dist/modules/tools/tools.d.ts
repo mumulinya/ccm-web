@@ -262,7 +262,7 @@ export declare function buildMcpSkillGoalCompletionAudit(input?: any): {
     requirements: {
         id: string;
         label: string;
-        status: "missing" | "proven" | "partial";
+        status: "missing" | "partial" | "proven";
         proven: boolean;
         evidence: any;
         blockers: any[];
@@ -523,7 +523,7 @@ export declare function runToolChainVerificationSelfTest(): {
             requirements: {
                 id: string;
                 label: string;
-                status: "missing" | "proven" | "partial";
+                status: "missing" | "partial" | "proven";
                 proven: boolean;
                 evidence: any;
                 blockers: any[];
@@ -546,7 +546,7 @@ export declare function runToolChainVerificationSelfTest(): {
             requirements: {
                 id: string;
                 label: string;
-                status: "missing" | "proven" | "partial";
+                status: "missing" | "partial" | "proven";
                 proven: boolean;
                 evidence: any;
                 blockers: any[];
@@ -569,7 +569,7 @@ export declare function runToolChainVerificationSelfTest(): {
             requirements: {
                 id: string;
                 label: string;
-                status: "missing" | "proven" | "partial";
+                status: "missing" | "partial" | "proven";
                 proven: boolean;
                 evidence: any;
                 blockers: any[];
@@ -592,7 +592,7 @@ export declare function runToolChainVerificationSelfTest(): {
             requirements: {
                 id: string;
                 label: string;
-                status: "missing" | "proven" | "partial";
+                status: "missing" | "partial" | "proven";
                 proven: boolean;
                 evidence: any;
                 blockers: any[];

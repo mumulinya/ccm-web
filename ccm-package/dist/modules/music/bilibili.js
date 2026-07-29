@@ -64,6 +64,7 @@ async function ensureBuvid3() {
             method: "GET",
             headers: { "User-Agent": exports.BILI_UA },
             redirect: "follow",
+            signal: AbortSignal.timeout(8_000),
         });
         let cookieStrings = [];
         if (typeof res.headers.getSetCookie === "function") {
@@ -94,7 +95,8 @@ async function refreshWbiKey() {
     try {
         await ensureBuvid3();
         const res = await fetch("https://api.bilibili.com/x/web-interface/nav", {
-            headers: { "User-Agent": exports.BILI_UA, "Referer": "https://www.bilibili.com", "Cookie": `buvid3=${buvid3}` }
+            headers: { "User-Agent": exports.BILI_UA, "Referer": "https://www.bilibili.com", "Cookie": `buvid3=${buvid3}` },
+            signal: AbortSignal.timeout(8_000),
         });
         const text = await res.text();
         if (!text.trim().startsWith("{")) {
@@ -159,7 +161,8 @@ async function biliSearch(keyword) {
                     "Sec-Fetch-Dest": "empty",
                     "Sec-Fetch-Mode": "cors",
                     "Sec-Fetch-Site": "same-site"
-                }
+                },
+                signal: AbortSignal.timeout(10_000),
             });
             if (cfg.proxy) {
                 if (oldHttpProxy)

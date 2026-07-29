@@ -38,6 +38,7 @@ exports.persistDailyDevBacklogFile = persistDailyDevBacklogFile;
 exports.readDailyDevBacklogStatus = readDailyDevBacklogStatus;
 exports.isDailyDevBacklogFile = isDailyDevBacklogFile;
 exports.importSharedDocsToDailyDevBacklog = importSharedDocsToDailyDevBacklog;
+exports.recoverExpiredDailyDevBacklogClaims = recoverExpiredDailyDevBacklogClaims;
 exports.claimReadyDailyDevBacklog = claimReadyDailyDevBacklog;
 exports.markDailyDevBacklogStatus = markDailyDevBacklogStatus;
 exports.listDailyDevBacklogs = listDailyDevBacklogs;
@@ -48,9 +49,14 @@ exports.runDailyDevAutopilotOnce = runDailyDevAutopilotOnce;
 exports.ensureDailyDevAutopilotCronJobs = ensureDailyDevAutopilotCronJobs;
 exports.buildDailyDevTaskDescription = buildDailyDevTaskDescription;
 exports.evaluateDailyDevIntakeQuality = evaluateDailyDevIntakeQuality;
+exports.normalizeDailyDevQualityDecision = normalizeDailyDevQualityDecision;
+exports.decideDailyDevIntakeQuality = decideDailyDevIntakeQuality;
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const storage_1 = require("./storage");
+const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
+const atomic_json_file_1 = require("../../core/atomic-json-file");
+const utils_1 = require("../../core/utils");
 let runtimeDeps = {};
 function configureDailyDevBacklogRuntime(deps) {
     runtimeDeps = deps;
@@ -84,7 +90,7 @@ function buildDailyDevBacklogUserQuestion(quality) {
 }
 function buildDailyDevBacklogDocument(payload, title, goal) {
     const createdAt = new Date().toISOString();
-    const quality = evaluateDailyDevIntakeQuality(payload || {}, goal || payload?.business_goal || payload?.businessGoal || "");
+    const quality = normalizeDailyDevQualityDecision(payload?.quality_decision || payload?.qualityDecision);
     const initialState = quality.pass ? "ready" : "needs_user";
     return [
         `# ${compactFormText(title, goal.slice(0, 60) || "业务开发需求")}`,
@@ -119,13 +125,19 @@ function buildDailyDevBacklogDocument(payload, title, goal) {
         "- 等待 CCM_AGENT_RECEIPT，并在最终报告中引用变更文件、验证结果和风险。",
     ].join("\n");
 }
-function persistDailyDevBacklogFile(groups, group, payload, title, goal) {
+function persistDailyDevBacklogFileUnlocked(groups, group, payload, title, goal) {
     if (payload.persist_documents === false || payload.persistDocuments === false)
         return null;
     if (!group.shared_files)
         group.shared_files = [];
+    const idempotencyKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
+    const existing = idempotencyKey
+        ? group.shared_files.find((item) => isDailyDevBacklogFile(item) && String(item.idempotency_key || "") === idempotencyKey)
+        : null;
+    if (existing)
+        return { name: existing.name, content: existing.content, status: readDailyDevBacklogStatus(existing), entry_id: existing.entry_id, revision: existing.revision, duplicate: true };
     const name = makeDailyDevBacklogFileName(title || goal);
-    const quality = evaluateDailyDevIntakeQuality(payload || {}, goal || payload?.business_goal || payload?.businessGoal || "");
+    const quality = normalizeDailyDevQualityDecision(payload?.quality_decision || payload?.qualityDecision);
     const initialState = quality.pass ? "ready" : "needs_user";
     const content = buildDailyDevBacklogDocument(payload, title, goal);
     const record = {
@@ -136,6 +148,11 @@ function persistDailyDevBacklogFile(groups, group, payload, title, goal) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         category: "daily_dev_backlog",
+        entry_id: `backlog_${crypto.randomUUID()}`,
+        revision: 1,
+        content_checksum: crypto.createHash("sha256").update(content).digest("hex"),
+        quality_decision: quality,
+        idempotency_key: idempotencyKey,
         status: initialState,
         needs_user_question: initialState === "needs_user" ? buildDailyDevBacklogUserQuestion(quality) : "",
         state_history: [{
@@ -146,8 +163,24 @@ function persistDailyDevBacklogFile(groups, group, payload, title, goal) {
             }],
     };
     group.shared_files.push(record);
-    (0, storage_1.saveGroups)(groups);
-    return { name, content, status: initialState };
+    return { name, content, status: initialState, entry_id: record.entry_id, revision: record.revision, duplicate: false };
+}
+function persistDailyDevBacklogFile(_groups, group, payload, title, goal) {
+    if (payload.persist_documents === false || payload.persistDocuments === false)
+        return null;
+    const groupId = String(group?.id || "").trim();
+    if (!groupId)
+        throw new Error("需求池缺少精确群聊身份");
+    return (0, atomic_json_file_1.withFileLock)(utils_1.GROUPS_FILE, () => {
+        const latestGroups = (0, storage_1.loadGroups)();
+        const latestGroup = latestGroups.find((item) => String(item.id || "") === groupId);
+        if (!latestGroup)
+            throw new Error("开发群聊不存在");
+        const result = persistDailyDevBacklogFileUnlocked(latestGroups, latestGroup, payload, title, goal);
+        if (result && !result.duplicate)
+            (0, storage_1.saveGroups)(latestGroups);
+        return result;
+    }, { timeoutMs: 30_000, staleMs: 15 * 60_000 });
 }
 function readDailyDevBacklogStatus(file) {
     const explicit = String(file?.status || "").trim().toLowerCase();
@@ -208,6 +241,8 @@ function getDailyDevBacklogTask(file) {
     return (0, db_1.loadTasks)().find((task) => task.id === taskId) || null;
 }
 function getDailyDevBacklogQuality(file) {
+    if (file?.quality_decision || file?.qualityDecision)
+        return normalizeDailyDevQualityDecision(file.quality_decision || file.qualityDecision);
     const payload = extractDailyDevBacklogPayload(file);
     return evaluateDailyDevIntakeQuality(payload, payload.business_goal || "");
 }
@@ -377,7 +412,7 @@ function buildDailyDevPayloadFromSharedFile(file, group, options = {}) {
         requires_code_changes: options.requires_code_changes !== false && options.requiresCodeChanges !== false,
     };
 }
-function importSharedDocsToDailyDevBacklog(options = {}) {
+function importSharedDocsToDailyDevBacklogUnlocked(options = {}) {
     const groupId = String(options.group_id || options.groupId || "").trim();
     const limit = Math.max(1, Math.min(100, Number(options.limit || 20)));
     const groups = (0, storage_1.loadGroups)();
@@ -394,7 +429,7 @@ function importSharedDocsToDailyDevBacklog(options = {}) {
                 continue;
             }
             const payload = buildDailyDevPayloadFromSharedFile(file, group, options);
-            const backlog = persistDailyDevBacklogFile(groups, group, payload, payload.title, payload.business_goal);
+            const backlog = persistDailyDevBacklogFileUnlocked(groups, group, payload, payload.title, payload.business_goal);
             if (!backlog) {
                 skipped.push({ group_id: group.id, name: file.name, reason: "未启用需求池写入" });
                 continue;
@@ -420,7 +455,35 @@ function importSharedDocsToDailyDevBacklog(options = {}) {
         }, {}),
     };
 }
-function claimReadyDailyDevBacklog(groupId, claim = {}) {
+function importSharedDocsToDailyDevBacklog(options = {}) {
+    return (0, atomic_json_file_1.withFileLock)(utils_1.GROUPS_FILE, () => importSharedDocsToDailyDevBacklogUnlocked(options), { timeoutMs: 30_000, staleMs: 15 * 60_000 });
+}
+function recoverExpiredDailyDevBacklogClaims(now = Date.now()) {
+    return (0, atomic_json_file_1.withFileLock)(utils_1.GROUPS_FILE, () => {
+        const groups = (0, storage_1.loadGroups)();
+        const recovered = [];
+        for (const group of groups) {
+            for (const file of Array.isArray(group.shared_files) ? group.shared_files : []) {
+                if (!isDailyDevBacklogFile(file) || file.task_id || !file.claim_lease)
+                    continue;
+                const expiresAt = Date.parse(String(file.claim_lease.expires_at || ""));
+                if (!Number.isFinite(expiresAt) || expiresAt > now)
+                    continue;
+                file.status = "ready";
+                file.claim_lease = null;
+                file.revision = Math.max(0, Number(file.revision || 0)) + 1;
+                file.updated_at = new Date(now).toISOString();
+                file.content = replaceBacklogStatusLine(String(file.content || ""), "ready");
+                appendDailyDevBacklogHistory(file, "ready", "旧认领租约已过期，需求已安全恢复到队列", "startup_recovery");
+                recovered.push({ group_id: group.id, name: file.name, entry_id: file.entry_id, revision: file.revision });
+            }
+        }
+        if (recovered.length)
+            (0, storage_1.saveGroups)(groups);
+        return { recovered_count: recovered.length, items: recovered };
+    }, { timeoutMs: 30_000, staleMs: 15 * 60_000 });
+}
+function claimReadyDailyDevBacklogUnlocked(groupId, claim = {}) {
     const groups = (0, storage_1.loadGroups)();
     const group = groups.find(g => g.id === groupId);
     if (!group)
@@ -445,13 +508,25 @@ function claimReadyDailyDevBacklog(groupId, claim = {}) {
     file.claimed_at = now;
     file.claimed_by = claim.source || "daily_dev_cron";
     file.claimed_by_cron_job_id = claim.cron_job_id || null;
+    file.entry_id = file.entry_id || `backlog_${crypto.randomUUID()}`;
+    file.revision = Math.max(0, Number(file.revision || 0)) + 1;
+    file.claim_lease = {
+        id: `claim_${crypto.randomUUID()}`,
+        owner: claim.source || "daily_dev_cron",
+        acquired_at: now,
+        expires_at: new Date(Date.now() + Math.max(60_000, Number(claim.lease_ms || 10 * 60_000))).toISOString(),
+        fencing_token: file.revision,
+    };
     file.updated_at = now;
     appendDailyDevBacklogHistory(file, "planned", "定时任务已认领，准备创建主 Agent 任务", claim.source || "daily_dev_cron");
     file.content = replaceBacklogStatusLine(String(file.content || ""), "planned");
     (0, storage_1.saveGroups)(groups);
     return extractDailyDevBacklogPayload(file);
 }
-function markDailyDevBacklogStatus(groupId, fileName, status, meta = {}) {
+function claimReadyDailyDevBacklog(groupId, claim = {}) {
+    return (0, atomic_json_file_1.withFileLock)(utils_1.GROUPS_FILE, () => claimReadyDailyDevBacklogUnlocked(groupId, claim), { timeoutMs: 30_000, staleMs: 15 * 60_000 });
+}
+function markDailyDevBacklogStatusUnlocked(groupId, fileName, status, meta = {}) {
     if (!groupId || !fileName)
         return null;
     const groups = (0, storage_1.loadGroups)();
@@ -464,6 +539,10 @@ function markDailyDevBacklogStatus(groupId, fileName, status, meta = {}) {
     const now = new Date().toISOString();
     const nextState = normalizeDailyDevBacklogState(status);
     file.status = nextState;
+    file.entry_id = file.entry_id || `backlog_${crypto.randomUUID()}`;
+    file.revision = Math.max(0, Number(file.revision || 0)) + 1;
+    if (meta.expected_revision !== undefined && Number(meta.expected_revision) !== file.revision - 1)
+        throw new Error("需求池条目已经更新，请刷新后重试");
     file.updated_at = now;
     if (meta.task_id)
         file.task_id = meta.task_id;
@@ -477,6 +556,9 @@ function markDailyDevBacklogStatus(groupId, fileName, status, meta = {}) {
     file.content = replaceBacklogStatusLine(String(file.content || ""), nextState);
     (0, storage_1.saveGroups)(groups);
     return file;
+}
+function markDailyDevBacklogStatus(groupId, fileName, status, meta = {}) {
+    return (0, atomic_json_file_1.withFileLock)(utils_1.GROUPS_FILE, () => markDailyDevBacklogStatusUnlocked(groupId, fileName, status, meta), { timeoutMs: 30_000, staleMs: 15 * 60_000 });
 }
 function listDailyDevBacklogs(groupId = "") {
     const groups = (0, storage_1.loadGroups)();
@@ -494,6 +576,10 @@ function listDailyDevBacklogs(groupId = "") {
                 group_id: group.id,
                 group_name: group.name || group.id,
                 name: file.name,
+                entry_id: file.entry_id || "",
+                revision: Math.max(0, Number(file.revision || 0)),
+                content_checksum: file.content_checksum || "",
+                claim_lease: file.claim_lease || null,
                 title,
                 status: stateCard.state,
                 raw_status: stateCard.raw_status,
@@ -635,7 +721,7 @@ function dailyDevGroupCanDispatch(groupId) {
         return false;
     }
 }
-function dispatchDailyDevBacklog(groupId, fileName, ctx, options = {}) {
+function dispatchDailyDevBacklogUnlocked(groupId, fileName, ctx, options = {}) {
     const groups = (0, storage_1.loadGroups)();
     const group = groups.find(g => g.id === groupId);
     if (!group || !Array.isArray(group.shared_files)) {
@@ -662,6 +748,10 @@ function dispatchDailyDevBacklog(groupId, fileName, ctx, options = {}) {
     const payload = extractDailyDevBacklogPayload(file);
     const now = new Date().toISOString();
     file.status = "planned";
+    file.entry_id = file.entry_id || `backlog_${crypto.randomUUID()}`;
+    file.revision = Math.max(0, Number(file.revision || 0)) + 1;
+    const claimLeaseId = `claim_${crypto.randomUUID()}`;
+    file.claim_lease = { id: claimLeaseId, owner: options.source || "manual_backlog_dispatch", acquired_at: now, expires_at: new Date(Date.now() + 10 * 60_000).toISOString(), fencing_token: file.revision };
     file.claimed_at = now;
     file.claimed_by = options.source || "manual_backlog_dispatch";
     file.updated_at = now;
@@ -692,11 +782,19 @@ function dispatchDailyDevBacklog(groupId, fileName, ctx, options = {}) {
                     dispatched_at: now,
                 },
             },
+            client_message_id: file.entry_id,
+            source_channel: options.source || "manual-backlog-dispatch",
+            target_scope: "group_session",
+            target_id: groupId,
+            exact_session_id: options.group_session_id || options.groupSessionId || groupId,
+            idempotency_key: file.idempotency_key || `daily-dev-backlog:${groupId}:${file.entry_id}:${file.content_checksum || crypto.createHash("sha256").update(String(file.content || "")).digest("hex")}`,
         });
         file.task_id = task.id;
         file.status = "dispatched";
         file.last_result = "已由用户从需求池立即派发给主 Agent";
         file.updated_at = new Date().toISOString();
+        file.claim_lease = null;
+        file.revision = Math.max(0, Number(file.revision || 0)) + 1;
         appendDailyDevBacklogHistory(file, "dispatched", "已创建主 Agent 任务并交给队列", options.source || "manual_backlog_dispatch");
         file.content = replaceBacklogStatusLine(String(file.content || ""), "dispatched");
         (0, storage_1.saveGroups)(groups);
@@ -704,7 +802,7 @@ function dispatchDailyDevBacklog(groupId, fileName, ctx, options = {}) {
         if (task.auto_execute) {
             queueResult = dep("enqueueTask")(task.id, ctx);
             if (queueResult?.blocked) {
-                markDailyDevBacklogStatus(groupId, fileName, "dispatched", {
+                markDailyDevBacklogStatusUnlocked(groupId, fileName, "dispatched", {
                     task_id: task.id,
                     result: queueResult.message || "任务已创建，等待执行通道恢复",
                 });
@@ -713,11 +811,14 @@ function dispatchDailyDevBacklog(groupId, fileName, ctx, options = {}) {
         return { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: dep("getQueueStatus")() };
     }
     catch (e) {
-        markDailyDevBacklogStatus(groupId, fileName, "ready", {
+        markDailyDevBacklogStatusUnlocked(groupId, fileName, "ready", {
             result: `立即派发失败，已恢复为 ready：${e.message}`,
         });
         return { success: false, status: 400, error: e.message };
     }
+}
+function dispatchDailyDevBacklog(groupId, fileName, ctx, options = {}) {
+    return (0, atomic_json_file_1.withFileLock)(utils_1.GROUPS_FILE, () => dispatchDailyDevBacklogUnlocked(groupId, fileName, ctx, options), { timeoutMs: 30_000, staleMs: 15 * 60_000 });
 }
 function dispatchReadyDailyDevBacklogs(ctx, options = {}) {
     const groupId = String(options.group_id || options.groupId || "").trim();
@@ -1059,5 +1160,48 @@ function evaluateDailyDevIntakeQuality(payload, goal) {
             ? "业务需求信息足够创建日常开发任务"
             : "业务需求信息不足，主 Agent 可能无法稳定拆分给子 Agent",
     };
+}
+function normalizeDailyDevQualityDecision(value) {
+    const state = ["ready", "needs_user", "reject"].includes(String(value?.state || "")) ? String(value.state) : "needs_user";
+    const missing = Array.isArray(value?.missing) ? value.missing.map(String).filter(Boolean).slice(0, 12) : [];
+    return {
+        schema: "ccm-requirement-intake-quality-decision-v2",
+        state,
+        pass: state === "ready",
+        score: state === "ready" ? 1 : 0,
+        total: 1,
+        passed: state === "ready" ? ["model_semantic_quality"] : [],
+        missing: missing.length ? missing : state === "ready" ? [] : ["需要主 Agent 完成需求质量判断"],
+        risks: Array.isArray(value?.risks) ? value.risks.map(String).filter(Boolean).slice(0, 12) : [],
+        reason: String(value?.reason || "需求质量尚未经过统一模型确认").slice(0, 800),
+        confidence: Math.max(0, Math.min(1, Number(value?.confidence || 0))),
+        semantic_decision_receipt: value?.semantic_decision_receipt || value?.semanticDecisionReceipt || null,
+        message: state === "ready" ? "主 Agent 已确认需求信息足够创建开发任务" : state === "reject" ? "需求不属于可执行开发任务" : "需求信息仍需补充",
+    };
+}
+async function decideDailyDevIntakeQuality(payload, goal, identity) {
+    const decision = await (0, semantic_decision_runtime_1.runSemanticDecision)({
+        kind: "requirement_intake_quality",
+        identity: { scope: "group", scopeId: identity.groupId, sessionId: identity.sessionId || `daily-dev:${identity.groupId}`, taskId: identity.taskId },
+        system: "你是需求池准入判断器。仅根据结构化输入判断这是否是可执行的软件开发需求。返回JSON：{schema:'ccm-requirement-intake-quality-decision-v2',state:'ready|needs_user|reject',missing:string[],risks:string[],reason:string,confidence:number}。ready要求业务目标、影响范围和可验证结果足够明确；不得按字数、关键词或正则判断。信息不足时needs_user，明显不是开发需求时reject。",
+        input: {
+            business_goal: goal,
+            scope: payload.scope || payload.development_scope || payload.developmentScope || "",
+            documents: payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "",
+            acceptance: payload.acceptance || payload.acceptance_criteria || payload.acceptanceCriteria || "",
+            constraints: payload.constraints || payload.notes || "",
+            source_coverage: payload.source_coverage || payload.sourceCoverage || payload.source_ingestion?.coverage_receipt || null,
+        },
+        validate: (value) => {
+            const normalized = normalizeDailyDevQualityDecision(value);
+            if (!value || value.schema !== "ccm-requirement-intake-quality-decision-v2" || !["ready", "needs_user", "reject"].includes(normalized.state)) {
+                throw new Error("需求质量模型返回结构无效");
+            }
+            return normalized;
+        },
+        confidence: value => value.confidence,
+        maxTokens: 900,
+    });
+    return { ...decision.value, semantic_decision_receipt: decision.receipt };
 }
 //# sourceMappingURL=daily-dev-backlog.js.map

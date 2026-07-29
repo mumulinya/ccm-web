@@ -43,6 +43,12 @@ import {
 } from "../../core/db";
 
 import { buildSelectedSkillUsageDirective, selectRoleSkills } from "../../skills/role-skills";
+import {
+  buildTaskAcceptancePolicySnapshot,
+  resolveTaskAcceptancePolicy,
+  validateTaskAcceptancePolicySnapshot,
+} from "./task-acceptance-policy";
+import { validateMainAgentSelfVerificationReceipt } from "./main-agent-self-verification";
 
 import {
   buildCodedCoordinatorSummary,
@@ -633,6 +639,8 @@ function createTaskWithScopedIdentity(task: any) {
     origin_session_id: task.origin_session_id || task.originSessionId || taskGroupSessionId || task.project_session_id || task.projectSessionId || null,
     parent_work_item_id: task.parent_work_item_id || task.parentWorkItemId || null,
     acceptance_state: task.acceptance_state || task.acceptanceState || "pending",
+    acceptance_mode: task.acceptance_mode || task.acceptanceMode || null,
+    test_agent_enabled: task.test_agent_enabled ?? task.testAgentEnabled ?? null,
     parent_task_id: task.parent_task_id || task.parentTaskId || null,
     root_task_id: task.root_task_id || task.rootTaskId || null,
     retry_of_task_id: task.retry_of_task_id || task.retryOfTaskId || null,
@@ -663,6 +671,12 @@ function createTaskWithScopedIdentity(task: any) {
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+  const acceptancePolicy = buildTaskAcceptancePolicySnapshot(newTask);
+  if (acceptancePolicy) {
+    newTask.acceptance_policy_snapshot = acceptancePolicy;
+    newTask.acceptance_mode = acceptancePolicy.mode;
+    newTask.test_agent_enabled = acceptancePolicy.test_agent_enabled;
+  }
   newTask.work_items = buildMainAgentWorkItems(newTask);
   newTask.work_item_summary = buildMainAgentWorkItemSummary(newTask.work_items);
   tasks.push(newTask);
@@ -1245,6 +1259,41 @@ const AUTOMATED_TERMINAL_WORKFLOWS = new Set([
 ]);
 
 export function hasStructuredTaskAcceptanceEvidence(task: any, updates: any = {}) {
+  const merged = { ...task, ...updates };
+  const workflowType = String(merged?.workflow_type || "general").trim().toLowerCase();
+  const exactAcceptanceWorkflow = ["daily_dev", "project_main_agent"].includes(workflowType)
+    || (String(merged?.assign_type || "") === "project"
+      && !!merged?.acceptance_policy_snapshot
+      && workflowType !== "agent_coordination_dependency");
+  if (exactAcceptanceWorkflow) {
+    const policyResult = resolveTaskAcceptancePolicy(merged);
+    if (!policyResult.valid || !policyResult.snapshot) return false;
+    const finalAcceptance = updates.main_agent_final_acceptance
+      || updates.delivery_summary?.main_agent_final_acceptance
+      || task?.main_agent_final_acceptance
+      || task?.delivery_summary?.main_agent_final_acceptance;
+    const finalAcceptanceValid = finalAcceptance?.accepted === true
+      && finalAcceptance?.acceptance_policy_checksum === policyResult.snapshot.checksum
+      && (finalAcceptance?.mode === policyResult.snapshot.mode || finalAcceptance?.mode === "not_required");
+    const acceptanceRequired = merged?.requires_code_changes === true
+      || merged?.requires_verification === true
+      || merged?.requires_independent_review === true;
+    if (!acceptanceRequired) return finalAcceptanceValid;
+    if (policyResult.snapshot.mode === "main_agent_self_verification") {
+      const receipt = updates.main_agent_self_verification || task?.main_agent_self_verification;
+      return validateMainAgentSelfVerificationReceipt(merged, policyResult.snapshot, receipt).valid
+        && finalAcceptanceValid;
+    }
+    const summary = updates.delivery_summary || task?.delivery_summary || {};
+    const review = updates.test_agent_review || task?.test_agent_review || updates.delivery_summary?.test_agent || task?.delivery_summary?.test_agent;
+    const independentReviewValid = review?.canAccept === true
+      && (review?.runner?.sourceStable === true || review?.invocation?.artifactVerification?.status === "passed")
+      && (review?.invocation?.outputValidation?.valid === true || review?.report?.acceptanceEvidenceGateSummary?.pass === true);
+    const groupIndependentReviewValid = summary?.independent_review_gate?.pass === true
+      && summary?.post_review_spot_check_gate?.pass === true
+      && summary?.verification_source_gate_passed === true;
+    return (independentReviewValid || groupIndependentReviewValid) && finalAcceptanceValid;
+  }
   const summary = updates.delivery_summary || task?.delivery_summary || {};
   const coordination = updates.coordination_acceptance || task?.coordination_acceptance || {};
   const report = summary.delivery_report || task?.delivery_report || {};
@@ -1298,6 +1347,21 @@ export function updateTask(id: string, updates: any) {
   const previousGatePassed = tasks[idx].global_mission_gate_passed === true;
   const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
   const previousCollaborationState = tasks[idx].collaboration_state || {};
+  const policyValidation = validateTaskAcceptancePolicySnapshot(tasks[idx]);
+  if (policyValidation.valid && policyValidation.snapshot) {
+    const policy = policyValidation.snapshot;
+    const requestedMode = updates.acceptance_mode || updates.acceptanceMode;
+    const requestedEnabled = updates.test_agent_enabled ?? updates.testAgentEnabled;
+    if (requestedMode && requestedMode !== policy.mode) throw new Error("任务验收模式已在创建时固定，不能在执行中切换");
+    if (requestedEnabled !== undefined && requestedEnabled !== policy.test_agent_enabled) throw new Error("任务 TestAgent 开关已在创建时固定，不能在执行中切换");
+    if (updates.acceptance_policy_snapshot && updates.acceptance_policy_snapshot.checksum !== policy.checksum) throw new Error("任务验收策略快照不可修改");
+    updates = {
+      ...updates,
+      acceptance_mode: policy.mode,
+      test_agent_enabled: policy.test_agent_enabled,
+      acceptance_policy_snapshot: policy,
+    };
+  }
   tasks[idx].trace_id = ensureTraceId(tasks[idx].trace_id || updates.trace_id || updates.traceId, "task");
   const requestedStatus = String(updates.status || "").toLowerCase();
   const terminalValidationError = validateTaskTerminalTransition(tasks[idx], updates);

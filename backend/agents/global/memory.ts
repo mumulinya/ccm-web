@@ -4,7 +4,6 @@ import * as path from "path";
 import { buildContextBudget, estimateTextTokens, microCompactText } from "../../system/context-budget";
 import {
   calculateSessionMemoryKeepWindow,
-  peelOldestApiConversationRound,
   SESSION_MEMORY_MAX_KEEP_TOKENS,
   SESSION_MEMORY_MIN_KEEP_TOKENS,
   SESSION_MEMORY_MIN_TEXT_MESSAGES,
@@ -900,6 +899,62 @@ function buildSegmentSummary(messages: any[], candidates: GlobalMemoryItem[]) {
   };
 }
 
+function splitGlobalCompactionTimelineByCompleteTurns(messages: any[], maxTokens: number) {
+  const rounds: any[][] = [];
+  let current: any[] = [];
+  for (const message of messages) {
+    const startsNewTurn = message?.role === "user"
+      && message?.hidden_execution !== true
+      && current.some((item) => item?.role === "assistant" && item?.hidden_execution !== true);
+    if (startsNewTurn && current.length) {
+      rounds.push(current);
+      current = [];
+    }
+    current.push(message);
+  }
+  if (current.length) rounds.push(current);
+
+  const chunks: any[][] = [];
+  let chunk: any[] = [];
+  let chunkTokens = 0;
+  for (const round of rounds) {
+    const roundTokens = round.reduce((sum, item) => sum + estimateTokens(item?.content || item), 0);
+    if (roundTokens > maxTokens) {
+      const error: any = new Error(`单个完整对话轮次超过压缩模型容量：${roundTokens}/${maxTokens}`);
+      error.code = "GLOBAL_COMPACTION_COMPLETE_TURN_TOO_LARGE";
+      throw error;
+    }
+    if (chunk.length && chunkTokens + roundTokens > maxTokens) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkTokens = 0;
+    }
+    chunk.push(...round);
+    chunkTokens += roundTokens;
+  }
+  if (chunk.length) chunks.push(chunk);
+  return chunks;
+}
+
+function mergeGlobalChunkSummaries(summaries: any[], sourceMessageIds: string[]) {
+  const list = (key: string, max: number) => summaries.flatMap((summary) => Array.isArray(summary?.[key]) ? summary[key] : []).map(String).filter(Boolean).slice(-max);
+  return normalizeGlobalModelSummary({
+    primaryRequest: summaries[0]?.primaryRequest || summaries.at(-1)?.primaryRequest || "",
+    userRequests: list("userRequests", 20),
+    keyOutcomes: list("keyOutcomes", 20),
+    userAnchors: list("userAnchors", 16),
+    feedback: list("feedback", 16),
+    authorization: list("authorization", 16),
+    decisions: list("decisions", 20),
+    references: list("references", 24),
+    unresolved: list("unresolved", 20),
+    errors: list("errors", 16),
+    filesAndResources: list("filesAndResources", 40),
+    missionIds: list("missionIds", 24),
+    latestOutcome: summaries.at(-1)?.latestOutcome || "",
+  }, sourceMessageIds);
+}
+
 function calculateGlobalMessagesToKeepIndex(messages: any[], options: { floorIndex?: number; force?: boolean } = {}) {
   return calculateSessionMemoryKeepWindow(messages, { floorIndex: options.floorIndex });
 }
@@ -1377,16 +1432,16 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
       "消息边界由服务端绑定，无需返回 sourceMessageIds。",
       "字段固定为 primaryRequest,userRequests,keyOutcomes,userAnchors,feedback,authorization,decisions,references,unresolved,errors,filesAndResources,missionIds,latestOutcome。",
     ].join("\n");
-    let retryTimeline = segmentModelTimeline.map((item: any) => ({ id: item.id, role: item.role, type: item.type || "message", timestamp: item.timestamp, content: item.content }));
-    const renderUser = () => JSON.stringify({
+    const fullTimeline = segmentModelTimeline.map((item: any) => ({ id: item.id, role: item.role, type: item.type || "message", timestamp: item.timestamp, content: item.content, hidden_execution: item.hidden_execution === true }));
+    const renderUser = (timeline = fullTimeline, preservationReference = reference, ids = sourceMessageIds, priorSummary = previousSummary) => JSON.stringify({
       sessionId: exactSessionId,
       reason: options.reason || "auto",
       customInstructions: compact(effectiveInstructions, 4000),
-      previousSummary,
-      previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? sha(previousSummary, 40) : ""),
-      PRESERVATION_REFERENCE: reference,
-      sourceMessageIds,
-      timeline: retryTimeline,
+      previousSummary: priorSummary,
+      previousSummaryChecksum: state.activeSummaryChecksum || (priorSummary ? sha(priorSummary, 40) : ""),
+      PRESERVATION_REFERENCE: preservationReference,
+      sourceMessageIds: ids,
+      timeline,
       fullTranscriptRetained: true,
     });
     const invoke = options.modelCall || (async ({ system, user, maxOutputTokens }: any) => callCompactionModel(config, system, user, maxOutputTokens));
@@ -1411,26 +1466,72 @@ export async function compactGlobalAgentSessionWithModel(sessionId: string, opti
         if (validation.valid) modelResult = { summary: reusable.summary, provider: state.sessionMemoryState?.provider, model: state.sessionMemoryState?.model, source: "session_memory" };
       }
     }
-    for (let attempt = 1; !validation.valid && attempt <= 4; attempt += 1) {
+    const invokeValidatedSummary = async (timeline: any[], preservationReference: any, ids: string[], priorSummary: any, label: string, sourceMessagesForValidation: any[] = timeline) => {
+      let localValidation: any = { valid: false, issues: ["model_summary_missing"] };
+      let localResult: any = null;
+      let localError: any = null;
+      for (let attempt = 1; !localValidation.valid && attempt <= 4; attempt += 1) {
+        try {
+          localResult = await invoke({ system, user: renderUser(timeline, preservationReference, ids, priorSummary), maxOutputTokens: GLOBAL_COMPACTION_MODEL_MAX_OUTPUT_TOKENS, attempt: `${label}:${attempt}`, sessionId: exactSessionId });
+          const candidate = bindTrustedGlobalSourceBoundary(localResult?.summary || localResult, ids);
+          localValidation = validateGlobalModelSummary(candidate, preservationReference, ids, {
+            sessionId: exactSessionId,
+            sourceMessages: sourceMessagesForValidation,
+            previousSummary: priorSummary,
+          });
+          if (!localValidation.valid) localError = new Error(`模型摘要校验失败：${localValidation.issues.join(", ")}`);
+        } catch (error) {
+          localError = error;
+          const promptTooLong = /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String((error as any)?.message || error || ""));
+          if (promptTooLong) {
+            const wrapped: any = new Error(`${label} 的完整轮次输入超过模型容量，未删除任何历史消息`);
+            wrapped.code = "GLOBAL_COMPACTION_CHUNK_PROMPT_TOO_LONG";
+            wrapped.cause = error;
+            throw wrapped;
+          }
+        }
+      }
+      if (!localValidation.valid) throw localError || new Error(`${label} 模型摘要不可用`);
+      return { result: localResult, validation: localValidation, summary: normalizeGlobalModelSummary(bindTrustedGlobalSourceBoundary(localResult?.summary || localResult, ids), ids) };
+    };
+
+    if (!validation.valid) {
       try {
-        modelResult = await invoke({ system, user: renderUser(), maxOutputTokens: GLOBAL_COMPACTION_MODEL_MAX_OUTPUT_TOKENS, attempt, sessionId: exactSessionId });
-        const candidate = bindTrustedGlobalSourceBoundary(modelResult?.summary || modelResult, sourceMessageIds);
-        validation = validateGlobalModelSummary(candidate, reference, sourceMessageIds, {
-          sessionId: exactSessionId,
-          sourceMessages: segmentModelTimeline,
-          previousSummary,
-        });
-        if (validation.valid) break;
-        lastError = new Error(`模型摘要校验失败：${validation.issues.join(", ")}`);
+        const capacityTokens = Number((modelCapacity as any)?.effectiveContextWindow || (modelCapacity as any)?.contextWindow || autoCompactTokenLimit);
+        const maxChunkTokens = Math.max(8_000, Math.min(80_000, Math.floor(Math.min(capacityTokens, autoCompactTokenLimit) * 0.45)));
+        const chunks = splitGlobalCompactionTimelineByCompleteTurns(fullTimeline, maxChunkTokens);
+        if (chunks.length <= 1) {
+          const one = await invokeValidatedSummary(fullTimeline, reference, sourceMessageIds, previousSummary, "full_segment");
+          modelResult = one.result;
+          validation = one.validation;
+        } else {
+          const chunkSummaries: any[] = [];
+          for (let index = 0; index < chunks.length; index += 1) {
+            const chunk = chunks[index];
+            const ids = chunk.map((item: any) => String(item.id || ""));
+            const chunkReference = buildSegmentSummary(chunk, []);
+            const compactedChunk = await invokeValidatedSummary(chunk, chunkReference, ids, null, `chunk_${index + 1}_of_${chunks.length}`);
+            chunkSummaries.push(compactedChunk.summary);
+          }
+          const deterministicMerge = mergeGlobalChunkSummaries([...(previousSummary ? [previousSummary] : []), ...chunkSummaries], sourceMessageIds);
+          const mergeTimeline = [{
+            id: `formal_merge_${sourceMessageIds[0] || "start"}_${sourceMessageIds.at(-1) || "end"}`,
+            role: "user",
+            type: "formal_compaction_merge",
+            timestamp: new Date().toISOString(),
+            content: JSON.stringify({ chunk_summaries: chunkSummaries, deterministic_merge: deterministicMerge }),
+          }];
+          const merged = await invokeValidatedSummary(mergeTimeline, reference, sourceMessageIds, previousSummary, "formal_chunk_merge", segmentModelTimeline);
+          modelResult = { ...merged.result, source: "model_hierarchical", chunkCount: chunks.length };
+          validation = validateGlobalModelSummary(bindTrustedGlobalSourceBoundary(merged.summary, sourceMessageIds), reference, sourceMessageIds, {
+            sessionId: exactSessionId,
+            sourceMessages: segmentModelTimeline,
+            previousSummary,
+          });
+          if (!validation.valid) throw new Error(`正式分段合并摘要校验失败：${validation.issues.join(", ")}`);
+        }
       } catch (error) {
         lastError = error;
-        const promptTooLong = /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String((error as any)?.message || error || ""));
-        if (promptTooLong && promptTooLongRetries < 3) {
-          const peeled = peelOldestApiConversationRound(retryTimeline);
-          if (!peeled.peeled) break;
-          retryTimeline = peeled.messages;
-          promptTooLongRetries += 1;
-        }
       }
     }
     if (!validation.valid) throw lastError || new Error("全局 Agent 模型摘要不可用");

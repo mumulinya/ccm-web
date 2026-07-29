@@ -13,11 +13,19 @@ const browser = await chromium.launch({ headless: true, ...(executablePath ? { e
 const report = { pass: false, generatedAt: new Date().toISOString(), baseUrl, checks: [], errors: [], screenshots: [] }
 
 const json = body => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+const adminSession = {
+  success: true,
+  authenticated: true,
+  user: { username: 'settings-selftest', role: 'admin' },
+  csrf: 'settings-render-csrf',
+  capabilities: ['read', 'chat.read_only', 'task.execute', 'project.runtime', 'project.git', 'attachment.manage', 'project.define', 'terminal.manage', 'agent.credentials', 'tools.manage', 'cleanup.permanent', 'permission.high_risk', 'security.manage'],
+}
 const mockBaseApi = async page => {
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
   await page.route('**/api/**', route => {
     const pathname = new URL(route.request().url()).pathname
-    if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'settings-selftest' } }))
+    if (pathname === '/api/auth/session') return route.fulfill(json(adminSession))
+    if (pathname === '/api/music/playback/commands/head') return route.fulfill(json({ success: true, command: null }))
     if (pathname === '/api/projects') return route.fulfill(json({ success: true, projects: [] }))
     if (pathname === '/api/pets/agents') return route.fulfill(json({ success: true, agents: [] }))
     if (pathname === '/api/system/settings-status') return route.fulfill(json({ success: true, version: '1.0.24', service: { status: 'online', pid: 1234, uptimeSeconds: 7200, startedAt: '2026-07-23T06:00:00.000Z' }, credentials: { protected: true, backend: 'AES-256-GCM', entries: 2 } }))

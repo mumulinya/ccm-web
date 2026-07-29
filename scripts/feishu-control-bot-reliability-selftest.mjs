@@ -37,7 +37,8 @@ assert.ok(projectSessionsSource.includes("latest_message_id: threadId"), "projec
 assert.ok(globalApiSource.includes("beginFeishuReactionFeedback") && globalApiSource.includes('finishReaction("completed")'), "global Agent feedback must start after ACP resolution and finish after processing");
 assert.ok(adapterSource.includes('postFeishuReactionFeedback("start"') && adapterSource.includes('postFeishuReactionFeedback("finish"'), "project ACP must use non-blocking CCM reaction feedback");
 assert.ok(reactionFeedbackSource.includes("AbortSignal.timeout(timeoutMs)"), "Feishu reaction API calls must have a hard timeout");
-assert.ok(reactionFeedbackSource.includes("仅允许本机 ACP 调用"), "reaction feedback API must be restricted to local ACP");
+assert.ok(reactionFeedbackSource.includes("仅允许签名飞书 ACP 调用"), "reaction feedback API must require signed ACP identity");
+assert.ok(adapterSource.includes("buildInternalApiHeaders"), "ACP calls must use the signed internal API identity");
 assert.ok(adapterSource.includes("prompt received mode="), "ACP must log when a prompt crosses the cc-connect boundary");
 assert.ok(adapterSource.includes("completeTurnWithText"), "ACP must complete every prompt with one visible terminal reply");
 assert.ok(adapterSource.includes("writeBatchAsync"), "ACP text and end_turn must use one ordered pipe write");

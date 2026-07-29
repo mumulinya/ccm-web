@@ -17,6 +17,7 @@ export type ProjectMainPlan = {
     summary: string;
     project: string;
     projectSessionId: string;
+    acceptanceMode: "test_agent" | "main_agent_self_verification";
     requiresConfirmation: boolean;
     acceptanceCriteria: string[];
     acceptanceEvidencePlan: TestAgentAcceptanceEvidence[];
@@ -90,12 +91,14 @@ export declare function planProjectMainTask(input: {
     userMessage: string;
     workflowDecision: WorkflowDecision;
     context?: string;
+    acceptanceMode?: "test_agent" | "main_agent_self_verification";
 }): Promise<{
     schema: "ccm-project-main-plan-v1";
     title: string;
     summary: string;
     project: string;
     projectSessionId: string;
+    acceptanceMode: "test_agent" | "main_agent_self_verification";
     requiresConfirmation: boolean;
     acceptanceCriteria: string[];
     acceptanceEvidencePlan: TestAgentAcceptanceEvidence[];
@@ -224,6 +227,7 @@ export declare function projectMainTaskPublic(task: any): {
     terminal_gate: any;
     acceptance_mode: any;
     test_agent_enabled: boolean;
+    acceptance_policy_snapshot: any;
     message_id: string;
     acceptance_evidence_plan: any;
     test_agent_review_policy: any;

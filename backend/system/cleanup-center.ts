@@ -4,7 +4,8 @@ import * as path from "path";
 import { loadCronJobs, loadTasks, saveCronJobs } from "../core/db";
 import { getSqliteTaskStoreStatus } from "../core/task-store";
 import { withFileLock } from "../core/atomic-json-file";
-import { CCM_DIR, GROUP_MESSAGES_DIR, GROUPS_FILE } from "../core/utils";
+import { CCM_DIR, GROUP_MESSAGES_DIR, GROUPS_FILE, UPLOAD_DIR } from "../core/utils";
+import { listOrphanAttachments, purgeOrphanAttachment, reconcileAttachmentReferences } from "./attachment-reference-registry";
 import { purgeArchivedTask } from "../modules/collaboration/collaboration";
 import {
   archiveProjectChatRun,
@@ -74,6 +75,13 @@ const ACTIONS: Record<string, {
     id: "purge_archived_project_runs",
     label: "永久删除已归档项目运行",
     description: "永久移除项目运行记录及关联会话和执行产物。",
+    risk: "danger",
+    irreversible: true,
+  },
+  purge_orphan_uploads: {
+    id: "purge_orphan_uploads",
+    label: "清理孤立上传附件",
+    description: "删除超过24小时且没有任何任务引用的上传文件。",
     risk: "danger",
     irreversible: true,
   },
@@ -215,6 +223,15 @@ function listCleanupCandidates(action: string, retentionDays: number) {
       .filter((run: any) => run.status === "failed" && !run.archived && !run.deleted_at)
       .filter((run: any) => matchesRetention(run, retentionDays, ["updated_at", "created_at"]))
       .map(projectRunCandidate);
+  } else if (action === "purge_orphan_uploads") {
+    candidates = listOrphanAttachments(24 * 60 * 60_000).map((item: any) => ({
+      id: item.id,
+      title: item.id,
+      status: "orphan",
+      project: "未被任务引用",
+      updated_at: item.updated_at,
+      fingerprint: candidateFingerprint(item),
+    }));
   }
   return candidates
     .filter(candidate => !!candidate.id)
@@ -231,9 +248,10 @@ function getStorageStats() {
   const testArtifacts = countFilesAndBytes(path.join(CCM_DIR, "test-agent-artifacts"));
   const testRuns = countFilesAndBytes(path.join(CCM_DIR, "test-agent-runs"));
   const replay = countFilesAndBytes(path.join(CCM_DIR, "reliability", "task-replay-journal"));
-  const totalBytes = [executions, checkpoints, outputs, projectSessions, groupMessages, testArtifacts, testRuns, replay]
+  const uploads = countFilesAndBytes(UPLOAD_DIR);
+  const totalBytes = [executions, checkpoints, outputs, projectSessions, groupMessages, testArtifacts, testRuns, replay, uploads]
     .reduce((sum, item) => sum + item.bytes, 0);
-  return { executions, checkpoints, outputs, projectSessions, groupMessages, testArtifacts, testRuns, replay, totalBytes };
+  return { executions, checkpoints, outputs, projectSessions, groupMessages, testArtifacts, testRuns, replay, uploads, totalBytes };
 }
 
 function appendCleanupAudit(record: any) {
@@ -264,6 +282,7 @@ export function getCleanupHistory(limit = 40) {
 }
 
 export function getCleanupSummary() {
+  const attachmentRegistry = reconcileAttachmentReferences();
   const tasks = loadTasks();
   const cronJobs = loadCronJobs();
   const projectRuns = [...projectChatRuns.values()];
@@ -292,6 +311,13 @@ export function getCleanupSummary() {
   const executionBytes = storage.executions.bytes + storage.checkpoints.bytes + storage.outputs.bytes;
   const defaultCandidates = Object.fromEntries(Object.keys(ACTIONS).map(action => [action, listCleanupCandidates(action, DEFAULT_RETENTION_DAYS)]));
   const cards = [
+    {
+      id: "uploads",
+      title: "需求附件",
+      count: storage.uploads.files,
+      bytes: storage.uploads.bytes,
+      detail: `${attachmentRegistry.items.filter((item: any) => item.reference_count === 0).length} 个当前无任务引用`,
+    },
     {
       id: "tasks",
       title: "任务记录",
@@ -397,6 +423,14 @@ export function getCleanupSummary() {
         { id: "test-runs", title: "TestAgent 运行记录", type: "测试证据", count: storage.testRuns.files, bytes: storage.testRuns.bytes },
         { id: "task-replay", title: "任务回放日志", type: "回放证据", count: storage.replay.files, bytes: storage.replay.bytes },
       ],
+      uploads: attachmentRegistry.items.slice(-200).reverse().map((item: any) => ({
+        id: item.id,
+        title: item.id,
+        type: item.reference_count ? "任务附件" : "未引用附件",
+        count: item.reference_count,
+        bytes: item.bytes,
+        updated_at: item.updated_at,
+      })),
     },
     actions: Object.values(ACTIONS).map(action => ({
       ...action,
@@ -505,6 +539,11 @@ export function runCleanupAction(action: string, options: { preview_token?: any;
               const result: any = purgeArchivedTask(id);
               if (!result) throw new Error("任务不存在");
               mergeCleanupTotals(cleanup, result.purge_cleanup);
+              results.push({ id, status: "deleted" });
+            } else if (action === "purge_orphan_uploads") {
+              const result = purgeOrphanAttachment(id, 24 * 60 * 60_000);
+              cleanup.upload_files = Number(cleanup.upload_files || 0) + 1;
+              cleanup.upload_bytes = Number(cleanup.upload_bytes || 0) + Number(result.bytes || 0);
               results.push({ id, status: "deleted" });
             }
           } catch (error: any) {

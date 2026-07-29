@@ -47,9 +47,11 @@
   },
   "dependencies": {
     "@huggingface/transformers": "4.2.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "better-sqlite3": "^12.11.1",
+    "busboy": "1.6.0",
     "cc-connect": "^1.4.1",
+    "ccm": "file:..",
     "js-tiktoken": "1.0.21",
     "pdf-parse": "^1.1.1",
     "playwright": "^1.61.1",

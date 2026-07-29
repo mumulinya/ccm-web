@@ -12,6 +12,8 @@ const isolatedHome = path.join(root, 'scratch', `main-agent-runtime-e2e-home-${p
 const ccmHome = path.join(isolatedHome, '.cc-connect')
 const port = 33100 + (process.pid % 500)
 const baseUrl = `http://127.0.0.1:${port}`
+let authCookie = ''
+let csrfToken = ''
 
 assert.ok(isolatedHome.startsWith(path.join(root, 'scratch') + path.sep), 'isolated home must stay inside scratch')
 fs.rmSync(isolatedHome, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
@@ -125,7 +127,7 @@ function assertOrderedEvents(events, label) {
 async function postSse(url, body) {
   const response = await fetch(`${baseUrl}${url}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Cookie: authCookie, 'X-CCM-CSRF': csrfToken },
     body: JSON.stringify(body),
   })
   assert.equal(response.ok, true, `${url} should return 2xx`)
@@ -133,7 +135,7 @@ async function postSse(url, body) {
 }
 
 async function loadTasks() {
-  const response = await fetch(`${baseUrl}/api/tasks`)
+  const response = await fetch(`${baseUrl}/api/tasks`, { headers: { Cookie: authCookie } })
   assert.equal(response.ok, true, 'task list should be available')
   return (await response.json()).tasks || []
 }
@@ -143,6 +145,20 @@ try {
 
   const page = await (await fetch(baseUrl)).text()
   assert.match(page, /<div id="app">/, 'production frontend should be served')
+
+  await fetch(`${baseUrl}/api/auth/session`)
+  const setupCodeFile = path.join(ccmHome, 'auth', 'setup-code.txt')
+  assert.equal(fs.existsSync(setupCodeFile), true, 'fresh runtime should create a one-time setup code')
+  const registerResponse = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'runtimeadmin', password: 'runtime-e2e-password', setup_code: fs.readFileSync(setupCodeFile, 'utf8').trim() }),
+  })
+  assert.equal(registerResponse.status, 201, 'first administrator registration should succeed')
+  const registerPayload = await registerResponse.json()
+  authCookie = String(registerResponse.headers.get('set-cookie') || '').split(';')[0]
+  csrfToken = String(registerPayload.csrf || '')
+  assert.ok(authCookie && csrfToken, 'authenticated E2E should receive cookie and CSRF token')
 
   assert.equal((await loadTasks()).length, 0, 'isolated runtime should start without tasks')
 

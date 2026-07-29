@@ -21,6 +21,7 @@ function publicData(value) {
         "originType", "originSessionId", "state", "status", "operation", "runId", "run_id",
         "deliveryId", "delivery_id", "count", "reason", "source",
         "profileId", "profile_id", "exitCode", "exit_code", "runtimeKind", "runtime_kind",
+        "commandId", "command_id", "generation", "title", "messageId", "message_id",
     ]) {
         if (!Object.prototype.hasOwnProperty.call(source, key))
             continue;

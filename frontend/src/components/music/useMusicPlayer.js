@@ -1091,6 +1091,15 @@ export function useMusicPlayer(options = {}) {
       try { syncUiFromAudio?.() } catch {}
     }
 
+    window.__cc_global_cancel_music_command = (commandId = '') => {
+      playbackCoordinator.beginPlaybackIntent({
+        keyword: `superseded:${String(commandId || '')}`,
+        source: 'server-superseded',
+      })
+      stopPlayback({ source: 'server-superseded', broadcast: false })
+      return { success: true }
+    }
+
     window.__cc_global_play_music = async (keyword, options = {}) => {
       console.log('[GlobalPlay] 收到全局播放指令:', keyword, options)
       const kw = String(keyword || '').trim()
@@ -1109,87 +1118,36 @@ export function useMusicPlayer(options = {}) {
       }
 
       const requestText = String(options.requestText || options.request_text || kw).trim()
-      let playbackPlan = {
-        strategy: isRandomMusicKeyword(kw) ? 'random' : 'exact_song',
-        searchQuery: kw,
-        artist: '',
-        randomize: isRandomMusicKeyword(kw),
-        strictMatch: !isRandomMusicKeyword(kw),
-        source: 'frontend-fallback',
-        reason: '',
-      }
-      if (aiRecommendationEnabled.value) {
+      let authoritativeDecision = options.playbackDecision || null
+      if (!authoritativeDecision) {
         try {
-          const planRes = await fetch('/api/music/resolve-play-request', {
+          const planRes = await fetch('/api/music/playback/resolve', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requestText, keyword: kw, mode: playModeHint }),
+            body: JSON.stringify({
+              requestText,
+              mode: playModeHint,
+              aiRecommendationEnabled: aiRecommendationEnabled.value,
+              aiAutoSelectEnabled: aiAutoSelectEnabled.value,
+            }),
           })
           if (!isLatest()) return superseded()
           const planData = await planRes.json()
           if (!isLatest()) return superseded()
-          if (planData?.success && planData?.plan?.strategy) playbackPlan = planData.plan
+          if (!planRes.ok || !planData?.decision?.selectedCandidate) {
+            return { success: false, error: planData?.error || planData?.decision?.reply || '模型未能形成可执行的播放决定' }
+          }
+          authoritativeDecision = planData.decision
         } catch (error) {
-          console.warn('[GlobalPlay] 播放意图识别失败，使用精确/随机兜底:', error)
+          return { success: false, error: error?.message || '播放意图识别失败，未执行规则兜底' }
         }
       }
-      const effectiveQuery = String(playbackPlan.searchQuery || kw).trim()
-      console.log('[GlobalPlay] 结构化播放计划:', playbackPlan)
+      if (!authoritativeDecision?.selectedCandidate) return { success: false, error: '没有可执行的播放决定' }
+      console.log('[GlobalPlay] 权威播放决定:', authoritativeDecision.id || authoritativeDecision.checksum)
 
       if (!tracks.value.length) {
         await loadTracks()
         if (!isLatest()) return superseded()
-      }
-
-      const selectTrackFromCandidates = async (query, candidates, plan = playbackPlan) => {
-        if (!isLatest()) return superseded()
-        const list = Array.isArray(candidates) ? candidates.slice(0, 8) : []
-        if (!list.length) return { success: false, rejected: true, error: '没有可供选择的候选歌曲' }
-        if (!aiAutoSelectEnabled.value) {
-          const selected = plan.randomize === true || plan.strategy === 'artist_random'
-            ? pickRandomTrack(list)
-            : pickBestSearchResult(query, list)
-          return selected
-            ? { success: true, item: selected, source: 'local-selection', reason: 'AI 自动选歌已关闭' }
-            : { success: false, rejected: true, error: '没有足够匹配的歌曲' }
-        }
-        try {
-          const res = await fetch('/api/music/select-track', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              keyword: query,
-              originalRequest: requestText,
-              selectionMode: plan.strictMatch ? 'exact' : (plan.strategy === 'artist_random' ? 'artist_random' : 'recommendation'),
-              randomize: plan.randomize === true,
-              candidates: list.map((item) => ({
-                title: item.title || item.name || '',
-                artist: item.artist || item.author || item.singer || '',
-                name: item.name || '',
-                author: item.author || '',
-                singer: item.singer || '',
-                filename: item.filename || item.track?.filename || '',
-              })),
-            }),
-          })
-          if (!isLatest()) return superseded()
-          const data = await res.json()
-          if (!isLatest()) return superseded()
-          if (data?.rejected || data?.success === false || !Number.isInteger(data?.index) || data.index < 0) {
-            return { success: false, rejected: true, error: data?.reason || '未找到足够匹配的歌曲', source: data?.source }
-          }
-          return {
-            success: true,
-            item: list[data.index],
-            source: data.source || 'model',
-            reason: data.reason || '',
-          }
-        } catch (err) {
-          if (!isLatest()) return superseded()
-          const best = plan.strictMatch ? pickBestSearchResult(query, list) : pickRandomTrack(list)
-          if (!best) return { success: false, rejected: true, error: err?.message || '选曲失败' }
-          return { success: true, item: best, source: 'fallback', reason: '本地规则打分兜底' }
-        }
       }
 
       const playSelectedLocal = async (track, sourceLabel = 'local') => {
@@ -1204,121 +1162,41 @@ export function useMusicPlayer(options = {}) {
         return { success: true, source: sourceLabel, title: formatTrackLabel(track) }
       }
 
-      const playCloudByMode = async (query, plan = playbackPlan) => {
+      const decidedCandidate = authoritativeDecision.selectedCandidate
+      if (decidedCandidate) {
         if (!isLatest()) return superseded()
-        const q = String(query || '').trim()
-        if (!q) return { success: false, error: '缺少搜索关键词' }
-        if (playModeHint === 'local') {
-          return { success: false, error: '本地模式未找到可播放歌曲' }
+        if (decidedCandidate.source === 'local') {
+          const local = tracks.value.find(track => track.filename === (decidedCandidate.filename || decidedCandidate.sourceId))
+          if (!local) return { success: false, error: '权威播放决定指向的本地歌曲已经不存在' }
+          return playSelectedLocal(local, 'server-decision-local')
         }
-        if (playModeHint === 'netease') {
-          console.log('[GlobalPlay] 网易云搜索:', q)
-          const res = await fetch(`/api/music/search-netease?q=${encodeURIComponent(q)}`)
-          if (!isLatest()) return superseded()
-          const data = await res.json()
-          if (!isLatest()) return superseded()
-          if (data.success && data.results?.length) {
-            const picked = await selectTrackFromCandidates(q, data.results, plan)
-            if (!isLatest()) return superseded()
-            if (!picked.success) return { success: false, error: picked.error || '网易未找到足够匹配的歌曲' }
-            const played = await convertNeteaseAndPlay(picked.item, { ...options, remote: true, playbackIntent })
-            if (!isLatest()) return superseded()
-            syncUiFromAudio?.()
-            return played?.success ? { ...played, pickSource: picked.source } : played
-          }
-          return { success: false, error: data.error || '网易未找到相关歌曲' }
-        }
-        console.log('[GlobalPlay] B站搜索:', q)
-        const biliRes = await fetch(`/api/music/search?q=${encodeURIComponent(q)}`)
+        const remote = decidedCandidate.source === 'netease'
+          ? {
+              type: 'netease',
+              songId: decidedCandidate.sourceId,
+              title: decidedCandidate.title,
+              artist: decidedCandidate.artist,
+              duration: decidedCandidate.duration,
+              downloadToken: decidedCandidate.downloadToken,
+            }
+          : {
+              type: 'bilibili',
+              bvid: decidedCandidate.sourceId,
+              title: decidedCandidate.title,
+              author: decidedCandidate.artist,
+              duration: decidedCandidate.duration,
+              downloadToken: decidedCandidate.downloadToken,
+            }
+        if (!remote.downloadToken) return { success: false, error: '播放决定缺少有效下载凭证，请重新点歌' }
+        const played = decidedCandidate.source === 'netease'
+          ? await convertNeteaseAndPlay(remote, { ...options, remote: true, playbackIntent })
+          : await convertAndPlay(remote, { ...options, remote: true, playbackIntent })
         if (!isLatest()) return superseded()
-        const biliData = await biliRes.json()
-        if (!isLatest()) return superseded()
-        if (biliData.success && biliData.results?.length) {
-          const picked = await selectTrackFromCandidates(q, biliData.results, plan)
-          if (!isLatest()) return superseded()
-          if (!picked.success) return { success: false, error: picked.error || 'B站未找到足够匹配的歌曲' }
-          const played = await convertAndPlay(picked.item, { ...options, remote: true, playbackIntent })
-          if (!isLatest()) return superseded()
-          syncUiFromAudio?.()
-          return played?.success ? { ...played, pickSource: picked.source } : played
-        }
-        return { success: false, error: biliData.error || 'B站未找到相关歌曲' }
-      }
-
-      // 播放指定歌单：整单入队
-      const savedPlaylist = playbackPlan.strictMatch ? matchSavedPlaylistByKeyword(effectiveQuery) : null
-      if (savedPlaylist && playbackPlan.strategy !== 'random') {
-        const played = await playPlaylistById(savedPlaylist.id, { ...options, remote: true, playbackIntent })
-        if (!isLatest()) return superseded()
-        if (played.success) {
-          console.log('[GlobalPlay] 播放歌单:', savedPlaylist.name, played.count)
-          return played
-        }
-      }
-
-      if (playbackPlan.strategy === 'random') {
-        // 有本地曲：全库入队后在队列内随机，绝不先走云端热门
-        if (tracks.value.length) {
-          const pool = await useFullLibraryAsPlaybackQueue()
-          if (!isLatest()) return superseded()
-          const randomTrack = pickRandomTrack(pool, { excludeTrack: currentTrack.value })
-          if (randomTrack) {
-            console.log('[GlobalPlay] 随机播放本地队列:', randomTrack.title || randomTrack.filename)
-            const playResult = await play(randomTrack, { ...options, remote: true, source: 'local-random', playbackIntent })
-            if (!isLatest()) return superseded()
-            syncUiFromAudio?.()
-            if (playResult?.skipped) return playResult
-            if (!playResult?.success) return { success: false, error: playResult?.error || '播放失败' }
-            return { success: true, source: 'local-random', title: formatTrackLabel(randomTrack) }
-          }
-        }
-        // 仅本地无曲时云端兜底，查询词轮换避免总播同一批热门
-        if (playModeHint === 'local') {
-          return { success: false, error: '本地曲库为空，请先导入歌曲或切换到云端模式' }
-        }
-        const cloudQuery = nextCloudRandomQuery(playModeHint)
-        try {
-          const cloud = await playCloudByMode(cloudQuery, { ...playbackPlan, strategy: 'mood_recommendation', strictMatch: false, randomize: true })
-          if (!isLatest()) return superseded()
-          if (cloud.success) return { ...cloud, source: `${cloud.source || playModeHint}-random` }
-          return cloud
-        } catch (err) {
-          if (!isLatest()) return superseded()
-          return { success: false, error: err?.message || '随机播放失败' }
-        }
-      }
-
-      // 1. Local candidates: exact requests stay strict; artist/mood/genre use recommendation semantics.
-      const localMinScore = playbackPlan.strictMatch ? 40 : (playbackPlan.strategy === 'artist_random' ? 40 : 1)
-      const localRows = listLocalTrackCandidates(effectiveQuery, tracks.value, { minScore: localMinScore, limit: 8 })
-      const strongLocal = localRows.filter(row => row.score >= MUSIC_MATCH_MIN_SCORE)
-      if (playbackPlan.strictMatch && strongLocal.length === 1) {
-        console.log('[GlobalPlay] 本地唯一高分匹配:', formatTrackLabel(strongLocal[0].track))
-        return await playSelectedLocal(strongLocal[0].track, 'local')
-      }
-      if (localRows.length > 0) {
-        const picked = await selectTrackFromCandidates(effectiveQuery, localRows.map(row => row.track), playbackPlan)
-        if (!isLatest()) return superseded()
-        if (picked.success && picked.item) {
-          console.log('[GlobalPlay] 本地候选已点名:', formatTrackLabel(picked.item), picked.source)
-          return await playSelectedLocal(picked.item, `local-${picked.source || 'pick'}`)
-        }
-        // Keep going to cloud if local pick rejected.
-      } else if (playbackPlan.strictMatch) {
-        const matchedLocal = findLocalTrackByKeyword(effectiveQuery)
-        if (matchedLocal) return await playSelectedLocal(matchedLocal, 'local')
-      }
-
-      // 2. Mode-aware cloud search + model pick.
-      try {
-        const played = await playCloudByMode(effectiveQuery, playbackPlan)
-        if (!isLatest()) return superseded()
+        syncUiFromAudio?.()
         return played
-      } catch (err) {
-        if (!isLatest()) return superseded()
-        console.error('[GlobalPlay] 云端播放失败:', err)
-        return { success: false, error: err?.message || '未在本地或网络搜索到相关歌曲' }
       }
+
+      return { success: false, error: '权威播放决定缺少可执行歌曲' }
     }
 
     await loadLibraryState().catch((error) => {
@@ -1357,6 +1235,9 @@ export function useMusicPlayer(options = {}) {
     }
     if (window.__cc_global_sync_music_ui) {
       delete window.__cc_global_sync_music_ui
+    }
+    if (window.__cc_global_cancel_music_command) {
+      delete window.__cc_global_cancel_music_command
     }
     stopDanmaku()
     stopSpectrum()
@@ -1438,7 +1319,9 @@ export function useMusicPlayer(options = {}) {
       if (agentConfig.value.enabled && agentConfig.value.hasKey && agentConfig.value.model) {
         await sendToClaudeAgent(msg, signal)
       } else {
-        await sendToSimpleAgent(msg, signal)
+        const text = '音乐助手需要统一大模型来理解文本点歌。请先到系统设置配置模型；你仍可使用曲库搜索、播放按钮和队列控制。'
+        pushAgentMessage({ role: 'agent', content: text, time: formatTimeHHMMSS() })
+        notifyMusicPetSpeech(text, { role: 'status', mode: 'replace', final: true, source: 'music-chat' })
       }
     } finally {
       finishAgentRequest()
@@ -1457,6 +1340,7 @@ export function useMusicPlayer(options = {}) {
     let petStreamStarted = false
     let petStreamHadError = false
     let musicAction = null
+    let playbackDecision = null
     try {
       const res = await fetch('/api/music/agent', {
         method: 'POST',
@@ -1494,6 +1378,11 @@ export function useMusicPlayer(options = {}) {
               petStreamStarted = true
             } else if (data.type === 'music_action') {
               musicAction = data.action || null
+            } else if (data.type === 'decision') {
+              playbackDecision = data.decision || null
+              if (musicAction && playbackDecision) musicAction = { ...musicAction, playbackDecision }
+            } else if (data.type === 'candidate_results') {
+              setAgentMessageResults(agentMsg, data.results || [])
             } else if (data.type === 'music_results') {
               setAgentMessageResults(agentMsg, data.results || [])
             } else if (data.type === 'error') {
@@ -1517,17 +1406,6 @@ export function useMusicPlayer(options = {}) {
           console.error('Failed to persist music assistant response:', error)
         })
       }
-      const playResult = await autoplayFromAgentAction(musicAction, msg)
-      if (playResult) {
-        pushAgentMessage({
-          role: 'system',
-          content: playResult.success
-            ? `🎵 已自动播放：${playResult.title}（${playResult.source}）`
-            : `❌ 自动播放失败：${playResult.error || '未找到歌曲'}`,
-          time: formatTimeHHMMSS()
-        })
-        scrollChat()
-      }
     } catch (error) {
       const anchor = captureAgentChatScroll()
       const stopped = error?.name === 'AbortError'
@@ -1536,64 +1414,6 @@ export function useMusicPlayer(options = {}) {
       notifyMusicPetSpeech(stopped ? '已停止回复' : '连接失败，请检查系统设置里的统一大模型配置', { role: stopped ? 'status' : 'error', mode: 'replace', final: true, source: 'music-chat' })
     } finally {
       setAgentMessageStreaming(agentMsg, false)
-    }
-  }
-
-  const sendToSimpleAgent = async (msg, signal) => {
-    try {
-      const res = await fetch('/api/music/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, mode: mode.value, history: agentMessages.value.slice(-10) }),
-        signal,
-      })
-      const data = await res.json()
-      if (data.success) {
-        const replyText = data.reply || '...'
-        pushAgentMessage({
-          role: 'agent',
-          content: replyText,
-          time: formatTimeHHMMSS(),
-          results: [
-            ...(data.localResults || []).map(t => ({ type: 'local', track: t })),
-            ...(data.biliResults || []).map(r => ({ type: 'bilibili', ...r })),
-            ...(data.neteaseResults || []).map(r => ({ type: 'netease', ...r }))
-          ].slice(0, 8) || []
-        })
-        scrollChat()
-        notifyMusicPetSpeech(replyText, { role: 'assistant', mode: 'replace', final: true, source: 'music-chat' })
-        await persistAssistantMessage(replyText, {
-          action: data.action || null,
-          results: [
-            ...(data.localResults || []).map(t => ({ type: 'local', track: t })),
-            ...(data.biliResults || []).map(r => ({ type: 'bilibili', ...r })),
-            ...(data.neteaseResults || []).map(r => ({ type: 'netease', ...r }))
-          ].slice(0, 8)
-        }).catch((error) => console.error('Failed to persist music assistant response:', error))
-        if (data.action?.type === 'play_music') {
-          const result = await autoplayFromAgentAction(data.action, msg)
-          if (result && !result.skipped) {
-            pushAgentMessage({
-              role: 'system',
-              content: result.success
-                ? `🎵 已自动播放：${result.title}（${result.source}）`
-                : `❌ 自动播放失败：${result.error || '未找到歌曲'}`,
-              time: formatTimeHHMMSS()
-            })
-            scrollChat()
-          }
-        }
-      } else {
-        const errorText = `出错: ${data.error}`
-        pushAgentMessage({ role: 'agent', content: errorText, time: formatTimeHHMMSS() })
-        scrollChat()
-        notifyMusicPetSpeech(errorText, { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
-      }
-    } catch (error) {
-      const errorText = error?.name === 'AbortError' ? '已停止本次回复。' : '请求失败，请稍后再试。'
-      pushAgentMessage({ role: 'agent', content: errorText, time: formatTimeHHMMSS() })
-      scrollChat()
-      notifyMusicPetSpeech(errorText, { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
     }
   }
 
@@ -1954,7 +1774,6 @@ export function useMusicPlayer(options = {}) {
     savePlaylistRename,
     sendAgentMessage,
     sendToClaudeAgent,
-    sendToSimpleAgent,
     setAgentMessageContent,
     setAgentMessageResults,
     setAgentMessageStreaming,

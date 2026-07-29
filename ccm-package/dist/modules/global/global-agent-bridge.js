@@ -47,6 +47,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
+const internal_api_auth_1 = require("../system/internal-api-auth");
 const GLOBAL_AGENT_BRIDGE_FILE = path.join(utils_1.CCM_DIR, "global-agent-bridge.json");
 function writeGlobalJsonAtomic(file, value) {
     const temp = `${file}.${process.pid}.${Date.now()}.${crypto.randomBytes(2).toString("hex")}.tmp`;
@@ -108,7 +109,11 @@ function getRequestBaseUrl(req) {
     return `http://127.0.0.1:${port}`;
 }
 async function callLocalApi(baseUrl, pathname, options = {}) {
-    const response = await fetch(baseUrl + pathname, options);
+    const method = String(options.method || "GET").toUpperCase();
+    const response = await fetch(baseUrl + pathname, {
+        ...options,
+        headers: { ...(options.headers || {}), ...(0, internal_api_auth_1.buildInternalApiHeaders)("global-agent", method, pathname) },
+    });
     const data = await response.json();
     if (!response.ok || data?.success === false || data?.error) {
         throw new Error(data?.error || `接口执行失败 (${response.status})`);
@@ -150,7 +155,7 @@ function parseSseApiEventBlock(block) {
 async function postLocalSseOrJsonApi(baseUrl, pathname, body, options = {}) {
     const response = await fetch(baseUrl + pathname, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" },
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json", ...(0, internal_api_auth_1.buildInternalApiHeaders)("global-agent", "POST", pathname) },
         body: JSON.stringify(body || {}),
     });
     const contentType = response.headers.get("content-type") || "";

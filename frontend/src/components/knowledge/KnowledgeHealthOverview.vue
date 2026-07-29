@@ -59,7 +59,7 @@ const formatTime = value => {
           <strong>{{ healthTitle }}</strong>
           <span v-if="status?.state === 'building'">已处理 {{ status.processedDocuments || 0 }}/{{ status.totalDocuments || 0 }} 份文档</span>
           <span v-else-if="status?.state === 'failed'">{{ status.error || '索引更新失败，请查看技术详情' }}</span>
-          <span v-else-if="!semanticReady">{{ status?.localModel?.state === 'downloading' ? `正在准备本地语义模型 ${Number(status.localModel.progress || 0).toFixed(0)}%` : '当前仅使用词面检索；准备本地模型后可进行语义召回' }}</span>
+          <span v-else-if="!semanticReady">{{ status?.localModel?.state === 'downloading' ? `CCM 启动后台正在准备本地语义模型 ${Number(status.localModel.progress || 0).toFixed(0)}%` : '当前暂用词面检索；首次运行 ccm start 后会自动准备本地语义模型' }}</span>
           <span v-else>真实语义向量已可用，回答会附带可追溯来源</span>
         </div>
       </div>

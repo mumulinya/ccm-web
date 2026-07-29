@@ -22,6 +22,8 @@ export declare function selectMusicTrack(input?: {
     source: string;
     reason: string;
     rejected: boolean;
+    semanticDecisionReceipt?: undefined;
+    reply?: undefined;
     candidate?: undefined;
 } | {
     success: boolean;
@@ -29,5 +31,16 @@ export declare function selectMusicTrack(input?: {
     source: string;
     reason: string;
     rejected: boolean;
+    semanticDecisionReceipt: import("../../system/semantic-decision-runtime").SemanticDecisionReceiptV1;
+    reply?: undefined;
+    candidate?: undefined;
+} | {
+    success: boolean;
+    index: number;
+    source: string;
+    reason: string;
+    reply: string;
+    rejected: boolean;
     candidate: any;
+    semanticDecisionReceipt: import("../../system/semantic-decision-runtime").SemanticDecisionReceiptV1;
 }>;

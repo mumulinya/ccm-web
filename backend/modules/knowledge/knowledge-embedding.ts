@@ -307,3 +307,7 @@ export function setKnowledgeEmbeddingTestAdapter(adapter: typeof testAdapter) {
   localPipeline = null;
   localPipelineSignature = "";
 }
+
+export function knowledgeEmbeddingUsesTestAdapter() {
+  return testAdapter !== null;
+}

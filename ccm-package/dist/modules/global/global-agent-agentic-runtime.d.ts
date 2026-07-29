@@ -49,6 +49,10 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
         clarificationRunId?: string;
         onEvent?: (event: any) => void;
         sourceIngestion?: RequirementIngestionResult | null;
+        readOnly?: boolean;
+        turnId?: string;
+        queueScope?: string;
+        principal?: any;
     }) => Promise<any>;
     resumeGlobalAgentLoopsForServer: (ctx: CollabCtx, port: number) => Promise<any>;
     startGlobalMissionSupervisionForServer: (ctx: CollabCtx) => any;

@@ -21,6 +21,11 @@ export type ConversationTurnRecord = {
     updated_at: string;
     claimed_at: string;
     settled_at: string;
+    lease_id: string;
+    lease_expires_at: string;
+    run_id: string;
+    checkpoint: string;
+    semantic_decision_receipt: any;
 };
 export declare class ConversationTurnControlStore {
     readonly file: string;
@@ -58,13 +63,20 @@ export declare class ConversationTurnControlStore {
             updated_at: string;
             claimed_at: string;
             settled_at: string;
+            lease_id: string;
+            lease_expires_at: string;
+            run_id: string;
+            checkpoint: string;
+            semantic_decision_receipt: any;
         }[];
     };
     claim(input: any): ConversationTurnRecord;
     settle(input: any): ConversationTurnRecord;
+    defer(id: string, reason?: string): ConversationTurnRecord;
     cancel(id: string, reason?: string): ConversationTurnRecord;
     guide(id: string): ConversationTurnRecord;
     retry(id: string): ConversationTurnRecord;
+    heartbeat(input: any): ConversationTurnRecord;
 }
 export declare const conversationTurnControl: ConversationTurnControlStore;
 export declare function handleConversationTurnControlApi(pathname: string, req: IncomingMessage, res: ServerResponse, parsed: any): boolean;

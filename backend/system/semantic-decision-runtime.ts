@@ -14,10 +14,14 @@ import { estimateModelMessagesTokens } from "./model-token-preflight";
 export type SemanticDecisionScope = "global" | "group" | "project" | "music" | "test_agent";
 export type SemanticDecisionKind =
   | "workflow"
+  | "music_intent"
+  | "music_selection"
   | "agent_collaboration_route"
   | "test_agent_plan"
   | "memory_extraction"
-  | "acceptance_projection";
+  | "acceptance_projection"
+  | "main_agent_self_verification"
+  | "requirement_intake_quality";
 
 export interface SemanticDecisionIdentityV1 {
   scope: SemanticDecisionScope;

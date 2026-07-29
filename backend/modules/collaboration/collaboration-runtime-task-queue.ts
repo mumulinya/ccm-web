@@ -109,12 +109,6 @@ import {
   recordGroupTypedMemoryPressureRecallUsageLedger,
 } from "./group-memory-index";
 import {
-  sendFeishuReportMessage,
-} from "./feishu";
-import {
-  hasFeishuTaskBinding,
-} from "./feishu-channel";
-import {
   handleFeishuRoutes,
 } from "./feishu-routes";
 import {
@@ -1494,7 +1488,7 @@ export function getTaskById(taskId: string) {
 
 export function buildChildAgentTaskText(childTaskText: string, task: any = null) {
   if (!task) return childTaskText;
-  const attachmentContext = compactMemoryText(task.source_attachment_context || task.sourceAttachmentContext || "", 50_000);
+  const attachmentContext = String(task.source_attachment_context || task.sourceAttachmentContext || "");
   if (task.workflow_type !== "daily_dev") {
     return [
       childTaskText,
@@ -1596,50 +1590,15 @@ export function updateGroupMessageAssignmentStatus(
 }
 
 export async function sendTaskCompletionNotification(task: any, result: string) {
-  // Tasks bound to Feishu are already delivered to their originating chat by
-  // the task status hook. Preserve the fixed webhook as a legacy fallback.
-  if (hasFeishuTaskBinding({ taskId: task?.id, missionId: task?.parent_task_id || task?.root_task_id })) return;
-  const summary = task?.delivery_summary || {};
-  const sourceReport = String(summary.user_report || result || "");
-  const resultSummary = sourceReport.substring(0, 900) + (sourceReport.length > 900 ? "..." : "");
-  const fileCount = summary.actual_file_change_count ?? summary.files_changed?.length ?? 0;
-  const verificationCount = summary.verification?.length || 0;
-  const missingVerificationCount = summary.verification_required_missing?.length || 0;
-  const reviewStatus = summary.has_final_review ? (summary.review_status || "complete") : "无";
-  const priority = task.priority === "high" ? "高" : task.priority === "normal" ? "中" : "低";
-  const markdown = [
-    `**任务标题**：${task.title || "未命名任务"}`,
-    `**目标项目**：${task.target_project || "群聊"}`,
-    `**优先级**：${priority}`,
-    `**完成时间**：${new Date().toLocaleString("zh-CN")}`,
-    `**实际文件变更**：${fileCount} 个`,
-    `**验证记录**：${verificationCount} 条`,
-    `**缺命令验证**：${missingVerificationCount} 项`,
-    `**主 Agent 复盘**：${reviewStatus}`,
-    "",
-    `**用户交付报告**：\n${resultSummary || "无"}`,
-  ].join("\n");
-  const notification = await sendFeishuReportMessage({
-    title: "任务完成通知",
-    markdown,
-  });
-  if (!notification.success) console.warn("[飞书通知] 任务完成通知发送失败:", notification.error || "未知错误");
+  // Exact Feishu-origin tasks are delivered by the bound task status hook.
+  // Web and standalone group tasks must never fall back to the generic webhook.
+  void task;
+  void result;
 }
 
 export async function sendTaskFailureNotification(task: any, errorMsg: string) {
-  if (hasFeishuTaskBinding({ taskId: task?.id, missionId: task?.parent_task_id || task?.root_task_id })) return;
-  const markdown = [
-    `**任务标题**：${task.title || "未命名任务"}`,
-    `**目标项目**：${task.target_project || "群聊"}`,
-    `**失败时间**：${new Date().toLocaleString("zh-CN")}`,
-    "",
-    `**错误信息**：\n${String(errorMsg || "未知错误").substring(0, 900)}`,
-  ].join("\n");
-  const notification = await sendFeishuReportMessage({
-    title: "任务执行失败",
-    markdown,
-  });
-  if (!notification.success) console.warn("[飞书通知] 任务失败通知发送失败:", notification.error || "未知错误");
+  void task;
+  void errorMsg;
 }
 
 export function appendTaskGroupReport(task: any, status: "done" | "waiting" | "failed", detail = "") {

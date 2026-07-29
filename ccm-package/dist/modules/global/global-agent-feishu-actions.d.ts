@@ -5,6 +5,7 @@ export declare function createGlobalAgentFeishuActions(deps: any): {
         mode?: string;
         source?: string;
         originalText?: string;
+        sessionId?: string;
     }) => Promise<{
         success: boolean;
         message: string;

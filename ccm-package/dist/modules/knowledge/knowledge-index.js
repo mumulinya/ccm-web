@@ -438,6 +438,7 @@ function loadActiveKnowledgeIndex() {
 }
 function embeddingSignature(config) {
     const backend = (0, knowledge_embedding_1.preferredKnowledgeEmbeddingBackend)(config);
+    const runtime = (0, knowledge_embedding_1.knowledgeEmbeddingUsesTestAdapter)() ? ":test-adapter" : "";
     if (backend === "remote") {
         let endpoint = "remote";
         try {
@@ -445,11 +446,11 @@ function embeddingSignature(config) {
             endpoint = `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
         }
         catch { }
-        return `remote:${endpoint}:${config.model}`;
+        return `remote:${endpoint}:${config.model}${runtime}`;
     }
     if (backend === "local")
-        return `local:${config.localModel}:${config.localRevision}:${config.localDtype}`;
-    return "lexical";
+        return `local:${config.localModel}:${config.localRevision}:${config.localDtype}${runtime}`;
+    return `lexical${runtime}`;
 }
 function semanticReceipt(result) {
     const { vector: _vector, ...receipt } = result;

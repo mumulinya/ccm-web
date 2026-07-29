@@ -18,12 +18,14 @@ import {
   executeGlobalAgentAuthorizedTool,
 } from "./global-agent-tool-authorization";
 import { saveRun as saveGlobalAgentRun } from "../../agents/global/global-agent-run-store";
+import { appendTraceEvent } from "../../system/reliability-ledger";
+import { buildGlobalWriteAuthorizationReceipt } from "../../agents/global/global-agent-authorization";
 
 type LocalIntentResult = any;
 
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 export function createGlobalAgentAgenticRuntime(deps: any) {
-  const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, sendFeishuReportMessage, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps
+  const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps
 
   function safeProjectRows() {
     return getConfigs().map((config: any) => {
@@ -397,15 +399,63 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       inspectMission: (missionId) => getGlobalDevelopmentMission(missionId),
       advanceMission: (missionId, options) => superviseGlobalDevelopmentMissionCycle(missionId, ctx, options),
       controlMission: (missionId, operation, payload) => controlGlobalDevelopmentMission(missionId, operation, ctx, payload),
-      onCompleted: async (record, report) => {
+      deliverTerminal: async (record, receipt, delivery) => {
+        const report = record.final_report || {};
         const formatted = formatGlobalMissionFinalReport(report);
-        recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "completed", report });
-        if (record.global_run_id) completeGlobalAgentSupervision(record.global_run_id, { ...report, formatted }, "completed");
-        if (/feishu/i.test(record.source)) {
+        if (delivery.kind === "memory") {
+          recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: receipt.outcome, report });
+          return;
+        }
+        if (delivery.kind === "run") {
+          if (record.global_run_id) {
+            const run = completeGlobalAgentSupervision(record.global_run_id, { ...report, formatted, terminal_receipt: receipt }, receipt.outcome);
+            if (run) {
+              run.terminal_receipt = receipt;
+              saveGlobalAgentRun(run, true);
+            }
+          }
+          return;
+        }
+        if (delivery.kind === "replay") {
+          appendTraceEvent(record.trace_id, {
+            id: `${record.id}:terminal-delivery:${receipt.checksum}`,
+            type: "global_agent.terminal_delivery_recorded",
+            status: receipt.outcome === "completed" ? "ok" : "warning",
+            task_id: record.mission_id,
+            message: report?.summary || formatted,
+            data: { terminal_receipt: receipt },
+          });
+          return;
+        }
+        if (delivery.kind === "web_session") {
+          ingestGlobalAgentConversation({
+            sessionId: record.session_id,
+            source: record.source || "global-supervisor",
+            messages: [{
+              id: `gam_${record.global_run_id || record.mission_id}_terminal`,
+              role: "assistant",
+              content: formatted,
+              timestamp: receipt.settled_at,
+              trace_id: record.trace_id,
+              mission_id: record.mission_id,
+              metadata: { terminal_receipt: receipt },
+            }],
+          });
+          return;
+        }
+        if (delivery.kind === "feishu") {
           bindFeishuIdentifiersFromValue(record.session_id, report);
-          bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], source: record.source });
-          const delivered = await notifyFeishuTaskStage({ stage: "completion", title: "任务已经完成", markdown: formatted, sessionId: record.session_id, runId: record.global_run_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:completed` });
-          if (delivered.reason === "no_binding") await sendFeishuReportMessage({ title: "全局 Agent 最终交付报告", markdown: formatted });
+          bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], source: record.source, targetType: "global_agent" });
+          const delivered = await notifyFeishuTaskStage({
+            stage: receipt.outcome === "completed" ? "completion" : receipt.outcome,
+            title: receipt.outcome === "completed" ? "任务已经完成" : receipt.outcome === "cancelled" ? "任务已取消" : "任务执行遇到问题",
+            markdown: formatted,
+            sessionId: record.session_id,
+            runId: record.global_run_id,
+            missionId: record.mission_id,
+            dedupeKey: `mission:${record.mission_id}:terminal:${receipt.checksum}`,
+          });
+          if (delivered?.success !== true && delivered?.queued !== true) throw new Error(delivered?.reason || "飞书终态投递失败");
         }
       },
       onProgress: async (record, event) => {
@@ -416,12 +466,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           ...(event.items || []).map((item: any) => item.task_id || item.taskId),
           ...(event.actions || []).map((item: any) => item.task_id || item.taskId),
         ].filter(Boolean);
-        bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], taskIds, source: record.source });
+        bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], taskIds, source: record.source, targetType: "global_agent" });
         if (event?.type === "waiting_user") {
           const lines = (event.items || []).map((item: any) => `- ${item.reason || "需要你补充信息"}`);
           const markdown = `任务暂时需要你的帮助：\n${lines.join("\n")}`;
-          const delivered = await notifyFeishuTaskStage({ stage: "waiting_user", title: "任务需要你补充信息", markdown, sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:waiting-user:${record.cycle_count}` });
-          if (delivered.reason === "no_binding") await sendFeishuReportMessage({ title: "全局 Agent 等待人工处理", markdown });
+          await notifyFeishuTaskStage({ stage: "waiting_user", title: "任务需要你补充信息", markdown, sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:waiting-user:${record.cycle_count}` });
           return;
         }
         if (event?.type === "actions" && event.actions?.length) {
@@ -438,17 +487,6 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           };
           const lines = event.actions.map((item: any) => `- ${actionLabels[item.type] || "任务进度已经更新"}`);
           await notifyFeishuTaskStage({ stage: "rework", title: "任务进度更新", markdown: [...new Set(lines)].join("\n"), sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:actions:${record.cycle_count}` });
-        }
-      },
-      onTerminal: async (record, outcome, report) => {
-        recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: outcome, report });
-        if (record.global_run_id) completeGlobalAgentSupervision(record.global_run_id, report, outcome);
-        if (/feishu/i.test(record.source)) {
-          bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], source: record.source });
-          const title = outcome === "cancelled" ? "任务已取消" : "任务执行遇到问题";
-          const markdown = report?.summary || "任务未完成，我已经保留执行记录供排查。";
-          const delivered = await notifyFeishuTaskStage({ stage: outcome, title, markdown, sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:terminal:${outcome}` });
-          if (delivered.reason === "no_binding") await sendFeishuReportMessage({ title, markdown });
         }
       },
     };
@@ -868,6 +906,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           mode: args.mode || "",
           source: run.source || "global-agent",
           originalText: run.user_message,
+          sessionId: run.session_id,
         });
         observation = {
           success: played.success !== false,
@@ -991,7 +1030,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         console.warn(`[全局 Agent] 模型决策失败，已进入安全兜底：${detail}`);
         recordGlobalAgentRuntimeOutput(run, { type: "model_fallback", status: "warning", error: detail });
         // 模型不可用时只总结已有观察；不得让本地关键词规则替模型选择新工作流。
-        return localActionToAgenticDecision(null, run);
+        return null;
       },
       onEvent: input.onEvent ? (event) => input.onEvent!(event) : undefined,
     };
@@ -1008,6 +1047,10 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     clarificationRunId?: string;
     onEvent?: (event: any) => void;
     sourceIngestion?: RequirementIngestionResult | null;
+    readOnly?: boolean;
+    turnId?: string;
+    queueScope?: string;
+    principal?: any;
   }) {
     const sessionId = input.sessionId || "default";
     const visibleUserMessage = input.originalMessage || input.message;
@@ -1066,14 +1109,57 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         has_waiting_clarification: !!clarificationCandidate,
       },
     });
+    if (input.readOnly === true && workflowDecision.actionRequired === true) {
+      throw Object.assign(new Error("当前 Viewer 账户仅允许只读问答；这条需求需要创建任务或执行写入操作，请联系 Operator 或 Admin"), { code: "VIEWER_EXECUTION_FORBIDDEN" });
+    }
     const waitingClarification = clarificationCandidate && workflowDecision.continuationKind !== "new_task"
       ? clarificationCandidate
       : null;
-    const explicitWriteAuthorization = workflowDecision.actionRequired === true;
-    const run = waitingClarification
+    const authorizationReceipt = buildGlobalWriteAuthorizationReceipt({
+      turnId: input.turnId || `direct:${input.traceId || sessionId}`,
+      sessionId,
+      source: input.source || "web",
+      message: visibleUserMessage,
+      workflowDecision,
+      principal: input.principal,
+      readOnly: input.readOnly,
+    });
+    const explicitWriteAuthorization = authorizationReceipt.allowed_risk === "write";
+    const supervisedCandidate = !waitingClarification && workflowDecision.continuationKind !== "new_task"
+      ? listGlobalAgentRuns({ sessionId, limit: 100 }).find((item: any) => item.supervisor_id && ["supervising", "paused"].includes(String(item.status || ""))) || null
+      : null;
+    let supervisedContinuation: any = null;
+    if (supervisedCandidate) {
+      const supervisorBefore = getGlobalMissionSupervisor(supervisedCandidate.supervisor_id);
+      if (!supervisorBefore) throw new Error("全局任务跟进记录不存在");
+      const kind = workflowDecision.continuationKind === "revise_goal" ? "revise_goal" : "supplement";
+      const businessGoal = [
+        String(supervisorBefore.business_goal || supervisedCandidate.original_user_message || supervisedCandidate.user_message || "").trim(),
+        `${kind === "revise_goal" ? "目标调整" : "补充要求"}：${visibleUserMessage}`,
+      ].filter(Boolean).join("\n").slice(0, 50_000);
+      const supervisor = await controlGlobalMissionSupervisor(supervisedCandidate.supervisor_id, "update_goal", createMissionSupervisorRuntime(ctx), {
+        business_goal: businessGoal,
+        acceptance: supervisorBefore.acceptance,
+        message: visibleUserMessage,
+        continuation_kind: kind,
+        request_id: input.turnId || input.traceId || "",
+        source: input.source || "global-supervision-continuation",
+        continuation: { kind, source: input.source || "global-supervision-continuation", reason: visibleUserMessage, interrupt_current_run: kind === "revise_goal" },
+      });
+      supervisedContinuation = applyGlobalAgentSupervisionSteer(supervisedCandidate.id, visibleUserMessage, {
+        kind,
+        source: input.source || "global-supervision-continuation",
+        requestId: input.turnId || input.traceId || "",
+        supervisorState: supervisor.status,
+        continuationSummary: supervisor.last_continuation || null,
+      });
+    }
+    const run = supervisedContinuation?.run || (waitingClarification
       ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, {
-          explicitWriteAuthorization,
-        })
+            explicitWriteAuthorization,
+            writeAuthorizationReceipt: authorizationReceipt,
+            turnId: input.turnId,
+          })
       : await startGlobalAgentRun({
           message: input.message,
           originalMessage: input.originalMessage || input.message,
@@ -1082,11 +1168,21 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           source: input.source || "web",
           traceId: input.traceId,
           explicitWriteAuthorization,
+          writeAuthorizationReceipt: authorizationReceipt,
+          authorizationMessage: visibleUserMessage,
+          turnId: input.turnId,
+          queueScope: input.queueScope,
           workflowDecision,
           maxSteps: 10,
           timeoutMs: 12 * 60 * 1000,
-        }, runtime);
+        }, runtime));
     attachGlobalRunRequirementSources(run, input.sourceIngestion);
+    (run as any).write_authorization_receipt = authorizationReceipt;
+    (run as any).writeAuthorizationReceipt = authorizationReceipt;
+    (run as any).retryable = run.status === "failed";
+    (run as any).degraded = run.status === "failed" && /模型|provider|timeout|network|熔断/i.test(String(run.error || run.final_reply || ""));
+    if ((run as any).degraded) (run as any).failure_category = "provider_unavailable";
+    saveGlobalAgentRun(run, true);
     if (input.onEvent) {
       const canonicalReply = globalRunVisibleReply(run, "我已整理处理结果，技术细节已放入技术详情。");
       if (canonicalReply.trim()) {

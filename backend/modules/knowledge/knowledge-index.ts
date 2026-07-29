@@ -20,6 +20,7 @@ import {
   embedLocalKnowledgeTexts,
   embedRemoteKnowledgeTexts,
   getLocalKnowledgeModelStatus,
+  knowledgeEmbeddingUsesTestAdapter,
   preferredKnowledgeEmbeddingBackend,
   prepareLocalKnowledgeModel,
 } from "./knowledge-embedding";
@@ -462,13 +463,14 @@ export function loadActiveKnowledgeIndex() {
 
 function embeddingSignature(config: any) {
   const backend = preferredKnowledgeEmbeddingBackend(config);
+  const runtime = knowledgeEmbeddingUsesTestAdapter() ? ":test-adapter" : "";
   if (backend === "remote") {
     let endpoint = "remote";
     try { const url = new URL(config.apiUrl); endpoint = `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`; } catch {}
-    return `remote:${endpoint}:${config.model}`;
+    return `remote:${endpoint}:${config.model}${runtime}`;
   }
-  if (backend === "local") return `local:${config.localModel}:${config.localRevision}:${config.localDtype}`;
-  return "lexical";
+  if (backend === "local") return `local:${config.localModel}:${config.localRevision}:${config.localDtype}${runtime}`;
+  return `lexical${runtime}`;
 }
 
 function semanticReceipt(result: KnowledgeVectorResult): Omit<KnowledgeVectorResult, "vector"> {

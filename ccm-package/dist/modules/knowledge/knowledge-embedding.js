@@ -41,6 +41,7 @@ exports.embedLocalKnowledgeTexts = embedLocalKnowledgeTexts;
 exports.preferredKnowledgeEmbeddingBackend = preferredKnowledgeEmbeddingBackend;
 exports.removeLocalKnowledgeModel = removeLocalKnowledgeModel;
 exports.setKnowledgeEmbeddingTestAdapter = setKnowledgeEmbeddingTestAdapter;
+exports.knowledgeEmbeddingUsesTestAdapter = knowledgeEmbeddingUsesTestAdapter;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -320,5 +321,8 @@ function setKnowledgeEmbeddingTestAdapter(adapter) {
     testAdapter = adapter;
     localPipeline = null;
     localPipelineSignature = "";
+}
+function knowledgeEmbeddingUsesTestAdapter() {
+    return testAdapter !== null;
 }
 //# sourceMappingURL=knowledge-embedding.js.map

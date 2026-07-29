@@ -1,0 +1,72 @@
+export type DevelopmentAgentAuthEvidenceV2 = {
+    schema: "ccm-development-agent-auth-evidence-v2";
+    version: 2;
+    provider: string;
+    status: "credential_detected" | "verified" | "expired" | "revoked" | "degraded" | "failed";
+    source: "native_status" | "model_challenge" | "api_challenge" | "credential_file";
+    accountFingerprint: string;
+    model: string;
+    cliVersion: string;
+    verifiedAt: string;
+    expiresAt: string;
+    detail: string;
+    checksum: string;
+};
+export declare function accountFingerprint(account: unknown): string;
+export declare function recordDevelopmentAgentAuthEvidence(input: {
+    provider: string;
+    status: DevelopmentAgentAuthEvidenceV2["status"];
+    source: DevelopmentAgentAuthEvidenceV2["source"];
+    account?: string;
+    model?: string;
+    cliVersion?: string;
+    detail?: string;
+    ttlMs?: number;
+}): {
+    checksum: string;
+    schema: "ccm-development-agent-auth-evidence-v2";
+    version: 2;
+    provider: string;
+    status: "failed" | "degraded" | "credential_detected" | "verified" | "expired" | "revoked";
+    source: "native_status" | "model_challenge" | "api_challenge" | "credential_file";
+    accountFingerprint: string;
+    model: string;
+    cliVersion: string;
+    verifiedAt: string;
+    expiresAt: string;
+    detail: string;
+};
+export declare function getDevelopmentAgentAuthEvidence(provider: string, input?: {
+    account?: string;
+    model?: string;
+    cliVersion?: string;
+}): {
+    valid: boolean;
+    schema: "ccm-development-agent-auth-evidence-v2";
+    version: 2;
+    provider: string;
+    status: "credential_detected" | "verified" | "expired" | "revoked" | "degraded" | "failed";
+    source: "native_status" | "model_challenge" | "api_challenge" | "credential_file";
+    accountFingerprint: string;
+    model: string;
+    cliVersion: string;
+    verifiedAt: string;
+    expiresAt: string;
+    detail: string;
+    checksum: string;
+};
+export declare function revokeDevelopmentAgentAuthEvidence(provider: string, detail?: string): {
+    checksum: string;
+    schema: "ccm-development-agent-auth-evidence-v2";
+    version: 2;
+    provider: string;
+    status: "failed" | "degraded" | "credential_detected" | "verified" | "expired" | "revoked";
+    source: "native_status" | "model_challenge" | "api_challenge" | "credential_file";
+    accountFingerprint: string;
+    model: string;
+    cliVersion: string;
+    verifiedAt: string;
+    expiresAt: string;
+    detail: string;
+};
+export declare function publicDevelopmentAgentAuthEvidence(evidence: any): any;

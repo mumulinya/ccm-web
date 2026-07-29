@@ -62,6 +62,7 @@ const db_1 = require("../../core/db");
 const feishu_1 = require("./feishu");
 const runtime_events_1 = require("../../system/runtime-events");
 const feishu_access_1 = require("./feishu-access");
+const feishu_conversation_v2_1 = require("./feishu-conversation-v2");
 const STATE_FILE = path.join(utils_1.CCM_DIR, "feishu-channel-state.json");
 const SESSION_DIR = path.join(utils_1.CCM_DIR, "sessions");
 const CONTROL_BOT_PID_FILE = path.join(utils_1.CCM_DIR, "pids", "ccm-control-bot.pid");
@@ -94,7 +95,16 @@ function loadState() {
         return {
             ...emptyState(),
             ...value,
-            bindings: Array.isArray(value.bindings) ? value.bindings : [],
+            bindings: (Array.isArray(value.bindings) ? value.bindings : []).map((binding) => {
+                if (binding.target_type)
+                    return binding;
+                const source = String(binding.source || "");
+                if (/group|collaboration/i.test(source))
+                    return { ...binding, target_type: "group_agent", legacy_read_only: true };
+                if (/project/i.test(source))
+                    return { ...binding, target_type: "project_agent" };
+                return { ...binding, target_type: "global_agent" };
+            }),
             deliveries: Array.isArray(value.deliveries) ? value.deliveries : [],
             cards: Array.isArray(value.cards) ? value.cards : [],
             identities: Array.isArray(value.identities) ? value.identities : [],
@@ -133,12 +143,16 @@ function safeText(value, max = 1400) {
 }
 function parsePlatformSessionKey(value) {
     const text = String(value || "").trim();
-    const match = text.match(/^feishu:([^:]+):([^:]+)$/i);
-    if (!match)
+    if (!/^(?:feishu|lark):/i.test(text))
         return null;
-    const chatId = match[1];
-    const openId = match[2];
-    return { chat_id: chatId, open_id: openId, user_id: "", receive_id: chatId || openId, receive_id_type: chatId ? "chat_id" : "open_id", platform_session_key: text, message_id: "", root_message_id: "", thread_id: "" };
+    const parts = text.split(":");
+    const chatId = parts.find(part => /^oc_/i.test(part)) || "";
+    const openId = parts.find(part => /^ou_/i.test(part)) || "";
+    const rootIndex = parts.findIndex(part => part.toLowerCase() === "root");
+    const threadId = rootIndex >= 0 ? String(parts[rootIndex + 1] || "") : "";
+    if (!chatId && !openId)
+        return null;
+    return { chat_id: chatId, open_id: openId, user_id: "", receive_id: chatId || openId, receive_id_type: chatId ? "chat_id" : "open_id", platform_session_key: text, message_id: "", root_message_id: threadId, thread_id: threadId };
 }
 function directDestination(payload = {}) {
     const message = payload?.event?.message || payload?.message || {};
@@ -146,12 +160,41 @@ function directDestination(payload = {}) {
     const chatId = String(message.chat_id || payload.chat_id || payload.chatId || "").trim();
     const openId = String(sender.open_id || payload.open_id || payload.openId || "").trim();
     const userId = String(sender.user_id || payload.user_id || payload.userId || "").trim();
-    const messageId = String(message.message_id || payload.message_id || payload.messageId || "").trim();
+    const rawMessageId = String(message.message_id || payload.message_id || payload.messageId || "").trim();
+    const platformMessageId = String(payload.platform_message_id || payload.open_message_id || "").trim();
+    const messageId = /^om_[a-z0-9_-]{8,200}$/i.test(rawMessageId)
+        ? rawMessageId
+        : /^om_[a-z0-9_-]{8,200}$/i.test(platformMessageId) ? platformMessageId : "";
     const rootMessageId = String(message.root_id || message.root_message_id || payload.root_id || payload.rootMessageId || "").trim();
     const threadId = String(message.thread_id || payload.thread_id || payload.threadId || rootMessageId || "").trim();
     if (!chatId && !openId)
         return null;
-    return { chat_id: chatId, open_id: openId, user_id: userId, receive_id: chatId || openId, receive_id_type: chatId ? "chat_id" : "open_id", platform_session_key: chatId && openId ? `feishu:${chatId}:${openId}` : "", message_id: messageId, root_message_id: rootMessageId, thread_id: threadId };
+    const parsed = parsePlatformSessionKey(payload.platform_session_key || payload.platformSessionKey || payload.sessionKey);
+    const targetType = String(payload.target_type || payload.targetType || "global_agent");
+    const projectId = String(payload.project || payload.project_id || "").trim();
+    let identity = null;
+    try {
+        identity = (0, feishu_conversation_v2_1.buildFeishuConversationIdentityV2)({ payload, targetType, projectId, applicationId: payload.application_id || payload.app_id });
+    }
+    catch { }
+    const platformSessionKey = parsed?.platform_session_key || (chatId
+        ? `feishu:${chatId}:${openId || "chat"}${threadId ? `:root:${threadId}` : ""}`
+        : `feishu:user:${openId}`);
+    return {
+        chat_id: chatId,
+        open_id: openId,
+        user_id: userId,
+        receive_id: chatId || openId,
+        receive_id_type: chatId ? "chat_id" : "open_id",
+        platform_session_key: platformSessionKey,
+        message_id: messageId,
+        root_message_id: rootMessageId,
+        thread_id: threadId,
+        conversation_key_v2: payload.conversation_key_v2 || identity?.conversation_key_v2 || "",
+        app_fingerprint: payload.feishu_app_fingerprint || identity?.application_fingerprint || "",
+        target_type: identity?.target_type || targetType,
+        project_id: identity?.project_id || projectId,
+    };
 }
 function sessionFiles() {
     try {
@@ -208,9 +251,25 @@ function bindFeishuTaskContext(input) {
     const destination = input.destination || resolveFeishuDestination({}, input.sessionId || "");
     if (!destination?.receive_id)
         return null;
+    const requestedTarget = String(input.targetType || destination.target_type || (String(input.source || "").includes("project") ? "project_agent" : "global_agent"));
+    if (["group", "group_session", "group_agent"].includes(requestedTarget))
+        throw new Error("群聊不再允许建立飞书直接绑定");
+    if (!["global_agent", "project_agent"].includes(requestedTarget))
+        throw new Error("飞书绑定目标类型无效");
     const state = loadState();
     const now = new Date().toISOString();
-    const existing = state.bindings.find((row) => row.platform_session_key === destination.platform_session_key || (row.chat_id === destination.chat_id && row.open_id === destination.open_id));
+    const exactThread = String(destination.thread_id || destination.root_message_id || "");
+    const requestedProject = String(input.projectId || destination.project_id || "");
+    const existing = state.bindings.find((row) => {
+        const rowTarget = String(row.target_type || (String(row.source || "").includes("project") ? "project_agent" : "global_agent"));
+        const sameTarget = rowTarget === requestedTarget;
+        const sameProject = requestedTarget !== "project_agent" || String(row.project_id || requestedProject) === requestedProject;
+        if (!sameTarget || !sameProject)
+            return false;
+        return (destination.conversation_key_v2 && row.conversation_key_v2 === destination.conversation_key_v2)
+            || (row.platform_session_key === destination.platform_session_key)
+            || (!exactThread && !row.thread_id && row.chat_id === destination.chat_id && row.open_id === destination.open_id);
+    });
     const binding = {
         id: existing?.id || `fsb_${crypto.randomBytes(8).toString("hex")}`,
         session_ids: uniqueStrings([...(existing?.session_ids || []), input.sessionId]),
@@ -226,6 +285,11 @@ function bindFeishuTaskContext(input) {
         latest_message_id: destination.message_id || existing?.latest_message_id || "",
         root_message_id: destination.message_id ? (destination.root_message_id || destination.message_id) : existing?.root_message_id || "",
         thread_id: destination.message_id ? (destination.thread_id || "") : existing?.thread_id || "",
+        conversation_key_v2: destination.conversation_key_v2 || existing?.conversation_key_v2 || "",
+        app_fingerprint: destination.app_fingerprint || existing?.app_fingerprint || "",
+        target_type: requestedTarget,
+        project_id: requestedProject || String(existing?.project_id || ""),
+        origin_receipt: input.originReceipt || existing?.origin_receipt || null,
         active_card_key: existing?.active_card_key || "",
         active_session_id: existing?.active_session_id || String(input.sessionId || ""),
         source: input.source || existing?.source || "feishu-control-bot",
@@ -252,14 +316,15 @@ function resolveBoundFeishuGlobalSessionId(payload = {}, fallbackSessionId = "")
     if (!destination)
         return String(fallbackSessionId || "");
     const state = loadState();
-    const binding = [...state.bindings].reverse().find((row) => (destination.platform_session_key && row.platform_session_key === destination.platform_session_key)
-        || (destination.chat_id && row.chat_id === destination.chat_id && (!destination.open_id || !row.open_id || row.open_id === destination.open_id)));
+    const binding = [...state.bindings].reverse().find((row) => String(row.target_type || "global_agent") === "global_agent" && ((destination.conversation_key_v2 && row.conversation_key_v2 === destination.conversation_key_v2)
+        || (destination.platform_session_key && row.platform_session_key === destination.platform_session_key)
+        || (!destination.thread_id && !row.thread_id && destination.chat_id && row.chat_id === destination.chat_id && (!destination.open_id || !row.open_id || row.open_id === destination.open_id))));
     return String(binding?.active_session_id || fallbackSessionId || "");
 }
 function getFeishuGlobalSessionBindings() {
     const state = loadState();
     const identities = state.identities || [];
-    return (state.bindings || []).map((binding) => {
+    return (state.bindings || []).filter((binding) => String(binding.target_type || "global_agent") === "global_agent").map((binding) => {
         const identity = identities.find((item) => (binding.open_id && item.open_id === binding.open_id)
             || (binding.user_id && item.user_id === binding.user_id));
         return {
@@ -272,6 +337,11 @@ function getFeishuGlobalSessionBindings() {
             active_session_id: binding.active_session_id || "",
             latest_message_id: binding.latest_message_id || "",
             thread_id: binding.thread_id || "",
+            conversation_key_v2: binding.conversation_key_v2 || "",
+            target_type: binding.target_type || "global_agent",
+            project_id: binding.project_id || "",
+            legacy_read_only: binding.target_type === "group_agent" || binding.target_type === "group_session",
+            origin_receipt: binding.origin_receipt || null,
             source: binding.source || "feishu-control-bot",
             updated_at: binding.updated_at || "",
         };
@@ -284,6 +354,8 @@ function bindFeishuGlobalSession(input) {
     const binding = state.bindings.find((row) => row.id === bindingId);
     if (!binding)
         throw new Error("飞书目标绑定不存在");
+    if (String(binding.target_type || "global_agent") !== "global_agent")
+        throw new Error("只能将全局飞书目标绑定到全局飞书会话");
     if (input.action === "unbind") {
         if (!sessionId || binding.active_session_id === sessionId)
             binding.active_session_id = "";
@@ -359,10 +431,10 @@ function findBinding(input) {
     const missionId = String(input.missionId || input.mission_id || "");
     const taskId = String(input.taskId || input.task_id || "");
     const sessionId = String(input.sessionId || input.session_id || "");
-    return [...state.bindings].reverse().find((row) => (runId && row.run_ids?.includes(runId)) ||
+    return [...state.bindings].reverse().find((row) => !["group_agent", "group_session"].includes(String(row.target_type || "")) && ((runId && row.run_ids?.includes(runId)) ||
         (missionId && row.mission_ids?.includes(missionId)) ||
         (taskId && row.task_ids?.includes(taskId)) ||
-        (sessionId && row.session_ids?.includes(sessionId))) || null;
+        (sessionId && row.session_ids?.includes(sessionId)))) || null;
 }
 function hasFeishuTaskBinding(input) {
     return !!findBinding(input || {});
@@ -626,6 +698,10 @@ async function notifyFeishuTaskStage(input) {
         run_id: input.runId || "",
         mission_id: input.missionId || "",
         task_id: input.taskId || "",
+        target_type: binding.target_type || "global_agent",
+        project_id: binding.project_id || "",
+        conversation_key_v2: binding.conversation_key_v2 || "",
+        thread_scope: binding.thread_id || "main",
         status: "pending",
         attempts: 0,
         created_at: now,
@@ -703,6 +779,11 @@ function getFeishuChannelDeliverySnapshot(limit = 50) {
             run_id: row.run_id || "",
             mission_id: row.mission_id || "",
             task_id: row.task_id || "",
+            target_type: row.target_type || "global_agent",
+            project_id: row.project_id || "",
+            conversation_key_v2: row.conversation_key_v2 || "",
+            thread_scope: row.thread_scope || "main",
+            retryable: row.status !== "sent" && Number(row.attempts || 0) < 5,
         })),
         reports: state.report_deliveries.slice(-bounded).reverse(),
         identities: getFeishuChannelIdentitySnapshot().slice(0, bounded),

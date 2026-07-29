@@ -11,6 +11,8 @@ import type {
 import {
   sendJson,
 } from "../../core/utils";
+import { requestIsReadOnly } from "../system/api-access-control";
+import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 import {
   getConfigInfo,
   getConfigs,
@@ -377,6 +379,7 @@ export async function handleGroupLiveRoutesSendPreface(
   ctx: any,
   deps: GroupLiveRoutesDeps,
   res: any,
+  readOnly = false,
 ) {
   const {
     writeSse,
@@ -562,6 +565,10 @@ export async function handleGroupLiveRoutesSendPreface(
             sharedFilesContext: uploadedFilesContext,
             groupSessionId,
           });
+        if (readOnly && taskIntent?.workflowDecision?.actionRequired === true) {
+          sendJson(res, { success: false, error: "当前 Viewer 账户仅允许群聊只读问答；这条需求需要创建或执行任务，请联系 Operator 或 Admin", code: "VIEWER_EXECUTION_FORBIDDEN" }, 403);
+          return { done: true as const };
+        }
         if (explicitContinuationTask && taskIntent?.workflowDecision) {
           taskIntent = {
             ...taskIntent,
@@ -867,7 +874,7 @@ export function handleGroupLiveRoutes(
       let client_message_id = "";
       let configs: any;
       try {
-        const preface = await handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res);
+        const preface = await handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res, requestIsReadOnly(req));
         if (preface.done) return;
         ({
           payload,
@@ -1490,16 +1497,9 @@ export function handleGroupLiveRoutes(
     };
 
     if (contentType.includes("multipart/form-data")) {
-      ctx.collectRequestBuffer(req).then((buffer) => {
-        try {
-          const boundary = ctx.getMultipartBoundary(contentType);
-          if (!boundary) return sendJson(res, { error: "无效请求" }, 400);
-          const { files, fields } = ctx.parseMultipart(buffer, boundary);
-          handleGroupSend(fields, files);
-        } catch (e: any) {
-          sendJson(res, { error: e.message }, 400);
-        }
-      }).catch((e: any) => sendJson(res, { error: e.message }, 400));
+      parseSecureMultipartRequest(req)
+        .then(({ files, fields }) => handleGroupSend(fields, files))
+        .catch((e: any) => sendJson(res, { error: e.message }, 400));
       return true;
     }
 

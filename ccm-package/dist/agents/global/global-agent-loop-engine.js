@@ -63,6 +63,8 @@ const runtime_1 = require("./runtime");
 const workchain_1 = require("../workchain");
 const delivery_report_1 = require("../delivery-report");
 const workflow_decision_1 = require("../workflow-decision");
+const global_agent_authorization_1 = require("./global-agent-authorization");
+const global_terminal_delivery_1 = require("./global-terminal-delivery");
 const global_agent_loop_self_tests_1 = require("./global-agent-loop-self-tests");
 const global_agent_run_supervision_1 = require("./global-agent-run-supervision");
 const globalAgentRunProjection = __importStar(require("./global-agent-run-projection"));
@@ -770,6 +772,15 @@ function completeRun(run, runtime, status, reply, error = "") {
     run.completed_at = completedAt;
     run.updated_at = run.completed_at;
     run.pending_tool = null;
+    run.terminal_receipt = (0, global_terminal_delivery_1.createGlobalRunTerminalReceipt)({
+        id: "",
+        mission_id: run.mission_id || "",
+        global_run_id: run.id,
+        session_id: run.session_id,
+        outcome: status,
+        report: run.final_report || { summary: run.final_reply, error: run.error },
+        settled_at: completedAt,
+    });
     saveRun(run, runtime.persist !== false);
     (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "run_terminal", status, reply: run.final_reply, error: run.error });
     (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:${status}:${run.completed_at}`, type: `global_agent.run_${status}`, status: status === "completed" ? "ok" : status === "cancelled" ? "warning" : "error", message: run.final_reply.slice(0, 1000), data: { steps: run.steps.length, model_calls: run.model_calls, tool_calls: run.tool_calls, error: run.error } });
@@ -1026,8 +1037,9 @@ async function continueLoop(run, runtime) {
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "permission_denied", tool: decision.tool.name, risk, rule: permission.rule });
                 return completeRun(run, runtime, "failed", step.error, "permission_denied");
             }
+            const receiptAuthorization = (0, global_agent_authorization_1.globalWriteAuthorizationAllowsTool)({ run, tool: decision.tool.name, args, risk });
             const approved = run.approved_tool_signatures.includes(signature) || permission.allowed;
-            const requiresUserConfirmation = (risk === "write" && !run.explicit_write_authorization && !approved) || (risk === "high" && !approved);
+            const requiresUserConfirmation = (risk === "write" && !receiptAuthorization.allowed && !approved) || (risk === "high" && !approved);
             // 点歌/导航等 UI 副作用：即使模型把 intent 标成 execution，也不挂「执行前计划」脚手架
             const lightUiTool = LIGHT_UI_TOOL_NAMES.includes(String(decision.tool.name || ""));
             const shouldExposePlanMode = !lightUiTool && ((Array.isArray(decision.plan) && decision.plan.length > 0)
@@ -1316,6 +1328,11 @@ async function startGlobalAgentRun(input, runtime) {
         status: "running",
         phase: "plan",
         explicit_write_authorization: input.explicitWriteAuthorization === true,
+        turn_id: String(input.turnId || "") || undefined,
+        queue_scope: String(input.queueScope || "") || undefined,
+        write_authorization_receipt: input.writeAuthorizationReceipt || null,
+        writeAuthorizationReceipt: input.writeAuthorizationReceipt || null,
+        authorization_message: String(input.authorizationMessage || input.originalMessage || input.message || ""),
         workflow_decision: input.workflowDecision || null,
         workflowDecision: input.workflowDecision || null,
         created_at: createdAt,
@@ -1514,6 +1531,14 @@ async function continueGlobalAgentRunWithClarification(id, answer, runtime, opti
         run.sourceExecutionWaiver = run.source_execution_waiver;
     }
     run.explicit_write_authorization = currentAuthorization || inheritedAuthorization;
+    if (options.writeAuthorizationReceipt) {
+        run.write_authorization_receipt = options.writeAuthorizationReceipt;
+        run.writeAuthorizationReceipt = options.writeAuthorizationReceipt;
+        run.authorization_message = clarification;
+        run.turn_id = String(options.turnId || run.turn_id || "");
+    }
+    if (revokesAuthorization)
+        (0, global_agent_authorization_1.revokeGlobalWriteAuthorization)(run);
     run.status = "running";
     run.phase = "plan";
     run.clarification_question = "";
@@ -1567,7 +1592,7 @@ function cancelGlobalAgentRun(id) {
     return run;
 }
 async function recoverInterruptedGlobalAgentRuns(runtime) {
-    const candidates = listGlobalAgentRuns({ status: "running", limit: 20 });
+    const candidates = loadStore().runs.filter((run) => run.status === "running");
     const results = [];
     for (const stored of candidates) {
         const run = normalizeRun(stored);
@@ -1576,13 +1601,32 @@ async function recoverInterruptedGlobalAgentRuns(runtime) {
             results.push(completeRun(run, runtime, "failed", "服务重启后发现运行已超过时间预算，已安全终止。", "recovery_deadline_exceeded"));
             continue;
         }
-        const currentContext = runtime.getContext ? await runtime.getContext(run) : {};
-        (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "restart_recovery_context", currentContext);
-        (0, reasoning_loop_1.recordReasoningRecoveryCheck)(run.reasoning_loop, { reason: "服务重启后恢复同一运行", goalRevalidated: !!run.reasoning_loop.original_goal, stateRevalidated: true, acceptanceRevalidated: run.reasoning_loop.assertions.length > 0, remainingGaps: run.reasoning_loop.assertions.filter(item => item.status !== "passed").map(item => item.label) });
-        run.resume_count += 1;
-        results.push(await continueLoop(run, runtime));
+        try {
+            const currentContext = runtime.getContext ? await runtime.getContext(run) : {};
+            const boundary = runtime.verifyContextBoundary?.(currentContext, run);
+            if (boundary === false || (typeof boundary === "object" && boundary?.valid !== true))
+                throw new Error("恢复时上下文边界无法证明");
+            (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "restart_recovery_context", currentContext);
+            (0, reasoning_loop_1.recordReasoningRecoveryCheck)(run.reasoning_loop, { reason: "服务重启后恢复同一运行", goalRevalidated: !!run.reasoning_loop.original_goal, stateRevalidated: true, acceptanceRevalidated: run.reasoning_loop.assertions.length > 0, remainingGaps: run.reasoning_loop.assertions.filter(item => item.status !== "passed").map(item => item.label) });
+            run.resume_count += 1;
+            run.explicit_write_authorization = false;
+            run.write_authorization_receipt = null;
+            run.writeAuthorizationReceipt = null;
+            (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "recovered", status: "running", authorization_revalidation_required: true });
+            results.push(await continueLoop(run, runtime));
+        }
+        catch (error) {
+            run.status = "blocked";
+            run.error = error?.message || String(error);
+            run.final_reply = `服务重启后无法安全证明原运行状态，已阻止自动续跑：${run.error}`;
+            run.retryable = true;
+            run.updated_at = nowIso(runtime);
+            saveRun(run, runtime.persist !== false);
+            (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:recovery-blocked:${run.updated_at}`, type: "global_agent.recovery_blocked", status: "warning", message: run.final_reply });
+            results.push(run);
+        }
     }
-    return { total: candidates.length, resumed: results.filter(item => item.status !== "failed").length, results };
+    return { total: candidates.length, resumed: results.filter(item => !["failed", "blocked"].includes(item.status)).length, blocked: results.filter(item => item.status === "blocked").length, results };
 }
 exports.runGlobalAgentLoopSelfTest = (0, global_agent_loop_self_tests_1.createGlobalAgentLoopSelfTest)({ GLOBAL_USER_SUMMARY_INTERNAL_PATTERN, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision: exports.attachGlobalAgentRunSupervision, buildGlobalDispatchLaunchSummary, completeGlobalAgentSupervision: exports.completeGlobalAgentSupervision, continueGlobalAgentRunWithClarification, parseGlobalAgentDecision, pauseGlobalAgentRun, resumeGlobalAgentRun, runMainAgentDeliveryReportSelfTest: delivery_report_1.runMainAgentDeliveryReportSelfTest, runMainAgentWorkchainSelfTest: workchain_1.runMainAgentWorkchainSelfTest, startGlobalAgentRun, steerGlobalAgentRun, updateGlobalAgentSupervisionState: exports.updateGlobalAgentSupervisionState });
 //# sourceMappingURL=global-agent-loop-engine.js.map

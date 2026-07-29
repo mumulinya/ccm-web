@@ -49,6 +49,8 @@ exports.handleGroupLiveRoutesSendPreface = handleGroupLiveRoutesSendPreface;
 exports.handleGroupLiveRoutes = handleGroupLiveRoutes;
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
+const api_access_control_1 = require("../system/api-access-control");
+const secure_multipart_1 = require("../../system/secure-multipart");
 const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("./group-orchestrator");
 const group_routes_1 = require("./group-routes");
@@ -290,7 +292,7 @@ function buildGroupTaskIntakeSummary(input) {
     };
 }
 // ===== merged from group-live-routes-part-02-part-01.ts =====
-async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res) {
+async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res, readOnly = false) {
     const { writeSse, ensureTraceId, classifyGroupProjectTaskIntentWithAgent, shouldCreatePersistentGroupTask, shouldUseProjectAnalysisMode, continueTaskWithMessage, appendMainAgentDecisionTrace, applyMainAgentDecisionPetState, buildWorkflowMeta, buildInlineTaskRuntime, updateGroupMemory, getAgentQaItemsForGroup, } = deps;
     let reliabilityOperationKey = "";
     const { group_id, target_project, message, client_message_id } = payload;
@@ -479,6 +481,10 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         sharedFilesContext: uploadedFilesContext,
         groupSessionId,
     });
+    if (readOnly && taskIntent?.workflowDecision?.actionRequired === true) {
+        (0, utils_1.sendJson)(res, { success: false, error: "当前 Viewer 账户仅允许群聊只读问答；这条需求需要创建或执行任务，请联系 Operator 或 Admin", code: "VIEWER_EXECUTION_FORBIDDEN" }, 403);
+        return { done: true };
+    }
     if (explicitContinuationTask && taskIntent?.workflowDecision) {
         taskIntent = {
             ...taskIntent,
@@ -747,7 +753,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
             let client_message_id = "";
             let configs;
             try {
-                const preface = await handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res);
+                const preface = await handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res, (0, api_access_control_1.requestIsReadOnly)(req));
                 if (preface.done)
                     return;
                 ({
@@ -1361,18 +1367,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
             }
         };
         if (contentType.includes("multipart/form-data")) {
-            ctx.collectRequestBuffer(req).then((buffer) => {
-                try {
-                    const boundary = ctx.getMultipartBoundary(contentType);
-                    if (!boundary)
-                        return (0, utils_1.sendJson)(res, { error: "无效请求" }, 400);
-                    const { files, fields } = ctx.parseMultipart(buffer, boundary);
-                    handleGroupSend(fields, files);
-                }
-                catch (e) {
-                    (0, utils_1.sendJson)(res, { error: e.message }, 400);
-                }
-            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+            (0, secure_multipart_1.parseSecureMultipartRequest)(req)
+                .then(({ files, fields }) => handleGroupSend(fields, files))
+                .catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
             return true;
         }
         let body = "";

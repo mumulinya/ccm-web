@@ -67,6 +67,8 @@ const project_session_compaction_1 = require("./project-session-compaction");
 const project_main_agent_source_1 = require("./project-main-agent-source");
 const project_main_agent_runtime_diagnostics_1 = require("./project-main-agent-runtime-diagnostics");
 const test_agent_settings_1 = require("../system/test-agent-settings");
+const main_agent_self_verification_1 = require("../collaboration/main-agent-self-verification");
+const task_acceptance_policy_1 = require("../collaboration/task-acceptance-policy");
 function projectMainToolCallId(projectSessionId, toolName) {
     return `pmtool_${crypto.createHash("sha256").update(`${projectSessionId}:${toolName}:${Date.now()}:${crypto.randomBytes(4).toString("hex")}`).digest("hex").slice(0, 20)}`;
 }
@@ -523,7 +525,9 @@ async function planProjectMainTask(input) {
     const project = (0, project_validation_1.validateProjectName)(input.project);
     const projectSessionId = (0, project_validation_1.validateSessionId)(input.projectSessionId);
     const decision = input.workflowDecision;
-    const independentTestAgentEnabled = (0, test_agent_settings_1.isTestAgentEnabled)();
+    const independentTestAgentEnabled = input.acceptanceMode
+        ? input.acceptanceMode === "test_agent"
+        : (0, test_agent_settings_1.isTestAgentEnabled)();
     const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("project-main-agent", input.userMessage, {
         forceWork: true,
         source: "project-main-agent",
@@ -647,6 +651,7 @@ ${configuredToolContext.policyPrompt}`,
         summary: cleanText(parsed?.summary || decision.reason, 1600),
         project,
         projectSessionId,
+        acceptanceMode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
         requiresConfirmation: parsed?.requiresConfirmation === true
             || decision.requiresUserConfirmation === true
             || decision.riskLevel === "high"
@@ -743,7 +748,7 @@ async function answerAsProjectMainAgent(input) {
     }, input.onDelta), 12000);
 }
 function createProjectMainTask(input) {
-    const independentTestAgentEnabled = (0, test_agent_settings_1.isTestAgentEnabled)();
+    const independentTestAgentEnabled = input.plan.acceptanceMode === "test_agent";
     const planMode = projectMainPlanMode(input.plan, input.workflowDecision);
     const task = (0, collaboration_task_service_1.createTask)({
         title: input.plan.title,
@@ -1004,6 +1009,7 @@ async function reviseProjectMainTask(input) {
             userMessage: `${String(task.business_goal || task.description || task.title || "").trim()}\n\n用户对执行前计划的补充要求：\n${feedback}`,
             workflowDecision: decision,
             context: input.context,
+            acceptanceMode: task.acceptance_policy_snapshot?.mode || task.acceptance_mode || undefined,
         });
         const completedAt = new Date().toISOString();
         const revision = {
@@ -1083,48 +1089,19 @@ async function reviseProjectMainTask(input) {
 }
 async function runProjectMainAgentSelfVerification(input) {
     const changes = aggregateFileChanges(input.results);
-    const messages = [
-        {
-            role: "system",
-            content: `你是项目主 Agent，现在 TestAgent 已由用户关闭。你必须只执行一次主 Agent 自验，不得声称这是独立验收，也不得补写或修改代码。
-只依据用户目标、验收标准、开发 Agent 原始结果、实际文件变更和已经执行的验证证据判断能否交付。证据不足、要求的代码变更缺失、验证失败或存在未解决阻塞时必须 accepted=false。
-只返回 JSON：{"accepted":true,"summary":"自验结论","verification":["真实验证证据"],"risks":["风险"],"gaps":["未满足项"]}`,
-        },
-        {
-            role: "user",
-            content: JSON.stringify({
-                goal: input.task.business_goal || input.task.description || input.task.title,
-                acceptance_criteria: input.plan.acceptanceCriteria,
-                requires_code_changes: input.task.requires_code_changes === true,
-                requires_verification: input.task.requires_verification === true,
-                changed_files: changes.files.map((item) => item.path || item.file).filter(Boolean),
-                worker_results: input.results.map(result => ({
-                    success: result.success,
-                    output: cleanText(result.output, 2800),
-                    error: cleanText(result.error, 600),
-                    files: (Array.isArray(result.fileChanges?.files) ? result.fileChanges.files : []).map((item) => item.path || item.file).filter(Boolean),
-                })),
-            }),
-        },
-    ];
-    const parsed = await modelJson(messages, "项目主 Agent 自验模型调用失败", {
-        project: input.plan.project,
-        projectSessionId: input.plan.projectSessionId,
-        currentRequest: input.task.business_goal || input.task.title || "",
+    return (0, main_agent_self_verification_1.runMainAgentSelfVerification)({
+        task: input.task,
+        policy: input.policy,
+        acceptanceCriteria: input.plan.acceptanceCriteria,
+        changedFiles: changes.files,
+        projects: [{
+                name: input.plan.project,
+                workDir: input.workDir,
+                verificationCommands: input.verificationCommands,
+            }],
+        workerOutputs: input.results.map(result => result.output),
+        sourceSnapshotChecksum: input.plan.sourceEvidence?.manifestChecksum || "",
     });
-    const accepted = parsed?.accepted === true;
-    const verification = cleanList(parsed?.verification, 20, 600);
-    const risks = cleanList(parsed?.risks, 12, 600);
-    const gaps = cleanList(parsed?.gaps, 16, 700);
-    const summary = cleanText(parsed?.summary, 1600) || (accepted ? "项目主 Agent 自验通过" : "项目主 Agent 自验未通过");
-    return {
-        mode: "main_agent_self_verification",
-        canAccept: accepted,
-        status: accepted ? "main_agent_self_verified" : "main_agent_self_verification_failed",
-        report: { summary, verification, risks, blockers: gaps },
-        verdict: { accepted, gaps, evidence: verification, nextActions: gaps },
-        decision: { route: accepted ? "complete" : "needs_user", reason: summary },
-    };
 }
 function buildProjectMainConfiguredToolContext(input) {
     return (0, main_agent_tool_runtime_1.buildMainAgentToolRuntimeContext)({
@@ -1229,6 +1206,17 @@ async function executeProjectMainTask(input) {
     }
     const project = (0, project_validation_1.validateProjectName)(input.task.target_project);
     const workDir = projectWorkDir(project);
+    let acceptancePolicyResult = (0, task_acceptance_policy_1.resolveTaskAcceptancePolicy)(getProjectMainTask(taskId) || input.task, { allowLegacyCapture: true });
+    if (!acceptancePolicyResult.valid || !acceptancePolicyResult.snapshot)
+        throw new Error(`任务验收策略不可用：${acceptancePolicyResult.reason}`);
+    if (acceptancePolicyResult.legacyCaptured) {
+        (0, collaboration_task_service_1.updateTask)(taskId, {
+            acceptance_policy_snapshot: acceptancePolicyResult.snapshot,
+            acceptance_mode: acceptancePolicyResult.snapshot.mode,
+            test_agent_enabled: acceptancePolicyResult.snapshot.test_agent_enabled,
+        });
+    }
+    const acceptancePolicy = acceptancePolicyResult.snapshot;
     const traceId = (0, reliability_ledger_1.ensureTraceId)(input.task.trace_id, "project-main");
     const lease = (0, reliability_ledger_1.acquireTaskLease)(taskId, traceId, PROJECT_MAIN_LEASE_TTL_MS);
     if (!lease.acquired)
@@ -1281,7 +1269,7 @@ async function executeProjectMainTask(input) {
     };
     const results = [];
     let latestReview = null;
-    const independentTestAgentEnabled = (0, test_agent_settings_1.isTestAgentEnabled)();
+    const independentTestAgentEnabled = acceptancePolicy.mode === "test_agent";
     const assertNotCancelled = () => {
         if (leaseLost)
             throw new Error("项目主 Agent 执行租约已丢失，为避免重复执行已停止本轮编排");
@@ -1337,10 +1325,6 @@ async function executeProjectMainTask(input) {
             || input.task.requires_independent_review === true
             || input.task.requires_verification === true;
         const requiresTestAgent = requiresAcceptanceReview && independentTestAgentEnabled;
-        (0, collaboration_task_service_1.updateTask)(taskId, {
-            test_agent_enabled: independentTestAgentEnabled,
-            acceptance_mode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
-        });
         if (!requiresAcceptanceReview)
             latestReview = { canAccept: true, status: "not_required", mode: "not_required" };
         if (requiresAcceptanceReview && !independentTestAgentEnabled) {
@@ -1349,7 +1333,14 @@ async function executeProjectMainTask(input) {
             (0, collaboration_task_service_1.updateTask)(taskId, { status: "reviewing", acceptance_state: "main_agent_self_verifying", status_detail: "TestAgent 已关闭，项目主 Agent 正在执行一次自验" });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_main_self_verification_started", title: "项目主 Agent 开始自验", detail: "TestAgent 已关闭，本轮不产生独立验收结论", status: "active", phase: "reviewing", agent: "project-main-agent" });
             emit("testing", { status: "running", mode: "main_agent_self_verification", round: 1, max_rounds: 1 });
-            latestReview = await runProjectMainAgentSelfVerification({ task: getProjectMainTask(taskId) || input.task, plan: input.plan, results });
+            latestReview = await runProjectMainAgentSelfVerification({
+                task: getProjectMainTask(taskId) || input.task,
+                plan: input.plan,
+                results,
+                workDir,
+                verificationCommands: input.verificationCommands || [],
+                policy: acceptancePolicy,
+            });
             (0, collaboration_task_service_1.updateTask)(taskId, { test_agent_review: null, main_agent_self_verification: latestReview, acceptance_state: latestReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_main_self_verification_finished", title: latestReview.canAccept ? "项目主 Agent 自验通过" : "项目主 Agent 自验未通过", detail: latestReview.report.summary, status: latestReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: "project-main-agent", data: { review: latestReview } });
             emit("testing", { status: latestReview.canAccept ? "passed" : "needs_user", mode: "main_agent_self_verification", round: 1, review: latestReview });
@@ -1511,6 +1502,14 @@ async function executeProjectMainTask(input) {
         for (const item of input.plan.workItems)
             if (accepted && item.status === "awaiting_review")
                 item.status = "completed";
+        const finalAcceptance = {
+            schema: "ccm-main-agent-final-acceptance-v1",
+            accepted,
+            mode: acceptancePolicy.mode,
+            acceptance_policy_checksum: acceptancePolicy.checksum,
+            review_checksum: String(latestReview?.checksum || latestReview?.runner?.checksum || latestReview?.runner?.id || ""),
+            decided_at: new Date().toISOString(),
+        };
         const finalTask = (0, collaboration_task_service_1.updateTask)(taskId, {
             status: accepted ? "done" : "blocked",
             acceptance_state: accepted ? "accepted" : "blocked",
@@ -1522,6 +1521,7 @@ async function executeProjectMainTask(input) {
             file_changes: fileChanges,
             verification,
             risks,
+            main_agent_final_acceptance: finalAcceptance,
             work_items: input.plan.workItems,
             delivery_summary: {
                 accepted,
@@ -1534,6 +1534,7 @@ async function executeProjectMainTask(input) {
                 test_agent: independentTestAgentEnabled ? latestReview : null,
                 main_agent_self_verification: independentTestAgentEnabled ? null : latestReview,
                 acceptance_mode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
+                main_agent_final_acceptance: finalAcceptance,
             },
             project_main_execution: {
                 schema: "ccm-project-main-execution-v1",
@@ -1635,6 +1636,7 @@ function projectMainTaskPublic(task) {
         terminal_gate: task.terminal_gate || null,
         acceptance_mode: task.acceptance_mode || (task.test_agent_enabled === false ? "main_agent_self_verification" : "test_agent"),
         test_agent_enabled: task.test_agent_enabled !== false,
+        acceptance_policy_snapshot: task.acceptance_policy_snapshot || null,
         message_id: `project-main-task:${task.id}`,
         acceptance_evidence_plan: task.acceptance_evidence_plan || task.workflow_meta?.project_main_plan?.acceptanceEvidencePlan || [],
         test_agent_review_policy: task.test_agent_review_policy || null,

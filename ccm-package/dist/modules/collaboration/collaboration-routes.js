@@ -45,7 +45,9 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
+const secure_multipart_1 = require("../../system/secure-multipart");
 const source_ingestion_1 = require("../requirements/source-ingestion");
+const source_evidence_v2_1 = require("../requirements/source-evidence-v2");
 const requirement_epic_self_tests_1 = require("../requirements/requirement-epic-self-tests");
 const mission_supervisor_1 = require("../../agents/global/mission-supervisor");
 const db_1 = require("../../core/db");
@@ -667,7 +669,17 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                     availableTargets,
                 });
                 const extractedRequirement = sourceIngestion.requirement;
+                if (sourceIngestion.coverage_receipt?.complete === false) {
+                    (0, task_attachments_1.removeUploadedFiles)(files);
+                    return (0, utils_1.sendJson)(res, {
+                        error: "仍有必需资料未完整读取，请重试、移除或改为非必需后再生成计划",
+                        code: "requirement_source_coverage_incomplete",
+                        source_ingestion: sourceIngestion.technical,
+                        coverage_receipt: sourceIngestion.coverage_receipt,
+                    }, 422);
+                }
                 if (!extractedRequirement) {
+                    (0, task_attachments_1.removeUploadedFiles)(files);
                     return (0, utils_1.sendJson)(res, {
                         error: sourceIngestion.warnings?.[0] || "统一大模型未能形成可靠需求结构，本轮未创建任务",
                         code: "requirement_model_decision_required",
@@ -804,16 +816,13 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                 (0, utils_1.sendJson)(res, { success: true, task: updated, confirmation: intakeDraft, source_ingestion: sourceIngestion.technical, same_task_trace: true });
             }
             catch (e) {
+                (0, task_attachments_1.removeUploadedFiles)(files);
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
             }
         };
         const contentType = String(req.headers["content-type"] || "");
         if (contentType.includes("multipart/form-data")) {
-            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
-                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
-                if (!boundary)
-                    throw new Error("无效的附件请求");
-                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+            (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ fields, files }) => {
                 return handleIntakePreview(fields || {}, files || []);
             }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
             return true;
@@ -826,6 +835,112 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (["/api/requirements/sources/retry", "/api/requirements/sources/refresh"].includes(pathname) && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const taskId = String(payload.task_id || payload.taskId || "").trim();
+                const current = (0, db_1.loadTasks)().find((item) => String(item.id || "") === taskId);
+                if (!current)
+                    return (0, utils_1.sendJson)(res, { error: "需求草稿或任务不存在" }, 404);
+                const attachments = Array.isArray(current.source_attachments) ? current.source_attachments : [];
+                if (!attachments.length)
+                    return (0, utils_1.sendJson)(res, { error: "当前任务没有可重新读取的来源" }, 409);
+                const requestedIds = new Set((Array.isArray(payload.source_ids || payload.sourceIds) ? (payload.source_ids || payload.sourceIds) : [])
+                    .map((value) => String(value || "")).filter(Boolean));
+                const selected = requestedIds.size ? attachments.filter((item) => requestedIds.has(String(item.id || ""))) : attachments;
+                if (!selected.length)
+                    return (0, utils_1.sendJson)(res, { error: "没有找到指定来源" }, 404);
+                if (pathname.endsWith("/refresh") && !selected.some((item) => item.url)) {
+                    return (0, utils_1.sendJson)(res, { error: "刷新仅适用于在线文档快照" }, 409);
+                }
+                const requirementBySource = {};
+                for (const item of attachments) {
+                    requirementBySource[String(item.id || "")] = item.required !== false;
+                    if (item.url)
+                        requirementBySource[String(item.url)] = item.required !== false;
+                }
+                if (typeof payload.required === "boolean") {
+                    for (const item of selected) {
+                        item.required = payload.required;
+                        requirementBySource[String(item.id || "")] = payload.required;
+                        if (item.url)
+                            requirementBySource[String(item.url)] = payload.required;
+                    }
+                }
+                const files = attachments.filter((item) => item.path).map((item) => ({
+                    filename: item.name,
+                    savedPath: item.path,
+                    size: item.size,
+                    required: item.required !== false,
+                }));
+                const urls = attachments.map((item) => String(item.url || "")).filter(Boolean);
+                const groups = (0, storage_1.loadGroups)();
+                const availableTargets = [
+                    ...groups.map((group) => ({ type: "group", id: group.id, name: group.name || group.id, capabilities: (group.members || []).flatMap((member) => member.skills || member.capabilities || []) })),
+                    ...(0, db_1.getConfigs)().map((config) => ({ type: "project", id: config.name, name: config.display_name || config.name })),
+                ];
+                const ingestion = await (0, source_ingestion_1.ingestRequirementSources)({
+                    files,
+                    urls,
+                    userText: current.business_goal || current.description || current.title || "",
+                    extractRequirement: true,
+                    decomposeRequirement: true,
+                    availableTargets,
+                    sourceRequirements: requirementBySource,
+                });
+                const refreshedAt = new Date().toISOString();
+                const history = [...(Array.isArray(current.source_refresh_history) ? current.source_refresh_history : []), {
+                        action: pathname.endsWith("/refresh") ? "refresh" : "retry",
+                        source_ids: selected.map((item) => item.id),
+                        old_content_hash: current.requirement_content_hash || "",
+                        new_content_hash: ingestion.content_hash,
+                        coverage_checksum: ingestion.coverage_receipt?.checksum || "",
+                        at: refreshedAt,
+                    }].slice(-30);
+                const updated = (0, collaboration_1.updateTask)(taskId, {
+                    source_attachments: ingestion.attachments,
+                    source_documents: ingestion.source_documents,
+                    source_ingestion: ingestion.technical,
+                    requirement_extraction: ingestion.requirement,
+                    requirement_decomposition: ingestion.decomposition,
+                    decomposition_plan: ingestion.decomposition,
+                    requirement_content_hash: ingestion.content_hash,
+                    source_refresh_history: history,
+                    intake_state: "awaiting_confirmation",
+                    auto_execute: false,
+                    status: "pending",
+                    status_detail: ingestion.coverage_receipt?.complete && ingestion.decomposition
+                        ? "资料已重新读取，计划已更新，等待重新确认"
+                        : "资料重新读取后仍不完整，已阻止自动派发",
+                });
+                (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                    type: pathname.endsWith("/refresh") ? "requirement_sources_refreshed" : "requirement_sources_retried",
+                    title: pathname.endsWith("/refresh") ? "在线文档快照已刷新" : "需求资料已重新读取",
+                    detail: ingestion.user_summary || "已重新核验需求来源",
+                    status: ingestion.coverage_receipt?.complete && ingestion.decomposition ? "completed" : "warning",
+                    phase: "planning",
+                    agent: "system",
+                    data: { coverage_receipt: ingestion.coverage_receipt, content_hash: ingestion.content_hash, source_ids: selected.map((item) => item.id) },
+                });
+                const success = ingestion.coverage_receipt?.complete === true && !!ingestion.requirement && !!ingestion.decomposition;
+                return (0, utils_1.sendJson)(res, {
+                    success,
+                    task: updated,
+                    source_ingestion: ingestion.technical,
+                    coverage_receipt: ingestion.coverage_receipt,
+                    retryable: !success,
+                    error: success ? undefined : "仍有资料未完整读取或模型未能生成可靠计划",
+                }, success ? 200 : 422);
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, retryable: true, error: error?.message || String(error) }, 400);
             }
         });
         return true;
@@ -854,6 +969,10 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                         extractionMethod: submittedPlan.extraction_method,
                     })
                     : (current.decomposition_plan || current.requirement_decomposition);
+                const sourceIngestion = current.source_ingestion || current.workflow_meta?.intake?.source_ingestion || {};
+                (0, source_evidence_v2_1.assertRequirementPlanEvidence)(confirmedPlan || {}, sourceIngestion.manifest || [], sourceIngestion.coverage_receipt || {
+                    complete: !(sourceIngestion.blocking_sources || []).length,
+                });
                 if (submittedPlan) {
                     (0, logs_1.appendTaskTimelineEvent)(current.id, {
                         type: "requirement_plan_edited",
@@ -1279,11 +1398,7 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
         };
         const contentType = String(req.headers["content-type"] || "");
         if (contentType.includes("multipart/form-data")) {
-            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
-                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
-                if (!boundary)
-                    throw new Error("无效的任务附件请求");
-                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+            (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ fields, files }) => {
                 const payload = fields.payload ? JSON.parse(fields.payload) : fields;
                 return handleCreate(payload, files || []);
             }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
@@ -1321,26 +1436,6 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                 const goal = (0, collaboration_1.compactFormText)(payload.business_goal || payload.businessGoal || payload.goal || payload.description, "");
                 if (!goal)
                     return (0, utils_1.sendJson)(res, { error: "请输入业务目标" }, 400);
-                const qualityPayload = files.length ? {
-                    ...payload,
-                    documents: [payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "", "已提交业务需求附件，创建时由主 Agent 读取解析。"].filter(Boolean).join("\n\n"),
-                } : payload;
-                const quality = (0, daily_dev_backlog_1.evaluateDailyDevIntakeQuality)(qualityPayload, goal);
-                const forceQualityGate = !!(payload.force_quality_gate || payload.forceQualityGate || payload.force);
-                if (!quality.pass && !forceQualityGate) {
-                    return (0, utils_1.sendJson)(res, {
-                        success: false,
-                        needs_confirmation: true,
-                        error: quality.message,
-                        quality,
-                    }, 422);
-                }
-                const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "create-daily-dev", key: operationKey, traceId, leaseMs: 60_000 }) : null;
-                if (operation && !operation.acquired) {
-                    const existingTask = operation.record?.result?.task_id ? (0, db_1.loadTasks)().find((item) => item.id === operation.record.result.task_id) : null;
-                    (0, utils_1.sendJson)(res, { success: true, duplicate: true, task: existingTask, trace_id: operation.traceId });
-                    return;
-                }
                 const attachmentBundle = files.length
                     ? await (0, task_attachments_1.buildTaskAttachmentMutation)({
                         files,
@@ -1348,10 +1443,33 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                         userText: [payload.title, goal, payload.scope, payload.documents, payload.acceptance, payload.constraints].filter(Boolean).join("\n"),
                     })
                     : { attachments: [], contexts: [], context: "", warnings: [], technical: null };
+                if (attachmentBundle.technical?.coverage_receipt?.complete === false) {
+                    return (0, utils_1.sendJson)(res, { success: false, error: "必需附件尚未完整读取", code: "requirement_source_coverage_incomplete", source_ingestion: attachmentBundle.technical }, 422);
+                }
+                const qualityPayload = {
+                    ...payload,
+                    documents: [payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "", attachmentBundle.context].filter(Boolean).join("\n\n"),
+                    source_ingestion: attachmentBundle.technical,
+                };
+                const quality = await (0, daily_dev_backlog_1.decideDailyDevIntakeQuality)(qualityPayload, goal, {
+                    groupId,
+                    sessionId: payload.group_session_id || payload.groupSessionId || `daily-dev:${groupId}`,
+                });
+                if (!quality.pass) {
+                    return (0, utils_1.sendJson)(res, { success: false, needs_confirmation: quality.state === "needs_user", error: quality.message, quality }, 422);
+                }
+                const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "create-daily-dev", key: operationKey, traceId, leaseMs: 60_000 }) : null;
+                if (operation && !operation.acquired) {
+                    const existingTask = operation.record?.result?.task_id ? (0, db_1.loadTasks)().find((item) => item.id === operation.record.result.task_id) : null;
+                    (0, utils_1.sendJson)(res, { success: true, duplicate: true, task: existingTask, trace_id: operation.traceId });
+                    return;
+                }
                 const title = (0, collaboration_1.compactFormText)(payload.title, goal.slice(0, 60));
                 const backlogPayload = {
                     ...payload,
                     documents: [payload.documents || payload.docs || payload.source_documents || payload.sourceDocuments || "", attachmentBundle.context].filter(Boolean).join("\n\n"),
+                    quality_decision: quality,
+                    idempotency_key: operationKey,
                 };
                 const backlogFile = (0, daily_dev_backlog_1.persistDailyDevBacklogFile)(groups, group, backlogPayload, title, goal);
                 const sourceDocuments = [
@@ -1440,11 +1558,7 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
         };
         const contentType = String(req.headers["content-type"] || "");
         if (contentType.includes("multipart/form-data")) {
-            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
-                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
-                if (!boundary)
-                    throw new Error("无效的业务开发任务附件请求");
-                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+            (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ fields, files }) => {
                 const payload = fields.payload ? JSON.parse(fields.payload) : fields;
                 return handleDailyDevCreate(payload, files || []);
             }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
@@ -1463,6 +1577,7 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
         return true;
     }
     if (pathname === "/api/tasks/daily-dev-backlog" && req.method === "GET") {
+        (0, daily_dev_backlog_1.recoverExpiredDailyDevBacklogClaims)();
         const groupId = String(parsed.query.group_id || parsed.query.groupId || "");
         const items = (0, daily_dev_backlog_1.listDailyDevBacklogs)(groupId);
         const collections = (0, daily_dev_backlog_1.listRequirementBacklogCollections)(groupId);
@@ -1910,11 +2025,7 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
         };
         const contentType = String(req.headers["content-type"] || "");
         if (contentType.includes("multipart/form-data")) {
-            (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
-                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
-                if (!boundary)
-                    throw new Error("无效的任务附件请求");
-                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+            (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ fields, files }) => {
                 const payload = fields.payload ? JSON.parse(fields.payload) : fields;
                 return handleUpdate(payload, files || [], true);
             }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));

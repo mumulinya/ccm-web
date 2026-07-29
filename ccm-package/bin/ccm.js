@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { execFileSync, spawn, spawnSync } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const net = require("net");
 const os = require("os");
@@ -21,6 +22,7 @@ const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
 const SERVER_LOCK_FILE = path.resolve(process.env.CCM_SERVER_LOCK_FILE || path.join(RUN_DIR, "ccm-server-instance.lock"));
 const SERVER_LOG_FILE = path.join(LOG_DIR, "ccm-server.log");
+const INTERNAL_SECRET_FILE = path.join(CCM_DIR, "auth", "internal-api-secret");
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const color = (code, value) => useColor ? `\u001b[${code}m${value}\u001b[0m` : String(value);
 const style = {
@@ -102,6 +104,23 @@ function hasFlag(args, ...names) {
   return names.some(name => args.includes(name));
 }
 
+function internalApiHeaders(caller, method, pathname) {
+  fs.mkdirSync(path.dirname(INTERNAL_SECRET_FILE), { recursive: true });
+  if (!fs.existsSync(INTERNAL_SECRET_FILE)) {
+    try { fs.writeFileSync(INTERNAL_SECRET_FILE, `${crypto.randomBytes(48).toString("base64url")}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" }); } catch (error) { if (error?.code !== "EEXIST") throw error; }
+  }
+  const secret = fs.readFileSync(INTERNAL_SECRET_FILE, "utf-8").trim();
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(18).toString("base64url");
+  const payload = ["ccm-internal-api-v1", caller, String(method).toUpperCase(), pathname, timestamp, nonce].join("\n");
+  return {
+    "X-CCM-Internal-Caller": caller,
+    "X-CCM-Internal-Timestamp": timestamp,
+    "X-CCM-Internal-Nonce": nonce,
+    "X-CCM-Internal-Signature": crypto.createHmac("sha256", secret).update(payload).digest("base64url"),
+  };
+}
+
 function divider() {
   console.log(style.muted("-".repeat(62)));
 }
@@ -117,13 +136,14 @@ function printHelp() {
   printHeader("Command line control center");
   console.log(`${style.strong("Usage")}  ccm <command> [options]\n`);
   console.log(style.strong("Workspace service"));
-  console.log("  start [--port 3080] [--host 127.0.0.1] [...] Start CCM");
+  console.log("  start [--port 3080] [--host 127.0.0.1] [--public-origin URL] Start CCM");
   console.log("  stop [web]                                  Stop CCM");
   console.log("  restart [--background] [--open]              Restart CCM");
   console.log("  status [--json]                              Service and project status");
   console.log("  open [--port 3080]                           Open the workspace");
   console.log("  logs [--lines 120] [--follow]                Read background logs");
-  console.log("  doctor [--json]                              Check local readiness\n");
+  console.log("  doctor [--json]                              Check local readiness");
+  console.log("  setup-code [--rotate]                        Show or rotate first-install code\n");
   console.log(style.strong("Projects and extensions"));
   console.log("  project list                                 List projects");
   console.log("  project start <name> [agent]                 Start one project");
@@ -180,6 +200,7 @@ async function startWorkspace(args = []) {
   ensureRuntimeDirs();
   const requestedPort = validPort(optionValue(args, "--port", 3080));
   const requestedHost = validHost(optionValue(args, "--host", process.env.CCM_HOST || "127.0.0.1"));
+  const publicOrigin = optionValue(args, "--public-origin", process.env.CCM_PUBLIC_ORIGIN || "");
   const existing = readServerState();
   if (existing.active) {
     const urls = serviceUrls(existing.host, existing.port);
@@ -204,7 +225,12 @@ async function startWorkspace(args = []) {
       detached: true,
       windowsHide: true,
       stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, CCM_HOST: requestedHost },
+      env: {
+        ...process.env,
+        CCM_HOST: requestedHost,
+        CCM_PUBLIC_ORIGIN: publicOrigin,
+        CCM_STARTUP_PREPARE_LOCAL_EMBEDDING: process.env.CCM_STARTUP_PREPARE_LOCAL_EMBEDDING || "1",
+      },
     });
     child.unref();
     fs.closeSync(logFd);
@@ -231,7 +257,12 @@ async function startWorkspace(args = []) {
     cwd: PACKAGE_ROOT,
     windowsHide: false,
     stdio: "inherit",
-    env: { ...process.env, CCM_HOST: requestedHost },
+    env: {
+      ...process.env,
+      CCM_HOST: requestedHost,
+      CCM_PUBLIC_ORIGIN: publicOrigin,
+      CCM_STARTUP_PREPARE_LOCAL_EMBEDDING: process.env.CCM_STARTUP_PREPARE_LOCAL_EMBEDDING || "1",
+    },
   });
   return await new Promise(resolve => {
     child.once("error", error => {
@@ -255,6 +286,7 @@ async function stopWorkspace({ quiet = false } = {}) {
   try {
     const response = await fetch(`http://127.0.0.1:${state.port}/api/projects/runtime/shutdown`, {
       method: "POST",
+      headers: internalApiHeaders("ccm-cli", "POST", "/api/projects/runtime/shutdown"),
       signal: AbortSignal.timeout(3000),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -422,6 +454,16 @@ function projectCommand(args) {
   return 1;
 }
 
+function showSetupCode(args = []) {
+  const authModule = require(path.join(PACKAGE_ROOT, "dist", "modules", "system", "local-auth.js"));
+  const result = authModule.getOrCreateLocalSetupCode({ rotate: hasFlag(args, "--rotate") });
+  printHeader("First-install security");
+  console.log(`${style.muted("Setup code")}  ${style.strong(result.code)}`);
+  console.log(`${style.muted("Expires")}     ${result.expires_at}`);
+  console.log(style.muted("One-time use; accepted only while no account exists."));
+  return 0;
+}
+
 function npmInvocation() {
   const cli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
   if (fs.existsSync(cli)) return { command: process.execPath, prefix: [cli] };
@@ -480,6 +522,7 @@ async function main() {
   if (["version", "--version", "-v"].includes(command)) { console.log(`${PACKAGE_NAME} ${VERSION}`); return 0; }
   if (command === "status") return showStatus(rest);
   if (command === "doctor") return showDoctor(rest);
+  if (command === "setup-code") return showSetupCode(rest);
   if (command === "open") {
     const state = readServerState();
     const port = validPort(optionValue(rest, "--port", state.port || 3080));

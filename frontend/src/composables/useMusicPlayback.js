@@ -154,6 +154,13 @@ export function useMusicPlayback(deps) {
       isPlaying.value = true
       syncUiFromAudio()
       notifyMusicPetPlaying(track)
+      const completeGestureCommand = globalThis.window?.__cc_complete_music_gesture
+      if (typeof completeGestureCommand === 'function') {
+        await completeGestureCommand({
+          title: formatTrackLabel(track),
+          source: options.source || 'user-gesture',
+        }).catch(() => {})
+      }
       return { success: true }
     } catch (err) {
       if (!isPlaybackIntentCurrent(playbackIntent)) return supersededResult(playbackIntent)

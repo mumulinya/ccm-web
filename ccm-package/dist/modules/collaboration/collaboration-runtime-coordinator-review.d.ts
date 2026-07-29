@@ -12,6 +12,7 @@ export declare function runCoordinatorReviewLoop(input: {
     executionOrder?: string;
     taskId?: string;
     groupSessionId?: string;
+    acceptancePolicy?: any;
 }): Promise<any>;
 declare function executeTask(task: any, ctx: CollabCtx): Promise<any>;
 export declare function finalizeTaskKernel(task: any, execution: any, deliverySummary: any, state: "succeeded" | "failed" | "reviewing" | "cancelled", message: string): any;

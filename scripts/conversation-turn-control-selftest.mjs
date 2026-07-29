@@ -36,7 +36,7 @@ const source = {
   acp: fs.readFileSync(path.join(root, 'backend/integrations/control-bot-acp.ts'), 'utf8'),
 }
 assert.match(source.composer, /allowInputWhileBusy/, '共享输入框必须支持工作中继续编辑')
-assert.match(source.controls, /引导当前[\s\S]*排队下一条[\s\S]*停止/, '共享控件必须提供引导、排队和停止')
+assert.match(source.controls, /emit\('guide'[\s\S]*turn\.status === 'queued'[\s\S]*emit\('stop'\)/, '共享控件必须提供引导、串行排队和停止')
 assert.match(source.global, /drainGlobalTurnQueue[\s\S]*stopGlobalCurrentWork/, '全局 Agent 必须接入自动续发和停止')
 assert.match(source.group, /drainGroupTurnQueue[\s\S]*stopGroupCurrentWork/, '群聊主 Agent 必须接入自动续发和停止')
 assert.match(source.project, /project-runs\/cancel[\s\S]*drainProjectTurnQueue/, '项目 Agent 必须真实取消后端运行并续发')

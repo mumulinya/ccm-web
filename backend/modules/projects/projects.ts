@@ -1612,8 +1612,8 @@ type = "${finalPlatform}"${platformOptionsToml}
   }
 
   if (pathname === "/api/projects/session-runtime-event" && req.method === "POST") {
-    if (String(req.headers["x-ccm-acp"] || "") !== "1") {
-      sendJson(res, { success: false, error: "仅允许项目 ACP 运行通道通知会话变化" }, 403);
+    if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "feishu-acp") {
+      sendJson(res, { success: false, error: "仅允许签名项目 ACP 通道通知会话变化" }, 403);
       return true;
     }
     let body = "";

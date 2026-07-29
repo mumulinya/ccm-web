@@ -22,6 +22,10 @@ const requirement = ref('')
 const target = ref('')
 const intakeBusy = ref(false)
 const confirmation = ref(null)
+const confirmationCoverage = computed(() => confirmation.value?.source_ingestion?.coverage_receipt
+  || confirmation.value?.intake?.source_ingestion?.coverage_receipt
+  || null)
+const confirmationSourcesComplete = computed(() => !confirmationCoverage.value || confirmationCoverage.value.complete === true)
 const actionBusy = ref('')
 const intakeFiles = ref([])
 const intakeClientMessageId = ref('')
@@ -130,6 +134,7 @@ const createPreview = async () => {
 
 const confirmIntake = async () => {
   if (!confirmation.value?.id) return
+  if (!confirmationSourcesComplete.value) return toast.warning('必需资料尚未完整读取，不能开始执行')
   intakeBusy.value = true
   try {
     const result = await api('/api/usability/intake/confirm', { task_id: confirmation.value.id })
@@ -384,6 +389,7 @@ onUnmounted(() => {
         <div class="wide"><label>验收标准</label><p>{{ Array.isArray(confirmation.intake?.acceptance) ? confirmation.intake.acceptance.join('；') : confirmation.intake?.acceptance }}</p></div>
         <div class="wide"><label>主要风险</label><p>{{ (confirmation.intake?.risks || confirmation.intake?.risk?.reasons || [confirmation.intake?.risk?.summary]).filter(Boolean).join('；') }}</p></div>
         <div v-if="confirmation.intake?.source_summary" class="wide source-summary"><label>需求资料</label><p>{{ confirmation.intake.source_summary }}</p></div>
+        <div v-if="confirmationCoverage" class="wide source-summary"><label>资料覆盖</label><p>{{ confirmationSourcesComplete ? '全部必需资料已完整读取' : `仅覆盖 ${confirmationCoverage.covered_source_count || 0}/${confirmationCoverage.required_source_count || 0} 份，尚不能执行` }}</p></div>
         <div v-if="confirmation.intake?.clarification_questions?.length" class="wide">
           <label>需要确认</label>
           <p v-for="(item, index) in confirmation.intake.clarification_questions.slice(0, 4)" :key="item.id || item.question || index">{{ typeof item === 'string' ? item : item.question }}</p>
@@ -402,7 +408,7 @@ onUnmounted(() => {
       <div class="confirm-actions">
         <button class="ghost" :disabled="intakeBusy" @click="reviseIntake">调整计划</button>
         <button class="ghost danger-text" @click="discardIntake">放弃</button>
-        <button class="primary" :disabled="intakeBusy" @click="confirmIntake">确认并开始</button>
+        <button class="primary" :disabled="intakeBusy || !confirmationSourcesComplete" @click="confirmIntake">确认并开始</button>
       </div>
     </section>
 

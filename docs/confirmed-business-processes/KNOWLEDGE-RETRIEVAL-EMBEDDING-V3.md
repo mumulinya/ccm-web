@@ -26,7 +26,7 @@
 | 外部Embedding | 使用OpenAI-compatible `/embeddings`，批量最多32条、最多两个并发批次 |
 | 仅词面检索 | 使用关键词、中文字符/二元词和Hashing近似；不标记为语义命中 |
 
-本地模型约118MB，首次使用下载到`.cc-connect/models/embedding`，不放入npm包。下载过程展示进度、速度、缓存位置和错误，并验证固定文件大小及SHA256。可配置镜像；删除模型不会删除知识文档。
+本地模型约118MB，不放入npm包。用户首次运行`ccm start`后，服务会在端口就绪后后台下载到`.cc-connect/models/embedding`并完成固定revision、文件大小和SHA256校验，不阻塞CCM启动；准备完成后自动重建语义索引。下载过程展示进度、速度、缓存位置和错误，可配置镜像；删除模型不会删除知识文档。
 
 ## 召回与权限
 
@@ -64,13 +64,18 @@
 - `POST /api/rag/local-model/prepare`：异步准备并校验本地模型。
 - `DELETE /api/rag/local-model`：删除本地模型缓存并切换词面模式。
 - `POST /api/rag/repair-vectors`：重新生成失败、缺失或过期向量。
+- `DELETE /api/rag/index-cache`：只清除失效generation，保留active/last-good索引和文档原文。
 - 现有查询、问答和签名MCP接口保持兼容。
 
 ## 验证证据
 
-- Mock向量验证零词面同义召回、失败向量重试、缓存命中统计、作用域隔离和精确项目受限文档读取。
+- V3自测共15项通过：Mock向量验证零词面同义召回、失败向量重试、缓存命中统计、作用域隔离、generation切换、跨进程租约和精确项目受限文档读取。
 - 本地HTTP接口验证远程批量和单条兼容，不产生付费Provider调用。
 - 独立进程验证构建租约和last-good读取；模型文件验证覆盖大小及SHA256失败。
-- knowledge域、前端、Agent、MCP、生产构建和文档链接检查作为上线门禁。
+- knowledge域`5/5`、快速回归`24/24`、TypeScript检查、前端/后端/飞书MCP生产构建和npm包预览通过。
+- Playwright在`1440x1000`与`390x844`验证无横向溢出、普通回答隐藏技术得分、来源折叠和引用分片定位；测试使用网络夹具，不改写用户知识库。
+- 文档检查覆盖1197个链接，失败为0；所有自动化Provider调用为0。
+
+真实本地模型下载是显式可选验收：设置`CCM_LIVE_LOCAL_EMBEDDING=1`后运行`node scripts/knowledge-local-embedding-live.mjs`。默认测试不会下载约118MB模型。
 
 本轮不发布npm。

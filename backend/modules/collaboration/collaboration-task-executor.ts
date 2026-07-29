@@ -9,7 +9,9 @@ import {
   openTaskProviderCircuit,
   readTaskProviderCircuit,
 } from "./provider-task-circuit-breaker";
-import { isTestAgentEnabled } from "../system/test-agent-settings";
+import { runMainAgentSelfVerification } from "./main-agent-self-verification";
+import { resolveTaskAcceptancePolicy } from "./task-acceptance-policy";
+import { loadProjectConfigs } from "../../core/db";
 
 type CollabCtx = any;
 
@@ -23,31 +25,6 @@ function groupPlanningProjectRefs(task: any) {
 function isTestAgentAssignment(value: any) {
   return /^(?:test[-_ ]?agent|qa[-_ ]?agent)$/i.test(String(value?.targetName || value?.project || value?.name || "").trim())
     || String(value?.role || value?.member?.role || "").trim().toLowerCase() === "test-agent";
-}
-
-function buildDirectMainAgentSelfVerification(task: any, receipt: any, changedFiles: any[], output: string, requiresChanges: boolean, extractRunnerVerificationEvidence: (text: string) => any) {
-  const runner = extractRunnerVerificationEvidence(output);
-  const verification = Array.from(new Set([
-    ...(Array.isArray(receipt?.verification) ? receipt.verification : []),
-    ...(Array.isArray(runner?.verification) ? runner.verification : []),
-  ].map(value => String(value || "").trim()).filter(Boolean)));
-  const gaps = [
-    String(receipt?.status || "") !== "done" ? "开发 Agent 缺少完成状态的结构化结果说明" : "",
-    requiresChanges && changedFiles.length === 0 ? "任务要求修改代码，但没有捕获到实际文件变更" : "",
-    task?.requires_verification !== false && verification.length === 0 ? "没有找到已执行验证的证据" : "",
-    ...(Array.isArray(runner?.failed) ? runner.failed : []),
-    ...(Array.isArray(receipt?.blockers) ? receipt.blockers : []),
-  ].map(value => String(value || "").trim()).filter(Boolean);
-  const accepted = gaps.length === 0;
-  const summary = accepted ? "项目主 Agent 已核对开发结果、文件变更和验证证据" : `项目主 Agent 自验发现缺口：${gaps.join("；")}`;
-  return {
-    mode: "main_agent_self_verification",
-    canAccept: accepted,
-    status: accepted ? "main_agent_self_verified" : "main_agent_self_verification_failed",
-    report: { summary, verification, risks: accepted ? ["未经过独立 TestAgent 验收"] : [], blockers: gaps },
-    verdict: { accepted, gaps, evidence: verification, nextActions: gaps },
-    decision: { route: accepted ? "complete" : "needs_user", reason: summary },
-  };
 }
 
 function summarizeGroupPlanningSource(source: any) {
@@ -248,6 +225,16 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
     updateTaskWorkItemFromReceipt
   } = deps;
   const configs = getConfigs();
+  let acceptancePolicyResult = resolveTaskAcceptancePolicy(task, { allowLegacyCapture: true });
+  if (acceptancePolicyResult.legacyCaptured && acceptancePolicyResult.snapshot) {
+    task = updateTask(task.id, {
+      acceptance_policy_snapshot: acceptancePolicyResult.snapshot,
+      acceptance_mode: acceptancePolicyResult.snapshot.mode,
+      test_agent_enabled: acceptancePolicyResult.snapshot.test_agent_enabled,
+    }) || task;
+    acceptancePolicyResult = resolveTaskAcceptancePolicy(task);
+  }
+  const acceptancePolicy = acceptancePolicyResult.snapshot;
 
   if (task.assign_type === "group" && task.group_id) {
     const groups = loadGroups();
@@ -562,11 +549,8 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
       }
     }
 
-    const independentTestAgentEnabled = isTestAgentEnabled();
-    updateTask(task.id, {
-      test_agent_enabled: independentTestAgentEnabled,
-      acceptance_mode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
-    });
+    if (!acceptancePolicyResult.valid || !acceptancePolicy) throw new Error(`群聊任务验收策略不可用：${acceptancePolicyResult.reason}`);
+    const independentTestAgentEnabled = acceptancePolicy.mode === "test_agent";
     if (!independentTestAgentEnabled) {
       validMentions = validMentions.filter((item: any) => !isTestAgentAssignment(item));
       planAssignments = planAssignments.filter((item: any) => !isTestAgentAssignment(item));
@@ -667,12 +651,14 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
         executionOrder: (coordinatorResult as any).executionOrder || "parallel",
         taskId: task.id,
         groupSessionId: task.group_session_id || task.groupSessionId || "",
+        acceptancePolicy,
       });
       appendTaskTimelineEvent(task.id, { type: "coordinator_review", title: "主 Agent 验收", detail: compactMemoryText(reviewResult?.content || reviewResult?.detail || "", 500), status: reviewResult?.status === "done" ? "ok" : "warn", phase: "reviewing", agent: coordinatorProject, data: { review: reviewResult?.review || reviewResult } });
     }
 
     const outputText = [...coordinatorTranscript, ...crossOutputs, reviewResult?.content || ""].filter(Boolean).join("\n\n---\n\n");
-    return getGroupTaskExecutionStatus(reviewResult, coordinatorResult, outputText, task);
+    const latestTask = loadTasks().find((item: any) => item.id === task.id) || task;
+    return getGroupTaskExecutionStatus(reviewResult, coordinatorResult, outputText, latestTask);
   } else {
     const config = configs.find(c => c.name === task.target_project);
     if (!config) throw new Error("项目配置不存在");
@@ -1304,16 +1290,26 @@ ${requirementEpicExecutionBoundary(task)}
       || task.requires_verification === true
       || taskRequiresCodeChanges(task)
       || changedFiles.length > 0;
-    const independentTestAgentEnabled = isTestAgentEnabled();
-    updateTask(task.id, {
-      test_agent_enabled: independentTestAgentEnabled,
-      acceptance_mode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
-    });
+    if (requiresProjectReview && (!acceptancePolicyResult.valid || !acceptancePolicy)) throw new Error(`项目任务验收策略不可用：${acceptancePolicyResult.reason}`);
+    const independentTestAgentEnabled = acceptancePolicy?.mode === "test_agent";
     let projectReview: any = null;
     if (requiresProjectReview && !independentTestAgentEnabled) {
       updateTask(task.id, { status: "reviewing", acceptance_state: "main_agent_self_verifying", status_detail: "TestAgent 已关闭，项目主 Agent 正在执行一次自验" });
       appendTaskTimelineEvent(task.id, { type: "project_main_self_verification_started", title: "项目主 Agent 开始自验", detail: "TestAgent 已关闭，本轮不产生独立验收结论", status: "active", phase: "reviewing", agent: task.target_project });
-      projectReview = buildDirectMainAgentSelfVerification(task, receipt, changedFiles, output, taskRequiresCodeChanges(task), extractRunnerVerificationEvidence);
+      projectReview = await runMainAgentSelfVerification({
+        task: loadTasks().find((item: any) => item.id === task.id) || task,
+        policy: acceptancePolicy!,
+        acceptanceCriteria: String(task.acceptance_criteria || "").split(/\r?\n|；/).filter(Boolean),
+        changedFiles,
+        projects: [{
+          name: task.target_project,
+          workDir,
+          verificationCommands: Array.isArray(loadProjectConfigs()?.[task.target_project]?.verification_commands)
+            ? loadProjectConfigs()[task.target_project].verification_commands
+            : [],
+        }],
+        workerOutputs: [output],
+      });
       updateTask(task.id, { test_agent_review: null, main_agent_self_verification: projectReview, acceptance_state: projectReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
       appendTaskTimelineEvent(task.id, { type: "project_main_self_verification_finished", title: projectReview.canAccept ? "项目主 Agent 自验通过" : "项目主 Agent 自验未通过", detail: projectReview.report.summary, status: projectReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: task.target_project, data: { review: projectReview } });
       if (!projectReview.canAccept) {
@@ -1439,8 +1435,20 @@ ${requirementEpicExecutionBoundary(task)}
     }
 
     const green = evaluateGreenContract({ receipt, fileChanges, requiresChanges: taskRequiresCodeChanges(task), requiresVerification: task.requires_verification !== false, reviewPassed: !requiresProjectReview || projectReview?.canAccept === true, requiredLevel: "project" });
+    const mainAgentFinalAcceptance = {
+      schema: "ccm-main-agent-final-acceptance-v1",
+      accepted: !requiresProjectReview || projectReview?.canAccept === true,
+      mode: acceptancePolicy?.mode || "not_required",
+      acceptance_policy_checksum: acceptancePolicy?.checksum || "",
+      review_checksum: String(projectReview?.checksum || projectReview?.runner?.id || ""),
+      decided_at: new Date().toISOString(),
+    };
+    updateTask(task.id, {
+      ...(independentTestAgentEnabled ? { test_agent_review: projectReview } : { main_agent_self_verification: projectReview }),
+      main_agent_final_acceptance: mainAgentFinalAcceptance,
+    });
     const acceptedResult = requiresProjectReview
-      ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : "项目主 Agent 自验通过", review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview }
+      ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : "项目主 Agent 自验通过", review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
       : result;
     transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
       green,

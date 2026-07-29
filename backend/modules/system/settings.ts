@@ -7,6 +7,7 @@ import {
   getAgentProviderStatuses,
   refreshAgentProviderStatusesAsync,
   getAgentProviderLoginSession,
+  getAgentProviderInstallJobs,
   getAgentProviderModels,
   loadAgentProviderSettings,
   logoutAgentProvider,
@@ -87,6 +88,11 @@ export function handleSystemSettingsApi(pathname: string, req: IncomingMessage, 
     return true;
   }
 
+  if (pathname === "/api/system/agent-providers/install-jobs" && req.method === "GET") {
+    sendJson(res, { success: true, jobs: getAgentProviderInstallJobs() });
+    return true;
+  }
+
   const modelsMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/models$/);
   if (modelsMatch && req.method === "GET") {
     getAgentProviderModels(modelsMatch[1])
@@ -136,14 +142,12 @@ export function handleSystemSettingsApi(pathname: string, req: IncomingMessage, 
 
   const actionMatch = pathname.match(/^\/api\/system\/agent-providers\/(codex|cursor|gemini|opencode|claudecode)\/(login|logout)$/);
   if (actionMatch && req.method === "POST") {
-    try {
+    readJsonBody(req, 16 * 1024).then(payload => {
       const result = actionMatch[2] === "login"
-        ? startAgentProviderLogin(actionMatch[1])
+        ? startAgentProviderLogin(actionMatch[1], { providerId: payload?.provider_id, methodId: payload?.method_id })
         : logoutAgentProvider(actionMatch[1]);
       sendJson(res, { success: true, ...result });
-    } catch (error: any) {
-      sendJson(res, { success: false, error: error?.message || "Agent 认证操作失败" }, 400);
-    }
+    }).catch((error: any) => sendJson(res, { success: false, error: error?.message || "Agent 认证操作失败" }, 400));
     return true;
   }
 

@@ -639,7 +639,10 @@ const GROUP_ICONS = {
 }
 
 const menuConfig = ref(loadMenuConfiguration(DEFAULT_TABS))
-const tabs = ref(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value))
+const authRole = window.__CCM_AUTH__?.user?.role || 'viewer'
+const ADMIN_ONLY_TABS = new Set(['tools', 'cleanup-center', 'terminal', 'menumanager'])
+const roleFilteredTabs = source => source.filter(tab => authRole === 'admin' || !ADMIN_ONLY_TABS.has(tab.id))
+const tabs = ref(roleFilteredTabs(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value)))
 // 工作台是首页：普通深链接仍可直达，浏览器刷新统一回到工作台。
 const startupNavigationTarget = isPageReload ? { tab: 'dashboard' } : readNavigationTargetFromUrl()
 const startupTabId = RETIRED_TAB_REDIRECTS[startupNavigationTarget?.tab] || startupNavigationTarget?.tab
@@ -677,7 +680,7 @@ const toggleGroup = (groupId) => { collapsedGroups.value[groupId] = !collapsedGr
 
 const applyMenuConfiguration = config => {
   menuConfig.value = config || loadMenuConfiguration(DEFAULT_TABS)
-  tabs.value = buildConfiguredTabs(DEFAULT_TABS, menuConfig.value)
+  tabs.value = roleFilteredTabs(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value))
   if (typeof openTabs !== 'undefined') {
     openTabs.value = openTabs.value.map(open => tabs.value.find(tab => tab.id === open.id)).filter(Boolean)
     if (!openTabs.value.length) openTabs.value = [tabs.value.find(tab => tab.id === 'dashboard') || tabs.value[0]]

@@ -37,6 +37,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const readline = __importStar(require("readline"));
+const feishu_conversation_v2_1 = require("../modules/collaboration/feishu-conversation-v2");
+const internal_api_auth_1 = require("../modules/system/internal-api-auth");
 const port = Number(process.env.CCM_PORT || process.argv.find((arg) => arg.startsWith("--port="))?.split("=")[1] || 3080);
 const baseUrl = `http://127.0.0.1:${port}`;
 const project = String(process.argv.find((arg) => arg.startsWith("--project="))?.slice("--project=".length) || "").trim();
@@ -156,7 +158,7 @@ async function postFeishuReactionFeedback(action, platformContext, status) {
     try {
         const response = await fetch(`${baseUrl}/api/internal/feishu-reaction/${action}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-CCM-ACP": "1" },
+            headers: { "Content-Type": "application/json", ...(0, internal_api_auth_1.buildInternalApiHeaders)("feishu-acp", "POST", `/api/internal/feishu-reaction/${action}`) },
             body: JSON.stringify({
                 scope: projectMode ? "project" : "global",
                 project: projectMode ? project : "",
@@ -207,13 +209,14 @@ async function callGlobalAgent(text, sessionId = "default", messageId = "", plat
         const run = (async () => {
             const response = await fetch(`${baseUrl}/api/feishu/control-bot/message`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "Accept": "text/event-stream", "X-CCM-ACP": "1" },
+                headers: { "Content-Type": "application/json", "Accept": "text/event-stream", ...(0, internal_api_auth_1.buildInternalApiHeaders)("feishu-acp", "POST", "/api/feishu/control-bot/message") },
                 body: JSON.stringify({
                     text,
                     sessionId,
                     acpSessionId: sessionId,
                     messageId: platformContext.platform_message_id || `acp:${sessionId}:${messageId || "turn"}:${Date.now()}`,
                     ...platformContext,
+                    target_type: "global_agent",
                     source: "cc-connect-acp",
                     stream: true,
                 }),
@@ -246,7 +249,8 @@ function projectTargetMatches(target, context) {
     return true;
 }
 async function jsonRequest(pathname, init = {}) {
-    const response = await fetch(`${baseUrl}${pathname}`, init);
+    const method = String(init.method || "GET").toUpperCase();
+    const response = await fetch(`${baseUrl}${pathname}`, { ...init, headers: { ...(init.headers || {}), ...(0, internal_api_auth_1.buildInternalApiHeaders)("feishu-acp", method, pathname) } });
     const text = await response.text();
     let data = {};
     try {
@@ -263,7 +267,7 @@ async function notifyProjectSessionChanged(projectSessionId, status) {
     try {
         await jsonRequest("/api/projects/session-runtime-event", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-CCM-ACP": "1" },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ project, sessionId: projectSessionId, status }),
         });
     }
@@ -407,26 +411,60 @@ async function callProjectAgent(text, sessionId = "default", messageId = "", pla
                 thread_id: platformContext.thread_id || String(resolvedTarget.thread_id || ""),
                 platform_message_id: platformContext.platform_message_id || String(resolvedTarget.latest_message_id || ""),
                 platform_session_key: String(resolvedTarget.platform_session_key || resolvedTarget.id || ""),
+                target_type: "project_agent",
+                project,
+                conversation_key_v2: String(resolvedTarget.conversation_key_v2 || ""),
             };
             onResolvedPlatformContext?.(resolvedPlatformContext);
-            void notifyProjectSessionChanged(projectSessionId, "inbound");
-            const response = await fetch(`${baseUrl}/api/send-stream`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-CCM-ACP": "1" },
-                body: JSON.stringify({ project, sessionId: projectSessionId, message: text, source: "feishu", platform_context: resolvedPlatformContext }),
-                signal: controller.signal,
+            const stableMessageId = String(platformContext.platform_message_id || platformContext.message_id || `acp:${sessionId}:${messageId}:${crypto.createHash("sha256").update(text).digest("hex").slice(0, 16)}`);
+            const inboundEnvelope = (0, feishu_conversation_v2_1.buildFeishuInboundEnvelopeV2)({
+                payload: { ...resolvedPlatformContext, message_id: stableMessageId },
+                targetType: "project_agent",
+                projectId: project,
+                transport: "acp",
+                messageId: stableMessageId,
             });
-            if (!response.ok) {
-                const body = await response.text();
-                let failure = {};
-                try {
-                    failure = JSON.parse(body);
+            const inboundClaim = (0, feishu_conversation_v2_1.acquireFeishuInboundReceipt)(inboundEnvelope, requestTimeoutMs + 30_000);
+            if (!inboundClaim.acquired) {
+                if (inboundClaim.receipt.processing_state === "completed" && inboundClaim.receipt.result?.reply) {
+                    return { reply: inboundClaim.receipt.result.reply, projectSessionId, duplicate: true };
                 }
-                catch { }
-                throw new Error(failure.error || `项目主 Agent 请求失败 (${response.status})`);
+                throw new Error("这条项目飞书消息正在处理中，请稍后查看原会话结果");
             }
-            const reply = await readProjectSseResponse(response, onDelta);
-            return { reply, projectSessionId };
+            const originReceipt = (0, feishu_conversation_v2_1.buildFeishuOriginReceiptV2)({ envelope: inboundEnvelope, sessionId: projectSessionId });
+            (0, feishu_conversation_v2_1.updateFeishuInboundReceipt)(inboundClaim.receipt.id, "agent_processing");
+            void notifyProjectSessionChanged(projectSessionId, "inbound");
+            try {
+                const response = await fetch(`${baseUrl}/api/send-stream`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", ...(0, internal_api_auth_1.buildInternalApiHeaders)("feishu-acp", "POST", "/api/send-stream") },
+                    body: JSON.stringify({
+                        project,
+                        sessionId: projectSessionId,
+                        message: text,
+                        source: "feishu",
+                        target_type: "project_agent",
+                        platform_context: { ...resolvedPlatformContext, platform_message_id: stableMessageId, feishu_inbound_envelope: inboundEnvelope, feishu_origin_receipt: originReceipt },
+                    }),
+                    signal: controller.signal,
+                });
+                if (!response.ok) {
+                    const body = await response.text();
+                    let failure = {};
+                    try {
+                        failure = JSON.parse(body);
+                    }
+                    catch { }
+                    throw new Error(failure.error || `项目主 Agent 请求失败 (${response.status})`);
+                }
+                const reply = await readProjectSseResponse(response, onDelta);
+                (0, feishu_conversation_v2_1.completeFeishuInboundReceipt)(inboundClaim.receipt.id, { reply });
+                return { reply, projectSessionId, originReceipt };
+            }
+            catch (error) {
+                (0, feishu_conversation_v2_1.failFeishuInboundReceipt)(inboundClaim.receipt.id, error, true);
+                throw error;
+            }
         })();
         return await Promise.race([run, hardTimeout]);
     }

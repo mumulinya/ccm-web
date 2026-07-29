@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { RANDOM_MUSIC_KEYWORD, resolveMusicPlaybackRequest } = require('../ccm-package/dist/modules/music/agent.js')
+const { RANDOM_MUSIC_KEYWORD, resolveMusicIntentDecisionV2, resolveMusicPlaybackRequest } = require('../ccm-package/dist/modules/music/agent.js')
 const { selectMusicTrack } = require('../ccm-package/dist/modules/music/select-track.js')
 const root = path.resolve(import.meta.dirname, '..')
 const source = (file) => fs.readFileSync(path.join(root, file), 'utf8')
@@ -21,20 +21,20 @@ const mockServer = http.createServer(async (req, res) => {
     userText = String(messages.filter((item) => item?.role === 'user').at(-1)?.content || body)
   } catch {}
   let content
-  if (userText.includes('候选列表')) {
-    content = '{"index":1,"reject":false,"reason":"模型结合歌手与安静偏好选择候选"}'
+  if (userText.includes('selectionMode')) {
+    content = '{"index":1,"reject":false,"confidence":0.96,"reason":"模型结合歌手与安静偏好选择候选","reply":"已选择周杰伦的《安静》。"}'
   } else if (userText.includes('心情不好')) {
-    content = '{"strategy":"mood_recommendation","searchQuery":"治愈 温柔","mood":"难过","reason":"模型识别情绪"}'
+    content = '{"action":"play","strategy":"mood_recommendation","searchQuery":"治愈 温柔","mood":"难过","sourceMode":"netease","confidence":0.95,"reason":"模型识别情绪"}'
   } else if (userText.includes('特别开心')) {
-    content = '{"strategy":"mood_recommendation","searchQuery":"欢快 庆祝","mood":"开心","reason":"模型识别情绪"}'
+    content = '{"action":"play","strategy":"mood_recommendation","searchQuery":"欢快 庆祝","mood":"开心","sourceMode":"netease","confidence":0.95,"reason":"模型识别情绪"}'
   } else if (userText.includes('周杰伦的晴天')) {
-    content = '{"strategy":"exact_song","searchQuery":"周杰伦 晴天","artist":"周杰伦","reason":"模型识别明确歌曲"}'
+    content = '{"action":"play","strategy":"exact_song","searchQuery":"周杰伦 晴天","artist":"周杰伦","sourceMode":"netease","confidence":0.98,"reason":"模型识别明确歌曲"}'
   } else if (userText.includes('周杰伦的歌')) {
-    content = '{"strategy":"artist_random","searchQuery":"周杰伦","artist":"周杰伦","reason":"模型识别歌手范围"}'
+    content = '{"action":"play","strategy":"artist_random","searchQuery":"周杰伦","artist":"周杰伦","sourceMode":"netease","confidence":0.96,"reason":"模型识别歌手范围"}'
   } else if (userText.includes('摇滚')) {
-    content = '{"strategy":"genre_recommendation","searchQuery":"摇滚","genre":"摇滚","reason":"模型识别曲风"}'
+    content = '{"action":"play","strategy":"genre_recommendation","searchQuery":"摇滚","genre":"摇滚","sourceMode":"netease","confidence":0.94,"reason":"模型识别曲风"}'
   } else {
-    content = '{"strategy":"random","searchQuery":"__random__","reason":"模型确认无额外限制"}'
+    content = '{"action":"play","strategy":"random","searchQuery":"__random__","sourceMode":"netease","confidence":0.9,"reason":"模型确认无额外限制"}'
   }
   res.writeHead(200, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ choices: [{ message: { content } }] }))
@@ -46,6 +46,7 @@ const config = { enabled: true, apiKey: 'mock-key', model: 'mock-model', apiUrl:
 
 let plans
 let artistSelected
+let sourceLockedIntent
 try {
   plans = {
     exact: await resolveMusicPlaybackRequest(config, '播放周杰伦的晴天', '周杰伦 晴天'),
@@ -66,6 +67,12 @@ try {
       { title: '安静', artist: '周杰伦' },
     ],
     modelConfig: config,
+  })
+  sourceLockedIntent = await resolveMusicIntentDecisionV2({
+    config,
+    message: '随便放一首歌',
+    mode: 'local',
+    sessionId: `music-source-lock-${Date.now()}`,
   })
 } finally {
   await new Promise((resolve) => mockServer.close(resolve))
@@ -93,12 +100,16 @@ const checks = {
   modelUnavailableFailsClosed: disabledRejected,
   selectorWithoutModelFailsClosed: selectorWithoutModel.rejected === true && selectorWithoutModel.source === 'reject',
   artistCandidatesFilteredThenModelSelected: artistSelected?.success === true && artistSelected?.source === 'model-artist-selection' && artistSelected?.index === 3,
-  mockProviderUsedOnly: modelCalls === 7,
+  authorizedSourceCannotBeExpandedByModel: sourceLockedIntent.sourceMode === 'local',
+  mockProviderUsedOnly: modelCalls === 8,
   noLocalSelectionFallback: !source('backend/modules/music/select-track.ts').includes('recommendation-fallback')
     && !source('backend/modules/music/select-track.ts').includes('改用规则选曲'),
   noLocalIntentFallback: source('backend/modules/music/agent.ts').includes('本地音乐语义兜底已停用'),
+  noPseudoToolCallProtocol: !source('backend/modules/music/agent.ts').includes('<tool_call>'),
+  noFrontendRuleFallback: !source('frontend/src/components/music/useMusicPlayer.js').includes('frontend-fallback')
+    && !source('frontend/src/components/music/useMusicPlayer.js').includes('sendToSimpleAgent'),
 }
 
 const pass = Object.values(checks).every(Boolean)
-console.log(JSON.stringify({ pass, paidProviderCalls: 0, modelCalls, checks, plans, artistSelected }, null, 2))
+console.log(JSON.stringify({ pass, paidProviderCalls: 0, modelCalls, checks, plans, artistSelected, sourceLockedIntent }, null, 2))
 if (!pass) process.exitCode = 1

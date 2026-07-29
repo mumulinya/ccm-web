@@ -1,0 +1,142 @@
+export type FeishuAgentTargetType = "global_agent" | "project_agent";
+export type FeishuInboundProcessingState = "received" | "processing" | "completed" | "failed";
+export type FeishuConversationIdentityV2 = {
+    schema: "ccm-feishu-conversation-identity-v2";
+    target_type: FeishuAgentTargetType;
+    project_id: string;
+    application_fingerprint: string;
+    chat_id: string;
+    open_id: string;
+    user_id: string;
+    root_message_id: string;
+    thread_id: string;
+    thread_scope: string;
+    platform_session_key: string;
+    conversation_key_v2: string;
+    checksum: string;
+};
+export type FeishuInboundEnvelopeV2 = {
+    schema: "ccm-feishu-inbound-envelope-v2";
+    target_type: FeishuAgentTargetType;
+    project_id: string;
+    transport: "acp" | "event_callback" | "internal";
+    message_id: string;
+    event_id: string;
+    identity: FeishuConversationIdentityV2;
+    idempotency_key: string;
+    checksum: string;
+};
+export type FeishuInboundReceiptV2 = {
+    schema: "ccm-feishu-inbound-receipt-v2";
+    id: string;
+    envelope_checksum: string;
+    idempotency_key: string;
+    target_type: FeishuAgentTargetType;
+    project_id: string;
+    conversation_key_v2: string;
+    message_id: string;
+    transports: string[];
+    processing_state: FeishuInboundProcessingState;
+    processing_stage: string;
+    attempt: number;
+    owner_pid: number;
+    lease_expires_at: string;
+    retryable: boolean;
+    result: {
+        reply?: string;
+        error?: string;
+        delivery_id?: string;
+    };
+    created_at: string;
+    updated_at: string;
+    completed_at: string;
+    failed_at: string;
+};
+export type FeishuQueuedTurnContextV2 = {
+    schema: "ccm-feishu-queued-turn-context-v2";
+    target_type: FeishuAgentTargetType;
+    project_id: string;
+    conversation_key_v2: string;
+    message_id: string;
+    payload: Record<string, any>;
+    destination: Record<string, any>;
+    envelope_checksum: string;
+};
+export type FeishuOriginReceiptV2 = {
+    schema: "ccm-feishu-origin-receipt-v2";
+    source: "global_feishu" | "project_feishu";
+    project_id: string;
+    session_id: string;
+    conversation_key_v2: string;
+    message_id: string;
+    envelope_checksum: string;
+    checksum: string;
+};
+export declare function buildFeishuConversationIdentityV2(input: {
+    payload?: any;
+    targetType: FeishuAgentTargetType | string;
+    projectId?: string;
+    applicationId?: string;
+}): {
+    root_message_id: string;
+    thread_id: string;
+    platform_session_key: string;
+    conversation_key_v2: string;
+    checksum: string;
+    target_type: FeishuAgentTargetType;
+    project_id: string;
+    application_fingerprint: string;
+    chat_id: string;
+    open_id: string;
+    user_id: string;
+    thread_scope: string;
+    schema: "ccm-feishu-conversation-identity-v2";
+};
+export declare function buildFeishuInboundEnvelopeV2(input: {
+    payload?: any;
+    targetType: FeishuAgentTargetType | string;
+    projectId?: string;
+    applicationId?: string;
+    transport?: "acp" | "event_callback" | "internal";
+    messageId?: string;
+    eventId?: string;
+}): {
+    checksum: string;
+    target_type: FeishuAgentTargetType;
+    project_id: string;
+    transport: "internal" | "acp" | "event_callback";
+    message_id: string;
+    event_id: string;
+    identity: {
+        root_message_id: string;
+        thread_id: string;
+        platform_session_key: string;
+        conversation_key_v2: string;
+        checksum: string;
+        target_type: FeishuAgentTargetType;
+        project_id: string;
+        application_fingerprint: string;
+        chat_id: string;
+        open_id: string;
+        user_id: string;
+        thread_scope: string;
+        schema: "ccm-feishu-conversation-identity-v2";
+    };
+    idempotency_key: string;
+    schema: "ccm-feishu-inbound-envelope-v2";
+};
+export declare function acquireFeishuInboundReceipt(envelope: FeishuInboundEnvelopeV2, leaseMs?: number): {
+    acquired: boolean;
+    duplicate: boolean;
+    in_progress: boolean;
+    receipt: FeishuInboundReceiptV2;
+};
+export declare function updateFeishuInboundReceipt(receiptId: string, stage: string, result?: any): FeishuInboundReceiptV2;
+export declare function completeFeishuInboundReceipt(receiptId: string, result?: any): FeishuInboundReceiptV2;
+export declare function failFeishuInboundReceipt(receiptId: string, error: any, retryable?: boolean): FeishuInboundReceiptV2;
+export declare function getFeishuInboundReceipt(idempotencyKey: string): FeishuInboundReceiptV2;
+export declare function buildFeishuQueuedTurnContextV2(envelope: FeishuInboundEnvelopeV2, payload: any, destination: any): FeishuQueuedTurnContextV2;
+export declare function buildFeishuOriginReceiptV2(input: {
+    envelope: FeishuInboundEnvelopeV2;
+    sessionId: string;
+}): FeishuOriginReceiptV2;

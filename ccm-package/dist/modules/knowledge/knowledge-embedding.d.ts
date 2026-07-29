@@ -41,4 +41,5 @@ export declare function embedLocalKnowledgeTexts(texts: string[], kind: "query" 
 export declare function preferredKnowledgeEmbeddingBackend(config?: KnowledgeEmbeddingConfigV3): KnowledgeEmbeddingBackend;
 export declare function removeLocalKnowledgeModel(): Promise<LocalKnowledgeModelStatus>;
 export declare function setKnowledgeEmbeddingTestAdapter(adapter: typeof testAdapter): void;
+export declare function knowledgeEmbeddingUsesTestAdapter(): boolean;
 export {};

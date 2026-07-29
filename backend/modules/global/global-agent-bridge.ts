@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
+import { buildInternalApiHeaders } from "../system/internal-api-auth";
 
 const GLOBAL_AGENT_BRIDGE_FILE = path.join(CCM_DIR, "global-agent-bridge.json");
 
@@ -60,7 +61,11 @@ export function getRequestBaseUrl(req: any): string {
 }
 
 export async function callLocalApi(baseUrl: string, pathname: string, options: any = {}): Promise<any> {
-  const response = await fetch(baseUrl + pathname, options);
+  const method = String(options.method || "GET").toUpperCase();
+  const response = await fetch(baseUrl + pathname, {
+    ...options,
+    headers: { ...(options.headers || {}), ...buildInternalApiHeaders("global-agent", method, pathname) },
+  });
   const data = await response.json() as any;
   if (!response.ok || data?.success === false || data?.error) {
     throw new Error(data?.error || `接口执行失败 (${response.status})`);
@@ -103,7 +108,7 @@ export function parseSseApiEventBlock(block: string) {
 export async function postLocalSseOrJsonApi(baseUrl: string, pathname: string, body: any, options: { onEvent?: (event: any) => void } = {}): Promise<any> {
   const response = await fetch(baseUrl + pathname, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" },
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json", ...buildInternalApiHeaders("global-agent", "POST", pathname) },
     body: JSON.stringify(body || {}),
   });
   const contentType = response.headers.get("content-type") || "";

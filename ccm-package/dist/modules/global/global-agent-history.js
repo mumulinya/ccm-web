@@ -8,6 +8,7 @@ const fs_1 = __importDefault(require("fs"));
 const crypto_1 = __importDefault(require("crypto"));
 const global_agent_attachments_1 = require("./global-agent-attachments");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 // Persistent Web/Feishu conversation history and session routing.
 function createGlobalAgentHistoryRuntime(deps) {
     const { GLOBAL_AGENT_HISTORY_FILE, GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_AGENT_SESSION_LIMIT, buildGlobalVisibleReplyContent, ingestGlobalAgentConversation, writeGlobalJsonAtomic } = deps;
@@ -444,13 +445,20 @@ function createGlobalAgentHistoryRuntime(deps) {
         }
     }
     function buildFeishuConversationId(payload) {
-        const message = payload?.event?.message || payload?.message || {};
-        const sender = payload?.event?.sender?.sender_id || payload?.sender || {};
-        const chatId = String(message.chat_id || payload?.chat_id || payload?.chatId || "").trim();
-        const openId = String(sender.open_id || payload?.open_id || payload?.openId || "").trim();
-        const nativeSession = payload?.session_id || payload?.sessionId || payload?.sessionKey || payload?.conversation_id || payload?.conversationId || message.session_id || payload?.data?.session_id || "default";
-        const raw = chatId ? `${chatId}:${openId || "chat"}` : nativeSession;
-        return "feishu:" + String(raw || "default").replace(/[^a-zA-Z0-9:_@.-]/g, "_").slice(0, 120);
+        const exactV2 = String(payload?.conversation_key_v2 || payload?.conversationKeyV2 || "").trim();
+        if (/^feishu:v2:[a-f0-9]{32}$/.test(exactV2))
+            return exactV2;
+        try {
+            return (0, feishu_conversation_v2_1.buildFeishuConversationIdentityV2)({
+                payload,
+                targetType: "global_agent",
+                applicationId: payload?.application_id || payload?.app_id,
+            }).conversation_key_v2;
+        }
+        catch {
+            const nativeSession = payload?.session_id || payload?.sessionId || payload?.sessionKey || payload?.conversation_id || payload?.conversationId || payload?.data?.session_id || "default";
+            return "feishu:legacy:" + crypto_1.default.createHash("sha256").update(String(nativeSession)).digest("hex").slice(0, 32);
+        }
     }
     function resolveFeishuGlobalAgentSessionId(payload, store = loadGlobalAgentHistoryStore()) {
         const explicitConversationId = String(payload?.ccm_conversation_id || payload?.ccmConversationId || "").trim();
@@ -466,9 +474,9 @@ function createGlobalAgentHistoryRuntime(deps) {
         const reconciled = reconcileGlobalAgentWebHistory(staleStore, { sessions: [currentWeb, recentWeb], currentSessionId: recentWeb.id });
         const checks = {
             removesDeletedWebSession: !reconciled.sessions.some((session) => session.id === oldWeb.id),
-            isolatesAcpSessionFromWebHistory: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, reconciled) === "feishu:acp-bound",
-            ignoresRecentWebSessionFallback: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, { ...reconciled, current_session_id: "missing" }) === "feishu:acp-bound",
-            onlyUsesAcpSessionWithoutWebHistory: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, { current_session_id: "", sessions: [] }) === "feishu:acp-bound",
+            isolatesAcpSessionFromWebHistory: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, reconciled).startsWith("feishu:"),
+            ignoresRecentWebSessionFallback: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, { ...reconciled, current_session_id: "missing" }).startsWith("feishu:"),
+            onlyUsesAcpSessionWithoutWebHistory: resolveFeishuGlobalAgentSessionId({ sessionId: "acp-bound" }, { current_session_id: "", sessions: [] }).startsWith("feishu:"),
         };
         return { pass: Object.values(checks).every(Boolean), checks };
     }

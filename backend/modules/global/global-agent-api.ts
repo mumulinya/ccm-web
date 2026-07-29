@@ -1,4 +1,5 @@
 import { execFileSync } from "child_process";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import type { CollabCtx } from "../collaboration/collaboration";
@@ -18,6 +19,21 @@ import {
   runGlobalAgentToolAuthorizationSelfTest,
   saveGlobalAgentToolAuthorization,
 } from "./global-agent-tool-authorization";
+import {
+  acquireFeishuInboundReceipt,
+  buildFeishuInboundEnvelopeV2,
+  completeFeishuInboundReceipt,
+  failFeishuInboundReceipt,
+  updateFeishuInboundReceipt,
+} from "../collaboration/feishu-conversation-v2";
+import {
+  bindFeishuTaskContext as bindFeishuTaskContextDirect,
+  notifyFeishuTaskStage as notifyFeishuTaskStageDirect,
+  recordFeishuInbound as recordFeishuInboundDirect,
+} from "../collaboration/feishu-channel";
+import { requestAccessPrincipal, requestIsReadOnly } from "../system/api-access-control";
+import { listGlobalTerminalDeliveries, retryGlobalTerminalDelivery } from "../../agents/global/global-terminal-delivery";
+import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 
 function resolveControlBotAcpPlatformContext(acpSessionIdValue: string) {
   const acpSessionId = String(acpSessionIdValue || "").trim();
@@ -32,13 +48,9 @@ function resolveControlBotAcpPlatformContext(acpSessionIdValue: string) {
       const sessionIds = Object.entries(store.sessions || {})
         .filter(([, session]: any) => String(session?.agent_session_id || "") === acpSessionId)
         .map(([sessionId]) => String(sessionId));
-      let platformKeys = Object.entries(store.active_session || {})
+      const platformKeys = Object.entries(store.active_session || {})
         .filter(([, sessionId]) => sessionIds.includes(String(sessionId)))
         .map(([platformKey]) => String(platformKey));
-      if (!platformKeys.length) {
-        const activeKeys = Object.keys(store.active_session || {}).filter((key) => /^(?:feishu|lark):/i.test(key));
-        if (activeKeys.length === 1) platformKeys = activeKeys;
-      }
       if (platformKeys.length !== 1) continue;
       const platformSessionKey = platformKeys[0];
       const parts = platformSessionKey.split(":");
@@ -63,7 +75,7 @@ function resolveControlBotAcpPlatformContext(acpSessionIdValue: string) {
 
 // HTTP transport adapter for the global Agent feature surface.
 export function createGlobalAgentApi(deps: any) {
-  const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, bindFeishuGlobalSession, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, compactGlobalAgentSessionWithModel, completeGlobalAgentSupervision, completeIdempotency, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalAgentConversationSession, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createMissionSupervisorRuntime, deleteGlobalAgentConversationSession, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuGlobalSessionBindings, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processedFeishuMessageIds, processFeishuCardAction, processFeishuControlledMessage, publicGlobalAgentRun, publicGlobalAgentRunSummary, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps
+  const { GLOBAL_AGENT_TOOL_SPECS, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_MANAGEMENT_REQUIRED_PARAMS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, appendGlobalActionAudit, applyGlobalAgentSupervisionSteer, bindFeishuGlobalSession, buildAgentQualitySnapshot, buildAgenticContext, buildGlobalAgentEventUi, buildGlobalAgentGroupMemoryModelContext, buildGlobalAgentSessionDebug, buildGlobalAgentToolDefinitions, buildGlobalControlCenterSnapshot, buildGlobalDispatchStrategy, buildGlobalGroupMemoryContext, buildGlobalSystemHealth, buildPublicGlobalStatusRun, buildTraceReplaySuite, buildUploadedFilesContext, callLlm, cancelGlobalAgentRun, checkGlobalMissionSupervisorNow, classifyGlobalAgentUserSteer, classifyGlobalControlIntent, collectRequestBuffer, compactGlobalAgentSessionWithModel, completeGlobalAgentSupervision, completeIdempotency, conversationTurnControl, controlGlobalMissionSupervisor, createAgenticRuntime, createGlobalAgentConversationSession, createGlobalDevelopmentMission, createRequirementEpicWithChildren, createMissionSupervisorRuntime, deleteGlobalAgentConversationSession, deleteGlobalAgentHook, deleteGlobalAgentPermissionRule, ensureTraceId, extractCcConnectHookText, extractFeishuMessageText, failIdempotency, formatMissionStatus, getAgentQualityPolicy, getConfigInfo, getConfigs, getFeishuGlobalSessionBindings, getFeishuMessageId, getGlobalAgentBackgroundOutput, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, getIdempotencyRecord, getMultipartBoundary, getRequestBaseUrl, globalRunVisibleReply, ingestGlobalAgentConversation, ingestRequirementSources, isGlobalProgressStatusRequest, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadFeishuConfig, loadGlobalAgentHooks, loadGlobalAgentPermissionRules, loadGlobalAgentBridgeStore, loadGlobalAgentHistoryStore, loadGroups, loadOrchestratorConfig, loadTasks, normalizeFeishuEventPayload, parseMultipart, pauseGlobalAgentRun, processFeishuCardAction, processFeishuControlledMessage, publicGlobalAgentRun, publicGlobalAgentRunSummary, refreshGlobalDevelopmentMissions, relayGlobalPetEvent, replayAgentTrace, resolveFeishuDestination, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgentQualityCenterSelfTest, runAgentReasoningLoopSelfTest, runAgentRuntimeKernelSelfTest, runGlobalAgentLoopSelfTest, runGlobalAgentRuntimeSelfTest, runGlobalControlCenterSelfTest, runGlobalGroupMemoryContextSelfTest, runGlobalMissionSupervisorAsyncSelfTest, runGlobalMissionSupervisorSelfTest, runAgenticGlobalRequest, saveGlobalAgentBridgeStore, saveGlobalAgentHook, saveGlobalAgentPermissionRule, sendFeishuReportMessage, sendJson, setAgentQualityPolicy, startGlobalMissionSupervisor, steerGlobalAgentRun, syncGlobalAgentWebHistory, updateGlobalAgentSupervisionState, verifyFeishuEventToken, waitForIdempotencyResult } = deps
   const readJsonRequest = (req: any) => new Promise<any>((resolve, reject) => {
     let body = "";
     req.on("data", (chunk: any) => {
@@ -98,6 +110,66 @@ export function createGlobalAgentApi(deps: any) {
     })),
     ...getConfigs().map((config: any) => ({ type: "project", id: config.name, name: projectDisplayName(config.name) })),
   ];
+
+  const drainingGlobalWebTurns = new Set<string>();
+  let globalWebTurnRecoveryTimer: NodeJS.Timeout | null = null;
+  const drainGlobalWebTurns = async (baseUrl: string, ctx: CollabCtx, sessionId: string) => {
+    if (!sessionId || drainingGlobalWebTurns.has(sessionId)) return;
+    drainingGlobalWebTurns.add(sessionId);
+    try {
+      while (true) {
+        const turn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId });
+        if (!turn) break;
+        const metadata = turn.metadata?.global_context_v2 || {};
+        try {
+          const run = await runAgenticGlobalRequest(baseUrl, ctx, {
+            message: String(metadata.message || turn.message || ""),
+            originalMessage: String(metadata.original_message || turn.message || ""),
+            history: Array.isArray(metadata.history) ? metadata.history : [],
+            sessionId,
+            source: String(metadata.source || "web-queue-recovery"),
+            traceId: String(metadata.trace_id || ""),
+            clarificationRunId: String(metadata.clarification_run_id || ""),
+            sourceIngestion: metadata.source_ingestion || null,
+            readOnly: metadata.read_only === true,
+            principal: metadata.principal || null,
+            turnId: turn.id,
+            queueScope: `global:${sessionId}`,
+          });
+          conversationTurnControl.settle({
+            id: turn.id,
+            status: run.status === "failed" ? "failed" : "completed",
+            run_id: run.id,
+            checkpoint: run.status,
+            semantic_decision_receipt: run.workflow_decision || run.workflowDecision || null,
+            result: { run_id: run.id, status: run.status, retryable: run.retryable === true },
+            error: run.status === "failed" ? run.error || run.final_reply : "",
+          });
+        } catch (error: any) {
+          conversationTurnControl.settle({ id: turn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) });
+        }
+      }
+    } finally {
+      drainingGlobalWebTurns.delete(sessionId);
+    }
+  };
+  const startGlobalWebTurnRecoveryForServer = (baseUrl: string, ctx: CollabCtx) => {
+    if (globalWebTurnRecoveryTimer) return { started: false };
+    const tick = () => {
+      const queued = conversationTurnControl.list({ scope: "global", statuses: "queued", limit: 500 }).turns;
+      for (const sessionId of [...new Set(queued.map((turn: any) => String(turn.conversation_id || "")).filter(Boolean))]) {
+        void drainGlobalWebTurns(baseUrl, ctx, sessionId as string).catch((error: any) => console.warn(`[全局 Agent 队列] 启动恢复失败：${error?.message || error}`));
+      }
+    };
+    tick();
+    globalWebTurnRecoveryTimer = setInterval(tick, 3_000);
+    globalWebTurnRecoveryTimer.unref?.();
+    return { started: true };
+  };
+  const stopGlobalWebTurnRecoveryForServer = () => {
+    if (globalWebTurnRecoveryTimer) clearInterval(globalWebTurnRecoveryTimer);
+    globalWebTurnRecoveryTimer = null;
+  };
 
   function handleGlobalAgentApi(
     pathname: string,
@@ -247,6 +319,8 @@ export function createGlobalAgentApi(deps: any) {
       req.on("data", (chunk: any) => body += chunk);
       req.on("end", async () => {
         let reactionInput: { scope: "global"; messageId: string } | null = null;
+        let inboundReceiptId = "";
+        let inboundOperationKey = "";
         let streamResponse = false;
         const emitControlStream = (event: any) => {
           if (!streamResponse || res.writableEnded || res.destroyed) return;
@@ -273,31 +347,67 @@ export function createGlobalAgentApi(deps: any) {
             }
           }
           let payload = body ? JSON.parse(body) : {};
+          const requestedTargetType = String(payload.target_type || payload.targetType || "global_agent");
+          if (requestedTargetType !== "global_agent") {
+            sendJson(res, { success: false, error: requestedTargetType.includes("group") ? "飞书不再支持直接进入群聊 Agent" : "全局飞书入口目标类型无效" }, 403);
+            return;
+          }
           streamResponse = isAcp && payload.stream === true;
           if (isAcp) {
             payload = { ...payload, ...resolveControlBotAcpPlatformContext(payload.acpSessionId || payload.sessionId) };
           }
+          const inboundEnvelope = buildFeishuInboundEnvelopeV2({
+            payload: { ...payload, target_type: "global_agent" },
+            targetType: "global_agent",
+            applicationId: config.control_bot_app_id || config.app_id,
+            transport: isAcp ? "acp" : "internal",
+            messageId: getFeishuMessageId(payload),
+          });
+          payload = {
+            ...payload,
+            target_type: "global_agent",
+            conversation_key_v2: inboundEnvelope.identity.conversation_key_v2,
+            feishu_app_fingerprint: inboundEnvelope.identity.application_fingerprint,
+            feishu_inbound_envelope: inboundEnvelope,
+          };
           const text = extractCcConnectHookText(payload);
           if (!text) {
             sendJson(res, { success: false, error: "未从控制机器人载荷中识别到文本消息" }, 400);
             return;
           }
+          const inboundClaim = acquireFeishuInboundReceipt(inboundEnvelope, 11 * 60 * 1000);
+          inboundReceiptId = inboundClaim.receipt.id;
+          inboundOperationKey = inboundEnvelope.idempotency_key;
           const conversationId = resolveFeishuGlobalAgentSessionId(payload);
           const messageId = getFeishuMessageId(payload);
-          const operationKey = messageId ? `${conversationId}:${messageId}` : "";
-          const operation = operationKey ? acquireIdempotency({ scope: "feishu-control-message", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { conversation_id: conversationId, message_id: messageId } }) : null;
-          if (operation && !operation.acquired) {
-            const settled = operation.inProgress ? await waitForIdempotencyResult("feishu-control-message", operationKey) : operation.record;
-            const replay = settled?.result || {};
-            const duplicateResult = { success: settled?.status === "completed", duplicate: true, message: "重复控制消息已抑制", reply: replay.reply || replay.error || "消息仍在处理中", trace_id: settled?.trace_id || operation.traceId };
+          const operationKey = inboundEnvelope.idempotency_key;
+          const operation = acquireIdempotency({ scope: "feishu-global-inbound-v2", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { conversation_id: conversationId, message_id: messageId, envelope_checksum: inboundEnvelope.checksum } });
+          const replyWithDuplicate = (settled: any) => {
+            const replay = settled?.result || inboundClaim.receipt.result || {};
+            const duplicateResult = { success: settled?.status === "completed" || inboundClaim.receipt.processing_state === "completed", duplicate: true, message: "重复飞书消息已抑制", reply: replay.reply || replay.error || "消息仍在处理中", trace_id: settled?.trace_id || operation.traceId };
             if (streamResponse) {
               res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
               emitControlStream({ type: "result", ...duplicateResult });
               emitControlStream({ type: "done" });
               res.end();
-            } else {
-              sendJson(res, duplicateResult);
+            } else sendJson(res, duplicateResult);
+          };
+          if (!inboundClaim.acquired) {
+            const settled = operation.acquired
+              ? { status: inboundClaim.receipt.processing_state === "completed" ? "completed" : "failed", result: inboundClaim.receipt.result, trace_id: operation.traceId }
+              : operation.inProgress ? await waitForIdempotencyResult("feishu-global-inbound-v2", operationKey) : operation.record;
+            if (operation.acquired) {
+              if (settled.status === "completed") completeIdempotency("feishu-global-inbound-v2", operationKey, settled.result);
+              else failIdempotency("feishu-global-inbound-v2", operationKey, settled.result?.error || "飞书入站回执未完成");
             }
+            replyWithDuplicate(settled);
+            return;
+          }
+          if (!operation.acquired) {
+            const settled = operation.inProgress ? await waitForIdempotencyResult("feishu-global-inbound-v2", operationKey) : operation.record;
+            if (settled?.status === "completed") completeFeishuInboundReceipt(inboundReceiptId, { reply: settled.result?.reply });
+            else failFeishuInboundReceipt(inboundReceiptId, settled?.result?.error || "重复飞书消息仍在处理中", true);
+            replyWithDuplicate(settled);
             return;
           }
           if (isAcp && /^om_[a-z0-9_-]{8,200}$/i.test(messageId)) {
@@ -318,7 +428,9 @@ export function createGlobalAgentApi(deps: any) {
             traceId: operation?.traceId,
             onDelta: streamResponse ? (delta: string) => emitControlStream({ type: "chunk", text: delta }) : undefined,
           });
-          if (operationKey) completeIdempotency("feishu-control-message", operationKey, controlled);
+          updateFeishuInboundReceipt(inboundReceiptId, "agent_completed", { reply: controlled.reply });
+          completeIdempotency("feishu-global-inbound-v2", operationKey, controlled);
+          completeFeishuInboundReceipt(inboundReceiptId, { reply: controlled.reply, delivery_id: controlled.delivery?.id });
           const responsePayload = { success: true, message: controlled.queued ? "控制机器人消息已排队" : "控制机器人消息已处理", ...controlled, trace_id: operation?.traceId || "" };
           if (streamResponse) {
             emitControlStream({ type: "result", ...responsePayload });
@@ -329,6 +441,8 @@ export function createGlobalAgentApi(deps: any) {
           }
           finishReaction("completed");
         } catch (error: any) {
+          if (inboundReceiptId) try { failFeishuInboundReceipt(inboundReceiptId, error, true); } catch {}
+          if (inboundOperationKey) try { failIdempotency("feishu-global-inbound-v2", inboundOperationKey, error); } catch {}
           finishReaction("failed");
           if (streamResponse && res.headersSent) {
             emitControlStream({ type: "error", text: error?.message || "控制机器人消息处理失败" });
@@ -378,6 +492,8 @@ export function createGlobalAgentApi(deps: any) {
           const config = loadFeishuConfig();
           const rawPayload = body ? JSON.parse(body) : {};
           const payload = normalizeFeishuEventPayload(rawPayload, config);
+          const requestedTargetType = String(payload.target_type || payload.targetType || "global_agent");
+          if (requestedTargetType !== "global_agent") throw new Error(requestedTargetType.includes("group") ? "飞书不再支持直接进入群聊 Agent" : "飞书事件目标类型无效");
           verifyFeishuEventToken(payload, config);
   
           if (payload.type === "url_verification" || payload.challenge) {
@@ -404,30 +520,70 @@ export function createGlobalAgentApi(deps: any) {
           if (payload?.event?.sender?.sender_type === "app") return;
   
           const messageId = getFeishuMessageId(payload);
-          if (messageId && processedFeishuMessageIds.has(messageId)) return;
-          if (messageId) {
-            processedFeishuMessageIds.add(messageId);
-            if (processedFeishuMessageIds.size > 1000) {
-              const oldest = processedFeishuMessageIds.values().next().value;
-              if (oldest) processedFeishuMessageIds.delete(oldest);
-            }
-          }
-          const text = extractFeishuMessageText(payload);
+          const messageType = String(payload?.event?.message?.message_type || "").toLowerCase();
+          const extractedText = extractFeishuMessageText(payload);
+          const text = extractedText || (["file", "media", "image"].includes(messageType) ? "请读取并处理这条飞书附件。" : "");
           if (!text) {
-            void sendFeishuReportMessage({ title: "全局 Agent", markdown: "目前控制机器人只处理文字消息，请把需求或指令以文字发送。" });
+            const conversationId = resolveFeishuGlobalAgentSessionId({ ...payload, target_type: "global_agent" });
+            const destination = recordFeishuInboundDirect({ payload: { ...payload, target_type: "global_agent" }, sessionId: conversationId, messageId });
+            bindFeishuTaskContextDirect({ sessionId: conversationId, destination, source: "feishu-control-bot", targetType: "global_agent" });
+            void notifyFeishuTaskStageDirect({
+              stage: "global_agent_reply",
+              title: "全局 Agent",
+              markdown: "目前支持文字、图片和文件消息；请重新发送可读取的内容。",
+              sessionId: conversationId,
+              dedupeKey: `unsupported-feishu-message:${messageId || payload?.header?.event_id || "unknown"}`,
+            });
             return;
           }
-          const operationKey = messageId || String(payload?.header?.event_id || "").trim();
-          const operation = operationKey ? acquireIdempotency({ scope: "feishu-event", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { message_id: messageId, event_id: payload?.header?.event_id || "" } }) : null;
-          if (operation && !operation.acquired) return;
-          void processFeishuControlledMessage(getRequestBaseUrl(req), ctx, text, payload, { traceId: operation?.traceId })
+          const inboundEnvelope = buildFeishuInboundEnvelopeV2({
+            payload: { ...payload, target_type: "global_agent" },
+            targetType: "global_agent",
+            applicationId: config.control_bot_app_id || config.app_id,
+            transport: "event_callback",
+            messageId,
+            eventId: payload?.header?.event_id,
+          });
+          const routedPayload = {
+            ...payload,
+            target_type: "global_agent",
+            conversation_key_v2: inboundEnvelope.identity.conversation_key_v2,
+            feishu_app_fingerprint: inboundEnvelope.identity.application_fingerprint,
+            feishu_inbound_envelope: inboundEnvelope,
+          };
+          const inboundClaim = acquireFeishuInboundReceipt(inboundEnvelope, 11 * 60 * 1000);
+          const operationKey = inboundEnvelope.idempotency_key;
+          const operation = acquireIdempotency({ scope: "feishu-global-inbound-v2", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { message_id: messageId, event_id: payload?.header?.event_id || "", envelope_checksum: inboundEnvelope.checksum } });
+          if (!inboundClaim.acquired) {
+            if (operation.acquired) {
+              if (inboundClaim.receipt.processing_state === "completed") completeIdempotency("feishu-global-inbound-v2", operationKey, inboundClaim.receipt.result || {});
+              else failIdempotency("feishu-global-inbound-v2", operationKey, inboundClaim.receipt.result?.error || "飞书入站回执仍在处理中");
+            }
+            return;
+          }
+          if (!operation.acquired) {
+            if (operation.record?.status === "completed") completeFeishuInboundReceipt(inboundClaim.receipt.id, { reply: operation.record?.result?.reply });
+            else failFeishuInboundReceipt(inboundClaim.receipt.id, operation.record?.result?.error || "重复飞书消息仍在处理中", true);
+            return;
+          }
+          updateFeishuInboundReceipt(inboundClaim.receipt.id, "agent_processing");
+          void processFeishuControlledMessage(getRequestBaseUrl(req), ctx, text, routedPayload, { traceId: operation.traceId })
             .then(result => {
-              if (operationKey) completeIdempotency("feishu-event", operationKey, result);
-              if (!result.report_sent && (result.queued || result.stopped_run_id || result.turn?.mode === "steer")) {
-                return sendFeishuReportMessage({ title: "全局 Agent", markdown: result.reply });
-              }
+              completeIdempotency("feishu-global-inbound-v2", operationKey, result);
+              completeFeishuInboundReceipt(inboundClaim.receipt.id, { reply: result.reply, delivery_id: result.delivery?.id });
             })
-            .catch(error => { if (operationKey) failIdempotency("feishu-event", operationKey, error); });
+            .catch(error => {
+              failIdempotency("feishu-global-inbound-v2", operationKey, error);
+              failFeishuInboundReceipt(inboundClaim.receipt.id, error, true);
+              const conversationId = resolveFeishuGlobalAgentSessionId(routedPayload);
+              void notifyFeishuTaskStageDirect({
+                stage: "failure",
+                title: "全局 Agent 处理失败",
+                markdown: `这条消息暂时没有处理成功：${String(error?.message || error).slice(0, 240)}。你可以直接重新发送。`,
+                sessionId: conversationId,
+                dedupeKey: `global-inbound-failure:${inboundEnvelope.idempotency_key}:${inboundClaim.receipt.attempt}`,
+              });
+            });
         } catch (error: any) {
           if (!res.headersSent) sendJson(res, { code: 1, error: error?.message || "飞书事件处理失败" }, 401);
         }
@@ -532,6 +688,20 @@ export function createGlobalAgentApi(deps: any) {
         supervisors: listGlobalMissionSupervisors({ status: String(parsed.query.status || "") || undefined, limit: Number(parsed.query.limit || 50) }),
         scheduler: getGlobalMissionSupervisorSchedulerStatus(),
       });
+      return true;
+    }
+
+    if (pathname === "/api/global-agent/terminal-deliveries" && req.method === "GET") {
+      const states = String(parsed.query.state || parsed.query.states || "").split(",").map((item: string) => item.trim()).filter(Boolean);
+      sendJson(res, { success: true, deliveries: listGlobalTerminalDeliveries({ supervisorId: String(parsed.query.supervisor_id || "") || undefined, states }) });
+      return true;
+    }
+
+    if (pathname === "/api/global-agent/terminal-deliveries/retry" && req.method === "POST") {
+      void readJsonRequest(req).then((payload: any) => {
+        const delivery = retryGlobalTerminalDelivery(String(payload.id || payload.delivery_id || ""));
+        sendJson(res, { success: true, delivery });
+      }).catch((error: any) => sendJson(res, { success: false, error: error?.message || String(error) }, 400));
       return true;
     }
   
@@ -1060,6 +1230,8 @@ export function createGlobalAgentApi(deps: any) {
         let reliabilityOperationAcquired = false;
         let streamRequestId = "";
         let streamSequence = 0;
+        let activeTurn: any = null;
+        let activeSessionId = "";
         if (isStream) {
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
@@ -1100,7 +1272,7 @@ export function createGlobalAgentApi(deps: any) {
           const sessionId = String(payload.session_id || payload.sessionId || "web:default");
           ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "thinking", "全局 Agent 正在思考...", { tab: "global-agent" }, 12 * 60 * 1000);
           ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: displayMessage, final: true, source: "global" });
-          const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || "").trim();
+          const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || `server-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`).trim();
           const operationKey = requestId ? `${sessionId}:${requestId}` : "";
           streamRequestId = requestId;
           reliabilityOperationKey = operationKey;
@@ -1118,6 +1290,43 @@ export function createGlobalAgentApi(deps: any) {
             } else sendJson(res, { success: true, run: result, source_files: sourceFiles, files: sourceFiles, duplicate: true });
             return;
           }
+          const principal = requestAccessPrincipal(req);
+          const queued = conversationTurnControl.enqueue({
+            scope: "global",
+            conversation_id: sessionId,
+            mode: "queue",
+            message: displayMessage,
+            attachments: sourceFiles,
+            request_id: requestId,
+            metadata: {
+              global_context_v2: {
+                message,
+                original_message: displayMessage,
+                history,
+                source: "web",
+                trace_id: operation?.traceId || "",
+                clarification_run_id: payload.clarification_run_id || payload.clarificationRunId || "",
+                source_ingestion: sourceIngestion,
+                read_only: requestIsReadOnly(req),
+                principal,
+              },
+            },
+          });
+          activeSessionId = sessionId;
+          activeTurn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId, id: queued.turn.id, lease_ms: 13 * 60 * 1000 });
+          if (!activeTurn) {
+            const position = conversationTurnControl.list({ scope: "global", conversation_id: sessionId, statuses: "queued,sending" })
+              .turns.find((turn: any) => turn.id === queued.turn.id)?.position || 1;
+            const queuedResult = { accepted: true, queued: true, turn_id: queued.turn.id, queue_scope: `global:${sessionId}`, queue_position: position, retryable: false };
+            if (operationKey) completeIdempotency("global-agent-request", operationKey, queuedResult);
+            if (isStream) {
+              emit({ type: "queued", ...queuedResult });
+              emit({ type: "done", ...queuedResult });
+              res.end();
+            } else sendJson(res, { success: true, ...queuedResult }, 202);
+            return;
+          }
+          emit({ type: "claimed", turn_id: activeTurn.id, queue_scope: `global:${sessionId}`, queue_position: 1 });
           let finalPetEventRelayed = false;
           const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
             message,
@@ -1128,6 +1337,10 @@ export function createGlobalAgentApi(deps: any) {
             traceId: operation?.traceId,
             clarificationRunId: payload.clarification_run_id || payload.clarificationRunId || "",
             sourceIngestion,
+            readOnly: requestIsReadOnly(req),
+            principal,
+            turnId: activeTurn.id,
+            queueScope: `global:${sessionId}`,
             onEvent: (event: any) => {
               emit(event);
               relayGlobalPetEvent(ctx, event);
@@ -1136,17 +1349,29 @@ export function createGlobalAgentApi(deps: any) {
               }
             },
           });
+          conversationTurnControl.settle({
+            id: activeTurn.id,
+            status: run.status === "failed" ? "failed" : "completed",
+            run_id: run.id,
+            checkpoint: run.status,
+            semantic_decision_receipt: run.workflow_decision || run.workflowDecision || null,
+            result: { run_id: run.id, status: run.status, retryable: run.retryable === true },
+            error: run.status === "failed" ? run.error || run.final_reply : "",
+          });
           if (operationKey) completeIdempotency("global-agent-request", operationKey, { run_id: run.id, status: run.status });
           const result = publicGlobalAgentRun(run);
           if (!finalPetEventRelayed) {
             relayGlobalPetEvent(ctx, { type: run.status === "failed" ? "failed" : "completed", run }, { finalRun: result });
           }
           if (isStream) {
-            emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles });
+            emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles, turn_id: activeTurn.id, queue_scope: `global:${sessionId}`, queue_position: 0, authorization_receipt: run.write_authorization_receipt || null, retryable: run.retryable === true, terminal_receipt: run.terminal_receipt || null });
             emit({ type: "done" });
             res.end();
-          } else sendJson(res, { success: true, run: result, source_files: sourceFiles, files: sourceFiles });
+          } else sendJson(res, { success: true, run: result, source_files: sourceFiles, files: sourceFiles, turn_id: activeTurn.id, queue_scope: `global:${sessionId}`, queue_position: 0, authorization_receipt: run.write_authorization_receipt || null, retryable: run.retryable === true, terminal_receipt: run.terminal_receipt || null });
         } catch (error: any) {
+          if (activeTurn?.id) {
+            try { conversationTurnControl.settle({ id: activeTurn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) }); } catch {}
+          }
           if (reliabilityOperationKey && reliabilityOperationAcquired) {
             try { failIdempotency("global-agent-request", reliabilityOperationKey, error); } catch {}
           }
@@ -1155,14 +1380,17 @@ export function createGlobalAgentApi(deps: any) {
             emit({ type: "error", text: error?.message || String(error) });
             emit({ type: "done" });
             res.end();
-          } else sendJson(res, { success: false, error: error?.message || String(error) }, 400);
+          } else sendJson(res, { success: false, error: error?.message || String(error), retryable: true, turn_id: activeTurn?.id || "" }, 400);
+        } finally {
+          if (activeSessionId) {
+            void drainGlobalWebTurns(getRequestBaseUrl(req), ctx, activeSessionId).catch((error: any) => {
+              console.warn(`[全局 Agent 队列] 后台续跑失败：${error?.message || error}`);
+            });
+          }
         }
       };
       if (contentType.includes("multipart/form-data")) {
-        collectRequestBuffer(req).then(buffer => {
-          const boundary = getMultipartBoundary(contentType);
-          if (!boundary) throw new Error("无效的附件请求");
-          const { fields, files } = parseMultipart(buffer, boundary);
+        parseSecureMultipartRequest(req).then(({ fields, files }) => {
           return handleRun(fields || {}, files || []);
         }).catch(error => sendJson(res, { success: false, error: error?.message || String(error) }, 400));
       } else {
@@ -1181,6 +1409,8 @@ export function createGlobalAgentApi(deps: any) {
   
       const handleAgenticChatProxy = async (payload: any, files: any[] = []) => {
         const isStream = parsed.query.stream === "true" || payload.stream === true || String(req.headers.accept || "").includes("text/event-stream");
+        let legacyTurn: any = null;
+        let legacySessionId = "";
         if (isStream) {
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
@@ -1215,6 +1445,30 @@ export function createGlobalAgentApi(deps: any) {
           let history: any[] = [];
           try { history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]")); } catch {}
           const sessionId = String(payload.session_id || payload.sessionId || "legacy:web");
+          legacySessionId = sessionId;
+          const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || `legacy-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`);
+          const principal = requestAccessPrincipal(req);
+          const sourceFiles = serializeGlobalRequestAttachments(files);
+          const queued = conversationTurnControl.enqueue({
+            scope: "global",
+            conversation_id: sessionId,
+            mode: "queue",
+            message: displayMessage,
+            attachments: sourceFiles,
+            request_id: requestId,
+            metadata: { global_context_v2: { message, original_message: displayMessage, history, source: "legacy-chat-proxy", source_ingestion: sourceIngestion, read_only: requestIsReadOnly(req), principal } },
+          });
+          const turn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId, id: queued.turn.id });
+          legacyTurn = turn;
+          if (!turn) {
+            const position = conversationTurnControl.list({ scope: "global", conversation_id: sessionId, statuses: "queued,sending" }).turns.find((item: any) => item.id === queued.turn.id)?.position || 1;
+            if (isStream) {
+              emit({ type: "queued", accepted: true, queued: true, turn_id: queued.turn.id, queue_scope: `global:${sessionId}`, queue_position: position });
+              emit({ type: "done" });
+              res.end();
+            } else sendJson(res, { success: true, accepted: true, queued: true, turn_id: queued.turn.id, queue_scope: `global:${sessionId}`, queue_position: position }, 202);
+            return;
+          }
           const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
             message,
             originalMessage: displayMessage,
@@ -1222,18 +1476,26 @@ export function createGlobalAgentApi(deps: any) {
             sessionId,
             source: "legacy-chat-proxy",
             sourceIngestion,
+            readOnly: requestIsReadOnly(req),
+            principal,
+            turnId: turn.id,
+            queueScope: `global:${sessionId}`,
             onEvent: emit,
           });
+          conversationTurnControl.settle({ id: turn.id, status: run.status === "failed" ? "failed" : "completed", run_id: run.id, checkpoint: run.status, semantic_decision_receipt: run.workflow_decision || run.workflowDecision || null, result: { run_id: run.id, status: run.status }, error: run.status === "failed" ? run.error || run.final_reply : "" });
           const result = publicGlobalAgentRun(run);
-          const sourceFiles = serializeGlobalRequestAttachments(files);
           if (isStream) {
-            emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles });
+            emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles, turn_id: turn.id, queue_scope: `global:${sessionId}`, authorization_receipt: run.write_authorization_receipt || null, retryable: run.retryable === true });
             emit({ type: "done" });
             res.end();
           } else {
-            sendJson(res, { success: true, reply: globalRunVisibleReply(run, ""), run: result, source_files: sourceFiles, files: sourceFiles, agentic: true });
+            sendJson(res, { success: true, reply: globalRunVisibleReply(run, ""), run: result, source_files: sourceFiles, files: sourceFiles, agentic: true, turn_id: turn.id, queue_scope: `global:${sessionId}`, authorization_receipt: run.write_authorization_receipt || null, retryable: run.retryable === true });
           }
+          void drainGlobalWebTurns(getRequestBaseUrl(req), ctx, sessionId).catch((error: any) => console.warn(`[全局 Agent 队列] legacy续跑失败：${error?.message || error}`));
         } catch (error: any) {
+          if (legacyTurn?.id) {
+            try { conversationTurnControl.settle({ id: legacyTurn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) }); } catch {}
+          }
           if (isStream) {
             emit({ type: "error", text: error?.message || String(error) });
             emit({ type: "done" });
@@ -1241,14 +1503,13 @@ export function createGlobalAgentApi(deps: any) {
           } else {
             sendJson(res, { success: false, error: error?.message || String(error) }, 400);
           }
+        } finally {
+          if (legacySessionId) void drainGlobalWebTurns(getRequestBaseUrl(req), ctx, legacySessionId).catch((error: any) => console.warn(`[全局 Agent 队列] legacy恢复失败：${error?.message || error}`));
         }
       };
   
       if (contentType.includes("multipart/form-data")) {
-        collectRequestBuffer(req).then(buffer => {
-          const boundary = getMultipartBoundary(contentType);
-          if (!boundary) throw new Error("无效的附件请求");
-          const { fields, files } = parseMultipart(buffer, boundary);
+        parseSecureMultipartRequest(req).then(({ fields, files }) => {
           return handleAgenticChatProxy(fields || {}, files || []);
         }).catch(error => sendJson(res, { success: false, error: error?.message || String(error) }, 400));
       } else {
@@ -1346,5 +1607,5 @@ export function createGlobalAgentApi(deps: any) {
     return false;
   }
 
-  return { handleGlobalAgentApi }
+  return { handleGlobalAgentApi, drainGlobalWebTurns, startGlobalWebTurnRecoveryForServer, stopGlobalWebTurnRecoveryForServer }
 }

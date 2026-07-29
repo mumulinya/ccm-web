@@ -19,7 +19,7 @@ export declare function runProjectFeishuSessionSourceSelfTest(): {
         explicit_web_beats_historical_mapping: boolean;
         preserves_explicit_unbound_feishu_session: boolean;
         resolves_real_acp_session_to_exact_project_session: boolean;
-        allows_only_unambiguous_first_turn_fallback: boolean;
+        rejects_unproven_first_turn_fallback: boolean;
         rejects_ambiguous_acp_target_mapping: boolean;
     };
 };

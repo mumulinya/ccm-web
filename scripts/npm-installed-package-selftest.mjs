@@ -40,7 +40,7 @@ const port = await new Promise((resolve, reject) => {
     server.close(error => error ? reject(error) : resolve(selected))
   })
 })
-const env = { ...process.env, HOME: fixtureHome, USERPROFILE: fixtureHome, CCM_TASK_STORE_DIR: dataDir, CCM_SERVER_LOCK_FILE: lockFile, NO_COLOR: '1' }
+const env = { ...process.env, HOME: fixtureHome, USERPROFILE: fixtureHome, CCM_TASK_STORE_DIR: dataDir, CCM_SERVER_LOCK_FILE: lockFile, CCM_DISABLE_LOCAL_EMBEDDING_STARTUP_PREPARE: '1', NO_COLOR: '1' }
 const run = (args, timeout = 45_000) => execFileSync(process.execPath, [cli, ...args], { cwd: installRoot, env, encoding: 'utf8', timeout, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 const request = async (pathname, options = {}, cookie = '') => {
   const headers = { ...(options.headers || {}), ...(cookie ? { Cookie: cookie } : {}) }
@@ -63,14 +63,16 @@ try {
   assert.equal(initial.response.status, 200)
   assert.equal(initial.data.first_install, true)
 
+  const setupCode = fs.readFileSync(path.join(dataDir, 'auth', 'setup-code.txt'), 'utf8').trim()
   const registration = await request('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `release_${Date.now().toString(36)}`, password: `Release-${Date.now()}-Safe` }),
+    body: JSON.stringify({ username: `release_${Date.now().toString(36)}`, password: `Release-${Date.now()}-Safe`, setup_code: setupCode }),
   })
   assert.equal(registration.response.status, 201)
   assert.equal(registration.data.success, true)
   const cookie = String(registration.response.headers.get('set-cookie') || '').split(';')[0]
+  const csrf = registration.data.csrf || registration.data.session?.csrf
   assert.ok(cookie)
 
   const endpoints = [
@@ -84,19 +86,19 @@ try {
 
   const terminalId = `release-pty-${Date.now().toString(36)}`
   const created = await request('/api/terminal/session', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CCM-CSRF': csrf },
     body: JSON.stringify({ sessionId: terminalId, name: 'Release PTY', cwd: installRoot, cols: 90, rows: 24 }),
   }, cookie)
   assert.equal(created.response.status, 200)
   assert.ok(created.data.session.pid > 0)
   const input = await request('/api/terminal/session/input', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CCM-CSRF': csrf },
     body: JSON.stringify({ id: terminalId, data: "Write-Output 'INSTALLED_PTY_OK'\r" }),
   }, cookie)
   assert.equal(input.response.status, 200)
   const sessions = await request('/api/terminal/sessions', {}, cookie)
   assert.equal(sessions.data.sessions.some(session => session.id === terminalId), true)
-  const removed = await request(`/api/terminal/session?id=${encodeURIComponent(terminalId)}`, { method: 'DELETE' }, cookie)
+  const removed = await request(`/api/terminal/session?id=${encodeURIComponent(terminalId)}`, { method: 'DELETE', headers: { 'X-CCM-CSRF': csrf } }, cookie)
   assert.equal(removed.response.status, 200)
 
   const stopped = run(['stop'])

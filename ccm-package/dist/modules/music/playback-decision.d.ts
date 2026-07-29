@@ -1,0 +1,76 @@
+import { MusicIntentDecisionV2 } from "./agent";
+export type MusicPlaybackCandidateV2 = {
+    source: "local" | "netease" | "bilibili";
+    sourceId: string;
+    filename?: string;
+    title: string;
+    artist: string;
+    duration?: string;
+    downloadToken?: string;
+};
+export type MusicPlaybackDecisionV2 = {
+    schema: "ccm-music-playback-decision-v2";
+    version: 2;
+    id: string;
+    requestId: string;
+    originalRequest: string;
+    action: MusicIntentDecisionV2["action"];
+    strategy: MusicIntentDecisionV2["strategy"];
+    sourceMode: MusicIntentDecisionV2["sourceMode"];
+    searchQuery: string;
+    status: "resolved" | "awaiting_user_selection" | "rejected";
+    candidates: MusicPlaybackCandidateV2[];
+    selectedCandidate: MusicPlaybackCandidateV2 | null;
+    reply: string;
+    reason: string;
+    intentReceipt: any;
+    selectionReceipt: any;
+    createdAt: string;
+    expiresAt: string;
+    checksum: string;
+};
+export declare function resolveMusicPlaybackDecisionV2(input: {
+    intent: MusicIntentDecisionV2;
+    requestId?: string;
+    aiRecommendationEnabled?: boolean;
+    aiAutoSelectEnabled?: boolean;
+    modelConfig?: any;
+}): Promise<MusicPlaybackDecisionV2>;
+export declare function publicMusicPlaybackDecision(decision: MusicPlaybackDecisionV2 | null): {
+    candidates: {
+        downloadToken: any;
+        source: "local" | "netease" | "bilibili";
+        sourceId: string;
+        filename?: string;
+        title: string;
+        artist: string;
+        duration?: string;
+    }[];
+    selectedCandidate: {
+        downloadToken: any;
+        source: "local" | "netease" | "bilibili";
+        sourceId: string;
+        filename?: string;
+        title: string;
+        artist: string;
+        duration?: string;
+    };
+    schema: "ccm-music-playback-decision-v2";
+    version: 2;
+    id: string;
+    requestId: string;
+    originalRequest: string;
+    action: MusicIntentDecisionV2["action"];
+    strategy: MusicIntentDecisionV2["strategy"];
+    sourceMode: MusicIntentDecisionV2["sourceMode"];
+    searchQuery: string;
+    status: "resolved" | "awaiting_user_selection" | "rejected";
+    reply: string;
+    reason: string;
+    intentReceipt: any;
+    selectionReceipt: any;
+    createdAt: string;
+    expiresAt: string;
+    checksum: string;
+};
+export declare function sameMusicPlaybackCandidate(left: any, right: any): boolean;

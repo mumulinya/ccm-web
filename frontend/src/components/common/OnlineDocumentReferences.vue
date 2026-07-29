@@ -36,7 +36,8 @@ const rows = computed(() => {
 })
 
 const statusLabel = row => {
-  if (row.readable || row.status === 'parsed' || row.status === 'partial') return '已读取'
+  if (row.status === 'partial') return '部分读取'
+  if (row.readable || row.status === 'parsed') return '完整读取'
   if (row.status === 'needs_authorization') return '需要授权'
   if (row.status === 'failed' || row.status === 'unsupported') return '读取失败'
   return props.pendingLabel
@@ -52,17 +53,18 @@ const statusLabel = row => {
         <small :title="row.url">{{ row.detail }}</small>
       </span>
       <span class="online-document-state">
-        <CircleCheck v-if="row.readable || row.status === 'parsed' || row.status === 'partial'" :size="13" />
+        <TriangleAlert v-if="row.status === 'partial'" :size="13" />
+        <CircleCheck v-else-if="row.readable || row.status === 'parsed'" :size="13" />
         <LockKeyhole v-else-if="row.status === 'needs_authorization'" :size="13" />
         <TriangleAlert v-else-if="row.status === 'failed' || row.status === 'unsupported'" :size="13" />
         <Link2 v-else :size="13" />
         {{ statusLabel(row) }}
       </span>
     </article>
-    <small v-if="!compact" class="online-document-note">私有腾讯文档需要公开分享，或在设置中心配置显式授权。</small>
+    <small v-if="!compact" class="online-document-note">私有在线文档需先设置为公开分享；系统只读取用户明确提交的公网快照。</small>
   </div>
 </template>
 
 <style scoped>
-.online-document-references{display:grid;gap:5px}.online-document-reference{display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;gap:7px;min-width:0;padding:6px 8px;border:1px solid color-mix(in srgb,var(--accent-blue) 18%,var(--border-color));border-radius:6px;background:color-mix(in srgb,var(--accent-blue) 4%,var(--surface));color:var(--accent-blue)}.online-document-icon{width:24px;height:24px;display:grid;place-items:center;border-radius:5px;background:color-mix(in srgb,var(--accent-blue) 10%,var(--surface))}.online-document-copy{display:grid;min-width:0;gap:1px}.online-document-copy strong{color:var(--text-primary);font-size:10.5px}.online-document-copy small{overflow:hidden;color:var(--text-muted);font-size:9.5px;text-overflow:ellipsis;white-space:nowrap}.online-document-state{display:inline-flex;align-items:center;gap:4px;color:var(--text-secondary);font-size:9.5px;white-space:nowrap}.online-document-reference.needs_authorization .online-document-state,.online-document-reference.failed .online-document-state,.online-document-reference.unsupported .online-document-state{color:var(--accent-yellow)}.online-document-reference.parsed .online-document-state,.online-document-reference.partial .online-document-state{color:var(--accent-green)}.online-document-note{color:var(--text-muted);font-size:9.5px;line-height:1.4}.compact .online-document-note{display:none}@media(max-width:560px){.online-document-reference{grid-template-columns:24px minmax(0,1fr)}.online-document-state{grid-column:2}}
+.online-document-references{display:grid;gap:5px}.online-document-reference{display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;gap:7px;min-width:0;padding:6px 8px;border:1px solid color-mix(in srgb,var(--accent-blue) 18%,var(--border-color));border-radius:6px;background:color-mix(in srgb,var(--accent-blue) 4%,var(--surface));color:var(--accent-blue)}.online-document-icon{width:24px;height:24px;display:grid;place-items:center;border-radius:5px;background:color-mix(in srgb,var(--accent-blue) 10%,var(--surface))}.online-document-copy{display:grid;min-width:0;gap:1px}.online-document-copy strong{color:var(--text-primary);font-size:10.5px}.online-document-copy small{overflow:hidden;color:var(--text-muted);font-size:9.5px;text-overflow:ellipsis;white-space:nowrap}.online-document-state{display:inline-flex;align-items:center;gap:4px;color:var(--text-secondary);font-size:9.5px;white-space:nowrap}.online-document-reference.needs_authorization .online-document-state,.online-document-reference.failed .online-document-state,.online-document-reference.unsupported .online-document-state,.online-document-reference.partial .online-document-state{color:var(--accent-yellow)}.online-document-reference.parsed .online-document-state{color:var(--accent-green)}.online-document-note{color:var(--text-muted);font-size:9.5px;line-height:1.4}.compact .online-document-note{display:none}@media(max-width:560px){.online-document-reference{grid-template-columns:24px minmax(0,1fr)}.online-document-state{grid-column:2}}
 </style>

@@ -43,8 +43,10 @@ exports.getAgentProviderAccountIdentity = getAgentProviderAccountIdentity;
 exports.parseCursorAuthStatus = parseCursorAuthStatus;
 exports.refreshAgentProviderStatusesAsync = refreshAgentProviderStatusesAsync;
 exports.getAgentProviderStatuses = getAgentProviderStatuses;
+exports.buildAgentProviderLoginSpec = buildAgentProviderLoginSpec;
 exports.buildAgentProviderInstallSpec = buildAgentProviderInstallSpec;
 exports.startAgentProviderInstall = startAgentProviderInstall;
+exports.getAgentProviderInstallJobs = getAgentProviderInstallJobs;
 exports.buildAgentProviderTestSpec = buildAgentProviderTestSpec;
 exports.parseAgentProviderTestOutput = parseAgentProviderTestOutput;
 exports.testAgentProvider = testAgentProvider;
@@ -68,6 +70,7 @@ const crypto_1 = require("crypto");
 const child_process_1 = require("child_process");
 const credential_store_1 = require("../../core/credential-store");
 const cc_switch_provider_1 = require("./cc-switch-provider");
+const development_agent_auth_evidence_1 = require("./development-agent-auth-evidence");
 const SETTINGS_FILE = path.join(os.homedir(), ".cc-connect", "agent-provider-settings.json");
 const STATUS_CACHE = new Map();
 // 状态探测涉及 spawnSync 外部 CLI（最长 8s），过期后由后台异步刷新兜底，
@@ -75,12 +78,49 @@ const STATUS_CACHE = new Map();
 const STATUS_CACHE_TTL_MS = 60_000;
 const INSTALL_OUTPUT_LIMIT = 12_000;
 const INSTALL_STATES = new Map();
+const INSTALL_STATE_FILE = path.join(os.homedir(), ".cc-connect", "agent-install-jobs.json");
+let installStatesLoaded = false;
+function persistInstallStates() {
+    fs.mkdirSync(path.dirname(INSTALL_STATE_FILE), { recursive: true });
+    const temp = `${INSTALL_STATE_FILE}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify({ schema: "ccm-agent-install-jobs-v1", updatedAt: new Date().toISOString(), jobs: Object.fromEntries(INSTALL_STATES) }, null, 2), { encoding: "utf-8", mode: 0o600 });
+    fs.renameSync(temp, INSTALL_STATE_FILE);
+}
+function ensureInstallStatesLoaded() {
+    if (installStatesLoaded)
+        return;
+    installStatesLoaded = true;
+    try {
+        const parsed = JSON.parse(fs.readFileSync(INSTALL_STATE_FILE, "utf-8"));
+        for (const [provider, state] of Object.entries(parsed?.jobs || {})) {
+            if (!["codex", "cursor", "gemini", "opencode", "claudecode"].includes(provider))
+                continue;
+            const job = state;
+            if (job.status === "running" && job.pid) {
+                try {
+                    process.kill(job.pid, 0);
+                }
+                catch {
+                    job.status = "failed";
+                    job.completedAt = new Date().toISOString();
+                    job.error = "CCM重启后未发现原安装进程，已标记为中断";
+                    job.pid = undefined;
+                }
+            }
+            INSTALL_STATES.set(provider, job);
+        }
+    }
+    catch { }
+}
+function setInstallState(provider, state) {
+    INSTALL_STATES.set(provider, state);
+    persistInstallStates();
+}
 const LOGIN_OUTPUT_LIMIT = 24_000;
 const LOGIN_SESSION_TTL_MS = 10 * 60 * 1000;
 const LOGIN_SESSIONS = new Map();
 const AGENT_TEST_TIMEOUT_MS = 90_000;
 const AGENT_TEST_OUTPUT_LIMIT = 128 * 1024;
-const AGENT_TEST_PROMPT = "Reply with exactly CCM_AGENT_OK and nothing else. Do not use tools, read files, or modify anything.";
 const AGENT_TESTS_IN_FLIGHT = new Map();
 function defaults() {
     return {
@@ -212,8 +252,19 @@ function saveAgentProviderSettings(updates) {
             next.claudecode.enabled = claude.enabled === true;
         if (claude.apiUrl !== undefined) {
             const apiUrl = String(claude.apiUrl || "").trim().replace(/\/+$/, "");
-            if (apiUrl && !/^https?:\/\//i.test(apiUrl))
-                throw new Error("Claude Code API 地址必须以 http:// 或 https:// 开头");
+            if (apiUrl) {
+                let parsed;
+                try {
+                    parsed = new URL(apiUrl);
+                }
+                catch {
+                    throw new Error("Claude Code API 地址格式无效");
+                }
+                const loopback = parsed.hostname === "localhost" || parsed.hostname === "::1" || /^127\./.test(parsed.hostname);
+                if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) {
+                    throw new Error("Claude Code远程API必须使用HTTPS；HTTP仅允许本机回环地址");
+                }
+            }
             next.claudecode.apiUrl = apiUrl;
         }
         if (claude.model !== undefined)
@@ -254,7 +305,12 @@ function saveAgentProviderSettings(updates) {
         updatedAt: next.updatedAt,
     };
     writeSettings(stored);
+    for (const provider of ["codex", "cursor", "gemini", "opencode", "claudecode"]) {
+        if (updates?.[provider])
+            (0, development_agent_auth_evidence_1.revokeDevelopmentAgentAuthEvidence)(provider, "Agent配置已修改，需要重新验证");
+    }
     markAgentProviderStatusesStale();
+    invalidateAgentModelCatalog();
     return loadAgentProviderSettings();
 }
 function publicAgentProviderSettings(settings = loadAgentProviderSettings()) {
@@ -466,6 +522,18 @@ function geminiCredentialPresent() {
         path.join(os.homedir(), ".config", "gcloud", "application_default_credentials.json"),
     ]);
 }
+function geminiCredentialSources() {
+    const sources = [];
+    if (fs.existsSync(path.join(os.homedir(), ".gemini", "oauth_creds.json")))
+        sources.push("gemini_oauth");
+    if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)
+        sources.push("environment_api_key");
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS)
+        sources.push("service_account");
+    if (fs.existsSync(path.join(os.homedir(), ".config", "gcloud", "application_default_credentials.json")))
+        sources.push("gcloud_adc");
+    return sources;
+}
 function openCodeCredentialPresent() {
     return jsonCredentialPresent([
         path.join(os.homedir(), ".local", "share", "opencode", "auth.json"),
@@ -509,6 +577,7 @@ function cursorStatus(command) {
     }
 }
 function installState(provider) {
+    ensureInstallStatesLoaded();
     return INSTALL_STATES.get(provider) || { status: "idle" };
 }
 // 与 spawnSync 默认 maxBuffer 对齐的输出上限，防止挂死的探测进程无界累积内存
@@ -672,15 +741,39 @@ function assembleAgentProviderStatuses(probes) {
     const openCodeAuth = openCodeCredentialPresent();
     const effectiveClaude = resolveEffectiveClaudeProviderSettings(config);
     const claudeReady = effectiveClaude.enabled && !!effectiveClaude.apiUrl && !!effectiveClaude.model && !!effectiveClaude.apiKey;
+    const authState = (provider, detected, account, version, model = "") => {
+        const evidence = (0, development_agent_auth_evidence_1.getDevelopmentAgentAuthEvidence)(provider, { account, cliVersion: version, model });
+        return {
+            authState: evidence?.valid ? "logged_in" : detected ? "credential_detected" : "logged_out",
+            authEvidence: (0, development_agent_auth_evidence_1.publicDevelopmentAgentAuthEvidence)(evidence),
+        };
+    };
+    const codexIdentity = codexAuth ? getAgentProviderAccountIdentity("codex") : "";
+    const geminiIdentity = geminiAuth ? getAgentProviderAccountIdentity("gemini") : "";
+    const openCodeIdentity = openCodeAuth ? getAgentProviderAccountIdentity("opencode") : "";
+    const codexState = authState("codex", codexAuth, codexIdentity, probes.versions.codex, config.codex.model);
+    const geminiState = authState("gemini", geminiAuth, geminiIdentity, probes.versions.gemini, config.gemini.model);
+    const openCodeState = authState("opencode", openCodeAuth, openCodeIdentity, probes.versions.opencode, config.opencode.model);
+    const currentCursorEvidence = (0, development_agent_auth_evidence_1.getDevelopmentAgentAuthEvidence)("cursor", {
+        account: probes.cursor.account,
+        cliVersion: probes.versions.cursor,
+        model: config.cursor.model,
+    });
+    const cursorEvidence = probes.cursor.loggedIn
+        ? currentCursorEvidence?.valid
+            ? currentCursorEvidence
+            : (0, development_agent_auth_evidence_1.recordDevelopmentAgentAuthEvidence)({ provider: "cursor", status: "verified", source: "native_status", account: probes.cursor.account, cliVersion: probes.versions.cursor, model: config.cursor.model, detail: "Cursor CLI返回有效登录状态" })
+        : (0, development_agent_auth_evidence_1.getDevelopmentAgentAuthEvidence)("cursor");
+    const claudeEvidence = (0, development_agent_auth_evidence_1.getDevelopmentAgentAuthEvidence)("claudecode", { cliVersion: probes.versions.claude, model: effectiveClaude.model });
     return {
         codex: {
             provider: "codex",
             command: "codex",
             installed: probes.codexInstalled,
             version: probes.versions.codex,
-            authState: codexAuth ? "logged_in" : "logged_out",
-            account: codexAuth ? getAgentProviderAccountIdentity("codex") : "",
-            detail: codexAuth ? "已发现本机 Codex CLI 登录凭据" : "尚未发现本机 Codex CLI 登录凭据",
+            ...codexState,
+            account: codexIdentity,
+            detail: codexState.authState === "logged_in" ? "Codex认证已验证" : codexAuth ? "已发现Codex凭据，运行测试后才能用于任务" : "尚未发现本机Codex凭据",
             install: installState("codex"),
         },
         cursor: {
@@ -689,6 +782,7 @@ function assembleAgentProviderStatuses(probes) {
             installed: probes.cursorInstalled,
             version: probes.versions.cursor,
             authState: probes.cursor.loggedIn ? "logged_in" : "logged_out",
+            authEvidence: (0, development_agent_auth_evidence_1.publicDevelopmentAgentAuthEvidence)(cursorEvidence),
             account: probes.cursor.account,
             detail: probes.cursor.detail,
             install: installState("cursor"),
@@ -698,9 +792,9 @@ function assembleAgentProviderStatuses(probes) {
             command: "gemini",
             installed: probes.geminiInstalled,
             version: probes.versions.gemini,
-            authState: geminiAuth ? "logged_in" : "logged_out",
-            account: geminiAuth ? getAgentProviderAccountIdentity("gemini") : "",
-            detail: geminiAuth ? "已发现 Gemini CLI 的 Google 或 API 凭据" : "请启动 Gemini CLI 完成 Google 登录或配置 API 凭据",
+            ...geminiState,
+            account: geminiIdentity,
+            detail: geminiState.authState === "logged_in" ? "Gemini认证已验证" : geminiAuth ? "已发现Gemini凭据，运行测试后才能用于任务" : "请启动Gemini CLI完成登录",
             install: installState("gemini"),
         },
         opencode: {
@@ -708,9 +802,9 @@ function assembleAgentProviderStatuses(probes) {
             command: "opencode",
             installed: probes.openCodeInstalled,
             version: probes.versions.opencode,
-            authState: openCodeAuth ? "logged_in" : "logged_out",
-            account: openCodeAuth ? getAgentProviderAccountIdentity("opencode") : "",
-            detail: openCodeAuth ? "已发现 OpenCode Provider 凭据" : "请使用 OpenCode 连接至少一个模型 Provider",
+            ...openCodeState,
+            account: openCodeIdentity,
+            detail: openCodeState.authState === "logged_in" ? "OpenCode认证已验证" : openCodeAuth ? "已发现OpenCode Provider凭据，运行测试后才能用于任务" : "请使用OpenCode连接至少一个Provider",
             install: installState("opencode"),
         },
         claudecode: {
@@ -718,7 +812,8 @@ function assembleAgentProviderStatuses(probes) {
             command: "claude",
             installed: probes.claudeInstalled,
             version: probes.versions.claude,
-            authState: claudeReady ? "configured" : "not_configured",
+            authState: claudeEvidence?.valid ? "configured" : claudeReady ? "credential_detected" : "not_configured",
+            authEvidence: (0, development_agent_auth_evidence_1.publicDevelopmentAgentAuthEvidence)(claudeEvidence),
             credentialSource: effectiveClaude.source,
             providerName: effectiveClaude.providerName,
             externalManaged: effectiveClaude.externalManaged,
@@ -794,7 +889,7 @@ function getAgentProviderStatuses(force = false) {
     // 无缓存且无在途刷新：仅可能出现在非服务器上下文（脚本/CLI 直接调用），保留同步兜底
     return storeAgentProviderStatuses(assembleAgentProviderStatuses(collectAgentProviderProbes()));
 }
-function loginCommand(provider) {
+function buildAgentProviderLoginSpec(provider, options = {}) {
     if (provider === "codex") {
         return { command: "codex", args: ["login", "--device-auth"], env: {}, requiresCode: false };
     }
@@ -806,9 +901,15 @@ function loginCommand(provider) {
         return { command: "gemini", args: [], env: { NO_BROWSER: "true" }, requiresCode: true };
     }
     if (provider === "opencode") {
+        const providerId = String(options.providerId || "").trim();
+        const methodId = String(options.methodId || "").trim();
+        if (providerId && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(providerId))
+            throw new Error("OpenCode Provider ID格式无效");
+        if (methodId && (methodId.length > 120 || /[\r\n\u0000]/.test(methodId)))
+            throw new Error("OpenCode认证方式格式无效");
         return {
             command: "opencode",
-            args: ["auth", "login", "--provider", "openai", "--method", "ChatGPT Pro/Plus (headless)"],
+            args: ["auth", "login", ...(providerId ? ["--provider", providerId] : []), ...(methodId ? ["--method", methodId] : [])],
             env: {},
             requiresCode: false,
         };
@@ -824,6 +925,8 @@ function shellCommandText(spec) {
 function appendInstallOutput(provider, chunk) {
     const current = installState(provider);
     const combined = `${current.output || ""}${String(chunk || "")}`;
+    // Keep high-frequency process output in memory. The running marker is already
+    // persisted, and the final state persists the bounded output once the child exits.
     INSTALL_STATES.set(provider, { ...current, output: combined.slice(-INSTALL_OUTPUT_LIMIT) });
 }
 function buildAgentProviderInstallSpec(provider, installed) {
@@ -906,12 +1009,13 @@ function startAgentProviderInstall(providerValue) {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env },
+        detached: process.platform !== "win32",
     });
-    INSTALL_STATES.set(provider, { status: "running", operation, startedAt, output: "", pid: Number(child.pid || 0) });
+    setInstallState(provider, { status: "running", operation, startedAt, output: "", pid: Number(child.pid || 0) });
     child.stdout?.on("data", chunk => appendInstallOutput(provider, chunk));
     child.stderr?.on("data", chunk => appendInstallOutput(provider, chunk));
     child.once("error", error => {
-        INSTALL_STATES.set(provider, {
+        setInstallState(provider, {
             ...installState(provider),
             status: "failed",
             completedAt: new Date().toISOString(),
@@ -923,14 +1027,14 @@ function startAgentProviderInstall(providerValue) {
     child.once("close", code => {
         const previous = installState(provider);
         if (previous.status === "failed" && previous.error) {
-            INSTALL_STATES.set(provider, { ...previous, pid: undefined });
+            setInstallState(provider, { ...previous, pid: undefined });
             markAgentProviderStatusesStale();
             return;
         }
         const succeeded = code === 0;
         const actionLabel = operation === "update" ? "更新" : "安装";
         const outputTail = String(previous.output || "").trim().slice(-1_200);
-        INSTALL_STATES.set(provider, {
+        setInstallState(provider, {
             ...previous,
             status: succeeded ? "succeeded" : "failed",
             completedAt: new Date().toISOString(),
@@ -942,7 +1046,12 @@ function startAgentProviderInstall(providerValue) {
         markAgentProviderStatusesStale();
     });
     markAgentProviderStatusesStale();
+    invalidateAgentModelCatalog(provider);
     return { provider, launched: true, install: installState(provider) };
+}
+function getAgentProviderInstallJobs() {
+    ensureInstallStatesLoaded();
+    return Object.fromEntries(["codex", "cursor", "gemini", "opencode", "claudecode"].map(provider => [provider, installState(provider)]));
 }
 function parseCursorModels(output) {
     const models = [];
@@ -995,7 +1104,7 @@ function buildAgentProviderTestSpec(providerValue, modelValue = "", promptFile =
         return { command: process.execPath, args: [cliHelper, promptFile, "opencode", encodeCliArgs(args)], env: {} };
     }
     if (provider === "claudecode") {
-        const args = ["--permission-mode", "plan", ...modelArgs, "-p"];
+        const args = ["--permission-mode", "plan", "--output-format", "json", ...modelArgs, "-p"];
         return { command: process.execPath, args: [cliHelper, promptFile, "claude", encodeCliArgs(args)], env: getConfiguredDevelopmentAgentEnv("claudecode") };
     }
     throw new Error("不支持的开发 Agent 测试目标");
@@ -1006,23 +1115,53 @@ function redactAgentTestError(value) {
         .replace(/\b(?:sk|key|token)-[A-Za-z0-9_-]{12,}\b/gi, "[redacted]")
         .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]"));
 }
-function parseAgentProviderTestOutput(rawOutput, selectedModel = "") {
+function structuredAgentReplies(provider, rawOutput) {
     const output = stripTerminalFormatting(String(rawOutput || ""));
-    const usable = /\bCCM_AGENT_OK\b/.test(output);
+    const replies = [];
+    for (const line of output.split(/\r?\n/).map(value => value.trim()).filter(Boolean)) {
+        let value;
+        try {
+            value = JSON.parse(line);
+        }
+        catch {
+            continue;
+        }
+        const add = (candidate) => { if (typeof candidate === "string" && candidate.trim())
+            replies.push(candidate.trim()); };
+        if (provider === "codex" && value?.type === "item.completed" && value?.item?.type === "agent_message")
+            add(value.item.text);
+        if (provider === "cursor" && ["result", "assistant"].includes(String(value?.type || "")))
+            add(value.result || value.text || value.message?.content);
+        if (provider === "gemini")
+            add(value.response || (value.type === "result" ? value.result : ""));
+        if (provider === "opencode" && !["user", "input"].includes(String(value?.role || value?.type || "")))
+            add(value.text || value.part?.text || value.message?.content);
+        if (provider === "claudecode" && value?.type === "result")
+            add(value.result);
+    }
+    return replies;
+}
+function parseAgentProviderTestOutput(rawOutput, selectedModel = "", providerValue = "codex", challenge = "") {
+    const provider = String(providerValue || "codex").trim().toLowerCase();
+    const output = stripTerminalFormatting(String(rawOutput || ""));
+    const expected = challenge ? `CCM_AGENT_OK:${challenge}` : "CCM_AGENT_OK";
+    const replies = structuredAgentReplies(provider, output);
+    const usable = replies.some(reply => reply === expected);
     const model = output.match(/["'](?:model|model_id|modelId)["']\s*:\s*["']([^"']{1,180})["']/i)?.[1] || selectedModel || "";
-    return { usable, model: safeIdentity(model) };
+    return { usable, model: safeIdentity(model), replyObserved: replies.length > 0 };
 }
 async function runAgentProviderTest(provider, model) {
     // 等待一轮真实探测而非信任过期快照，避免刚登录成功就测试被误拒
     const statuses = await refreshAgentProviderStatusesAsync();
     const status = statuses?.[provider];
-    const ready = status?.installed === true && (provider === "claudecode" ? status.authState === "configured" : status.authState === "logged_in");
+    const ready = status?.installed === true && ["logged_in", "configured", "credential_detected"].includes(status.authState);
     if (!ready)
         throw new Error(provider === "claudecode" ? "请先保存完整的 Claude Code API 配置" : "请先安装并登录该 Agent");
     const runDir = path.join(os.homedir(), ".cc-connect", "run", "agent-provider-tests");
     fs.mkdirSync(runDir, { recursive: true });
     const promptFile = path.join(runDir, `${provider}-${(0, crypto_1.randomUUID)()}.txt`);
-    fs.writeFileSync(promptFile, AGENT_TEST_PROMPT, { encoding: "utf-8", mode: 0o600 });
+    const challenge = (0, crypto_1.randomUUID)().replace(/-/g, "");
+    fs.writeFileSync(promptFile, `Reply with exactly CCM_AGENT_OK:${challenge} and nothing else. Do not use tools, read files, or modify anything.`, { encoding: "utf-8", mode: 0o600 });
     const spec = buildAgentProviderTestSpec(provider, model, promptFile);
     const startedAt = Date.now();
     try {
@@ -1032,6 +1171,7 @@ async function runAgentProviderTest(provider, model) {
                 windowsHide: true,
                 stdio: ["ignore", "pipe", "pipe"],
                 env: { ...process.env, ...spec.env },
+                detached: process.platform !== "win32",
             });
             let stdout = "";
             let stderr = "";
@@ -1044,15 +1184,28 @@ async function runAgentProviderTest(provider, model) {
                 timedOut = true;
                 if (process.platform === "win32" && child.pid)
                     (0, child_process_1.spawnSync)("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-                else
-                    child.kill("SIGTERM");
+                else if (child.pid) {
+                    try {
+                        process.kill(-child.pid, "SIGTERM");
+                    }
+                    catch {
+                        try {
+                            child.kill("SIGTERM");
+                        }
+                        catch { }
+                    }
+                    setTimeout(() => { try {
+                        process.kill(-child.pid, "SIGKILL");
+                    }
+                    catch { } }, 1500).unref?.();
+                }
             }, AGENT_TEST_TIMEOUT_MS);
             child.once("close", code => {
                 clearTimeout(timer);
                 resolve({ code, stdout, stderr, timedOut });
             });
         });
-        const parsed = parseAgentProviderTestOutput(`${execution.stdout}\n${execution.stderr}`, model);
+        const parsed = parseAgentProviderTestOutput(`${execution.stdout}\n${execution.stderr}`, model, provider, challenge);
         const latencyMs = Date.now() - startedAt;
         const usable = !execution.timedOut && execution.code === 0 && parsed.usable;
         const detail = usable
@@ -1060,7 +1213,7 @@ async function runAgentProviderTest(provider, model) {
             : execution.timedOut
                 ? "Agent 测试超过 90 秒，已终止"
                 : redactAgentTestError(execution.stderr || execution.stdout || `Agent 退出码 ${execution.code ?? "unknown"}`) || "Agent 未返回预期测试响应";
-        return {
+        const result = {
             provider,
             usable,
             latencyMs,
@@ -1069,6 +1222,18 @@ async function runAgentProviderTest(provider, model) {
             detail,
             checkedAt: new Date().toISOString(),
         };
+        (0, development_agent_auth_evidence_1.recordDevelopmentAgentAuthEvidence)({
+            provider,
+            status: usable ? "verified" : "failed",
+            source: provider === "claudecode" ? "api_challenge" : "model_challenge",
+            account: status?.account,
+            model,
+            cliVersion: status?.version,
+            detail,
+            ttlMs: usable ? undefined : 15 * 60 * 1000,
+        });
+        markAgentProviderStatusesStale();
+        return result;
     }
     finally {
         try {
@@ -1081,12 +1246,14 @@ function testAgentProvider(providerValue, modelValue = "") {
     const provider = String(providerValue || "").trim().toLowerCase();
     if (!["codex", "cursor", "gemini", "opencode", "claudecode"].includes(provider))
         throw new Error("不支持的开发 Agent 测试目标");
-    const existing = AGENT_TESTS_IN_FLIGHT.get(provider);
+    const status = getAgentProviderStatuses()?.[provider];
+    const key = [provider, String(modelValue || "").trim(), status?.account || "", status?.version || "", status?.authEvidence?.checksum || ""].join("\u0000");
+    const existing = AGENT_TESTS_IN_FLIGHT.get(key);
     if (existing)
         return existing;
     const promise = runAgentProviderTest(provider, String(modelValue || "").trim())
-        .finally(() => AGENT_TESTS_IN_FLIGHT.delete(provider));
-    AGENT_TESTS_IN_FLIGHT.set(provider, promise);
+        .finally(() => AGENT_TESTS_IN_FLIGHT.delete(key));
+    AGENT_TESTS_IN_FLIGHT.set(key, promise);
     return promise;
 }
 function codexAccountModels() {
@@ -1275,7 +1442,7 @@ async function fetchClaudeProviderModels(settings) {
         return [{ id, label: safeIdentity(item?.display_name || item?.displayName || id) || id }];
     }).slice(0, 240);
 }
-async function getAgentProviderModels(providerValue) {
+async function computeAgentProviderModels(providerValue) {
     const provider = String(providerValue || "").trim().toLowerCase();
     const settings = loadAgentProviderSettings();
     if (provider === "codex") {
@@ -1384,6 +1551,38 @@ async function getAgentProviderModels(providerValue) {
     }
     throw new Error("不支持的开发 Agent");
 }
+const MODEL_CATALOG_CACHE = new Map();
+const MODEL_CATALOG_IN_FLIGHT = new Map();
+let modelCatalogGeneration = 0;
+function invalidateAgentModelCatalog(provider) {
+    modelCatalogGeneration += 1;
+    if (!provider)
+        MODEL_CATALOG_CACHE.clear();
+    else
+        for (const key of MODEL_CATALOG_CACHE.keys())
+            if (key.startsWith(`${provider}\u0000`))
+                MODEL_CATALOG_CACHE.delete(key);
+}
+function getAgentProviderModels(providerValue) {
+    const provider = String(providerValue || "").trim().toLowerCase();
+    const status = getAgentProviderStatuses()?.[provider];
+    const key = [provider, status?.account || "", status?.version || "", status?.authEvidence?.checksum || "", modelCatalogGeneration].join("\u0000");
+    const cached = MODEL_CATALOG_CACHE.get(key);
+    if (cached && cached.expiresAt > Date.now())
+        return Promise.resolve({ ...cached.value, cached: true, generation: modelCatalogGeneration });
+    const active = MODEL_CATALOG_IN_FLIGHT.get(key);
+    if (active)
+        return active;
+    const promise = computeAgentProviderModels(provider)
+        .then(value => {
+        const result = { ...value, cached: false, generation: modelCatalogGeneration };
+        MODEL_CATALOG_CACHE.set(key, { expiresAt: Date.now() + 60_000, value: result });
+        return result;
+    })
+        .finally(() => MODEL_CATALOG_IN_FLIGHT.delete(key));
+    MODEL_CATALOG_IN_FLIGHT.set(key, promise);
+    return promise;
+}
 function stripTerminalFormatting(value) {
     return String(value || "")
         .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
@@ -1468,6 +1667,20 @@ function providerCredentialPresent(provider) {
         return openCodeCredentialPresent();
     return false;
 }
+function markLoginVerified(provider) {
+    const command = provider === "cursor" ? resolveCursorAgentCommand() : provider;
+    (0, development_agent_auth_evidence_1.recordDevelopmentAgentAuthEvidence)({
+        provider,
+        status: "verified",
+        source: "native_status",
+        account: getAgentProviderAccountIdentity(provider),
+        cliVersion: commandVersion(command),
+        model: getConfiguredDevelopmentAgentModel(provider),
+        detail: "Provider原生登录流程已完成",
+    });
+    invalidateAgentModelCatalog(provider);
+    markAgentProviderStatusesStale();
+}
 function stopLoginChild(session) {
     try {
         if (session.child && !session.child.killed)
@@ -1524,11 +1737,11 @@ function expireLoginSessions() {
             LOGIN_SESSIONS.delete(id);
     }
 }
-function startAgentProviderLogin(providerValue) {
+function startAgentProviderLogin(providerValue, options = {}) {
     const provider = String(providerValue || "").trim().toLowerCase();
     if (!["codex", "cursor", "gemini", "opencode"].includes(provider))
         throw new Error("该 Agent 不支持网页登录");
-    const spec = loginCommand(provider);
+    const spec = buildAgentProviderLoginSpec(provider, options);
     if (!commandExists(spec.command))
         throw new Error(`${spec.command} 未安装或不在 PATH 中`);
     expireLoginSessions();
@@ -1583,6 +1796,7 @@ function startAgentProviderLogin(providerValue) {
             session.status = "succeeded";
             session.detail = "网页登录成功";
             session.error = "";
+            markLoginVerified(provider);
             return;
         }
         if (session.status !== "failed") {
@@ -1606,7 +1820,7 @@ function getAgentProviderLoginSession(providerValue, sessionIdValue) {
         session.detail = "网页登录成功";
         session.error = "";
         stopLoginChild(session);
-        markAgentProviderStatusesStale();
+        markLoginVerified(provider);
     }
     return publicLoginSession(session);
 }
@@ -1638,8 +1852,11 @@ function logoutAgentProvider(providerValue) {
         else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS) {
             throw new Error("Gemini 当前使用环境变量凭据，请在系统环境变量中移除后重新检查");
         }
+        (0, development_agent_auth_evidence_1.revokeDevelopmentAgentAuthEvidence)(provider, "Gemini退出登录");
+        invalidateAgentModelCatalog(provider);
         markAgentProviderStatusesStale();
-        return { provider, loggedOut: true };
+        const remainingCredentialSources = geminiCredentialSources();
+        return { provider, loggedOut: remainingCredentialSources.length === 0, partial: remainingCredentialSources.length > 0, remainingCredentialSources };
     }
     if (provider === "opencode") {
         if (!commandExists("opencode"))
@@ -1673,6 +1890,8 @@ function logoutAgentProvider(providerValue) {
         timeout: 15_000,
     });
     markAgentProviderStatusesStale();
+    (0, development_agent_auth_evidence_1.revokeDevelopmentAgentAuthEvidence)(provider, "Agent退出登录");
+    invalidateAgentModelCatalog(provider);
     if (provider === "codex") {
         const sourceAuth = path.join(os.homedir(), ".codex", "auth.json");
         if (result.status !== 0) {

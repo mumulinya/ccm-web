@@ -12,6 +12,13 @@ const candidates = [process.env.PLAYWRIGHT_BROWSER_PATH, 'C:\\Program Files (x86
 const executablePath = candidates.find(candidate => fs.existsSync(candidate))
 const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) })
 const report = { pass: false, generatedAt: new Date().toISOString(), checks: [], screenshots: [], errors: [] }
+const adminSession = {
+  success: true,
+  authenticated: true,
+  user: { username: 'selftest', role: 'admin' },
+  csrf: 'project-render-csrf',
+  capabilities: ['read', 'chat.read_only', 'task.execute', 'project.runtime', 'project.git', 'attachment.manage', 'project.define', 'terminal.manage', 'agent.credentials', 'tools.manage', 'cleanup.permanent', 'permission.high_risk', 'security.manage'],
+}
 
 const projectsFixture = { projects: [{ name: 'ccm-demo', display_name: 'CCM 演示项目', running: true, agent_connection: { running: true, pid: 3210 }, runtime_summary: { profile_count: 2, running_count: 1, building_count: 0 }, agent: 'codex', platform: '飞书', work_dir: 'C:\\workspace\\ccm-demo', session_count: 1, state: 'idle' }] }
 const runtimeFixture = {
@@ -54,7 +61,8 @@ const prepare = async (page, options = {}) => {
     report.errors.push(`console: ${message.text()}${location ? ` (${location})` : ''}`)
   })
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
-  await page.route('**/api/auth/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, authenticated: true, user: { username: 'selftest' } }) }))
+  await page.route('**/api/auth/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(adminSession) }))
+  await page.route('**/api/music/playback/commands/head', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, command: null }) }))
   await page.route('**/api/pets/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, agents: [] }) }))
   await page.route('**/api/status/stream**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
   await page.route('**/api/runtime/events**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))

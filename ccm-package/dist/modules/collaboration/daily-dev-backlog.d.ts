@@ -13,10 +13,13 @@ type DailyDevRuntimeDeps = {
     hasDailyDevContinuationGaps: (task: any) => boolean;
 };
 export declare function configureDailyDevBacklogRuntime(deps: DailyDevRuntimeDeps): void;
-export declare function persistDailyDevBacklogFile(groups: any[], group: any, payload: any, title: string, goal: string): {
-    name: string;
-    content: string;
+export declare function persistDailyDevBacklogFile(_groups: any[], group: any, payload: any, title: string, goal: string): {
+    name: any;
+    content: any;
     status: string;
+    entry_id: any;
+    revision: any;
+    duplicate: boolean;
 };
 export declare function readDailyDevBacklogStatus(file: any): string;
 export declare function isDailyDevBacklogFile(file: any): boolean;
@@ -27,6 +30,10 @@ export declare function importSharedDocsToDailyDevBacklog(options?: any): {
     items: any[];
     skipped_items: any[];
     counts: any;
+};
+export declare function recoverExpiredDailyDevBacklogClaims(now?: number): {
+    recovered_count: number;
+    items: any[];
 };
 export declare function claimReadyDailyDevBacklog(groupId: string, claim?: any): {
     title: string;
@@ -225,4 +232,36 @@ export declare function evaluateDailyDevIntakeQuality(payload: any, goal: string
     missing: string[];
     message: string;
 };
+export declare function normalizeDailyDevQualityDecision(value: any): {
+    schema: string;
+    state: string;
+    pass: boolean;
+    score: number;
+    total: number;
+    passed: string[];
+    missing: any;
+    risks: any;
+    reason: string;
+    confidence: number;
+    semantic_decision_receipt: any;
+    message: string;
+};
+export declare function decideDailyDevIntakeQuality(payload: any, goal: string, identity: {
+    groupId: string;
+    sessionId: string;
+    taskId?: string;
+}): Promise<{
+    semantic_decision_receipt: import("../../system/semantic-decision-runtime").SemanticDecisionReceiptV1;
+    schema: string;
+    state: string;
+    pass: boolean;
+    score: number;
+    total: number;
+    passed: string[];
+    missing: any;
+    risks: any;
+    reason: string;
+    confidence: number;
+    message: string;
+}>;
 export {};

@@ -1,7 +1,8 @@
 import type { AgentDecisionIntent } from "../quality-center";
 import type { AgentReasoningState } from "../reasoning-loop";
 import type { WorkflowDecision } from "../workflow-decision";
-export type GlobalAgentRunStatus = "running" | "supervising" | "paused" | "waiting_confirmation" | "waiting_clarification" | "completed" | "failed" | "cancelled";
+import type { GlobalWriteAuthorizationReceiptV2 } from "./global-agent-authorization";
+export type GlobalAgentRunStatus = "running" | "supervising" | "paused" | "waiting_confirmation" | "waiting_clarification" | "blocked" | "completed" | "failed" | "cancelled";
 export type GlobalAgentDecisionState = "answer" | "investigate" | "plan" | "execute" | "needs_confirmation" | "complete";
 export type GlobalAgentToolRisk = "read" | "write" | "high";
 export type GlobalAgentUserSteerKind = "supplement" | "revise_goal";
@@ -71,6 +72,15 @@ export interface GlobalAgentRun {
     status: GlobalAgentRunStatus;
     phase: GlobalAgentDecisionState;
     explicit_write_authorization: boolean;
+    turn_id?: string;
+    queue_scope?: string;
+    write_authorization_receipt?: GlobalWriteAuthorizationReceiptV2 | null;
+    writeAuthorizationReceipt?: GlobalWriteAuthorizationReceiptV2 | null;
+    retryable?: boolean;
+    degraded?: boolean;
+    failure_category?: string;
+    terminal_receipt?: any;
+    authorization_message?: string;
     created_at: string;
     updated_at: string;
     started_at: string;

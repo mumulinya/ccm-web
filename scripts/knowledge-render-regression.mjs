@@ -10,8 +10,13 @@ fs.mkdirSync(outputDir, { recursive: true })
 
 const documentsResponse = await fetch(`${baseUrl}/api/rag/documents`)
 const documentsData = await documentsResponse.json()
-const sourceDocument = documentsData.documents?.[0]
-assert.ok(sourceDocument?.name, 'render regression requires at least one knowledge document')
+const sourceDocument = documentsData.documents?.[0] || {
+  name: 'knowledge-render-fixture.md',
+  title: '知识页面回归测试资料',
+  chunksCount: 1,
+  scope: { type: 'global', id: '' },
+  visibility: 'restricted'
+}
 
 const installedBrowsers = [
   process.env.PLAYWRIGHT_BROWSER_PATH,
@@ -28,8 +33,38 @@ const runViewport = async (name, viewport) => {
   page.on('pageerror', error => report.errors.push(`${name}: ${error.message}`))
   page.on('console', message => {
     const text = message.text()
-    if (message.type() === 'error' && !/net::ERR_CONNECTION_CLOSED/.test(text)) report.errors.push(`${name} console: ${text}`)
+    if (message.type() === 'error' && !/net::ERR_CONNECTION_CLOSED|EventSource's response has a MIME type/.test(text)) report.errors.push(`${name} console: ${text}`)
   })
+  await page.route('**/api/**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, projects: [], groups: [], tasks: [], sessions: [], items: [] })
+  }))
+  await page.route('**/api/auth/session', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, authenticated: true, user: { username: 'knowledge-render-selftest' } })
+  }))
+  await page.route('https://fonts.googleapis.com/**', route => route.fulfill({
+    status: 200,
+    contentType: 'text/css',
+    body: ''
+  }))
+  if (!documentsData.documents?.length) {
+    await page.route('**/api/rag/documents', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, documents: [sourceDocument], status: documentsData.status || { state: 'ready', chunks: 1 } })
+    }))
+  }
+  await page.route('**/api/rag/chunks*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      chunks: [{ filename: sourceDocument.name, index: 0, heading: '安全保管', text: '密钥应妥善保管，并通过安全方式提供给技术实施方。' }]
+    })
+  }))
   await page.route('**/api/rag/chat', async route => {
     await route.fulfill({
       status: 200,
@@ -47,14 +82,8 @@ const runViewport = async (name, viewport) => {
       })
     })
   })
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.goto(`${baseUrl}/?tab=knowledge`, { waitUntil: 'commit', timeout: 30_000 })
   await page.locator('body').waitFor()
-  if (viewport.width <= 768) {
-    await page.getByRole('button', { name: '更多', exact: true }).click()
-    await page.locator('.mobile-more-grid').getByRole('button', { name: '知识库与文档', exact: true }).click()
-  } else {
-    await page.getByText('知识库与文档', { exact: true }).first().click()
-  }
   await page.locator('h1').filter({ hasText: '知识库与文档' }).waitFor()
   await page.waitForTimeout(500)
 

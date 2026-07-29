@@ -53,7 +53,7 @@ const submit = () => emit('save', {
           <div v-if="localMode" class="local-model-state" :data-state="localModel.state || 'idle'">
             <div><strong>本地多语言模型</strong><span>{{ localModel.model || config.localModel || 'Xenova/multilingual-e5-small' }} · INT8</span></div>
             <div class="model-progress"><span :style="{ width: `${localModel.progress || 0}%` }"></span></div>
-            <p>{{ localModel.state === 'ready' ? '模型已校验，可以生成本地语义向量' : localModel.state === 'downloading' ? `正在准备 ${Number(localModel.progress || 0).toFixed(0)}%` : localModel.error || '首次使用时下载约118MB模型' }}</p>
+            <p>{{ localModel.state === 'ready' ? '模型已校验，可以生成本地语义向量' : localModel.state === 'downloading' ? `CCM 启动后正在后台准备 ${Number(localModel.progress || 0).toFixed(0)}%` : localModel.error || '首次运行 ccm start 后会在后台下载并校验约118MB模型' }}</p>
             <div class="maintenance-actions"><button type="button" :disabled="saving" @click="emit('prepare-local')">{{ localModel.state === 'ready' ? '重新校验下载' : '准备本地模型' }}</button><button v-if="localModel.state === 'ready'" type="button" :disabled="saving" @click="emit('remove-local')">删除模型缓存</button></div>
             <label><span>下载镜像地址（可选）</span><input v-model="form.mirrorUrl" type="url" placeholder="留空使用Hugging Face"></label>
           </div>

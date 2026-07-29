@@ -22,6 +22,18 @@ export async function playMusicViaGlobalHost(keyword, options = {}) {
   return window.__cc_global_play_music(keyword, { ...options, mode })
 }
 
+export async function playMusicDecisionViaGlobalHost(decision, options = {}) {
+  if (typeof window.__cc_global_play_music !== 'function') {
+    return { success: false, error: '音乐播放引擎尚未就绪，请稍候再试' }
+  }
+  return window.__cc_global_play_music(decision?.searchQuery || decision?.selectedCandidate?.title || '__decision__', {
+    ...options,
+    mode: decision?.sourceMode || options.mode || getPreferredMusicMode(),
+    playbackDecision: decision,
+    requestText: decision?.originalRequest || options.requestText || '',
+  })
+}
+
 export async function stopMusicViaGlobalHost(options = {}) {
   if (typeof window.__cc_global_stop_music !== 'function') {
     return { success: false, error: '音乐播放引擎尚未就绪，请稍候再试' }
@@ -55,14 +67,58 @@ export async function ackMusicRemoteCommand(id, status, error = '') {
   } catch {}
 }
 
-async function requeueMusicRemotePlay(keyword, mode = '', source = 'client-effect-retry', requestText = '') {
-  try {
-    await fetch('/api/music/remote-command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword, mode, source, request_text: requestText || keyword }),
-    })
-  } catch {}
+async function claimMusicRemoteCommandV2(command) {
+  if (!command?.id) return null
+  const response = await fetch(`/api/music/playback/commands/${encodeURIComponent(command.id)}/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ generation: command.generation }),
+  })
+  const data = await response.json().catch(() => ({}))
+  return response.ok && data.success ? data.command : null
+}
+
+async function heartbeatMusicRemoteCommandV2(command, status = 'playing') {
+  if (!command?.id) return false
+  const response = await fetch(`/api/music/playback/commands/${encodeURIComponent(command.id)}/heartbeat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ generation: command.generation, status }),
+  })
+  return response.ok
+}
+
+async function completeMusicRemoteCommandV2(command, result = {}) {
+  if (!command?.id) return false
+  const needsGesture = result?.errorName === 'NotAllowedError'
+  const response = await fetch(`/api/music/playback/commands/${encodeURIComponent(command.id)}/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      generation: command.generation,
+      success: result?.success === true,
+      status: needsGesture ? 'needs_user_gesture' : undefined,
+      error: result?.error || '',
+      result: result?.success ? { title: result.title || '', source: result.source || '' } : undefined,
+    }),
+  })
+  if (needsGesture && response.ok) {
+    const commandIdentity = { id: command.id, generation: command.generation }
+    window.__cc_complete_music_gesture = async (playResult = {}) => {
+      try {
+        return await completeMusicRemoteCommandV2(commandIdentity, {
+          success: true,
+          title: playResult.title || '',
+          source: playResult.source || 'user-gesture',
+        })
+      } finally {
+        if (window.__cc_complete_music_gesture) delete window.__cc_complete_music_gesture
+      }
+    }
+  } else if (response.ok && window.__cc_complete_music_gesture) {
+    delete window.__cc_complete_music_gesture
+  }
+  return response.ok
 }
 
 /**
@@ -99,14 +155,31 @@ export async function playMusicFromClientEffect(params = {}) {
 
   try {
     const resolvedRequestText = String(takenCommand?.request_text || requestText || keyword).trim()
-    const result = await playFn(keyword, { mode, remote: true, commandId, requestText: resolvedRequestText })
-    // take() already removed the row; failed plays must re-queue for the poller.
-    if (ownedViaTake && result && !result.success && !result.skipped) {
-      await requeueMusicRemotePlay(keyword, mode, 'client-effect-retry', resolvedRequestText)
+    let heartbeat = null
+    if (takenCommand) {
+      heartbeat = setInterval(async () => {
+        const alive = await heartbeatMusicRemoteCommandV2(takenCommand, 'playing').catch(() => false)
+        if (!alive) window.__cc_global_cancel_music_command?.(takenCommand.id)
+      }, 5_000)
+      const initialLease = await heartbeatMusicRemoteCommandV2(takenCommand, 'playing').catch(() => false)
+      if (!initialLease) {
+        window.__cc_global_cancel_music_command?.(takenCommand.id)
+        clearInterval(heartbeat)
+        return { success: false, skipped: true, reason: 'superseded' }
+      }
     }
+    let result
+    try {
+      result = takenCommand?.decision
+        ? await playMusicDecisionViaGlobalHost(takenCommand.decision, { remote: true, commandId, requestText: resolvedRequestText })
+        : await playFn(keyword, { mode, remote: true, commandId, requestText: resolvedRequestText })
+    } finally {
+      if (heartbeat) clearInterval(heartbeat)
+    }
+    if (ownedViaTake) await completeMusicRemoteCommandV2(takenCommand, result)
     return result
   } catch (error) {
-    if (ownedViaTake) await requeueMusicRemotePlay(keyword, mode, 'client-effect-retry', requestText)
+    if (ownedViaTake && takenCommand) await completeMusicRemoteCommandV2(takenCommand, { success: false, error: error?.message || String(error) })
     return { success: false, error: error?.message || String(error) }
   }
 }
@@ -129,26 +202,10 @@ export async function stopMusicFromClientEffect(params = {}) {
   }
   try {
     const result = await stopMusicViaGlobalHost({ remote: true, commandId })
-    if (ownedViaTake && result && !result.success && !result.skipped) {
-      try {
-        await fetch('/api/music/remote-command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'stop', keyword: '__stop__', source: 'client-effect-retry' }),
-        })
-      } catch {}
-    }
+    if (ownedViaTake) await completeMusicRemoteCommandV2({ id: commandId }, result)
     return result
   } catch (error) {
-    if (ownedViaTake) {
-      try {
-        await fetch('/api/music/remote-command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'stop', keyword: '__stop__', source: 'client-effect-retry' }),
-        })
-      } catch {}
-    }
+    if (ownedViaTake) await completeMusicRemoteCommandV2({ id: commandId }, { success: false, error: error?.message || String(error) })
     return { success: false, error: error?.message || String(error) }
   }
 }
@@ -171,45 +228,71 @@ export function startMusicRemoteCommandPoller(options = {}) {
     const stopReady = typeof window.__cc_global_stop_music === 'function'
     busy = true
     try {
-      const res = await fetch('/api/music/remote-command')
+      const res = await fetch('/api/music/playback/commands/head')
       const data = await res.json()
-      const command = data.command
-      if (!command?.id) return
+      const pending = data.command
+      if (!pending?.id) return
       if (!playReady && !stopReady) {
-        onEngineRequired?.(command)
+        onEngineRequired?.(pending)
         return
       }
 
+      if (pending.type === 'play' && !playReady) {
+        onEngineRequired?.(pending)
+        return
+      }
+      if (pending.type === 'stop' && !stopReady) {
+        onEngineRequired?.(pending)
+        return
+      }
+      const command = await claimMusicRemoteCommandV2(pending)
+      if (!command) return
+
       if (command.type === 'stop') {
-        if (!stopReady) return
         const result = await stopMusicViaGlobalHost({ remote: true, commandId: command.id })
+        await completeMusicRemoteCommandV2(command, result)
         if (result?.success) {
-          await ackMusicRemoteCommand(command.id, 'success')
           onStopped?.(result, command)
-        } else if (result?.skipped) {
-          await ackMusicRemoteCommand(command.id, 'success')
         } else {
-          await ackMusicRemoteCommand(command.id, 'failed', result?.error || '停止失败')
           onError?.(result?.error || '停止失败', command)
         }
         return
       }
 
-      if (command.type !== 'play' || !command.keyword || !playReady) return
-      const result = await playMusicViaGlobalHost(command.keyword, {
-        mode: command.mode || getPreferredMusicMode(),
-        remote: true,
-        commandId: command.id,
-        requestText: command.request_text || command.keyword,
-      })
+      if (command.type !== 'play' || !command.keyword) return
+      let heartbeat = setInterval(async () => {
+        const alive = await heartbeatMusicRemoteCommandV2(command, 'playing').catch(() => false)
+        if (!alive) window.__cc_global_cancel_music_command?.(command.id)
+      }, 5_000)
+      const initialLease = await heartbeatMusicRemoteCommandV2(command, 'playing').catch(() => false)
+      if (!initialLease) {
+        window.__cc_global_cancel_music_command?.(command.id)
+        clearInterval(heartbeat)
+        return
+      }
+      let result
+      try {
+        result = command.decision
+          ? await playMusicDecisionViaGlobalHost(command.decision, { remote: true, commandId: command.id })
+          : await playMusicViaGlobalHost(command.keyword, {
+              mode: command.mode || getPreferredMusicMode(),
+              remote: true,
+              commandId: command.id,
+              requestText: command.request_text || command.keyword,
+            })
+      } catch (error) {
+        result = { success: false, error: error?.message || String(error) }
+      } finally {
+        clearInterval(heartbeat)
+        heartbeat = null
+      }
+      await completeMusicRemoteCommandV2(command, result)
       if (result?.success) {
-        await ackMusicRemoteCommand(command.id, 'success')
         onPlayed?.(result, command)
-      } else if (result?.skipped) {
-        await ackMusicRemoteCommand(command.id, 'success')
+      } else if (result?.skipped && result?.reason === 'superseded') {
+        // The server has already terminalized the older generation.
       } else {
-        await ackMusicRemoteCommand(command.id, 'failed', result?.error || '播放失败')
-        onError?.(result?.error || '播放失败', command)
+        onError?.(result?.errorName === 'NotAllowedError' ? '浏览器需要你点击一次播放按钮' : (result?.error || '播放失败'), command)
       }
     } catch (error) {
       onError?.(error?.message || String(error), null)

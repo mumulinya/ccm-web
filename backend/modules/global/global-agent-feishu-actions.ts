@@ -2,7 +2,7 @@
 export function createGlobalAgentFeishuActions(deps: any) {
   const { GLOBAL_MANAGEMENT_ACTIONS, RANDOM_MUSIC_KEYWORD, buildGlobalDirectDispatchHandoff, buildGlobalSingleProjectMissionPayload, callLocalApi, formatGlobalDevelopmentDispatchVisibleResult, formatSystemStatus, getConfigs, inferGlobalDirectDispatchRequiresCodeChanges, loadGroups, postLocalApi, postLocalSseOrJsonApi, relayGlobalTestAgentEventFromGroup, renderGlobalDirectGroupDispatchAcceptedSummary, renderGlobalDirectGroupWorkOrder } = deps
 
-  async function executePlayMusic(baseUrl: string, input: { keyword?: string; mode?: string; source?: string; originalText?: string } = {}) {
+  async function executePlayMusic(baseUrl: string, input: { keyword?: string; mode?: string; source?: string; originalText?: string; sessionId?: string } = {}) {
     const raw = String(input.keyword || "").trim();
     const normalizedKeyword = raw;
     if (!normalizedKeyword) {
@@ -21,6 +21,8 @@ export function createGlobalAgentFeishuActions(deps: any) {
       request_text: requestText,
       mode,
       source,
+      session_id: String(input.sessionId || ""),
+      origin: { source, scope: "global", sessionId: String(input.sessionId || "") },
     });
     const label = normalizedKeyword === RANDOM_MUSIC_KEYWORD ? "随机播放音乐" : `「${normalizedKeyword}」`;
     const command = result.command || null;
@@ -28,8 +30,8 @@ export function createGlobalAgentFeishuActions(deps: any) {
       success: result.success !== false,
       // 用户气泡只给短确认；指令 ID 仅放 client_effect 给前端领取，不展示
       message: normalizedKeyword === RANDOM_MUSIC_KEYWORD
-        ? "已开始随机播放。"
-        : `已把${label}交给音乐播放器播放。`,
+        ? "已接收随机点歌，正在选择并准备播放。"
+        : `已接收${label}，正在选择并准备播放。`,
       keyword: normalizedKeyword,
       mode,
       command,
@@ -168,6 +170,7 @@ export function createGlobalAgentFeishuActions(deps: any) {
         mode: params.mode,
         source: options.source || "feishu-global-agent",
         originalText,
+        sessionId: options.sessionId,
       });
       return played.message;
     }

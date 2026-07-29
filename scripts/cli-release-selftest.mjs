@@ -28,15 +28,26 @@ const env = {
   USERPROFILE: fixtureHome,
   CCM_TASK_STORE_DIR: dataDir,
   CCM_SERVER_LOCK_FILE: lockFile,
+  CCM_DISABLE_LOCAL_EMBEDDING_STARTUP_PREPARE: '1',
   NO_COLOR: '1',
 }
 const run = (args, options = {}) => execFileSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: options.timeout || 45_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+const removeWithRetry = async target => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try { fs.rmSync(target, { recursive: true, force: true }); return true } catch (error) {
+      if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code)) throw error
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)))
+    }
+  }
+  return false
+}
 
 try {
   assert.match(run(['--version']), new RegExp(`@mumulinya167/cc-web ${escapedVersion}`))
   const help = run(['help'])
-  for (const command of ['start', 'stop', 'restart', 'status', 'doctor', 'open', 'logs', 'update', 'project']) assert.match(help, new RegExp(`\\b${command}\\b`))
+  for (const command of ['start', 'stop', 'restart', 'status', 'doctor', 'open', 'logs', 'update', 'project', 'setup-code']) assert.match(help, new RegExp(`\\b${command}\\b`))
   assert.match(help, /--host 127\.0\.0\.1/)
+  assert.match(help, /--public-origin/)
 
   const started = run(['start', '--background', '--port', String(port)])
   assert.match(started, /STARTED/)
@@ -53,6 +64,8 @@ try {
   assert.equal(sessionResponse.status, 200)
   const session = await sessionResponse.json()
   assert.equal(typeof session.first_install, 'boolean')
+  const setupCode = run(['setup-code'])
+  assert.match(setupCode, /Setup code\s+[A-Z0-9]{8,}/)
 
   const doctor = JSON.parse(run(['doctor', '--json']))
   assert.equal(doctor.success, true)
@@ -87,6 +100,7 @@ try {
       isolatedBackgroundStart: true,
       structuredStatus: true,
       firstInstallAuthEndpoint: true,
+      oneTimeSetupCodeCli: true,
       doctorIncludesPty: true,
       singleModernStartupBanner: true,
       controlledStop: true,
@@ -98,5 +112,5 @@ try {
 } finally {
   try { run(['stop'], { timeout: 10_000 }) } catch {}
   const lock = fs.existsSync(lockFile) ? JSON.parse(fs.readFileSync(lockFile, 'utf8')) : null
-  if (!lock?.pid || (() => { try { process.kill(Number(lock.pid), 0); return false } catch { return true } })()) fs.rmSync(fixtureHome, { recursive: true, force: true })
+  if (!lock?.pid || (() => { try { process.kill(Number(lock.pid), 0); return false } catch { return true } })()) await removeWithRetry(fixtureHome)
 }

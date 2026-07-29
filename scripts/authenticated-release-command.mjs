@@ -20,7 +20,7 @@ const port = await new Promise((resolve, reject) => {
     server.close(error => error ? reject(error) : resolve(selected))
   })
 })
-const env = { ...process.env, HOME: fixtureHome, USERPROFILE: fixtureHome, CCM_TASK_STORE_DIR: dataDir, CCM_SERVER_LOCK_FILE: lockFile, NO_COLOR: '1' }
+const env = { ...process.env, HOME: fixtureHome, USERPROFILE: fixtureHome, CCM_TASK_STORE_DIR: dataDir, CCM_SERVER_LOCK_FILE: lockFile, CCM_DISABLE_LOCAL_EMBEDDING_STARTUP_PREPARE: '1', NO_COLOR: '1' }
 const runCli = args => execFileSync(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 45_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 
 try {

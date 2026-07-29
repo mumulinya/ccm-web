@@ -165,6 +165,34 @@ export declare function parseCursorAuthStatus(rawOutput: string, exitCode: numbe
 };
 export declare function refreshAgentProviderStatusesAsync(): Promise<any>;
 export declare function getAgentProviderStatuses(force?: boolean): any;
+export declare function buildAgentProviderLoginSpec(provider: DevelopmentAgentProvider, options?: {
+    providerId?: string;
+    methodId?: string;
+}): {
+    command: string;
+    args: string[];
+    env: {
+        NO_OPEN_BROWSER?: undefined;
+        NO_BROWSER?: undefined;
+    };
+    requiresCode: boolean;
+} | {
+    command: string;
+    args: string[];
+    env: {
+        NO_OPEN_BROWSER: string;
+        NO_BROWSER?: undefined;
+    };
+    requiresCode: boolean;
+} | {
+    command: string;
+    args: any[];
+    env: {
+        NO_BROWSER: string;
+        NO_OPEN_BROWSER?: undefined;
+    };
+    requiresCode: boolean;
+};
 export declare function buildAgentProviderInstallSpec(provider: DevelopmentAgentProvider, installed: boolean): {
     command: string;
     args: string[];
@@ -179,89 +207,25 @@ export declare function startAgentProviderInstall(providerValue: string): {
     launched: boolean;
     install: InstallState;
 };
+export declare function getAgentProviderInstallJobs(): {
+    [k: string]: InstallState;
+};
 export declare function buildAgentProviderTestSpec(providerValue: string, modelValue?: string, promptFile?: string): {
     command: string;
     args: string[];
     env: Record<string, string>;
 };
-export declare function parseAgentProviderTestOutput(rawOutput: string, selectedModel?: string): {
+export declare function parseAgentProviderTestOutput(rawOutput: string, selectedModel?: string, providerValue?: string, challenge?: string): {
     usable: boolean;
     model: string;
+    replyObserved: boolean;
 };
 export declare function testAgentProvider(providerValue: string, modelValue?: string): Promise<any>;
 export declare function parseGeminiCliDefaultModels(source: string): {
     id: string;
     label: string;
 }[];
-export declare function getAgentProviderModels(providerValue: string): Promise<{
-    provider: "codex";
-    selected: string;
-    models: {
-        id: string;
-        label: string;
-    }[];
-    allowsCustom: boolean;
-    source: string;
-    error: string;
-    detail?: undefined;
-} | {
-    provider: "cursor";
-    selected: string;
-    models: any[];
-    allowsCustom: boolean;
-    error: string;
-    source?: undefined;
-    detail?: undefined;
-} | {
-    provider: "cursor";
-    selected: string;
-    models: {
-        id: string;
-        label: string;
-    }[];
-    allowsCustom: boolean;
-    source: string;
-    error: string;
-    detail?: undefined;
-} | {
-    provider: "claudecode";
-    selected: string;
-    models: any;
-    allowsCustom: boolean;
-    source: string;
-    error: string;
-    detail?: undefined;
-} | {
-    provider: "gemini";
-    selected: string;
-    models: {
-        id: string;
-        label: string;
-    }[];
-    allowsCustom: boolean;
-    source: string;
-    detail: string;
-    error: string;
-} | {
-    provider: "gemini";
-    selected: string;
-    models: any[];
-    allowsCustom: boolean;
-    source: string;
-    error: string;
-    detail?: undefined;
-} | {
-    provider: "opencode";
-    selected: string;
-    models: {
-        id: string;
-        label: string;
-    }[];
-    allowsCustom: boolean;
-    source: string;
-    error: string;
-    detail?: undefined;
-}>;
+export declare function getAgentProviderModels(providerValue: string): Promise<any>;
 export declare function parseAgentProviderLoginProgress(providerValue: string, rawOutput: string): {
     authUrl: any;
     userCode: string;
@@ -269,7 +233,10 @@ export declare function parseAgentProviderLoginProgress(providerValue: string, r
     succeeded: boolean;
     failed: boolean;
 };
-export declare function startAgentProviderLogin(providerValue: string): {
+export declare function startAgentProviderLogin(providerValue: string, options?: {
+    providerId?: string;
+    methodId?: string;
+}): {
     sessionId: string;
     provider: DevelopmentAgentProvider;
     status: LoginSessionStatus;
@@ -313,6 +280,8 @@ export declare function submitAgentProviderLoginCode(providerValue: string, sess
 export declare function logoutAgentProvider(providerValue: string): {
     provider: "gemini";
     loggedOut: boolean;
+    partial: boolean;
+    remainingCredentialSources: string[];
     interactive?: undefined;
     manual?: undefined;
     command?: undefined;
@@ -322,15 +291,21 @@ export declare function logoutAgentProvider(providerValue: string): {
     interactive: boolean;
     manual: boolean;
     command: string;
+    partial?: undefined;
+    remainingCredentialSources?: undefined;
 } | {
     provider: "opencode";
     loggedOut: boolean;
     interactive: boolean;
+    partial?: undefined;
+    remainingCredentialSources?: undefined;
     manual?: undefined;
     command?: undefined;
 } | {
     provider: "claudecode" | "codex" | "cursor";
     loggedOut: boolean;
+    partial?: undefined;
+    remainingCredentialSources?: undefined;
     interactive?: undefined;
     manual?: undefined;
     command?: undefined;
