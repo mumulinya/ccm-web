@@ -8,8 +8,11 @@ const props = defineProps({
   selectedPath: { type: String, default: '' },
   checkedPaths: { type: Object, required: true },
   filter: { type: String, default: 'all' },
+  totalCount: { type: Number, default: 0 },
+  hasMore: { type: Boolean, default: false },
+  loadingMore: { type: Boolean, default: false },
 })
-const emit = defineEmits(['select', 'toggle', 'toggle-visible', 'filter-change'])
+const emit = defineEmits(['select', 'toggle', 'toggle-visible', 'filter-change', 'load-more'])
 const query = ref('')
 const storedGroupingMode = typeof localStorage === 'undefined' ? '' : localStorage.getItem('ccm-code-change-grouping')
 const groupingMode = ref(['directory', 'module', 'status'].includes(storedGroupingMode) ? storedGroupingMode : 'directory')
@@ -116,7 +119,7 @@ watch(groupingMode, value => {
   <aside class="change-files" aria-label="变更文件">
     <div class="files-title">
       <span><FileCode2 :size="15" />变更文件</span>
-      <strong>{{ tabs[0].count }}</strong>
+      <strong>{{ tabs[0].count }}<template v-if="totalCount > files.length"> / {{ totalCount }}</template></strong>
     </div>
     <label class="file-search">
       <Search :size="14" aria-hidden="true" />
@@ -171,6 +174,7 @@ watch(groupingMode, value => {
           </button>
         </section>
       </template>
+      <button v-if="hasMore" type="button" class="load-more" :disabled="loadingMore" @click="emit('load-more')">{{ loadingMore ? '正在加载更多变更' : `继续加载（已加载 ${files.length} / ${totalCount}）` }}</button>
     </div>
   </aside>
 </template>
@@ -185,5 +189,6 @@ watch(groupingMode, value => {
 .file-scroll { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }.file-group h4 { margin:0; padding:8px 14px 5px; color:var(--text-muted); font-size:10px; font-weight:650; text-transform:none; }.file-group h4 span { margin-left:4px; font-weight:400; }
 .file-row { width:100%; min-height:47px; padding:7px 12px; display:flex; align-items:center; gap:8px; border:0; border-left:3px solid transparent; background:transparent; color:inherit; text-align:left; cursor:pointer; }.file-row:hover { background:rgba(37,99,235,.045); }.file-row.active { border-left-color:#2563eb; background:rgba(37,99,235,.08); }.file-row.conflict { border-left-color:#dc2626; }
 .file-row input { flex-shrink:0; }.file-copy { min-width:0; flex:1; }.file-copy strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:550; color:var(--text-primary); }.file-copy small { display:flex; align-items:center; gap:7px; margin-top:3px; color:var(--text-muted); font-size:10px; }.adds { color:#047857; }.deletes,.conflict-icon { color:#b91c1c; }.empty-files { padding:38px 16px; text-align:center; color:var(--text-muted); font-size:12px; }
+.load-more { width:calc(100% - 24px); min-height:34px; margin:10px 12px 14px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-secondary); color:var(--text-secondary); font-size:11px; cursor:pointer; }.load-more:hover:not(:disabled) { border-color:#2563eb; color:#2563eb; }.load-more:disabled { opacity:.55; cursor:wait; }
 @media(max-width:768px){.change-files{width:100%;height:100%;min-height:0}.file-tabs button{font-size:9px}}
 </style>

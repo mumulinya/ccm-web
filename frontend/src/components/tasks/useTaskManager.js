@@ -977,7 +977,7 @@ export function useTaskManager(props, emit) {
     if (!confirmed) return
     executionActionBusy.value = `rollback:${execution.id}`
     try {
-      await tasksApi.rollbackExecution({ checkpoint_id: checkpointId, reason: reason.trim(), allow_shared: shared })
+      await tasksApi.rollbackExecution({ checkpoint_id: checkpointId, reason: reason.trim(), allow_shared: shared, confirmed: true })
       toast.success('已回滚到任务检查点')
       await loadTaskExecutions(currentTaskReport.value?.id)
     } catch (e) { toast.error(e.message || '回滚失败') }
@@ -989,7 +989,7 @@ export function useTaskManager(props, emit) {
     if (!confirmed) return
     executionActionBusy.value = `merge:${execution.id}`
     try {
-      await tasksApi.mergeExecution({ execution_id: execution.id, commit: true })
+      await tasksApi.mergeExecution({ execution_id: execution.id, commit: true, confirmed: true })
       toast.success('worktree 已安全合并')
       await loadTaskExecutions(currentTaskReport.value?.id)
     } catch (e) { toast.error(e.message || '合并失败') }
@@ -1001,7 +1001,7 @@ export function useTaskManager(props, emit) {
     if (!confirmed) return
     executionActionBusy.value = `cleanup:${execution.id}`
     try {
-      await tasksApi.cleanupExecution({ execution_id: execution.id })
+      await tasksApi.cleanupExecution({ execution_id: execution.id, confirmed: true })
       toast.success('worktree 已清理')
       await loadTaskExecutions(currentTaskReport.value?.id)
     } catch (e) { toast.error(e.message || '清理失败') }

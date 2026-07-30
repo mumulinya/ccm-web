@@ -174,13 +174,13 @@
         <header class="view-heading">
           <div>
             <h4>工作复盘</h4>
-            <p>根据任务、对话、代码变更和验收记录还原真实工作。</p>
+            <p>大模型基于任务、代码变更和验收证据生成工作总结。</p>
           </div>
           <div class="report-actions">
             <button class="btn btn-outline" :disabled="isBusy" @click="reportKind === 'daily' ? generateDailyReport() : generateWeeklyReport()">
               {{ activeAction.includes('report') ? '生成中' : '刷新复盘' }}
             </button>
-            <button class="btn btn-primary" :disabled="isBusy || !feishu.notification_ready" @click="sendNotification(reportKind)">
+            <button class="btn btn-primary" :disabled="isBusy || !feishu.notification_ready || !reportCanSend" @click="sendNotification(reportKind)">
               {{ activeAction.startsWith('send-') ? '发送中' : '发送到飞书' }}
             </button>
           </div>
@@ -198,6 +198,11 @@
             <option v-for="item in weeklyReports" :key="item.id" :value="item.id">{{ item.start_date }} 至 {{ item.end_date }}</option>
           </select>
         </div>
+
+        <section v-if="activeReport" :class="['report-generation-state', reportStatusPresentation.tone]" aria-live="polite">
+          <strong>{{ reportStatusPresentation.label }}</strong>
+          <span>{{ reportStatusPresentation.detail }}</span>
+        </section>
 
         <section v-if="activeReport" class="evidence-strip" aria-label="工作复盘数据依据">
           <div>
@@ -267,6 +272,20 @@
               </select>
               <input v-model="notification.weekly_time" type="time" aria-label="周报发送时间">
             </div>
+            <div class="field-row timezone-field-row">
+              <label for="report-timezone">
+                <strong>报告时区</strong>
+                <small>日期、星期和发送时间均按该时区计算</small>
+              </label>
+              <select id="report-timezone" v-model="notification.timezone">
+                <option value="Asia/Shanghai">中国标准时间（Asia/Shanghai）</option>
+                <option value="Asia/Hong_Kong">香港时间（Asia/Hong_Kong）</option>
+                <option value="Asia/Tokyo">日本时间（Asia/Tokyo）</option>
+                <option value="UTC">协调世界时（UTC）</option>
+                <option value="America/Los_Angeles">美国太平洋时间</option>
+                <option value="Europe/London">英国时间</option>
+              </select>
+            </div>
             <div class="form-actions">
               <button class="btn btn-primary" :disabled="isBusy" @click="saveNotification">
                 {{ activeAction === 'save-notification' ? '保存中' : '保存通知计划' }}
@@ -287,9 +306,9 @@
             <EmptyState v-if="!notificationHistory.length" icon="📨" title="还没有通知记录" />
             <div v-else class="history-list">
               <article v-for="item in notificationHistory" :key="item.id">
-                <span :class="['history-dot', item.success ? 'ok' : 'fail']"></span>
+                <span :class="['history-dot', item.success ? 'ok' : item.status === 'queued' ? 'pending' : 'fail']"></span>
                 <div>
-                  <strong>{{ item.kind === 'weekly' ? '周报' : '日报' }} · {{ item.success ? '发送成功' : '发送失败' }}</strong>
+                  <strong>{{ item.kind === 'weekly' ? '周报' : '日报' }} · {{ item.success ? '发送成功' : item.status === 'queued' ? '等待发送' : item.status === 'delivery_unknown' ? '投递结果未知' : '发送失败' }}</strong>
                   <span>{{ formatShortTime(item.attempted_at) }}</span>
                 </div>
               </article>

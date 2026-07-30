@@ -54,6 +54,39 @@ function createGlobalAgentLoopSelfTest(deps) {
             executeTool: async () => { throw new Error("不应调用工具"); },
             onEvent: event => consultationEvents.push(event),
         });
+        let directReplyLoopCalls = 0;
+        const directReplyEvents = [];
+        const directReply = await startGlobalAgentRun({
+            message: "你好",
+            workflowDecision: {
+                mode: "answer",
+                confidence: 1,
+                reason: "当前消息是自包含问候",
+                directReplyReady: true,
+                directReply: "你好！有什么可以帮你？",
+                semanticDecisionReceipt: {
+                    durationMs: 320,
+                    usage: {
+                        inputTokens: 420,
+                        outputTokens: 48,
+                        totalTokens: 468,
+                        reported: true,
+                        directInputTokens: 420,
+                        cacheCreationInputTokens: 0,
+                        cacheReadInputTokens: 0,
+                    },
+                },
+            },
+            directReply: "你好！有什么可以帮你？",
+        }, {
+            persist: false,
+            callModel: async () => {
+                directReplyLoopCalls += 1;
+                throw new Error("模型已给出直接回复后不应再次进入完整Agent Loop");
+            },
+            executeTool: async () => { throw new Error("直接回复不应调用工具"); },
+            onEvent: event => directReplyEvents.push(event),
+        });
         const readOnlyStatusConsultationDecisions = [
             {
                 state: "investigate",
@@ -442,6 +475,14 @@ function createGlobalAgentLoopSelfTest(deps) {
             executionRunsHaveUnifiedDeliveryReport: supervisedCompleted?.final_delivery_report?.schema === "ccm-main-agent-delivery-report-v1",
             executionRunsHaveCompletionCard: supervisedCompleted?.final_delivery_report?.completion_card?.schema === "ccm-main-agent-completion-card-v1",
             ordinaryAnswerDoesNotShowDeliveryReport: !consultation.final_delivery_report && !consultation.display_stream?.delivery_report,
+            modelConfirmedDirectReplySkipsFullLoop: directReply.status === "completed"
+                && directReply.final_reply === "你好！有什么可以帮你？"
+                && directReplyLoopCalls === 0
+                && directReply.tool_calls === 0
+                && directReply.model_calls === 1
+                && directReply.input_tokens === 420
+                && directReply.direct_reply_fast_path === true
+                && directReplyEvents.some(event => event.type === "completed"),
             globalDispatchLaunchSummaryVisible: supervisedDispatchSummary?.schema === "ccm-main-agent-dispatch-launch-summary-v1"
                 && supervisedDispatchSummary?.rows?.some((row) => row.agent === "demo")
                 && supervised.display_stream?.main_agent_decision?.dispatch_launch_summary?.rows?.length >= 1,

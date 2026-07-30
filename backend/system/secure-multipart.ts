@@ -34,6 +34,11 @@ function signatureMatches(file: string, name: string) {
   if (ext === ".gif") return ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"));
   if (ext === ".webp") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
   if (ext === ".bmp") return bytes.subarray(0, 2).toString("ascii") === "BM";
+  if (ext === ".mp3" || ext === ".aac") return bytes.subarray(0, 3).toString("ascii") === "ID3" || bytes[0] === 0xff;
+  if (ext === ".wav") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WAVE";
+  if (ext === ".ogg") return bytes.subarray(0, 4).toString("ascii") === "OggS";
+  if (ext === ".flac") return bytes.subarray(0, 4).toString("ascii") === "fLaC";
+  if (ext === ".m4a") return bytes.subarray(4, 8).toString("ascii") === "ftyp";
   return true;
 }
 
@@ -49,6 +54,9 @@ function mimeMatchesName(name: string, mimeType: string) {
   if (ext === ".docx") return ["application/zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(mime);
   if (ext === ".xlsx") return ["application/zip", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"].includes(mime);
   if (ext === ".pptx") return ["application/zip", "application/vnd.openxmlformats-officedocument.presentationml.presentation"].includes(mime);
+  if ([".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"].includes(ext)) {
+    return mime.startsWith("audio/") || (ext === ".m4a" && mime === "video/mp4");
+  }
   return mime.startsWith("text/") || ["application/json", "application/xml", "text/xml"].includes(mime);
 }
 
@@ -62,11 +70,19 @@ export async function parseSecureMultipartRequest(req: any, options: {
   timeoutMs?: number;
   maxFiles?: number;
   maxRequestBytes?: number;
+  maxFileBytes?: number;
+  maxTotalFileBytes?: number;
+  allowedExtensions?: string[];
 } = {}) {
   const maxFiles = Math.max(1, Math.min(MAX_MULTIPART_FILES, Number(options.maxFiles || MAX_MULTIPART_FILES)));
-  const maxRequestBytes = Math.max(1024, Math.min(MAX_MULTIPART_REQUEST_BYTES, Number(options.maxRequestBytes || MAX_MULTIPART_REQUEST_BYTES)));
+  const maxRequestBytes = Math.max(1024, Number(options.maxRequestBytes || MAX_MULTIPART_REQUEST_BYTES));
+  const maxFileBytes = Math.max(1024, Number(options.maxFileBytes || MAX_MULTIPART_FILE_BYTES));
+  const maxTotalFileBytes = Math.max(1024, Number(options.maxTotalFileBytes || MAX_MULTIPART_TOTAL_FILE_BYTES));
+  const allowedExtensions = options.allowedExtensions?.length
+    ? new Set(options.allowedExtensions.map(item => String(item).toLowerCase()))
+    : null;
   const declared = Number(req.headers?.["content-length"] || 0);
-  if (declared > maxRequestBytes) throw new Error("附件请求超过 64 MB");
+  if (declared > maxRequestBytes) throw new Error(`附件请求超过 ${Math.ceil(maxRequestBytes / 1024 / 1024)} MB`);
   fs.mkdirSync(STAGING_DIR, { recursive: true });
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -81,7 +97,7 @@ export async function parseSecureMultipartRequest(req: any, options: {
   try {
     parser = Busboy({
       headers: req.headers,
-      limits: { files: maxFiles, fileSize: MAX_MULTIPART_FILE_BYTES, fields: 64, fieldSize: MAX_MULTIPART_FIELD_BYTES, parts: maxFiles + 64 },
+      limits: { files: maxFiles, fileSize: maxFileBytes, fields: 64, fieldSize: MAX_MULTIPART_FIELD_BYTES, parts: maxFiles + 64 },
     });
   } catch {
     throw new Error("无效的附件请求");
@@ -103,7 +119,7 @@ export async function parseSecureMultipartRequest(req: any, options: {
     req.on("data", (chunk: Buffer) => {
       requestBytes += Buffer.byteLength(chunk);
       if (requestBytes > maxRequestBytes && !terminalError) {
-        terminalError = new Error("附件请求超过 64 MB");
+        terminalError = new Error(`附件请求超过 ${Math.ceil(maxRequestBytes / 1024 / 1024)} MB`);
         req.unpipe(parser);
         parser.destroy(terminalError);
       }
@@ -126,6 +142,11 @@ export async function parseSecureMultipartRequest(req: any, options: {
         return;
       }
       const ext = path.extname(originalName).toLowerCase();
+      if (allowedExtensions && !allowedExtensions.has(ext)) {
+        terminalError = new Error(`${originalName} 的文件类型不受支持`);
+        stream.resume();
+        return;
+      }
       if (!mimeMatchesName(originalName, String(info?.mimeType || ""))) {
         terminalError = new Error(`${originalName} 的MIME类型与扩展名不一致`);
         stream.resume();
@@ -139,12 +160,12 @@ export async function parseSecureMultipartRequest(req: any, options: {
       const writer = fs.createWriteStream(stagingPath, { flags: "wx", mode: 0o600 });
       const completion = new Promise<void>((done, failWrite) => {
         stream.on("data", (chunk: Buffer) => { size += chunk.length; totalFileBytes += chunk.length; });
-        stream.on("limit", () => { terminalError = new Error(`${originalName} 超过 25 MB`); });
+        stream.on("limit", () => { terminalError = new Error(`${originalName} 超过 ${Math.ceil(maxFileBytes / 1024 / 1024)} MB`); });
         stream.on("error", failWrite);
         writer.on("error", failWrite);
         writer.on("finish", () => {
           if (size <= 0) return failWrite(new Error(`${originalName} 是空文件`));
-          if (totalFileBytes > MAX_MULTIPART_TOTAL_FILE_BYTES) return failWrite(new Error("本次上传附件总大小不能超过 60 MB"));
+          if (totalFileBytes > maxTotalFileBytes) return failWrite(new Error(`本次上传附件总大小不能超过 ${Math.ceil(maxTotalFileBytes / 1024 / 1024)} MB`));
           if (!signatureMatches(stagingPath, originalName)) return failWrite(new Error(`${originalName} 的扩展名与文件内容不一致`));
           fs.renameSync(stagingPath, finalPath);
           committed.push(finalPath);

@@ -93,21 +93,21 @@ export declare function collectRuntimeToolingFromSources(task?: any, execution?:
 };
 export declare function buildRuntimeKernelSnapshot(task?: any, summary?: any): {
     trace_id: any;
-    lifecycle_count: any;
-    latest_lifecycle: any;
-    blocked_count: any;
+    lifecycle_count: number;
+    latest_lifecycle: any[];
+    blocked_count: number;
     ack_only: {
         active: boolean;
-        count: any;
+        count: number;
         latest: any;
     };
-    dispatch_worker_count: any;
+    dispatch_worker_count: number;
     worker_context_packet_ids: string[];
-    contract_injections: any;
+    contract_injections: any[];
     injection_ids: string[];
     context_budget: {
         max_pressure: number;
-        compact_recommended: any;
+        compact_recommended: boolean;
     };
     task_agent_memory_context_snapshot: {
         required: boolean;

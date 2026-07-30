@@ -38,7 +38,9 @@ export declare function createGlobalAgentHistoryRuntime(deps: any): {
         context_cache_invalidated: boolean;
     };
     getGlobalAgentConversationMessages: (sessionId: string) => any[];
-    appendGlobalAgentConversationMessage: (sessionId: string, role: "user" | "assistant", content: string, source?: string) => void;
+    appendGlobalAgentConversationMessage: (sessionId: string, role: "user" | "assistant", content: string, source?: string, options?: {
+        extractMemory?: boolean;
+    }) => void;
     scheduleGlobalSessionAutoTitle: (sessionId: string) => Promise<any>;
     resolveFeishuGlobalAgentSessionId: (payload: any, store?: any) => string;
     runFeishuGlobalAgentSessionRoutingSelfTest: () => {

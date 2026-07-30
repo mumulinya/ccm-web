@@ -898,7 +898,11 @@ export function inspectBranchFreshness(workDir: string, baseRef = "") {
   const repoRoot = runGit(workDir, ["rev-parse", "--show-toplevel"]);
   const branch = runGit(repoRoot, ["branch", "--show-current"]);
   const base = baseRef || runGit(repoRoot, ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]).replace(/^origin\//, "");
-  const baseFull = base.startsWith("origin/") ? base : (spawnSync("git", ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${base}`], { cwd: repoRoot }).status === 0 ? `origin/${base}` : base);
+  const baseFull = base.startsWith("origin/") ? base : (spawnSync("git", ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${base}`], {
+    cwd: repoRoot,
+    windowsHide: true,
+    stdio: "ignore",
+  }).status === 0 ? `origin/${base}` : base);
   const counts = runGit(repoRoot, ["rev-list", "--left-right", "--count", `${baseFull}...HEAD`]).split(/\s+/).map(Number);
   const behind = counts[0] || 0;
   const ahead = counts[1] || 0;

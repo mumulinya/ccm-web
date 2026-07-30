@@ -37,6 +37,8 @@ const {
   enabledDailyDevJobs,
   notificationHistory,
   isBusy,
+  reportStatusPresentation,
+  reportCanSend,
   readinessTone,
   readinessTitle,
   readinessDescription,

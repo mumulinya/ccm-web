@@ -86,6 +86,7 @@ const os = __importStar(require("os"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const role_skills_1 = require("../../skills/role-skills");
+const shared_files_v2_1 = require("../tools/shared-files-v2");
 const group_orchestrator_1 = require("./group-orchestrator");
 const display_1 = require("./display");
 const memory_1 = require("./memory");
@@ -1152,8 +1153,15 @@ async function runAgentCliProbeBatch(payload, ctx) {
     };
 }
 function buildCoordinatorSharedFilesContext(ctx, group) {
-    const content = ctx.buildFilesContext(group?.shared_files || [], "以下是群聊共享文档/文件（主 Agent 拆分任务时必须读取，并在子 Agent 工作单中引用相关文档、接口、字段、业务规则或验收要求）：");
-    return content.trim() ? content : undefined;
+    const groupId = String(group?.id || "").trim();
+    if (!groupId)
+        return undefined;
+    (0, shared_files_v2_1.migrateLegacySharedFilesV2)("group", groupId, group?.shared_files || [], "groups-v1");
+    const projection = (0, shared_files_v2_1.buildSharedFilesContextV2)("group", groupId, {
+        maxTokens: 32_000,
+        title: "以下是当前群聊已授权共享文档/文件。主 Agent拆分任务时必须引用对应文件与分片证据：",
+    });
+    return projection.context.trim() ? projection.context : undefined;
 }
 function buildTaskSourceDocumentsContext(task) {
     const lines = [

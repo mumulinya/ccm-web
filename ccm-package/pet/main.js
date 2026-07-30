@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, screen, shell, protocol } = require('electr
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const crypto = require('crypto');
+const { buildInternalApiHeaders } = require('../dist/modules/system/internal-api-auth.js');
 
 // 禁用 GPU 硬件加速，防止在 Headless/远程/系统 Session 隔离环境下因 GPU 崩溃导致闪退
 app.disableHardwareAcceleration();
@@ -25,11 +27,13 @@ const PET_ASSETS_DIR = path.resolve(__dirname, '..', 'public', 'pets');
 const API_BASE = `http://localhost:${CCM_PORT}`;
 const PETS_FILE = path.join(CCM_DIR, 'pets.json');
 const PID_FILE = path.join(CCM_DIR, 'pids', 'pet.pid');
+const RUNTIME_FILE = path.join(CCM_DIR, 'pids', 'pet-runtime.json');
+const PET_CLIENT_ID = `desktop-pet:${os.hostname()}:${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
 
 const petWindows = new Map(); // agentName -> BrowserWindow
 const petWindowTypes = new Map(); // agentName -> pet type currently loaded in the window
 const petLabels = new Map(); // agentName -> display label
-let config = { configs: {}, positions: {}, customTypes: [] };
+let config = { schema: 'ccm-pet-config-v2', revision: 0, configs: {}, positions: {}, customTypes: [], settings: { autoStart: false, webFallback: true } };
 let agentStates = {};
 const SPEECH_MIN_WIDTH = 330;
 const PET_SPRITE_SCALE = 0.5;
@@ -151,44 +155,91 @@ function clampWindowPosition(win, x, y, agent) {
 }
 
 // === HTTP 工具 ===
+function signedHeaders(method, urlPath, extra = {}) {
+  return { ...extra, ...buildInternalApiHeaders('desktop-pet', method, urlPath) };
+}
+
 function httpGet(urlPath) {
-  return new Promise((resolve) => {
-    const req = http.get(`${API_BASE}${urlPath}`, { timeout: 5000 }, (res) => {
+  return new Promise((resolve, reject) => {
+    const req = http.get(`${API_BASE}${urlPath}`, {
+      timeout: 5000,
+      headers: signedHeaders('GET', urlPath),
+    }, (res) => {
       let data = '';
       res.on('data', (chunk) => data += chunk);
-      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+      res.on('end', () => {
+        if ((res.statusCode || 500) < 200 || (res.statusCode || 500) >= 300) {
+          return reject(new Error(`CCM API ${urlPath} 返回 ${res.statusCode}`));
+        }
+        try { resolve(JSON.parse(data)); } catch { reject(new Error(`CCM API ${urlPath} 返回无效JSON`)); }
+      });
     });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error(`CCM API ${urlPath} 请求超时`)));
   });
 }
 
-function httpPost(path, body) {
-  return new Promise((resolve) => {
+function httpMutation(method, path, body) {
+  return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const req = http.request(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+      method,
+      timeout: 5000,
+      headers: signedHeaders(method, path, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) })
     }, (res) => {
       let d = '';
       res.on('data', (chunk) => d += chunk);
-      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
+      res.on('end', () => {
+        let parsed = {};
+        let parsedOk = !d;
+        try { parsed = d ? JSON.parse(d) : {}; parsedOk = true; } catch {}
+        if ((res.statusCode || 500) < 200 || (res.statusCode || 500) >= 300) {
+          const error = new Error(parsed.error || `CCM API ${path} 返回 ${res.statusCode}`);
+          error.statusCode = res.statusCode;
+          error.code = parsed.code;
+          error.current = parsed.current;
+          return reject(error);
+        }
+        if (parsedOk) resolve(parsed);
+        else reject(new Error(`CCM API ${path} 返回无效JSON`));
+      });
     });
-    req.on('error', () => resolve(null));
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error(`CCM API ${path} 请求超时`)));
     req.write(data);
     req.end();
   });
 }
+function httpPost(path, body) { return httpMutation('POST', path, body); }
+function httpPatch(path, body) { return httpMutation('PATCH', path, body); }
 
 // === 配置管理 ===
 async function loadConfig() {
   const data = await httpGet('/api/pets/config');
   if (data) {
     config = {
+      schema: data.schema || 'ccm-pet-config-v2',
+      revision: Number(data.revision || 0),
       configs: data.configs || {},
       positions: data.positions || {},
-      customTypes: data.customTypes || []
+      customTypes: data.customTypes || [],
+      settings: { autoStart: data.settings?.autoStart === true, webFallback: data.settings?.webFallback !== false },
     };
+  }
+}
+
+async function saveConfigPatch(patch, retry = true) {
+  try {
+    const result = await httpPatch('/api/pets/config', { revision: config.revision, patch });
+    if (result?.config) config = result.config;
+    return result;
+  } catch (error) {
+    if (retry && error?.code === 'state_drift') {
+      if (error.current) config = error.current;
+      else await loadConfig();
+      return saveConfigPatch(patch, false);
+    }
+    throw error;
   }
 }
 
@@ -205,10 +256,66 @@ function getPositionForAgent(agent) {
 
 // === SSE 状态流 ===
 let sseReq = null;
+let sseReconnectTimer = null;
+let sseReconnectAttempt = 0;
+let shuttingDown = false;
+
+function scheduleSseReconnect(reason) {
+  if (shuttingDown || sseReconnectTimer) return;
+  const delay = Math.min(30_000, 1_000 * 2 ** Math.min(5, sseReconnectAttempt++));
+  console.error(`[pet] SSE 已断开 (${reason})，${delay}ms 后重连`);
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null;
+    connectSSE();
+  }, delay);
+}
+
+async function acknowledgeNotification(notification) {
+  if (!notification?.delivery_id) return;
+  try {
+    await httpPost(`/api/pets/runtime/deliveries/${encodeURIComponent(notification.delivery_id)}/ack`, {
+      client_id: PET_CLIENT_ID,
+      notification_id: notification.notification_id,
+    });
+  } catch (error) {
+    console.error('[pet] 通知确认失败:', error.message);
+  }
+}
+
+function notifyPersistentNotification(notification) {
+  const preferred = String(notification?.action?.scope_id || '');
+  const agent = petWindows.has(preferred)
+    ? preferred
+    : petWindows.has('global-agent') ? 'global-agent' : petWindows.keys().next().value;
+  if (!agent) return false;
+  const text = [notification.title, notification.summary].filter(Boolean).join('\n');
+  notifySpeech(agent, {
+    role: notification.role || 'status',
+    text,
+    final: true,
+    mode: 'replace',
+    notification_id: notification.notification_id,
+    delivery_id: notification.delivery_id,
+    action: notification.action || {},
+  });
+  return true;
+}
+
 function connectSSE() {
-  console.log(`[pet] 连接 SSE: ${API_BASE}/api/status/stream?client=pet`);
-  http.get(`${API_BASE}/api/status/stream?client=pet`, (res) => {
-    console.log(`[pet] SSE 连接成功, status: ${res.statusCode}`);
+  if (shuttingDown || sseReq) return;
+  const streamPath = `/api/pets/runtime/stream?client_id=${encodeURIComponent(PET_CLIENT_ID)}`;
+  console.log(`[pet] 连接 SSE: ${API_BASE}${streamPath}`);
+  const request = http.get(`${API_BASE}${streamPath}`, {
+    headers: signedHeaders('GET', streamPath),
+  }, (res) => {
+    if (res.statusCode !== 200) {
+      res.resume();
+      sseReq = null;
+      scheduleSseReconnect(`HTTP ${res.statusCode}`);
+      return;
+    }
+    console.log('[pet] SSE 连接成功');
+    sseReconnectAttempt = 0;
     let buffer = '';
     res.on('data', (chunk) => {
       buffer += chunk.toString();
@@ -232,6 +339,8 @@ function connectSSE() {
             if (oldState !== data.state) notifyStateChange(data.agent, data.state);
           } else if (data.type === 'speech') {
             notifySpeech(data.agent, data);
+          } else if (data.type === 'notification') {
+            notifyPersistentNotification(data.notification);
           } else if (data.type === 'config') {
             schedulePetSync('config changed');
           }
@@ -255,15 +364,22 @@ function connectSSE() {
             notifyStateChange(data.agent, data.state);
           } else if (data.type === 'speech') {
             notifySpeech(data.agent, data);
+          } else if (data.type === 'notification') {
+            notifyPersistentNotification(data.notification);
           } else if (data.type === 'config') {
             schedulePetSync('config changed');
           }
         } catch {}
       }
-      setTimeout(connectSSE, 5000);
+      sseReq = null;
+      scheduleSseReconnect('server ended');
     });
-    sseReq = res;
-  }).on('error', () => { setTimeout(connectSSE, 10000); });
+  });
+  sseReq = request;
+  request.on('error', error => {
+    sseReq = null;
+    scheduleSseReconnect(error.message);
+  });
 }
 
 function notifyStateChange(agent, state) {
@@ -277,7 +393,7 @@ function notifyStateChange(agent, state) {
 function notifySpeech(agent, payload) {
   const win = petWindows.get(agent);
   if (win && !win.isDestroyed()) {
-    win.webContents.send('speech', payload);
+    win.webContents.send('speech', { ...payload, agent });
   }
 }
 
@@ -429,26 +545,54 @@ async function syncPets() {
 
 // === IPC 处理 ===
 ipcMain.handle('get-config', () => config);
+ipcMain.handle('ack-notification', async (_, notification) => {
+  const deliveryId = String(notification?.delivery_id || '').trim();
+  if (!/^und_[a-f0-9]{32}$/i.test(deliveryId)) return { success: false, error: '通知投递标识无效' };
+  try {
+    await acknowledgeNotification({
+      delivery_id: deliveryId,
+      notification_id: String(notification?.notification_id || '').trim(),
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 ipcMain.handle('get-asset-path', (_, filename) => {
   const safeName = String(filename || '').replace(/\\/g, '/');
   if (safeName.includes('..') || path.isAbsolute(safeName)) return null;
-  const filePath = path.join(PET_ASSETS_DIR, safeName);
-  if (fs.existsSync(filePath)) return filePath;
+  const resolveSafeAsset = candidate => {
+    try {
+      const full = path.resolve(PET_ASSETS_DIR, candidate);
+      const relative = path.relative(path.resolve(PET_ASSETS_DIR), full);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+      if (!['.svg', '.png', '.apng', '.webp', '.json'].includes(path.extname(full).toLowerCase())) return null;
+      const stat = fs.lstatSync(full);
+      if (!stat.isFile() || stat.isSymbolicLink()) return null;
+      const real = fs.realpathSync(full);
+      const realRelative = path.relative(fs.realpathSync(PET_ASSETS_DIR), real);
+      return realRelative.startsWith('..') || path.isAbsolute(realRelative) ? null : real;
+    } catch {
+      return null;
+    }
+  };
+  const filePath = resolveSafeAsset(safeName);
+  if (filePath) return filePath;
 
   // 加上智能自适应：如果找不到，尝试将后缀替换后查找
   const ext = path.extname(safeName);
   if (ext) {
     const baseWithoutExt = safeName.slice(0, -ext.length);
     const altExt = ext.toLowerCase() === '.png' ? '.svg' : '.png';
-    const altFilePath = path.join(PET_ASSETS_DIR, baseWithoutExt + altExt);
-    if (fs.existsSync(altFilePath)) return altFilePath;
+    const altFilePath = resolveSafeAsset(baseWithoutExt + altExt);
+    if (altFilePath) return altFilePath;
   }
 
   // 回退到基础 SVG
   const baseName = path.basename(safeName);
   const baseFile = baseName.split('-')[0] + '.svg';
-  const basePath = path.join(PET_ASSETS_DIR, baseFile);
-  if (fs.existsSync(basePath)) return basePath;
+  const basePath = resolveSafeAsset(baseFile);
+  if (basePath) return basePath;
   return null;
 });
 ipcMain.handle('get-agent-name', (event) => {
@@ -497,13 +641,10 @@ ipcMain.on('resize-window', (event, w, h, size) => {
   }
 });
 ipcMain.handle('save-size', async (_, agent, size) => {
-  if (!config.configs[agent]) config.configs[agent] = { type: BUILTIN_FALLBACK_PET_TYPE };
-  config.configs[agent].size = size;
-  await httpPost('/api/pets/config', config);
+  await saveConfigPatch({ configs: { [agent]: { size } } });
 });
 ipcMain.handle('save-position', async (_, agent, x, y) => {
-  config.positions[agent] = { x, y };
-  await httpPost('/api/pets/config', config);
+  await saveConfigPatch({ positions: { [agent]: { x, y } } });
 });
 
 ipcMain.on('mouse-enter', (event) => {
@@ -519,8 +660,7 @@ ipcMain.on('start-drag', () => {});
 ipcMain.on('end-drag', async (_, agent, x, y) => {
   const win = petWindows.get(agent);
   const pos = win && !win.isDestroyed() ? clampWindowPosition(win, x, y, agent) : { x, y };
-  config.positions[agent] = pos;
-  await httpPost('/api/pets/config', config);
+  await saveConfigPatch({ positions: { [agent]: pos } });
 });
 
 ipcMain.on('open-console', () => {
@@ -537,18 +677,51 @@ ipcMain.handle('open-workspace', async (_, agent) => {
   }
 });
 
+function notificationActionUrl(action) {
+  const safe = action && typeof action === 'object' ? action : {};
+  const query = new URLSearchParams();
+  const taskId = String(safe.task_id || '').trim();
+  const permissionId = String(safe.permission_id || '').trim();
+  const sessionId = String(safe.session_id || '').trim();
+  const scopeId = String(safe.scope_id || '').trim();
+  const projectId = String(safe.project_id || '').trim();
+  const groupId = String(safe.group_id || '').trim();
+  let tab = 'dashboard';
+  if (permissionId) {
+    tab = 'tasks';
+    query.set('permission_id', permissionId);
+  } else if (taskId) {
+    tab = 'trace-replay';
+  } else if (projectId || safe.scope_type === 'project') {
+    tab = 'projects';
+  } else if (groupId || safe.scope_type === 'group') {
+    tab = 'groups';
+  } else if (safe.scope_type === 'global') {
+    tab = 'global-agent';
+  }
+  query.set('tab', tab);
+  if (taskId) query.set('task_id', taskId);
+  if (sessionId) query.set('session_id', sessionId);
+  if (projectId) query.set('project', projectId);
+  if (groupId) query.set('group', groupId);
+  if (scopeId) query.set('scope_id', scopeId);
+  return `${API_BASE}/?${query.toString()}`;
+}
+
+ipcMain.handle('open-notification', async (_, action) => {
+  const target = notificationActionUrl(action);
+  await shell.openExternal(target);
+  return { success: true, url: target };
+});
+
 ipcMain.on('change-type', async (_, agent, type) => {
-  if (!config.configs[agent]) config.configs[agent] = { enabled: true };
-  config.configs[agent].type = type;
-  await httpPost('/api/pets/config', config);
+  await saveConfigPatch({ configs: { [agent]: { type, enabled: true } } });
   destroyPetWindow(agent);
   createPetWindow(agent, type);
 });
 
 ipcMain.on('hide-pet', async (_, agent) => {
-  if (!config.configs[agent]) config.configs[agent] = {};
-  config.configs[agent].enabled = false;
-  await httpPost('/api/pets/config', config);
+  await saveConfigPatch({ configs: { [agent]: { enabled: false } } });
   destroyPetWindow(agent);
 });
 
@@ -558,14 +731,33 @@ app.whenReady().then(async () => {
   // 写入 PID 文件
   if (!fs.existsSync(path.dirname(PID_FILE))) fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
   fs.writeFileSync(PID_FILE, String(process.pid));
+  const runtimeTemp = `${RUNTIME_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(runtimeTemp, JSON.stringify({
+    schema: 'ccm-pet-runtime-v2',
+    pid: process.pid,
+    port: CCM_PORT,
+    clientId: PET_CLIENT_ID,
+    status: 'ready',
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+  try { fs.renameSync(runtimeTemp, RUNTIME_FILE); }
+  catch {
+    try { fs.unlinkSync(RUNTIME_FILE); } catch {}
+    fs.renameSync(runtimeTemp, RUNTIME_FILE);
+  }
 
-  await loadConfig();
-  await syncPets();
+  try {
+    await loadConfig();
+    await syncPets();
+  } catch (error) {
+    console.error('[pet] 初始化配置失败:', error.message);
+  }
   connectSSE();
   console.log('[pet] 初始化完成');
 
   // 定期同步宠物列表（3秒轮询，快速响应隐藏/显示）
-  setInterval(syncPets, 3000);
+  setInterval(() => schedulePetSync('periodic'), 3000);
 });
 
 app.on('window-all-closed', () => {
@@ -573,6 +765,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  shuttingDown = true;
   try { fs.unlinkSync(PID_FILE); } catch {}
+  try { fs.unlinkSync(RUNTIME_FILE); } catch {}
+  if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
   if (sseReq) sseReq.destroy();
 });

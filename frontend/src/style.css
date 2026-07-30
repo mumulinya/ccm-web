@@ -942,23 +942,6 @@ html[data-theme="dark"] .modal .modal-close:hover,
   color: var(--text-secondary);
 }
 
-/* 11. 浠〃鐩?(Dashboard.vue) */
-[data-theme="dark"] .dashboard .toolbar {
-  background: rgba(10, 15, 30, 0.4);
-  border-bottom-color: rgba(255, 255, 255, 0.05);
-}
-[data-theme="dark"] .dashboard .stat-card,
-[data-theme="dark"] .dashboard .card {
-  background: rgba(10, 15, 30, 0.6);
-  border-color: rgba(56, 189, 248, 0.12);
-}
-[data-theme="dark"] .dashboard textarea[style*="background:rgba(255,255,255,0.85)"],
-[data-theme="dark"] .dashboard textarea[style*="background: rgba(255, 255, 255, 0.85)"] {
-  background: rgba(17, 24, 39, 0.85);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-}
-
 /* 12. 缇よ亰鍗忎綔 (GroupChat.vue) */
 [data-theme="dark"] .group-chat .toolbar,
 [data-theme="dark"] .group-chat-container .toolbar {
@@ -1274,7 +1257,6 @@ a {
 .code-changes,
 .task-manager,
 .tools-config,
-.dashboard,
 .settings,
 .search-history,
 .templates-container,
@@ -1298,7 +1280,6 @@ a {
 .code-changes .main-content,
 .tools-config .main-content,
 .task-manager .content,
-.dashboard-content,
 .settings-content,
 .templates-content,
 .cron-content,
@@ -1314,7 +1295,6 @@ a {
 .code-changes .toolbar,
 .tools-config .toolbar,
 .task-manager .toolbar,
-.dashboard .toolbar,
 .cron-jobs .toolbar,
 .templates-container .toolbar,
 .templates-manager .toolbar,
@@ -1559,7 +1539,6 @@ label,
 .metric-card,
 .result-card,
 .settings .card,
-.dashboard .card,
 .pet-card-section,
 .pet-detail-panel,
 .pet-list-item,
@@ -1664,7 +1643,6 @@ label,
 }
 
 .stats-grid,
-.dashboard-grid,
 .tool-list,
 .task-list,
 .template-grid,
@@ -1963,7 +1941,6 @@ label,
   .code-changes .toolbar,
   .tools-config .toolbar,
   .task-manager .toolbar,
-  .dashboard .toolbar,
   .cron-jobs .toolbar {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -2304,7 +2281,6 @@ html[data-theme-preset]:not([data-theme-preset="default"]) .pulse-glow {
 
 /* 卡片悬停：扁平令牌风格（禁用 3D 位移，避免与 2026 Workspace 冲突） */
 .card:hover,
-.dashboard-card:hover,
 .metric-card:hover,
 .project-card:hover,
 .task-card:hover,

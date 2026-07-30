@@ -25,6 +25,12 @@ export type MusicPlaybackDecisionV2 = {
     reason: string;
     intentReceipt: any;
     selectionReceipt: any;
+    sourceStatuses: Record<"local" | "netease" | "bilibili", {
+        status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "not_requested";
+        resultCount: number;
+        error?: string;
+        retryable?: boolean;
+    }>;
     createdAt: string;
     expiresAt: string;
     checksum: string;
@@ -69,6 +75,12 @@ export declare function publicMusicPlaybackDecision(decision: MusicPlaybackDecis
     reason: string;
     intentReceipt: any;
     selectionReceipt: any;
+    sourceStatuses: Record<"local" | "netease" | "bilibili", {
+        status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "not_requested";
+        resultCount: number;
+        error?: string;
+        retryable?: boolean;
+    }>;
     createdAt: string;
     expiresAt: string;
     checksum: string;

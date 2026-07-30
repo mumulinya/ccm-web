@@ -50,13 +50,14 @@ for (const command of snapshot.commands.filter(item => ['query', 'mutation'].inc
 }
 
 const slashClientSource = read('frontend/src/composables/useSlashCommands.js')
-assert.ok(slashClientSource.includes("command.risk === 'high' || command.actionType === 'mutation'"), '高风险命令必须经过确认')
+assert.ok(slashClientSource.includes('/api/slash-commands/confirm'), '高风险命令必须使用服务端确认挑战')
+assert.ok(read('backend/modules/tools/slash-commands.ts').includes('SLASH_CONFIRMATION_REQUIRED'), '服务端必须拒绝缺少确认回执的高风险命令')
 assert.ok(!slashClientSource.includes('.slice(0, 18)'), '命令菜单不能继续限制为 18 项')
 
 for (const page of [
   'frontend/src/components/global/GlobalAgent.vue',
-  'frontend/src/components/projects/ProjectManager.vue',
-  'frontend/src/components/collaboration/GroupChat.vue',
+  'frontend/src/components/projects/useProjectManager.js',
+  'frontend/src/components/collaboration/useGroupChat.js',
 ]) {
   const source = read(page)
   assert.ok(source.includes('useSlashCommands'), `${page} 未接入命令中心`)
@@ -69,4 +70,3 @@ console.log(JSON.stringify({ success: true, counts: snapshot.counts, checks: bui
 function itemEndpoint(value = '') {
   return String(value || '').split('?')[0]
 }
-

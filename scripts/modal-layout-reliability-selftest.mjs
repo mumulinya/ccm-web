@@ -32,12 +32,36 @@ const walk = directory => {
   }
 }
 walk(path.join(root, 'frontend', 'src', 'components'))
-assert.ok(modalFiles.length >= 18, `expected at least 18 legacy modal components, received ${modalFiles.length}`)
+const expectedModalFiles = [
+  'agents/AgentPipelineModal.vue',
+  'collaboration/GroupCreateModal.vue',
+  'collaboration/GroupLogsModal.vue',
+  'collaboration/GroupMembersModal.vue',
+  'collaboration/GroupRenameModal.vue',
+  'collaboration/GroupSharedFilesModal.vue',
+  'common/UnifiedDiffModal.vue',
+  'pets/PetCreateModal.vue',
+  'pets/PetSkinCreateModal.vue',
+  'projects/ProjectAgentSwitchModal.vue',
+  'projects/ProjectSharedFilesModal.vue',
+  'settings/ControlBotQrModal.vue',
+  'tasks/AutomatedTaskIntakeModal.vue',
+  'tasks/DailyDevTaskModal.vue',
+  'tasks/TaskBacklogModal.vue',
+  'tools/code-changes/CodeCommitPanel.vue',
+]
+const actualModalFiles = modalFiles.map(file => path.relative(path.join(root, 'frontend', 'src', 'components'), file).replaceAll('\\', '/')).sort()
+assert.deepEqual(actualModalFiles, expectedModalFiles.slice().sort(), 'active modal inventory drifted without an explicit review')
+assert.equal(
+  modalFiles.some(file => /Template(?:Picker|VariablesModal)\.vue$/i.test(file)),
+  false,
+  'retired template modals must not return to the active modal inventory',
+)
 const scopedToolModal = read('frontend/src/components/common/AgentToolsModal.vue')
 assert.match(scopedToolModal, /<Teleport to="body">/)
 assert.match(scopedToolModal, /class="agent-tools-overlay"/)
 assert.match(scopedToolModal, /class="tool-column"/)
-checks.push({ name: `audited ${modalFiles.length} legacy modal-overlay components plus the shared scoped tool modal`, pass: true })
+checks.push({ name: `audited ${modalFiles.length} active modal-overlay components plus the shared scoped tool modal`, pass: true })
 
 const projectForm = read('frontend/src/components/projects/ProjectFormModal.vue')
 const projectFeishu = read('frontend/src/components/projects/ProjectFeishuQrModal.vue')

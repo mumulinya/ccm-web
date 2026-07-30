@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MAX_DIFF_MATRIX_CELLS = exports.MAX_DIFF_CHARS = exports.MAX_FILE_SNAPSHOT_BYTES = exports.MAX_INLINE_FILE_CHARS = exports.OOXML_FILE_EXTENSIONS = exports.IMAGE_FILE_EXTENSIONS = exports.TEXT_FILE_EXTENSIONS = exports.PET_PID_FILE_GLOBAL = exports.PETS_FILE = exports.MUSIC_CONFIG_FILE = exports.GROUP_LOGS_FILE = exports.PROJECT_CONFIGS_FILE = exports.TEMPLATES_FILE = exports.FEISHU_CONFIG_FILE = exports.METRICS_FILE = exports.PUBLIC_DIR = exports.GROUP_LOGS_FILE_SHARED = exports.GROUP_MESSAGES_DIR = exports.GROUPS_FILE = exports.UPLOAD_DIR = exports.CRON_FILE = exports.TASKS_FILE = exports.SHARED_DIR = exports.SESSIONS_DIR = exports.LOG_DIR = exports.PID_DIR = exports.CONFIGS_DIR = exports.CCM_DIR = void 0;
+exports.MAX_DIFF_MATRIX_CELLS = exports.MAX_DIFF_CHARS = exports.MAX_FILE_SNAPSHOT_BYTES = exports.MAX_INLINE_FILE_CHARS = exports.OOXML_FILE_EXTENSIONS = exports.IMAGE_FILE_EXTENSIONS = exports.TEXT_FILE_EXTENSIONS = exports.PET_PID_FILE_GLOBAL = exports.PETS_FILE = exports.MUSIC_CONFIG_FILE = exports.GROUP_LOGS_FILE = exports.PROJECT_CONFIGS_FILE = exports.FEISHU_CONFIG_FILE = exports.METRICS_FILE = exports.PUBLIC_DIR = exports.GROUP_LOGS_FILE_SHARED = exports.GROUP_MESSAGES_DIR = exports.GROUPS_FILE = exports.UPLOAD_DIR = exports.CRON_FILE = exports.TASKS_FILE = exports.SHARED_DIR = exports.SESSIONS_DIR = exports.LOG_DIR = exports.PID_DIR = exports.CONFIGS_DIR = exports.CCM_DIR = void 0;
 exports.refreshEnvPath = refreshEnvPath;
 exports.sendJson = sendJson;
 exports.ensureSharedDir = ensureSharedDir;
@@ -80,17 +80,22 @@ function refreshEnvPath() {
     if (process.platform !== "win32")
         return;
     try {
-        const { execSync } = require("child_process");
         let userPath = "";
         let sysPath = "";
         try {
-            const hkcu = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf8" });
+            const hkcu = (0, child_process_1.execFileSync)("reg.exe", ["query", "HKCU\\Environment", "/v", "Path"], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
             const matchHkcu = hkcu.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
             userPath = matchHkcu ? matchHkcu[1].trim() : "";
         }
         catch (e) { }
         try {
-            const hklm = execSync('reg query "HKLM\\System\\CurrentControlSet\\Control\\Session Manager\\Environment" /v Path', { encoding: "utf8" });
+            const hklm = (0, child_process_1.execFileSync)("reg.exe", ["query", "HKLM\\System\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"], {
+                encoding: "utf8",
+                windowsHide: true,
+            });
             const matchHklm = hklm.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
             sysPath = matchHklm ? matchHklm[1].trim() : "";
         }
@@ -140,7 +145,7 @@ function refreshEnvPath() {
         console.error("刷新 Windows PATH 失败:", e.message);
     }
 }
-exports.CCM_DIR = path.join(os.homedir(), ".cc-connect");
+exports.CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".cc-connect"));
 exports.CONFIGS_DIR = path.join(exports.CCM_DIR, "configs");
 exports.PID_DIR = path.join(exports.CCM_DIR, "pids");
 exports.LOG_DIR = path.join(exports.CCM_DIR, "logs");
@@ -162,7 +167,6 @@ exports.PUBLIC_DIR = publicDirCandidates.find(candidate => fs.existsSync(path.jo
 // 业务级别配置文件路径
 exports.METRICS_FILE = path.join(exports.CCM_DIR, "metrics.json");
 exports.FEISHU_CONFIG_FILE = path.join(exports.CCM_DIR, "feishu-config.json");
-exports.TEMPLATES_FILE = path.join(exports.CCM_DIR, "prompt-templates.json");
 exports.PROJECT_CONFIGS_FILE = path.join(exports.CCM_DIR, "project-configs.json");
 exports.GROUP_LOGS_FILE = path.join(exports.CCM_DIR, "group-logs.json");
 exports.MUSIC_CONFIG_FILE = path.join(exports.CCM_DIR, "music-config.json");
@@ -500,7 +504,8 @@ function parseGitStatus(workDir) {
     try {
         const status = (0, child_process_1.execFileSync)("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
             encoding: "utf-8", cwd: workDir, timeout: 5000,
-            stdio: ["pipe", "pipe", "pipe"]
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
         }).trimEnd();
         if (!status)
             return [];
@@ -573,7 +578,8 @@ function readHeadFileText(workDir, filePath) {
             cwd: workDir,
             timeout: 5000,
             maxBuffer: 8 * 1024 * 1024,
-            stdio: ["pipe", "pipe", "pipe"]
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
         });
         const tooLarge = buffer.length > exports.MAX_FILE_SNAPSHOT_BYTES;
         if (tooLarge)

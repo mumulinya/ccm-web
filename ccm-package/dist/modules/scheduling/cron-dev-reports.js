@@ -38,9 +38,12 @@ exports.generateAutoDevDailyReport = generateAutoDevDailyReport;
 exports.upsertAutoDevDailyReport = upsertAutoDevDailyReport;
 exports.generateAutoDevWeeklyReport = generateAutoDevWeeklyReport;
 exports.upsertAutoDevWeeklyReport = upsertAutoDevWeeklyReport;
+exports.buildAutoDevReportPreview = buildAutoDevReportPreview;
+exports.generateAndUpsertAutoDevReport = generateAndUpsertAutoDevReport;
 exports.normalizeAutoDevNotifyConfig = normalizeAutoDevNotifyConfig;
 exports.saveNormalizedNotifyConfig = saveNormalizedNotifyConfig;
 exports.dispatchAutoDevReport = dispatchAutoDevReport;
+exports.reconcileAutoDevReportDeliveryStatuses = reconcileAutoDevReportDeliveryStatuses;
 exports.tickAutoDevReportNotifications = tickAutoDevReportNotifications;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -50,8 +53,9 @@ const collaboration_1 = require("../collaboration/collaboration");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const cron_job_store_1 = require("./cron-job-store");
 const work_journal_1 = require("./work-journal");
-function localDateKey(date = new Date()) {
-    return `${date.getFullYear()}-${(0, cron_job_store_1.pad2)(date.getMonth() + 1)}-${(0, cron_job_store_1.pad2)(date.getDate())}`;
+const work_report_ai_1 = require("./work-report-ai");
+function localDateKey(date = new Date(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+    return (0, cron_job_store_1.dateKeyInTimezone)(date, (0, cron_job_store_1.normalizeCronTimezone)(timezone));
 }
 function parseReportDay(dateKey = localDateKey()) {
     const safe = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKey)) ? String(dateKey) : localDateKey();
@@ -279,14 +283,29 @@ function buildAutoDevReportMarkdown(report) {
     ];
     return lines.join("\n");
 }
-function generateAutoDevDailyReport(dateKey = localDateKey()) {
-    return (0, work_journal_1.generateEvidenceDailyReport)(dateKey);
+function generateAutoDevDailyReport(dateKey = localDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE, inputEvents) {
+    return (0, work_journal_1.generateEvidenceDailyReport)(dateKey, inputEvents, timezone);
 }
 function upsertAutoDevDailyReport(dateKey = localDateKey(), options = {}) {
     const existing = (0, db_1.loadDevReports)().find((item) => item.date === dateKey || item.id === dateKey);
-    if (options.force !== true && dateKey < localDateKey() && existing?.schema === "ccm-evidence-work-report-v2")
+    const timezone = (0, cron_job_store_1.normalizeCronTimezone)(options.timezone || (0, db_1.loadAutoDevNotifyConfig)()?.timezone || cron_job_store_1.DEFAULT_CRON_TIMEZONE);
+    if (options.force !== true && dateKey < localDateKey(new Date(), timezone) && existing?.schema === "ccm-evidence-work-report-v2")
         return existing;
-    const report = generateAutoDevDailyReport(dateKey);
+    const events = options.events || (0, work_journal_1.syncWorkJournal)().events;
+    const report = generateAutoDevDailyReport(dateKey, timezone, events);
+    const snapshot = (0, work_report_ai_1.buildWorkReportEvidenceSnapshotV3)(report, events, timezone);
+    const sameEvidence = existing?.evidence_checksum === snapshot.checksum;
+    Object.assign(report, {
+        report_schema_v3: "ccm-ai-work-report-v3",
+        evidence_snapshot: snapshot,
+        evidence_checksum: snapshot.checksum,
+        ai_summary: sameEvidence ? existing.ai_summary || null : existing?.ai_summary || null,
+        generation_receipt: sameEvidence ? existing.generation_receipt || null : existing?.generation_receipt || null,
+        generation_status: sameEvidence && existing?.ai_summary ? "generated" : existing?.ai_summary ? "stale" : "evidence_ready",
+        stale: !!existing?.ai_summary && !sameEvidence,
+        delivery_status: sameEvidence ? existing?.delivery_status || "not_sent" : "not_sent",
+        markdown: sameEvidence && existing?.ai_summary ? existing.markdown : report.markdown,
+    });
     const reports = (0, db_1.loadDevReports)().filter((item) => item.date !== report.date && item.id !== report.id);
     reports.unshift(report);
     (0, db_1.saveDevReports)(reports.slice(0, 120));
@@ -300,13 +319,8 @@ function addLocalDays(date, days) {
     next.setDate(next.getDate() + days);
     return next;
 }
-function reportWeekRange(dateKey = localDateKey()) {
-    const day = parseReportDay(dateKey);
-    const weekday = day.start.getDay();
-    const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
-    const start = addLocalDays(day.start, mondayOffset);
-    const end = addLocalDays(start, 6);
-    return { id: `week-${dateKeyFromDate(start)}`, start, end, start_key: dateKeyFromDate(start), end_key: dateKeyFromDate(end) };
+function reportWeekRange(dateKey = localDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+    return (0, work_journal_1.workWeekRange)(dateKey, timezone);
 }
 function uniqueBy(items, keyOf) {
     const result = [];
@@ -345,19 +359,118 @@ function buildWeeklyReportMarkdown(report) {
     ];
     return lines.join("\n");
 }
-function generateAutoDevWeeklyReport(dateKey = localDateKey()) {
-    return (0, work_journal_1.generateEvidenceWeeklyReport)(dateKey);
+function generateAutoDevWeeklyReport(dateKey = localDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE, inputEvents) {
+    return (0, work_journal_1.generateEvidenceWeeklyReport)(dateKey, inputEvents, timezone);
 }
 function upsertAutoDevWeeklyReport(dateKey = localDateKey(), options = {}) {
-    const range = (0, work_journal_1.workWeekRange)(dateKey);
+    const timezone = (0, cron_job_store_1.normalizeCronTimezone)(options.timezone || (0, db_1.loadAutoDevNotifyConfig)()?.timezone || cron_job_store_1.DEFAULT_CRON_TIMEZONE);
+    const range = (0, work_journal_1.workWeekRange)(dateKey, timezone);
     const existing = (0, db_1.loadDevWeeklyReports)().find((item) => item.id === range.id);
-    if (options.force !== true && range.end_key < localDateKey() && existing?.schema === "ccm-evidence-work-report-v2")
+    if (options.force !== true && range.end_key < localDateKey(new Date(), timezone) && existing?.schema === "ccm-evidence-work-report-v2")
         return existing;
-    const report = generateAutoDevWeeklyReport(dateKey);
+    const events = options.events || (0, work_journal_1.syncWorkJournal)().events;
+    const report = generateAutoDevWeeklyReport(dateKey, timezone, events);
+    const snapshot = (0, work_report_ai_1.buildWorkReportEvidenceSnapshotV3)(report, events, timezone);
+    const sameEvidence = existing?.evidence_checksum === snapshot.checksum;
+    Object.assign(report, {
+        report_schema_v3: "ccm-ai-work-report-v3",
+        evidence_snapshot: snapshot,
+        evidence_checksum: snapshot.checksum,
+        ai_summary: sameEvidence ? existing.ai_summary || null : existing?.ai_summary || null,
+        generation_receipt: sameEvidence ? existing.generation_receipt || null : existing?.generation_receipt || null,
+        generation_status: sameEvidence && existing?.ai_summary ? "generated" : existing?.ai_summary ? "stale" : "evidence_ready",
+        stale: !!existing?.ai_summary && !sameEvidence,
+        delivery_status: sameEvidence ? existing?.delivery_status || "not_sent" : "not_sent",
+        markdown: sameEvidence && existing?.ai_summary ? existing.markdown : report.markdown,
+    });
     const reports = (0, db_1.loadDevWeeklyReports)().filter((item) => item.id !== report.id);
     reports.unshift(report);
     (0, db_1.saveDevWeeklyReports)(reports.slice(0, 80));
     return report;
+}
+function saveGeneratedReport(kind, report) {
+    if (kind === "weekly") {
+        const reports = (0, db_1.loadDevWeeklyReports)().filter((item) => item.id !== report.id);
+        reports.unshift(report);
+        (0, db_1.saveDevWeeklyReports)(reports.slice(0, 80));
+    }
+    else {
+        const reports = (0, db_1.loadDevReports)().filter((item) => item.date !== report.date && item.id !== report.id);
+        reports.unshift(report);
+        (0, db_1.saveDevReports)(reports.slice(0, 120));
+    }
+    return report;
+}
+function buildAutoDevReportPreview(kind, dateKey, timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+    const normalizedTimezone = (0, cron_job_store_1.normalizeCronTimezone)(timezone);
+    const events = (0, work_journal_1.readWorkJournalEvents)();
+    const report = kind === "weekly"
+        ? generateAutoDevWeeklyReport(dateKey, normalizedTimezone, events)
+        : generateAutoDevDailyReport(dateKey, normalizedTimezone, events);
+    const snapshot = (0, work_report_ai_1.buildWorkReportEvidenceSnapshotV3)(report, events, normalizedTimezone);
+    return {
+        ...report,
+        report_schema_v3: "ccm-ai-work-report-v3",
+        evidence_snapshot: snapshot,
+        evidence_checksum: snapshot.checksum,
+        ai_summary: null,
+        generation_receipt: null,
+        generation_status: "evidence_ready",
+        stale: false,
+        delivery_status: "not_sent",
+    };
+}
+async function generateAndUpsertAutoDevReport(kind, dateKey = localDateKey(), options = {}) {
+    const config = normalizeAutoDevNotifyConfig((0, db_1.loadAutoDevNotifyConfig)());
+    const timezone = (0, cron_job_store_1.normalizeCronTimezone)(options.timezone || config.timezone);
+    const events = (0, work_journal_1.syncWorkJournal)().events;
+    const report = kind === "weekly"
+        ? generateAutoDevWeeklyReport(dateKey, timezone, events)
+        : generateAutoDevDailyReport(dateKey, timezone, events);
+    const snapshot = (0, work_report_ai_1.buildWorkReportEvidenceSnapshotV3)(report, events, timezone);
+    const existing = kind === "weekly"
+        ? (0, db_1.loadDevWeeklyReports)().find((item) => item.id === report.id)
+        : (0, db_1.loadDevReports)().find((item) => item.id === report.id || item.date === report.date);
+    if (options.force !== true && existing?.generation_status === "generated" && existing?.evidence_checksum === snapshot.checksum && existing?.ai_summary) {
+        return existing;
+    }
+    const generating = saveGeneratedReport(kind, {
+        ...report,
+        report_schema_v3: "ccm-ai-work-report-v3",
+        evidence_snapshot: snapshot,
+        evidence_checksum: snapshot.checksum,
+        ai_summary: existing?.ai_summary || null,
+        generation_receipt: existing?.generation_receipt || null,
+        generation_status: "generating",
+        generation_error: "",
+        stale: !!existing?.ai_summary,
+        delivery_status: "not_sent",
+    });
+    try {
+        const generated = await (0, work_report_ai_1.generateWorkReportSummaryV3)(snapshot, { modelCall: options.modelCall });
+        const markdown = (0, work_report_ai_1.renderWorkReportSummaryMarkdownV3)(generated.summary, snapshot);
+        return saveGeneratedReport(kind, {
+            ...generating,
+            ai_summary: generated.summary,
+            generation_receipt: generated.receipt,
+            generation_status: "generated",
+            generation_error: "",
+            stale: false,
+            markdown,
+            generated_at: generated.receipt.generated_at,
+        });
+    }
+    catch (error) {
+        const failed = saveGeneratedReport(kind, {
+            ...generating,
+            generation_status: "generation_failed",
+            generation_error: String(error?.message || error || "AI总结生成失败").slice(0, 400),
+            generation_failure_receipt: error?.semanticDecisionReceipt || null,
+            stale: !!generating.ai_summary,
+        });
+        error.report = failed;
+        throw error;
+    }
 }
 function normalizeClock(value, fallback) {
     const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
@@ -372,6 +485,7 @@ function normalizeAutoDevNotifyConfig(input = {}) {
         weekly_enabled: input.weekly_enabled === true,
         weekly_day: Math.max(0, Math.min(6, Number(input.weekly_day ?? 5))),
         weekly_time: normalizeClock(input.weekly_time, "18:40"),
+        timezone: (0, cron_job_store_1.normalizeCronTimezone)(input.timezone || cron_job_store_1.DEFAULT_CRON_TIMEZONE),
         target_type: "user",
         target_id: "",
         retry_limit: Math.max(1, Math.min(10, Number(input.retry_limit || 3))),
@@ -399,39 +513,82 @@ function saveNormalizedNotifyConfig(config) {
 }
 async function dispatchAutoDevReport(kind, options = {}) {
     let config = normalizeAutoDevNotifyConfig((0, db_1.loadAutoDevNotifyConfig)());
-    const dateKey = String(options.date || localDateKey());
-    const report = kind === "weekly" ? upsertAutoDevWeeklyReport(dateKey) : upsertAutoDevDailyReport(dateKey);
+    const dateKey = String(options.date || localDateKey(new Date(), config.timezone));
+    let report;
+    try {
+        report = await generateAndUpsertAutoDevReport(kind, dateKey, { force: options.force === true, timezone: config.timezone, modelCall: options.modelCall });
+    }
+    catch (error) {
+        const now = new Date().toISOString();
+        const prefix = kind === "weekly" ? "weekly" : "daily";
+        const key = kind === "weekly" ? (0, work_journal_1.workWeekRange)(dateKey, config.timezone).id : dateKey;
+        const previousAttemptKey = config[`${prefix}_attempt_key`];
+        const retryCount = previousAttemptKey === key ? Number(config[`${prefix}_retry_count`] || 0) + 1 : 1;
+        config = saveNormalizedNotifyConfig({
+            ...config,
+            [`${prefix}_attempt_key`]: key,
+            [`${prefix}_retry_count`]: retryCount,
+            [`last_${prefix}_attempt_at`]: now,
+            [`last_${prefix}_status`]: "generation_failed",
+            [`last_${prefix}_result`]: String(error?.message || "AI总结生成失败").slice(0, 300),
+        });
+        return { success: false, kind, report: error?.report || null, config, status: "generation_failed", retryable: retryCount < config.retry_limit, error: String(error?.message || error) };
+    }
+    if (report.generation_status !== "generated" || !report.ai_summary || report.stale) {
+        return { success: false, kind, report, config, status: report.generation_status || "generation_failed", retryable: true, error: "AI报告尚未通过证据校验" };
+    }
     const targetType = "webhook";
     const targetId = "";
     const title = kind === "weekly" ? `开发周报 ${report.start_date} 至 ${report.end_date}` : `开发日报 ${report.date}`;
-    const result = await (0, collaboration_1.sendFeishuReportMessage)({ title, markdown: report.markdown });
+    const result = await (0, feishu_channel_1.enqueueFeishuReportDelivery)({ kind, reportId: report.id, reportChecksum: report.generation_receipt?.summary_checksum || report.evidence_checksum, title, markdown: report.markdown });
     const now = new Date().toISOString();
     const key = kind === "weekly" ? report.id : report.date;
     const prefix = kind === "weekly" ? "weekly" : "daily";
     const retryKey = `${prefix}_retry_count`;
     const previousAttemptKey = config[`${prefix}_attempt_key`];
-    const retryCount = previousAttemptKey === key ? Number(config[retryKey] || 0) + (result.success ? 0 : 1) : (result.success ? 0 : 1);
-    const historyItem = { id: `${kind}-${Date.now()}`, kind, report_id: report.id, attempted_at: now, success: !!result.success, target_type: targetType, target_id: result.target_id || targetId, message_id: result.message_id || "", result: result.success ? "发送成功" : result.error || "发送失败" };
-    (0, feishu_channel_1.recordFeishuReportDelivery)({
-        kind,
-        reportId: report.id,
-        success: !!result.success,
-        attemptedAt: now,
-        messageId: result.message_id || "",
-        error: result.error || "",
-        targetType,
-    });
+    const deliveryStatus = String(result.status || (result.success ? "sent" : result.queued ? "queued" : "failed"));
+    const countedFailure = deliveryStatus === "failed";
+    const retryCount = previousAttemptKey === key ? Number(config[retryKey] || 0) + (countedFailure ? 1 : 0) : (countedFailure ? 1 : 0);
+    const historyItem = { id: `${kind}-${Date.now()}`, kind, report_id: report.id, attempted_at: now, success: !!result.success, status: deliveryStatus, target_type: targetType, target_id: result.delivery?.webhook_fingerprint || targetId, message_id: result.delivery?.id || "", result: result.success ? "发送成功" : deliveryStatus === "queued" ? "已进入飞书持久发件箱" : deliveryStatus === "delivery_unknown" ? "投递结果未知，等待人工确认" : result.delivery?.error || "发送失败" };
+    saveGeneratedReport(kind, { ...report, delivery_status: deliveryStatus, delivery_id: result.delivery?.id || report.delivery_id || "", delivery_updated_at: now });
     config = saveNormalizedNotifyConfig({
         ...config,
         [`${prefix}_attempt_key`]: key,
         [retryKey]: result.success ? 0 : retryCount,
         [`last_${prefix}_attempt_at`]: now,
-        [`last_${prefix}_status`]: result.success ? "sent" : "failed",
+        [`last_${prefix}_status`]: deliveryStatus,
         [`last_${prefix}_result`]: historyItem.result,
         ...(result.success ? { [`last_${prefix}_sent_key`]: key } : {}),
         history: [...config.history, historyItem],
     });
-    return { ...result, kind, report, config, history: historyItem };
+    return { ...result, success: result.success === true || result.queued === true, delivered: result.success === true, kind, report: { ...report, delivery_status: deliveryStatus, delivery_id: result.delivery?.id || "" }, config, history: historyItem };
+}
+function reconcileAutoDevReportDeliveryStatuses() {
+    let changed = 0;
+    const reconcile = (kind, reports) => reports.map(report => {
+        if (!report?.delivery_id)
+            return report;
+        const delivery = (0, feishu_channel_1.getFeishuReportDelivery)(report.delivery_id);
+        if (!delivery || report.delivery_status === delivery.status)
+            return report;
+        changed += 1;
+        return { ...report, delivery_status: delivery.status, delivery_updated_at: delivery.last_attempt_at || delivery.created_at || new Date().toISOString(), delivery_error: delivery.error || "" };
+    });
+    const daily = reconcile("daily", (0, db_1.loadDevReports)());
+    const weekly = reconcile("weekly", (0, db_1.loadDevWeeklyReports)());
+    if (changed) {
+        (0, db_1.saveDevReports)(daily.slice(0, 120));
+        (0, db_1.saveDevWeeklyReports)(weekly.slice(0, 80));
+        const config = normalizeAutoDevNotifyConfig((0, db_1.loadAutoDevNotifyConfig)());
+        const dailyReport = daily.find((item) => item.date === config.daily_attempt_key || item.id === config.daily_attempt_key);
+        const weeklyReport = weekly.find((item) => item.id === config.weekly_attempt_key);
+        saveNormalizedNotifyConfig({
+            ...config,
+            ...(dailyReport?.delivery_status ? { last_daily_status: dailyReport.delivery_status, ...(dailyReport.delivery_status === "sent" ? { last_daily_sent_key: dailyReport.date || dailyReport.id } : {}) } : {}),
+            ...(weeklyReport?.delivery_status ? { last_weekly_status: weeklyReport.delivery_status, ...(weeklyReport.delivery_status === "sent" ? { last_weekly_sent_key: weeklyReport.id } : {}) } : {}),
+        });
+    }
+    return { changed };
 }
 let reportNotificationRunning = false;
 function clockReached(now, clock) {
@@ -446,17 +603,22 @@ async function tickAutoDevReportNotifications(now = new Date()) {
     if (reportNotificationRunning)
         return;
     const config = normalizeAutoDevNotifyConfig((0, db_1.loadAutoDevNotifyConfig)());
-    const today = localDateKey(now);
-    const week = reportWeekRange(today);
+    const today = localDateKey(now, config.timezone);
+    const week = reportWeekRange(today, config.timezone);
+    const zonedNow = (0, cron_job_store_1.zonedDateParts)(now, config.timezone);
     const jobs = [];
     const dailyRetries = config.daily_attempt_key === today ? config.daily_retry_count : 0;
     const weeklyRetries = config.weekly_attempt_key === week.id ? config.weekly_retry_count : 0;
     const dailyRetryReady = config.daily_attempt_key !== today || retryReady(config.last_daily_attempt_at, config.retry_interval_minutes, now);
     const weeklyRetryReady = config.weekly_attempt_key !== week.id || retryReady(config.last_weekly_attempt_at, config.retry_interval_minutes, now);
-    if (config.daily_enabled && config.last_daily_sent_key !== today && clockReached(now, config.daily_time)
+    const reportClockReached = (clock) => {
+        const [hour, minute] = normalizeClock(clock, "18:30").split(":").map(Number);
+        return zonedNow.hour * 60 + zonedNow.minute >= hour * 60 + minute;
+    };
+    if (config.daily_enabled && config.last_daily_sent_key !== today && !(config.daily_attempt_key === today && config.last_daily_status === "delivery_unknown") && reportClockReached(config.daily_time)
         && dailyRetries < config.retry_limit && dailyRetryReady)
         jobs.push("daily");
-    if (config.weekly_enabled && now.getDay() === config.weekly_day && config.last_weekly_sent_key !== week.id && clockReached(now, config.weekly_time)
+    if (config.weekly_enabled && zonedNow.weekday === config.weekly_day && config.last_weekly_sent_key !== week.id && !(config.weekly_attempt_key === week.id && config.last_weekly_status === "delivery_unknown") && reportClockReached(config.weekly_time)
         && weeklyRetries < config.retry_limit && weeklyRetryReady)
         jobs.push("weekly");
     if (!jobs.length)

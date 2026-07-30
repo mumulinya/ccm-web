@@ -52,6 +52,12 @@ export declare function verifyBrowserCsrf(req: IncomingMessage, auth?: {
 export declare function roleCapabilities(role: AuthRole): AuthCapability[];
 export declare function hasAuthCapability(role: AuthRole, capability: AuthCapability): boolean;
 export declare function browserApiAccessAllowed(req: IncomingMessage): boolean;
+export declare function listActiveLocalAuthUsers(): {
+    id: string;
+    username: string;
+    role: AuthRole;
+}[];
+export declare function listActiveAdminUserIds(): string[];
 export declare function localAuthPublicState(req: IncomingMessage): {
     authenticated: boolean;
     registration_enabled: boolean;

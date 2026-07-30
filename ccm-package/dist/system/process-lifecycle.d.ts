@@ -13,7 +13,7 @@ export declare function initializeProcessLifecycle(): any;
 export declare function touchProcessLifecycle(): boolean;
 export declare function markProcessShutdown(input?: any): any;
 export declare function recordProcessFault(error: any, type?: string): void;
-export declare function installProcessLifecycleFaultHandlers(): void;
+export declare function installProcessLifecycleFaultHandlers(onFatal?: (reason: any, type: string) => void): void;
 export declare function getProcessLifecycleSnapshot(options?: any): {
     current: any;
     events: any[];

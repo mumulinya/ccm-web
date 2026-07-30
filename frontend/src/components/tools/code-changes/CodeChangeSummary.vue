@@ -14,7 +14,7 @@ defineEmits(['open-replay', 'view-residuals', 'cleanup-residuals'])
 const latestTask = computed(() => props.context?.tasks?.[0] || null)
 const testAgent = computed(() => props.context?.latestTestAgent || null)
 const exactAttribution = computed(() => props.context?.attribution === 'exact')
-const originLabel = computed(() => exactAttribution.value ? '任务来源' : latestTask.value ? '最近项目任务（未确认归因）' : '任务来源')
+const originLabel = computed(() => exactAttribution.value ? '任务来源' : latestTask.value ? '历史任务关联（当前内容未核验）' : '任务来源')
 const verificationLabel = computed(() => {
   const exactTestAgent = testAgent.value && (testAgent.value.association === 'exact' || exactAttribution.value && (!testAgent.value.taskId || testAgent.value.taskId === latestTask.value?.taskId))
   if (exactTestAgent) return /pass|accept|completed/i.test(testAgent.value.status + testAgent.value.recommendation) ? 'TestAgent 已通过' : 'TestAgent 需复检'
@@ -70,7 +70,7 @@ const verificationLabel = computed(() => {
           <span class="detail-label">{{ originLabel }}</span>
           <strong>{{ latestTask?.title || '当前改动没有可验证的任务归因' }}</strong>
           <small v-if="latestTask">
-            {{ latestTask.agent }} · {{ context.attribution === 'exact' ? '文件记录精确匹配' : '按项目匹配的最近任务' }}
+            {{ latestTask.agent }} · {{ context.attribution === 'exact' ? 'HEAD与文件内容证据一致' : latestTask.matchingFiles?.length ? '仅文件路径曾出现，不能证明当前改动已验收' : '按项目匹配的最近任务' }}
           </small>
           <small v-else>手工改动或第三方工具尚未写入任务链记录</small>
         </div>

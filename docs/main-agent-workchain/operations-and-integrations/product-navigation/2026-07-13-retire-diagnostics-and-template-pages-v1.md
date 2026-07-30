@@ -1,5 +1,9 @@
 # 系统自检与对话模板页面下线 V1
 
+> 历史说明：本文记录 2026-07-13 的阶段性决策。模板兼容链已在后续生产化收口中正式下线，当前规则以
+> `docs/confirmed-business-processes/SLASH-COMMANDS-AND-SHARED-FILES-V2.md` 为准；`/api/templates`
+> 现在统一返回 `410 TEMPLATE_FEATURE_REMOVED`。
+
 ## 目标
 
 精简普通用户可见的导航与页面，不再将系统自检和对话模板作为独立工作台页面，同时保留主 Agent 与现有业务仍需要的底层能力。

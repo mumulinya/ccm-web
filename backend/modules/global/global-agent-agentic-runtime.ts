@@ -20,6 +20,10 @@ import {
 import { saveRun as saveGlobalAgentRun } from "../../agents/global/global-agent-run-store";
 import { appendTraceEvent } from "../../system/reliability-ledger";
 import { buildGlobalWriteAuthorizationReceipt } from "../../agents/global/global-agent-authorization";
+import {
+  buildSharedFilesContextV2,
+  migrateLegacyGlobalSharedDirectoryV2,
+} from "../tools/shared-files-v2";
 
 type LocalIntentResult = any;
 
@@ -68,6 +72,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     "tools",
     "global_memory",
     "global_knowledge",
+    "global_shared_files",
     "session_continuity",
     "memory_context_boundary",
     "context_source_manifest",
@@ -102,7 +107,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       if (task?.group_session_id || task?.groupSessionId || task?.description || task?.content || task?.memory) issues.push("global_context_group_task_payload_present");
     }
     const manifestEntries = Array.isArray(context?.context_source_manifest?.entries) ? context.context_source_manifest.entries : [];
-    const expectedSources = ["global_agent_memory", "global_agent_session", "global_knowledge", "routing_directory", "global_task_state", "runtime_capability_directory"];
+    const expectedSources = ["global_agent_memory", "global_agent_session", "global_knowledge", "global_shared_files", "routing_directory", "global_task_state", "runtime_capability_directory"];
     if (expectedSources.some(source => !manifestEntries.some((entry: any) => entry.source === source && entry.allowed === true))) issues.push("global_context_source_manifest_incomplete");
     if (manifestEntries.some((entry: any) => !expectedSources.includes(String(entry?.source || "")))) issues.push("global_context_source_manifest_unknown_source");
     if (manifestEntries.some((entry: any) => entry.allowed !== true)) issues.push("global_context_source_manifest_contains_unapproved_source");
@@ -180,6 +185,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       executionId: String(options.executionId || options.execution_id || ""),
       source: String(options.source || "global-agent-context"),
     });
+    migrateLegacyGlobalSharedDirectoryV2();
+    const globalSharedFiles = buildSharedFilesContextV2("global", "global", {
+      maxTokens: 32_000,
+      title: "以下是全局 Agent 已授权共享文件。使用其中事实时必须引用文件和分片：",
+    });
     const context: any = {
       projects: safeProjectRows(),
       groups: groups.map((group: any) => ({ id: group.id, name: group.name, members: (group.members || []).map((member: any) => ({ project: member.project, agent: member.agent })) })),
@@ -217,6 +227,17 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
       }) : "",
       global_knowledge: options.knowledgeContext || options.knowledge_context || "",
+      global_shared_files: {
+        context: globalSharedFiles.context,
+        manifest_checksum: globalSharedFiles.checksum,
+        complete: globalSharedFiles.complete,
+        files: globalSharedFiles.files.map((file: any) => ({
+          id: file.id,
+          name: file.name,
+          checksum: file.checksum,
+          chunks: file.chunks?.length || 0,
+        })),
+      },
       session_continuity: sessionId && options.includeSessionContinuity !== false && options.include_session_continuity !== false
         ? buildGlobalAgentSessionContinuation(sessionId, { persistMicroCompactReceipt: true })
         : null,
@@ -235,6 +256,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           { source: "global_agent_memory", allowed: true },
           { source: "global_agent_session", allowed: true },
           { source: "global_knowledge", allowed: true },
+          { source: "global_shared_files", allowed: true },
           { source: "routing_directory", allowed: true },
           { source: "global_task_state", allowed: true },
           { source: "runtime_capability_directory", allowed: true },
@@ -929,10 +951,9 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       } else if (name === "git_review") {
         observation = await postLocalApi(baseUrl, "/api/global-agent/git-review", { project: args.project });
       } else if (name === "git_commit") {
-        const files = Array.isArray(args.files) ? args.files : [];
-        observation = await postLocalApi(baseUrl, "/api/git/commit", { project: args.project, message: args.message || "chore: 由全局 Agent 提交变更", files, allFiles: files.length === 0, confirmed: true, action: "commit" });
-      } else if (name === "create_template") {
-        observation = await postLocalApi(baseUrl, "/api/templates", { name: args.name, category: args.category || "custom", prompt: args.content || args.prompt || "" });
+        const files = Array.isArray(args.files) ? args.files.map((item: any) => String(item || "").trim()).filter(Boolean) : [];
+        if (!files.length) throw new Error("全局 Agent提交代码必须提供精确文件清单，禁止隐式提交整个工作区");
+        observation = await postLocalApi(baseUrl, "/api/git/commit", { project: args.project, message: args.message || "chore: 由全局 Agent 提交变更", files, all_files: false, confirmed: true, action: "commit", expected_snapshot_checksum: args.expected_snapshot_checksum || "" });
       } else {
         let action: any = { type: name, params: { ...(args || {}) } };
         if (GLOBAL_MANAGEMENT_ACTIONS[name]) {
@@ -1064,29 +1085,8 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           input.onEvent?.(event);
         }
       : undefined;
-    let globalKnowledgeContext = "";
-    try {
-      globalKnowledgeContext = (await searchAgentKnowledge(input.message, { role: "global-agent" }, { limit: 5, maxContextChars: 14000 })).context;
-    } catch (error: any) {
-      console.warn(`[全局知识检索] 已使用无知识上下文继续：${error?.message || error}`);
-    }
-    const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: runtimeEventSink, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
     if (!/feishu/i.test(input.source || "")) {
       ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: visibleUserMessage, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
-    }
-    const compactionFixedContext = buildAgenticContext(input.message, sessionId, {
-      includeSessionContinuity: false,
-      recordMemoryMetric: false,
-      knowledgeContext: globalKnowledgeContext,
-    });
-    const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
-      reason: "auto_model",
-      currentRequest: { role: "user", content: input.message },
-      fixedContext: compactionFixedContext,
-      tools: GLOBAL_AGENT_TOOL_SPECS,
-    });
-    if (compaction?.reason === "circuit_breaker") {
-      throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
     }
     const requestedClarificationRunId = String(input.clarificationRunId || "").trim();
     let clarificationCandidate: any = null;
@@ -1112,6 +1112,43 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     if (input.readOnly === true && workflowDecision.actionRequired === true) {
       throw Object.assign(new Error("当前 Viewer 账户仅允许只读问答；这条需求需要创建任务或执行写入操作，请联系 Operator 或 Admin"), { code: "VIEWER_EXECUTION_FORBIDDEN" });
     }
+    const directReply = !clarificationCandidate
+      && workflowDecision.mode === "answer"
+      && workflowDecision.directReplyReady === true
+      && !!String(workflowDecision.directReply || "").trim()
+      && workflowDecision.actionRequired === false
+      && workflowDecision.readAction === "none"
+      && workflowDecision.continuationKind === "new_task"
+      && workflowDecision.targetRefs.length === 0
+      && workflowDecision.selectedSkills.length === 0
+      && workflowDecision.clarificationQuestions.length === 0
+      && Number((input.sourceIngestion as any)?.source_count || (input.sourceIngestion as any)?.sources?.length || 0) === 0
+      ? String(workflowDecision.directReply).trim()
+      : "";
+    let globalKnowledgeContext = "";
+    let compactionFixedContext: any = null;
+    if (!directReply) {
+      try {
+        globalKnowledgeContext = (await searchAgentKnowledge(input.message, { role: "global-agent" }, { limit: 5, maxContextChars: 14000 })).context;
+      } catch (error: any) {
+        console.warn(`[全局知识检索] 已使用无知识上下文继续：${error?.message || error}`);
+      }
+      compactionFixedContext = buildAgenticContext(input.message, sessionId, {
+        includeSessionContinuity: false,
+        recordMemoryMetric: false,
+        knowledgeContext: globalKnowledgeContext,
+      });
+      const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
+        reason: "auto_model",
+        currentRequest: { role: "user", content: input.message },
+        fixedContext: compactionFixedContext,
+        tools: GLOBAL_AGENT_TOOL_SPECS,
+      });
+      if (compaction?.reason === "circuit_breaker") {
+        throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
+      }
+    }
+    const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: runtimeEventSink, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
     const waitingClarification = clarificationCandidate && workflowDecision.continuationKind !== "new_task"
       ? clarificationCandidate
       : null;
@@ -1173,6 +1210,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           turnId: input.turnId,
           queueScope: input.queueScope,
           workflowDecision,
+          directReply,
           maxSteps: 10,
           timeoutMs: 12 * 60 * 1000,
         }, runtime));
@@ -1186,53 +1224,57 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     if (input.onEvent) {
       const canonicalReply = globalRunVisibleReply(run, "我已整理处理结果，技术细节已放入技术详情。");
       if (canonicalReply.trim()) {
-        let emittedVisibleDelta = false;
-        try {
-          const config = loadOrchestratorConfig();
-          const renderMessages = [
-            {
-              role: "system",
-              content: "你是 CCM 的正式回复输出层。请完整保留给定正式回复中的事实、结论、风险、未完成事项、文件和验证结果，仅改善自然语言可读性。不得增加未提供的事实，不得输出 JSON、协议字段、分析过程或代码围栏，只输出面向用户的最终正文。",
-            },
-            {
-              role: "user",
-              content: JSON.stringify({ user_request: visibleUserMessage, official_reply: canonicalReply }),
-            },
-          ];
-          (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(renderMessages, String(run.session_id || ""));
-          const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
-          const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
-          const renderedReply = await callGlobalModelWithRetry(config, renderMessages, {
-            providerContextCache: {
-              scope: "global",
-              scopeId: String(run.session_id || ""),
-              sessionId: String(run.session_id || ""),
-              generation: Number((run as any).generation || 0),
-              boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
-              source: "global_final_reply",
-            },
-            onProviderContextCache: (receipt: any) => {
-              (run as any).latest_provider_context_cache = receipt;
-            },
-            onDelta: (delta: string) => {
-              if (!delta) return;
-              emittedVisibleDelta = true;
-              input.onEvent?.({ type: "text", text: delta, run_id: run.id, trace_id: run.trace_id });
-            },
-            onUsage: (usage: any) => {
-              (run as any).latest_context_usage = usage;
-              accumulateGlobalAgentRunUsage(run, usage);
-            },
-          });
-          if (String(renderedReply || "").trim()) {
-            run.final_reply = String(renderedReply).trim().slice(0, 12000);
-            run.updated_at = new Date().toISOString();
-            saveGlobalAgentRun(run, runtime.persist !== false);
-          }
-        } catch (error: any) {
-          console.warn(`[全局 Agent] 正式回复流式输出失败：${error?.message || error}`);
-          if (!emittedVisibleDelta) {
-            input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, fallback: true });
+        if ((run as any).direct_reply_fast_path === true) {
+          input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, direct_reply: true });
+        } else {
+          let emittedVisibleDelta = false;
+          try {
+            const config = loadOrchestratorConfig();
+            const renderMessages = [
+              {
+                role: "system",
+                content: "你是 CCM 的正式回复输出层。请完整保留给定正式回复中的事实、结论、风险、未完成事项、文件和验证结果，仅改善自然语言可读性。不得增加未提供的事实，不得输出 JSON、协议字段、分析过程或代码围栏，只输出面向用户的最终正文。",
+              },
+              {
+                role: "user",
+                content: JSON.stringify({ user_request: visibleUserMessage, official_reply: canonicalReply }),
+              },
+            ];
+            (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(renderMessages, String(run.session_id || ""));
+            const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
+            const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
+            const renderedReply = await callGlobalModelWithRetry(config, renderMessages, {
+              providerContextCache: {
+                scope: "global",
+                scopeId: String(run.session_id || ""),
+                sessionId: String(run.session_id || ""),
+                generation: Number((run as any).generation || 0),
+                boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
+                source: "global_final_reply",
+              },
+              onProviderContextCache: (receipt: any) => {
+                (run as any).latest_provider_context_cache = receipt;
+              },
+              onDelta: (delta: string) => {
+                if (!delta) return;
+                emittedVisibleDelta = true;
+                input.onEvent?.({ type: "text", text: delta, run_id: run.id, trace_id: run.trace_id });
+              },
+              onUsage: (usage: any) => {
+                (run as any).latest_context_usage = usage;
+                accumulateGlobalAgentRunUsage(run, usage);
+              },
+            });
+            if (String(renderedReply || "").trim()) {
+              run.final_reply = String(renderedReply).trim().slice(0, 12000);
+              run.updated_at = new Date().toISOString();
+              saveGlobalAgentRun(run, runtime.persist !== false);
+            }
+          } catch (error: any) {
+            console.warn(`[全局 Agent] 正式回复流式输出失败：${error?.message || error}`);
+            if (!emittedVisibleDelta) {
+              input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, fallback: true });
+            }
           }
         }
       }
@@ -1261,6 +1303,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
             trace_id: run.trace_id,
             mission_id: run.mission_id,
           }],
+          extractMemory: (run as any).direct_reply_fast_path !== true,
         });
       } catch (error: any) {
         console.warn(`[全局记忆] Agentic 结果写入失败：${error?.message || error}`);
@@ -1273,10 +1316,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         model: String((run as any).latest_context_usage?.model || loadOrchestratorConfig()?.model || ""),
         anchorMessageId: assistantMessageId,
         currentRequest: { role: "user", content: input.message },
-        fixedContext: compactionFixedContext,
-        tools: GLOBAL_AGENT_TOOL_SPECS,
+        fixedContext: compactionFixedContext || { direct_reply_fast_path: true },
+        tools: (run as any).direct_reply_fast_path === true ? [] : GLOBAL_AGENT_TOOL_SPECS,
         modelVisiblePayload: (run as any).latest_model_visible_payload || null,
         contextComponents: (() => {
+          if ((run as any).direct_reply_fast_path === true) return { skills: [], mcpTools: [] };
           const authorizedTools = buildGlobalAgentToolRuntimeContext({ taskId: run.id, source: run.source || "global-agent-usage" });
           return {
             skills: authorizedTools.catalog.skills.map((skill: any) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill: any) => skill.name),

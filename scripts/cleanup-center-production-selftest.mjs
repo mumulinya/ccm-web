@@ -40,9 +40,10 @@ try {
   assert.equal(summary.response.ok, true)
   assert.equal(summary.data.success, true)
   assert.deepEqual(summary.data.policy.retention_options, [7, 30, 90, 0])
-  assert.ok(Array.isArray(summary.data.cards) && summary.data.cards.length === 6)
+  assert.ok(Array.isArray(summary.data.cards) && summary.data.cards.length >= 7)
   assert.ok(Array.isArray(summary.data.history))
   assert.equal(summary.data.cards.some(card => card.id === 'quality_evidence'), true)
+  assert.ok(summary.data.storage?.index)
   checks.push({ name: 'summary exposes storage, retention policy, quality evidence and cleanup history', pass: true })
 
   const preview = await request('/api/cleanup/preview', {

@@ -47,7 +47,7 @@ for (const key of ['aiRecommendationEnabled', 'aiEmotionEnabled', 'aiAutoSelectE
   assert.match(settings, new RegExp(key), `${key} should have an independent switch`)
 }
 const recommendationGate = playbackDecision.indexOf('input.aiRecommendationEnabled === false')
-const candidateSearch = playbackDecision.indexOf('const candidates = await searchCandidates(intent)')
+const candidateSearch = playbackDecision.indexOf('const searched = await searchCandidates(intent)')
 assert.ok(recommendationGate >= 0 && candidateSearch > recommendationGate, 'AI recommendation must reject mood/genre requests before candidate search')
 const selectionGate = playbackDecision.indexOf('input.aiAutoSelectEnabled === false')
 const selectionRequest = playbackDecision.indexOf('const selection = await selectMusicTrack')

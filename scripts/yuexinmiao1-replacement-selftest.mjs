@@ -21,7 +21,7 @@ for (const target of roots) {
 }
 
 const checks = [
-  ['前端使用指定来源图集', menu.includes("spritesheetPath: 'yuexinmiao1/spritesheet.webp'")],
+  ['前端使用指定来源图集', menu.includes("sourceUrl: 'https://codex-pet.org/zh/pets/yuexinmiao1/'") && sprite.includes('spritesheetPath')],
   ['前端支持混合补充动作', sprite.includes('useSupplementalState')],
   ['九行图集动态计算背景', v2.includes('Math.max(9, props.rows)')],
   ['桌宠注册内置图集元数据', desktopMain.includes('BUILTIN_PET_SKINS')],

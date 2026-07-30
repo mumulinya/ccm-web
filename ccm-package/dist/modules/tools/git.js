@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.inspectGitRemoteState = inspectGitRemoteState;
+exports.inspectGitRemoteStateAsync = inspectGitRemoteStateAsync;
 exports.normalizeRepoPath = normalizeRepoPath;
 exports.resolveSafeProjectFile = resolveSafeProjectFile;
 exports.parseGitStatus = parseGitStatus;
@@ -46,6 +47,8 @@ const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
+const test_agent_runner_1 = require("../collaboration/test-agent-runner");
+const git_workspace_runtime_1 = require("./git-workspace-runtime");
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const LARGE_FILE_BYTES = 1024 * 1024;
 const REMOTE_GIT_TIMEOUT_MS = 30_000;
@@ -269,8 +272,54 @@ function inspectGitRemoteState(workDir, changedFiles = -1) {
         pullTarget: upstream || (remoteUrl && branch ? `origin/${branch}` : ""),
     };
 }
+async function inspectGitRemoteStateAsync(workDir, changedFiles = -1) {
+    const branchResult = await (0, git_workspace_runtime_1.tryGitCommand)(workDir, ["branch", "--show-current"]);
+    const branch = branchResult.ok ? branchResult.output : "";
+    const remoteResult = await (0, git_workspace_runtime_1.tryGitCommand)(workDir, ["remote", "get-url", "origin"]);
+    const remoteUrl = remoteResult.ok ? sanitizeRemoteUrl(remoteResult.output) : "";
+    const upstreamResult = await (0, git_workspace_runtime_1.tryGitCommand)(workDir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+    const upstream = upstreamResult.ok ? upstreamResult.output : "";
+    const tracking = !upstream && branch && remoteUrl
+        ? await (0, git_workspace_runtime_1.tryGitCommand)(workDir, ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`])
+        : { ok: false, output: "" };
+    const remoteTrackingRef = tracking.ok ? `origin/${branch}` : "";
+    const comparisonRef = upstream || remoteTrackingRef;
+    let ahead = 0;
+    let behind = 0;
+    if (comparisonRef) {
+        const counts = await (0, git_workspace_runtime_1.tryGitCommand)(workDir, ["rev-list", "--left-right", "--count", `HEAD...${comparisonRef}`]);
+        const match = counts.output.match(/^(\d+)\s+(\d+)$/);
+        if (counts.ok && match) {
+            ahead = Number(match[1]);
+            behind = Number(match[2]);
+        }
+    }
+    const changed = changedFiles >= 0
+        ? changedFiles
+        : parseGitStatus((await (0, git_workspace_runtime_1.tryGitCommand)(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])).output).length;
+    const detached = !branch;
+    return {
+        remoteUrl,
+        remoteName: remoteUrl ? "origin" : "",
+        branch: branch || "detached HEAD",
+        detached,
+        upstream,
+        comparisonRef,
+        ahead,
+        behind,
+        dirty: changed > 0,
+        changedFiles: changed,
+        canFetch: !!remoteUrl,
+        canPull: !!remoteUrl && !detached && changed === 0,
+        canPush: !!remoteUrl && !detached && behind === 0 && (!upstream || ahead > 0),
+        canCommitAndPush: !!remoteUrl && !detached,
+        pushState: !remoteUrl ? "remote_missing" : detached ? "detached" : behind > 0 ? "remote_ahead" : !upstream ? "first_push" : ahead > 0 ? "ready" : "up_to_date",
+        pushTarget: upstream || (remoteUrl && branch ? `origin/${branch}` : ""),
+        pullTarget: upstream || (remoteUrl && branch ? `origin/${branch}` : ""),
+    };
+}
 async function performGitRemoteOperation(workDir, operation) {
-    let before = inspectGitRemoteState(workDir);
+    let before = await inspectGitRemoteStateAsync(workDir);
     if (!before.remoteUrl)
         throw new Error("当前项目没有配置 origin 远端仓库");
     if (operation !== "fetch" && before.detached)
@@ -285,8 +334,8 @@ async function performGitRemoteOperation(workDir, operation) {
             ? ["pull", "--ff-only"]
             : ["pull", "--ff-only", "origin", before.branch];
     else if (operation === "push") {
-        await runGitRemote(workDir, ["fetch", "--prune", "origin"]);
-        before = inspectGitRemoteState(workDir);
+        await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["fetch", "--prune", "origin"], { remote: true, timeoutMs: REMOTE_GIT_TIMEOUT_MS, maxOutputBytes: REMOTE_GIT_MAX_OUTPUT_BYTES });
+        before = await inspectGitRemoteStateAsync(workDir);
         if (before.behind > 0) {
             throw gitCommandError("remote branch contains commits that are not available locally", "", "", "remote_ahead");
         }
@@ -303,12 +352,12 @@ async function performGitRemoteOperation(workDir, operation) {
     }
     else
         throw new Error("不支持的 Git 远端操作");
-    const output = await runGitRemote(workDir, args);
+    const output = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, args, { remote: true, timeoutMs: REMOTE_GIT_TIMEOUT_MS, maxOutputBytes: REMOTE_GIT_MAX_OUTPUT_BYTES })).stdout.trim();
     return {
         operation,
         output: output.slice(-4_000),
         noop: false,
-        repository: inspectGitRemoteState(workDir),
+        repository: await inspectGitRemoteStateAsync(workDir),
     };
 }
 function commitSelectedChanges(workDir, message, requested, allFiles) {
@@ -375,18 +424,10 @@ function projectWorkDir(project) {
     return { workDir: path.resolve(workDir), config };
 }
 function normalizeRepoPath(filePath) {
-    return String(filePath ?? "").replace(/\\/g, "/");
+    return (0, git_workspace_runtime_1.normalizeGitRepoPath)(filePath);
 }
 function resolveSafeProjectFile(workDir, filePath) {
-    const normalized = normalizeRepoPath(filePath);
-    if (!normalized || normalized.includes("\0") || path.isAbsolute(normalized) || normalized.split("/").includes("..")) {
-        throw new Error("非法文件路径");
-    }
-    const root = path.resolve(workDir);
-    const absolute = path.resolve(root, normalized);
-    if (absolute !== root && !absolute.startsWith(root + path.sep))
-        throw new Error("文件不在项目目录内");
-    return { normalized, absolute };
+    return (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(workDir, filePath, { allowLeafSymlink: true });
 }
 function expandedRenamePath(rawPath) {
     const value = rawPath.trim();
@@ -545,6 +586,27 @@ function untrackedStats(workDir, filePath) {
         return { additions: 0, deletions: 0, binary: !!state.binary };
     return { additions: state.text ? state.text.split(/\r?\n/).length : 0, deletions: 0, binary: false };
 }
+async function readSafeWorkingFileText(workDir, filePath) {
+    const safe = (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(workDir, filePath, { allowLeafSymlink: true });
+    if (!fs.existsSync(safe.absolute))
+        return { exists: false, binary: false, text: "", truncated: false, tooLarge: false, size: 0, symlink: false };
+    const stat = fs.lstatSync(safe.absolute);
+    if (stat.isSymbolicLink())
+        return { exists: true, binary: false, text: "", truncated: false, tooLarge: false, size: stat.size, symlink: true };
+    if (!stat.isFile())
+        throw new Error("仅支持读取普通文件");
+    if (stat.size > 4 * 1024 * 1024)
+        return { exists: true, binary: false, text: "", truncated: true, tooLarge: true, size: stat.size, symlink: false };
+    const buffer = await fs.promises.readFile(safe.absolute);
+    const binary = buffer.subarray(0, Math.min(buffer.length, 8_192)).includes(0);
+    return { exists: true, binary, text: binary ? "" : buffer.toString("utf-8"), truncated: false, tooLarge: false, size: stat.size, symlink: false };
+}
+async function untrackedStatsAsync(workDir, filePath) {
+    const state = await readSafeWorkingFileText(workDir, filePath);
+    if (!state.exists || state.binary || state.tooLarge || state.symlink)
+        return { additions: 0, deletions: 0, binary: !!state.binary };
+    return { additions: state.text ? state.text.split(/\r?\n/).length : 0, deletions: 0, binary: false };
+}
 function taskFiles(task) {
     const values = [
         task?.delivery_summary?.actual_file_changes,
@@ -652,6 +714,96 @@ function buildChangeContext(project, workDir, changedPaths) {
         attribution: deduped.some(item => item.association === "exact") ? "exact" : deduped.length ? "project_recent" : "none",
     };
 }
+async function buildChangeContextAsync(project, workDir, changedPaths) {
+    const normalizedFiles = new Set(changedPaths.map(normalizeRepoPath));
+    const tasks = (0, db_1.loadTasks)();
+    const sessionStore = readJson(path.join(utils_1.CCM_DIR, "task-agent-sessions.json"), { sessions: [] });
+    const sessions = Array.isArray(sessionStore) ? sessionStore : sessionStore?.sessions || [];
+    const runStore = readJson(path.join(utils_1.CCM_DIR, "project-chat-runs.json"), { runs: [] });
+    const projectRuns = (runStore?.runs || []).filter((run) => run?.project === project);
+    const candidates = [];
+    for (const task of tasks) {
+        const files = taskFiles(task);
+        const matchingFiles = files.filter(file => normalizedFiles.has(file));
+        const projectMatch = String(task?.target_project || task?.project || "") === project;
+        const runMatch = projectRuns.some((run) => String(run?.taskId || run?.id || "") === String(task?.id || ""));
+        if (!projectMatch && !matchingFiles.length && !runMatch)
+            continue;
+        const session = sessions.filter((item) => item?.taskId === task?.id && (!item?.project || item.project === project)).sort((a, b) => timeOf(b) - timeOf(a))[0];
+        candidates.push({
+            taskId: String(task?.id || ""),
+            title: String(task?.title || task?.business_goal || "关联任务"),
+            status: String(task?.status || ""),
+            updatedAt: new Date(timeOf(task) || Date.now()).toISOString(),
+            traceId: String(task?.trace_id || task?.traceId || ""),
+            groupId: String(task?.group_id || task?.groupId || ""),
+            agent: String(session?.agentType || task?.runtime_override || task?.runtime || "项目 Agent"),
+            files,
+            exactFiles: [],
+            matchingFiles,
+            association: matchingFiles.length ? "path_only" : "project_recent",
+            verification: verificationSummary(task),
+            acceptancePassed: false,
+            _time: timeOf(task),
+        });
+    }
+    for (const run of projectRuns) {
+        const files = (run?.fileChanges?.files || []).map((item) => normalizeRepoPath(typeof item === "string" ? item : item?.path)).filter(Boolean);
+        const matchingFiles = files.filter((file) => normalizedFiles.has(file));
+        candidates.push({
+            taskId: String(run?.taskId || run?.id || ""), title: String(run?.message || "项目 Agent 对话"), status: String(run?.status || ""),
+            updatedAt: new Date(timeOf(run) || Date.now()).toISOString(), traceId: String(run?.trace_id || ""), groupId: "",
+            agent: String(run?.agentType || run?.runtime || project), files, exactFiles: [], matchingFiles,
+            association: matchingFiles.length ? "path_only" : "project_recent", verification: [], acceptancePassed: false, _time: timeOf(run),
+        });
+    }
+    const deduped = Array.from(new Map(candidates.sort((a, b) => b._time - a._time).map(item => [item.taskId, item])).values()).slice(0, 3);
+    const taskIds = deduped.map(item => item.taskId).filter(Boolean);
+    let latestTestAgent = null;
+    const records = (0, test_agent_runner_1.listTestAgentRunnerRecords)({ taskIds, limit: 100 }).filter(record => record.mode === "invocation").sort((a, b) => timeOf(b) - timeOf(a));
+    for (const record of records) {
+        const source = record.sourceAfter || record.sourceBefore;
+        const sourceProject = source?.projects?.find((item) => item.name === project || path.resolve(item.realWorkDir || item.workDir || ".") === path.resolve(workDir));
+        if (!sourceProject)
+            continue;
+        const overlap = (sourceProject.declaredFiles || []).map(normalizeRepoPath).filter((file) => normalizedFiles.has(file));
+        if (!overlap.length)
+            continue;
+        const current = (0, test_agent_runner_1.captureTestAgentSourceBinding)({ projects: [{ name: project, workDir, changedFiles: sourceProject.declaredFiles || [] }] }).projects[0];
+        const contractPassed = record.status === "completed" && record.sourceStable === true;
+        const evidenceVerified = Array.isArray(sourceProject.declaredFileEvidence)
+            ? sourceProject.declaredFileEvidence.length > 0 && sourceProject.declaredFileEvidence.every((item) => item.verified === true)
+            : false;
+        const exact = contractPassed
+            && evidenceVerified
+            && current.realWorkDir.toLowerCase() === String(sourceProject.realWorkDir || "").toLowerCase()
+            && current.gitHead === String(sourceProject.gitHead || "")
+            && current.declaredFileHash === String(sourceProject.declaredFileHash || "");
+        const task = deduped.find(item => item.taskId === record.taskId);
+        if (task && exact) {
+            task.association = "exact";
+            task.exactFiles = overlap;
+            task.acceptancePassed = true;
+        }
+        const report = record?.result?.report || {};
+        latestTestAgent = {
+            runId: String(record.id || ""), taskId: String(record.taskId || report.taskId || ""),
+            status: String(report.status || record?.result?.outcome || record.status || ""),
+            recommendation: String(report.recommendation || record?.result?.recommendation || ""),
+            summary: String(report.summary || record.error || ""), finishedAt: String(report.finishedAt || record.finishedAt || ""),
+            browserChecks: Array.isArray(report.browserResults) ? report.browserResults.length : Number(report.browserCheckCount || 0),
+            association: exact ? "exact" : "historical_unverified",
+            evidenceChecksum: source.fingerprint || "",
+        };
+        if (exact)
+            break;
+    }
+    return {
+        tasks: deduped.map(({ _time, ...item }) => item),
+        latestTestAgent,
+        attribution: deduped.some(item => item.association === "exact") ? "exact" : deduped.length ? "historical_unverified" : "none",
+    };
+}
 function buildGitStatusSummary(files) {
     const summary = files.reduce((acc, file) => {
         if (file.indexResidual) {
@@ -709,6 +861,20 @@ function cleanupIndexResiduals(workDir, requestedFiles) {
     const remaining = parseGitStatus(runGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]))
         .filter(isIndexResidual)
         .map(file => file.path);
+    return { cleaned: requested, remaining };
+}
+async function cleanupIndexResidualsAsync(workDir, requestedFiles) {
+    const current = parseGitStatus((await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])).stdout).filter(isIndexResidual);
+    const available = new Map(current.map(file => [normalizeRepoPath(file.path), file]));
+    const requested = Array.from(new Set((requestedFiles || []).map(normalizeRepoPath).filter(Boolean)));
+    if (!requested.length)
+        throw new Error("没有选择要清理的索引残留");
+    const invalid = requested.filter(file => !available.has(file));
+    if (invalid.length)
+        throw new Error(`文件状态已变化，请刷新后重试：${invalid.slice(0, 3).join("、")}`);
+    requested.forEach(file => (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(workDir, file, { allowLeafSymlink: true }));
+    await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["rm", "--cached", "--ignore-unmatch", "-f", "--", ...requested]);
+    const remaining = parseGitStatus((await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])).stdout).filter(isIndexResidual).map(file => file.path);
     return { cleaned: requested, remaining };
 }
 function parseDiffHunks(diff) {
@@ -782,6 +948,175 @@ function commitPreview(workDir, requestedFiles) {
         warnings,
     };
 }
+async function commitPreviewAsync(workDir, requestedFiles, project = "") {
+    const snapshot = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(workDir, project);
+    const allFiles = parseGitStatus(snapshot.status_raw);
+    const files = Array.from(new Set((requestedFiles || []).map(normalizeRepoPath).filter(Boolean)));
+    files.forEach(file => (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(workDir, file, { allowLeafSymlink: true }));
+    const selected = allFiles.filter(file => files.includes(normalizeRepoPath(file.path)));
+    const outsideStaged = allFiles.filter(file => file.staged && !files.includes(normalizeRepoPath(file.path)));
+    const conflicts = selected.filter(file => file.conflict);
+    const warnings = [];
+    if (selected.some(file => file.untracked))
+        warnings.push("包含未跟踪文件，提交后会开始受 Git 管理");
+    if (selected.some(file => file.statusCode.includes("D")))
+        warnings.push("包含删除文件，请确认删除符合预期");
+    if (outsideStaged.length)
+        warnings.push(`暂存区还有 ${outsideStaged.length} 个未选文件，本次不会提交`);
+    const evidence = await (0, git_workspace_runtime_1.captureFileEvidence)(workDir, files);
+    const previewBase = {
+        schema: "ccm-git-commit-preview-v2",
+        files: selected,
+        requestedFiles: files,
+        outsideStaged: outsideStaged.map(file => file.path),
+        conflicts: conflicts.map(file => file.path),
+        blocked: !files.length || selected.length !== files.length || conflicts.length > 0,
+        warnings,
+        workspace_snapshot_checksum: snapshot.checksum,
+        file_evidence: evidence,
+    };
+    return { ...previewBase, checksum: (0, git_workspace_runtime_1.gitChecksum)(previewBase), snapshot };
+}
+async function commitSelectedChangesAsync(workDir, message, requested, allFiles, project = "") {
+    let commitPaths = [];
+    if (requested.length) {
+        const preview = await commitPreviewAsync(workDir, requested, project);
+        if (preview.blocked) {
+            const error = new Error(preview.conflicts.length ? "存在冲突文件，不能提交" : "所选文件已变化，请刷新后重试");
+            error.preview = preview;
+            throw error;
+        }
+        const stagingPaths = Array.from(new Set([...requested, ...preview.files.map((file) => normalizeRepoPath(file.originalPath)).filter(Boolean)]));
+        await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["add", "-A", "--", ...stagingPaths]);
+        commitPaths = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["diff", "--cached", "--name-only", "-z", "--", ...stagingPaths])).stdout.split("\0").filter(Boolean);
+        if (!commitPaths.length)
+            return { hash: "", fullHash: "", files: [], blobs: [], noop: true };
+        await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["commit", "--only", "-m", message, "--", ...commitPaths]);
+    }
+    else if (allFiles) {
+        await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["add", "-A"]);
+        await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["commit", "-m", message]);
+        commitPaths = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "HEAD"])).stdout.split("\0").filter(Boolean);
+    }
+    else
+        throw new Error("请明确选择本次要提交的文件");
+    const fullHash = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["rev-parse", "HEAD"])).stdout.trim();
+    const hash = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["rev-parse", "--short", "HEAD"])).stdout.trim();
+    const blobOutput = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["ls-tree", "-r", "-z", "HEAD", "--", ...commitPaths])).stdout;
+    const blobs = blobOutput.split("\0").filter(Boolean).map(row => {
+        const match = row.match(/^\d+\s+(\w+)\s+([0-9a-f]+)\t(.+)$/);
+        return match ? { type: match[1], blob: match[2], path: normalizeRepoPath(match[3]) } : null;
+    }).filter(Boolean);
+    return { hash, fullHash, files: commitPaths, blobs, noop: false };
+}
+const gitStatusSnapshots = new Map();
+function statusCursor(checksum, offset) {
+    return Buffer.from(JSON.stringify({ checksum, offset }), "utf-8").toString("base64url");
+}
+function parseStatusCursor(value) {
+    if (!value)
+        return null;
+    try {
+        const parsed = JSON.parse(Buffer.from(String(value), "base64url").toString("utf-8"));
+        return { checksum: String(parsed.checksum || ""), offset: Math.max(0, Number(parsed.offset || 0)) };
+    }
+    catch {
+        throw new Error("Git状态游标无效，请刷新后重试");
+    }
+}
+async function buildGitStatusSnapshot(project, workDir, requestedChecksum = "") {
+    const cached = requestedChecksum ? gitStatusSnapshots.get(requestedChecksum) : null;
+    if (cached && cached.expiresAt > Date.now())
+        return cached;
+    const snapshot = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(workDir, project);
+    if (requestedChecksum && requestedChecksum !== snapshot.checksum) {
+        const error = new Error("Git工作区已发生变化，请刷新状态");
+        error.gitErrorCode = "state_drift";
+        throw error;
+    }
+    const [stagedRaw, workingRaw, effectiveRaw] = await Promise.all([
+        (0, git_workspace_runtime_1.runGitCommand)(workDir, ["diff", "--staged", "--numstat", "-z"]),
+        (0, git_workspace_runtime_1.runGitCommand)(workDir, ["diff", "--numstat", "-z"]),
+        snapshot.repository.head
+            ? (0, git_workspace_runtime_1.runGitCommand)(workDir, ["diff", "HEAD", "--numstat", "-z"])
+            : Promise.resolve({ stdout: "", stderr: "", exitCode: 0 }),
+    ]);
+    const stagedStats = parseNumstat(stagedRaw.stdout);
+    const workingStats = parseNumstat(workingRaw.stdout);
+    const effectiveStats = parseNumstat(effectiveRaw.stdout);
+    const files = parseGitStatus(snapshot.status_raw).map(file => {
+        const key = normalizeRepoPath(file.path);
+        const staged = stagedStats.get(key) || { additions: 0, deletions: 0, binary: false };
+        const working = workingStats.get(key) || { additions: 0, deletions: 0, binary: false };
+        const indexResidual = isIndexResidual(file);
+        const effective = file.untracked
+            ? { additions: 0, deletions: 0, binary: false }
+            : (effectiveStats.get(key) || (indexResidual ? { additions: 0, deletions: 0, binary: false } : {
+                additions: staged.additions + working.additions,
+                deletions: staged.deletions + working.deletions,
+                binary: staged.binary || working.binary,
+            }));
+        return {
+            ...file, indexResidual, effective: !indexResidual,
+            stagedAdditions: staged.additions, stagedDeletions: staged.deletions,
+            workingAdditions: working.additions, workingDeletions: working.deletions,
+            additions: effective.additions, deletions: effective.deletions, binary: effective.binary,
+            size: 0, large: false,
+        };
+    });
+    const entry = { expiresAt: Date.now() + 30_000, snapshot, files, summary: buildGitStatusSummary(files), stagedStats, workingStats, effectiveStats };
+    gitStatusSnapshots.set(snapshot.checksum, entry);
+    for (const [key, item] of gitStatusSnapshots)
+        if (item.expiresAt <= Date.now())
+            gitStatusSnapshots.delete(key);
+    return entry;
+}
+async function enrichGitStatusPage(workDir, files) {
+    const result = [];
+    const concurrency = 8;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(concurrency, Math.max(1, files.length)) }, async () => {
+        while (cursor < files.length) {
+            const index = cursor++;
+            const file = files[index];
+            const safe = (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(workDir, file.path, { allowLeafSymlink: true });
+            let size = 0;
+            let symlink = !!safe.leafSymlink;
+            try {
+                if (fs.existsSync(safe.absolute)) {
+                    const stat = fs.lstatSync(safe.absolute);
+                    size = stat.size;
+                    symlink = stat.isSymbolicLink();
+                }
+            }
+            catch { }
+            let working = { additions: file.workingAdditions || 0, deletions: file.workingDeletions || 0, binary: !!file.binary };
+            if (file.untracked && !symlink && size <= LARGE_FILE_BYTES)
+                working = await untrackedStatsAsync(workDir, file.path);
+            result[index] = {
+                ...file,
+                workingAdditions: working.additions,
+                workingDeletions: working.deletions,
+                additions: file.untracked ? working.additions : file.additions,
+                deletions: file.untracked ? working.deletions : file.deletions,
+                binary: file.binary || working.binary,
+                size,
+                large: size > LARGE_FILE_BYTES,
+                symlink,
+            };
+        }
+    });
+    await Promise.all(workers);
+    return result;
+}
+function gitApiFailure(res, error, fallback, operation = "") {
+    const code = String(error?.gitErrorCode || "");
+    if (code === "repository_busy")
+        return (0, utils_1.sendJson)(res, { success: false, error: error.message, errorCode: code, operation, retryable: true, lease: error.lease ? { operation: error.lease.operation, acquired_at: error.lease.acquired_at, expires_at: error.lease.expires_at } : null }, 423);
+    if (code === "state_drift")
+        return (0, utils_1.sendJson)(res, { success: false, error: error.message, errorCode: code, retryable: true, expected: error.expected || "", actual: error.actual || "" }, 409);
+    return (0, utils_1.sendJson)(res, { success: false, error: `${fallback}: ${(0, git_workspace_runtime_1.sanitizeGitDiagnostic)(error?.stderr || error?.message || error)}` }, 400);
+}
 function handleGitApi(pathname, req, res, parsed) {
     if (pathname === "/api/git/status" && req.method === "GET") {
         const project = String(parsed.query.project || "");
@@ -790,61 +1125,63 @@ function handleGitApi(pathname, req, res, parsed) {
         const resolved = projectWorkDir(project);
         if ("error" in resolved)
             return (0, utils_1.sendJson)(res, { error: resolved.error }, resolved.status);
-        const { workDir } = resolved;
-        try {
-            runGit(workDir, ["rev-parse", "--is-inside-work-tree"]);
-            const files = parseGitStatus(runGit(workDir, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]));
-            const stagedStats = parseNumstat(runGit(workDir, ["diff", "--staged", "--numstat", "-z"]));
-            const workingStats = parseNumstat(runGit(workDir, ["diff", "--numstat", "-z"]));
-            const hasHead = tryGit(workDir, ["rev-parse", "--verify", "HEAD"]).ok;
-            const effectiveStats = hasHead
-                ? parseNumstat(runGit(workDir, ["diff", "HEAD", "--numstat", "-z"]))
-                : new Map();
-            const enriched = files.map(file => {
-                const safe = resolveSafeProjectFile(workDir, file.path);
-                const staged = stagedStats.get(normalizeRepoPath(file.path)) || { additions: 0, deletions: 0, binary: false };
-                const working = file.untracked ? untrackedStats(workDir, file.path) : (workingStats.get(normalizeRepoPath(file.path)) || { additions: 0, deletions: 0, binary: false });
-                const indexResidual = isIndexResidual(file);
-                const effective = file.untracked
-                    ? working
-                    : (effectiveStats.get(normalizeRepoPath(file.path)) || (indexResidual ? { additions: 0, deletions: 0, binary: false } : {
-                        additions: staged.additions + working.additions,
-                        deletions: staged.deletions + working.deletions,
-                        binary: staged.binary || working.binary,
-                    }));
-                let size = 0;
-                try {
-                    size = fs.existsSync(safe.absolute) ? fs.statSync(safe.absolute).size : 0;
-                }
-                catch { }
-                return {
-                    ...file,
-                    indexResidual,
-                    effective: !indexResidual,
-                    stagedAdditions: staged.additions,
-                    stagedDeletions: staged.deletions,
-                    workingAdditions: working.additions,
-                    workingDeletions: working.deletions,
-                    additions: effective.additions,
-                    deletions: effective.deletions,
-                    binary: effective.binary,
-                    size,
-                    large: size > LARGE_FILE_BYTES,
+        void (async () => {
+            try {
+                const cursor = parseStatusCursor(parsed.query.cursor);
+                const limit = Math.min(500, Math.max(1, Number(parsed.query.limit || 200)));
+                const entry = await buildGitStatusSnapshot(project, resolved.workDir, cursor?.checksum || "");
+                const offset = cursor?.offset || 0;
+                const pageFiles = await enrichGitStatusPage(resolved.workDir, entry.files.slice(offset, offset + limit));
+                const nextOffset = offset + pageFiles.length;
+                const context = parsed.query.include_context === "false"
+                    ? { tasks: [], latestTestAgent: null, attribution: "pending" }
+                    : await buildChangeContextAsync(project, resolved.workDir, entry.files.filter(file => !file.indexResidual).map(file => file.path));
+                const repository = {
+                    ...(await inspectGitRemoteStateAsync(resolved.workDir, entry.files.length)),
+                    changedFiles: entry.summary.total,
+                    indexResidualFiles: entry.summary.indexResidual,
+                    identityChecksum: entry.snapshot.repository.checksum,
                 };
-            });
-            const branch = runGit(workDir, ["branch", "--show-current"]).trim() || "detached HEAD";
-            const summary = buildGitStatusSummary(enriched);
-            const context = buildChangeContext(project, workDir, enriched.filter(file => !file.indexResidual).map(file => file.path));
-            const repository = {
-                ...inspectGitRemoteState(workDir, enriched.length),
-                changedFiles: summary.total,
-                indexResidualFiles: summary.indexResidual,
-            };
-            (0, utils_1.sendJson)(res, { success: true, branch, files: enriched, total: summary.total, rawTotal: enriched.length, summary, context, repository });
-        }
-        catch (error) {
-            (0, utils_1.sendJson)(res, { success: false, error: "无法读取 Git 工作区: " + (error.stderr || error.message) });
-        }
+                (0, utils_1.sendJson)(res, {
+                    success: true,
+                    branch: entry.snapshot.repository.branch,
+                    files: pageFiles,
+                    total: entry.summary.total,
+                    rawTotal: entry.files.length,
+                    summary: entry.summary,
+                    context,
+                    repository,
+                    workspace_snapshot_checksum: entry.snapshot.checksum,
+                    snapshot: { checksum: entry.snapshot.checksum, captured_at: entry.snapshot.captured_at, status_checksum: entry.snapshot.status_checksum },
+                    cursor: cursor ? String(parsed.query.cursor || "") : "",
+                    next_cursor: nextOffset < entry.files.length ? statusCursor(entry.snapshot.checksum, nextOffset) : "",
+                    truncated: nextOffset < entry.files.length,
+                    page_size: pageFiles.length,
+                });
+            }
+            catch (error) {
+                gitApiFailure(res, error, "无法读取 Git 工作区");
+            }
+        })();
+        return true;
+    }
+    if (pathname === "/api/git/context" && req.method === "GET") {
+        const project = String(parsed.query.project || "");
+        const resolved = projectWorkDir(project);
+        if (!project)
+            return (0, utils_1.sendJson)(res, { error: "缺少项目参数" }, 400);
+        if ("error" in resolved)
+            return (0, utils_1.sendJson)(res, { error: resolved.error }, resolved.status);
+        void (async () => {
+            try {
+                const entry = await buildGitStatusSnapshot(project, resolved.workDir, String(parsed.query.workspace_snapshot_checksum || ""));
+                const context = await buildChangeContextAsync(project, resolved.workDir, entry.files.filter(file => !file.indexResidual).map(file => file.path));
+                (0, utils_1.sendJson)(res, { success: true, context, workspace_snapshot_checksum: entry.snapshot.checksum });
+            }
+            catch (error) {
+                gitApiFailure(res, error, "无法读取任务与验收关联");
+            }
+        })();
         return true;
     }
     if (pathname === "/api/git/index-residuals/cleanup" && req.method === "POST") {
@@ -857,18 +1194,20 @@ function handleGitApi(pathname, req, res, parsed) {
                 return (0, utils_1.sendJson)(res, { success: false, error: "清理索引残留需要用户明确确认", confirmationRequired: true }, 409);
             if ("error" in resolved)
                 return (0, utils_1.sendJson)(res, { success: false, error: resolved.error }, resolved.status);
-            try {
-                const result = cleanupIndexResiduals(resolved.workDir, body.files);
-                (0, utils_1.sendJson)(res, {
-                    success: true,
-                    message: `已清理 ${result.cleaned.length} 个暂存区索引残留，本地有效文件未被删除`,
-                    cleanedFiles: result.cleaned,
-                    remaining: result.remaining.length,
-                });
-            }
-            catch (error) {
-                (0, utils_1.sendJson)(res, { success: false, error: "清理索引残留失败: " + safeGitError(error) }, 409);
-            }
+            void (async () => {
+                try {
+                    const response = await (0, git_workspace_runtime_1.withGitMutationLease)(resolved.workDir, project, "cleanup_index_residuals", async ({ before }) => {
+                        (0, git_workspace_runtime_1.assertExpectedWorkspaceSnapshot)(body.expected_snapshot_checksum, before);
+                        const result = await cleanupIndexResidualsAsync(resolved.workDir, body.files);
+                        const after = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(resolved.workDir, project);
+                        return { result, after, receipt: await (0, git_workspace_runtime_1.buildGitMutationReceipt)({ projectId: project, operation: "cleanup_index_residuals", before, after, files: result.cleaned, actor: body.actor }) };
+                    });
+                    (0, utils_1.sendJson)(res, { success: true, message: `已清理 ${response.result.cleaned.length} 个暂存区索引残留，本地有效文件未被删除`, cleanedFiles: response.result.cleaned, remaining: response.result.remaining.length, mutation_receipt: response.receipt, workspace_snapshot_checksum: response.after.checksum });
+                }
+                catch (error) {
+                    gitApiFailure(res, error, "清理索引残留失败", "cleanup_index_residuals");
+                }
+            })();
         });
         return true;
     }
@@ -886,16 +1225,24 @@ function handleGitApi(pathname, req, res, parsed) {
                 return (0, utils_1.sendJson)(res, { success: false, error: "该操作需要用户明确确认", confirmationRequired: true }, 409);
             }
             try {
-                runGit(resolved.workDir, ["rev-parse", "--is-inside-work-tree"]);
-                const result = await performGitRemoteOperation(resolved.workDir, operation);
+                const response = await (0, git_workspace_runtime_1.withGitMutationLease)(resolved.workDir, project, operation, async ({ before }) => {
+                    (0, git_workspace_runtime_1.assertExpectedWorkspaceSnapshot)(body.expected_snapshot_checksum, before);
+                    const result = await performGitRemoteOperation(resolved.workDir, operation);
+                    const after = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(resolved.workDir, project);
+                    const receipt = await (0, git_workspace_runtime_1.buildGitMutationReceipt)({ projectId: project, operation, before, after, actor: body.actor, outcome: result.noop ? "no_changes" : "completed" });
+                    return { result, after, receipt };
+                });
+                const result = response.result;
                 const message = result.noop
                     ? "当前分支已与远端同步，没有待推送提交"
                     : operation === "fetch"
                         ? "远端引用已拉取"
                         : operation === "pull" ? "本地分支已更新" : "本地提交已推送";
-                (0, utils_1.sendJson)(res, { success: true, message, ...result });
+                (0, utils_1.sendJson)(res, { success: true, message, ...result, mutation_receipt: response.receipt, workspace_snapshot_checksum: response.after.checksum });
             }
             catch (error) {
+                if (["repository_busy", "state_drift"].includes(String(error?.gitErrorCode || "")))
+                    return gitApiFailure(res, error, `${operation}失败`, operation);
                 (0, utils_1.sendJson)(res, { success: false, ...gitFailureDetails(error, operation), operation }, 409);
             }
         });
@@ -909,31 +1256,38 @@ function handleGitApi(pathname, req, res, parsed) {
             return (0, utils_1.sendJson)(res, { error: "缺少参数" }, 400);
         if ("error" in resolved)
             return (0, utils_1.sendJson)(res, { error: resolved.error }, resolved.status);
-        try {
-            const { normalized: filePath } = resolveSafeProjectFile(resolved.workDir, parsed.query.file);
-            const statusLine = fileStatus(resolved.workDir, filePath);
-            const statusCode = statusLine.slice(0, 2);
-            let diff = runGit(resolved.workDir, staged ? ["diff", "--staged", "--", filePath] : ["diff", "--", filePath]);
-            let reason = "";
-            let truncated = false;
-            if (!staged && !diff.trim() && (statusCode === "??" || statusCode.includes("A"))) {
-                const afterState = (0, utils_1.readWorkingFileText)(resolved.workDir, filePath);
-                if (afterState.binary)
-                    reason = "二进制文件无法做文本对比";
-                else if (afterState.exists) {
-                    diff = (0, utils_1.createUnifiedDiff)("", afterState.text, filePath);
-                    truncated = !!(afterState.truncated || afterState.tooLarge);
-                    if (truncated)
-                        reason = "文件过大，仅展示前半部分内容";
+        void (async () => {
+            try {
+                const expected = String(parsed.query.workspace_snapshot_checksum || "");
+                const snapshot = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(resolved.workDir, project);
+                (0, git_workspace_runtime_1.assertExpectedWorkspaceSnapshot)(expected, snapshot);
+                const { normalized: filePath } = (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(resolved.workDir, parsed.query.file, { allowLeafSymlink: true });
+                const statusLine = (await (0, git_workspace_runtime_1.runGitCommand)(resolved.workDir, ["-c", "core.quotepath=false", "status", "--porcelain", "--", filePath])).stdout.split("\n")[0] || "";
+                const statusCode = statusLine.slice(0, 2);
+                let diff = (await (0, git_workspace_runtime_1.runGitCommand)(resolved.workDir, staged ? ["diff", "--staged", "--", filePath] : ["diff", "--", filePath], { maxOutputBytes: 8 * 1024 * 1024 })).stdout;
+                let reason = "";
+                let truncated = false;
+                if (!staged && !diff.trim() && (statusCode === "??" || statusCode.includes("A"))) {
+                    const afterState = await readSafeWorkingFileText(resolved.workDir, filePath);
+                    if (afterState.symlink)
+                        reason = "符号链接仅展示Git记录，不读取链接目标内容";
+                    else if (afterState.binary)
+                        reason = "二进制文件无法做文本对比";
+                    else if (afterState.exists && !afterState.tooLarge)
+                        diff = (0, utils_1.createUnifiedDiff)("", afterState.text, filePath);
+                    else if (afterState.tooLarge) {
+                        truncated = true;
+                        reason = "文件超过4MB安全预览上限，请使用本地IDE查看";
+                    }
                 }
+                const additions = diff.split("\n").filter(line => line.startsWith("+") && !line.startsWith("+++")).length;
+                const deletions = diff.split("\n").filter(line => line.startsWith("-") && !line.startsWith("---")).length;
+                (0, utils_1.sendJson)(res, { success: true, file: filePath, hunks: parseDiffHunks(diff), raw: diff, reason, truncated, additions, deletions, workspace_snapshot_checksum: snapshot.checksum });
             }
-            const additions = diff.split("\n").filter(line => line.startsWith("+") && !line.startsWith("+++")).length;
-            const deletions = diff.split("\n").filter(line => line.startsWith("-") && !line.startsWith("---")).length;
-            (0, utils_1.sendJson)(res, { success: true, file: filePath, hunks: parseDiffHunks(diff), raw: diff, reason, truncated, additions, deletions });
-        }
-        catch (error) {
-            (0, utils_1.sendJson)(res, { success: false, error: "获取 diff 失败: " + (error.stderr || error.message) });
-        }
+            catch (error) {
+                gitApiFailure(res, error, "获取diff失败");
+            }
+        })();
         return true;
     }
     if (pathname === "/api/git/file" && req.method === "GET") {
@@ -943,14 +1297,17 @@ function handleGitApi(pathname, req, res, parsed) {
             return (0, utils_1.sendJson)(res, { error: "缺少参数" }, 400);
         if ("error" in resolved)
             return (0, utils_1.sendJson)(res, { error: resolved.error }, resolved.status);
-        try {
-            const { normalized: filePath } = resolveSafeProjectFile(resolved.workDir, parsed.query.file);
-            const state = (0, utils_1.readWorkingFileText)(resolved.workDir, filePath);
-            return (0, utils_1.sendJson)(res, { success: true, project, file: filePath, exists: !!state.exists, binary: !!state.binary, text: state.binary ? "" : state.text || "", truncated: !!(state.truncated || state.tooLarge), size: state.size || 0 });
-        }
-        catch (error) {
-            return (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400);
-        }
+        void (async () => {
+            try {
+                const { normalized: filePath } = (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(resolved.workDir, parsed.query.file, { allowLeafSymlink: true });
+                const state = await readSafeWorkingFileText(resolved.workDir, filePath);
+                return (0, utils_1.sendJson)(res, { success: true, project, file: filePath, exists: !!state.exists, binary: !!state.binary, symlink: !!state.symlink, text: state.binary || state.symlink ? "" : state.text || "", truncated: !!(state.truncated || state.tooLarge), size: state.size || 0 });
+            }
+            catch (error) {
+                return (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400);
+            }
+        })();
+        return true;
     }
     if (pathname === "/api/git/commit-preview" && req.method === "POST") {
         readBody(req, res, body => {
@@ -960,12 +1317,15 @@ function handleGitApi(pathname, req, res, parsed) {
                 return (0, utils_1.sendJson)(res, { success: false, error: "缺少项目或文件列表" }, 400);
             if ("error" in resolved)
                 return (0, utils_1.sendJson)(res, { success: false, error: resolved.error }, resolved.status);
-            try {
-                (0, utils_1.sendJson)(res, { success: true, preview: commitPreview(resolved.workDir, body.files) });
-            }
-            catch (error) {
-                (0, utils_1.sendJson)(res, { success: false, error: "提交预检失败: " + error.message }, 400);
-            }
+            void (async () => {
+                try {
+                    const preview = await commitPreviewAsync(resolved.workDir, body.files, project);
+                    (0, utils_1.sendJson)(res, { success: true, preview, workspace_snapshot_checksum: preview.workspace_snapshot_checksum });
+                }
+                catch (error) {
+                    gitApiFailure(res, error, "提交预检失败");
+                }
+            })();
         });
         return true;
     }
@@ -985,59 +1345,69 @@ function handleGitApi(pathname, req, res, parsed) {
                 return (0, utils_1.sendJson)(res, { success: false, error: resolved.error }, resolved.status);
             try {
                 const requested = Array.isArray(body.files) ? Array.from(new Set(body.files.map(normalizeRepoPath).filter(Boolean))) : [];
-                const allFiles = body.allFiles === true && body.confirmed === true;
+                const allRequested = body.all_files === true || body.allFiles === true;
+                const allFiles = allRequested && body.confirmed === true;
+                if (allRequested && (!allFiles || req.ccmAuth?.kind !== "browser" || req.ccmAuth?.role !== "admin")) {
+                    return (0, utils_1.sendJson)(res, { success: false, error: "提交全部文件仅允许管理员在页面明确确认后执行", confirmationRequired: true, errorCode: "all_files_authorization_required" }, 403);
+                }
                 if (!requested.length && !allFiles)
                     return (0, utils_1.sendJson)(res, { success: false, error: "请明确选择本次要提交的文件" }, 400);
-                if (action === "commit_and_push") {
-                    const preflight = inspectGitRemoteState(resolved.workDir);
-                    if (!preflight.remoteUrl)
-                        return (0, utils_1.sendJson)(res, { success: false, error: "当前项目没有配置 origin 远端仓库", errorCode: "remote_missing" }, 409);
-                    if (preflight.detached)
-                        return (0, utils_1.sendJson)(res, { success: false, error: "当前处于 detached HEAD，不能提交并推送", errorCode: "detached_head" }, 409);
-                }
-                const committed = commitSelectedChanges(resolved.workDir, message, requested, allFiles);
-                if (committed.noop) {
-                    (0, utils_1.sendJson)(res, {
-                        success: true,
-                        action,
-                        outcome: "no_changes",
-                        message: "所选文件同步后没有可提交内容，变更状态已刷新",
-                        commit: { success: false, noop: true, hash: "" },
-                        push: null,
-                        hash: "",
-                        committedFiles: [],
-                        committedAllFiles: allFiles,
-                        verification: body.verification || "not_recorded",
-                    });
-                    return;
-                }
+                const response = await (0, git_workspace_runtime_1.withGitMutationLease)(resolved.workDir, project, action, async ({ before }) => {
+                    (0, git_workspace_runtime_1.assertExpectedWorkspaceSnapshot)(body.expected_snapshot_checksum || body.workspace_snapshot_checksum, before);
+                    if (action === "commit_and_push") {
+                        const preflight = await inspectGitRemoteStateAsync(resolved.workDir);
+                        if (!preflight.remoteUrl) {
+                            const error = new Error("当前项目没有配置 origin 远端仓库");
+                            error.gitErrorCode = "remote_missing";
+                            throw error;
+                        }
+                        if (preflight.detached) {
+                            const error = new Error("当前处于 detached HEAD，不能提交并推送");
+                            error.gitErrorCode = "detached_head";
+                            throw error;
+                        }
+                    }
+                    const committed = await commitSelectedChangesAsync(resolved.workDir, message, requested, allFiles, project);
+                    let push = null;
+                    let outcome = committed.noop ? "no_changes" : "committed";
+                    let partialSuccess = false;
+                    if (!committed.noop && action === "commit_and_push") {
+                        try {
+                            push = { success: true, ...(await performGitRemoteOperation(resolved.workDir, "push")) };
+                            outcome = "committed_and_pushed";
+                        }
+                        catch (pushError) {
+                            push = { success: false, ...gitFailureDetails(pushError, "push") };
+                            outcome = "committed_push_failed";
+                            partialSuccess = true;
+                        }
+                    }
+                    const after = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(resolved.workDir, project);
+                    const receipt = await (0, git_workspace_runtime_1.buildGitMutationReceipt)({ projectId: project, operation: action, before, after, files: committed.files, actor: req.ccmAuth?.kind === "browser" ? `user:${req.ccmAuth.userId || ""}` : `internal:${req.ccmAuth?.caller || "unknown"}`, outcome });
+                    return { committed, push, outcome, partialSuccess, after, receipt };
+                });
+                const { committed, push, outcome, partialSuccess, after, receipt } = response;
                 const hash = committed.hash;
-                const base = { hash, committedFiles: committed.files, committedAllFiles: allFiles, verification: body.verification || "not_recorded" };
-                if (action === "commit") {
-                    (0, utils_1.sendJson)(res, { success: true, action, outcome: "committed", message: "代码已提交到本地仓库", commit: { success: true, hash }, push: null, ...base });
-                    return;
-                }
-                try {
-                    const pushed = await performGitRemoteOperation(resolved.workDir, "push");
-                    (0, utils_1.sendJson)(res, { success: true, action, outcome: "committed_and_pushed", message: "代码已提交并推送到远端", commit: { success: true, hash }, push: { success: true, ...pushed }, ...base });
-                }
-                catch (pushError) {
-                    const failure = gitFailureDetails(pushError, "push");
-                    (0, utils_1.sendJson)(res, {
-                        success: true,
-                        action,
-                        outcome: "committed_push_failed",
-                        partialSuccess: true,
-                        message: `本地提交 ${hash} 已创建，但推送失败`,
-                        commit: { success: true, hash },
-                        push: { success: false, ...failure },
-                        ...base,
-                    });
-                }
+                const messageText = outcome === "no_changes" ? "所选文件同步后没有可提交内容，变更状态已刷新"
+                    : outcome === "committed" ? "代码已提交到本地仓库"
+                        : outcome === "committed_and_pushed" ? "代码已提交并推送到远端"
+                            : `本地提交 ${hash} 已创建，但推送失败`;
+                (0, utils_1.sendJson)(res, {
+                    success: true, action, outcome, partialSuccess, message: messageText,
+                    commit: committed.noop ? { success: false, noop: true, hash: "" } : { success: true, hash, fullHash: committed.fullHash, blobs: committed.blobs },
+                    push, hash, committedFiles: committed.files, committedAllFiles: allFiles,
+                    verification: body.verification || "not_recorded",
+                    mutation_receipt: receipt,
+                    workspace_snapshot_checksum: after.checksum,
+                });
             }
             catch (error) {
+                if (["repository_busy", "state_drift"].includes(String(error?.gitErrorCode || "")))
+                    return gitApiFailure(res, error, "提交失败", action);
+                if (["remote_missing", "detached_head"].includes(String(error?.gitErrorCode || "")))
+                    return (0, utils_1.sendJson)(res, { success: false, error: error.message, errorCode: error.gitErrorCode }, 409);
                 const preview = error?.preview;
-                (0, utils_1.sendJson)(res, { success: false, error: "提交失败: " + safeGitError(error), ...(preview ? { preview } : {}) }, preview ? 409 : 400);
+                (0, utils_1.sendJson)(res, { success: false, error: "提交失败: " + (0, git_workspace_runtime_1.sanitizeGitDiagnostic)(error?.stderr || error?.message), ...(preview ? { preview } : {}) }, preview ? 409 : 400);
             }
         });
         return true;
@@ -1048,22 +1418,34 @@ function handleGitApi(pathname, req, res, parsed) {
             const resolved = projectWorkDir(project);
             if (!project || !body.file)
                 return (0, utils_1.sendJson)(res, { success: false, error: "缺少参数" }, 400);
+            if (body.confirmed !== true)
+                return (0, utils_1.sendJson)(res, { success: false, error: "丢弃或取消暂存需要用户明确确认", confirmationRequired: true }, 409);
             if ("error" in resolved)
                 return (0, utils_1.sendJson)(res, { success: false, error: resolved.error }, resolved.status);
-            try {
-                const { normalized: filePath } = resolveSafeProjectFile(resolved.workDir, body.file);
-                const status = fileStatus(resolved.workDir, filePath).slice(0, 2);
-                if (status === "??")
-                    return (0, utils_1.sendJson)(res, { success: false, error: "未跟踪文件不会自动删除，请确认内容后在文件系统中处理" }, 409);
-                if (body.staged)
-                    runGit(resolved.workDir, ["restore", "--staged", "--", filePath]);
-                else
-                    runGit(resolved.workDir, ["restore", "--worktree", "--", filePath]);
-                (0, utils_1.sendJson)(res, { success: true, message: body.staged ? "已取消暂存" : "已丢弃工作区改动", action: body.staged ? "unstage" : "discard" });
-            }
-            catch (error) {
-                (0, utils_1.sendJson)(res, { success: false, error: "操作失败: " + String(error.stderr || error.message).trim() });
-            }
+            void (async () => {
+                try {
+                    const operation = body.staged ? "unstage" : "discard";
+                    const response = await (0, git_workspace_runtime_1.withGitMutationLease)(resolved.workDir, project, operation, async ({ before }) => {
+                        (0, git_workspace_runtime_1.assertExpectedWorkspaceSnapshot)(body.expected_snapshot_checksum, before);
+                        const { normalized: filePath } = (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(resolved.workDir, body.file, { allowLeafSymlink: true });
+                        const status = (await (0, git_workspace_runtime_1.runGitCommand)(resolved.workDir, ["-c", "core.quotepath=false", "status", "--porcelain", "--", filePath])).stdout.slice(0, 2);
+                        if (status === "??") {
+                            const error = new Error("未跟踪文件不会自动删除，请确认内容后在文件系统中处理");
+                            error.gitErrorCode = "untracked_delete_denied";
+                            throw error;
+                        }
+                        await (0, git_workspace_runtime_1.runGitCommand)(resolved.workDir, body.staged ? ["restore", "--staged", "--", filePath] : ["restore", "--worktree", "--", filePath]);
+                        const after = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(resolved.workDir, project);
+                        return { after, receipt: await (0, git_workspace_runtime_1.buildGitMutationReceipt)({ projectId: project, operation, before, after, files: [filePath], actor: body.actor }) };
+                    });
+                    (0, utils_1.sendJson)(res, { success: true, message: body.staged ? "已取消暂存" : "已丢弃工作区改动", action: body.staged ? "unstage" : "discard", mutation_receipt: response.receipt, workspace_snapshot_checksum: response.after.checksum });
+                }
+                catch (error) {
+                    if (error?.gitErrorCode === "untracked_delete_denied")
+                        return (0, utils_1.sendJson)(res, { success: false, error: error.message }, 409);
+                    gitApiFailure(res, error, "操作失败", body.staged ? "unstage" : "discard");
+                }
+            })();
         });
         return true;
     }
@@ -1074,18 +1456,20 @@ function handleGitApi(pathname, req, res, parsed) {
             return (0, utils_1.sendJson)(res, { error: "缺少项目参数" }, 400);
         if ("error" in resolved)
             return (0, utils_1.sendJson)(res, { error: resolved.error }, resolved.status);
-        try {
-            const limit = Math.min(Math.max(Number(parsed.query.limit || 20), 1), 100);
-            const log = runGit(resolved.workDir, ["log", "--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s", "-n", String(limit)]);
-            const commits = log.split("\n").filter(Boolean).map(line => {
-                const [hash, shortHash, author, email, timestamp, message] = line.split("\x1f");
-                return { hash, shortHash, author, email, timestamp: new Date(Number(timestamp) * 1000).toISOString(), message };
-            });
-            (0, utils_1.sendJson)(res, { success: true, commits });
-        }
-        catch (error) {
-            (0, utils_1.sendJson)(res, { success: false, error: "获取提交历史失败: " + error.message });
-        }
+        void (async () => {
+            try {
+                const limit = Math.min(Math.max(Number(parsed.query.limit || 20), 1), 100);
+                const log = (await (0, git_workspace_runtime_1.runGitCommand)(resolved.workDir, ["log", "--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s", "-n", String(limit)])).stdout;
+                const commits = log.split("\n").filter(Boolean).map(line => {
+                    const [hash, shortHash, author, email, timestamp, message] = line.split("\x1f");
+                    return { hash, shortHash, author, email, timestamp: new Date(Number(timestamp) * 1000).toISOString(), message };
+                });
+                (0, utils_1.sendJson)(res, { success: true, commits });
+            }
+            catch (error) {
+                gitApiFailure(res, error, "获取提交历史失败");
+            }
+        })();
         return true;
     }
     if (pathname === "/api/git/apply-patch" && req.method === "POST") {
@@ -1097,23 +1481,30 @@ function handleGitApi(pathname, req, res, parsed) {
                 return (0, utils_1.sendJson)(res, { success: false, error: "缺少参数" }, 400);
             if ("error" in resolved)
                 return (0, utils_1.sendJson)(res, { success: false, error: resolved.error }, resolved.status);
-            try {
-                const patchPaths = validatePatchPaths(patchText);
-                patchPaths.forEach(file => resolveSafeProjectFile(resolved.workDir, file));
-                if (body.file && !patchPaths.includes(normalizeRepoPath(body.file)))
-                    throw new Error("Patch 与当前文件不一致");
-                const args = ["apply", "--recount", "--whitespace=nowarn"];
-                if (body.cached)
-                    args.push("--cached");
-                if (body.revert)
-                    args.push("-R");
-                runGit(resolved.workDir, [...args, "--check"], { input: patchText });
-                runGit(resolved.workDir, args, { input: patchText });
-                (0, utils_1.sendJson)(res, { success: true, message: "Patch 已通过检查并应用", checked: true, files: patchPaths });
-            }
-            catch (error) {
-                (0, utils_1.sendJson)(res, { success: false, error: "应用 Patch 失败: " + String(error.stderr || error.message).trim() });
-            }
+            void (async () => {
+                try {
+                    const patchPaths = validatePatchPaths(patchText);
+                    patchPaths.forEach(file => (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(resolved.workDir, file, { allowLeafSymlink: false }));
+                    if (body.file && !patchPaths.includes(normalizeRepoPath(body.file)))
+                        throw new Error("Patch 与当前文件不一致");
+                    const response = await (0, git_workspace_runtime_1.withGitMutationLease)(resolved.workDir, project, "apply_patch", async ({ before }) => {
+                        (0, git_workspace_runtime_1.assertExpectedWorkspaceSnapshot)(body.expected_snapshot_checksum, before);
+                        const args = ["apply", "--recount", "--whitespace=nowarn"];
+                        if (body.cached)
+                            args.push("--cached");
+                        if (body.revert)
+                            args.push("-R");
+                        await (0, git_workspace_runtime_1.runGitCommand)(resolved.workDir, [...args, "--check"], { input: patchText, maxOutputBytes: 4 * 1024 * 1024 });
+                        await (0, git_workspace_runtime_1.runGitCommand)(resolved.workDir, args, { input: patchText, maxOutputBytes: 4 * 1024 * 1024 });
+                        const after = await (0, git_workspace_runtime_1.captureWorkspaceSnapshot)(resolved.workDir, project);
+                        return { after, receipt: await (0, git_workspace_runtime_1.buildGitMutationReceipt)({ projectId: project, operation: "apply_patch", before, after, files: patchPaths, actor: body.actor }) };
+                    });
+                    (0, utils_1.sendJson)(res, { success: true, message: "Patch 已通过检查并应用", checked: true, files: patchPaths, mutation_receipt: response.receipt, workspace_snapshot_checksum: response.after.checksum });
+                }
+                catch (error) {
+                    gitApiFailure(res, error, "应用Patch失败", "apply_patch");
+                }
+            })();
         });
         return true;
     }

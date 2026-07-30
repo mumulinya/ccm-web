@@ -5,6 +5,9 @@ exports.normalizeCronRunHistory = normalizeCronRunHistory;
 exports.aggregateCronRunStatus = aggregateCronRunStatus;
 exports.pad2 = pad2;
 exports.normalizeCronTimezone = normalizeCronTimezone;
+exports.zonedDateParts = zonedDateParts;
+exports.dateKeyInTimezone = dateKeyInTimezone;
+exports.zonedDateTimeToDate = zonedDateTimeToDate;
 exports.minuteKey = minuteKey;
 exports.validateCronExpression = validateCronExpression;
 exports.matchesCron = matchesCron;
@@ -122,6 +125,24 @@ function zonedDateParts(date, timezone) {
     const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
     const weekday = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[values.weekday] ?? 0;
     return { year: Number(values.year), month: Number(values.month), day: Number(values.day), hour: Number(values.hour), minute: Number(values.minute), weekday };
+}
+function dateKeyInTimezone(date = new Date(), timezone = exports.DEFAULT_CRON_TIMEZONE) {
+    const parts = zonedDateParts(date, timezone);
+    return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
+}
+function zonedDateTimeToDate(input, timezone = exports.DEFAULT_CRON_TIMEZONE) {
+    const normalizedTimezone = normalizeCronTimezone(timezone);
+    const targetUtc = Date.UTC(input.year, input.month - 1, input.day, input.hour || 0, input.minute || 0, 0, 0);
+    let candidate = targetUtc;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        const actual = zonedDateParts(new Date(candidate), normalizedTimezone);
+        const actualUtc = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, 0, 0);
+        const adjustment = targetUtc - actualUtc;
+        if (adjustment === 0)
+            break;
+        candidate += adjustment;
+    }
+    return new Date(candidate);
 }
 function minuteKey(date, timezone = exports.DEFAULT_CRON_TIMEZONE) {
     const parts = zonedDateParts(date, timezone);

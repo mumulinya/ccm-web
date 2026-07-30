@@ -7,6 +7,9 @@ export declare function parseSecureMultipartRequest(req: any, options?: {
     timeoutMs?: number;
     maxFiles?: number;
     maxRequestBytes?: number;
+    maxFileBytes?: number;
+    maxTotalFileBytes?: number;
+    allowedExtensions?: string[];
 }): Promise<{
     fields: Record<string, string>;
     files: any[];

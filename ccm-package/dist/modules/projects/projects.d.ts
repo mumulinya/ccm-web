@@ -38,7 +38,7 @@ export declare function startControlBotConnection(port?: number): {
     log_file: string;
     message: string;
 };
-declare function startProject(projectName: string, agentType: string, port: number): {
+declare function startProject(projectName: string, agentType: string, port: number, discoveredPid?: number): Promise<{
     success: boolean;
     error: string;
     running?: undefined;
@@ -65,11 +65,12 @@ declare function startProject(projectName: string, agentType: string, port: numb
     recycled: boolean;
     message: string;
     error?: undefined;
-};
-declare function stopProject(projectName: string, explicit?: boolean): {
+}>;
+declare function stopProject(projectName: string, explicit?: boolean): Promise<{
     success: boolean;
     running: boolean;
     process_owned: boolean;
+    channel_stop_receipt: import("../../system/managed-process-tree").ManagedProcessStopReceiptV2;
     runtime_stop: {
         success: boolean;
         project: string;
@@ -83,9 +84,9 @@ declare function stopProject(projectName: string, explicit?: boolean): {
     };
     error: string;
     message: string;
-};
+}>;
 export { startProject, stopProject };
-export declare function reconcileProjectFeishuConnections(port: number): any[];
+export declare function reconcileProjectFeishuConnections(port: number): Promise<any[]>;
 export declare function startFeishuChannelSupervisorForServer(port: number): void;
 export declare function stopFeishuChannelSupervisorForServer(): void;
 export declare function handleProjectsApi(pathname: string, req: any, res: any, parsed: any, ctx: {

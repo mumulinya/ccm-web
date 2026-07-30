@@ -34,7 +34,6 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentApi = createGlobalAgentApi;
-const child_process_1 = require("child_process");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -50,6 +49,7 @@ const global_agent_tool_authorization_1 = require("./global-agent-tool-authoriza
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const api_access_control_1 = require("../system/api-access-control");
+const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
 const global_terminal_delivery_1 = require("../../agents/global/global-terminal-delivery");
 const secure_multipart_1 = require("../../system/secure-multipart");
 function resolveControlBotAcpPlatformContext(acpSessionIdValue) {
@@ -358,7 +358,7 @@ function createGlobalAgentApi(deps) {
                     reactionInput = null;
                 };
                 try {
-                    const isAcp = req.headers["x-ccm-acp"] === "1";
+                    const isAcp = req.ccmAuth?.kind === "internal" && req.ccmAuth?.caller === "feishu-acp";
                     const config = loadFeishuConfig();
                     if (!isAcp) {
                         const expected = String(config.control_bot_hook_token || "").trim();
@@ -1627,11 +1627,14 @@ function createGlobalAgentApi(deps) {
                     let status = "";
                     let diff = "";
                     try {
-                        status = (0, child_process_1.execFileSync)("git", ["status", "--porcelain"], { encoding: "utf-8", cwd: workDir });
-                        diff = (0, child_process_1.execFileSync)("git", ["diff"], { encoding: "utf-8", cwd: workDir, maxBuffer: 10 * 1024 * 1024 });
+                        status = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["status", "--porcelain"], { maxOutputBytes: 10 * 1024 * 1024 })).stdout;
+                        diff = (await (0, git_workspace_runtime_1.runGitCommand)(workDir, ["diff"], { maxOutputBytes: 10 * 1024 * 1024 })).stdout;
                         // 如果工作区干净，尝试对比暂存区
                         if (!diff.trim()) {
-                            diff = (0, child_process_1.execFileSync)("git", ["diff", "--staged"], { encoding: "utf-8", cwd: workDir, maxBuffer: 10 * 1024 * 1024 });
+                            const staged = await (0, git_workspace_runtime_1.tryGitCommand)(workDir, ["diff", "--staged"], { maxOutputBytes: 10 * 1024 * 1024 });
+                            if (!staged.ok)
+                                throw new Error(staged.error || "读取暂存区差异失败");
+                            diff = staged.output;
                         }
                     }
                     catch (gitErr) {

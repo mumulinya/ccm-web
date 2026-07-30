@@ -50,6 +50,7 @@ export declare function createGlobalAgentLoopSelfTest(deps: {
     executionRunsHaveUnifiedDeliveryReport: boolean;
     executionRunsHaveCompletionCard: boolean;
     ordinaryAnswerDoesNotShowDeliveryReport: boolean;
+    modelConfirmedDirectReplySkipsFullLoop: boolean;
     globalDispatchLaunchSummaryVisible: boolean;
     globalDispatchLaunchSummaryStreamsLive: boolean;
     globalDispatchLaunchSummaryDoesNotCallDoneTargetCompleted: boolean;

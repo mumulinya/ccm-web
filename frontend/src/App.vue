@@ -32,11 +32,15 @@ import {
 import UsabilityWorkbench from './components/common/UsabilityWorkbench.vue'
 import PageLoadingOverlay from './components/common/PageLoadingOverlay.vue'
 import PageLoadError from './components/common/PageLoadError.vue'
+import NotificationCenter from './components/system/NotificationCenter.vue'
+import WebPetHost from './components/pets/WebPetHost.vue'
 import {
   MENU_CONFIG_EVENT,
   MENU_CONFIG_KEY,
   buildConfiguredTabs,
   loadMenuConfiguration,
+  loadServerMenuConfiguration,
+  subscribeMenuConfigurationBroadcast,
 } from './utils/menuConfiguration.js'
 import {
   setActivePageLoadScope,
@@ -55,6 +59,8 @@ const pagePendingTokens = new Map()
 const pageSettleTimers = new Map()
 const pageSlowTimers = new Map()
 let unsubscribeFeishuAlerts = null
+let unsubscribeNavigationEvents = null
+let unsubscribeNavigationBroadcast = null
 
 const ensurePageLoadState = pageId => {
   if (!pageLoadStates[pageId]) {
@@ -249,19 +255,7 @@ const isMobile = ref(window.innerWidth <= 768)
 const isDark = ref(localStorage.getItem('theme') === 'dark')
 const showMobileMenu = ref(false)
 
-// 全局对话模板分发总线
-const activeSelectedTemplate = ref(null)
-provide('activeSelectedTemplate', activeSelectedTemplate)
 provide('slashNavigate', (tab) => switchTab(tab))
-provide('applyTemplate', (template, targetTab, targetId) => {
-  switchTab(targetTab)
-  if (targetTab === 'groups') {
-    navigateTo.value = { tab: 'groups', groupId: targetId }
-  } else if (targetTab === 'projects') {
-    navigateTo.value = { tab: 'projects', project: targetId }
-  }
-  activeSelectedTemplate.value = { template, targetTab, targetId }
-})
 
 // 搜索结果跳转目标
 const navigateTo = ref(null)
@@ -272,11 +266,13 @@ const goToResult = async (item) => {
   if (item.conversationType === 'task') {
     navigateTo.value = { tab: 'tasks', taskId: item.taskId }
   } else if (item.conversationType === 'global') {
-    navigateTo.value = { tab: 'global-agent', sessionId: item.sessionId, messageId: item.messageId, messageIndex: item.messageIndex, keyword: item.query || item._keyword || '' }
+    navigateTo.value = { tab: 'global-agent', sessionId: item.sessionId, messageId: item.messageId, messageIndex: item.messageIndex, messageWindow: item.messageWindow, keyword: item.query || item._keyword || '' }
   } else if (item.conversationType === 'group' || item.isGroup) {
-    navigateTo.value = { tab: 'groups', groupId: item.groupId || item.sessionId, groupSessionId: item.conversationType === 'group' ? item.sessionId : '', messageId: item.messageId, messageIndex: item.messageIndex, keyword: item.query || item._keyword || '' }
+    navigateTo.value = { tab: 'groups', groupId: item.groupId || item.sessionId, groupSessionId: item.conversationType === 'group' ? item.sessionId : '', messageId: item.messageId, messageIndex: item.messageIndex, messageWindow: item.messageWindow, keyword: item.query || item._keyword || '' }
+  } else if (item.conversationType === 'music') {
+    navigateTo.value = { tab: 'music', sessionId: item.sessionId, messageId: item.messageId, messageIndex: item.messageIndex, messageWindow: item.messageWindow, keyword: item.query || item._keyword || '' }
   } else {
-    navigateTo.value = { tab: 'projects', project: item.project, sessionId: item.sessionId, messageId: item.messageId, messageIndex: item.messageIndex, keyword: item.query || item._keyword || '' }
+    navigateTo.value = { tab: 'projects', project: item.project, sessionId: item.sessionId, messageId: item.messageId, messageIndex: item.messageIndex, messageWindow: item.messageWindow, keyword: item.query || item._keyword || '' }
   }
   switchTab(navigateTo.value.tab)
 }
@@ -545,6 +541,10 @@ onMounted(async () => {
   document.documentElement.classList.toggle('low-perf', lowPerf)
   window.addEventListener('storage', handleSettingsStorage)
   window.addEventListener(MENU_CONFIG_EVENT, handleMenuConfigurationEvent)
+  unsubscribeNavigationBroadcast = subscribeMenuConfigurationBroadcast(() => void reloadServerNavigation({ quiet: true }))
+  unsubscribeNavigationEvents = subscribeRuntimeEvents(['system'], event => {
+    if (String(event?.type || '').startsWith('navigation.')) void reloadServerNavigation({ quiet: true })
+  })
   unsubscribeFeishuAlerts = subscribeRuntimeEvents(['system'], event => {
     if (event?.type !== 'feishu.delivery_exhausted') return
     toast.error('飞书消息连续发送失败，请到“设置 → 通知与渠道”检查投递记录并重试。')
@@ -553,6 +553,7 @@ onMounted(async () => {
   await Promise.all([
     fetch('/api/projects').then(res => res.json()).then(data => { projects.value = data.projects || [] }).catch(() => {}),
     refreshMusicPetAgent(),
+    reloadServerNavigation({ quiet: true }),
   ])
   const initialNavigation = startupNavigationTarget
   if (initialNavigation) {
@@ -565,6 +566,10 @@ onMounted(async () => {
 onUnmounted(() => {
   unsubscribeFeishuAlerts?.()
   unsubscribeFeishuAlerts = null
+  unsubscribeNavigationEvents?.()
+  unsubscribeNavigationEvents = null
+  unsubscribeNavigationBroadcast?.()
+  unsubscribeNavigationBroadcast = null
   unsubscribePageLoadRequests()
   pageSettleTimers.forEach(timer => window.clearTimeout(timer))
   pageSlowTimers.forEach(timer => window.clearTimeout(timer))
@@ -637,11 +642,20 @@ const GROUP_ICONS = {
   system: Settings2,
   ungrouped: Menu,
 }
+const CONFIGURABLE_ICONS = {
+  Activity, Bot, BookOpen, Brain, Clock3, FileDiff, FolderKanban, History, LayoutDashboard,
+  Link, ListTodo, Menu, MessageSquare, Music2, PawPrint, Search, Settings2, SlidersHorizontal,
+  Sparkles, SquareTerminal, Trash2, Wrench, Workflow,
+}
 
 const menuConfig = ref(loadMenuConfiguration(DEFAULT_TABS))
+const navigationState = ref(null)
 const authRole = window.__CCM_AUTH__?.user?.role || 'viewer'
-const ADMIN_ONLY_TABS = new Set(['tools', 'cleanup-center', 'terminal', 'menumanager'])
-const roleFilteredTabs = source => source.filter(tab => authRole === 'admin' || !ADMIN_ONLY_TABS.has(tab.id))
+const ADMIN_ONLY_TABS = new Set(['tools', 'cleanup-center', 'terminal'])
+const roleFilteredTabs = source => source.map(tab => ({
+  ...tab,
+  disabledReason: authRole !== 'admin' && ADMIN_ONLY_TABS.has(tab.id) ? '需要 Admin 权限' : '',
+}))
 const tabs = ref(roleFilteredTabs(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value)))
 // 工作台是首页：普通深链接仍可直达，浏览器刷新统一回到工作台。
 const startupNavigationTarget = isPageReload ? { tab: 'dashboard' } : readNavigationTargetFromUrl()
@@ -658,8 +672,18 @@ const currentTabInfo = () => tabs.value.find(t => t.id === currentTab.value)
 const activePageLoadState = computed(() => ensurePageLoadState(currentTab.value || 'dashboard'))
 const currentPageLoadingTitle = computed(() => `正在加载${currentTabInfo()?.label || '页面'}`)
 const reloadCurrentPage = () => window.location.reload()
-const getTabIcon = (tabId) => TAB_ICONS[tabId] || Link
-const getGroupIcon = (groupId) => GROUP_ICONS[groupId] || Menu
+const configuredIconComponent = value => {
+  const name = String(value || '')
+  return /^[A-Za-z][A-Za-z0-9-]{0,47}$/.test(name) ? (CONFIGURABLE_ICONS[name] || null) : null
+}
+const configuredIconGlyph = value => configuredIconComponent(value) ? '' : String(value || '')
+const getTabIcon = tabOrId => {
+  const tab = typeof tabOrId === 'object' ? tabOrId : tabs.value.find(item => item.id === tabOrId)
+  return configuredIconComponent(tab?.configuredIcon) || TAB_ICONS[tab?.id || tabOrId] || Link
+}
+const getTabGlyph = tab => configuredIconGlyph(tab?.configuredIcon)
+const getGroupIcon = group => configuredIconComponent(group?.icon) || GROUP_ICONS[group?.id || group] || Menu
+const getGroupGlyph = group => configuredIconGlyph(group?.icon)
 const mobilePrimaryTabs = computed(() => tabs.value.filter(tab => tab.mobilePrimary && !tab.hiddenFromMenu).slice(0, 4))
 const mobileMoreTabs = computed(() => tabs.value.filter(tab => (
   !tab.hiddenFromMenu && !tab.mobilePrimary
@@ -687,6 +711,16 @@ const applyMenuConfiguration = config => {
   }
 }
 
+const reloadServerNavigation = async ({ quiet = false } = {}) => {
+  try {
+    const state = await loadServerMenuConfiguration(DEFAULT_TABS)
+    navigationState.value = state
+    applyMenuConfiguration(state.config)
+  } catch (error) {
+    if (!quiet) toast.warning(error?.message || '服务端导航暂时不可用，已使用本地备份')
+  }
+}
+
 const syncNavigationTabUrl = tabId => {
   const url = new URL(window.location.href)
   if (url.searchParams.get('tab') === tabId) return
@@ -694,7 +728,11 @@ const syncNavigationTabUrl = tabId => {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
 }
 const handleMenuConfigurationEvent = event => applyMenuConfiguration(event?.detail || loadMenuConfiguration(DEFAULT_TABS))
-const updateMenuConfiguration = config => applyMenuConfiguration(config)
+const updateMenuConfiguration = payload => {
+  const state = payload?.state || navigationState.value
+  if (state) navigationState.value = state
+  applyMenuConfiguration(payload?.config || payload)
+}
 
 // 浏览器风格标签页管理
 const openTabs = ref([startupTab])
@@ -704,6 +742,48 @@ const handleWorkbenchNavigate = (target = {}) => {
   if (target.groupId) navigateTo.value = { tab: 'groups', groupId: target.groupId }
   if (target.project) navigateTo.value = { tab: 'projects', project: target.project }
   switchTab(target.tab || 'dashboard')
+}
+
+const handleNotificationNavigate = (action = {}) => {
+  const kind = String(action.kind || '')
+  if (kind === 'permission') {
+    navigateTo.value = {
+      tab: 'tasks',
+      taskId: action.task_id || '',
+      permissionId: action.permission_id || '',
+    }
+    switchTab('tasks')
+    return
+  }
+  if (kind === 'task' || action.task_id) {
+    navigateTo.value = { tab: 'trace-replay', taskId: action.task_id || action.scope_id || '' }
+    switchTab('trace-replay')
+    return
+  }
+  if (action.project_id || action.scope_type === 'project') {
+    navigateTo.value = {
+      tab: 'projects',
+      project: action.project_id || action.scope_id || '',
+      sessionId: action.session_id || '',
+    }
+    switchTab('projects')
+    return
+  }
+  if (action.group_id || action.scope_type === 'group') {
+    navigateTo.value = {
+      tab: 'groups',
+      groupId: action.group_id || action.scope_id || '',
+      groupSessionId: action.session_id || '',
+    }
+    switchTab('groups')
+    return
+  }
+  if (action.scope_type === 'global' || kind === 'agent') {
+    navigateTo.value = { tab: 'global-agent', sessionId: action.session_id || '' }
+    switchTab('global-agent')
+    return
+  }
+  toast.info('这条通知关联的记录已归档或暂时无法定位')
 }
 
 const handleTerminalAnalysis = (payload = {}) => {
@@ -733,6 +813,10 @@ const switchTab = (tabId) => {
   tabId = RETIRED_TAB_REDIRECTS[tabId] || tabId
   const tabInfo = tabs.value.find(t => t.id === tabId)
   if (!tabInfo) return
+  if (tabInfo.disabledReason) {
+    toast.warning(tabInfo.disabledReason)
+    return
+  }
   if (tabInfo.isExternal) {
     window.open(tabInfo.url, '_blank', 'noopener,noreferrer')
     return
@@ -773,59 +857,65 @@ const closeTab = (tabId, event) => {
       </div>
       <div class="nav-menu">
         <template v-if="pinnedTabs.length">
-          <div class="nav-group-header" @click="toggleGroup('pinned')">
+          <button type="button" class="nav-group-header" :aria-expanded="!collapsedGroups.pinned" @click="toggleGroup('pinned')">
             <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups.pinned }" :size="13" />
             <Sparkles class="group-icon" :size="15" />
             <span>常用</span>
-          </div>
+          </button>
           <div v-show="!collapsedGroups.pinned" class="nav-group-items">
-            <div v-for="tab in pinnedTabs" :key="tab.id" class="nav-item" :class="{ active: currentTab === tab.id }" @mouseenter="preloadTab(tab.id)" @focusin="preloadTab(tab.id)" @click="switchTab(tab.id)">
-              <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
+            <button v-for="tab in pinnedTabs" :key="tab.id" type="button" class="nav-item" :class="{ active: currentTab === tab.id, disabled: tab.disabledReason }" :title="tab.disabledReason || tab.label" :aria-disabled="!!tab.disabledReason" @mouseenter="preloadTab(tab.id)" @focusin="preloadTab(tab.id)" @click="switchTab(tab.id)">
+              <span v-if="getTabGlyph(tab)" class="nav-icon glyph">{{ getTabGlyph(tab) }}</span><component v-else :is="getTabIcon(tab)" class="nav-icon" :size="16" />
               <span>{{ tab.label }}</span>
-            </div>
+            </button>
           </div>
         </template>
         <template v-for="group in menuGroups" :key="group.id">
-          <div class="nav-group-header" @click="toggleGroup(group.id)">
+          <button type="button" class="nav-group-header" :aria-expanded="!collapsedGroups[group.id]" @click="toggleGroup(group.id)">
             <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups[group.id] }" :size="13" />
-            <component :is="getGroupIcon(group.id)" class="group-icon" :size="15" />
+            <span v-if="getGroupGlyph(group)" class="group-icon glyph">{{ getGroupGlyph(group) }}</span><component v-else :is="getGroupIcon(group)" class="group-icon" :size="15" />
             <span>{{ group.label }}</span>
-          </div>
+          </button>
           <div v-show="!collapsedGroups[group.id]" class="nav-group-items">
-            <div
+            <button
               v-for="tab in getGroupTabs(group.id)"
               :key="tab.id"
+              type="button"
               class="nav-item"
-              :class="{ active: currentTab === tab.id }"
+              :class="{ active: currentTab === tab.id, disabled: tab.disabledReason }"
+              :title="tab.disabledReason || tab.label"
+              :aria-disabled="!!tab.disabledReason"
               @mouseenter="preloadTab(tab.id)"
               @focusin="preloadTab(tab.id)"
               @click="switchTab(tab.id)"
             >
-              <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
+              <span v-if="getTabGlyph(tab)" class="nav-icon glyph">{{ getTabGlyph(tab) }}</span><component v-else :is="getTabIcon(tab)" class="nav-icon" :size="16" />
               <span>{{ tab.label }}</span>
-            </div>
+            </button>
           </div>
         </template>
         <!-- 未分组 -->
         <template v-if="ungroupedTabs.length > 0">
-          <div class="nav-group-header" @click="toggleGroup('ungrouped')">
+          <button type="button" class="nav-group-header" :aria-expanded="!collapsedGroups.ungrouped" @click="toggleGroup('ungrouped')">
             <ChevronDown class="group-arrow" :class="{ collapsed: collapsedGroups['ungrouped'] }" :size="13" />
             <Menu class="group-icon" :size="15" />
             <span>其他</span>
-          </div>
+          </button>
           <div v-show="!collapsedGroups['ungrouped']" class="nav-group-items">
-            <div
+            <button
               v-for="tab in ungroupedTabs"
               :key="tab.id"
+              type="button"
               class="nav-item"
-              :class="{ active: currentTab === tab.id }"
+              :class="{ active: currentTab === tab.id, disabled: tab.disabledReason }"
+              :title="tab.disabledReason || tab.label"
+              :aria-disabled="!!tab.disabledReason"
               @mouseenter="preloadTab(tab.id)"
               @focusin="preloadTab(tab.id)"
               @click="switchTab(tab.id)"
             >
-              <component :is="getTabIcon(tab.id)" class="nav-icon" :size="16" />
+              <span v-if="getTabGlyph(tab)" class="nav-icon glyph">{{ getTabGlyph(tab) }}</span><component v-else :is="getTabIcon(tab)" class="nav-icon" :size="16" />
               <span>{{ tab.label }}</span>
-            </div>
+            </button>
           </div>
         </template>
       </div>
@@ -835,7 +925,7 @@ const closeTab = (tabId, event) => {
     <main class="main-wrapper">
       <div class="header">
         <h2>
-          <component :is="getTabIcon(currentTab)" :size="17" />
+          <span v-if="getTabGlyph(currentTabInfo())" class="glyph">{{ getTabGlyph(currentTabInfo()) }}</span><component v-else :is="getTabIcon(currentTabInfo())" :size="17" />
           <span>{{ currentTabInfo()?.label }}</span>
         </h2>
         <div class="tab-bar" v-if="openTabs.length > 0">
@@ -845,7 +935,7 @@ const closeTab = (tabId, event) => {
             @focusin="preloadTab(tab.id)"
             @click="switchTab(tab.id)"
             @contextmenu.prevent="closeTab(tab.id, $event)">
-            <component :is="getTabIcon(tab.id)" class="tab-icon" :size="14" />
+            <span v-if="getTabGlyph(tab)" class="tab-icon glyph">{{ getTabGlyph(tab) }}</span><component v-else :is="getTabIcon(tab)" class="tab-icon" :size="14" />
             <span class="tab-label">{{ tab.label }}</span>
             <button class="tab-close" @click.stop="closeTab(tab.id)" :aria-label="`关闭${tab.label}`" title="关闭"><X :size="13" /></button>
           </div>
@@ -878,7 +968,7 @@ const closeTab = (tabId, event) => {
         <div v-if="musicPlayerActivated" v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :active="currentTab === 'music'" :agent-label="musicPetLabel" /></div>
         <MusicRemoteHost @switch-tab="switchTab" />
         <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
-        <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" :config="menuConfig" @update-config="updateMenuConfiguration" /></div>
+        <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" :config="menuConfig" :navigation-state="navigationState" :auth-role="authRole" @update-config="updateMenuConfiguration" /></div>
         <PageLoadingOverlay
           v-if="activePageLoadState.loading"
           :page-id="currentTab"
@@ -910,7 +1000,7 @@ const closeTab = (tabId, event) => {
           @focus="preloadTab(tab.id)"
           @click="openMobileTab(tab.id)"
         >
-          <component :is="getTabIcon(tab.id)" :size="19" />
+          <span v-if="getTabGlyph(tab)" class="glyph">{{ getTabGlyph(tab) }}</span><component v-else :is="getTabIcon(tab)" :size="19" />
           <span>{{ tab.label }}</span>
         </button>
       </div>
@@ -927,7 +1017,7 @@ const closeTab = (tabId, event) => {
         @focus="preloadTab(tab.id)"
         @click="openMobileTab(tab.id)"
       >
-        <component :is="getTabIcon(tab.id)" class="bottom-icon" :size="19" />
+        <span v-if="getTabGlyph(tab)" class="bottom-icon glyph">{{ getTabGlyph(tab) }}</span><component v-else :is="getTabIcon(tab)" class="bottom-icon" :size="19" />
         <span class="bottom-label">{{ tab.label.replace('我的', '') }}</span>
       </button>
       <button class="bottom-item" :class="{ active: mobileMoreActive || showMobileMenu }" type="button" @click="showMobileMenu = !showMobileMenu">
@@ -935,6 +1025,9 @@ const closeTab = (tabId, event) => {
         <span class="bottom-label">更多</span>
       </button>
     </nav>
+
+    <NotificationCenter @navigate="handleNotificationNavigate" />
+    <WebPetHost @navigate="handleNotificationNavigate" />
 
   </div>
 </template>
@@ -1033,6 +1126,7 @@ const closeTab = (tabId, event) => {
 }
 
 .nav-item {
+  width: 100%;
   min-height: 34px;
   padding: 7px 9px;
   display: flex;
@@ -1048,6 +1142,8 @@ const closeTab = (tabId, event) => {
   font-size: 13px;
   font-weight: 560;
   letter-spacing: 0;
+  background: transparent;
+  text-align: left;
 }
 
 .nav-item:hover {
@@ -1067,6 +1163,8 @@ const closeTab = (tabId, event) => {
   border-bottom-color: var(--border-color);
   box-shadow: none;
 }
+.nav-item.disabled { opacity: .48; cursor: not-allowed; }
+.glyph { display: inline-grid; place-items: center; line-height: 1; }
 
 .nav-icon {
   flex: 0 0 auto;
@@ -1412,6 +1510,7 @@ const closeTab = (tabId, event) => {
 }
 
 .nav-group-header {
+  width: 100%;
   min-height: 28px;
   padding: 6px 10px;
   font-size: 11px;
@@ -1428,6 +1527,8 @@ const closeTab = (tabId, event) => {
   transition: all 0.15s;
   border-radius: 6px;
   border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
 }
 .nav-group-header:hover { color: var(--text-primary); background: var(--control-hover); }
 .group-arrow { flex: 0 0 auto; transition: transform 0.2s; }

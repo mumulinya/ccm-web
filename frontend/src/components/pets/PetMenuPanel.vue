@@ -14,9 +14,9 @@ const emit = defineEmits(['agents-updated'])
 
 const {
   PetAgentList, PetSkinGrid, PetAssetGrid, PetSprite, rightTab,
-  selectedAgent, agentLabelDraft, desktopPetRunning, petConfigs, petPositions, actionPetType,
+  selectedAgent, agentLabelDraft, desktopPetRunning, petConfigRevision, petSettings, petConfigs, petPositions, actionPetType,
   assetVersion, uploadInputs, uploadingAsset, projectPetStrategy, GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME,
-  customPetTypes, imageErrors, handleImageError, isPixelated, loadConfigs, saveConfigs,
+  customPetTypes, imageErrors, handleImageError, isPixelated, loadConfigs, saveConfigs, updatePetSetting,
   checkDesktopPet, launchDesktopPet, closeDesktopPet, BUILTIN_FALLBACK_PET_TYPE, fallbackPetTypes, petTypes,
   editablePetTypes, getPetTypeInfo, isV2PetType, usesStatefulPetRenderer, assetsReadonlyNotice, actionPetSkin, normalizePetType, normalizePetConfigs, getPetIconPath,
   stateActions, reactionActions, fallbackProjectPetStrategy, getStateLabel, formatStrategyDuration, loadPetActionStrategy,

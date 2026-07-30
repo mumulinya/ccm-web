@@ -24,6 +24,8 @@ export interface WorkflowDecision {
     authorizationDirective: "preserve" | "grant" | "revoke";
     riskLevel: "low" | "write" | "high";
     requiresUserConfirmation: boolean;
+    directReplyReady: boolean;
+    directReply: string;
     source: "model" | "explicit_user_choice";
     semanticDecisionReceipt?: any;
 }
@@ -39,4 +41,6 @@ export declare function decideWorkflowWithModel(input: {
 export declare function runWorkflowDecisionContractSelfTest(): {
     success: boolean;
     cases: WorkflowDecision[];
+    direct: WorkflowDecision;
+    unsafeDirect: WorkflowDecision;
 };

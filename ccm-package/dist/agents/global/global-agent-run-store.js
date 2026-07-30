@@ -44,6 +44,7 @@ exports.loadStore = loadStore;
 exports.saveRun = saveRun;
 exports.getGlobalAgentRun = getGlobalAgentRun;
 exports.listGlobalAgentRuns = listGlobalAgentRuns;
+exports.findGlobalAgentRunsForTaskIds = findGlobalAgentRunsForTaskIds;
 exports.findWaitingGlobalAgentRun = findWaitingGlobalAgentRun;
 exports.findClarifyingGlobalAgentRun = findClarifyingGlobalAgentRun;
 exports.getGlobalAgentToolSpec = getGlobalAgentToolSpec;
@@ -308,6 +309,15 @@ function listGlobalAgentRuns(options = {}) {
         .filter(run => !options.status || run.status === options.status)
         .slice(0, Math.max(1, Math.min(100, Number(options.limit || 30))));
 }
+function findGlobalAgentRunsForTaskIds(taskIds) {
+    const ids = new Set([...taskIds].map(String).filter(Boolean));
+    if (!ids.size)
+        return [];
+    return loadStore().runs.filter(run => ids.has(String(run.mission_id || "")) || (run.steps || []).some(step => {
+        const observation = step?.observation || {};
+        return ids.has(String(observation.task_id || "")) || ids.has(String(observation.mission_id || ""));
+    }));
+}
 function findWaitingGlobalAgentRun(sessionId) {
     return listGlobalAgentRuns({ sessionId, status: "waiting_confirmation", limit: 1 })[0] || null;
 }
@@ -441,8 +451,7 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "manage_task", description: "暂停、恢复、续跑、重试、排队或删除任务。", required: ["operation"], risk: args => destructiveOperation(args) ? "high" : "write" },
     { name: "manage_tool", description: "管理 MCP 和 Skill。", required: ["operation"], risk: args => destructiveOperation(args) ? "high" : "write" },
     { name: "git_review", description: "读取并审查指定项目的 Git 变更。", required: ["project"], risk: "read" },
-    { name: "git_commit", description: "提交指定项目的代码变更。", required: ["project"], risk: "write" },
-    { name: "create_template", description: "创建全局对话模板。", required: ["name", "content"], risk: "write" },
+    { name: "git_commit", description: "提交指定项目中明确列出的代码变更。files 必须是本轮已审查的非空文件路径数组，禁止省略后提交整个工作区。", required: ["project", "files"], risk: "write" },
     { name: "play_music", description: "理解用户的点歌、歌手、心情或场景请求并播放音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。keyword 可为歌名、歌手、风格、情绪搜索主题，或 __random__ 表示随机播放。", required: ["keyword"], risk: "read" },
     { name: "stop_music", description: "停止当前正在播放的音乐（浏览器 UI 副作用，自动执行，不需要写授权确认）。用于用户说关闭/停止/关掉音乐、停歌等。", required: [], risk: "read" },
     { name: "toggle_pet", description: "打开或关闭桌面宠物。", required: ["action"], risk: "write" },

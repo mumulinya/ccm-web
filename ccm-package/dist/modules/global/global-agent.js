@@ -158,8 +158,8 @@ function deleteGlobalAgentConversationSession(sessionId, expectedSource = "") {
 function getGlobalAgentConversationMessages(sessionId) {
     return globalAgentHistoryRuntime.getGlobalAgentConversationMessages(sessionId);
 }
-function appendGlobalAgentConversationMessage(sessionId, role, content, source = "feishu") {
-    return globalAgentHistoryRuntime.appendGlobalAgentConversationMessage(sessionId, role, content, source);
+function appendGlobalAgentConversationMessage(sessionId, role, content, source = "feishu", options = {}) {
+    return globalAgentHistoryRuntime.appendGlobalAgentConversationMessage(sessionId, role, content, source, options);
 }
 function resolveFeishuGlobalAgentSessionId(payload, store) {
     return globalAgentHistoryRuntime.resolveFeishuGlobalAgentSessionId(payload, store);

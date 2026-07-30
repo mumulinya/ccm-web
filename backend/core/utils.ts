@@ -2,25 +2,30 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as zlib from "zlib";
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { getConfigs, getConfigInfo } from "./db";
 
 // === 动态从注册表中读取最新的 Windows PATH 环境变量 ===
 export function refreshEnvPath() {
   if (process.platform !== "win32") return;
   try {
-    const { execSync } = require("child_process");
     let userPath = "";
     let sysPath = "";
     
     try {
-      const hkcu = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf8" });
+      const hkcu = execFileSync("reg.exe", ["query", "HKCU\\Environment", "/v", "Path"], {
+        encoding: "utf8",
+        windowsHide: true,
+      });
       const matchHkcu = hkcu.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
       userPath = matchHkcu ? matchHkcu[1].trim() : "";
     } catch (e) {}
 
     try {
-      const hklm = execSync('reg query "HKLM\\System\\CurrentControlSet\\Control\\Session Manager\\Environment" /v Path', { encoding: "utf8" });
+      const hklm = execFileSync("reg.exe", ["query", "HKLM\\System\\CurrentControlSet\\Control\\Session Manager\\Environment", "/v", "Path"], {
+        encoding: "utf8",
+        windowsHide: true,
+      });
       const matchHklm = hklm.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
       sysPath = matchHklm ? matchHklm[1].trim() : "";
     } catch (e) {}
@@ -68,7 +73,7 @@ export function refreshEnvPath() {
   }
 }
 
-export const CCM_DIR = path.join(os.homedir(), ".cc-connect");
+export const CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".cc-connect"));
 export const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 export const PID_DIR = path.join(CCM_DIR, "pids");
 export const LOG_DIR = path.join(CCM_DIR, "logs");
@@ -91,7 +96,6 @@ export const PUBLIC_DIR = publicDirCandidates.find(candidate => fs.existsSync(pa
 // 业务级别配置文件路径
 export const METRICS_FILE = path.join(CCM_DIR, "metrics.json");
 export const FEISHU_CONFIG_FILE = path.join(CCM_DIR, "feishu-config.json");
-export const TEMPLATES_FILE = path.join(CCM_DIR, "prompt-templates.json");
 export const PROJECT_CONFIGS_FILE = path.join(CCM_DIR, "project-configs.json");
 export const GROUP_LOGS_FILE = path.join(CCM_DIR, "group-logs.json");
 export const MUSIC_CONFIG_FILE = path.join(CCM_DIR, "music-config.json");
@@ -438,7 +442,8 @@ export function parseGitStatus(workDir: string) {
   try {
     const status = execFileSync("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
       encoding: "utf-8", cwd: workDir, timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     }).trimEnd();
     if (!status) return [];
     return status.split("\n").filter(Boolean).map(line => {
@@ -500,7 +505,8 @@ export function readHeadFileText(workDir: string, filePath: string) {
       cwd: workDir,
       timeout: 5000,
       maxBuffer: 8 * 1024 * 1024,
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
     const tooLarge = buffer.length > MAX_FILE_SNAPSHOT_BYTES;
     if (tooLarge) buffer = buffer.subarray(0, MAX_FILE_SNAPSHOT_BYTES);

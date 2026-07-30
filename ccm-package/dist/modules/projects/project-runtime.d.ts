@@ -1,3 +1,4 @@
+import { ManagedProcessStopReceiptV2 } from "../../system/managed-process-tree";
 export type ProjectRuntimeProfileV1 = {
     id: string;
     label: string;
@@ -27,7 +28,7 @@ export type ProjectJavaToolchainV1 = {
 type RuntimeProcessState = {
     project: string;
     profileId: string;
-    status: "starting" | "running" | "stopped" | "failed" | "unknown";
+    status: "starting" | "running" | "stopping" | "stopped" | "failed" | "unknown";
     pid: number;
     managerPid?: number;
     commandChecksum: string;
@@ -37,11 +38,12 @@ type RuntimeProcessState = {
     stopReason?: "user" | "exited" | "missing";
     exitCode?: number | null;
     error?: string;
+    stopReceipt?: ManagedProcessStopReceiptV2;
 };
 type RuntimeBuildState = {
     project: string;
     profileId: string;
-    status: "building" | "succeeded" | "failed";
+    status: "building" | "cancelling" | "succeeded" | "failed";
     pid: number;
     managerPid?: number;
     startedAt: string;
@@ -105,27 +107,30 @@ export declare function testProjectJavaToolchain(project: string, input?: any): 
         error: string;
     };
 };
-export declare function stopManagedProjectRuntimesForShutdown(): {
+export declare function stopManagedProjectRuntimesForShutdown(): Promise<{
     stoppedProcesses: number;
     stoppedBuilds: number;
-};
+    failures: ManagedProcessStopReceiptV2[];
+}>;
 export declare function startProjectRuntime(project: string, profileId?: unknown): {
     success: boolean;
     profile: any;
     state: RuntimeProcessState;
 };
-export declare function stopProjectRuntime(project: string, profileId?: unknown): {
+export declare function stopProjectRuntime(project: string, profileId?: unknown): Promise<{
     success: boolean;
     alreadyStopped: boolean;
     profile: any;
     state: RuntimeProcessState;
+    transition_receipt?: undefined;
 } | {
     success: boolean;
     profile: any;
     state: RuntimeProcessState;
+    transition_receipt: ManagedProcessStopReceiptV2;
     alreadyStopped?: undefined;
-};
-export declare function stopAllProjectRuntimes(project: string): {
+}>;
+export declare function stopAllProjectRuntimes(project: string): Promise<{
     success: boolean;
     project: string;
     stoppedProcesses: number;
@@ -135,12 +140,12 @@ export declare function stopAllProjectRuntimes(project: string): {
         kind: "run" | "build";
         error: string;
     }[];
-};
-export declare function restartProjectRuntime(project: string, profileId?: unknown): {
+}>;
+export declare function restartProjectRuntime(project: string, profileId?: unknown): Promise<{
     success: boolean;
     profile: any;
     state: RuntimeProcessState;
-};
+}>;
 export declare function buildProjectRuntime(project: string, profileId?: unknown): {
     success: boolean;
     profile: any;
@@ -151,7 +156,21 @@ export declare function getProjectRuntimeLogs(project: string, profileId: unknow
     profileId: string;
     kind: "run" | "build";
     logs: string;
+    truncated?: undefined;
+} | {
+    project: string;
+    profileId: string;
+    kind: "run" | "build";
+    logs: string;
+    truncated: boolean;
 };
+export declare function getProjectRuntimeLogsAsync(project: string, profileId: unknown, kind: unknown, lines?: number): Promise<{
+    project: string;
+    profileId: string;
+    kind: "run" | "build";
+    logs: string;
+    truncated: boolean;
+}>;
 export declare function subscribeProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, listener: (event: RuntimeLogEvent) => void): () => void;
 export declare function getProjectRuntimeSnapshot(project: string): any;
 export declare function getProjectRuntimeSummary(project: string): {
@@ -161,13 +180,24 @@ export declare function getProjectRuntimeSummary(project: string): {
     building_count: any;
     selected_profile_id: any;
 };
-export declare function executeProjectRuntimeAction(project: string, profileId: unknown, action: unknown): {
+export declare function getProjectRuntimeSummaryReadOnly(project: string): {
+    profile_count: any;
+    running_count: any;
+    unknown_count: any;
+    building_count: any;
+    selected_profile_id: any;
+    profiles: any;
+    processes: any;
+};
+export declare function executeProjectRuntimeAction(project: string, profileId: unknown, action: unknown): Promise<{
+    operation_id: string;
     success: boolean;
     profile: any;
     state: RuntimeProcessState;
 } | {
+    operation_id: string;
     success: boolean;
     profile: any;
     build: RuntimeBuildState;
-};
+}>;
 export {};

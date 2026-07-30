@@ -43,6 +43,11 @@ export function useMusicPlayer(options = {}) {
   const mode = ref(getPreferredMusicMode()) // local | cloud(B站) | netease(网易)
   watch(mode, (value) => setPreferredMusicMode(value))
   const tracks = ref([])
+  let trackLoadGeneration = 0
+  let trackLoadController = null
+  let trackLoadRetryTimer = null
+  let trackLoadRetryAttempt = 0
+  const trackLoadRetryDelays = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000]
   const playlist = ref([])
   const currentIndex = ref(-1)
   /** Source of truth for what the <audio> element is actually on (survives loadTracks reshuffles). */
@@ -155,12 +160,14 @@ export function useMusicPlayer(options = {}) {
     loadDownloadJobs,
     createDownloadJob,
     cancelDownloadJob,
+    cancelPlaybackDownloads,
     retryDownloadJob,
     clearFinishedDownloadJobs,
     waitForJob,
   } = useMusicDownloadJobs({
-    onCompleted: async () => {
-      await loadTracks()
+    onCompleted: async (job) => {
+      if (job?.filename) await waitForDownloadedTrack(job.filename)
+      else await loadTracks()
       syncUiFromAudio?.()
     },
   })
@@ -530,14 +537,51 @@ export function useMusicPlayer(options = {}) {
   }
 
   // === 音乐列表 ===
-  const loadTracks = async () => {
+  const clearTrackLoadRetry = () => {
+    if (trackLoadRetryTimer) clearTimeout(trackLoadRetryTimer)
+    trackLoadRetryTimer = null
+  }
+
+  const scheduleTrackLoadRetry = () => {
+    if (trackLoadRetryTimer) return
+    const delay = trackLoadRetryDelays[Math.min(trackLoadRetryAttempt, trackLoadRetryDelays.length - 1)]
+    trackLoadRetryAttempt += 1
+    trackLoadRetryTimer = setTimeout(() => {
+      trackLoadRetryTimer = null
+      void loadTracks({ backgroundRetry: true })
+    }, delay)
+  }
+
+  const loadTracks = async (requestOptions = {}) => {
+    const generation = ++trackLoadGeneration
+    trackLoadController?.abort()
+    trackLoadController = new AbortController()
     try {
-      const res = await fetch('/api/music/list')
-      const data = await res.json()
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || '加载本地曲库失败')
+      const allTracks = []
+      let cursor = 0
+      do {
+        const res = await fetch(`/api/music/list?cursor=${cursor}&limit=500`, { signal: trackLoadController.signal })
+        const data = await res.json()
+        if (!res.ok || data.success === false) {
+          const error = new Error(data.error || '加载本地曲库失败')
+          error.httpStatus = res.status
+          throw error
+        }
+        allTracks.push(...(data.tracks || []))
+        cursor = data.next_cursor == null ? null : Number(data.next_cursor)
+      } while (cursor != null && generation === trackLoadGeneration)
+      if (generation !== trackLoadGeneration) return
+      tracks.value = allTracks
+      if (!tracks.value.length) {
+        const statusResponse = await fetch('/api/music/library/index-status', { signal: trackLoadController.signal })
+        const status = await statusResponse.json()
+        if (['indexing', 'index_building'].includes(status?.status?.indexStatus)) {
+          scheduleTrackLoadRetry()
+          return
+        }
       }
-      tracks.value = data.tracks || []
+      clearTrackLoadRetry()
+      trackLoadRetryAttempt = 0
       const savedQueue = (libraryState.value.queue || []).map(filename => tracks.value.find(track => track.filename === filename)).filter(Boolean)
       playlist.value = savedQueue.length ? savedQueue : [...tracks.value]
       // Re-read AFTER await — download onCompleted often starts before play() sets filename.
@@ -563,9 +607,34 @@ export function useMusicPlayer(options = {}) {
       }
       updatePreselectedTrack()
     } catch (error) {
-      tracks.value = []
-      toast.error(error?.message || '加载本地曲库失败')
+      if (error?.name === 'AbortError') return
+      const retryable = !error?.httpStatus || error.httpStatus === 429 || error.httpStatus >= 500
+      if (retryable) scheduleTrackLoadRetry()
+      if (!requestOptions.backgroundRetry && !tracks.value.length) {
+        toast.error(`${error?.message || '加载本地曲库失败'}，服务恢复后会自动重试`)
+      }
     }
+  }
+
+  const waitForDownloadedTrack = async (filename, timeoutMs = 20_000) => {
+    const expected = String(filename || '').trim()
+    if (!expected) throw new Error('下载任务没有返回有效的本地文件名')
+    const deadline = Date.now() + timeoutMs
+    let delay = 180
+    while (Date.now() < deadline) {
+      await loadTracks({ backgroundRetry: true })
+      const track = tracks.value.find(candidate => candidate.filename === expected)
+      if (track) return track
+      await new Promise(resolve => setTimeout(resolve, delay))
+      delay = Math.min(1200, Math.round(delay * 1.7))
+    }
+    throw new Error('歌曲文件已经下载，但曲库索引尚未准备完成，请在下载中心重试同步')
+  }
+
+  const recoverMusicLibraryAfterServiceInterruption = () => {
+    if (document.visibilityState === 'hidden') return
+    clearTrackLoadRetry()
+    void loadTracks({ backgroundRetry: true })
   }
 
   const deleteTrack = async (track) => {
@@ -575,10 +644,13 @@ export function useMusicPlayer(options = {}) {
       const res = await fetch('/api/music/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: track.filename })
+        body: JSON.stringify({ filename: track.filename, expected_revision: libraryState.value.revision })
       })
       const data = await res.json()
       if (data.success) {
+        if (data.state) libraryState.value = data.state
+        tracks.value = tracks.value.filter(candidate => candidate.filename !== track.filename)
+        playlist.value = playlist.value.filter(candidate => candidate.filename !== track.filename)
         if (currentTrack.value && currentTrack.value.filename === track.filename) {
           stopPlayback()
           currentIndex.value = -1
@@ -586,6 +658,9 @@ export function useMusicPlayer(options = {}) {
           duration.value = 0
         }
         await loadTracks()
+        if (tracks.value.some(candidate => candidate.filename === track.filename)) {
+          throw new Error('歌曲文件已删除，但曲库仍返回旧索引，请重试刷新')
+        }
       } else {
         toast.error(`删除失败: ${data.error || '未知错误'}`)
       }
@@ -649,7 +724,11 @@ export function useMusicPlayer(options = {}) {
       if (focusFilename) activePlaybackFilename.value = focusFilename
       else if (options.clearCurrent === true) activePlaybackFilename.value = ''
       syncUiFromAudio?.()
-    } catch (error) { toast.error(error.message || '更新播放队列失败') }
+      return true
+    } catch (error) {
+      toast.error(error.message || '更新播放队列失败')
+      return false
+    }
   }
 
   const restorePlaybackQueue = () => {
@@ -1075,6 +1154,10 @@ export function useMusicPlayer(options = {}) {
   }
 
   onMounted(async () => {
+    window.addEventListener('online', recoverMusicLibraryAfterServiceInterruption)
+    window.addEventListener('focus', recoverMusicLibraryAfterServiceInterruption)
+    window.addEventListener('pageshow', recoverMusicLibraryAfterServiceInterruption)
+    document.addEventListener('visibilitychange', recoverMusicLibraryAfterServiceInterruption)
     refreshSessionAnimeCover()
 
     // 必须先注册全局播放引擎，再 await 曲库加载；否则 client_effect 会 take 掉指令却找不到引擎
@@ -1126,7 +1209,7 @@ export function useMusicPlayer(options = {}) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               requestText,
-              mode: playModeHint,
+              mode: options.sourceMode || 'auto',
               aiRecommendationEnabled: aiRecommendationEnabled.value,
               aiAutoSelectEnabled: aiAutoSelectEnabled.value,
             }),
@@ -1227,6 +1310,12 @@ export function useMusicPlayer(options = {}) {
   })
 
   onUnmounted(() => {
+    trackLoadController?.abort()
+    clearTrackLoadRetry()
+    window.removeEventListener('online', recoverMusicLibraryAfterServiceInterruption)
+    window.removeEventListener('focus', recoverMusicLibraryAfterServiceInterruption)
+    window.removeEventListener('pageshow', recoverMusicLibraryAfterServiceInterruption)
+    document.removeEventListener('visibilitychange', recoverMusicLibraryAfterServiceInterruption)
     if (window.__cc_global_play_music) {
       delete window.__cc_global_play_music
     }
@@ -1447,15 +1536,20 @@ export function useMusicPlayer(options = {}) {
     if (!isLatest()) return superseded()
     converting.value = { ...converting.value, [identifier]: true }
     try {
-      const job = await createDownloadJob(item, { quality: playbackSettings.value.quality })
-      if (!isLatest()) return superseded()
+      const commandId = String(options.commandId || options.command_id || playbackIntent?.id || '')
+      const job = await createDownloadJob(item, {
+        quality: playbackSettings.value.quality,
+        commandId,
+        consumerKind: options.remote ? 'playback' : 'manual',
+      })
+      if (!isLatest()) {
+        if (commandId) await cancelPlaybackDownloads(commandId).catch(() => {})
+        return superseded()
+      }
       if (options.wait === false) return { success: true, queued: true, jobId: job.id, source: item.type, title }
       const completed = await waitForJob(job.id)
       if (!isLatest()) return superseded()
-      await loadTracks()
-      if (!isLatest()) return superseded()
-      const newTrack = tracks.value.find(track => track.filename === completed.filename)
-      if (!newTrack) throw new Error('下载完成，但歌曲没有出现在本地曲库')
+      const newTrack = await waitForDownloadedTrack(completed.filename)
       if (!isLatest()) return superseded()
       if (options.queue !== false) {
         if (options.queuePosition === 'next') await playTrackNext(newTrack)

@@ -344,7 +344,6 @@ export function getGlobalToolDisplayName(toolName: string) {
     manage_tool: "管理工具",
     git_review: "审查代码变更",
     git_commit: "提交代码",
-    create_template: "创建模板",
     play_music: "播放音乐",
     stop_music: "停止音乐",
     toggle_pet: "控制桌面宠物",

@@ -39,6 +39,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const url = __importStar(require("url"));
 const os = __importStar(require("os"));
+const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const tool_manager_1 = require("./tools/tool-manager");
 const tool_call_loop_1 = require("./tools/tool-call-loop");
@@ -69,15 +70,19 @@ const context_engine_recovery_1 = require("./system/context-engine-recovery");
 const unified_task_scheduler_1 = require("./system/unified-task-scheduler");
 // 导入子模块控制器
 const projects_1 = require("./modules/projects/projects");
+const project_git_1 = require("./modules/projects/project-git");
+const git_workspace_runtime_1 = require("./modules/tools/git-workspace-runtime");
 const project_chat_intent_1 = require("./modules/projects/project-chat-intent");
 const project_main_agent_1 = require("./modules/projects/project-main-agent");
 const sessions_1 = require("./modules/projects/sessions");
 const conversation_search_1 = require("./modules/search/conversation-search");
+const conversation_search_index_1 = require("./modules/search/conversation-search-index");
 const git_1 = require("./modules/tools/git");
 const marketplace_1 = require("./modules/tools/marketplace");
-const templates_1 = require("./modules/templates/templates");
 const cron_1 = require("./modules/scheduling/cron");
 const tools_1 = require("./modules/tools/tools");
+const shared_files_api_1 = require("./modules/tools/shared-files-api");
+const shared_files_v2_1 = require("./modules/tools/shared-files-v2");
 const terminal_1 = require("./modules/tools/terminal");
 const project_runtime_1 = require("./modules/projects/project-runtime");
 const pets_1 = require("./modules/pets/pets");
@@ -100,6 +105,7 @@ const reliability_drills_1 = require("./system/reliability-drills");
 const soak_test_1 = require("./system/soak-test");
 const process_lifecycle_1 = require("./system/process-lifecycle");
 const runtime_events_1 = require("./system/runtime-events");
+const user_notifications_1 = require("./system/user-notifications");
 const session_compaction_hooks_1 = require("./system/session-compaction-hooks");
 const context_budget_1 = require("./system/context-budget");
 const global_agent_1 = require("./modules/global/global-agent");
@@ -111,6 +117,7 @@ const slash_commands_1 = require("./modules/tools/slash-commands");
 const credential_store_1 = require("./core/credential-store");
 const feishu_reaction_feedback_1 = require("./integrations/feishu-reaction-feedback");
 const usability_1 = require("./modules/system/usability");
+const navigation_config_1 = require("./modules/system/navigation-config");
 const settings_1 = require("./modules/system/settings");
 const agent_provider_settings_1 = require("./modules/system/agent-provider-settings");
 const local_auth_1 = require("./modules/system/local-auth");
@@ -118,16 +125,20 @@ const api_access_control_1 = require("./modules/system/api-access-control");
 const role_skills_1 = require("./skills/role-skills");
 const chat_runs_1 = require("./projects/chat-runs");
 const cleanup_center_1 = require("./system/cleanup-center");
+const storage_index_1 = require("./system/storage-index");
 const project_session_agent_binding_1 = require("./modules/projects/project-session-agent-binding");
 const project_feishu_turn_queue_1 = require("./modules/projects/project-feishu-turn-queue");
 const project_session_compaction_1 = require("./modules/projects/project-session-compaction");
 const server_pet_activity_1 = require("./server-pet-activity");
+const pet_asset_pack_1 = require("./modules/pets/pet-asset-pack");
 const server_agent_runner_1 = require("./server-agent-runner");
 const server_static_1 = require("./server-static");
 const server_bootstrap_1 = require("./server-bootstrap");
 // === 运行时内存状态与心跳推送 ===
 let PORT = 3080;
 let LISTEN_HOST = "127.0.0.1";
+let SERVICE_LIFECYCLE_STATE = "starting";
+let REQUEST_SERVICE_DRAIN = null;
 const CCM_RUNTIME_VERSION = (() => {
     try {
         return String(require("../package.json")?.version || "dev");
@@ -151,6 +162,8 @@ const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, M
     path,
     projectChatRuns: chat_runs_1.projectChatRuns,
     saveProjectChatRuns: chat_runs_1.saveProjectChatRuns,
+    createPetSpeechNotification: user_notifications_1.createPetSpeechNotification,
+    sanitizePetNotificationText: user_notifications_1.sanitizePetNotificationText,
     url
 });
 // === Agent 并行/同步调用底座 ===
@@ -241,6 +254,52 @@ function createCollabCtx() {
         normalizeSharedFileList: utils_1.normalizeSharedFileList,
         onTaskStatusChange: async (task, status, result = "") => {
             (0, cron_1.syncCronTaskStatus)(task, status, result);
+            const normalizedStatus = String(status || "").toLowerCase();
+            if (["done", "completed", "failed", "blocked", "cancelled", "waiting"].includes(normalizedStatus)) {
+                const isSuccess = normalizedStatus === "done" || normalizedStatus === "completed";
+                const needsUser = normalizedStatus === "blocked" || normalizedStatus === "waiting";
+                const projectId = String(task?.target_project || task?.project_id || task?.project || "");
+                const groupId = String(task?.group_id || task?.groupId || "");
+                const exactSessionId = String(task?.exact_session_id
+                    || task?.origin_session_id
+                    || task?.project_session_id
+                    || task?.group_session_id
+                    || "");
+                try {
+                    (0, user_notifications_1.createUserNotification)({
+                        recipient_user_ids: [
+                            task?.requester_user_id,
+                            task?.created_by_user_id,
+                            task?.origin_user_id,
+                            task?.user_id,
+                        ].map(String).filter(Boolean),
+                        source_type: "task_terminal",
+                        source_channel: String(task?.source_channel || task?.origin_channel || "workspace"),
+                        scope_type: projectId ? "project" : groupId ? "group" : "task",
+                        scope_id: projectId || groupId || String(task?.id || ""),
+                        exact_session_id: exactSessionId,
+                        task_id: String(task?.id || ""),
+                        notification_type: needsUser ? "needs_user" : isSuccess ? "task_completed" : `task_${normalizedStatus}`,
+                        severity: needsUser ? "warning" : isSuccess ? "success" : normalizedStatus === "cancelled" ? "info" : "error",
+                        state: needsUser ? "active" : "resolved",
+                        title: needsUser ? "任务需要你处理" : isSuccess ? "任务已完成" : normalizedStatus === "cancelled" ? "任务已取消" : "任务未能完成",
+                        summary: result || task?.status_detail || task?.title || `任务状态已更新为 ${normalizedStatus}`,
+                        action: {
+                            kind: "task",
+                            task_id: String(task?.id || ""),
+                            scope_type: projectId ? "project" : groupId ? "group" : "task",
+                            scope_id: projectId || groupId || String(task?.id || ""),
+                            session_id: exactSessionId,
+                            project_id: projectId,
+                            group_id: groupId,
+                        },
+                        dedupe_key: `task-terminal:${task?.id || "unknown"}:${normalizedStatus}`,
+                    });
+                }
+                catch (error) {
+                    console.warn("[用户通知]", error?.message || error);
+                }
+            }
             try {
                 await (0, feishu_channel_1.notifyFeishuTaskStatus)(task, status, result);
             }
@@ -269,7 +328,7 @@ function handleRequest(req, res) {
         catch { }
     }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-CCM-CSRF");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-CCM-CSRF, X-CCM-Internal-Caller, X-CCM-Internal-Timestamp, X-CCM-Internal-Nonce, X-CCM-Internal-Signature");
     if (req.method === "OPTIONS") {
         res.writeHead(204);
         res.end();
@@ -279,9 +338,87 @@ function handleRequest(req, res) {
         return;
     if (pathname.startsWith("/api/") && !(0, api_access_control_1.authorizeApiRequest)(req, res, String(req.url || pathname)))
         return;
+    if (pathname === "/api/internal/lifecycle/identity" && req.method === "GET") {
+        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
+            (0, utils_1.sendJson)(res, { success: false, code: "INTERNAL_CALLER_REQUIRED" }, 403);
+            return;
+        }
+        const lock = (0, server_instance_lock_1.inspectCcmServerInstanceLock)();
+        (0, utils_1.sendJson)(res, {
+            success: lock.identity_verified,
+            lifecycle_state: SERVICE_LIFECYCLE_STATE,
+            identity: lock.owner,
+            identity_verified: lock.identity_verified,
+        }, lock.identity_verified ? 200 : 409);
+        return;
+    }
+    if (pathname === "/api/internal/lifecycle/ready" && req.method === "GET") {
+        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
+            (0, utils_1.sendJson)(res, { success: false, code: "INTERNAL_CALLER_REQUIRED" }, 403);
+            return;
+        }
+        const lock = (0, server_instance_lock_1.inspectCcmServerInstanceLock)();
+        const ready = SERVICE_LIFECYCLE_STATE === "ready" && lock.identity_verified;
+        (0, utils_1.sendJson)(res, {
+            success: ready,
+            ready,
+            lifecycle_state: SERVICE_LIFECYCLE_STATE,
+            identity: lock.owner,
+            identity_verified: lock.identity_verified,
+        }, ready ? 200 : 503);
+        return;
+    }
+    if (pathname === "/api/internal/lifecycle/drain" && req.method === "POST") {
+        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
+            (0, utils_1.sendJson)(res, { success: false, code: "INTERNAL_CALLER_REQUIRED" }, 403);
+            return;
+        }
+        if (!REQUEST_SERVICE_DRAIN) {
+            (0, utils_1.sendJson)(res, { success: false, code: "DRAIN_UNAVAILABLE", lifecycle_state: SERVICE_LIFECYCLE_STATE }, 503);
+            return;
+        }
+        (0, utils_1.sendJson)(res, { success: true, accepted: true, lifecycle_state: "draining" }, 202);
+        setImmediate(() => REQUEST_SERVICE_DRAIN?.("ccm-cli"));
+        return;
+    }
+    if (pathname === "/api/internal/update/status" && req.method === "GET") {
+        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
+            (0, utils_1.sendJson)(res, { success: false, code: "INTERNAL_CALLER_REQUIRED" }, 403);
+            return;
+        }
+        const updateFile = path.join(utils_1.CCM_DIR, "updates", "current.json");
+        let transaction = null;
+        try {
+            transaction = JSON.parse(fs.readFileSync(updateFile, "utf-8"));
+        }
+        catch { }
+        (0, utils_1.sendJson)(res, { success: true, transaction });
+        return;
+    }
+    if (SERVICE_LIFECYCLE_STATE === "draining"
+        && !["GET", "HEAD", "OPTIONS"].includes(String(req.method || "GET").toUpperCase())) {
+        (0, utils_1.sendJson)(res, {
+            success: false,
+            error: "CCM正在安全停止，暂不接受新的修改操作",
+            code: "SERVICE_DRAINING",
+            retryable: true,
+        }, 503);
+        return;
+    }
+    if (req.method === "GET" && pathname.endsWith("/self-test")) {
+        (0, utils_1.sendJson)(res, {
+            success: false,
+            error: "诊断接口已迁移为显式POST，GET不会再执行任何自测或写入操作",
+            code: "DIAGNOSTIC_ENDPOINT_MOVED",
+            endpoint: "/api/reliability/diagnostics/run",
+        }, 410);
+        return;
+    }
     if ((0, feishu_reaction_feedback_1.handleFeishuReactionFeedbackApi)(pathname, req, res))
         return;
     if ((0, runtime_events_1.handleRuntimeEventsApi)(pathname, req, res, parsed))
+        return;
+    if ((0, user_notifications_1.handleUserNotificationsApi)(pathname, req, res, parsed))
         return;
     if (pathname === "/api/agent-runs" && req.method === "GET") {
         (0, utils_1.sendJson)(res, {
@@ -340,6 +477,56 @@ function handleRequest(req, res) {
     }
     if ((0, conversation_turn_control_1.handleConversationTurnControlApi)(pathname, req, res, parsed))
         return;
+    if (pathname === "/api/pets/runtime/stream" && req.method === "GET") {
+        const isDesktopPet = req.ccmAuth?.kind === "internal" && req.ccmAuth?.caller === "desktop-pet";
+        const recipientUserIds = isDesktopPet ? undefined : [String(req.ccmAuth?.userId || "")].filter(Boolean);
+        const channel = isDesktopPet ? "desktop_pet" : "web_pet";
+        const clientId = String(parsed.query.client_id || `${channel}:${crypto.randomUUID()}`).slice(0, 120);
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        });
+        petStatusClients.add(res);
+        writeSse(res, { type: "snapshot", agents: getPetAgents(), client_id: clientId });
+        const sent = new Set();
+        const flushNotifications = () => {
+            const pending = (0, user_notifications_1.listPendingPetDeliveries)({ channel, recipient_user_ids: recipientUserIds, limit: 30 });
+            for (const item of pending) {
+                if (sent.has(item.delivery.delivery_id))
+                    continue;
+                if (!(0, user_notifications_1.claimPetDelivery)(item.delivery.delivery_id, clientId))
+                    continue;
+                try {
+                    writeSse(res, { type: "notification", notification: (0, user_notifications_1.projectPetNotification)(item.notification, item.delivery) });
+                    sent.add(item.delivery.delivery_id);
+                }
+                catch (error) {
+                    (0, user_notifications_1.failPetDelivery)(item.delivery.delivery_id, error);
+                }
+            }
+        };
+        flushNotifications();
+        const unsubscribe = (0, user_notifications_1.subscribeUserNotifications)(notification => {
+            if (recipientUserIds?.length && !recipientUserIds.includes(notification.recipient_user_id))
+                return;
+            flushNotifications();
+        });
+        const heartbeat = setInterval(() => {
+            try {
+                res.write(`: heartbeat ${Date.now()}\n\n`);
+                flushNotifications();
+            }
+            catch { }
+        }, 10_000);
+        req.on("close", () => {
+            clearInterval(heartbeat);
+            unsubscribe();
+            petStatusClients.delete(res);
+        });
+        return;
+    }
     // 1. SSE 实时状态数据管道单独拦截
     if (pathname === "/api/status/stream" && req.method === "GET") {
         const clientType = String(parsed.query.client || "").trim();
@@ -609,6 +796,15 @@ function handleRequest(req, res) {
     if (pathname === "/api/cleanup/summary" && req.method === "GET") {
         return (0, utils_1.sendJson)(res, (0, cleanup_center_1.getCleanupSummary)());
     }
+    if (pathname.startsWith("/pets/") && req.method === "GET") {
+        const downloaded = (0, pet_asset_pack_1.resolveDownloadedPetAsset)(pathname.slice("/pets/".length));
+        if (downloaded)
+            return (0, server_static_1.sendFile)(res, downloaded);
+    }
+    if (pathname === "/api/cleanup/transaction" && req.method === "GET") {
+        const transaction = (0, cleanup_center_1.getCleanupTransaction)(String(parsed.query?.transaction_id || ""), { offset: parsed.query?.offset, limit: parsed.query?.limit });
+        return transaction ? (0, utils_1.sendJson)(res, { success: true, transaction }) : (0, utils_1.sendJson)(res, { success: false, error: "清理事务不存在" }, 404);
+    }
     if (pathname === "/api/cleanup/preview" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
@@ -637,14 +833,35 @@ function handleRequest(req, res) {
                 const result = (0, cleanup_center_1.runCleanupAction)(String(payload.action || ""), {
                     preview_token: payload.preview_token,
                     selected_ids: payload.selected_ids,
+                    confirmation_phrase: payload.confirmation_phrase,
+                    requested_by: req.auth?.username || req.ccmAuth?.username || "admin",
                 });
-                (0, utils_1.sendJson)(res, result, result.success === false ? 400 : 200);
+                (0, utils_1.sendJson)(res, result, result.success === false ? (result.code === "state_drift" ? 409 : result.code === "cleanup_busy" ? 423 : 400) : 202);
             }
             catch (error) {
                 (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
             }
         });
         return;
+    }
+    if (["/api/cleanup/cancel", "/api/cleanup/resume"].includes(pathname) && req.method === "POST") {
+        let body = "";
+        req.on("data", chunk => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const id = String(payload.transaction_id || "");
+                const result = pathname.endsWith("/cancel") ? (0, cleanup_center_1.cancelCleanupTransaction)(id) : (0, cleanup_center_1.resumeCleanupTransaction)(id);
+                (0, utils_1.sendJson)(res, result, result.success ? 200 : 404);
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+        });
+        return;
+    }
+    if (pathname === "/api/cleanup/storage-index/run" && req.method === "POST") {
+        return (0, utils_1.sendJson)(res, { success: true, ...(0, storage_index_1.startStorageIndexScan)({ force: true }) }, 202);
     }
     if (pathname === "/api/projects/main-agent/task" && req.method === "GET") {
         const task = (0, project_main_agent_1.getProjectMainTask)(String(parsed.query?.task_id || parsed.query?.taskId || ""));
@@ -870,6 +1087,12 @@ function handleRequest(req, res) {
             catch (error) {
                 console.warn(`[项目知识检索] ${project} 已使用无知识上下文继续：${error?.message || error}`);
             }
+            const projectConfigSnapshot = (0, db_1.loadProjectConfigs)()?.[project] || {};
+            (0, shared_files_v2_1.migrateLegacySharedFilesV2)("project", project, projectConfigSnapshot.shared_files || [], "project-config-v1");
+            const projectSharedFiles = (0, shared_files_v2_1.buildSharedFilesContextV2)("project", project, {
+                maxTokens: 32_000,
+                title: "以下是当前项目已授权共享文件。规划、开发和验收必须引用对应文件与分片证据：",
+            });
             if (exactProjectSessionId) {
                 const knowledgeToolCallId = `knowledge_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
                 (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
@@ -896,6 +1119,29 @@ function handleRequest(req, res) {
                     },
                     error: projectKnowledge.embeddingError || "",
                 });
+                if (projectSharedFiles.files.length) {
+                    const sharedToolCallId = `shared_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+                    (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
+                        type: "tool_use",
+                        toolName: "read_shared_files",
+                        toolCallId: sharedToolCallId,
+                        runId: `project-main:${exactProjectSessionId}`,
+                        arguments: { scope: "project", manifest_checksum: projectSharedFiles.checksum },
+                    });
+                    (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
+                        type: "tool_result",
+                        toolName: "read_shared_files",
+                        toolCallId: sharedToolCallId,
+                        runId: `project-main:${exactProjectSessionId}`,
+                        status: "ok",
+                        observation: {
+                            manifest_checksum: projectSharedFiles.checksum,
+                            files: projectSharedFiles.files.map((file) => ({ id: file.id, name: file.name, checksum: file.checksum, chunks: file.chunks?.length || 0 })),
+                            selected_chunks: projectSharedFiles.selected_chunks,
+                            complete: projectSharedFiles.complete,
+                        },
+                    });
+                }
             }
             let chatIntent;
             try {
@@ -937,7 +1183,7 @@ function handleRequest(req, res) {
                     projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
                         reason: "auto_model",
                         currentRequest: finalMessage,
-                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context },
+                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
                         tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
                         provider: agentType,
                     });
@@ -1010,20 +1256,21 @@ function handleRequest(req, res) {
                         const hydratedPayloadTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0)
                             + (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
                             + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
+                            + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context)
                             + (0, context_budget_1.estimateTextTokens)(finalMessage);
                         if (threshold > 0 && hydratedPayloadTokens >= threshold && projectCompaction?.compacted !== true) {
                             projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
                                 force: true,
                                 reason: "third_party_memory_mcp_required_hydration",
                                 currentRequest: finalMessage,
-                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context },
+                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
                                 tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
                                 provider: agentType,
                             });
                             projectMemoryMcp = prepareProjectMemoryMcp();
                             toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
                             projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
-                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context) + (0, context_budget_1.estimateTextTokens)(finalMessage);
+                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context) + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context) + (0, context_budget_1.estimateTextTokens)(finalMessage);
                             if (threshold > 0 && postTokens >= threshold)
                                 throw new Error(`项目记忆 MCP 必读上下文压缩后仍超过阈值：${postTokens}/${threshold}`);
                         }
@@ -1035,7 +1282,7 @@ function handleRequest(req, res) {
             }
             if (toolContext.dispatchGate?.dispatchReady === false)
                 return sendRuntimeToolDispatchBlocked(res, toolContext);
-            const fullMessage = [toolContext.prompt, projectKnowledge.context, finalMessage].filter(Boolean).join("\n\n");
+            const fullMessage = [toolContext.prompt, projectKnowledge.context, projectSharedFiles.context, finalMessage].filter(Boolean).join("\n\n");
             const memoryMcpEnabled = projectMemoryMcp?.ready === true;
             const projectSessionContext = memoryMcpEnabled
                 ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
@@ -1096,7 +1343,7 @@ function handleRequest(req, res) {
                 if (chatIntent.mode !== "task") {
                     send({ type: "presentation", message_mode: chatIntent.mode, show_task_card: false, main_agent: "project" });
                     send({ type: "status", text: chatIntent.mode === "project_analysis" ? "项目主 Agent 正在分析当前项目..." : "项目主 Agent 正在回复...", agent: "project-main-agent" });
-                    const projectMainContext = projectKnowledge.context;
+                    const projectMainContext = [projectKnowledge.context, projectSharedFiles.context].filter(Boolean).join("\n\n");
                     let streamedAnswer = false;
                     const answer = await (0, project_main_agent_1.answerAsProjectMainAgent)({
                         project,
@@ -1132,7 +1379,7 @@ function handleRequest(req, res) {
                     projectSessionId: exactProjectSessionId,
                     userMessage: finalMessage,
                     workflowDecision: chatIntent.workflowDecision,
-                    context: projectKnowledge.context,
+                    context: [projectKnowledge.context, projectSharedFiles.context].filter(Boolean).join("\n\n"),
                 });
                 const task = existingTask || (0, project_main_agent_1.createProjectMainTask)({
                     project,
@@ -1538,9 +1785,13 @@ function handleRequest(req, res) {
         return;
     if ((0, marketplace_1.handleMarketplaceApi)(pathname, req, res, parsed))
         return;
-    if ((0, templates_1.handleTemplatesApi)(pathname, req, res, parsed))
+    if (pathname.startsWith("/api/templates")) {
+        (0, utils_1.sendJson)(res, { success: false, error: "对话模板功能已移除，请使用 Skill、斜杠命令或共享文件", code: "TEMPLATE_FEATURE_REMOVED" }, 410);
         return;
+    }
     if ((0, cron_1.handleCronApi)(pathname, req, res, parsed, collabCtx))
+        return;
+    if ((0, shared_files_api_1.handleSharedFilesV2Api)(pathname, req, res, parsed))
         return;
     if ((0, tools_1.handleToolsAndMetricsApi)(pathname, req, res, parsed))
         return;
@@ -1558,7 +1809,16 @@ function handleRequest(req, res) {
         return;
     if ((0, slash_commands_1.handleSlashCommandsApi)(pathname, req, res, parsed))
         return;
-    if ((0, usability_1.handleUsabilityApi)(pathname, req, res))
+    if ((0, navigation_config_1.handleNavigationConfigApi)(pathname, req, res))
+        return;
+    if ((0, usability_1.handleUsabilityApi)(pathname, req, res, parsed, {
+        ctx: collabCtx,
+        archiveTask: collaboration_1.archiveTask,
+        continueTaskWithMessage: collaboration_1.continueTaskWithMessage,
+        enqueueTask: collaboration_1.enqueueTask,
+        removeTaskFromQueues: collaboration_1.removeTaskFromQueues,
+        retryTask: collaboration_1.retryTask,
+    }))
         return;
     if ((0, settings_1.handleSystemSettingsApi)(pathname, req, res))
         return;
@@ -1633,16 +1893,33 @@ function networkAccessUrls(host, port) {
 function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
     PORT = port;
     LISTEN_HOST = normalizeListenHost(host);
-    const instanceLock = (0, server_instance_lock_1.acquireCcmServerInstanceLock)(port, LISTEN_HOST);
+    SERVICE_LIFECYCLE_STATE = "starting";
+    const instanceLock = (0, server_instance_lock_1.acquireCcmServerInstanceLock)(port, LISTEN_HOST, {
+        publicOrigin: process.env.CCM_PUBLIC_ORIGIN || "",
+        launchMode: ["foreground", "background"].includes(String(process.env.CCM_LAUNCH_MODE || ""))
+            ? process.env.CCM_LAUNCH_MODE
+            : "unknown",
+        packageVersion: CCM_RUNTIME_VERSION,
+        bootId: (0, process_lifecycle_1.getProcessBootId)(),
+    });
+    (0, git_workspace_runtime_1.cleanupStaleGitMutationLeases)();
+    (0, project_git_1.cleanupStaleProjectCloneArtifacts)();
     (0, context_engine_recovery_1.registerContextEngineRecoveryHook)();
     const startupCollabCtx = createCollabCtx();
     const server = http.createServer(handleRequest);
-    server.on("error", () => (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock));
+    let managedShutdownInProgress = false;
+    server.on("error", () => {
+        SERVICE_LIFECYCLE_STATE = "failed";
+        (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
+    });
     server.on("close", () => {
+        SERVICE_LIFECYCLE_STATE = "stopped";
         (0, projects_1.stopFeishuChannelSupervisorForServer)();
         (0, projects_1.stopControlBotConnection)();
-        (0, project_runtime_1.stopManagedProjectRuntimesForShutdown)();
-        (0, terminal_1.stopAllTerminalRuns)();
+        if (!managedShutdownInProgress) {
+            void (0, project_runtime_1.stopManagedProjectRuntimesForShutdown)();
+            void (0, terminal_1.stopAllTerminalRuns)();
+        }
         (0, cron_1.stopCronScheduler)();
         (0, collaboration_1.stopTaskWatchdog)();
         (0, collaboration_1.stopAgentRecoveryMonitor)();
@@ -1651,25 +1928,46 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         (0, global_agent_1.stopFeishuConversationTurnRecoveryForServer)();
         (0, project_feishu_turn_queue_1.stopProjectFeishuTurnRecoveryForServer)();
         (0, reliability_drills_1.stopReliabilityDrillScheduler)();
+        (0, storage_index_1.stopStorageIndexScheduler)();
+        (0, conversation_search_index_1.stopConversationSearchIndexScheduler)();
         (0, usability_1.stopUsabilityArchiveScheduler)();
         (0, group_session_maintenance_1.stopGroupSessionRetentionMaintenanceScheduler)();
         (0, model_capability_cache_1.stopModelCapabilityRefreshScheduler)();
         (0, runtime_tool_real_cli_matrix_1.stopRuntimeToolRealCliMatrixScheduler)();
         (0, task_permission_broker_1.stopTaskPermissionNotificationScheduler)();
         (0, soak_test_1.shutdownSoakMonitor)();
-        (0, task_store_1.closeSqliteTaskStore)();
-        (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
+        if (!managedShutdownInProgress) {
+            (0, task_store_1.closeSqliteTaskStore)();
+            (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
+        }
     });
     server.listen(port, LISTEN_HOST, () => {
         // Port ownership and the data-directory lock are the fail-closed singleton
         // gates. No mutable startup work may run before both have succeeded.
+        SERVICE_LIFECYCLE_STATE = "ready";
+        try {
+            const marketplaceRecovery = (0, marketplace_1.recoverMarketplaceProductionState)();
+            if (marketplaceRecovery.quarantined || marketplaceRecovery.recoveredTransactions) {
+                console.log(`[工具市场] 隔离旧外部工具 ${marketplaceRecovery.quarantined} 个，恢复待处理事务 ${marketplaceRecovery.recoveredTransactions} 个`);
+            }
+        }
+        catch (error) {
+            console.warn(`[工具市场] 启动恢复失败：${error?.message || error}`);
+        }
         bootstrapServerRuntime(startupCollabCtx, port);
         (0, feishu_channel_1.setFeishuChannelAlertHandler)(payload => {
             startupCollabCtx.broadcastPetSpeech?.("global-agent", { role: payload.role, text: payload.text, final: true, source: payload.source });
         });
         (0, task_permission_broker_1.startTaskPermissionNotificationScheduler)(startupCollabCtx);
+        const petAutoStart = (0, pets_1.maybeAutoStartPet)(port);
+        if (!petAutoStart.success) {
+            console.warn(`[桌面宠物] 自动启动失败：${"error" in petAutoStart ? petAutoStart.error || "未知错误" : "未知错误"}`);
+        }
         (0, model_capability_cache_1.startModelCapabilityRefreshScheduler)();
         (0, runtime_tool_real_cli_matrix_1.startRuntimeToolRealCliMatrixScheduler)();
+        (0, cleanup_center_1.recoverCleanupTransactions)();
+        (0, storage_index_1.startStorageIndexScheduler)();
+        (0, conversation_search_index_1.startConversationSearchIndexScheduler)();
         // 预热提供商状态缓存：让首个请求也走缓存路径，避免同步 spawnSync 探测冻结事件循环
         void (0, agent_provider_settings_1.refreshAgentProviderStatusesAsync)().catch(() => { });
         const localEmbeddingStartup = (0, knowledge_model_startup_1.scheduleLocalKnowledgeModelStartupPreparation)();
@@ -1708,22 +2006,27 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         catch (error) {
             console.warn(`[飞书控制机器人] 自动启动失败：${error?.message || error}`);
         }
-        const projectChannelResults = (0, projects_1.reconcileProjectFeishuConnections)(port);
-        const recycledProjectChannels = projectChannelResults.filter((item) => item.recycled).length;
-        const failedProjectChannels = projectChannelResults.filter((item) => item.success === false);
-        if (recycledProjectChannels > 0)
-            console.log(`[项目飞书通道] 已更新并重连 ${recycledProjectChannels} 个旧运行实例`);
-        for (const item of failedProjectChannels)
-            console.warn(`[项目飞书通道] ${item.project} 协调失败：${item.error}`);
+        void (0, projects_1.reconcileProjectFeishuConnections)(port).then(projectChannelResults => {
+            const recycledProjectChannels = projectChannelResults.filter((item) => item.recycled).length;
+            const failedProjectChannels = projectChannelResults.filter((item) => item.success === false);
+            if (recycledProjectChannels > 0)
+                console.log(`[项目飞书通道] 已更新并重连 ${recycledProjectChannels} 个旧运行实例`);
+            for (const item of failedProjectChannels)
+                console.warn(`[项目飞书通道] ${item.project} 协调失败：${item.error}`);
+        }).catch(error => console.warn(`[项目飞书通道] 启动协调失败：${error?.message || error}`));
         (0, projects_1.startFeishuChannelSupervisorForServer)(port);
     });
     process.once("exit", () => (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock));
+    server.beginManagedShutdown = () => { managedShutdownInProgress = true; };
+    server.finalizeManagedShutdown = () => {
+        SERVICE_LIFECYCLE_STATE = "stopped";
+        (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
+    };
     return server;
 }
 if (require.main === module) {
     PORT = parseInt(process.argv[2]) || 3080;
     LISTEN_HOST = normalizeListenHost(process.argv[3] || process.env.CCM_HOST || "127.0.0.1");
-    (0, process_lifecycle_1.installProcessLifecycleFaultHandlers)();
     const server = startServer(PORT, LISTEN_HOST);
     let lifecycleHeartbeat = null;
     server.prependOnceListener("listening", () => {
@@ -1732,21 +2035,60 @@ if (require.main === module) {
         lifecycleHeartbeat.unref?.();
     });
     let shuttingDown = false;
-    const shutdown = (signal) => {
+    const shutdown = async (signal, exitCode = 0) => {
         if (shuttingDown)
             return;
         shuttingDown = true;
+        SERVICE_LIFECYCLE_STATE = "draining";
+        server.beginManagedShutdown?.();
         if (lifecycleHeartbeat)
             clearInterval(lifecycleHeartbeat);
-        (0, process_lifecycle_1.markProcessShutdown)({ category: "system_shutdown", reason: `收到 ${signal}，执行受控退出`, signal, exit_code: 0 });
+        (0, cron_1.stopCronScheduler)();
+        (0, collaboration_1.stopTaskWatchdog)();
+        (0, collaboration_1.stopAgentRecoveryMonitor)();
+        (0, global_agent_1.stopGlobalMissionSupervisionForServer)();
+        (0, global_agent_1.stopGlobalWebTurnRecoveryForServer)();
+        (0, global_agent_1.stopFeishuConversationTurnRecoveryForServer)();
+        (0, project_feishu_turn_queue_1.stopProjectFeishuTurnRecoveryForServer)();
+        (0, reliability_drills_1.stopReliabilityDrillScheduler)();
+        (0, storage_index_1.stopStorageIndexScheduler)();
+        (0, conversation_search_index_1.stopConversationSearchIndexScheduler)();
+        (0, usability_1.stopUsabilityArchiveScheduler)();
+        (0, group_session_maintenance_1.stopGroupSessionRetentionMaintenanceScheduler)();
+        (0, model_capability_cache_1.stopModelCapabilityRefreshScheduler)();
+        (0, runtime_tool_real_cli_matrix_1.stopRuntimeToolRealCliMatrixScheduler)();
+        (0, task_permission_broker_1.stopTaskPermissionNotificationScheduler)();
         (0, projects_1.stopFeishuChannelSupervisorForServer)();
         (0, projects_1.stopControlBotConnection)();
-        (0, project_runtime_1.stopManagedProjectRuntimesForShutdown)();
-        server.close(() => process.exit(0));
-        setTimeout(() => process.exit(0), 5_000).unref?.();
+        const forceExit = setTimeout(() => process.exit(1), 15_000);
+        forceExit.unref?.();
+        const closed = new Promise(resolve => server.close(() => resolve()));
+        await Promise.all([
+            (0, project_runtime_1.stopManagedProjectRuntimesForShutdown)().catch(error => console.warn(`[项目运行] 受控退出停止失败：${error?.message || error}`)),
+            (0, terminal_1.stopAllTerminalRuns)().catch(error => console.warn(`[终端] 受控退出停止失败：${error?.message || error}`)),
+        ]);
+        await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 8_000))]);
+        (0, process_lifecycle_1.markProcessShutdown)({
+            category: exitCode === 0 ? "system_shutdown" : "unexpected_crash",
+            reason: `收到 ${signal}，受控排空完成`,
+            signal,
+            exit_code: exitCode,
+        });
+        (0, task_store_1.closeSqliteTaskStore)();
+        server.finalizeManagedShutdown?.();
+        clearTimeout(forceExit);
+        process.exit(exitCode);
     };
-    process.once("SIGINT", () => shutdown("SIGINT"));
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
+    REQUEST_SERVICE_DRAIN = reason => { void shutdown(reason || "internal_drain"); };
+    (0, process_lifecycle_1.installProcessLifecycleFaultHandlers)((_reason, type) => { void shutdown(type, 1); });
+    server.once("error", (error) => {
+        SERVICE_LIFECYCLE_STATE = "failed";
+        console.error(`[CCM] 服务监听失败：${error?.code || error?.message || error}`);
+        process.exitCode = 1;
+        setImmediate(() => process.exit(1));
+    });
+    process.once("SIGINT", () => { void shutdown("SIGINT"); });
+    process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
     process.once("exit", code => (0, process_lifecycle_1.markProcessShutdown)({ category: code === 0 ? "system_shutdown" : "unexpected_crash", reason: `进程退出，exit code ${code}`, exit_code: code }));
 }
 module.exports = { startServer };

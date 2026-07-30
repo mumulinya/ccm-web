@@ -57,6 +57,7 @@ const group_compaction_strategy_1 = require("../collaboration/group-compaction-s
 const session_summary_quality_gate_1 = require("../../system/session-summary-quality-gate");
 const session_summary_secondary_review_1 = require("../../system/session-summary-secondary-review");
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
+const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 exports.MUSIC_AGENT_MEMORY_FILE = path.join(utils_1.CCM_DIR, "music-agent-memory.json");
 exports.MUSIC_AGENT_MEMORY_SCHEMA = "ccm-music-agent-memory-v1";
 exports.MUSIC_AGENT_SINGLETON_ID = "music-agent";
@@ -123,6 +124,7 @@ function loadMusicAgentMemory() {
 }
 function saveMusicAgentMemory(value) {
     (0, atomic_json_file_1.writeJsonAtomic)(exports.MUSIC_AGENT_MEMORY_FILE, { ...normalizeStore(value), updatedAt: nowIso() });
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)("music:music-agent");
 }
 function mutateStore(operation) {
     return (0, atomic_json_file_1.withFileLock)(exports.MUSIC_AGENT_MEMORY_FILE, () => {

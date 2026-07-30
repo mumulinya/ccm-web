@@ -6,7 +6,7 @@
 
 ## 当前文档
 
-- [项目结构与业务流程覆盖矩阵](./PROJECT-COVERAGE-MATRIX.md)：生产代码、页面、API、CLI与确认文档的全量对应关系。
+- [项目结构与业务流程覆盖矩阵](./PROJECT-COVERAGE-MATRIX.md)：由结构化清单自动生成的生产代码、页面、API、CLI、测试与确认文档全量对应关系；`npm run coverage:check` 是发布门禁。
 - [本地认证与访问安全](./LOCAL-AUTH-AND-SECURITY.md)：首次安装、注册、登录、Cookie会话、密码修改和访问门禁。
 - [全局 Agent运行体系](./GLOBAL-AGENT-OPERATIONS.md)：普通问答、工具调用、Global Mission、运行监督和精确来源回传。
 - [记忆系统](./MEMORY-SYSTEM.md)：全局 Agent、群聊主 Agent、独立项目 Agent、群聊项目子 Agent的单会话记忆，以及无会话列表的音乐 Agent 单例记忆、长期记忆、压缩、MCP 读取和受控写回流程。

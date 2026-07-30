@@ -70,7 +70,10 @@ try {
   assert.ok(fs.readdirSync(path.join(tempRoot, 'legacy-json-backups')).length >= 3)
 
   const firstLock = serverLock.acquireCcmServerInstanceLock(39001)
-  assert.throws(() => serverLock.acquireCcmServerInstanceLock(39002), /已有 CCM 服务运行/)
+  assert.throws(
+    () => serverLock.acquireCcmServerInstanceLock(39002),
+    error => error?.code === 'ownership_unproven' && /同一数据目录已有CCM实例记录/.test(String(error?.message || '')),
+  )
   assert.equal(serverLock.releaseCcmServerInstanceLock(firstLock), true)
   const secondLock = serverLock.acquireCcmServerInstanceLock(39002)
   assert.equal(serverLock.releaseCcmServerInstanceLock(secondLock), true)

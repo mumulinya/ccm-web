@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { PUBLIC_DIR } from "../../core/utils";
 import { MUSIC_DIR, getMp3Cover } from "./library";
+import { resolveSafeMusicFile } from "./music-catalog";
+import { musicPlatformRequest } from "./platform-http";
 
 const MIN_IMAGE_BYTES = 256;
 const MAX_REMOTE_BYTES = 2.5 * 1024 * 1024;
@@ -16,12 +18,14 @@ const RANDOM_ANIME_COVER_URLS = [
 ];
 
 function sendBuffer(res: any, buffer: Buffer, contentType: string, cacheControl = "public, max-age=31536000") {
+  if (res.destroyed || res.writableEnded) return false;
   res.writeHead(200, {
     "Content-Type": contentType,
     "Content-Length": buffer.length,
     "Cache-Control": cacheControl,
   });
   res.end(buffer);
+  return true;
 }
 
 function looksLikeImage(buffer: Buffer) {
@@ -93,21 +97,23 @@ function shuffle<T>(items: T[]): T[] {
 async function fetchRemoteAnimeCover(timeoutMs = REMOTE_TIMEOUT_MS) {
   for (const url of shuffle(RANDOM_ANIME_COVER_URLS)) {
     try {
-      const resp = await fetch(url, {
-        signal: AbortSignal.timeout(timeoutMs),
-        redirect: "follow",
+      const resp = await musicPlatformRequest({
+        url,
+        timeoutMs,
+        maxBytes: MAX_REMOTE_BYTES,
+        retries: 0,
+        allowedHosts: ["www.dmoe.cc", "api.btstu.cn", "pic.re"],
         headers: {
           Accept: "image/*,*/*",
           "User-Agent": "ccm-music-cover/1.0",
         },
       });
-      if (!resp.ok) continue;
-      const mime = String(resp.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      const mime = String(resp.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
       // alcy 等源偶发 video/mp4，直接跳过，避免白下大文件
       if (mime && !mime.startsWith("image/") && mime !== "application/octet-stream") continue;
-      const lenHeader = Number(resp.headers.get("content-length") || 0);
+      const lenHeader = Number(resp.headers["content-length"] || 0);
       if (lenHeader > MAX_REMOTE_BYTES) continue;
-      const buffer = Buffer.from(await resp.arrayBuffer());
+      const buffer = resp.buffer;
       if (buffer.length > MAX_REMOTE_BYTES || !looksLikeImage(buffer)) continue;
       const contentType = mime.startsWith("image/") ? mime : contentTypeForPath("", buffer);
       return { buffer, contentType, source: url };
@@ -182,7 +188,9 @@ export function handleAnimeCoverApi(res: any, parsed: any): boolean {
       return;
     }
     sendLocalAnimeCover(res, String(Date.now()), "no-cache");
-  })();
+  })().catch(() => {
+    if (!res.destroyed && !res.writableEnded) sendLocalAnimeCover(res, String(Date.now()), "no-cache");
+  });
   return true;
 }
 
@@ -203,12 +211,15 @@ export function handleMusicCoverApi(res: any, parsed: any): boolean {
         return;
       }
       sendLocalAnimeCover(res, String(Date.now()), "no-cache");
-    })();
+    })().catch(() => {
+      if (!res.destroyed && !res.writableEnded) sendLocalAnimeCover(res, String(Date.now()), "no-cache");
+    });
     return true;
   }
 
-  const filePath = path.join(MUSIC_DIR, filename);
-  if (!fs.existsSync(filePath)) {
+  let filePath = "";
+  try { filePath = resolveSafeMusicFile(filename).filePath; } catch {}
+  if (!filePath || !fs.existsSync(filePath)) {
     res.writeHead(404);
     res.end("Not Found");
     return true;
@@ -254,6 +265,8 @@ export function handleMusicCoverApi(res: any, parsed: any): boolean {
       return;
     }
     sendDefaultCover(res, cachePath, hash);
-  })();
+  })().catch(() => {
+    if (!res.destroyed && !res.writableEnded) sendDefaultCover(res, cachePath, hash);
+  });
   return true;
 }

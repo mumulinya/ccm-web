@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
   Bot,
   Bookmark,
@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   MessageSquareText,
   MessagesSquare,
+  Music2,
   RefreshCw,
   Search,
   Send,
@@ -23,7 +24,6 @@ import { toast } from '../../utils/toast.js'
 
 const emit = defineEmits(['go-to'])
 const RECENT_KEY = 'ccm-conversation-search-recent-v2'
-const FAVORITES_KEY = 'ccm-conversation-search-favorites-v2'
 
 const query = ref('')
 const source = ref('all')
@@ -47,6 +47,7 @@ const sourceFilters = [
   { id: 'global', label: '全局助手', icon: Bot },
   { id: 'group', label: '群聊', icon: MessagesSquare },
   { id: 'project', label: '项目', icon: FolderKanban },
+  { id: 'music', label: '音乐助手', icon: Music2 },
   { id: 'feishu', label: '飞书', icon: Send },
 ]
 const pageSize = 25
@@ -61,7 +62,7 @@ const readStored = (key) => {
 }
 
 const recentSearches = ref(readStored(RECENT_KEY))
-const favorites = ref(readStored(FAVORITES_KEY))
+const favorites = ref([])
 const results = computed(() => response.value.results || [])
 const terms = computed(() => response.value.query?.terms || query.value.trim().split(/\s+/).filter(Boolean))
 const locationOptions = computed(() => {
@@ -71,7 +72,7 @@ const locationOptions = computed(() => {
   return [...projects, ...groups]
 })
 const activeFilterCount = computed(() => [role.value, agent.value, location.value, timeRange.value !== 'all' ? timeRange.value : '', matchMode.value !== 'all' ? matchMode.value : '', sort.value !== 'newest' ? sort.value : ''].filter(Boolean).length)
-const favoriteIds = computed(() => new Set(favorites.value.map(item => item.id)))
+const favoriteIds = computed(() => new Set(favorites.value.map(item => item.rowId)))
 
 const persist = (key, value) => localStorage.setItem(key, JSON.stringify(value))
 
@@ -193,15 +194,20 @@ const sourceCount = id => searched.value && Number.isFinite(Number(sourceCounts.
   ? Number(sourceCounts.value[id])
   : null
 
-const toggleFavorite = (item) => {
-  if (favoriteIds.value.has(item.id)) {
-    favorites.value = favorites.value.filter(row => row.id !== item.id)
-    toast.info('已取消收藏')
-  } else {
-    favorites.value = [{ ...item, favoriteAt: new Date().toISOString() }, ...favorites.value].slice(0, 50)
-    toast.success('已收藏这条消息')
-  }
-  persist(FAVORITES_KEY, favorites.value)
+const loadFavorites = async () => {
+  const res = await fetch('/api/search/favorites')
+  const data = await res.json().catch(() => ({}))
+  if (res.ok && data.success !== false) favorites.value = data.favorites || []
+}
+
+const toggleFavorite = async (item) => {
+  const selected = favoriteIds.value.has(item.rowId)
+  const url = selected ? `/api/search/favorites?row_id=${encodeURIComponent(item.rowId)}` : '/api/search/favorites'
+  const res = await fetch(url, selected ? { method: 'DELETE' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ row_id: item.rowId }) })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data.success === false) return toast.error(data.error || '收藏操作失败')
+  await loadFavorites()
+  toast[selected ? 'info' : 'success'](selected ? '已取消收藏' : '已收藏这条消息')
 }
 
 const copyText = async (value, message) => {
@@ -213,16 +219,22 @@ const copyText = async (value, message) => {
 
 const copyResult = item => copyText(item.content || '', '已复制消息')
 const copyMarkdown = item => copyText(`### ${item.sourceLabel} · ${item.sessionName}\n\n- 时间：${formatTime(item.timestamp)}\n- 角色：${item.role === 'user' ? '用户' : item.agent || 'Agent'}\n${item.taskId ? `- 关联任务：${item.taskTitle || item.taskId}\n` : ''}\n${item.content || ''}`, '已复制 Markdown')
-const goTo = item => emit('go-to', { ...item, query: query.value.trim() || (item.matchTerms || []).join(' ') })
+const goTo = async item => {
+  const params = new URLSearchParams({ generation: item.indexGeneration || '', row_id: item.rowId || '', before: '12', after: '12' })
+  const res = await fetch(`/api/conversations/message-window?${params}`)
+  const data = await res.json().catch(() => ({}))
+  emit('go-to', { ...item, messageWindow: res.ok ? data.window : null, query: query.value.trim() || (item.matchTerms || []).join(' ') })
+}
 const goToTask = item => emit('go-to', { conversationType: 'task', taskId: item.taskId })
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '时间未记录'
-const sourceLabel = value => ({ all: '全部来源', global: '全局助手', group: '群聊', project: '项目', feishu: '飞书' }[value] || '全部来源')
+const sourceLabel = value => ({ all: '全部来源', global: '全局助手', group: '群聊', project: '项目', music: '音乐助手', feishu: '飞书' }[value] || '全部来源')
 const recentMeta = item => [
   sourceLabel(item?.source),
   item?.role === 'user' ? '用户消息' : item?.role === 'assistant' ? 'Agent 回复' : '',
   item?.timeRange && item.timeRange !== 'all' ? '限定时间' : '',
 ].filter(Boolean).join(' · ')
 
+onMounted(loadFavorites)
 onUnmounted(() => activeRequest?.abort())
 </script>
 
@@ -312,7 +324,7 @@ onUnmounted(() => activeRequest?.abort())
           <div class="result-summary"><div><Search :size="16" /><strong>搜索结果</strong><span>{{ response.total || 0 }} 条</span></div><span v-if="response.total">第 {{ response.page }} / {{ response.page_count }} 页</span></div>
           <div v-if="!results.length" class="empty-state"><Search :size="24" /><strong>没有找到匹配消息</strong><span>调整关键词或筛选条件后重新搜索</span></div>
           <div v-else class="result-list">
-            <ConversationSearchResult v-for="item in results" :key="item.id" :item="item" :terms="terms" :favorite="favoriteIds.has(item.id)" @open="goTo" @task="goToTask" @favorite="toggleFavorite" @copy="copyResult" @copy-markdown="copyMarkdown" />
+            <ConversationSearchResult v-for="item in results" :key="item.id" :item="item" :terms="terms" :favorite="favoriteIds.has(item.rowId)" @open="goTo" @task="goToTask" @favorite="toggleFavorite" @copy="copyResult" @copy-markdown="copyMarkdown" />
           </div>
           <nav v-if="response.page_count > 1" class="pagination" aria-label="搜索结果分页">
             <button :disabled="response.page <= 1 || loading" @click="search(response.page - 1, { remember: false })"><ChevronLeft :size="14" />上一页</button>

@@ -908,6 +908,7 @@ function showBubble(text) {
 let speechTimer = null;
 let speechBuffer = '';
 let speechRole = '';
+let currentNotificationAction = null;
 
 function cleanSpeechText(text) {
   return String(text || '')
@@ -944,13 +945,6 @@ function getSpeechLabel(role) {
   return labels[role] || 'Agent 回复';
 }
 
-function looksLikeQuestion(text) {
-  const value = String(text || '').trim();
-  if (!value) return false;
-  return /[?？]\s*$/.test(value)
-    || /(请问|是否|要不要|需不需要|可以吗|确认一下|你希望|你想|需要你|告诉我|选择|哪个|哪种|能否|方便吗)/.test(value);
-}
-
 function setSpeechTone(role, streaming) {
   speech.classList.remove('speech-user', 'speech-status', 'speech-error', 'speech-assistant', 'speech-ask', 'streaming');
   speech.classList.add(`speech-${role}`);
@@ -971,6 +965,7 @@ function hideSpeech() {
 
 function showSpeech(data = {}) {
   const role = data.role || 'assistant';
+  currentNotificationAction = data.action && typeof data.action === 'object' ? data.action : null;
   const mode = data.mode || 'replace';
   if (isInternalSpeechText(data.text)) return;
   const text = cleanSpeechText(data.text);
@@ -989,7 +984,7 @@ function showSpeech(data = {}) {
     speechBuffer = '...' + speechBuffer.slice(-900);
   }
 
-  const displayRole = role === 'assistant' && data.final && looksLikeQuestion(speechBuffer) ? 'ask' : role;
+  const displayRole = role;
   const streaming = mode === 'append' && !data.final;
 
   setSpeechTone(displayRole, streaming);
@@ -1229,6 +1224,14 @@ sprite.addEventListener('click', (e) => {
   hideMenu();
   showPetReaction('clickLeft');
   showBubble('正在打开工作台...');
+  if (currentNotificationAction && window.petBridge.openNotification) {
+    window.petBridge.openNotification(currentNotificationAction)
+      .then(result => {
+        if (!result || result.success === false) showBubble('通知目标暂时无法打开');
+      })
+      .catch(() => showBubble('通知目标暂时无法打开'));
+    return;
+  }
   if (window.petBridge.openWorkspace) {
     window.petBridge.openWorkspace(agentName)
       .then((result) => {
@@ -1308,6 +1311,12 @@ window.petBridge.onStateUpdate((data) => {
 window.petBridge.onSpeech((data) => {
   if (data.agent === agentName) {
     showSpeech(data);
+    if (data.delivery_id) {
+      window.petBridge.ackNotification({
+        delivery_id: data.delivery_id,
+        notification_id: data.notification_id || '',
+      });
+    }
   }
 });
 

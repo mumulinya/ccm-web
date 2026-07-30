@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted } from 'vue'
-import { Bot, Cloud, ExternalLink, FolderCode, FolderGit2, FolderOpen, GitBranch, GitFork, RefreshCw, Save, X } from '@lucide/vue'
+import { Bot, Cloud, ExternalLink, FolderCode, FolderGit2, FolderOpen, GitBranch, GitFork, LoaderCircle, RefreshCw, Save, Square, X } from '@lucide/vue'
 
 const props = defineProps({
   mode: { type: String, required: true },
@@ -8,9 +8,11 @@ const props = defineProps({
   form: { type: Object, required: true },
   agentOptions: { type: Array, default: () => [] },
   platforms: { type: Array, default: () => [] },
+  submitting: { type: Boolean, default: false },
+  cloneStatus: { type: Object, default: null },
 })
 
-const emit = defineEmits(['close', 'submit', 'browse', 'open-feishu', 'refresh-git', 'update-field'])
+const emit = defineEmits(['close', 'submit', 'cancel-clone', 'browse', 'open-feishu', 'refresh-git', 'update-field'])
 
 const updateField = (field, event) => {
   emit('update-field', { field, value: event.target.value })
@@ -26,6 +28,7 @@ const gitStatus = computed(() => props.form.git_status || null)
 const canSubmit = computed(() => {
   const hasDirectory = String(props.form.work_dir || '').trim().length > 0
   const hasRepository = !githubSource.value || String(props.form.repository_url || '').trim().length > 0
+  if (props.submitting) return false
   return props.mode === 'create'
     ? hasDirectory && hasRepository && hasValidAgent.value && hasValidPlatform.value && String(props.form.name || '').trim().length > 0
     : hasDirectory && hasValidAgent.value && hasValidPlatform.value && String(props.form.display_name || '').trim().length > 0
@@ -49,7 +52,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <h3 id="project-form-title">{{ title }}</h3>
           <p>{{ mode === 'create' ? '添加一个可由开发 Agent 执行的代码项目' : projectName }}</p>
         </div>
-        <button type="button" class="project-form-close" title="关闭" aria-label="关闭" @click="emit('close')"><X :size="18" /></button>
+        <button type="button" class="project-form-close" title="关闭" aria-label="关闭" :disabled="submitting" @click="emit('close')"><X :size="18" /></button>
       </header>
 
       <div class="project-form-body">
@@ -87,6 +90,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             <span><GitBranch :size="14" />克隆分支（可选）</span>
             <input :value="form.repository_branch" autocomplete="off" placeholder="留空使用仓库默认分支" @input="updateField('repository_branch', $event)">
           </label>
+        </div>
+
+        <div v-if="githubSource && cloneStatus" class="project-clone-progress" role="status" aria-live="polite">
+          <LoaderCircle v-if="submitting" :size="17" class="spinning" />
+          <GitFork v-else :size="17" />
+          <span>
+            <strong>{{ cloneStatus.stage || (submitting ? '正在克隆仓库' : '克隆状态') }}</strong>
+            <small>{{ cloneStatus.status === 'recovery_required' ? '源码已保留，请按回执继续注册，CCM不会自动删除目录。' : (cloneStatus.message || cloneStatus.error || '正在核验仓库、分支和 HEAD') }}</small>
+          </span>
         </div>
 
         <label class="project-field project-directory-field">
@@ -156,8 +168,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       </div>
 
       <footer class="project-form-actions">
-        <button type="button" class="project-secondary-button" @click="emit('close')">取消</button>
-        <button type="button" class="project-primary-button" :disabled="!canSubmit" @click="emit('submit')"><Save :size="16" />{{ mode === 'create' ? '创建项目' : '保存修改' }}</button>
+        <button v-if="submitting && githubSource" type="button" class="project-secondary-button danger" @click="emit('cancel-clone')"><Square :size="15" />停止克隆</button>
+        <button v-else type="button" class="project-secondary-button" @click="emit('close')">取消</button>
+        <button type="button" class="project-primary-button" :disabled="!canSubmit" @click="emit('submit')"><LoaderCircle v-if="submitting" :size="16" class="spinning" /><Save v-else :size="16" />{{ submitting ? '正在创建' : mode === 'create' ? '创建项目' : '保存修改' }}</button>
       </footer>
     </section>
   </div>
@@ -301,6 +314,45 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
   gap: 14px;
+}
+
+.project-clone-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 16px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 24%, var(--border-color));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-blue) 7%, var(--surface));
+  color: var(--accent-blue);
+}
+
+.project-clone-progress span,
+.project-clone-progress strong,
+.project-clone-progress small {
+  display: block;
+}
+
+.project-clone-progress span {
+  min-width: 0;
+}
+
+.project-clone-progress strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.project-clone-progress small {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.project-secondary-button.danger {
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 38%, var(--border-color));
+  color: var(--danger, #dc2626);
 }
 
 .project-field {

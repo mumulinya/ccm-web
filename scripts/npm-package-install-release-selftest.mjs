@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -28,22 +29,59 @@ const run = (args, options = {}) => {
   return String(result.stdout || '')
 }
 
+const removeWithRetry = async target => {
+  let lastError = null
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 })
+      return true
+    } catch (error) {
+      lastError = error
+      if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code)) throw error
+      await new Promise(resolve => setTimeout(resolve, Math.min(1_000, 150 + attempt * 75)))
+    }
+  }
+  throw lastError
+}
+
 try {
+  if (!providedTarball) {
+    run([path.join(root, 'scripts', 'build-release-artifact.mjs'), temporaryRoot], { command: process.execPath, inherit: true })
+  }
+  const generatedManifest = providedTarball ? null : JSON.parse(fs.readFileSync(path.join(temporaryRoot, 'release-artifact-manifest.json'), 'utf8'))
   const tarball = providedTarball
     ? path.resolve(providedTarball)
-    : path.join(temporaryRoot, JSON.parse(run(['pack', './ccm-package', '--ignore-scripts', '--json', '--pack-destination', temporaryRoot]))[0].filename)
+    : path.join(temporaryRoot, generatedManifest.tarball)
   if (!fs.existsSync(tarball) || !fs.statSync(tarball).isFile()) throw new Error(`发布 tarball 不存在：${tarball}`)
   const installStartedAt = Date.now()
   run(['install', tarball, '--omit=dev', '--no-audit', '--no-fund', '--prefer-offline'], { cwd: installRoot, inherit: true })
   const installDurationMs = Date.now() - installStartedAt
   run([path.join(root, 'scripts', 'npm-installed-package-selftest.mjs'), installRoot, packageInfo.version], { command: process.execPath, inherit: true })
-  console.log(JSON.stringify({ success: true, version: packageInfo.version, tarball, platform: process.platform, node: process.version, installDurationMs, paidProviderCalls: 0 }, null, 2))
+  const evidence = {
+    schema: 'ccm-release-platform-evidence-v1',
+    success: true,
+    version: packageInfo.version,
+    tarball: path.basename(tarball),
+    tarball_sha256: crypto.createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'),
+    platform: process.platform,
+    node: process.versions.node,
+    installDurationMs,
+    paidProviderCalls: 0,
+    verified_at: new Date().toISOString(),
+  }
+  const evidenceFile = String(process.env.CCM_RELEASE_EVIDENCE_FILE || '').trim()
+  if (evidenceFile) {
+    fs.mkdirSync(path.dirname(path.resolve(evidenceFile)), { recursive: true })
+    fs.writeFileSync(path.resolve(evidenceFile), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8')
+  }
+  console.log(JSON.stringify(evidence, null, 2))
 } finally {
   if (process.env.CCM_PRESERVE_RELEASE_INSTALL !== '1') {
     try {
-      fs.rmSync(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
+      await removeWithRetry(temporaryRoot)
     } catch (error) {
-      console.warn(`[release selftest] 临时目录稍后由系统清理：${String(error?.code || error)}`)
+      console.warn(`[release selftest] 成功验收后临时目录仍被占用：${temporaryRoot} (${String(error?.code || error)})`)
+      process.exitCode = 1
     }
   }
 }

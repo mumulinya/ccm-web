@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toolManager = exports.ToolManager = void 0;
 exports.runToolManagerRuntimeSelfTest = runToolManagerRuntimeSelfTest;
 const mcp_client_1 = require("./mcp-client");
+const mcp_remote_client_1 = require("./mcp-remote-client");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
@@ -248,7 +249,7 @@ class ToolManager {
     async loadTools() {
         for (const client of this.clients.values()) {
             try {
-                client.disconnect();
+                await client.disconnect();
             }
             catch { }
         }
@@ -259,7 +260,7 @@ class ToolManager {
         // 加载 MCP 工具配置
         const mcpConfigs = this.loadMcpConfigs();
         for (const config of mcpConfigs) {
-            if (!config.enabled || !config.command)
+            if (!config.enabled || (!config.command && !config.url))
                 continue;
             this.serverConfigs.set(config.name, config);
             const auth = deriveMcpAuthStatus(config);
@@ -285,7 +286,22 @@ class ToolManager {
             }
             if (this.clients.has(config.name))
                 continue;
-            const client = new mcp_client_1.McpClient(config.command, this.parseArgs(config.args), this.parseEnv(config.env));
+            let client;
+            try {
+                client = this.createClient(config);
+            }
+            catch (error) {
+                this.serverStatuses.set(config.name, {
+                    name: config.name,
+                    state: "failed",
+                    toolsCount: 0,
+                    error: String(error?.message || error).slice(0, 500),
+                    lastErrorAt: new Date().toISOString(),
+                    retryCount: 0,
+                    auth,
+                });
+                continue;
+            }
             const connected = await client.connect();
             if (connected) {
                 this.clients.set(config.name, client);
@@ -327,6 +343,23 @@ class ToolManager {
         // 加载 Skills
         this.skills = this.loadSkillConfigs().filter(s => s.enabled);
         this.initialized = true;
+    }
+    createClient(config) {
+        if (config?.url) {
+            return new mcp_remote_client_1.McpRemoteClient(String(config.url), config.headers && typeof config.headers === "object" ? config.headers : {}, config.transport === "sse" ? "sse" : "streamable_http");
+        }
+        const command = String(config.executablePath || config.command || "");
+        if (config.executablePath) {
+            try {
+                if (fs.realpathSync(command) !== command && fs.realpathSync(command).toLowerCase() !== command.toLowerCase()) {
+                    throw new Error("approved executable path drift");
+                }
+            }
+            catch {
+                throw new Error(`MCP approved executable is unavailable: ${command}`);
+            }
+        }
+        return new mcp_client_1.McpClient(command, this.parseArgs(config.args), this.parseEnv(config.env));
     }
     // 生成工具 prompt 注入文本
     buildToolPrompt(scope) {
@@ -585,7 +618,7 @@ class ToolManager {
     }
     async reconnectServer(serverName) {
         const config = this.serverConfigs.get(serverName) || this.loadMcpConfigs().find(item => item?.name === serverName);
-        if (!config?.enabled || !config?.command) {
+        if (!config?.enabled || (!config?.command && !config?.url)) {
             const auth = deriveMcpAuthStatus(config || {});
             this.serverStatuses.set(serverName, {
                 name: serverName,
@@ -613,11 +646,26 @@ class ToolManager {
         }
         const previous = this.clients.get(serverName);
         try {
-            previous?.disconnect();
+            await previous?.disconnect();
         }
         catch { }
         const retryCount = Number(this.serverStatuses.get(serverName)?.retryCount || 0) + 1;
-        const client = new mcp_client_1.McpClient(config.command, this.parseArgs(config.args), this.parseEnv(config.env));
+        let client;
+        try {
+            client = this.createClient(config);
+        }
+        catch (error) {
+            this.serverStatuses.set(serverName, {
+                name: serverName,
+                state: "failed",
+                toolsCount: 0,
+                error: String(error?.message || error).slice(0, 500),
+                lastErrorAt: new Date().toISOString(),
+                retryCount,
+                auth,
+            });
+            return false;
+        }
         const connected = await client.connect();
         if (!connected) {
             const diagnostics = client.getDiagnostics();
@@ -750,6 +798,9 @@ class ToolManager {
                     lastConnectedAt: status?.lastConnectedAt || "",
                     lastErrorAt: status?.lastErrorAt || "",
                     retryCount: status?.retryCount || 0,
+                    transport: client?.getDiagnostics?.()?.transport
+                        || this.serverConfigs.get(name)?.transport
+                        || (this.serverConfigs.get(name)?.url ? "streamable_http" : "stdio"),
                     instructions: client?.isConnected() ? String(client.getServerInstructions?.() || "") : "",
                     auth: status?.auth || deriveMcpAuthStatus(this.serverConfigs.get(name) || {}),
                 };
@@ -777,7 +828,12 @@ class ToolManager {
     // 关闭所有连接
     disconnect() {
         for (const [, client] of this.clients) {
-            client.disconnect();
+            try {
+                const result = client.disconnect();
+                if (result && typeof result.catch === "function")
+                    result.catch(() => { });
+            }
+            catch { }
         }
         this.clients.clear();
         for (const [name, status] of this.serverStatuses.entries()) {

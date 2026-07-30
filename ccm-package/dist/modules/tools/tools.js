@@ -57,9 +57,13 @@ exports.handleToolsAndMetricsApi = handleToolsAndMetricsApi;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
+const crypto = __importStar(require("crypto"));
 const perf_hooks_1 = require("perf_hooks");
 const child_process_1 = require("child_process");
+const managed_process_tree_1 = require("../../system/managed-process-tree");
 const utils_1 = require("../../core/utils");
+const secure_multipart_1 = require("../../system/secure-multipart");
+const shared_files_v2_1 = require("./shared-files-v2");
 const db_1 = require("../../core/db");
 const storage_1 = require("../collaboration/storage");
 const runtime_tool_sync_1 = require("../../tools/runtime-tool-sync");
@@ -71,6 +75,7 @@ const tool_catalog_management_1 = require("../../tools/tool-catalog-management")
 const internal_skill_catalog_1 = require("../../skills/internal-skill-catalog");
 const internal_mcp_registry_1 = require("../../tools/internal-mcp-registry");
 const global_agent_tool_authorization_1 = require("../global/global-agent-tool-authorization");
+const metrics_v3_1 = require("../../system/metrics-v3");
 // ===== merged from tools-part-01-part-01.ts =====
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
@@ -1270,86 +1275,152 @@ function splitTerminalCwd(output, marker) {
     const firstLine = after.split(/\r?\n/)[0]?.trim() || null;
     return { output: before ? before + os.EOL : "", cwd: firstLine };
 }
-function runTerminalCommand(command, cwd) {
+async function runTerminalCommand(command, cwd, options = {}) {
     const workDir = normalizeTerminalCwd(cwd);
     const marker = `__CCM_TERMINAL_CWD_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
-    const commonOptions = {
-        encoding: "utf-8",
-        cwd: workDir,
-        timeout: 30000,
-        maxBuffer: 5 * 1024 * 1024,
-        windowsHide: true
-    };
-    const parseResult = (stdout, stderr = "", status = 0, error = null) => {
-        const parsed = splitTerminalCwd(stdout, marker);
-        const stderrText = String(stderr || "").trim();
-        return {
-            output: parsed.output,
-            cwd: parsed.cwd && fs.existsSync(parsed.cwd) ? parsed.cwd : workDir,
-            error: error?.message || (status ? `Exit code: ${status}` : "") || (stderrText ? stderrText : "")
-        };
-    };
-    if (process.platform === "win32") {
-        const script = [
+    const maxOutputBytes = 5 * 1024 * 1024;
+    const script = process.platform === "win32"
+        ? [
             "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new();",
             "$OutputEncoding = [System.Text.UTF8Encoding]::new();",
             command,
-            `Write-Output "${marker}$((Get-Location).ProviderPath)"`
-        ].join("\n");
-        const result = (0, child_process_1.spawnSync)("powershell.exe", [
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script
-        ], commonOptions);
-        return parseResult(result.stdout, result.stderr, result.status, result.error);
-    }
-    const script = `${command}\nprintf '\\n${marker}%s\\n' "$PWD"`;
-    const result = (0, child_process_1.spawnSync)("bash", ["-lc", script], commonOptions);
-    return parseResult(result.stdout, result.stderr, result.status, result.error);
+            `Write-Output "${marker}$((Get-Location).ProviderPath)"`,
+        ].join("\n")
+        : `${command}\nprintf '\\n${marker}%s\\n' "$PWD"`;
+    const executable = process.platform === "win32" ? "powershell.exe" : "bash";
+    const args = process.platform === "win32"
+        ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
+        : ["-lc", script];
+    return new Promise(resolve => {
+        const child = (0, child_process_1.spawn)(executable, args, {
+            cwd: workDir,
+            windowsHide: true,
+            detached: process.platform !== "win32",
+            shell: false,
+            stdio: ["ignore", "pipe", "pipe"],
+            env: process.env,
+        });
+        let stdout = "";
+        let stderr = "";
+        let outputBytes = 0;
+        let outputTruncated = false;
+        let timedOut = false;
+        let cancelled = false;
+        let stopReceipt = null;
+        let settled = false;
+        let spawnError = null;
+        const append = (target, chunk) => {
+            const text = Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk || "");
+            const remaining = Math.max(0, maxOutputBytes - outputBytes);
+            if (!remaining) {
+                outputTruncated = true;
+                return;
+            }
+            const accepted = Buffer.from(text, "utf-8").subarray(0, remaining).toString("utf-8");
+            outputBytes += Buffer.byteLength(accepted, "utf-8");
+            if (accepted.length < text.length)
+                outputTruncated = true;
+            if (target === "stdout")
+                stdout += accepted;
+            else
+                stderr += accepted;
+        };
+        child.stdout?.on("data", chunk => append("stdout", chunk));
+        child.stderr?.on("data", chunk => append("stderr", chunk));
+        child.once("error", error => { spawnError = error; });
+        const stop = async (reason) => {
+            if (settled || !child.pid)
+                return;
+            if (reason === "timeout")
+                timedOut = true;
+            else
+                cancelled = true;
+            stopReceipt = await (0, managed_process_tree_1.terminateManagedProcessTree)(child, { gracefulTimeoutMs: 1_500, forceTimeoutMs: 2_000 });
+        };
+        const timeout = setTimeout(() => { void stop("timeout"); }, Math.max(1_000, Math.min(10 * 60_000, Number(options.timeoutMs || 30_000))));
+        timeout.unref?.();
+        const abort = () => { void stop("cancel"); };
+        options.signal?.addEventListener("abort", abort, { once: true });
+        child.once("close", code => {
+            settled = true;
+            clearTimeout(timeout);
+            options.signal?.removeEventListener("abort", abort);
+            const parsed = splitTerminalCwd(stdout, marker);
+            const exitCode = Number.isInteger(code) ? Number(code) : 1;
+            const stderrText = String(stderr || "").trim();
+            resolve({
+                success: exitCode === 0 && !spawnError && !timedOut && !cancelled,
+                output: parsed.output,
+                cwd: parsed.cwd && fs.existsSync(parsed.cwd) ? parsed.cwd : workDir,
+                exitCode,
+                timedOut,
+                cancelled,
+                outputTruncated,
+                stopReceipt,
+                error: spawnError?.message || (timedOut ? "命令执行超时" : cancelled ? "命令已取消" : exitCode ? `Exit code: ${exitCode}` : stderrText),
+            });
+        });
+    });
 }
 // === 共享文件系统辅助函数 ===
 function listSharedFiles() {
     (0, utils_1.ensureSharedDir)();
-    return fs.readdirSync(utils_1.SHARED_DIR)
+    const legacy = fs.readdirSync(utils_1.SHARED_DIR)
         .filter(f => !f.startsWith("."))
         .map(f => {
-        const stat = fs.statSync(path.join(utils_1.SHARED_DIR, f));
+        const target = path.join(utils_1.SHARED_DIR, f);
+        const stat = fs.lstatSync(target);
+        if (!stat.isFile() || stat.isSymbolicLink())
+            return null;
         const ext = path.extname(f).toLowerCase();
         const type = (0, utils_1.isTextFileName)(f) ? "text" : (0, utils_1.isImageFileName)(f) ? "image" : (0, utils_1.isOoxmlFileName)(f) ? ext.slice(1) : "file";
-        return { name: f, size: stat.size, modified: stat.mtime.toISOString(), type, path: path.join(utils_1.SHARED_DIR, f) };
+        return { name: f, size: stat.size, modified: stat.mtime.toISOString(), type, path: target };
     })
+        .filter(Boolean)
         .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+    (0, shared_files_v2_1.migrateLegacySharedFilesV2)("global", "global", legacy, "global-shared-v1");
+    return (0, shared_files_v2_1.listSharedFilesV2)("global", "global");
 }
 function readSharedFile(name) {
-    const filePath = (0, utils_1.getSharedFilePath)(name);
-    if (!filePath)
-        return null;
-    if (!fs.existsSync(filePath))
-        return null;
-    return (0, utils_1.describeFileFromPath)(filePath, path.basename(String(name)));
+    const safeName = (0, shared_files_v2_1.validateSharedFileV2Name)(name);
+    listSharedFiles();
+    const item = (0, shared_files_v2_1.listSharedFilesV2)("global", "global").find((file) => file.name === safeName);
+    return item ? (0, shared_files_v2_1.readSharedFileV2)("global", "global", item.id) : null;
 }
 // 写入/创建共享文件
 function writeSharedFile(name, content) {
-    (0, utils_1.ensureSharedDir)();
-    const filePath = (0, utils_1.getSharedFilePath)(name);
-    if (filePath) {
-        fs.writeFileSync(filePath, content);
-    }
+    return (0, shared_files_v2_1.upsertSharedTextV2)("global", "global", name, content);
 }
 function saveSharedUpload(filename, buffer) {
-    (0, utils_1.ensureSharedDir)();
-    const safeName = filename.replace(/[<>:"/\\|?*]/g, "_");
-    const filePath = path.join(utils_1.SHARED_DIR, safeName);
-    fs.writeFileSync(filePath, buffer);
-    return safeName;
+    const name = (0, shared_files_v2_1.validateSharedFileV2Name)(filename);
+    const staging = path.join(utils_1.SHARED_DIR, `.compat-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`);
+    fs.writeFileSync(staging, buffer, { mode: 0o600 });
+    try {
+        return (0, shared_files_v2_1.adoptSharedUploadV2)("global", "global", { filename: name, savedPath: staging, contentType: "" });
+    }
+    finally {
+        try {
+            fs.unlinkSync(staging);
+        }
+        catch { }
+    }
 }
 function deleteSharedFile(name) {
-    const filePath = path.join(utils_1.SHARED_DIR, name);
-    if (fs.existsSync(filePath))
-        fs.unlinkSync(filePath);
+    const safeName = (0, shared_files_v2_1.validateSharedFileV2Name)(name);
+    const item = listSharedFiles().find((file) => file.name === safeName);
+    if (item)
+        (0, shared_files_v2_1.deleteSharedFileV2)("global", "global", item.id);
+    const root = fs.realpathSync.native(utils_1.SHARED_DIR);
+    const candidate = path.join(root, safeName);
+    if (fs.existsSync(candidate)) {
+        const stat = fs.lstatSync(candidate);
+        const real = fs.realpathSync.native(candidate);
+        const relative = path.relative(root, real);
+        if (!stat.isFile() || stat.isSymbolicLink() || relative.startsWith("..") || path.isAbsolute(relative)) {
+            throw new Error("共享文件路径不安全");
+        }
+        fs.unlinkSync(candidate);
+    }
 }
 // 物理 Customizations Skills 路径
 const customSkillRoots = [
@@ -1799,10 +1870,10 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     }
     // === 性能监控指标 ===
     if (pathname === "/api/metrics/events" && req.method === "GET") {
-        const metrics = (0, db_1.loadMetrics)();
+        (0, metrics_v3_1.ensureLegacyMetricsMigrated)((0, db_1.loadMetrics)());
         const scopeType = String(parsed.query.scope_type || parsed.query.scopeType || "");
         const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "");
-        const result = (0, db_1.queryMetricEvents)(metrics, {
+        const result = (0, metrics_v3_1.queryMetricEventsV3)({
             scopeType,
             scopeId,
             days: parsed.query.days,
@@ -1816,7 +1887,9 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         return true;
     }
     if (pathname === "/api/metrics" && req.method === "GET") {
-        const metrics = (0, db_1.loadMetrics)();
+        (0, metrics_v3_1.ensureLegacyMetricsMigrated)((0, db_1.loadMetrics)());
+        (0, metrics_v3_1.pruneMetricEventsV3)();
+        const metrics = (0, metrics_v3_1.loadMetricsDashboardV3)();
         const groups = (0, storage_1.loadGroups)().map((group) => {
             const members = Array.isArray(group.members) ? group.members : [];
             const coordinator = members.find((member) => member.role === "coordinator") || members[0] || {};
@@ -1830,10 +1903,17 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 })).filter((member) => member.project),
             };
         });
+        const projects = Object.entries((0, db_1.loadProjectConfigs)()).map(([id, project]) => ({
+            id,
+            name: String(project?.display_name || project?.displayName || project?.name || id),
+            agent: String(project?.agent || project?.agent_type || "project-agent"),
+            scopeKey: `project:${id}`,
+        }));
         (0, utils_1.sendJson)(res, {
             metrics,
             catalog: {
                 groups,
+                projects,
                 global: {
                     id: "global",
                     name: "全局助手",
@@ -1853,8 +1933,13 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         return true;
     }
     if (pathname === "/api/metrics/reset" && req.method === "POST") {
-        (0, db_1.saveMetrics)({ version: 2, agents: {}, daily: {}, scopes: {}, events: [], updatedAt: null });
-        (0, utils_1.sendJson)(res, { success: true });
+        (0, utils_1.sendJson)(res, {
+            success: false,
+            error: "性能指标重置已迁移到清理中心，请先生成预览并确认永久删除",
+            code: "cleanup_preview_required",
+            action: "reset_metrics",
+            preview_endpoint: "/api/cleanup/preview",
+        }, 409);
         return true;
     }
     // === 共享上下文 API ===
@@ -1874,13 +1959,15 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     }
     // 下载文件
     if (pathname === "/api/shared/download" && req.method === "GET") {
-        const name = parsed.query.name;
-        const filePath = (0, utils_1.getSharedFilePath)(name);
-        if (!filePath || !fs.existsSync(filePath)) {
+        const name = (0, shared_files_v2_1.validateSharedFileV2Name)(parsed.query.name);
+        const record = listSharedFiles().find((item) => item.name === name);
+        const resolved = record ? (0, shared_files_v2_1.resolveSharedFileSourceV2)("global", "global", record.id) : null;
+        if (!resolved) {
             res.writeHead(404);
             res.end("Not Found");
             return true;
         }
+        const filePath = resolved.file;
         const ext = path.extname(name).toLowerCase();
         const types = {
             ".pdf": "application/pdf",
@@ -1902,26 +1989,17 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     if (pathname === "/api/shared/upload" && req.method === "POST") {
         const ct = req.headers["content-type"] || "";
         if (ct.includes("multipart/form-data")) {
-            const chunks = [];
-            req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-            req.on("end", () => {
+            void (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(result => {
                 try {
-                    const buffer = Buffer.concat(chunks);
-                    const boundary = (0, utils_1.getMultipartBoundary)(ct);
-                    if (!boundary)
-                        return (0, utils_1.sendJson)(res, { error: "无效请求" }, 400);
-                    const { files } = (0, utils_1.parseMultipart)(buffer, boundary);
-                    const uploaded = files.map(f => saveSharedUpload(f.filename, fs.readFileSync(f.savedPath)));
-                    try {
-                        files.forEach(f => fs.unlinkSync(f.savedPath));
-                    }
-                    catch { }
+                    const uploaded = result.files.map(file => (0, shared_files_v2_1.adoptSharedUploadV2)("global", "global", file));
+                    (0, secure_multipart_1.cleanupSecureMultipartFiles)(result.files);
                     (0, utils_1.sendJson)(res, { success: true, files: uploaded });
                 }
                 catch (e) {
+                    (0, secure_multipart_1.cleanupSecureMultipartFiles)(result.files);
                     (0, utils_1.sendJson)(res, { error: e.message }, 400);
                 }
-            });
+            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
             return true;
         }
         (0, utils_1.sendJson)(res, { error: "需要 multipart/form-data" }, 400);
@@ -1969,7 +2047,15 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
           Write-Output $d.SelectedPath
         }
       `.replace(/\n/g, '; ');
-            const out = (0, child_process_1.execSync)(`powershell -WindowStyle Normal -Sta -NoProfile -Command "${psCommand}"`, { encoding: 'utf-8' }).trim();
+            const out = (0, child_process_1.execFileSync)("powershell.exe", [
+                "-WindowStyle", "Hidden",
+                "-Sta",
+                "-NoProfile",
+                "-Command", psCommand,
+            ], {
+                encoding: "utf-8",
+                windowsHide: true,
+            }).trim();
             if (out && require('fs').existsSync(out)) {
                 (0, utils_1.sendJson)(res, { success: true, path: out });
             }
@@ -2073,30 +2159,41 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     // === 终端 API ===
     if (pathname === "/api/terminal/exec" && req.method === "POST") {
         let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        let rejected = false;
+        req.on("data", (chunk) => {
+            if (rejected)
+                return;
+            body += chunk;
+            if (Buffer.byteLength(body, "utf-8") > 2 * 1024 * 1024) {
+                rejected = true;
+                (0, utils_1.sendJson)(res, { success: false, error: "请求内容过大" }, 413);
+            }
+        });
+        req.on("end", async () => {
+            if (rejected)
+                return;
             try {
-                const { command, cwd } = JSON.parse(body);
+                const { command, cwd, challenge } = JSON.parse(body);
                 if (!command)
                     return (0, utils_1.sendJson)(res, { error: "命令不能为空" }, 400);
-                const workDir = cwd || os.homedir();
-                console.log(`[终端] 执行命令: ${command} (目录: ${workDir})`);
-                try {
-                    const result = runTerminalCommand(command, workDir);
-                    (0, utils_1.sendJson)(res, { success: true, output: result.output, cwd: result.cwd, error: result.error || undefined });
-                }
-                catch (e) {
-                    const text = (e.stdout || "") + (e.stderr || e.message);
-                    (0, utils_1.sendJson)(res, {
-                        success: true,
-                        output: text,
-                        cwd: workDir,
-                        error: e.status ? `Exit code: ${e.status}` : e.message
-                    });
-                }
+                if (String(command).length > 16_000)
+                    return (0, utils_1.sendJson)(res, { error: "命令过长" }, 400);
+                const authorization = (0, terminal_1.authorizeTerminalCommandExecution)(command, cwd, challenge);
+                if (!authorization.allowed)
+                    return (0, utils_1.sendJson)(res, { success: false, ...authorization }, 409);
+                const workDir = authorization.cwd || os.homedir();
+                const controller = new AbortController();
+                const cancel = () => { if (!res.writableEnded)
+                    controller.abort(); };
+                req.once("aborted", cancel);
+                res.once("close", cancel);
+                const result = await runTerminalCommand(String(command), workDir, { signal: controller.signal });
+                if (!res.writableEnded && !res.destroyed)
+                    (0, utils_1.sendJson)(res, result);
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+                if (!res.writableEnded && !res.destroyed)
+                    (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
             }
         });
         return true;

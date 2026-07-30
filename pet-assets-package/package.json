@@ -1,0 +1,18 @@
+{
+  "name": "@mumulinya167/ccm-pet-assets",
+  "version": "1.0.27",
+  "description": "Version-locked optional pet assets for CCM",
+  "license": "MIT",
+  "files": [
+    "assets/",
+    "manifest.json",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node prepublish-guard.js",
+    "prepublishOnly": "node prepublish-guard.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

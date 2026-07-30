@@ -46,11 +46,13 @@ export function safeTextList(values: any, max = 20, itemMax = 240) {
 
 export function normalizeStatus(value: any): TaskReplayStatus {
   const text = String(value || "").toLowerCase();
-  if (/cancel|revert/.test(text)) return "cancelled";
-  if (/fail|error|reject|invalid/.test(text)) return "failed";
-  if (/block|waiting_user|needs_user/.test(text)) return "blocked";
-  if (/warn|partial|attention|needs_review/.test(text)) return "warning";
-  if (/running|progress|reviewing|executing|queued|monitoring|supervising/.test(text)) return "running";
-  if (/pass|success|succeed|complete|done|ok|accept/.test(text)) return "passed";
-  return "info";
+  const exact: Record<string, TaskReplayStatus> = {
+    cancelled: "cancelled", canceled: "cancelled", reverted: "cancelled",
+    failed: "failed", error: "failed", rejected: "failed", invalid: "failed",
+    blocked: "blocked", waiting_user: "blocked", needs_user: "blocked", waiting_clarification: "blocked", waiting_confirmation: "blocked",
+    warning: "warning", warn: "warning", partial: "warning", attention: "warning", needs_review: "warning",
+    running: "running", in_progress: "running", progress: "running", reviewing: "running", executing: "running", queued: "running", pending: "running", monitoring: "running", supervising: "running",
+    passed: "passed", success: "passed", succeeded: "passed", completed: "passed", complete: "passed", done: "passed", ok: "passed", accepted: "passed",
+  };
+  return exact[text] || "info";
 }

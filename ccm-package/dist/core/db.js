@@ -37,6 +37,7 @@ exports.AGENTS = exports.SKILL_PACKAGES_DIR = exports.SKILLS_DIR = exports.MCP_D
 exports.getConfigs = getConfigs;
 exports.getConfigInfo = getConfigInfo;
 exports.isRunning = isRunning;
+exports.isRunningReadOnly = isRunningReadOnly;
 exports.getPid = getPid;
 exports.loadMcpTools = loadMcpTools;
 exports.saveMcpTool = saveMcpTool;
@@ -54,9 +55,10 @@ exports.loadTasks = loadTasks;
 exports.saveTasks = saveTasks;
 exports.getTaskById = getTaskById;
 exports.updateTaskById = updateTaskById;
+exports.updateTaskByIdCas = updateTaskByIdCas;
+exports.listUsabilityTaskCandidates = listUsabilityTaskCandidates;
+exports.listUsabilityArchiveCandidates = listUsabilityArchiveCandidates;
 exports.listTasksByParentId = listTasksByParentId;
-exports.loadTemplates = loadTemplates;
-exports.saveTemplates = saveTemplates;
 exports.loadProjectConfigs = loadProjectConfigs;
 exports.saveProjectConfigs = saveProjectConfigs;
 exports.loadMusicConfig = loadMusicConfig;
@@ -86,6 +88,7 @@ const internal_mcp_registry_1 = require("../tools/internal-mcp-registry");
 const runtime_events_1 = require("../system/runtime-events");
 const task_store_1 = require("./task-store");
 const atomic_json_file_1 = require("./atomic-json-file");
+const metrics_v3_1 = require("../system/metrics-v3");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -96,7 +99,6 @@ const DEV_WEEKLY_REPORTS_FILE = path.join(CCM_DIR, "dev-weekly-reports.json");
 const AUTO_DEV_NOTIFY_FILE = path.join(CCM_DIR, "auto-dev-notify.json");
 const METRICS_FILE = path.join(CCM_DIR, "metrics.json");
 const FEISHU_CONFIG_FILE = path.join(CCM_DIR, "feishu-config.json");
-const TEMPLATES_FILE = path.join(CCM_DIR, "prompt-templates.json");
 const PROJECT_CONFIGS_FILE = path.join(CCM_DIR, "project-configs.json");
 const MUSIC_CONFIG_FILE = path.join(CCM_DIR, "music-config.json");
 const RAG_WATCH_PATHS_FILE = path.join(CCM_DIR, "rag-watch-paths.json");
@@ -194,6 +196,21 @@ function isRunning(name) {
         return false;
     }
 }
+function isRunningReadOnly(name) {
+    const pidFile = path.join(PID_DIR, `${name}.pid`);
+    if (!fs.existsSync(pidFile))
+        return false;
+    const pid = Number(fs.readFileSync(pidFile, "utf-8").trim());
+    if (!Number.isInteger(pid) || pid <= 0)
+        return false;
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 function getPid(name) {
     const pidFile = path.join(PID_DIR, `${name}.pid`);
     if (!fs.existsSync(pidFile))
@@ -243,6 +260,12 @@ function loadMcpTools() {
             const migrated = (0, internal_mcp_registry_1.buildBundledFetchWebMcpTool)(storedTools[storedFetchIndex]);
             saveMcpTool(migrated);
             storedTools[storedFetchIndex] = { ...migrated, filename: "fetch-web-mcp.json" };
+        }
+        const storedFilesystemIndex = storedTools.findIndex(tool => String(tool?.name || "") === "filesystem-mcp");
+        if (storedFilesystemIndex >= 0 && (0, internal_mcp_registry_1.isLegacyOfficialFilesystemMcpDefinition)(storedTools[storedFilesystemIndex])) {
+            const migrated = (0, internal_mcp_registry_1.buildBundledFilesystemMcpTool)(storedTools[storedFilesystemIndex]);
+            saveMcpTool(migrated);
+            storedTools[storedFilesystemIndex] = { ...migrated, filename: "filesystem-mcp.json" };
         }
         const storedFeishu = storedTools.find(tool => String(tool?.name || "") === "mcp-feishu") || null;
         const bundledFeishu = (0, internal_mcp_registry_1.buildBundledFeishuMcpTool)(loadFeishuConfig(), storedFeishu || {});
@@ -472,10 +495,8 @@ function applyMetricToStore(value, agent, data = {}, now = new Date()) {
     const aggregate = scope.agents[cleanAgent];
     const success = data.success === true;
     const explicitStatus = String(data.status || "").trim().toLowerCase();
-    const inferredStatus = success
-        ? "completed"
-        : (/cancell?ed/i.test(String(data.error || data.message || "")) ? "cancelled" : "failed");
-    const status = ["completed", "failed", "cancelled"].includes(explicitStatus) ? explicitStatus : inferredStatus;
+    const inferredStatus = data.success === true ? "completed" : data.success === false ? "failed" : "unknown";
+    const status = ["completed", "failed", "cancelled", "blocked", "unknown"].includes(explicitStatus) ? explicitStatus : inferredStatus;
     metrics.events.push({
         id: String(data.eventId || data.event_id || `metric_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`),
         at,
@@ -535,11 +556,11 @@ function queryMetricEvents(value, filters = {}) {
     })
         .map((event) => {
         const explicit = String(event?.status || "").trim().toLowerCase();
-        const resolvedStatus = ["completed", "failed", "cancelled"].includes(explicit)
+        const resolvedStatus = ["completed", "failed", "cancelled", "blocked", "unknown"].includes(explicit)
             ? explicit
             : event?.success === true
                 ? "completed"
-                : (/cancell?ed/i.test(String(event?.error || "")) ? "cancelled" : "failed");
+                : event?.success === false ? "failed" : "unknown";
         return { ...event, resolvedStatus };
     })
         .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
@@ -547,8 +568,8 @@ function queryMetricEvents(value, filters = {}) {
         result.all += 1;
         result[event.resolvedStatus] = Number(result[event.resolvedStatus] || 0) + 1;
         return result;
-    }, { all: 0, completed: 0, failed: 0, cancelled: 0 });
-    const filtered = ["completed", "failed", "cancelled"].includes(status)
+    }, { all: 0, completed: 0, failed: 0, cancelled: 0, blocked: 0, unknown: 0 });
+    const filtered = ["completed", "failed", "cancelled", "blocked", "unknown"].includes(status)
         ? scoped.filter((event) => event.resolvedStatus === status)
         : scoped;
     const total = filtered.length;
@@ -561,7 +582,7 @@ function queryMetricEvents(value, filters = {}) {
         page,
         pageSize,
         totalPages,
-        status: ["completed", "failed", "cancelled"].includes(status) ? status : "all",
+        status: ["completed", "failed", "cancelled", "blocked", "unknown"].includes(status) ? status : "all",
         statusCounts,
         retentionLimit: METRICS_EVENT_LIMIT,
         range: { days, fromDate: fromDate || null, toDate: toDate || null },
@@ -572,9 +593,8 @@ function saveMetrics(metrics) {
 }
 function recordMetric(agent, data) {
     try {
-        (0, atomic_json_file_1.withFileLock)(METRICS_FILE, () => {
-            saveMetrics(applyMetricToStore(loadMetrics(), agent, data));
-        }, { timeoutMs: 5000 });
+        (0, metrics_v3_1.ensureLegacyMetricsMigrated)(loadMetrics());
+        (0, metrics_v3_1.recordMetricV3)(agent, data);
         return true;
     }
     catch (error) {
@@ -646,16 +666,20 @@ function updateTaskById(id, patchOrMutator) {
     (0, runtime_events_1.publishRuntimeEvent)("task", "task.changed", { taskId: id });
     return result;
 }
+function updateTaskByIdCas(id, predicate, mutator) {
+    const result = (0, task_store_1.updateTaskByIdCasInSqlite)(id, predicate, mutator);
+    if (result.updated)
+        (0, runtime_events_1.publishRuntimeEvent)("task", "task.changed", { taskId: id });
+    return result;
+}
+function listUsabilityTaskCandidates(recentCutoff) {
+    return (0, task_store_1.listUsabilityTaskCandidatesFromSqlite)(recentCutoff);
+}
+function listUsabilityArchiveCandidates(historyCutoff, intakeCutoff) {
+    return (0, task_store_1.listUsabilityArchiveCandidatesFromSqlite)(historyCutoff, intakeCutoff);
+}
 function listTasksByParentId(parentId) {
     return (0, task_store_1.listTasksByParentIdFromSqlite)(parentId);
-}
-// === Dialogue Templates ===
-function loadTemplates() {
-    const parsed = (0, atomic_json_file_1.readJsonWithBackup)(TEMPLATES_FILE, []);
-    return Array.isArray(parsed) ? parsed : [];
-}
-function saveTemplates(templates) {
-    (0, atomic_json_file_1.writeJsonAtomic)(TEMPLATES_FILE, templates);
 }
 // === Project Configs ===
 function loadProjectConfigs() {

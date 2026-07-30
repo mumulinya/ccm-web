@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.acquireFileLock = acquireFileLock;
+exports.acquireFileLockAsync = acquireFileLockAsync;
 exports.releaseFileLock = releaseFileLock;
 exports.withFileLock = withFileLock;
 exports.writeJsonAtomic = writeJsonAtomic;
@@ -66,25 +67,84 @@ function readLock(file) {
         return null;
     }
 }
-function removeStaleLock(file, staleMs) {
-    const owner = readLock(file);
-    let ageMs = Number.POSITIVE_INFINITY;
+function acquireReclaimGate(file) {
+    const gateFile = `${file}.reclaim`;
+    const token = crypto.randomBytes(16).toString("hex");
     try {
-        ageMs = Date.now() - fs.statSync(file).mtimeMs;
+        const fd = fs.openSync(gateFile, "wx", 0o600);
+        try {
+            fs.writeFileSync(fd, `${JSON.stringify({
+                schema: "ccm-file-lock-reclaim-v1",
+                token,
+                pid: process.pid,
+                hostname: os.hostname(),
+                acquired_at: new Date().toISOString(),
+            })}\n`, "utf-8");
+            fs.fsyncSync(fd);
+        }
+        finally {
+            fs.closeSync(fd);
+        }
+        return { file: gateFile, token };
+    }
+    catch (error) {
+        if (String(error?.code || "") !== "EEXIST")
+            throw error;
+        const owner = readLock(gateFile);
+        let ageMs = 0;
+        try {
+            ageMs = Date.now() - fs.statSync(gateFile).mtimeMs;
+        }
+        catch { }
+        const localDeadOwner = String(owner?.hostname || "") === os.hostname()
+            && !processAlive(Number(owner?.pid || 0));
+        if (localDeadOwner && ageMs >= 1_000) {
+            try {
+                fs.unlinkSync(gateFile);
+            }
+            catch { }
+        }
+        return null;
+    }
+}
+function releaseReclaimGate(handle) {
+    if (!handle)
+        return;
+    const owner = readLock(handle.file);
+    if (owner?.token !== handle.token || Number(owner?.pid || 0) !== process.pid)
+        return;
+    try {
+        fs.unlinkSync(handle.file);
     }
     catch { }
-    const localOwner = String(owner?.hostname || "") === os.hostname();
-    const stale = owner
-        ? (!!owner.released_at || (localOwner ? !processAlive(Number(owner.pid || 0)) : ageMs >= staleMs))
-        : ageMs >= staleMs;
-    if (!stale)
+}
+function removeStaleLock(file, staleMs) {
+    const gate = acquireReclaimGate(file);
+    if (!gate)
         return false;
     try {
-        fs.unlinkSync(file);
-        return true;
+        const owner = readLock(file);
+        let ageMs = Number.POSITIVE_INFINITY;
+        try {
+            ageMs = Date.now() - fs.statSync(file).mtimeMs;
+        }
+        catch { }
+        const localOwner = String(owner?.hostname || "") === os.hostname();
+        const stale = owner
+            ? (!!owner.released_at || (localOwner ? !processAlive(Number(owner.pid || 0)) : ageMs >= staleMs))
+            : ageMs >= staleMs;
+        if (!stale)
+            return false;
+        try {
+            fs.unlinkSync(file);
+            return true;
+        }
+        catch {
+            return false;
+        }
     }
-    catch {
-        return false;
+    finally {
+        releaseReclaimGate(gate);
     }
 }
 function acquireFileLock(targetFile, options = {}) {
@@ -95,6 +155,10 @@ function acquireFileLock(targetFile, options = {}) {
     const deadline = Date.now() + timeoutMs;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     while (Date.now() <= deadline) {
+        if (fs.existsSync(`${file}.reclaim`)) {
+            sleep(retryMs);
+            continue;
+        }
         const token = crypto.randomBytes(16).toString("hex");
         try {
             const fd = fs.openSync(file, "wx", 0o600);
@@ -118,6 +182,46 @@ function acquireFileLock(targetFile, options = {}) {
                 throw error;
             removeStaleLock(file, staleMs);
             sleep(retryMs);
+        }
+    }
+    const owner = readLock(file);
+    throw new Error(`file lock timeout: ${targetFile}${owner?.pid ? ` (owner pid ${owner.pid})` : ""}`);
+}
+async function acquireFileLockAsync(targetFile, options = {}) {
+    const file = `${targetFile}.lock`;
+    const timeoutMs = Math.max(1, Number(options.timeoutMs || 30_000));
+    const retryMs = Math.max(1, Number(options.retryMs || 25));
+    const staleMs = Math.max(1_000, Number(options.staleMs || 5 * 60_000));
+    const deadline = Date.now() + timeoutMs;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    while (Date.now() <= deadline) {
+        if (fs.existsSync(`${file}.reclaim`)) {
+            await new Promise(resolve => setTimeout(resolve, retryMs));
+            continue;
+        }
+        const token = crypto.randomBytes(16).toString("hex");
+        try {
+            const handle = await fs.promises.open(file, "wx", 0o600);
+            try {
+                await handle.writeFile(`${JSON.stringify({
+                    schema: "ccm-exclusive-file-lock-v1",
+                    token,
+                    pid: process.pid,
+                    hostname: os.hostname(),
+                    acquired_at: new Date().toISOString(),
+                })}\n`, "utf-8");
+                await handle.sync();
+            }
+            finally {
+                await handle.close();
+            }
+            return { file, token, pid: process.pid };
+        }
+        catch (error) {
+            if (String(error?.code || "") !== "EEXIST")
+                throw error;
+            removeStaleLock(file, staleMs);
+            await new Promise(resolve => setTimeout(resolve, retryMs));
         }
     }
     const owner = readLock(file);

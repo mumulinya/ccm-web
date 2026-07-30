@@ -3,13 +3,16 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 import {
   performance,
 } from "perf_hooks";
 import {
+  spawn,
   spawnSync,
-  execSync,
+  execFileSync,
 } from "child_process";
+import { terminateManagedProcessTree } from "../../system/managed-process-tree";
 import {
   sendJson,
   SHARED_DIR,
@@ -19,9 +22,18 @@ import {
   isTextFileName,
   isImageFileName,
   isOoxmlFileName,
-  getMultipartBoundary,
-  parseMultipart,
 } from "../../core/utils";
+import { cleanupSecureMultipartFiles, parseSecureMultipartRequest } from "../../system/secure-multipart";
+import {
+  adoptSharedUploadV2,
+  deleteSharedFileV2,
+  listSharedFilesV2,
+  migrateLegacySharedFilesV2,
+  readSharedFileV2,
+  resolveSharedFileSourceV2,
+  upsertSharedTextV2,
+  validateSharedFileV2Name,
+} from "./shared-files-v2";
 import {
   loadMetrics,
   queryMetricEvents,
@@ -54,6 +66,7 @@ import {
   startRuntimeToolRealCliMatrix,
 } from "../../tools/runtime-tool-real-cli-matrix";
 import {
+  authorizeTerminalCommandExecution,
   handleTerminalApi,
 } from "./terminal";
 import {
@@ -74,6 +87,13 @@ import {
   isInternalMcpName,
 } from "../../tools/internal-mcp-registry";
 import { loadGlobalAgentToolAuthorization } from "../global/global-agent-tool-authorization";
+import {
+  ensureLegacyMetricsMigrated,
+  loadMetricsDashboardV3,
+  pruneMetricEventsV3,
+  queryMetricEventsV3,
+  resetMetricsV3,
+} from "../../system/metrics-v3";
 
 // ===== merged from tools-part-01-part-01.ts =====
 
@@ -1323,91 +1343,143 @@ function splitTerminalCwd(output: string, marker: string) {
   return { output: before ? before + os.EOL : "", cwd: firstLine };
 }
 
-export function runTerminalCommand(command: string, cwd: string) {
+export async function runTerminalCommand(command: string, cwd: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) {
   const workDir = normalizeTerminalCwd(cwd);
   const marker = `__CCM_TERMINAL_CWD_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
-  const commonOptions = {
-    encoding: "utf-8" as const,
-    cwd: workDir,
-    timeout: 30000,
-    maxBuffer: 5 * 1024 * 1024,
-    windowsHide: true
-  };
+  const maxOutputBytes = 5 * 1024 * 1024;
+  const script = process.platform === "win32"
+    ? [
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new();",
+        "$OutputEncoding = [System.Text.UTF8Encoding]::new();",
+        command,
+        `Write-Output "${marker}$((Get-Location).ProviderPath)"`,
+      ].join("\n")
+    : `${command}\nprintf '\\n${marker}%s\\n' "$PWD"`;
+  const executable = process.platform === "win32" ? "powershell.exe" : "bash";
+  const args = process.platform === "win32"
+    ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
+    : ["-lc", script];
 
-  const parseResult = (stdout: string, stderr = "", status = 0, error: any = null) => {
-    const parsed = splitTerminalCwd(stdout, marker);
-    const stderrText = String(stderr || "").trim();
-    return {
-      output: parsed.output,
-      cwd: parsed.cwd && fs.existsSync(parsed.cwd) ? parsed.cwd : workDir,
-      error: error?.message || (status ? `Exit code: ${status}` : "") || (stderrText ? stderrText : "")
+  return new Promise(resolve => {
+    const child = spawn(executable, args, {
+      cwd: workDir,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let outputTruncated = false;
+    let timedOut = false;
+    let cancelled = false;
+    let stopReceipt: any = null;
+    let settled = false;
+    let spawnError: any = null;
+    const append = (target: "stdout" | "stderr", chunk: any) => {
+      const text = Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk || "");
+      const remaining = Math.max(0, maxOutputBytes - outputBytes);
+      if (!remaining) { outputTruncated = true; return; }
+      const accepted = Buffer.from(text, "utf-8").subarray(0, remaining).toString("utf-8");
+      outputBytes += Buffer.byteLength(accepted, "utf-8");
+      if (accepted.length < text.length) outputTruncated = true;
+      if (target === "stdout") stdout += accepted;
+      else stderr += accepted;
     };
-  };
-
-  if (process.platform === "win32") {
-    const script = [
-      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new();",
-      "$OutputEncoding = [System.Text.UTF8Encoding]::new();",
-      command,
-      `Write-Output "${marker}$((Get-Location).ProviderPath)"`
-    ].join("\n");
-    const result = spawnSync("powershell.exe", [
-      "-NoLogo",
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      script
-    ], commonOptions);
-    return parseResult(result.stdout, result.stderr, result.status, result.error);
-  }
-
-  const script = `${command}\nprintf '\\n${marker}%s\\n' "$PWD"`;
-  const result = spawnSync("bash", ["-lc", script], commonOptions);
-  return parseResult(result.stdout, result.stderr, result.status, result.error);
+    child.stdout?.on("data", chunk => append("stdout", chunk));
+    child.stderr?.on("data", chunk => append("stderr", chunk));
+    child.once("error", error => { spawnError = error; });
+    const stop = async (reason: "timeout" | "cancel") => {
+      if (settled || !child.pid) return;
+      if (reason === "timeout") timedOut = true;
+      else cancelled = true;
+      stopReceipt = await terminateManagedProcessTree(child, { gracefulTimeoutMs: 1_500, forceTimeoutMs: 2_000 });
+    };
+    const timeout = setTimeout(() => { void stop("timeout"); }, Math.max(1_000, Math.min(10 * 60_000, Number(options.timeoutMs || 30_000))));
+    timeout.unref?.();
+    const abort = () => { void stop("cancel"); };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    child.once("close", code => {
+      settled = true;
+      clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abort);
+      const parsed = splitTerminalCwd(stdout, marker);
+      const exitCode = Number.isInteger(code) ? Number(code) : 1;
+      const stderrText = String(stderr || "").trim();
+      resolve({
+        success: exitCode === 0 && !spawnError && !timedOut && !cancelled,
+        output: parsed.output,
+        cwd: parsed.cwd && fs.existsSync(parsed.cwd) ? parsed.cwd : workDir,
+        exitCode,
+        timedOut,
+        cancelled,
+        outputTruncated,
+        stopReceipt,
+        error: spawnError?.message || (timedOut ? "命令执行超时" : cancelled ? "命令已取消" : exitCode ? `Exit code: ${exitCode}` : stderrText),
+      });
+    });
+  });
 }
 
 // === 共享文件系统辅助函数 ===
 export function listSharedFiles() {
   ensureSharedDir();
-  return fs.readdirSync(SHARED_DIR)
+  const legacy = fs.readdirSync(SHARED_DIR)
     .filter(f => !f.startsWith("."))
     .map(f => {
-      const stat = fs.statSync(path.join(SHARED_DIR, f));
+      const target = path.join(SHARED_DIR, f);
+      const stat = fs.lstatSync(target);
+      if (!stat.isFile() || stat.isSymbolicLink()) return null;
       const ext = path.extname(f).toLowerCase();
       const type = isTextFileName(f) ? "text" : isImageFileName(f) ? "image" : isOoxmlFileName(f) ? ext.slice(1) : "file";
-      return { name: f, size: stat.size, modified: stat.mtime.toISOString(), type, path: path.join(SHARED_DIR, f) };
+      return { name: f, size: stat.size, modified: stat.mtime.toISOString(), type, path: target };
     })
+    .filter(Boolean)
     .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+  migrateLegacySharedFilesV2("global", "global", legacy, "global-shared-v1");
+  return listSharedFilesV2("global", "global");
 }
 
 export function readSharedFile(name: string) {
-  const filePath = getSharedFilePath(name);
-  if (!filePath) return null;
-  if (!fs.existsSync(filePath)) return null;
-  return describeFileFromPath(filePath, path.basename(String(name)));
+  const safeName = validateSharedFileV2Name(name);
+  listSharedFiles();
+  const item = listSharedFilesV2("global", "global").find((file: any) => file.name === safeName);
+  return item ? readSharedFileV2("global", "global", item.id) : null;
 }
 
 // 写入/创建共享文件
 export function writeSharedFile(name: string, content: string) {
-  ensureSharedDir();
-  const filePath = getSharedFilePath(name);
-  if (filePath) {
-    fs.writeFileSync(filePath, content);
-  }
+  return upsertSharedTextV2("global", "global", name, content);
 }
 
 export function saveSharedUpload(filename: string, buffer: Buffer) {
-  ensureSharedDir();
-  const safeName = filename.replace(/[<>:"/\\|?*]/g, "_");
-  const filePath = path.join(SHARED_DIR, safeName);
-  fs.writeFileSync(filePath, buffer);
-  return safeName;
+  const name = validateSharedFileV2Name(filename);
+  const staging = path.join(SHARED_DIR, `.compat-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`);
+  fs.writeFileSync(staging, buffer, { mode: 0o600 });
+  try {
+    return adoptSharedUploadV2("global", "global", { filename: name, savedPath: staging, contentType: "" });
+  } finally {
+    try { fs.unlinkSync(staging); } catch {}
+  }
 }
 
 export function deleteSharedFile(name: string) {
-  const filePath = path.join(SHARED_DIR, name);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  const safeName = validateSharedFileV2Name(name);
+  const item = listSharedFiles().find((file: any) => file.name === safeName);
+  if (item) deleteSharedFileV2("global", "global", item.id);
+  const root = fs.realpathSync.native(SHARED_DIR);
+  const candidate = path.join(root, safeName);
+  if (fs.existsSync(candidate)) {
+    const stat = fs.lstatSync(candidate);
+    const real = fs.realpathSync.native(candidate);
+    const relative = path.relative(root, real);
+    if (!stat.isFile() || stat.isSymbolicLink() || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("共享文件路径不安全");
+    }
+    fs.unlinkSync(candidate);
+  }
 }
 
 // 物理 Customizations Skills 路径
@@ -1857,10 +1929,10 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
 
   // === 性能监控指标 ===
   if (pathname === "/api/metrics/events" && req.method === "GET") {
-    const metrics = loadMetrics();
+    ensureLegacyMetricsMigrated(loadMetrics());
     const scopeType = String(parsed.query.scope_type || parsed.query.scopeType || "");
     const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "");
-    const result = queryMetricEvents(metrics, {
+    const result = queryMetricEventsV3({
       scopeType,
       scopeId,
       days: parsed.query.days,
@@ -1875,7 +1947,9 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   }
 
   if (pathname === "/api/metrics" && req.method === "GET") {
-    const metrics = loadMetrics();
+    ensureLegacyMetricsMigrated(loadMetrics());
+    pruneMetricEventsV3();
+    const metrics = loadMetricsDashboardV3();
     const groups = loadGroups().map((group: any) => {
       const members = Array.isArray(group.members) ? group.members : [];
       const coordinator = members.find((member: any) => member.role === "coordinator") || members[0] || {};
@@ -1889,10 +1963,17 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         })).filter((member: any) => member.project),
       };
     });
+    const projects = Object.entries(loadProjectConfigs()).map(([id, project]: [string, any]) => ({
+      id,
+      name: String(project?.display_name || project?.displayName || project?.name || id),
+      agent: String(project?.agent || project?.agent_type || "project-agent"),
+      scopeKey: `project:${id}`,
+    }));
     sendJson(res, {
       metrics,
       catalog: {
         groups,
+        projects,
         global: {
           id: "global",
           name: "全局助手",
@@ -1913,8 +1994,13 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   }
 
   if (pathname === "/api/metrics/reset" && req.method === "POST") {
-    saveMetrics({ version: 2, agents: {}, daily: {}, scopes: {}, events: [], updatedAt: null });
-    sendJson(res, { success: true });
+    sendJson(res, {
+      success: false,
+      error: "性能指标重置已迁移到清理中心，请先生成预览并确认永久删除",
+      code: "cleanup_preview_required",
+      action: "reset_metrics",
+      preview_endpoint: "/api/cleanup/preview",
+    }, 409);
     return true;
   }
 
@@ -1937,13 +2023,15 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
 
   // 下载文件
   if (pathname === "/api/shared/download" && req.method === "GET") {
-    const name = parsed.query.name;
-    const filePath = getSharedFilePath(name);
-    if (!filePath || !fs.existsSync(filePath)) {
+    const name = validateSharedFileV2Name(parsed.query.name);
+    const record = listSharedFiles().find((item: any) => item.name === name);
+    const resolved = record ? resolveSharedFileSourceV2("global", "global", record.id) : null;
+    if (!resolved) {
       res.writeHead(404);
       res.end("Not Found");
       return true;
     }
+    const filePath = resolved.file;
     const ext = path.extname(name).toLowerCase();
     const types: Record<string, string> = {
       ".pdf": "application/pdf",
@@ -1966,21 +2054,16 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   if (pathname === "/api/shared/upload" && req.method === "POST") {
     const ct = req.headers["content-type"] || "";
     if (ct.includes("multipart/form-data")) {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      req.on("end", () => {
+      void parseSecureMultipartRequest(req).then(result => {
         try {
-          const buffer = Buffer.concat(chunks);
-          const boundary = getMultipartBoundary(ct);
-          if (!boundary) return sendJson(res, { error: "无效请求" }, 400);
-          const { files } = parseMultipart(buffer, boundary);
-          const uploaded = files.map(f => saveSharedUpload(f.filename, fs.readFileSync(f.savedPath)));
-          try { files.forEach(f => fs.unlinkSync(f.savedPath)); } catch {}
+          const uploaded = result.files.map(file => adoptSharedUploadV2("global", "global", file));
+          cleanupSecureMultipartFiles(result.files);
           sendJson(res, { success: true, files: uploaded });
         } catch (e: any) {
+          cleanupSecureMultipartFiles(result.files);
           sendJson(res, { error: e.message }, 400);
         }
-      });
+      }).catch((e: any) => sendJson(res, { error: e.message }, 400));
       return true;
     }
     sendJson(res, { error: "需要 multipart/form-data" }, 400);
@@ -2030,7 +2113,15 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         }
       `.replace(/\n/g, '; ');
 
-      const out = execSync(`powershell -WindowStyle Normal -Sta -NoProfile -Command "${psCommand}"`, { encoding: 'utf-8' }).trim();
+      const out = execFileSync("powershell.exe", [
+        "-WindowStyle", "Hidden",
+        "-Sta",
+        "-NoProfile",
+        "-Command", psCommand,
+      ], {
+        encoding: "utf-8",
+        windowsHide: true,
+      }).trim();
       
       if (out && require('fs').existsSync(out)) {
         sendJson(res, { success: true, path: out });
@@ -2127,29 +2218,33 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   // === 终端 API ===
   if (pathname === "/api/terminal/exec" && req.method === "POST") {
     let body = "";
-    req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    let rejected = false;
+    req.on("data", (chunk) => {
+      if (rejected) return;
+      body += chunk;
+      if (Buffer.byteLength(body, "utf-8") > 2 * 1024 * 1024) {
+        rejected = true;
+        sendJson(res, { success: false, error: "请求内容过大" }, 413);
+      }
+    });
+    req.on("end", async () => {
+      if (rejected) return;
       try {
-        const { command, cwd } = JSON.parse(body);
+        const { command, cwd, challenge } = JSON.parse(body);
         if (!command) return sendJson(res, { error: "命令不能为空" }, 400);
+        if (String(command).length > 16_000) return sendJson(res, { error: "命令过长" }, 400);
 
-        const workDir = cwd || os.homedir();
-        console.log(`[终端] 执行命令: ${command} (目录: ${workDir})`);
-
-        try {
-          const result = runTerminalCommand(command, workDir);
-          sendJson(res, { success: true, output: result.output, cwd: result.cwd, error: result.error || undefined });
-        } catch (e: any) {
-          const text = (e.stdout || "") + (e.stderr || e.message);
-          sendJson(res, {
-            success: true,
-            output: text,
-            cwd: workDir,
-            error: e.status ? `Exit code: ${e.status}` : e.message
-          });
-        }
+        const authorization = authorizeTerminalCommandExecution(command, cwd, challenge);
+        if (!authorization.allowed) return sendJson(res, { success: false, ...authorization }, 409);
+        const workDir = authorization.cwd || os.homedir();
+        const controller = new AbortController();
+        const cancel = () => { if (!res.writableEnded) controller.abort(); };
+        req.once("aborted", cancel);
+        res.once("close", cancel);
+        const result = await runTerminalCommand(String(command), workDir, { signal: controller.signal });
+        if (!res.writableEnded && !res.destroyed) sendJson(res, result);
       } catch (e: any) {
-        sendJson(res, { error: e.message }, 400);
+        if (!res.writableEnded && !res.destroyed) sendJson(res, { success: false, error: e.message }, 400);
       }
     });
     return true;

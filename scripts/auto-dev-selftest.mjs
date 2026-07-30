@@ -4,7 +4,13 @@ import path from 'node:path'
 const root = process.cwd()
 const read = file => fs.readFileSync(path.join(root, file), 'utf8')
 
-const page = read('frontend/src/components/tools/AutoDevOps.vue')
+const page = [
+  read('frontend/src/components/tools/AutoDevOps.vue'),
+  read('frontend/src/components/tools/AutoDevOpsPanel.vue'),
+  read('frontend/src/components/tools/AutoDevOps.template.html'),
+  read('frontend/src/components/tools/AutoDevOps.css'),
+  read('frontend/src/components/tools/useAutoDevOps.js'),
+].join('\n')
 const report = read('frontend/src/components/auto-dev/AutoDevReportDocument.vue')
 const app = read('frontend/src/App.vue')
 const renderRegression = read('scripts/auto-dev-render-regression.mjs')
@@ -12,6 +18,7 @@ const journal = read('backend/modules/scheduling/work-journal.ts')
 const cron = read('backend/modules/scheduling/cron.ts')
 const cronReports = read('backend/modules/scheduling/cron-dev-reports.ts')
 const packageJson = read('package.json')
+const domainCatalog = read('scripts/test-domains.json')
 
 const checks = {
   threeUserViews: ['overview', 'reports', 'notifications'].every(view => page.includes(`{ id: '${view}'`))
@@ -45,7 +52,7 @@ const checks = {
   viewSwitchResetsScroll: page.includes('function switchView(viewId)')
     && page.includes("pageRoot.value?.scrollTo({ top: 0, left: 0 })")
     && page.includes('@click="switchView(view.id)"'),
-  renderRegressionRegistered: packageJson.includes('test:auto-dev-render')
+  renderRegressionRegistered: domainCatalog.includes('auto-dev-full-width-redesign-selftest.mjs')
     && renderRegression.includes('assertNoHorizontalOverflow')
     && renderRegression.includes('assertNoPanelOverlap')
     && renderRegression.includes('mobileToggleWidths')
@@ -68,9 +75,11 @@ const checks = {
   technicalEvidenceCollapsed: page.includes('<summary>技术详情</summary>')
     && page.includes('reportTechnicalDetails')
     && page.includes('immutable_source'),
-  historicalSnapshotsImmutableByDefault: cronReports.includes('options.force !== true && dateKey < localDateKey()')
-    && cronReports.includes('options.force !== true && range.end_key < localDateKey()')
-    && cron.includes('{ force: payload.force === true }'),
+  historicalSnapshotsImmutableByDefault: cronReports.includes('dateKey < localDateKey(new Date(), timezone)')
+    && cronReports.includes('range.end_key < localDateKey(new Date(), timezone)')
+    && cron.includes('generateAndUpsertAutoDevReport("daily"')
+    && cron.includes('generateAndUpsertAutoDevReport("weekly"')
+    && cron.includes('force: payload.force === true, timezone: config.timezone'),
 }
 
 const pass = Object.values(checks).every(Boolean)

@@ -47,6 +47,8 @@ vm.runInNewContext(transpiledGit, {
     if (id === 'child_process') return require('node:child_process')
     if (id === '../../core/utils') return { CCM_DIR: root, createUnifiedDiff: () => '', readWorkingFileText: () => ({ exists: false }), sendJson: () => true }
     if (id === '../../core/db') return { getConfigs: () => [], getConfigInfo: () => [] }
+    if (id === '../collaboration/test-agent-runner') return { captureTestAgentSourceBinding: () => ({ projects: [] }), listTestAgentRunnerRecords: () => [] }
+    if (id === './git-workspace-runtime') return require('../ccm-package/dist/modules/tools/git-workspace-runtime.js')
     throw new Error(`unexpected require: ${id}`)
   },
   Buffer,
@@ -91,13 +93,13 @@ const checks = {
   backendHasWriteGuards: gitModule.includes('resolveSafeProjectFile') && gitModule.includes('validatePatchPaths') && gitModule.includes('"--check"') && gitModule.includes('"--only"'),
   backendSeparatesCommitPushOutcomes: gitModule.includes('committed_and_pushed')
     && gitModule.includes('committed_push_failed')
-    && gitModule.includes('outcome: "no_changes"')
+    && gitModule.includes('"no_changes"')
     && gitModule.includes('请明确选择本次要提交的文件')
     && gitModule.includes('authentication_required'),
   backendBoundsRemoteGitAndKillsProcessTree: gitModule.includes('REMOTE_GIT_TIMEOUT_MS')
-    && gitModule.includes('GCM_INTERACTIVE: "Never"')
-    && gitModule.includes('taskkill')
-    && gitModule.includes('"/T"')
+    && read('backend/modules/tools/git-workspace-runtime.ts').includes('GCM_INTERACTIVE: "Never"')
+    && read('backend/modules/tools/git-workspace-runtime.ts').includes('taskkill.exe')
+    && read('backend/modules/tools/git-workspace-runtime.ts').includes('"/T"')
     && gitModule.includes('remote_timeout'),
   backendHasProvenanceContext: gitModule.includes('buildChangeContext') && gitModule.includes('test-agent-runs') && gitModule.includes('project_recent'),
 }

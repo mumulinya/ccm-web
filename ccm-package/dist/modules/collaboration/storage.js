@@ -58,6 +58,7 @@ exports.saveGroupMessages = saveGroupMessages;
 exports.runGroupChatSessionsSelfTest = runGroupChatSessionsSelfTest;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
@@ -677,6 +678,7 @@ function saveGroupMessages(groupId, messages, sessionId = "") {
         const sessions = manifest.sessions.map((item) => item.id === resolvedSessionId ? { ...item, messageCount: messages.length, updatedAt: now } : item);
         writeGroupSessionManifest(groupId, { ...manifest, sessions });
     }
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`group:${groupId}:${resolvedSessionId}`);
 }
 function runGroupChatSessionsSelfTest() {
     const groupId = `group-chat-sessions-selftest-${process.pid}-${Date.now().toString(36)}`;

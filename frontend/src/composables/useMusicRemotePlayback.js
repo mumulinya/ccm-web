@@ -28,7 +28,10 @@ export async function playMusicDecisionViaGlobalHost(decision, options = {}) {
   }
   return window.__cc_global_play_music(decision?.searchQuery || decision?.selectedCandidate?.title || '__decision__', {
     ...options,
-    mode: decision?.sourceMode || options.mode || getPreferredMusicMode(),
+    mode: decision?.selectedCandidate?.source === 'bilibili'
+      ? 'cloud'
+      : decision?.selectedCandidate?.source || options.mode || getPreferredMusicMode(),
+    sourceMode: decision?.sourceMode || 'auto',
     playbackDecision: decision,
     requestText: decision?.originalRequest || options.requestText || '',
   })
@@ -83,7 +86,12 @@ async function heartbeatMusicRemoteCommandV2(command, status = 'playing') {
   const response = await fetch(`/api/music/playback/commands/${encodeURIComponent(command.id)}/heartbeat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ generation: command.generation, status }),
+    body: JSON.stringify({
+      generation: command.generation,
+      lease_id: command.lease_id,
+      fencing_token: command.fencing_token,
+      status,
+    }),
   })
   return response.ok
 }
@@ -96,6 +104,8 @@ async function completeMusicRemoteCommandV2(command, result = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       generation: command.generation,
+      lease_id: command.lease_id,
+      fencing_token: command.fencing_token,
       success: result?.success === true,
       status: needsGesture ? 'needs_user_gesture' : undefined,
       error: result?.error || '',

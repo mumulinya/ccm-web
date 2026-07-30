@@ -71,7 +71,7 @@ try {
   storage.writeJsonAtomic(recoveryFile, { generation: 3 });
   assert.equal(JSON.parse(fs.readFileSync(`${recoveryFile}.bak`, "utf-8")).generation, 1, "corrupt primary must not replace a valid backup");
 
-  const leftovers = fs.readdirSync(root).filter(name => name.endsWith(".lock") || name.endsWith(".tmp") || name.endsWith(".replace-backup"));
+  const leftovers = fs.readdirSync(root).filter(name => name.endsWith(".lock") || name.endsWith(".reclaim") || name.endsWith(".tmp") || name.endsWith(".replace-backup"));
   assert.deepEqual(leftovers, [], "lock and replacement artifacts must be cleaned");
   console.log(JSON.stringify({ pass: true, workers: 24, entries: Object.keys(afterReleasedLock.entries).length, deadOwnerTakeover: true, releasedLockTakeover: true, corruptPrimaryRecovery: true, leftovers: 0 }, null, 2));
 } finally {

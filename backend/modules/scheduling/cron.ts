@@ -18,7 +18,9 @@ import {
   saveTasks,
 } from "../../core/db";
 import {
+  acquireFileLock,
   readJsonWithBackup,
+  releaseFileLock,
   withFileLock,
   writeJsonAtomic,
 } from "../../core/atomic-json-file";
@@ -58,9 +60,12 @@ import {
   validateCronJobPayload,
 } from "./cron-job-store";
 import {
+  buildAutoDevReportPreview,
   dispatchAutoDevReport,
+  generateAndUpsertAutoDevReport,
   localDateKey,
   normalizeAutoDevNotifyConfig,
+  reconcileAutoDevReportDeliveryStatuses,
   saveNormalizedNotifyConfig,
   tickAutoDevReportNotifications,
   upsertAutoDevDailyReport,
@@ -849,6 +854,8 @@ export function cancelCronRun(jobId: string, runId: string, reason = "用户取�
 // ===== merged from cron-part-02.ts =====
 
 let schedulerTimer: NodeJS.Timeout | null = null;
+let schedulerTickPromise: Promise<any> | null = null;
+const CRON_SCHEDULER_TICK_LOCK = path.join(CCM_DIR, "scheduler", "cron-tick");
 
 export function syncCronTaskStatus(task: any, status: string, result = "") {
   const cronJobId = task?.cron_job_id;
@@ -1175,7 +1182,7 @@ async function runCronJob(id: string, ctx: CollabCtx, trigger: CronRunTrigger, o
   }
 }
 
-export async function retryCronRun(jobId: string, runId: string, ctx: CollabCtx, trigger: "retry" | "resume" = "retry") {
+async function retryCronRunCore(jobId: string, runId: string, ctx: CollabCtx, trigger: "retry" | "resume" = "retry") {
   const job = loadCronJobs().find(item => item.id === jobId);
   if (!job) throw new Error("定时任务不存在");
   const parent = normalizeCronJob(job).run_history.find((item: any) => item.id === runId);
@@ -1222,6 +1229,19 @@ export async function retryCronRun(jobId: string, runId: string, ctx: CollabCtx,
   return { success: status !== "failed", run: updated, results };
 }
 
+export async function retryCronRun(jobId: string, runId: string, ctx: CollabCtx, trigger: "retry" | "resume" = "retry") {
+  const lockTarget = path.join(CCM_DIR, "scheduler", `cron-retry-${String(jobId).replace(/[^a-zA-Z0-9_-]/g, "_")}-${String(runId).replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+  let lock: any = null;
+  try {
+    lock = acquireFileLock(lockTarget, { timeoutMs: 50, retryMs: 10, staleMs: 2 * 60_000 });
+  } catch (error: any) {
+    if (/file lock timeout/i.test(String(error?.message || ""))) return { success: true, duplicate: true, queued: true, message: "同一轮定时任务正在恢复或重试" };
+    throw error;
+  }
+  try { return await retryCronRunCore(jobId, runId, ctx, trigger); }
+  finally { if (lock) releaseFileLock(lock); }
+}
+
 export function reconcileCronRunsOnStartup(now = new Date()) {
   const jobs = loadCronJobs();
   const tasks = loadTasks();
@@ -1266,7 +1286,7 @@ async function processDueCronRetries(ctx: CollabCtx, now: Date) {
   }
 }
 
-async function tickCronScheduler(ctx: CollabCtx) {
+async function tickCronSchedulerCore(ctx: CollabCtx) {
   const now = new Date();
   await processDueCronRetries(ctx, now);
   const jobs = loadCronJobs();
@@ -1308,11 +1328,31 @@ async function tickCronScheduler(ctx: CollabCtx) {
   }
   await tickAutoDevReportNotifications(now);
   await tickFeishuNotificationOutbox(now);
+  reconcileAutoDevReportDeliveryStatuses();
   try {
     runConflictResolutionMemoryMaintenanceSchedulerTick({ at: now.toISOString() });
   } catch (error: any) {
     console.error("[Cron][MemoryMaintenance]", error?.message || error);
   }
+}
+
+async function tickCronScheduler(ctx: CollabCtx) {
+  if (schedulerTickPromise) return schedulerTickPromise;
+  const operation = (async () => {
+    let lock: any = null;
+    try {
+      lock = acquireFileLock(CRON_SCHEDULER_TICK_LOCK, { timeoutMs: 20, retryMs: 5, staleMs: 2 * 60_000 });
+    } catch (error: any) {
+      if (/file lock timeout/i.test(String(error?.message || ""))) return { skipped: true, reason: "scheduler_tick_owned_elsewhere" };
+      throw error;
+    }
+    try { return await tickCronSchedulerCore(ctx); }
+    finally { if (lock) releaseFileLock(lock); }
+  })().finally(() => {
+    if (schedulerTickPromise === operation) schedulerTickPromise = null;
+  });
+  schedulerTickPromise = operation;
+  return operation;
 }
 
 export function startCronScheduler(ctx: CollabCtx) {
@@ -1348,6 +1388,8 @@ export function getConflictResolutionMemoryMaintenanceSchedulerStatus() {
 function schedulerStatus() {
   return {
     running: !!schedulerTimer,
+    tick_in_progress: !!schedulerTickPromise,
+    cross_process_singleflight: true,
     interval_ms: 30 * 1000,
     running_job_ids: Array.from(runningCronJobs),
     conflict_resolution_memory_maintenance: latestConflictResolutionMaintenanceTick || {
@@ -1543,8 +1585,13 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
   }
 
   if (pathname === "/api/auto-dev/overview" && req.method === "GET") {
-    const today = String(parsed.query.date || localDateKey());
-    const report = upsertAutoDevDailyReport(today);
+    const notification = normalizeAutoDevNotifyConfig(loadAutoDevNotifyConfig());
+    const today = String(parsed.query.date || localDateKey(new Date(), notification.timezone));
+    const preview = buildAutoDevReportPreview("daily", today, notification.timezone);
+    const stored = loadDevReports().find((item: any) => item.date === today || item.id === today);
+    const report = stored
+      ? { ...stored, stale: stored.evidence_checksum !== preview.evidence_checksum, generation_status: stored.evidence_checksum !== preview.evidence_checksum ? "stale" : stored.generation_status || (stored.ai_summary ? "generated" : "evidence_ready"), live_evidence_checksum: preview.evidence_checksum }
+      : preview;
     const reports = loadDevReports().slice(0, 30);
     const jobs = loadCronJobs().map(normalizeCronJob).filter((job: any) => job.workflow_type === "daily_dev");
     const journalAudit = getWorkJournalAudit({ sync: false });
@@ -1554,7 +1601,7 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
       today: report,
       reports,
       weekly_reports: loadDevWeeklyReports().slice(0, 20),
-      notification: normalizeAutoDevNotifyConfig(loadAutoDevNotifyConfig()),
+      notification,
       daily_dev_jobs: jobs,
       backlog: report.backlog,
       journal: {
@@ -1618,12 +1665,10 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
 
   if (pathname === "/api/auto-dev/weekly-report/generate" && req.method === "POST") {
     readJsonBody(req, (payload) => {
-      try {
-        const report = upsertAutoDevWeeklyReport(payload.date || localDateKey(), { force: payload.force === true });
-        sendJson(res, { success: true, report, reports: loadDevWeeklyReports().slice(0, 20) });
-      } catch (e: any) {
-        sendJson(res, { error: e.message }, 400);
-      }
+      const config = normalizeAutoDevNotifyConfig(loadAutoDevNotifyConfig());
+      generateAndUpsertAutoDevReport("weekly", payload.date || localDateKey(new Date(), config.timezone), { force: payload.force === true, timezone: config.timezone })
+        .then(report => sendJson(res, { success: true, report, reports: loadDevWeeklyReports().slice(0, 20) }))
+        .catch((e: any) => sendJson(res, { success: false, error: e.message, report: e.report || null, retryable: true }, 503));
     }, (e) => sendJson(res, { error: e.message }, 400));
     return true;
   }
@@ -1644,6 +1689,7 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
           weekly_enabled: payload.weekly_enabled === true,
           weekly_day: payload.weekly_day ?? current.weekly_day,
           weekly_time: payload.weekly_time ?? current.weekly_time,
+          timezone: payload.timezone ?? current.timezone,
           retry_limit: payload.retry_limit ?? current.retry_limit,
           retry_interval_minutes: payload.retry_interval_minutes ?? current.retry_interval_minutes,
           target_type: "user",
@@ -1660,7 +1706,8 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
   if (pathname === "/api/auto-dev/notification/send" && req.method === "POST") {
     readJsonBody(req, (payload) => {
       const kind = payload.kind === "weekly" ? "weekly" : "daily";
-      dispatchAutoDevReport(kind, { date: payload.date || localDateKey() })
+      const config = normalizeAutoDevNotifyConfig(loadAutoDevNotifyConfig());
+      dispatchAutoDevReport(kind, { date: payload.date || localDateKey(new Date(), config.timezone) })
         .then(result => sendJson(res, result, result.success ? 200 : 400))
         .catch((e: any) => sendJson(res, { error: e.message }, 500));
     }, (e) => sendJson(res, { error: e.message }, 400));
@@ -1668,12 +1715,10 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
   }
   if (pathname === "/api/auto-dev/report/generate" && req.method === "POST") {
     readJsonBody(req, (payload) => {
-      try {
-        const report = upsertAutoDevDailyReport(payload.date || localDateKey(), { force: payload.force === true });
-        sendJson(res, { success: true, report, reports: loadDevReports().slice(0, 30) });
-      } catch (e: any) {
-        sendJson(res, { error: e.message }, 400);
-      }
+      const config = normalizeAutoDevNotifyConfig(loadAutoDevNotifyConfig());
+      generateAndUpsertAutoDevReport("daily", payload.date || localDateKey(new Date(), config.timezone), { force: payload.force === true, timezone: config.timezone })
+        .then(report => sendJson(res, { success: true, report, reports: loadDevReports().slice(0, 30) }))
+        .catch((e: any) => sendJson(res, { success: false, error: e.message, report: e.report || null, retryable: true }, 503));
     }, (e) => sendJson(res, { error: e.message }, 400));
     return true;
   }

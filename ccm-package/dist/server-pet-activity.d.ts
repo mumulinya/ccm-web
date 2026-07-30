@@ -12,7 +12,7 @@ export declare function createPetActivityRuntime(deps: any): {
         url: string;
         timestamp: string;
     };
-    broadcastPetSpeech: (agent: string, payload?: any) => void;
+    broadcastPetSpeech: (agent: string, payload?: any) => any;
     getAgentRunActivityDuration: (timeoutMs?: number) => number;
     getAgentState: (name: string) => any;
     getMusicPetAgent: () => {

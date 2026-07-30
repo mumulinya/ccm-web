@@ -9,19 +9,25 @@ import { confirmDialog, toast } from '../../utils/toast.js'
 import {
   PROTECTED_MENU_IDS,
   buildConfiguredTabs,
+  clearMenuConfigurationBackup,
+  createDefaultMenuConfiguration,
   exportMenuConfiguration,
   hasMenuConfigurationBackup,
-  importMenuConfiguration,
   loadMenuConfiguration,
-  resetMenuConfiguration,
-  restoreMenuConfigurationBackup,
+  parseMenuConfigurationImport,
+  resetPersonalMenuConfigurationV3,
+  readMenuConfigurationBackup,
   sanitizeExternalUrl,
   saveMenuConfiguration,
+  savePersonalMenuConfigurationV3,
+  saveWorkspaceMenuConfigurationV3,
 } from '../../utils/menuConfiguration.js'
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
   config: { type: Object, default: null },
+  navigationState: { type: Object, default: null },
+  authRole: { type: String, default: 'viewer' },
 })
 const emit = defineEmits(['update-config'])
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -35,12 +41,20 @@ const groupForm = ref({ id: '', label: '', icon: '📁' })
 const showLinkDialog = ref(false)
 const linkForm = ref({ id: '', label: '', url: 'https://', icon: '🌐' })
 const importInput = ref(null)
+const saveBusy = ref(false)
+const configurationMode = ref('personal')
 
 const PRESET_ICONS = ['📁', '⭐', '🛠️', '🤝', '📊', '⚙️', '🛡️', '🌐', '🚀', '🔑', '🎨', '🎵', '⚡', '🔍', '📦', '💡', '📅', '📝', '🔔', '💬']
 
 watch(() => props.config, value => {
-  if (value) draft.value = clone(value)
+  if (value && configurationMode.value === 'personal') draft.value = clone(value)
 }, { deep: true })
+watch(configurationMode, mode => {
+  draft.value = clone(mode === 'workspace'
+    ? (props.navigationState?.workspaceDefault || createDefaultMenuConfiguration(builtInTabs.value))
+    : (props.navigationState?.config || props.config || loadMenuConfiguration(builtInTabs.value)))
+  activeView.value = 'all'
+})
 
 const configuredTabs = computed(() => buildConfiguredTabs(builtInTabs.value, draft.value))
 const groupMap = computed(() => new Map((draft.value.groups || []).map(group => [group.id, group])))
@@ -48,6 +62,9 @@ const mobileCount = computed(() => configuredTabs.value.filter(tab => tab.mobile
 const hiddenCount = computed(() => configuredTabs.value.filter(tab => tab.hiddenFromMenu).length)
 const pinnedCount = computed(() => configuredTabs.value.filter(tab => tab.pinned && !tab.hiddenFromMenu).length)
 const externalCount = computed(() => configuredTabs.value.filter(tab => tab.isExternal).length)
+const editableExternalIds = computed(() => new Set(configurationMode.value === 'workspace'
+  ? (draft.value.customLinks || []).map(link => link.id)
+  : (props.navigationState?.personalOverrides?.customLinks || []).map(link => link.id)))
 
 const viewOptions = computed(() => [
   { id: 'all', label: '全部菜单', count: configuredTabs.value.length },
@@ -70,11 +87,32 @@ const visibleRows = computed(() => {
   })
 })
 
-const persist = (next, message) => {
-  draft.value = saveMenuConfiguration(next, builtInTabs.value)
-  backupAvailable.value = hasMenuConfigurationBackup()
-  emit('update-config', clone(draft.value))
-  if (message) toast.success(message)
+const persist = async (next, message) => {
+  if (saveBusy.value) return
+  saveBusy.value = true
+  const previous = clone(draft.value)
+  draft.value = clone(next)
+  try {
+    const currentState = props.navigationState
+    if (!currentState) {
+      draft.value = saveMenuConfiguration(next, builtInTabs.value)
+      emit('update-config', clone(draft.value))
+    } else {
+      const state = configurationMode.value === 'workspace'
+        ? await saveWorkspaceMenuConfigurationV3(next, currentState, builtInTabs.value)
+        : await savePersonalMenuConfigurationV3(next, currentState, builtInTabs.value)
+      draft.value = clone(configurationMode.value === 'workspace' ? state.workspaceDefault : state.config)
+      emit('update-config', { config: clone(state.config), state })
+    }
+    backupAvailable.value = hasMenuConfigurationBackup()
+    if (message) toast.success(message)
+  } catch (error) {
+    draft.value = previous
+    if (error?.code === 'state_drift' || error?.status === 409) toast.warning('导航配置已在其他设备更新，请重新加载后再修改')
+    else toast.error(error?.message || '导航配置保存失败')
+  } finally {
+    saveBusy.value = false
+  }
 }
 
 const updateItem = (id, changes, message = '导航配置已更新') => {
@@ -89,6 +127,12 @@ const updateItem = (id, changes, message = '导航配置已更新') => {
     next.items[id].mobilePrimary = false
   }
   persist(next, message)
+}
+
+const editItemIcon = tab => {
+  const value = window.prompt('输入一个 Lucide 图标名（例如 FolderKanban），或单个 Unicode 图标；留空恢复默认。', tab.configuredIcon || '')
+  if (value == null) return
+  updateItem(tab.id, { icon: value.trim() }, value.trim() ? '菜单图标已更新' : '菜单图标已恢复默认')
 }
 
 const moveItem = (id, direction) => {
@@ -170,6 +214,7 @@ const saveLink = () => {
 }
 
 const deleteLink = async link => {
+  if (!editableExternalIds.value.has(link.id)) return toast.warning('工作区链接只能由 Admin 在“工作区默认”中修改')
   const approved = await confirmDialog(`确定删除外部链接“${link.label}”吗？该操作不会影响目标网站。`)
   if (!approved) return
   const next = clone(draft.value)
@@ -194,41 +239,49 @@ const importConfig = async event => {
   if (!file) return
   if (file.size > 512 * 1024) return toast.error('配置文件不能超过 512 KB')
   try {
-    const config = importMenuConfiguration(await file.text(), builtInTabs.value)
-    draft.value = config
-    emit('update-config', clone(config))
-    backupAvailable.value = hasMenuConfigurationBackup()
-    toast.success('导航配置已导入并立即生效')
+    const config = parseMenuConfigurationImport(await file.text(), builtInTabs.value)
+    await persist(config, '导航配置已导入并同步')
   } catch (error) { toast.error(error.message || '配置导入失败') }
 }
 
 const resetDefaults = async () => {
   const approved = await confirmDialog('恢复默认会重置分组、顺序、隐藏、固定、手机入口和外部链接。当前配置会保留为可撤销备份。是否继续？')
   if (!approved) return
-  const config = resetMenuConfiguration(builtInTabs.value)
-  draft.value = config
-  emit('update-config', clone(config))
-  backupAvailable.value = true
-  activeView.value = 'all'
-  toast.success('已恢复默认导航，可使用撤销恢复上一版')
+  try {
+    if (configurationMode.value === 'personal' && props.navigationState) {
+      const state = await resetPersonalMenuConfigurationV3(props.navigationState, builtInTabs.value)
+      draft.value = clone(state.config)
+      emit('update-config', { config: clone(state.config), state })
+      toast.success('已恢复工作区默认导航')
+    } else {
+      const config = createDefaultMenuConfiguration(builtInTabs.value)
+      await persist(config, '工作区默认导航已重置')
+    }
+    backupAvailable.value = true
+    activeView.value = 'all'
+  } catch (error) { toast.error(error?.message || '恢复默认失败') }
 }
 
-const undoLast = () => {
+const undoLast = async () => {
   try {
-    const config = restoreMenuConfigurationBackup(builtInTabs.value)
-    draft.value = config
-    emit('update-config', clone(config))
+    const config = readMenuConfigurationBackup(builtInTabs.value)
+    await persist(config, '已恢复上一版导航配置')
+    clearMenuConfigurationBackup()
     backupAvailable.value = false
-    toast.success('已恢复上一版导航配置')
   } catch (error) { toast.warning(error.message) }
 }
 </script>
 
 <template>
-  <div class="navigation-center">
+  <div class="navigation-center" :class="{ saving: saveBusy }" :aria-busy="saveBusy">
     <header class="center-header">
       <div class="title-block"><Menu :size="19" /><div><h2>导航配置中心</h2><span>v{{ draft.version || 2 }} · {{ configuredTabs.length }} 个菜单</span></div></div>
       <div class="header-actions">
+        <div class="config-scope" role="group" aria-label="配置范围">
+          <button :class="{ active: configurationMode === 'personal' }" @click="configurationMode = 'personal'">个人布局</button>
+          <button v-if="authRole === 'admin'" :class="{ active: configurationMode === 'workspace' }" @click="configurationMode = 'workspace'">工作区默认</button>
+        </div>
+        <span v-if="saveBusy" class="saving-state">正在同步</span>
         <button title="恢复上一版" :disabled="!backupAvailable" @click="undoLast"><Undo2 :size="15" /><span>撤销</span></button>
         <button title="导入配置" @click="importInput?.click()"><FileUp :size="15" /><span>导入</span></button>
         <button title="导出配置" @click="exportConfig"><Download :size="15" /><span>导出</span></button>
@@ -245,7 +298,7 @@ const undoLast = () => {
       <div><strong>{{ externalCount }}</strong><span>外部链接</span></div>
     </section>
 
-    <div class="config-layout">
+    <div class="config-layout" :inert="saveBusy || undefined">
       <aside class="group-sidebar">
         <div class="sidebar-heading"><strong>视图与分组</strong><button title="新建分组" @click="openGroupEditor(null)"><FolderPlus :size="15" /></button></div>
         <nav class="view-list" aria-label="菜单视图">
@@ -275,21 +328,21 @@ const undoLast = () => {
         <div class="menu-list">
           <div v-if="!visibleRows.length" class="empty-state">没有匹配的菜单</div>
           <article v-for="tab in visibleRows" :key="tab.id" class="menu-row" :class="{ muted: tab.hiddenFromMenu }" :data-menu-id="tab.id">
-            <div class="menu-identity"><span class="menu-icon">{{ tab.icon }}</span><div><strong>{{ tab.label }}</strong><small>{{ tab.id }}</small><a v-if="tab.isExternal" :href="tab.url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="11" />{{ tab.url }}</a></div></div>
+            <div class="menu-identity"><span class="menu-icon">{{ tab.displayIcon }}</span><div><strong>{{ tab.label }}</strong><small>{{ tab.id }}</small><a v-if="tab.isExternal" :href="tab.url" target="_blank" rel="noopener noreferrer"><ExternalLink :size="11" />{{ tab.url }}</a></div></div>
             <select :value="tab.groupId || 'ungrouped'" :aria-label="`${tab.label} 所属分组`" @change="updateItem(tab.id, { groupId: $event.target.value })"><option value="ungrouped">未分组</option><option v-for="group in draft.groups" :key="group.id" :value="group.id">{{ group.label }}</option></select>
             <button class="state-button" :class="{ active: !tab.hiddenFromMenu }" :title="tab.hiddenFromMenu ? '显示菜单' : '隐藏菜单'" :disabled="PROTECTED_MENU_IDS.has(tab.id)" @click="updateItem(tab.id, { hidden: !tab.hiddenFromMenu })"><Eye v-if="!tab.hiddenFromMenu" :size="15" /><EyeOff v-else :size="15" /></button>
             <button class="state-button" :class="{ active: tab.pinned }" :title="tab.pinned ? '取消固定' : '固定到常用'" :disabled="tab.hiddenFromMenu" @click="updateItem(tab.id, { pinned: !tab.pinned })"><PinOff v-if="tab.pinned" :size="15" /><Pin v-else :size="15" /></button>
             <button class="state-button" :class="{ active: tab.mobilePrimary }" :title="tab.mobilePrimary ? '移出手机主导航' : '加入手机主导航'" :disabled="tab.hiddenFromMenu" @click="updateItem(tab.id, { mobilePrimary: !tab.mobilePrimary })"><Smartphone :size="15" /></button>
             <div class="order-actions"><button title="上移菜单" @click="moveItem(tab.id, -1)"><ArrowUp :size="13" /></button><button title="下移菜单" @click="moveItem(tab.id, 1)"><ArrowDown :size="13" /></button></div>
-            <div class="item-actions"><button v-if="tab.isExternal" title="编辑外部链接" @click="openLinkEditor(tab)"><Pencil :size="14" /></button><button v-if="tab.isExternal" title="删除外部链接" @click="deleteLink(tab)"><Trash2 :size="14" /></button></div>
+            <div class="item-actions"><button title="修改菜单图标" @click="editItemIcon(tab)"><Pencil :size="14" /></button><button v-if="tab.isExternal && editableExternalIds.has(tab.id)" title="编辑外部链接" @click="openLinkEditor(tab)"><Link2 :size="14" /></button><button v-if="tab.isExternal && editableExternalIds.has(tab.id)" title="删除外部链接" @click="deleteLink(tab)"><Trash2 :size="14" /></button></div>
           </article>
         </div>
       </main>
     </div>
 
-    <div v-if="showGroupDialog" class="dialog-overlay" @click.self="showGroupDialog = false"><section class="config-dialog" role="dialog" aria-modal="true"><header><strong>{{ groupForm.id ? '编辑分组' : '新建分组' }}</strong><button title="关闭" @click="showGroupDialog = false"><X :size="18" /></button></header><div class="dialog-body"><label><span>分组名称</span><input v-model="groupForm.label" maxlength="48" autofocus @keydown.enter="saveGroup" /></label><div class="icon-picker"><span>图标</span><div><button v-for="icon in PRESET_ICONS" :key="icon" :class="{ active: groupForm.icon === icon }" @click="groupForm.icon = icon">{{ icon }}</button></div></div></div><footer><button @click="showGroupDialog = false">取消</button><button class="primary" @click="saveGroup">保存</button></footer></section></div>
+    <div v-if="showGroupDialog" class="dialog-overlay" @click.self="showGroupDialog = false" @keydown.esc="showGroupDialog = false"><section class="config-dialog" role="dialog" aria-modal="true" aria-labelledby="group-dialog-title"><header><strong id="group-dialog-title">{{ groupForm.id ? '编辑分组' : '新建分组' }}</strong><button title="关闭" @click="showGroupDialog = false"><X :size="18" /></button></header><div class="dialog-body"><label><span>分组名称</span><input v-model="groupForm.label" maxlength="48" autofocus @keydown.enter="saveGroup" /></label><div class="icon-picker"><span>图标</span><div><button v-for="icon in PRESET_ICONS" :key="icon" :class="{ active: groupForm.icon === icon }" @click="groupForm.icon = icon">{{ icon }}</button></div></div></div><footer><button @click="showGroupDialog = false">取消</button><button class="primary" @click="saveGroup">保存</button></footer></section></div>
 
-    <div v-if="showLinkDialog" class="dialog-overlay" @click.self="showLinkDialog = false"><section class="config-dialog" role="dialog" aria-modal="true"><header><strong>{{ linkForm.id ? '编辑外部链接' : '新增外部链接' }}</strong><button title="关闭" @click="showLinkDialog = false"><X :size="18" /></button></header><div class="dialog-body"><label><span>链接名称</span><input v-model="linkForm.label" maxlength="48" autofocus /></label><label><span>HTTP/HTTPS 地址</span><input v-model="linkForm.url" inputmode="url" @keydown.enter="saveLink" /></label><div class="icon-picker"><span>图标</span><div><button v-for="icon in PRESET_ICONS" :key="icon" :class="{ active: linkForm.icon === icon }" @click="linkForm.icon = icon">{{ icon }}</button></div></div></div><footer><button @click="showLinkDialog = false">取消</button><button class="primary" @click="saveLink">保存</button></footer></section></div>
+    <div v-if="showLinkDialog" class="dialog-overlay" @click.self="showLinkDialog = false" @keydown.esc="showLinkDialog = false"><section class="config-dialog" role="dialog" aria-modal="true" aria-labelledby="link-dialog-title"><header><strong id="link-dialog-title">{{ linkForm.id ? '编辑外部链接' : '新增外部链接' }}</strong><button title="关闭" @click="showLinkDialog = false"><X :size="18" /></button></header><div class="dialog-body"><label><span>链接名称</span><input v-model="linkForm.label" maxlength="48" autofocus /></label><label><span>HTTP/HTTPS 地址</span><input v-model="linkForm.url" inputmode="url" @keydown.enter="saveLink" /></label><div class="icon-picker"><span>图标</span><div><button v-for="icon in PRESET_ICONS" :key="icon" :class="{ active: linkForm.icon === icon }" @click="linkForm.icon = icon">{{ icon }}</button></div></div></div><footer><button @click="showLinkDialog = false">取消</button><button class="primary" @click="saveLink">保存</button></footer></section></div>
   </div>
 </template>
 
@@ -298,10 +351,11 @@ const undoLast = () => {
 .center-header { min-height:58px; padding:10px 18px; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--border-color); }
 .title-block { display:flex; align-items:center; gap:9px; }.title-block h2 { margin:0; font-size:15px; letter-spacing:0; }.title-block span { display:block; margin-top:2px; color:var(--text-muted); font-size:10px; }
 .header-actions { display:flex; align-items:center; gap:6px; }.header-actions button,.sidebar-heading button,.row-actions button,.state-button,.order-actions button,.item-actions button,.workspace-toolbar button,.dialog-overlay button { min-height:30px; padding:0 9px; display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--border-color); border-radius:6px; background:transparent; color:var(--text-secondary); font-size:11px; cursor:pointer; }.header-actions button:hover,.workspace-toolbar button:hover { color:var(--accent-blue); border-color:color-mix(in srgb,var(--accent-blue) 45%,var(--border-color)); }.header-actions button:disabled,.row-actions button:disabled { opacity:.35; cursor:not-allowed; }
+.config-scope{display:flex;padding:2px;border:1px solid var(--border-color);border-radius:7px;background:var(--surface-nav)}.config-scope button{min-height:26px;border:0}.config-scope button.active{background:var(--accent-soft);color:var(--accent-blue)}.saving-state{color:var(--text-muted);font-size:10px}
 .config-summary { display:grid; grid-template-columns:repeat(5,minmax(85px,1fr)); margin:12px 18px 0; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; }.config-summary div { min-height:48px; padding:8px 12px; display:flex; align-items:baseline; gap:7px; border-right:1px solid var(--border-color); }.config-summary div:last-child { border-right:0; }.config-summary strong { font-size:16px; }.config-summary span { color:var(--text-muted); font-size:10px; }
 .config-layout { flex:1; min-height:0; display:flex; margin:12px 18px 18px; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; }.group-sidebar { width:260px; flex:0 0 260px; display:flex; flex-direction:column; border-right:1px solid var(--border-color); background:var(--surface-nav); }.sidebar-heading { min-height:43px; padding:8px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border-color); font-size:12px; }.sidebar-heading button { width:29px; padding:0; }
 .view-list { padding:7px; display:flex; flex-direction:column; gap:2px; }.view-list button,.group-select,.ungrouped-row { width:100%; min-height:33px; padding:0 9px; display:flex; align-items:center; justify-content:space-between; border:0; border-radius:5px; background:transparent; color:var(--text-secondary); font-size:11px; cursor:pointer; text-align:left; }.view-list button:hover,.view-list button.active,.group-row.active,.ungrouped-row.active { background:var(--accent-soft); color:var(--accent-blue); }.view-list small,.group-select small,.ungrouped-row small { color:var(--text-muted); font-size:9px; }
-.group-heading { padding:9px 15px 4px; color:var(--text-muted); font-size:9px; font-weight:700; }.group-list { flex:1; min-height:0; padding:3px 7px 9px; overflow:auto; }.group-row { min-height:37px; display:flex; align-items:center; border-radius:5px; }.group-select { min-width:0; flex:1; }.group-select span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.row-actions { display:none; align-items:center; padding-right:4px; }.group-row:hover .row-actions { display:flex; }.row-actions button { width:23px; min-height:23px; padding:0; border:0; }.row-actions button:last-child { color:#b91c1c; }
+.group-heading { padding:9px 15px 4px; color:var(--text-muted); font-size:9px; font-weight:700; }.group-list { flex:1; min-height:0; padding:3px 7px 9px; overflow:auto; }.group-row { min-height:37px; display:flex; align-items:center; border-radius:5px; }.group-select { min-width:0; flex:1; }.group-select span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.row-actions { display:none; align-items:center; padding-right:4px; }.group-row:hover .row-actions,.group-row:focus-within .row-actions { display:flex; }.row-actions button { width:23px; min-height:23px; padding:0; border:0; }.row-actions button:last-child { color:#b91c1c; }
 .menu-workspace { min-width:0; flex:1; display:flex; flex-direction:column; background:var(--bg-primary); }.workspace-toolbar { min-height:51px; padding:9px 12px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--border-color); }.menu-search { width:min(420px,60%); height:32px; padding:0 8px; display:flex; align-items:center; gap:7px; border:1px solid var(--border-color); border-radius:6px; color:var(--text-muted); }.menu-search:focus-within { border-color:var(--accent-blue); }.menu-search input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--text-primary); font-size:11px; }.menu-search button { width:22px; min-height:22px; padding:0; border:0; }.add-link { color:var(--accent-blue) !important; }
 .column-head,.menu-row { display:grid; grid-template-columns:minmax(220px,1.5fr) minmax(125px,.7fr) 52px 52px 52px 65px 58px; align-items:center; column-gap:7px; }.column-head { min-height:31px; padding:0 12px; border-bottom:1px solid var(--border-color); background:var(--surface-nav); color:var(--text-muted); font-size:9px; }.column-head span:nth-child(n+3) { text-align:center; }.menu-list { flex:1; min-height:0; overflow:auto; }.menu-row { min-height:61px; padding:6px 12px; border-bottom:1px solid var(--border-color); }.menu-row:hover { background:color-mix(in srgb,var(--accent-blue) 3%,transparent); }.menu-row.muted { opacity:.58; }
 .menu-identity { min-width:0; display:flex; align-items:flex-start; gap:9px; }.menu-icon { width:25px; flex:0 0 25px; text-align:center; font-size:16px; }.menu-identity div { min-width:0; }.menu-identity strong,.menu-identity small,.menu-identity a { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.menu-identity strong { font-size:11px; }.menu-identity small { margin-top:2px; color:var(--text-muted); font:9px ui-monospace,monospace; }.menu-identity a { max-width:300px; margin-top:2px; color:var(--accent-blue); font-size:9px; text-decoration:none; }.menu-identity a svg { margin-right:3px; vertical-align:-2px; }

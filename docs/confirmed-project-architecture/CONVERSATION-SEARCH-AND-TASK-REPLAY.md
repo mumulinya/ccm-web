@@ -1,29 +1,27 @@
 # 会话搜索与任务回放
 
-## 会话搜索
+## 已确认边界
 
-- 搜索覆盖全局 Web/飞书会话、群聊会话和项目 Web/飞书会话。
-- 只读取 canonical会话文件和任务关联，不索引隐藏Prompt、密钥或其他技术协议。
-- 支持全部词、短语、来源、角色、Agent、项目、群聊、日期范围和排序筛选。
-- 结果包含消息上下文、附件摘要和关联任务，可跳回精确会话或任务回放。
-- 分页和Facet由服务端计算；最近搜索和收藏只保存在当前浏览器，不写入长期记忆。
+- 会话搜索覆盖全局、群聊、项目、音乐助手以及对应飞书来源，只检索当前用户有权读取的精确会话。
+- canonical transcript、任务、Trace、执行记录和TestAgent证据是事实来源；搜索索引与回放快照都是可重建投影。
+- 搜索不截断消息正文，不扫描兄弟作用域，不把收藏正文保存到浏览器公共存储。
+- 任务状态只读取结构化状态与终态回执；旧记录缺少证明时显示未知，不从自然语言猜测成功或失败。
 
-## 任务回放
+## ConversationSearchIndexV3
 
-- 任务派发和任务回放使用同一任务ID，不是两套记录。
-- 回放聚合需求、计划、开发工作项、权限、变更文件、TestAgent/主Agent自验、返工、终态和交付回执。
-- 默认显示用户能理解的关键时间线；Provider、session、generation、MCP、Skill和原始事件放在排障层。
-- 长时间线按页读取，SSE事件只局部刷新当前任务。
-- 任务记录、完整Trace和TestAgent产物分别显示保留状态；过期产物不能伪装为仍可下载。
+会话写入只标记索引为脏。后台Worker在SQLite中构建不可变generation，完成来源校验后原子切换active pointer；构建期间继续提供last-good generation并标记stale。三字及以上使用FTS5 trigram，一至二字使用短词索引。搜索结果绑定generation、row ID、消息ID、scope和source checksum。
 
-## 隔离与兼容
+点击结果先读取目标消息前后完整窗口，再进入对应页面。索引过期或消息身份不匹配时明确提示刷新，不通过“读取最近1000条”猜测位置。收藏按认证用户和row ID保存在服务端，索引内容变化后旧收藏不会错误指向新消息。
 
-- 搜索和回放均按登录权限与精确作用域读取，不能通过查询参数跨项目或跨群聊取数据。
-- 历史任务缺少结构化验收时显示“无法证明”，不从自由文本猜测通过。
-- 旧Trace仍可查看诊断事件，但明确标记为历史记录。
+## TaskReplayV3
 
-## 实现入口
+任务回放按根任务收集任务族、精确会话消息、全局Run、Mission监督、开发执行、Agent会话、TestAgent证据、Trace和任务日志。来源身份生成checksum与`task_replay_source_manifests_v3`，事件快照写完后才切换，不会在并发刷新时出现空窗口。
 
-- 搜索：`backend/modules/search/conversation-search.ts`
-- 回放：`backend/modules/collaboration/task-replay.ts`及`task-replay-*`
-- 页面：`frontend/src/components/workspace/SearchHistory.vue`、`frontend/src/components/system/TraceReplay.vue`
+首次打开读取用户摘要、计划、工作项、投递、证据目录和最近事件。运行期刷新只读取分页事件与轻量状态，不重复传输计划、文件清单和Diff。`blocked`是终态；历史未知状态保持`info/unknown`。完整文件证据不再静默限制200项，具体Diff按证据身份读取。
+
+## 安全与兼容
+
+- 搜索正文、Trace技术详情和回放证据继续执行脱敏与大小门禁。
+- Viewer可检索和维护自己的收藏；敏感Trace仍仅Admin可见。
+- V1/V2接口继续读取，新写入使用V3索引与manifest，不迁移或删除历史事实数据。
+- 索引Worker失败不影响会话写入；回放物化失败可由canonical来源重新生成。

@@ -9,6 +9,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const global_agent_attachments_1 = require("./global-agent-attachments");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
+const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 // Persistent Web/Feishu conversation history and session routing.
 function createGlobalAgentHistoryRuntime(deps) {
     const { GLOBAL_AGENT_HISTORY_FILE, GLOBAL_AGENT_HISTORY_LIMIT, GLOBAL_AGENT_SESSION_LIMIT, buildGlobalVisibleReplyContent, ingestGlobalAgentConversation, writeGlobalJsonAtomic } = deps;
@@ -232,6 +233,7 @@ function createGlobalAgentHistoryRuntime(deps) {
             .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
             .slice(0, GLOBAL_AGENT_SESSION_LIMIT);
         writeGlobalJsonAtomic(GLOBAL_AGENT_HISTORY_FILE, store);
+        (0, conversation_search_dirty_1.markConversationSearchIndexDirty)("global:history");
     }
     function scheduleGlobalSessionAutoTitle(sessionId) {
         const existingJob = globalSessionTitleJobs.get(sessionId);
@@ -412,7 +414,7 @@ function createGlobalAgentHistoryRuntime(deps) {
             return [];
         return getBaseGlobalAgentMessages(store);
     }
-    function appendGlobalAgentConversationMessage(sessionId, role, content, source = "feishu") {
+    function appendGlobalAgentConversationMessage(sessionId, role, content, source = "feishu", options = {}) {
         const store = loadGlobalAgentHistoryStore();
         const sessions = Array.isArray(store.sessions) ? store.sessions : [];
         let session = sessions.find((item) => item.id === sessionId);
@@ -429,7 +431,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         }
         const message = { role, content, timestamp: new Date().toISOString(), source };
         try {
-            ingestGlobalAgentConversation({ sessionId, source, messages: [message] });
+            ingestGlobalAgentConversation({ sessionId, source, messages: [message], extractMemory: options.extractMemory });
         }
         catch (error) {
             console.warn(`[全局记忆] 会话消息写入失败 (${sessionId})：${error?.message || error}`);

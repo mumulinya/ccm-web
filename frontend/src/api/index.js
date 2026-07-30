@@ -17,6 +17,9 @@ export async function api(path, opts = {}) {
 export const projectsApi = {
   list: () => api('/api/projects'),
   create: (data) => api('/api/projects/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  cloneStatus: (id) => api(`/api/projects/clone/status?id=${encodeURIComponent(id)}`),
+  cloneCancel: (id) => api('/api/projects/clone/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
+  cloneCleanup: (id) => api('/api/projects/clone/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
   update: (data) => api('/api/projects/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   gitStatus: (name) => api(`/api/projects/git-status?project=${encodeURIComponent(name)}`),
   delete: (name) => api('/api/projects/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
@@ -29,7 +32,7 @@ export const projectsApi = {
   start: (project, agent) => api('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, agent }) }),
   stop: (project) => api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }) }),
   agentConnection: (project, action, agent) => api('/api/projects/agent-connection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, action, agent }) }),
-  runtime: (project) => api(`/api/projects/runtime?project=${encodeURIComponent(project)}`),
+  runtime: (project, options = {}) => api(`/api/projects/runtime?project=${encodeURIComponent(project)}`, options),
   runtimeRescan: (project) => api('/api/projects/runtime/rescan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }) }),
   runtimeSave: (project, data) => api('/api/projects/runtime/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, ...data }) }),
   runtimeToolchainTest: (project, toolchain) => api('/api/projects/runtime/toolchain-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, toolchain }) }),
@@ -160,7 +163,7 @@ export const toolsApi = {
     create: (data) => api('/api/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
     delete: (name) => api('/api/skills/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   },
-  marketplace: {
+    marketplace: {
     list: (source = 'local', url = '', options = {}) => {
       const params = new URLSearchParams({ source, url })
       Object.entries(options || {}).forEach(([key, value]) => {
@@ -177,8 +180,14 @@ export const toolsApi = {
     authorizationImpact: (data) => api('/api/marketplace/authorization-impact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
     install: (data) => api('/api/marketplace/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
     update: (data) => api('/api/marketplace/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-    uninstall: (data) => api('/api/marketplace/uninstall', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  },
+      uninstall: (data) => api('/api/marketplace/uninstall', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+      transactions: (limit = 100) => api(`/api/marketplace/transactions?limit=${encodeURIComponent(limit)}`),
+      transaction: (id) => api(`/api/marketplace/transactions/${encodeURIComponent(id)}`),
+      createTransaction: (data) => api('/api/marketplace/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+      activateTransaction: (id, activationToken) => api(`/api/marketplace/transactions/${encodeURIComponent(id)}/activate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activation_token: activationToken }) }),
+      retryTransaction: (id) => api(`/api/marketplace/transactions/${encodeURIComponent(id)}/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+      rollbackTransaction: (id) => api(`/api/marketplace/transactions/${encodeURIComponent(id)}/rollback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+    },
   smithery: {
     getKey: () => api('/api/smithery/config'),
     saveKey: (key) => api('/api/smithery/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) }),
@@ -195,7 +204,7 @@ export const sharedApi = {
 
 // 终端 API
 export const terminalApi = {
-  exec: (data) => api('/api/terminal/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  exec: (data) => fetch('/api/terminal/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   info: () => api('/api/terminal/info'),
   shells: () => api('/api/terminal/shells'),
   sessions: () => api('/api/terminal/sessions'),
@@ -204,7 +213,7 @@ export const terminalApi = {
   input: (id, data) => fetch('/api/terminal/session/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, data }) }),
   confirmInput: (id, challenge) => api('/api/terminal/session/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, challenge }) }),
   resize: (id, cols, rows) => api('/api/terminal/session/resize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, cols, rows }) }),
-  projectActions: (cwd) => api(`/api/terminal/project-actions?cwd=${encodeURIComponent(cwd || '')}`),
+  projectActions: (cwd, options = {}) => api(`/api/terminal/project-actions?cwd=${encodeURIComponent(cwd || '')}`, options),
   workspace: () => api('/api/terminal/workspace'),
   saveWorkspace: (workspace) => api('/api/terminal/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace }) }),
   stop: (runId) => api('/api/terminal/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId }) }),

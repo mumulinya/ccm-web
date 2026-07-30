@@ -24,6 +24,7 @@ export type TaskPermissionRequest = {
     nextNotificationAt: string;
     notificationPetSent: boolean;
     notificationFeishuSent: boolean;
+    notificationV2Ids?: string[];
     operation: string;
     command: string;
     paths: string[];
@@ -74,6 +75,7 @@ export declare function requestTaskPermission(context: InternalMcpTaskContext, i
     nextNotificationAt: string;
     notificationPetSent: boolean;
     notificationFeishuSent: boolean;
+    notificationV2Ids?: string[];
     operation: string;
     paths: string[];
     hosts: string[];
@@ -114,6 +116,7 @@ export declare function listTaskPermissionRequests(filters?: any): {
     nextNotificationAt: string;
     notificationPetSent: boolean;
     notificationFeishuSent: boolean;
+    notificationV2Ids?: string[];
     operation: string;
     paths: string[];
     hosts: string[];
@@ -154,6 +157,7 @@ export declare function decideTaskPermission(requestId: string, input: any): {
     nextNotificationAt: string;
     notificationPetSent: boolean;
     notificationFeishuSent: boolean;
+    notificationV2Ids?: string[];
     operation: string;
     paths: string[];
     hosts: string[];
@@ -197,6 +201,7 @@ export declare function consumeTaskPermission(context: InternalMcpTaskContext, r
         nextNotificationAt: string;
         notificationPetSent: boolean;
         notificationFeishuSent: boolean;
+        notificationV2Ids?: string[];
         operation: string;
         paths: string[];
         hosts: string[];

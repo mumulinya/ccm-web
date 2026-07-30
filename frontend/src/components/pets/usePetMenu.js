@@ -10,6 +10,8 @@ export function usePetMenu(props, emit) {
   const selectedAgent = ref(null)
   const agentLabelDraft = ref('')
   const desktopPetRunning = ref(false)
+  const petConfigRevision = ref(0)
+  const petSettings = ref({ autoStart: false, webFallback: true })
   const petConfigs = ref({})
   const petPositions = ref({})
   const actionPetType = ref('yuexinmiao')
@@ -45,6 +47,11 @@ export function usePetMenu(props, emit) {
       const res = await fetch('/api/pets/config')
       if (!res.ok) throw new Error(`宠物配置请求失败 (${res.status})`)
       const data = await res.json()
+      petConfigRevision.value = Number(data.revision || 0)
+      petSettings.value = {
+        autoStart: data.settings?.autoStart === true,
+        webFallback: data.settings?.webFallback !== false,
+      }
       customPetTypes.value = data.customTypes || []
       petConfigs.value = normalizePetConfigs(data.configs || {})
       petPositions.value = data.positions || {}
@@ -63,10 +70,12 @@ export function usePetMenu(props, emit) {
     const replaceCustomTypes = options.replaceCustomTypes === true
     try {
       let customTypesToSave = customPetTypes.value
+      let expectedRevision = petConfigRevision.value
       if (!replaceCustomTypes) {
         try {
           const res = await fetch('/api/pets/config')
           const data = await res.json()
+          expectedRevision = Number(data.revision || expectedRevision)
           const remote = Array.isArray(data.customTypes) ? data.customTypes : []
           const localById = new Map(customPetTypes.value.map((item) => [item.id, item]))
           const merged = [...customPetTypes.value]
@@ -79,16 +88,26 @@ export function usePetMenu(props, emit) {
         } catch {}
       }
       const response = await fetch('/api/pets/config', {
-        method: 'POST',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          configs: petConfigs.value,
-          positions: petPositions.value,
-          customTypes: customTypesToSave
+          revision: expectedRevision,
+          patch: {
+            configs: petConfigs.value,
+            positions: petPositions.value,
+            customTypes: customTypesToSave,
+            settings: petSettings.value,
+          },
         })
       })
       const result = await response.json().catch(() => ({}))
+      if (response.status === 409 && result.current) {
+        petConfigRevision.value = Number(result.current.revision || 0)
+        throw new Error('宠物配置已在其他窗口更新，请重试')
+      }
       if (!response.ok || result.success === false) throw new Error(result.error || `保存失败 (${response.status})`)
+      const saved = result.config || result
+      petConfigRevision.value = Number(saved.revision || expectedRevision + 1)
       return true
     } catch (error) {
       toast.error(error?.message || '宠物配置保存失败')
@@ -96,13 +115,32 @@ export function usePetMenu(props, emit) {
     }
   }
 
+  const updatePetSetting = async (key, value) => {
+    const previous = { ...petSettings.value }
+    petSettings.value = { ...petSettings.value, [key]: value === true }
+    if (await saveConfigs()) return
+    petSettings.value = previous
+  }
+
   // 检查桌面宠物状态
   const checkDesktopPet = async () => {
     try {
       const res = await fetch('/api/pets/status')
       const data = await res.json()
-      desktopPetRunning.value = data.running || false
+      desktopPetRunning.value = data.running === true && data.runtime?.status === 'ready'
+      return data
     } catch {}
+    return null
+  }
+
+  const waitForDesktopPetState = async (expected, timeoutMs = 10_000) => {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const state = await checkDesktopPet()
+      if (expected ? desktopPetRunning.value : state?.running !== true) return true
+      await new Promise(resolve => setTimeout(resolve, 400))
+    }
+    return false
   }
 
   const launchDesktopPet = async () => {
@@ -111,7 +149,8 @@ export function usePetMenu(props, emit) {
       const res = await fetch('/api/pets/launch', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
-        desktopPetRunning.value = true
+        toast.info('桌面宠物正在启动')
+        if (!await waitForDesktopPetState(true)) throw new Error('桌面宠物启动握手超时')
         toast.success('桌面宠物引擎已启动')
       } else {
         throw new Error(data.error || '启动失败')
@@ -129,7 +168,7 @@ export function usePetMenu(props, emit) {
       const res = await fetch('/api/pets/close', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
-        desktopPetRunning.value = false
+        if (!await waitForDesktopPetState(false, 6_000)) throw new Error('桌面宠物进程未能按时退出')
         toast.success('桌面宠物引擎已关闭')
       } else {
         throw new Error(data.error || '关闭失败')
@@ -149,34 +188,10 @@ export function usePetMenu(props, emit) {
       name: '月薪喵',
       emoji: '🐱',
       color: '#b98268',
-      spriteVersionNumber: 2,
-      spriteRows: 9,
-      spritesheetPath: 'yuexinmiao1/spritesheet.webp',
-      format: 'hybrid',
-      pixelated: true,
+      format: 'svg',
+      pixelated: false,
       sourceCreator: 'kiffin',
       sourceUrl: 'https://codex-pet.org/zh/pets/yuexinmiao1/',
-      supplementalStateFiles: {
-        thinking: 'yuexinmiao1/thinking.svg',
-        planning: 'yuexinmiao1/planning.svg',
-        working: 'yuexinmiao1/working.svg',
-        building: 'yuexinmiao1/building.svg',
-        debugging: 'yuexinmiao1/debugging.svg',
-        reviewing: 'yuexinmiao1/reviewing.svg',
-        waiting: 'yuexinmiao1/waiting.svg',
-        juggling: 'yuexinmiao1/juggling.svg',
-        sweeping: 'yuexinmiao1/sweeping.svg',
-        carrying: 'yuexinmiao1/carrying.svg',
-        notification: 'yuexinmiao1/notification.svg',
-        attention: 'yuexinmiao1/attention.svg',
-        happy: 'yuexinmiao1/happy.svg',
-        error: 'yuexinmiao1/error.svg',
-        yawning: 'yuexinmiao1/yawning.svg',
-        dozing: 'yuexinmiao1/dozing.svg',
-        collapsing: 'yuexinmiao1/collapsing.svg',
-        sleeping: 'yuexinmiao1/sleeping.svg',
-        waking: 'yuexinmiao1/waking.svg',
-      },
     },
     { id: 'cloudling', name: '小云朵', emoji: '☁️', color: '#38bdf8' },
     { id: 'calico', name: '三花猫', emoji: '🐱', color: '#d97706' },
@@ -754,6 +769,23 @@ export function usePetMenu(props, emit) {
   }
 
   const updatePetType = async (agent, type) => {
+    if (type !== BUILTIN_FALLBACK_PET_TYPE && fallbackPetTypes.some(item => item.id === type)) {
+      engineBusy.value = true
+      try {
+        const response = await fetch('/api/pets/assets/prepare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ skin: type }),
+        })
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok || result.success === false) throw new Error(result.error || '官方宠物资源下载失败')
+      } catch (error) {
+        toast.error(error?.message || '官方宠物资源下载失败，当前配置未改变')
+        return false
+      } finally {
+        engineBusy.value = false
+      }
+    }
     const config = getConfig(agent)
     petConfigs.value = { ...petConfigs.value, [agent]: { ...config, type } }
     return await saveConfigs()
@@ -911,9 +943,9 @@ export function usePetMenu(props, emit) {
 
   return {
     PetAgentList, PetSkinGrid, PetAssetGrid, PetSprite, rightTab,
-    selectedAgent, agentLabelDraft, desktopPetRunning, petConfigs, petPositions, actionPetType,
+    selectedAgent, agentLabelDraft, desktopPetRunning, petConfigRevision, petSettings, petConfigs, petPositions, actionPetType,
     assetVersion, uploadInputs, uploadingAsset, projectPetStrategy, GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME,
-    customPetTypes, imageErrors, handleImageError, isPixelated, loadConfigs, saveConfigs,
+    customPetTypes, imageErrors, handleImageError, isPixelated, loadConfigs, saveConfigs, updatePetSetting,
     checkDesktopPet, launchDesktopPet, closeDesktopPet, BUILTIN_FALLBACK_PET_TYPE, fallbackPetTypes, petTypes,
     editablePetTypes, getPetTypeInfo, isV2PetType, usesStatefulPetRenderer, assetsReadonlyNotice, actionPetSkin, normalizePetType, normalizePetConfigs, getPetIconPath,
     stateActions, reactionActions, fallbackProjectPetStrategy, getStateLabel, formatStrategyDuration, loadPetActionStrategy,

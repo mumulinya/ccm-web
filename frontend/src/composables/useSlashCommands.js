@@ -253,21 +253,38 @@ export function useSlashCommands(options) {
       options.focus?.()
       return { needsArgs: true }
     }
-    if (command.risk === 'high' || command.actionType === 'mutation') {
-      const message = command.actionType === 'mutation'
-        ? `/${command.name} 将修改本地执行状态。确认参数和影响范围后继续吗？`
-        : `/${command.name} 属于高风险命令。继续后仍会进入现有确认与审计流程，是否继续？`
-      const approved = await (options.onConfirm?.(message) ?? Promise.resolve(window.confirm(message)))
-      if (!approved) return { cancelled: true }
-    }
     open.value = false
     try {
-      const res = await fetch('/api/slash-commands/resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: invocation, scope: options.scope, context: options.context?.() || {} })
-      })
-      const data = await res.json()
+      const resolveCommand = async (confirmationReceipt = '') => {
+        const response = await fetch('/api/slash-commands/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input: invocation,
+            scope: options.scope,
+            context: options.context?.() || {},
+            confirmation_receipt: confirmationReceipt || undefined
+          })
+        })
+        const payload = await response.json()
+        return { response, payload }
+      }
+      let { response: res, payload: data } = await resolveCommand()
+      if (data.confirmation_required && data.confirmation_challenge) {
+        const message = command.actionType === 'mutation'
+          ? `/${command.name} 将修改当前作用域的本地状态。请核对参数与影响范围后确认。`
+          : `/${command.name} 属于高风险命令，请确认本次精确操作。`
+        const approved = await (options.onConfirm?.(message) ?? Promise.resolve(window.confirm(message)))
+        if (!approved) return { cancelled: true }
+        const confirmRes = await fetch('/api/slash-commands/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ challenge: data.confirmation_challenge, confirmed: true })
+        })
+        const confirmation = await confirmRes.json()
+        if (!confirmRes.ok || !confirmation.confirmation_receipt) throw new Error(confirmation.error || '命令确认失败')
+        ;({ response: res, payload: data } = await resolveCommand(confirmation.confirmation_receipt))
+      }
       if (!res.ok) throw new Error(data.error || '命令执行失败')
       if (data.needsArgs) {
         options.input.value = `/${data.command.name} `

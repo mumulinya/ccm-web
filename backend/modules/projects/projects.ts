@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { spawn, execFileSync, execSync } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import { sendJson, CONFIGS_DIR, LOG_DIR, CCM_DIR, UPLOAD_DIR } from "../../core/utils";
 import {
   getConfigs,
@@ -20,11 +20,12 @@ import { publishRuntimeEvent } from "../../system/runtime-events";
 import { createPrivateRuntimeConfig, credentialStoreStatus, migrateConfigDirectory, migrateTomlCredentials, protectCredential, redactSensitiveText, resolveCredential, schedulePrivateRuntimeConfigCleanup } from "../../core/credential-store";
 import { buildFreshToolAuthorizationPayload, buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
 import { archiveProject, getProjectLifecycleAudit, listArchivedProjects, previewProjectPurge, purgeArchivedProject, restoreProject } from "./project-lifecycle";
-import { validateAgentType, validateProjectName, validateProjectPlatform, validateSessionId, validateSharedFileName, validateWorkDirectory } from "./project-validation";
-import { cloneGitHubRepository, configureProjectRepository, inspectProjectGit } from "./project-git";
+import { PROJECT_AGENT_TYPES, validateAgentType, validateProjectName, validateProjectPlatform, validateSessionId, validateSharedFileName, validateWorkDirectory } from "./project-validation";
+import { cancelProjectClone, cleanupStaleProjectCloneArtifacts, cloneGitHubRepository, configureProjectRepositoryAsync, finalizeProjectCloneReceipt, getProjectCloneReceipt, inspectProjectGitAsync, rollbackProjectClone } from "./project-git";
 import {
   executeProjectRuntimeAction,
   getProjectRuntimeLogs,
+  getProjectRuntimeLogsAsync,
   getProjectRuntimeSnapshot,
   getProjectRuntimeSummary,
   projectDisplayName,
@@ -45,6 +46,13 @@ import {
 import { getProjectTestAuthProfile, saveProjectTestAuthProfile } from "./project-test-auth";
 import { getProjectFolderState, updateProjectFolderState } from "./project-folders";
 import { disableBlockingFeishuReaction, disableVisibleCcConnectIdleRotation } from "../../integrations/cc-connect-feishu-runtime-config";
+import { terminateManagedProcessTree } from "../../system/managed-process-tree";
+import {
+  deleteSharedFileV2,
+  listSharedFilesV2,
+  migrateLegacySharedFilesV2,
+  upsertSharedTextV2,
+} from "../tools/shared-files-v2";
 
 function resolveCcConnectLauncher() {
   try {
@@ -262,6 +270,85 @@ function processCommandLine(pid: number) {
   }
 }
 
+type ManagedProcessRow = { pid: number; parentPid: number; commandLine: string };
+
+function managedProcessRows(): ManagedProcessRow[] {
+  try {
+    if (process.platform === "win32") {
+      const raw = execFileSync("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress",
+      ], {
+        encoding: "utf-8",
+        windowsHide: true,
+        timeout: 8_000,
+        maxBuffer: 8 * 1024 * 1024,
+      }).trim();
+      const parsed = raw ? JSON.parse(raw) : [];
+      return (Array.isArray(parsed) ? parsed : [parsed]).map((row: any) => ({
+        pid: Number(row.ProcessId || 0),
+        parentPid: Number(row.ParentProcessId || 0),
+        commandLine: String(row.CommandLine || ""),
+      })).filter((row: ManagedProcessRow) => row.pid > 0 && !!row.commandLine);
+    }
+    return execFileSync("ps", ["-eo", "pid=,ppid=,args="], {
+      encoding: "utf-8",
+      timeout: 8_000,
+      maxBuffer: 8 * 1024 * 1024,
+    }).split(/\r?\n/).flatMap(line => {
+      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+      return match ? [{ pid: Number(match[1]), parentPid: Number(match[2]), commandLine: match[3] }] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function runtimeConfigPathFromCommandLine(commandLine: string) {
+  const match = String(commandLine || "").match(/--config(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))/i);
+  return String(match?.[1] || match?.[2] || match?.[3] || "").trim();
+}
+
+function runtimeConfigOwnsProject(commandLine: string, expectedProjectName: string) {
+  try {
+    const configPath = path.resolve(runtimeConfigPathFromCommandLine(commandLine));
+    const privateConfigRoot = path.resolve(CCM_DIR, "private", "runtime-configs");
+    const relative = path.relative(privateConfigRoot, configPath);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return false;
+    if (fs.existsSync(configPath) && fs.statSync(configPath).isFile()) {
+      const content = fs.readFileSync(configPath, "utf-8");
+      const projectName = content.match(/\[\[projects\]\][\s\S]*?\bname\s*=\s*"([^"]+)"/i)?.[1] || "";
+      return projectName === expectedProjectName;
+    }
+    const escapedName = expectedProjectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const baseName = path.basename(configPath);
+    if (expectedProjectName === CONTROL_BOT_NAME) {
+      return new RegExp(`^${escapedName}-\\d+-\\d+\\.toml$`, "i").test(baseName);
+    }
+    const agentPattern = ["default", ...PROJECT_AGENT_TYPES].map(item => String(item).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    return new RegExp(`^${escapedName}-(?:${agentPattern})-\\d+-\\d+\\.toml$`, "i").test(baseName);
+  } catch {
+    return false;
+  }
+}
+
+function discoverOwnedChannelRootPids(expectedProjectName: string, rows = managedProcessRows()) {
+  const candidates = rows.filter(row => {
+    const commandLine = row.commandLine.replace(/\\/g, "/").toLowerCase();
+    return (commandLine.includes("cc-connect") || commandLine.includes("ccm-acp-launcher") || commandLine.includes("/run.js"))
+      && runtimeConfigOwnsProject(row.commandLine, expectedProjectName);
+  });
+  if (!candidates.length) return [];
+  const candidateIds = new Set(candidates.map(row => row.pid));
+  return candidates.filter(row => !candidateIds.has(row.parentPid)).map(row => row.pid);
+}
+
+function discoverOwnedProjectChannelRootPid(projectName: string, rows = managedProcessRows()) {
+  return discoverOwnedChannelRootPids(projectName, rows)[0] || 0;
+}
+
 function managedChannelProcessIsCurrent(pid: number, expected: FeishuChannelRuntimeManifest) {
   try { process.kill(pid, 0); } catch { return false; }
   const manifest = readChannelRuntimeManifest(expected.key);
@@ -449,7 +536,10 @@ export function stopControlBotConnection() {
   const owned = managedChannelProcessLooksOwned(pid);
   if (owned) {
     try {
-      if (process.platform === "win32") execSync(`taskkill /T /F /PID ${pid}`, { stdio: "ignore" });
+      if (process.platform === "win32") execFileSync("taskkill.exe", ["/T", "/F", "/PID", String(pid)], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
       else process.kill(pid, "SIGTERM");
     } catch {}
   }
@@ -521,7 +611,7 @@ function getControlBotConnectionStatus(expectedPort = 3080) {
   };
 }
 
-function startProject(projectName: string, agentType: string, port: number) {
+async function startProject(projectName: string, agentType: string, port: number, discoveredPid = 0) {
   projectName = validateProjectName(resolveProjectIdentifier(projectName));
   agentType = agentType ? validateAgentType(agentType) : "";
   const configs = getConfigs();
@@ -538,14 +628,19 @@ function startProject(projectName: string, agentType: string, port: number) {
   }
   content = buildProjectFeishuAcpRuntimeConfig(content, projectName, port);
   const adapterPath = path.join(__dirname, "..", "..", "integrations", "control-bot-acp.js");
-  const runningPid = Number(getPid(projectName) || 0);
+  const runningPid = Number(getPid(projectName) || discoveredPid || discoverOwnedProjectChannelRootPid(projectName) || 0);
+  if (runningPid && !getPid(projectName)) {
+    const pidDir = path.join(CCM_DIR, "pids");
+    fs.mkdirSync(pidDir, { recursive: true });
+    fs.writeFileSync(path.join(pidDir, `${projectName}.pid`), String(runningPid));
+  }
   const expected = buildChannelRuntimeIdentity(`project-${projectName}`, "project", projectName, runningPid, port, content, adapterPath);
   if (runningPid && managedChannelProcessIsCurrent(runningPid, expected)) {
     return { success: true, running: true, pid: runningPid, endpoint_current: true, build_current: true, message: "项目 Agent 通道已连接" };
   }
   const recycled = !!runningPid;
   if (runningPid) {
-    const stopped = stopProject(projectName, false);
+    const stopped = await stopProject(projectName, false);
     if (stopped.process_owned === false) throw new Error("无法证明旧项目通道进程归属，已拒绝启动重复飞书通道");
   }
   const configPath = createPrivateRuntimeConfig(`${projectName}-${agentType || "default"}`, content);
@@ -570,59 +665,70 @@ function startProject(projectName: string, agentType: string, port: number) {
   return { success: true, running: true, pid: child.pid, endpoint_current: true, build_current: true, recycled, message: recycled ? "项目 Agent 通道已更新并重新连接" : "项目 Agent 通道已连接" };
 }
 
-function stopProject(projectName: string, explicit = true) {
+async function stopProject(projectName: string, explicit = true) {
   projectName = validateProjectName(resolveProjectIdentifier(projectName));
   const pid = getPid(projectName);
   const owned = !!pid && managedChannelProcessLooksOwned(Number(pid));
-  if (pid && owned) {
+  const channelStopReceipt = pid && owned ? await terminateManagedProcessTree(Number(pid), { gracefulTimeoutMs: 5_000, forceTimeoutMs: 3_000 }) : null;
+  const channelStopped = !pid || (!!channelStopReceipt && channelStopReceipt.exited);
+  if (channelStopped) {
     try {
-      if (process.platform === "win32") {
-        execSync(`taskkill /T /F /PID ${pid}`, { stdio: "ignore" });
-      } else {
-        process.kill(parseInt(pid), "SIGTERM");
-      }
+      const pidFile = path.join(CCM_DIR, "pids", `${projectName}.pid`);
+      if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
     } catch {}
+    removeChannelRuntimeManifest(`project-${projectName}`);
   }
-
-  try {
-    const pidFile = path.join(CCM_DIR, "pids", `${projectName}.pid`);
-    if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
-  } catch {}
-  removeChannelRuntimeManifest(`project-${projectName}`);
-  if (explicit) {
+  if (explicit && channelStopped) {
     fs.mkdirSync(FEISHU_CHANNEL_MANIFEST_DIR, { recursive: true });
     fs.writeFileSync(channelDisabledFile(`project-${projectName}`), `${new Date().toISOString()}\n`, "utf-8");
   }
-  const runtimeStop = explicit ? stopAllProjectRuntimes(projectName) : null;
-  const channelMessage = pid ? (owned ? "项目 Agent 通道已断开" : "项目 Agent PID 已失效，未终止无法证明归属的进程") : "项目 Agent 通道未运行";
+  const runtimeStop = explicit ? await stopAllProjectRuntimes(projectName) : null;
+  const channelMessage = pid
+    ? (owned
+      ? (channelStopped ? "项目 Agent 通道已断开" : "项目 Agent 通道停止失败，进程仍可能运行")
+      : "项目 Agent PID 已失效，未终止无法证明归属的进程")
+    : "项目 Agent 通道未运行";
   const runtimeMessage = runtimeStop
     ? `；已停止 ${runtimeStop.stoppedProcesses} 个源码运行进程${runtimeStop.stoppedBuilds ? `和 ${runtimeStop.stoppedBuilds} 个构建任务` : ""}`
     : "";
   return {
-    success: runtimeStop?.success !== false,
-    running: false,
+    success: channelStopped && runtimeStop?.success !== false,
+    running: !channelStopped,
     process_owned: owned,
+    channel_stop_receipt: channelStopReceipt,
     runtime_stop: runtimeStop,
-    error: runtimeStop?.failures?.length ? `项目通道已断开，但有 ${runtimeStop.failures.length} 个源码进程无法证明归属，未强制终止` : undefined,
+    error: !channelStopped
+      ? channelStopReceipt?.error || "项目 Agent 通道进程树未能完整终止"
+      : (runtimeStop?.failures?.length ? `项目通道已断开，但有 ${runtimeStop.failures.length} 个源码进程无法证明归属，未强制终止` : undefined),
     message: `${channelMessage}${runtimeMessage}`,
   };
 }
 
 export { startProject, stopProject };
 
-export function reconcileProjectFeishuConnections(port: number) {
+export async function reconcileProjectFeishuConnections(port: number) {
   const results: any[] = [];
+  const processRows = managedProcessRows();
+  const currentControlBotPid = Number(getControlBotPid() || 0);
+  for (const duplicatePid of discoverOwnedChannelRootPids(CONTROL_BOT_NAME, processRows)) {
+    if (duplicatePid === currentControlBotPid) continue;
+    const receipt = await terminateManagedProcessTree(duplicatePid, { gracefulTimeoutMs: 3_000, forceTimeoutMs: 2_000 });
+    if (!receipt.exited) {
+      console.warn(`[飞书控制机器人] 旧通道 ${duplicatePid} 无法完整回收：${receipt.error || "进程仍在运行"}`);
+    }
+  }
   for (const config of getConfigs()) {
     const key = `project-${config.name}`;
     if (fs.existsSync(channelDisabledFile(key))) continue;
     const running = isRunning(config.name);
     const knownChannel = readChannelRuntimeManifest(key);
-    if (!running && !knownChannel) continue;
+    const discoveredPid = !running ? discoverOwnedProjectChannelRootPid(config.name, processRows) : 0;
+    if (!running && !knownChannel && !discoveredPid) continue;
     let content = "";
     try { content = fs.readFileSync(config.path, "utf-8"); } catch { continue; }
     if (!/\[\[projects\.platforms\]\][\s\S]*?type\s*=\s*"(?:feishu|lark)"/i.test(content)) continue;
     try {
-      results.push({ project: config.name, ...startProject(config.name, "", port) });
+      results.push({ project: config.name, ...await startProject(config.name, "", port, discoveredPid) });
     } catch (error: any) {
       results.push({ project: config.name, success: false, error: error?.message || String(error) });
     }
@@ -632,7 +738,7 @@ export function reconcileProjectFeishuConnections(port: number) {
 
 export function startFeishuChannelSupervisorForServer(port: number) {
   if (feishuChannelSupervisorTimer) return;
-  const tick = () => {
+  const tick = async () => {
     try {
       const config = loadFeishuConfig();
       const hasControlBotCredentials = !!((config.control_bot_app_id || config.app_id) && (config.control_bot_app_secret || config.app_secret));
@@ -640,11 +746,11 @@ export function startFeishuChannelSupervisorForServer(port: number) {
     } catch (error: any) {
       console.warn(`[飞书控制机器人] 通道监管失败：${error?.message || error}`);
     }
-    for (const result of reconcileProjectFeishuConnections(port)) {
+    for (const result of await reconcileProjectFeishuConnections(port)) {
       if (result.success === false) console.warn(`[项目飞书通道] ${result.project} 通道监管失败：${result.error}`);
     }
   };
-  feishuChannelSupervisorTimer = setInterval(tick, 30_000);
+  feishuChannelSupervisorTimer = setInterval(() => { void tick(); }, 30_000);
   feishuChannelSupervisorTimer.unref?.();
 }
 
@@ -794,6 +900,26 @@ export function handleProjectsApi(
     getAgentState: Function;
   }
 ): boolean {
+  if (pathname === "/api/projects/clone/status" && req.method === "GET") {
+    const id = String(parsed.query.id || "").trim();
+    const receipt = getProjectCloneReceipt(id);
+    return receipt ? sendJson(res, { success: true, receipt }) : sendJson(res, { success: false, error: "克隆记录不存在" }, 404);
+  }
+
+  if (pathname === "/api/projects/clone/cancel" && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try { const input = JSON.parse(body || "{}"); sendJson(res, { success: true, receipt: cancelProjectClone(String(input.id || "")) }); }
+      catch (error: any) { sendJson(res, { success: false, error: error.message }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/projects/clone/cleanup" && req.method === "POST") {
+    return sendJson(res, { success: true, cleaned: cleanupStaleProjectCloneArtifacts() });
+  }
+
   // 1. 获取项目列表
   if (pathname === "/api/projects" && req.method === "GET") {
     const configs = getConfigs();
@@ -842,10 +968,10 @@ export function handleProjectsApi(
   if (pathname === "/api/start" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const { project, agent } = JSON.parse(body);
-        sendJson(res, startProject(project, agent, ctx.PORT));
+        sendJson(res, await startProject(project, agent, ctx.PORT));
       } catch (e: any) {
         sendJson(res, { success: false, error: e.message }, 400);
       }
@@ -857,10 +983,10 @@ export function handleProjectsApi(
   if (pathname === "/api/stop" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const { project } = JSON.parse(body);
-        sendJson(res, stopProject(project));
+        sendJson(res, await stopProject(project));
       } catch (e: any) {
         sendJson(res, { success: false, error: e.message }, 400);
       }
@@ -872,12 +998,12 @@ export function handleProjectsApi(
   if (pathname === "/api/projects/agent-connection" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const payload = JSON.parse(body || "{}");
         const action = String(payload.action || "");
-        if (action === "connect") sendJson(res, startProject(payload.project, payload.agent, ctx.PORT));
-        else if (action === "disconnect") sendJson(res, stopProject(payload.project));
+        if (action === "connect") sendJson(res, await startProject(payload.project, payload.agent, ctx.PORT));
+        else if (action === "disconnect") sendJson(res, await stopProject(payload.project));
         else sendJson(res, { success: false, error: "不支持的 Agent 连接操作" }, 400);
       } catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
     });
@@ -891,8 +1017,9 @@ export function handleProjectsApi(
   }
 
   if (pathname === "/api/projects/runtime/logs" && req.method === "GET") {
-    try { sendJson(res, getProjectRuntimeLogs(parsed.query?.project, parsed.query?.profile_id, parsed.query?.kind, Number(parsed.query?.lines || 300))); }
-    catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
+    getProjectRuntimeLogsAsync(parsed.query?.project, parsed.query?.profile_id, parsed.query?.kind, Number(parsed.query?.lines || 300))
+      .then(result => sendJson(res, result))
+      .catch((e: any) => sendJson(res, { success: false, error: e.message }, 400));
     return true;
   }
 
@@ -911,19 +1038,28 @@ export function handleProjectsApi(
         "X-Accel-Buffering": "no",
       });
       res.flushHeaders?.();
+      let unsubscribe = () => {};
       const send = (event: any) => {
-        if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+        if (res.destroyed || res.writableEnded) return;
+        if (Number(res.writableLength || 0) > 1024 * 1024) {
+          unsubscribe();
+          res.end();
+          return;
+        }
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
       };
       let ready = false;
       const pending: any[] = [];
-      const unsubscribe = subscribeProjectRuntimeLogs(project, profileId, kind, event => {
+      unsubscribe = subscribeProjectRuntimeLogs(project, profileId, kind, event => {
         if (!ready) pending.push(event);
         else send(event);
       });
       send({ type: "snapshot", content: getProjectRuntimeLogs(project, profileId, kind, 2000).logs });
       ready = true;
       for (const event of pending) send(event);
-      const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), 15000);
+      const heartbeat = setInterval(() => {
+        if (!res.destroyed && !res.writableEnded) res.write(": heartbeat\n\n");
+      }, 15000);
       req.on("close", () => {
         clearInterval(heartbeat);
         unsubscribe();
@@ -936,22 +1072,32 @@ export function handleProjectsApi(
   }
 
   if (pathname === "/api/projects/runtime/shutdown" && req.method === "POST") {
-    try { sendJson(res, { success: true, ...stopManagedProjectRuntimesForShutdown() }); }
-    catch (e: any) { sendJson(res, { success: false, error: e.message }, 500); }
+    stopManagedProjectRuntimesForShutdown()
+      .then(result => sendJson(res, { success: result.failures.length === 0, ...result }, result.failures.length ? 409 : 200))
+      .catch((e: any) => sendJson(res, { success: false, error: e.message }, 500));
     return true;
   }
 
   if (["/api/projects/runtime/rescan", "/api/projects/runtime/config", "/api/projects/runtime/action", "/api/projects/runtime/toolchain-test"].includes(pathname) && req.method === "POST") {
     let body = "";
-    req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    let rejected = false;
+    req.on("data", (chunk) => {
+      if (rejected) return;
+      body += chunk;
+      if (Buffer.byteLength(body, "utf-8") > 2 * 1024 * 1024) {
+        rejected = true;
+        sendJson(res, { success: false, error: "请求内容过大" }, 413);
+      }
+    });
+    req.on("end", async () => {
+      if (rejected) return;
       try {
         const payload = JSON.parse(body || "{}");
         if (pathname.endsWith("/rescan")) sendJson(res, rescanProjectRuntimeProfiles(payload.project));
         else if (pathname.endsWith("/config")) sendJson(res, saveProjectRuntimeConfig(payload.project, payload));
         else if (pathname.endsWith("/toolchain-test")) sendJson(res, testProjectJavaToolchain(payload.project, payload.toolchain));
-        else sendJson(res, executeProjectRuntimeAction(payload.project, payload.profile_id, payload.action));
-      } catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
+        else sendJson(res, await executeProjectRuntimeAction(payload.project, payload.profile_id, payload.action));
+      } catch (e: any) { sendJson(res, { success: false, error: e.message, code: e.code || "" }, e.code === "RUNTIME_BUSY" ? 423 : 400); }
     });
     return true;
   }
@@ -1023,8 +1169,9 @@ export function handleProjectsApi(
     let body = "";
     req.on("data", (chunk) => body += chunk);
     req.on("end", async () => {
+      let cloneReceiptId = "";
       try {
-        const { name, display_name, work_dir, agent, platform, setup_token, source_type, repository_url, repository_branch, test_auth } = JSON.parse(body);
+        const { name, display_name, work_dir, agent, platform, setup_token, source_type, repository_url, repository_branch, test_auth, clone_request_id } = JSON.parse(body);
 
         const safeName = validateProjectName(name);
         const safeAgent = validateAgentType(agent);
@@ -1043,12 +1190,14 @@ export function handleProjectsApi(
         }
 
         let repositoryStatus: any = null;
+        let cloneResult: any = null;
         const safeWorkDir = sourceType === "github"
-          ? String((await cloneGitHubRepository({ repositoryUrl: repository_url, destination: work_dir, branch: repository_branch })).work_dir)
+          ? String((cloneResult = await cloneGitHubRepository({ repositoryUrl: repository_url, destination: work_dir, branch: repository_branch, receiptId: clone_request_id })).work_dir)
           : validateWorkDirectory(work_dir);
-        if (sourceType === "github") repositoryStatus = inspectProjectGit(safeWorkDir);
+        cloneReceiptId = String(cloneResult?.clone_receipt?.id || "");
+        if (sourceType === "github") repositoryStatus = await inspectProjectGitAsync(safeWorkDir);
         else {
-          const inspected = inspectProjectGit(safeWorkDir);
+          const inspected = await inspectProjectGitAsync(safeWorkDir);
           if (inspected.is_repository) repositoryStatus = inspected;
         }
 
@@ -1081,14 +1230,17 @@ type = "${finalPlatform}"${platformOptionsToml}
         const testAuth = test_auth ? saveProjectTestAuthProfile(safeName, test_auth) : getProjectTestAuthProfile(safeName);
         let runtime: any = null;
         try { runtime = rescanProjectRuntimeProfiles(safeName); } catch {}
+        if (cloneReceiptId) finalizeProjectCloneReceipt(cloneReceiptId, "completed");
         sendJson(res, {
           success: true,
           message: sourceType === "github" ? "GitHub 仓库已克隆并创建项目" : "项目配置已创建",
           repository: repositoryStatus,
           runtime,
           test_auth: testAuth,
+          clone_receipt: cloneReceiptId ? getProjectCloneReceipt(cloneReceiptId) : null,
         });
       } catch (e: any) {
+        if (cloneReceiptId) await rollbackProjectClone(cloneReceiptId, `项目配置创建失败：${e.message}`);
         sendJson(res, { success: false, error: e.message }, 400);
       }
     });
@@ -1099,7 +1251,7 @@ type = "${finalPlatform}"${platformOptionsToml}
   if (pathname === "/api/projects/update" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const { name, display_name, work_dir, agent, platform, repository_url, initialize_repository, test_auth } = JSON.parse(body);
 
@@ -1115,8 +1267,8 @@ type = "${finalPlatform}"${platformOptionsToml}
 
         const shouldManageRepository = initialize_repository === true || String(repository_url || "").trim().length > 0;
         const repositoryStatus = shouldManageRepository
-          ? configureProjectRepository({ workDir: safeWorkDir, repositoryUrl: repository_url, initialize: initialize_repository === true })
-          : inspectProjectGit(safeWorkDir);
+          ? await configureProjectRepositoryAsync({ workDir: safeWorkDir, repositoryUrl: repository_url, initialize: initialize_repository === true })
+          : await inspectProjectGitAsync(safeWorkDir);
 
         const content = fs.readFileSync(configPath, "utf-8");
         const appIdMatch = content.match(/app_id\s*=\s*"([^"]+)"/);
@@ -1188,13 +1340,11 @@ type = "${finalPlatform}"${platformOptionsToml}
   }
 
   if (pathname === "/api/projects/git-status" && req.method === "GET") {
-    try {
+    Promise.resolve().then(async () => {
       const project = requireActiveProjectName(parsed.query?.project);
       const workDir = validateWorkDirectory(getProjectWorkDir(project));
-      sendJson(res, { success: true, project, status: inspectProjectGit(workDir) });
-    } catch (e: any) {
-      sendJson(res, { success: false, error: e.message || "读取 Git 状态失败" }, 400);
-    }
+      sendJson(res, { success: true, project, status: await inspectProjectGitAsync(workDir) });
+    }).catch((e: any) => sendJson(res, { success: false, error: e.message || "读取 Git 状态失败" }, 400));
     return true;
   }
 
@@ -1529,7 +1679,8 @@ type = "${finalPlatform}"${platformOptionsToml}
     try { project = requireActiveProjectName(parsed.query.project); }
     catch (e: any) { sendJson(res, { error: e.message }, 400); return true; }
     const configs = loadProjectConfigs();
-    sendJson(res, { files: configs[project]?.shared_files || [] });
+    migrateLegacySharedFilesV2("project", project, configs[project]?.shared_files || [], "project-config-v1");
+    sendJson(res, { files: listSharedFilesV2("project", project) });
     return true;
   }
 
@@ -1544,27 +1695,8 @@ type = "${finalPlatform}"${platformOptionsToml}
         const name = validateSharedFileName(payload.name);
         const content = String(payload.content || "");
         if (Buffer.byteLength(content, "utf-8") > 1024 * 1024) return sendJson(res, { error: "单个共享文本文件不能超过 1 MB" }, 400);
-        const configs = loadProjectConfigs();
-        if (!configs[project]) configs[project] = {};
-        if (!configs[project].shared_files) configs[project].shared_files = [];
-        const existing = configs[project].shared_files.findIndex((f: any) => f.name === name);
-        if (existing >= 0) {
-          configs[project].shared_files[existing].content = content;
-          configs[project].shared_files[existing].type = "text";
-          configs[project].shared_files[existing].readable = true;
-          configs[project].shared_files[existing].updated_at = new Date().toISOString();
-        } else {
-          configs[project].shared_files.push({
-            name,
-            type: "text",
-            readable: true,
-            content,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-        }
-        saveProjectConfigs(configs);
-        sendJson(res, { success: true, files: configs[project].shared_files });
+        const file = upsertSharedTextV2("project", project, name, content);
+        sendJson(res, { success: true, file, files: listSharedFilesV2("project", project) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -1581,12 +1713,9 @@ type = "${finalPlatform}"${platformOptionsToml}
         const payload = JSON.parse(body);
         const project = requireActiveProjectName(payload.project);
         const name = validateSharedFileName(payload.name);
-        const configs = loadProjectConfigs();
-        if (configs[project]?.shared_files) {
-          configs[project].shared_files = configs[project].shared_files.filter((f: any) => f.name !== name);
-          saveProjectConfigs(configs);
-        }
-        sendJson(res, { success: true });
+        const file = listSharedFilesV2("project", project).find((item: any) => item.name === name);
+        if (file) deleteSharedFileV2("project", project, file.id);
+        sendJson(res, { success: true, files: listSharedFilesV2("project", project) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

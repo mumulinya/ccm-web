@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import { loadMusicConfig } from "../../core/db";
+import { musicPlatformJson, musicPlatformRequest } from "./platform-http";
 // B站相关常量与模块级变量
 export const BILI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 let wbiMixinKey = "";
@@ -20,21 +20,17 @@ function getMixinKey(orig: string): string {
 export async function ensureBuvid3(): Promise<string> {
   if (buvid3) return buvid3;
   try {
-    const res = await fetch("https://www.bilibili.com", {
+    const res = await musicPlatformRequest({
+      url: "https://www.bilibili.com",
       method: "GET",
       headers: { "User-Agent": BILI_UA },
-      redirect: "follow",
-      signal: AbortSignal.timeout(8_000),
+      timeoutMs: 8_000,
+      maxBytes: 512 * 1024,
+      retries: 1,
     });
     let cookieStrings: string[] = [];
-    if (typeof res.headers.getSetCookie === "function") {
-      cookieStrings = res.headers.getSetCookie();
-    } else {
-      const rawCookie = res.headers.get("set-cookie");
-      if (rawCookie) {
-        cookieStrings = rawCookie.split(/,\s*/);
-      }
-    }
+    const rawCookie = res.headers["set-cookie"];
+    cookieStrings = Array.isArray(rawCookie) ? rawCookie : rawCookie ? [String(rawCookie)] : [];
     for (const c of cookieStrings) {
       const match = c.match(/buvid3=([^;]+)/);
       if (match) {
@@ -53,16 +49,12 @@ export async function ensureBuvid3(): Promise<string> {
 async function refreshWbiKey() {
   try {
     await ensureBuvid3();
-    const res = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+    const data: any = await musicPlatformJson({
+      url: "https://api.bilibili.com/x/web-interface/nav",
       headers: { "User-Agent": BILI_UA, "Referer": "https://www.bilibili.com", "Cookie": `buvid3=${buvid3}` },
-      signal: AbortSignal.timeout(8_000),
+      timeoutMs: 8_000,
+      maxBytes: 1024 * 1024,
     });
-    const text = await res.text();
-    if (!text.trim().startsWith("{")) {
-      console.log("[WBI] nav 返回非 JSON:", text.substring(0, 80));
-      return;
-    }
-    const data = JSON.parse(text);
     const img = data?.data?.wbi_img?.img_url || "";
     const sub = data?.data?.wbi_img?.sub_url || "";
     const imgKey = img.split("/").pop()?.split(".")[0] || "";
@@ -91,9 +83,8 @@ export function signBiliParams(params: Record<string, string>): string {
 }
 
 export async function biliSearch(keyword: string): Promise<any[]> {
-  try {
-    await ensureBuvid3();
-    await ensureWbiKey();
+  await ensureBuvid3();
+  await ensureWbiKey();
 
     const params: Record<string, string> = {
       search_type: "video",
@@ -103,19 +94,9 @@ export async function biliSearch(keyword: string): Promise<any[]> {
     };
 
     const signedQs = signBiliParams(params);
-    const cfg = loadMusicConfig();
-
-    let oldHttpProxy = process.env.HTTP_PROXY;
-    let oldHttpsProxy = process.env.HTTPS_PROXY;
-    if (cfg.proxy) {
-      process.env.HTTP_PROXY = cfg.proxy;
-      process.env.HTTPS_PROXY = cfg.proxy;
-    }
-
     const url = `https://api.bilibili.com/x/web-interface/search/type?${signedQs}`;
-
-    try {
-      const res = await fetch(url, {
+    const data: any = await musicPlatformJson({
+        url,
         method: "GET",
         headers: {
           "User-Agent": BILI_UA,
@@ -128,28 +109,16 @@ export async function biliSearch(keyword: string): Promise<any[]> {
           "Sec-Fetch-Mode": "cors",
           "Sec-Fetch-Site": "same-site"
         },
-        signal: AbortSignal.timeout(10_000),
+        timeoutMs: 10_000,
+        maxBytes: 4 * 1024 * 1024,
+        retries: 1,
       });
-
-      if (cfg.proxy) {
-        if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
-        if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
-      }
-
-      const text = await res.text();
-      if (!text.trim().startsWith("{")) {
-        console.log("[BiliSearch] non-JSON:", text.substring(0, 100));
-        return [];
-      }
-      const data = JSON.parse(text);
       if (data.code !== 0) {
-        console.log("[BiliSearch] API error:", data.code, data.message);
-        return [];
+        throw new Error(`B站搜索失败：${data.message || data.code}`);
       }
       const resultList = data.data?.result;
       if (!Array.isArray(resultList)) {
-        console.log("[BiliSearch] result is not an array");
-        return [];
+        throw new Error("B站搜索返回结构无效");
       }
       const results = resultList.map((item: any) => ({
         bvid: item.bvid,
@@ -161,17 +130,6 @@ export async function biliSearch(keyword: string): Promise<any[]> {
       }));
       console.log("[BiliSearch] found", results.length, "results");
       return results;
-    } catch (err) {
-      if (cfg.proxy) {
-        if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
-        if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
-      }
-      throw err;
-    }
-  } catch (e: any) {
-    console.log("[BiliSearch] error:", e.message);
-    return [];
-  }
 }
 
 export async function getBiliAudioUrl(bvid: string): Promise<string> {
@@ -181,15 +139,17 @@ export async function getBiliAudioUrl(bvid: string): Promise<string> {
   const params = { bvid };
   const signedQs = signBiliParams(params);
   const viewUrl = `https://api.bilibili.com/x/web-interface/view?${signedQs}`;
-  const viewRes = await fetch(viewUrl, {
+  const viewData: any = await musicPlatformJson({
+    url: viewUrl,
     headers: {
       "User-Agent": BILI_UA,
       "Referer": "https://www.bilibili.com/",
       "Cookie": `buvid3=${buvid3}`,
       "Accept": "application/json, text/plain, */*"
-    }
+    },
+    timeoutMs: 10_000,
+    maxBytes: 2 * 1024 * 1024,
   });
-  const viewData: any = await viewRes.json();
   if (viewData?.code !== 0) {
     throw new Error(`获取视频信息失败: ${viewData?.message || "未知错误"}`);
   }
@@ -208,15 +168,17 @@ export async function getBiliAudioUrl(bvid: string): Promise<string> {
   };
   const playQs = signBiliParams(playParams);
   const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${playQs}`;
-  const playRes = await fetch(playUrl, {
+  const playData: any = await musicPlatformJson({
+    url: playUrl,
     headers: {
       "User-Agent": BILI_UA,
       "Referer": "https://www.bilibili.com/",
       "Cookie": `buvid3=${buvid3}`,
       "Accept": "application/json, text/plain, */*"
-    }
+    },
+    timeoutMs: 10_000,
+    maxBytes: 4 * 1024 * 1024,
   });
-  const playData: any = await playRes.json();
   if (playData?.code !== 0) {
     throw new Error(`获取播放地址失败: ${playData?.message || "未知错误"}`);
   }

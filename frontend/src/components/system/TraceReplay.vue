@@ -43,6 +43,18 @@ let indexReloadTimer = null
 let eventReloadTimer = null
 let liveRefreshTimer = null
 let fallbackTimer = null
+let requestGeneration = 0
+const requestControllers = new Map()
+
+const beginRequest = (kind) => {
+  requestControllers.get(kind)?.abort()
+  const controller = new AbortController()
+  const generation = ++requestGeneration
+  requestControllers.set(kind, controller)
+  return { kind, controller, generation }
+}
+const requestIsCurrent = request => requestControllers.get(request.kind) === request.controller && !request.controller.signal.aborted
+const finishRequest = request => { if (requestControllers.get(request.kind) === request.controller) requestControllers.delete(request.kind) }
 
 const taskRows = computed(() => index.value?.tasks || [])
 const visibleTaskRows = computed(() => taskRows.value)
@@ -109,6 +121,7 @@ const indexDateRange = () => {
   return { date_from: new Date(Date.now() - days * 86400000).toISOString() }
 }
 const loadIndex = async ({ resetPage = false } = {}) => {
+  const request = beginRequest('index')
   if (resetPage) indexPage.value = 1
   loading.value = true
   error.value = ''
@@ -119,14 +132,18 @@ const loadIndex = async ({ resetPage = false } = {}) => {
     if (indexFilters.groupId) params.set('group_id', indexFilters.groupId)
     if (indexFilters.status) params.set('status', indexFilters.status)
     for (const [key, value] of Object.entries(indexDateRange())) params.set(key, value)
-    const response = await fetch(`/api/tasks/replay?${params}`)
+    const response = await fetch(`/api/tasks/replay?${params}`, { signal: request.controller.signal })
     const data = await response.json()
+    if (!requestIsCurrent(request)) return
     if (!response.ok || data.success === false) throw new Error(data.error || '任务记录读取失败')
     index.value = data.index
   } catch (e) {
+    if (e?.name === 'AbortError') return
+    if (!requestIsCurrent(request)) return
     error.value = e.message || '任务记录读取失败'
   } finally {
-    loading.value = false
+    if (requestIsCurrent(request)) loading.value = false
+    finishRequest(request)
   }
 }
 
@@ -160,7 +177,7 @@ const mergeEvents = (...groups) => {
 }
 
 const applyReplayPayload = (nextReplay, events, page = nextReplay?.event_page) => {
-  replay.value = { ...nextReplay, events, event_page: page }
+  replay.value = { ...(replay.value || {}), ...nextReplay, events, event_page: page }
 }
 
 const syntheticLegacyReplay = (payload) => {
@@ -179,9 +196,9 @@ const syntheticLegacyReplay = (payload) => {
   return { schema: 'ccm-legacy-trace-replay-view-v1', title: '旧任务诊断记录', goal: '这条旧记录没有完整任务关联，只显示系统仍保留的诊断过程。', status: rows.every(row => row.verdict === 'pass') ? 'completed' : 'warning', completed: true, tasks: [], actors: [], phases: [], evidence: [], events, summary: { event_count: events.length, issue_count: events.filter(item => ['failed', 'warning', 'blocked'].includes(item.status)).length, failed_count: events.filter(item => item.status === 'failed').length, task_count: 0, evidence_count: 0, test_run_count: 0 }, retention: { trace: { status: 'available', policy: '系统诊断记录' } }, legacy: true }
 }
 
-const loadLegacyTrace = async () => {
+const loadLegacyTrace = async (signal) => {
   const base = scope.value === 'global' ? '/api/global-agent/trace-replay' : '/api/orchestrator/trace-replay'
-  const response = await fetch(`${base}?trace_id=${encodeURIComponent(traceId.value)}`)
+  const response = await fetch(`${base}?trace_id=${encodeURIComponent(traceId.value)}`, { signal })
   const data = await response.json()
   if (!response.ok || data.success === false) throw new Error(data.error || 'Trace 不存在')
   replay.value = syntheticLegacyReplay(data.replay)
@@ -189,6 +206,8 @@ const loadLegacyTrace = async () => {
 
 const loadReplay = async (id = taskId.value) => {
   const selected = String(id || '').trim()
+  const request = beginRequest('replay')
+  if (selected) taskId.value = selected
   loading.value = true
   error.value = ''
   focusedEventId.value = ''
@@ -198,7 +217,8 @@ const loadReplay = async (id = taskId.value) => {
       if (!index.value) await loadIndex()
       const target = taskRows.value.find(item => item.trace_id === traceId.value.trim())
       if (target) return await loadReplay(target.id)
-      await loadLegacyTrace()
+      await loadLegacyTrace(request.controller.signal)
+      if (!requestIsCurrent(request)) return
       return
     }
     if (!selected) {
@@ -206,8 +226,9 @@ const loadReplay = async (id = taskId.value) => {
       await loadIndex()
       return
     }
-    const response = await fetch(`/api/tasks/replay?${replayRequestParams(selected, { tail: true })}`)
+    const response = await fetch(`/api/tasks/replay?${replayRequestParams(selected, { tail: true })}`, { signal: request.controller.signal })
     const data = await response.json()
+    if (!requestIsCurrent(request) || selected !== String(taskId.value || selected)) return
     if (!response.ok || data.success === false) throw new Error(data.error || '任务回放读取失败')
     taskId.value = selected
     replay.value = data.replay
@@ -217,21 +238,27 @@ const loadReplay = async (id = taskId.value) => {
     applyReplayFocus(pendingReplayTarget.value)
     pendingReplayTarget.value = null
   } catch (e) {
+    if (e?.name === 'AbortError') return
+    if (!requestIsCurrent(request)) return
     error.value = e.message || '任务回放读取失败'
   } finally {
-    loading.value = false
+    if (requestIsCurrent(request)) loading.value = false
+    finishRequest(request)
   }
 }
 
 const loadOlderEvents = async () => {
   if (!replay.value || !eventPage.value.has_previous || loadingOlder.value) return
   loadingOlder.value = true
+  const selectedTaskId = taskId.value
+  const request = beginRequest('older-events')
   error.value = ''
   try {
     const previousOffset = Math.max(0, Number(eventPage.value.previous_offset || 0))
     const limit = Math.max(1, Number(eventPage.value.offset || 0) - previousOffset)
-    const response = await fetch(`/api/tasks/replay?${replayRequestParams(taskId.value, { offset: previousOffset, limit })}`)
+    const response = await fetch(`/api/tasks/replay/events?${replayRequestParams(selectedTaskId, { offset: previousOffset, limit })}`, { signal: request.controller.signal })
     const data = await response.json()
+    if (!requestIsCurrent(request) || selectedTaskId !== taskId.value) return
     if (!response.ok || data.success === false) throw new Error(data.error || '更早记录读取失败')
     const events = mergeEvents(data.replay?.events || [], allEvents.value)
     applyReplayPayload(data.replay, events, {
@@ -242,38 +269,50 @@ const loadOlderEvents = async () => {
       last_cursor: events.at(-1) ? { at: events.at(-1).at, id: events.at(-1).id } : null,
     })
   } catch (e) {
+    if (e?.name === 'AbortError') return
+    if (!requestIsCurrent(request)) return
     error.value = e.message || '更早记录读取失败'
   } finally {
-    loadingOlder.value = false
+    if (requestIsCurrent(request)) loadingOlder.value = false
+    finishRequest(request)
   }
 }
 
 const reloadEventWindow = async () => {
   if (!replay.value || !taskId.value) return
   loading.value = true
+  const selectedTaskId = taskId.value
+  const request = beginRequest('event-window')
   error.value = ''
   try {
-    const response = await fetch(`/api/tasks/replay?${replayRequestParams(taskId.value, { tail: true })}`)
+    const response = await fetch(`/api/tasks/replay/events?${replayRequestParams(selectedTaskId, { tail: true })}`, { signal: request.controller.signal })
     const data = await response.json()
+    if (!requestIsCurrent(request) || selectedTaskId !== taskId.value) return
     if (!response.ok || data.success === false) throw new Error(data.error || '任务记录筛选失败')
-    replay.value = data.replay
+    applyReplayPayload(data.replay, data.replay?.events || [], data.replay?.event_page)
     issuePosition.value = -1
   } catch (e) {
+    if (e?.name === 'AbortError') return
+    if (!requestIsCurrent(request)) return
     error.value = e.message || '任务记录筛选失败'
   } finally {
-    loading.value = false
+    if (requestIsCurrent(request)) loading.value = false
+    finishRequest(request)
   }
 }
 
 const refreshLiveReplay = async () => {
   if (!replay.value || !taskId.value || liveRefreshing.value) return
   liveRefreshing.value = true
+  const selectedTaskId = taskId.value
+  const request = beginRequest('live-events')
   let morePending = false
   try {
     const cursor = eventPage.value.last_cursor || (allEvents.value.at(-1) ? { at: allEvents.value.at(-1).at, id: allEvents.value.at(-1).id } : null)
-    const params = replayRequestParams(taskId.value, cursor ? { after: cursor, limit: 200 } : { tail: true })
-    const response = await fetch(`/api/tasks/replay?${params}`)
+    const params = replayRequestParams(selectedTaskId, cursor ? { after: cursor, limit: 200 } : { tail: true })
+    const response = await fetch(`/api/tasks/replay/events?${params}`, { signal: request.controller.signal })
     const data = await response.json()
+    if (!requestIsCurrent(request) || selectedTaskId !== taskId.value) return
     if (!response.ok || data.success === false || !data.replay) return
     const events = mergeEvents(allEvents.value, data.replay.events || [])
     const firstOffset = Number(eventPage.value.offset || 0)
@@ -288,15 +327,19 @@ const refreshLiveReplay = async () => {
     })
     morePending = data.replay.event_page?.has_more === true
     lastLiveUpdateAt.value = new Date().toISOString()
-  } catch {
+  } catch (e) {
+    if (e?.name === 'AbortError') return
     // The 60-second fallback and the next runtime event will retry.
   } finally {
-    liveRefreshing.value = false
-    if (morePending) scheduleLiveRefresh(40)
+    if (requestIsCurrent(request)) liveRefreshing.value = false
+    finishRequest(request)
+    if (morePending && selectedTaskId === taskId.value) scheduleLiveRefresh(40)
   }
 }
 
 const showIndex = async () => {
+  for (const controller of requestControllers.values()) controller.abort()
+  requestControllers.clear()
   taskId.value = ''; traceId.value = ''; replay.value = null
   await loadIndex()
 }
@@ -401,6 +444,8 @@ onUnmounted(() => {
   window.clearTimeout(indexReloadTimer)
   window.clearTimeout(eventReloadTimer)
   window.clearTimeout(liveRefreshTimer)
+  for (const controller of requestControllers.values()) controller.abort()
+  requestControllers.clear()
 })
 watch(() => props.navigateTo, (target) => { if (target?.tab === 'trace-replay' && applyReplayTarget(target)) loadReplay() })
 watch([listSearch, () => indexFilters.project, () => indexFilters.groupId, () => indexFilters.status, () => indexFilters.range], scheduleIndexReload)

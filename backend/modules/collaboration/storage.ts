@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { markConversationSearchIndexDirty } from "../../system/conversation-search-dirty";
 import {
   GROUP_MESSAGES_DIR,
   GROUPS_FILE,
@@ -584,6 +585,7 @@ export function saveGroupMessages(groupId: string, messages: any[], sessionId = 
     const sessions = manifest.sessions.map((item: any) => item.id === resolvedSessionId ? { ...item, messageCount: messages.length, updatedAt: now } : item);
     writeGroupSessionManifest(groupId, { ...manifest, sessions });
   }
+  markConversationSearchIndexDirty(`group:${groupId}:${resolvedSessionId}`);
 }
 
 export function runGroupChatSessionsSelfTest() {

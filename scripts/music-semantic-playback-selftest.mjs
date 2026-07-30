@@ -100,7 +100,7 @@ const checks = {
   modelUnavailableFailsClosed: disabledRejected,
   selectorWithoutModelFailsClosed: selectorWithoutModel.rejected === true && selectorWithoutModel.source === 'reject',
   artistCandidatesFilteredThenModelSelected: artistSelected?.success === true && artistSelected?.source === 'model-artist-selection' && artistSelected?.index === 3,
-  authorizedSourceCannotBeExpandedByModel: sourceLockedIntent.sourceMode === 'local',
+  pageBrowseModeDoesNotRestrictAiSource: sourceLockedIntent.sourceMode === 'netease',
   mockProviderUsedOnly: modelCalls === 8,
   noLocalSelectionFallback: !source('backend/modules/music/select-track.ts').includes('recommendation-fallback')
     && !source('backend/modules/music/select-track.ts').includes('改用规则选曲'),

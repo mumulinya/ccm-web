@@ -5,6 +5,8 @@ import {
   MENU_CONFIG_BACKUP_KEY,
   MENU_CONFIG_KEY,
   buildConfiguredTabs,
+  applyMenuConfigurationOverrides,
+  createMenuConfigurationOverrides,
   createDefaultMenuConfiguration,
   exportMenuConfiguration,
   importMenuConfiguration,
@@ -42,13 +44,13 @@ legacy.setItem('menu-custom-links', JSON.stringify([
 ]))
 legacy.setItem('tab-order', JSON.stringify(['knowledge', 'dashboard']))
 const migrated = loadMenuConfiguration(tabs, legacy)
-assert.equal(migrated.version, 2)
+assert.equal(migrated.version, 3)
 assert.equal(migrated.items.knowledge.groupId, 'data', 'newly introduced knowledge page must keep current default group')
 assert.equal(migrated.items['memory-center'].groupId, 'data')
 assert.equal(migrated.items['cleanup-center'].groupId, 'system')
 assert.equal(migrated.items.menumanager.groupId, 'system')
 assert.equal(migrated.customLinks.length, 1, 'unsafe legacy links must be dropped')
-assert.equal(JSON.parse(legacy.getItem(MENU_CONFIG_KEY)).schema, 'ccm-navigation-config-v2')
+assert.equal(JSON.parse(legacy.getItem(MENU_CONFIG_KEY)).schema, 'ccm-navigation-config-v3')
 
 assert.throws(() => sanitizeExternalUrl('javascript:alert(1)'), /HTTP/)
 assert.throws(() => sanitizeExternalUrl('https://user:secret@example.com'), /账号或密码/)
@@ -83,6 +85,18 @@ const restored = restoreMenuConfigurationBackup(tabs, storage)
 assert.equal(restored.items.knowledge.pinned, false)
 assert.equal(storage.getItem(MENU_CONFIG_BACKUP_KEY), null)
 
+const workspaceDefault = createDefaultMenuConfiguration(tabs)
+const personalLayout = JSON.parse(JSON.stringify(workspaceDefault))
+personalLayout.items.knowledge.pinned = true
+personalLayout.customLinks.push({ id: 'l_personal', label: '个人链接', icon: 'Link', url: 'https://example.com/personal', isExternal: true })
+personalLayout.items.l_personal = { groupId: 'data', order: 100, hidden: false, pinned: false, mobilePrimary: false, icon: 'Link' }
+const overrides = createMenuConfigurationOverrides(personalLayout, workspaceDefault, tabs)
+assert.deepEqual(Object.keys(overrides.items).sort(), ['knowledge', 'l_personal'].sort())
+assert.deepEqual(overrides.customLinks.map(link => link.id), ['l_personal'])
+const merged = applyMenuConfigurationOverrides(workspaceDefault, overrides, tabs)
+assert.equal(merged.items.knowledge.pinned, true)
+assert.equal(merged.customLinks[0].id, 'l_personal')
+
 const imported = importMenuConfiguration(exportMenuConfiguration(second, tabs), tabs, storage)
 assert.equal(imported.customLinks[0].url, 'https://example.com/')
 assert.throws(() => importMenuConfiguration('{broken', tabs, storage), /有效 JSON/)
@@ -96,7 +110,8 @@ assert.ok(!app.includes('showMenuManager'), 'legacy duplicate menu modal must be
 assert.ok(!app.includes('<iframe :src="tab.url"'), 'custom links must not run in an unsandboxed iframe')
 assert.ok(app.includes("window.open(tabInfo.url, '_blank', 'noopener,noreferrer')"))
 assert.ok(manager.includes('手机主导航最多保留 4 个入口'))
-assert.ok(manager.includes('importMenuConfiguration') && manager.includes('exportMenuConfiguration'))
+assert.ok(manager.includes('parseMenuConfigurationImport') && manager.includes('savePersonalMenuConfigurationV3'))
+assert.ok(app.includes('loadServerMenuConfiguration') && app.includes('subscribeMenuConfigurationBroadcast'))
 
 console.log(JSON.stringify({
   success: true,
@@ -108,6 +123,7 @@ console.log(JSON.stringify({
     mobilePrimaryLimitedToFour: true,
     previousVersionCanBeRestored: true,
     importExportRoundTripValidated: true,
+    workspaceDefaultAndPersonalOverridesMerge: true,
     duplicateManagerAndUnsafeIframeRemoved: true,
   },
 }, null, 2))

@@ -51,7 +51,7 @@ try {
   assert.equal(actions.scripts.some(script => script.name === 'build'), true)
   await jsonRequest(`/api/terminal/session?id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
 } finally {
-  stopAllTerminalRuns()
+  await stopAllTerminalRuns()
   await new Promise(resolve => server.close(resolve))
 }
 

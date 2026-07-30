@@ -85,12 +85,12 @@ try {
   assert.ok(streamedLogEvents.some(event => event.type === 'chunk' && event.content.includes('runtime-stream-ready')))
   unsubscribeLogs()
 
-  runtime.stopProjectRuntime(project, 'runtime_one')
+  await runtime.stopProjectRuntime(project, 'runtime_one')
   await sleep(150)
   snapshot = runtime.getProjectRuntimeSnapshot(project)
   assert.equal(snapshot.processes.find(item => item.profileId === 'runtime_one').exitCode, null)
   assert.equal(snapshot.processes.find(item => item.profileId === 'runtime_two').status, 'running')
-  const restarted = runtime.restartProjectRuntime(project, 'runtime_one')
+  const restarted = await runtime.restartProjectRuntime(project, 'runtime_one')
   assert.ok(restarted.state.pid > 0 && restarted.state.pid !== first.state.pid)
 
   runtime.buildProjectRuntime(project, 'runtime_one')
@@ -103,9 +103,9 @@ try {
   assert.equal(build.status, 'succeeded')
   assert.ok(build.artifacts.includes('dist'))
 
-  runtime.stopProjectRuntime(project, 'runtime_one')
+  await runtime.stopProjectRuntime(project, 'runtime_one')
   await sleep(150)
-  const disconnectResult = runtime.stopAllProjectRuntimes(project)
+  const disconnectResult = await runtime.stopAllProjectRuntimes(project)
   assert.equal(disconnectResult.success, true)
   assert.equal(disconnectResult.stoppedProcesses, 1)
   snapshot = runtime.getProjectRuntimeSnapshot(project)
@@ -124,7 +124,7 @@ try {
   assert.match(recoveryLogs, /正在准备 Maven reactor 依赖/)
   assert.match(recoveryLogs, /Maven reactor 依赖准备完成/)
   assert.match(recoveryLogs, /spring-service-ready/)
-  runtime.stopProjectRuntime(project, 'runtime_recovery')
+  await runtime.stopProjectRuntime(project, 'runtime_recovery')
   runtime.saveProjectRuntimeConfig(project, { profiles: profiles.filter(item => item.id !== 'runtime_one') })
   assert.match(runtime.getProjectRuntimeLogs(project, 'runtime_one', 'run', 100).logs, /runtime-stream-ready/)
   const unsubscribeHistoricalLogs = runtime.subscribeProjectRuntimeLogs(project, 'runtime_one', 'run', () => {})
@@ -144,14 +144,15 @@ try {
   assert.match(globalActionSource, /\/api\/projects\/runtime\/action/)
   assert.match(projectRoutesSource, /\/api\/projects\/runtime\/log-stream/)
   assert.match(projectRoutesSource, /\/api\/projects\/runtime\/shutdown/)
-  assert.match(cliSource, /\/api\/projects\/runtime\/shutdown/)
+  assert.match(cliSource, /return delegateLegacy\(\["stop", \.\.\.rest\]\)/)
+  assert.match(projectRoutesSource, /const runtimeStop = explicit \? await stopAllProjectRuntimes\(projectName\) : null/)
   assert.match(consoleSource, /new Terminal\(/)
   assert.match(consoleSource, /new EventSource\(/)
   assert.match(consoleSource, /\/api\/projects\/runtime\/logs/)
   assert.match(consoleSource, /startFallbackPolling/)
   assert.match(consoleSource, /setInterval\([\s\S]*loadSnapshot/)
   assert.match(projectManagerSource, /const targetProfileId = selectedRuntimeProfileId\.value/)
-  assert.match(projectManagerSource, /runtimeAction\(currentProject\.value, targetProfileId, action\)/)
+  assert.match(projectManagerSource, /runtimeAction\(targetProject, targetProfileId, action\)/)
   assert.match(consoleSource, /position:fixed/)
   assert.match(consoleSource, /safe-area-inset-bottom/)
   assert.match(slashSource, /project-restart/)
@@ -166,7 +167,7 @@ try {
 } finally {
   try {
     const runtime = await import('../ccm-package/dist/modules/projects/project-runtime.js')
-    for (const id of ['runtime_one', 'runtime_two', 'runtime_recovery']) try { runtime.stopProjectRuntime(project, id) } catch {}
+    for (const id of ['runtime_one', 'runtime_two', 'runtime_recovery']) try { await runtime.stopProjectRuntime(project, id) } catch {}
   } catch {}
   try { fs.rmSync(configFile, { force: true }) } catch {}
   try { fs.rmSync(workDir, { recursive: true, force: true }) } catch {}

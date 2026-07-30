@@ -40,6 +40,8 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const library_1 = require("./library");
+const music_catalog_1 = require("./music-catalog");
+const platform_http_1 = require("./platform-http");
 const MIN_IMAGE_BYTES = 256;
 const MAX_REMOTE_BYTES = 2.5 * 1024 * 1024;
 const REMOTE_TIMEOUT_MS = 3500;
@@ -50,12 +52,15 @@ const RANDOM_ANIME_COVER_URLS = [
     "https://pic.re/image",
 ];
 function sendBuffer(res, buffer, contentType, cacheControl = "public, max-age=31536000") {
+    if (res.destroyed || res.writableEnded)
+        return false;
     res.writeHead(200, {
         "Content-Type": contentType,
         "Content-Length": buffer.length,
         "Cache-Control": cacheControl,
     });
     res.end(buffer);
+    return true;
 }
 function looksLikeImage(buffer) {
     if (!buffer || buffer.length < MIN_IMAGE_BYTES)
@@ -138,24 +143,25 @@ function shuffle(items) {
 async function fetchRemoteAnimeCover(timeoutMs = REMOTE_TIMEOUT_MS) {
     for (const url of shuffle(RANDOM_ANIME_COVER_URLS)) {
         try {
-            const resp = await fetch(url, {
-                signal: AbortSignal.timeout(timeoutMs),
-                redirect: "follow",
+            const resp = await (0, platform_http_1.musicPlatformRequest)({
+                url,
+                timeoutMs,
+                maxBytes: MAX_REMOTE_BYTES,
+                retries: 0,
+                allowedHosts: ["www.dmoe.cc", "api.btstu.cn", "pic.re"],
                 headers: {
                     Accept: "image/*,*/*",
                     "User-Agent": "ccm-music-cover/1.0",
                 },
             });
-            if (!resp.ok)
-                continue;
-            const mime = String(resp.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+            const mime = String(resp.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
             // alcy 等源偶发 video/mp4，直接跳过，避免白下大文件
             if (mime && !mime.startsWith("image/") && mime !== "application/octet-stream")
                 continue;
-            const lenHeader = Number(resp.headers.get("content-length") || 0);
+            const lenHeader = Number(resp.headers["content-length"] || 0);
             if (lenHeader > MAX_REMOTE_BYTES)
                 continue;
-            const buffer = Buffer.from(await resp.arrayBuffer());
+            const buffer = resp.buffer;
             if (buffer.length > MAX_REMOTE_BYTES || !looksLikeImage(buffer))
                 continue;
             const contentType = mime.startsWith("image/") ? mime : contentTypeForPath("", buffer);
@@ -229,7 +235,10 @@ function handleAnimeCoverApi(res, parsed) {
             return;
         }
         sendLocalAnimeCover(res, String(Date.now()), "no-cache");
-    })();
+    })().catch(() => {
+        if (!res.destroyed && !res.writableEnded)
+            sendLocalAnimeCover(res, String(Date.now()), "no-cache");
+    });
     return true;
 }
 function handleMusicCoverApi(res, parsed) {
@@ -248,11 +257,18 @@ function handleMusicCoverApi(res, parsed) {
                 return;
             }
             sendLocalAnimeCover(res, String(Date.now()), "no-cache");
-        })();
+        })().catch(() => {
+            if (!res.destroyed && !res.writableEnded)
+                sendLocalAnimeCover(res, String(Date.now()), "no-cache");
+        });
         return true;
     }
-    const filePath = path.join(library_1.MUSIC_DIR, filename);
-    if (!fs.existsSync(filePath)) {
+    let filePath = "";
+    try {
+        filePath = (0, music_catalog_1.resolveSafeMusicFile)(filename).filePath;
+    }
+    catch { }
+    if (!filePath || !fs.existsSync(filePath)) {
         res.writeHead(404);
         res.end("Not Found");
         return true;
@@ -304,7 +320,10 @@ function handleMusicCoverApi(res, parsed) {
             return;
         }
         sendDefaultCover(res, cachePath, hash);
-    })();
+    })().catch(() => {
+        if (!res.destroyed && !res.writableEnded)
+            sendDefaultCover(res, cachePath, hash);
+    });
     return true;
 }
 //# sourceMappingURL=cover.js.map

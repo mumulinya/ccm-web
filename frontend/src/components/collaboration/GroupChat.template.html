@@ -209,20 +209,10 @@
               :disabled="false"
               :busy="isStreaming"
               :allow-input-while-busy="true"
-              :show-template-button="false"
               :files="messageFiles"
               :slash="slash"
-              :templates-open="showTemplateSelector"
-              :templates="allTemplates"
-              :template-search-query="templateSearchQuery"
-              :active-template-index="activeTemplateIndex"
-              :recommended-template="recommendedTemplate"
               @files-selected="onMessageFilesSelected"
               @remove-file="removeMessageFile"
-              @open-template="openTemplateSelector"
-              @update:template-search-query="templateSearchQuery = $event"
-              @select-template="selectChatTemplate"
-              @apply-recommendation="applyRecommendation"
               @keydown="handleKeydown"
               @input="handleInput"
               @send="sendMessage"
@@ -355,12 +345,4 @@
       @close="showMembers = false"
     />
 
-    <TemplateVariablesModal
-      v-if="showVariableModal && activeTemplate"
-      :template="activeTemplate"
-      :variables="templateVariables"
-      @update-variable="({ key, value }) => { templateVariables[key] = value }"
-      @apply="applyTemplateVariables"
-      @close="showVariableModal = false"
-    />
   </div>

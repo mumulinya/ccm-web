@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Archive, CircleCheck, Database, HardDrive, History, Info, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from '@lucide/vue'
 import { toast } from '../../../utils/toast'
 import CleanupStorageOverview from './CleanupStorageOverview.vue'
@@ -20,6 +20,8 @@ const selectedIds = ref([])
 const confirmationText = ref('')
 const retentionDays = ref(30)
 const initializedPolicy = ref(false)
+const activeTransaction = ref(null)
+let transactionPoller = null
 
 const views = [
   { id: 'overview', label: '存储概览', description: '查看运行数据分布', icon: HardDrive },
@@ -56,6 +58,10 @@ const loadSummary = async () => {
     const data = await response.json()
     if (!response.ok || data.success === false) throw new Error(data.error || '加载清理中心失败')
     summary.value = data
+    if (!activeTransaction.value && data.active_transactions?.length) {
+      activeTransaction.value = data.active_transactions[0]
+      startTransactionPolling(activeTransaction.value.transaction_id)
+    }
     if (!initializedPolicy.value) {
       retentionDays.value = Number(data.policy?.default_retention_days || 30)
       initializedPolicy.value = true
@@ -63,6 +69,65 @@ const loadSummary = async () => {
     if (!data.cards?.some(card => card.id === selectedCardId.value)) selectedCardId.value = data.cards?.[0]?.id || ''
   } catch (err) {
     error.value = err?.message || '清理中心暂时无法使用'
+  } finally {
+    loading.value = false
+  }
+}
+
+const terminalTransaction = status => ['completed', 'partial', 'failed', 'cancelled'].includes(String(status || ''))
+
+const pollTransaction = async (transactionId) => {
+  try {
+    const response = await fetch(`/api/cleanup/transaction?transaction_id=${encodeURIComponent(transactionId)}&limit=100`, { cache: 'no-store' })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '读取清理事务失败')
+    activeTransaction.value = data.transaction
+    if (terminalTransaction(data.transaction?.status)) {
+      if (transactionPoller) clearInterval(transactionPoller)
+      transactionPoller = null
+      running.value = false
+      toast[data.transaction.status === 'completed' ? 'success' : data.transaction.status === 'partial' ? 'warning' : 'error'](
+        data.transaction.status === 'completed'
+          ? `已处理 ${data.transaction.processed_count || 0} 条记录`
+          : `清理结束：成功 ${data.transaction.processed_count || 0} 条，失败 ${data.transaction.failed_count || 0} 条`,
+      )
+      await loadSummary()
+      activeTransaction.value = null
+      activeView.value = 'history'
+    }
+  } catch (err) {
+    error.value = err?.message || '清理进度加载失败'
+  }
+}
+
+const startTransactionPolling = (transactionId) => {
+  if (transactionPoller) clearInterval(transactionPoller)
+  running.value = true
+  void pollTransaction(transactionId)
+  transactionPoller = setInterval(() => void pollTransaction(transactionId), 1000)
+}
+
+const cancelTransaction = async () => {
+  const id = activeTransaction.value?.transaction_id
+  if (!id || terminalTransaction(activeTransaction.value?.status)) return
+  const response = await fetch('/api/cleanup/cancel', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transaction_id: id }),
+  })
+  const data = await response.json()
+  if (!response.ok || data.success === false) error.value = data.error || '取消清理失败'
+  else activeTransaction.value = data.transaction
+}
+
+const scanStorage = async () => {
+  loading.value = true
+  try {
+    const response = await fetch('/api/cleanup/storage-index/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '启动存储扫描失败')
+    toast.info(data.reason === 'already_building' ? '存储扫描正在进行' : '已在后台开始存储扫描')
+    setTimeout(() => void loadSummary(), 1000)
+  } catch (err) {
+    error.value = err?.message || '启动存储扫描失败'
   } finally {
     loading.value = false
   }
@@ -114,24 +179,21 @@ const runAction = async () => {
         confirm: true,
         preview_token: preview.value.preview_token,
         selected_ids: selectedIds.value,
+        confirmation_phrase: confirmationText.value.trim(),
       }),
     })
     const data = await response.json()
     if (!response.ok || data.success === false) throw new Error(data.error || '清理执行失败')
-    toast[data.partial ? 'warning' : 'success'](
-      data.partial
-        ? `已处理 ${data.receipt?.processed_count || 0} 条，部分记录需要重试`
-        : `已处理 ${data.receipt?.processed_count || 0} 条记录`,
-    )
+    if (!data.transaction_id) throw new Error('服务端未返回清理事务 ID')
     preview.value = null
     selectedIds.value = []
     confirmationText.value = ''
-    await loadSummary()
-    activeView.value = 'history'
+    activeTransaction.value = data.transaction
+    startTransactionPolling(data.transaction_id)
   } catch (err) {
     error.value = err?.message || '清理执行失败'
   } finally {
-    running.value = false
+    if (!activeTransaction.value?.transaction_id) running.value = false
   }
 }
 
@@ -147,6 +209,7 @@ const navigateSelected = () => {
 }
 
 onMounted(loadSummary)
+onUnmounted(() => { if (transactionPoller) clearInterval(transactionPoller) })
 </script>
 
 <template>
@@ -162,15 +225,24 @@ onMounted(loadSummary)
       <div class="cleanup-header-actions">
         <span v-if="summary?.updated_at" class="cleanup-last-update">扫描于 {{ new Date(summary.updated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
         <span class="cleanup-service-state">
-          <CircleCheck :size="15" /> 已启用安全预览
+          <CircleCheck :size="15" /> {{ summary?.storage?.index?.status === 'index_building' ? '存储索引构建中' : '已启用安全预览' }}
         </span>
         <button class="cleanup-icon-button" title="刷新清理摘要" :disabled="loading" @click="loadSummary">
           <RefreshCw :size="17" :class="{ spinning: loading }" />
         </button>
+        <button class="cleanup-button" title="在后台重新扫描存储" :disabled="loading" @click="scanStorage">重新扫描</button>
       </div>
     </header>
 
     <div v-if="error" class="cleanup-alert cleanup-page-alert" role="alert">{{ error }}</div>
+
+    <section v-if="activeTransaction" class="cleanup-alert cleanup-transaction-banner">
+      <div>
+        <strong>{{ activeTransaction.label }} · {{ activeTransaction.status }}</strong>
+        <span>已完成 {{ activeTransaction.processed_count || 0 }} / {{ activeTransaction.requested_count || 0 }}，失败 {{ activeTransaction.failed_count || 0 }}</span>
+      </div>
+      <button v-if="!terminalTransaction(activeTransaction.status)" class="cleanup-button" @click="cancelTransaction">停止后续步骤</button>
+    </section>
 
     <section v-if="summary" class="cleanup-summary-strip" aria-label="清理中心摘要">
       <div><Database :size="16" /><span><strong>{{ totalRecords.toLocaleString() }}</strong><small>条运行数据</small></span></div>

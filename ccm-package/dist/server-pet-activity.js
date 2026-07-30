@@ -3,12 +3,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPetActivityRuntime = createPetActivityRuntime;
 // Mechanically extracted from server.ts; preserves pet activity state and callbacks.
 function createPetActivityRuntime(deps) {
-    const { CCM_DIR, GlobalPetActivityCoordinator, PETS_FILE, PID_DIR, bindProjectSessionAgentExecution, fs, getConfigs, getPort, getTaskAgentSessionOptions, loadProjectChatRuns, openTaskAgentSession, path, projectChatRuns, saveProjectChatRuns, url } = deps;
+    const { CCM_DIR, GlobalPetActivityCoordinator, PETS_FILE, PID_DIR, bindProjectSessionAgentExecution, fs, getConfigs, getPort, getTaskAgentSessionOptions, loadProjectChatRuns, openTaskAgentSession, path, projectChatRuns, saveProjectChatRuns, createPetSpeechNotification, sanitizePetNotificationText, url } = deps;
     const petStatusClients = new Set();
     const petWorkspaceClients = new Set();
     const stateCache = new Map();
     const agentActivity = new Map();
     const petWorkspaceTargets = new Map();
+    const petSpeechBuffers = new Map();
     const globalPetActivityCoordinator = new GlobalPetActivityCoordinator();
     const MUSIC_PET_AGENT_NAME = "music-agent";
     const GLOBAL_PET_AGENT_NAME = "global-agent";
@@ -74,17 +75,39 @@ function createPetActivityRuntime(deps) {
         return { session, options: getTaskAgentSessionOptions(session) };
     }
     function broadcastPetSpeech(agent, payload = {}) {
-        const text = payload.text == null ? "" : String(payload.text);
+        const text = sanitizePetNotificationText(payload.text == null ? "" : String(payload.text));
         if (!agent || (!text.trim() && !payload.final))
             return;
+        const speechKey = `${agent}:${payload.source || "project"}`;
+        if (payload.mode === "append" && text) {
+            petSpeechBuffers.set(speechKey, sanitizePetNotificationText(`${petSpeechBuffers.get(speechKey) || ""}${text}`));
+        }
+        else if (text) {
+            petSpeechBuffers.set(speechKey, text);
+        }
+        const finalText = payload.final ? (text || petSpeechBuffers.get(speechKey) || "") : text;
         const source = payload.source || "project";
         const isMusic = agent === MUSIC_PET_AGENT_NAME;
         const isGlobal = agent === GLOBAL_PET_AGENT_NAME;
         const resolved = !isMusic && !isGlobal ? globalPetActivityCoordinator.resolve() : null;
         const actorDisplayName = isMusic ? getMusicPetAgentLabel() : isGlobal ? getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent") : (resolved?.displayName || agent);
-        const visibleText = isMusic || isGlobal || !text.trim() || text.trim().startsWith(`${actorDisplayName}：`)
-            ? text
-            : `${actorDisplayName}：${text}`;
+        const visibleText = isMusic || isGlobal || !finalText.trim() || finalText.trim().startsWith(`${actorDisplayName}：`)
+            ? finalText
+            : `${actorDisplayName}：${finalText}`;
+        if (payload.final && payload.role !== "user") {
+            petSpeechBuffers.delete(speechKey);
+            return createPetSpeechNotification({
+                agent,
+                role: payload.role,
+                text: visibleText,
+                source,
+                task_id: payload.task_id || payload.taskId,
+                scope_id: payload.scope_id || payload.scopeId || agent,
+                exact_session_id: payload.exact_session_id || payload.session_id || payload.sessionId,
+                action: payload.action,
+                dedupe_key: payload.dedupe_key || payload.dedupeKey,
+            });
+        }
         const event = {
             type: "speech",
             agent: isMusic ? MUSIC_PET_AGENT_NAME : GLOBAL_PET_AGENT_NAME,
@@ -92,7 +115,7 @@ function createPetActivityRuntime(deps) {
             actorKind: isMusic ? "music" : isGlobal ? "global" : (resolved?.actorKind || "project"),
             displayName: actorDisplayName,
             role: payload.role || "assistant",
-            text: visibleText,
+            text: sanitizePetNotificationText(visibleText),
             mode: payload.mode || "replace",
             final: !!payload.final,
             source,

@@ -821,26 +821,6 @@ const executeAction = async (action, actionFiles = []) => {
         toast.error(`创建项目失败: ${projData.error || '未知错误'}`)
         addAssistantMessage(`❌ [项目创建失败]: ${projData.error || '未知错误'}`)
       }
-    } else if (action.type === 'create_template') {
-      const templateContent = getActionParam(action, 'content', 'prompt', 'message')
-      toast.info(`正在为您自动创建对话模板: ${action.params.name}...`)
-      const tplRes = await fetch('/api/templates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: action.params.name,
-          category: action.params.category || 'custom',
-          prompt: templateContent
-        })
-      })
-      const tplData = await tplRes.json()
-      if (tplData.success) {
-        toast.success(`对话模板「${action.params.name}」创建成功！`)
-        addAssistantMessage(systemResultMessage('📚', `对话模板「${action.params.name}」已成功创建并保存！\n- **分类**: ${action.params.category || 'custom'}\n- **模板内容**:\n> ${templateContent}`))
-      } else {
-        toast.error(`创建对话模板失败: ${tplData.error || '未知错误'}`)
-        addAssistantMessage(`❌ [对话模板创建失败]: ${tplData.error || '未知错误'}`)
-      }
     } else if (action.type === 'git_review') {
       const project = getActionParam(action, 'project', 'projectName')
       if (!project) {

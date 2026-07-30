@@ -6,6 +6,7 @@ import {
   callAnthropicCompatibleJson,
   callOpenAiCompatibleJson,
   shouldUseAnthropic,
+  type LlmTokenUsage,
 } from "../modules/collaboration/group-orchestrator-llm-client";
 import { loadOrchestratorConfig } from "../modules/collaboration/group-orchestrator-config";
 import { resolveGroupModelContextCapacity } from "../modules/collaboration/group-compaction-strategy";
@@ -21,7 +22,8 @@ export type SemanticDecisionKind =
   | "memory_extraction"
   | "acceptance_projection"
   | "main_agent_self_verification"
-  | "requirement_intake_quality";
+  | "requirement_intake_quality"
+  | "work_report_summary";
 
 export interface SemanticDecisionIdentityV1 {
   scope: SemanticDecisionScope;
@@ -42,7 +44,10 @@ export interface SemanticDecisionReceiptV1 {
   model: string;
   confidence: number;
   status: "confirmed" | "failed";
+  startedAt?: string;
   decidedAt: string;
+  durationMs?: number;
+  usage?: LlmTokenUsage | null;
   checksum: string;
 }
 
@@ -98,6 +103,7 @@ type SemanticDecisionRequest<T> = {
   validate: (value: any) => T;
   confidence?: (value: T) => number;
   maxTokens?: number;
+  reasoningEffort?: "low" | "medium" | "high" | "off";
   modelCall?: (request: { config: any; messages: any[]; maxTokens: number }) => Promise<any>;
   config?: any;
 };
@@ -152,6 +158,9 @@ export async function runSemanticDecision<T>(request: SemanticDecisionRequest<T>
   if (existing) return existing;
 
   let resolvedConfig: any = request.config || null;
+  const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  let modelUsage: LlmTokenUsage | null = null;
   const operation = (async () => {
     const config = resolvedConfig || loadOrchestratorConfig();
     resolvedConfig = config;
@@ -179,16 +188,20 @@ export async function runSemanticDecision<T>(request: SemanticDecisionRequest<T>
         ? await callAnthropicCompatibleJson(config, {
             messages,
             maxTokens,
+            reasoningEffort: request.reasoningEffort,
             defaultTimeoutMs: Number(config.timeoutMs || 120_000),
             retryScope: `semantic:${request.kind}`,
             providerContextCache: { scope: identity.scope, scopeId: identity.scopeId, sessionId: identity.sessionId, source: `semantic_${request.kind}` },
+            onUsage: usage => { modelUsage = usage; },
           })
         : await callOpenAiCompatibleJson(config, {
             messages,
             maxTokens,
+            reasoningEffort: request.reasoningEffort,
             defaultTimeoutMs: Number(config.timeoutMs || 120_000),
             retryScope: `semantic:${request.kind}`,
             providerContextCache: { scope: identity.scope, scopeId: identity.scopeId, sessionId: identity.sessionId, source: `semantic_${request.kind}` },
+            onUsage: usage => { modelUsage = usage; },
           });
     const value = request.validate(parsed);
     const confidence = Math.max(0, Math.min(1, Number(request.confidence?.(value) ?? (value as any)?.confidence ?? 1)));
@@ -203,7 +216,10 @@ export async function runSemanticDecision<T>(request: SemanticDecisionRequest<T>
       model: String(config.model || ""),
       confidence,
       status: "confirmed" as const,
+      startedAt,
       decidedAt: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - startedMs),
+      usage: modelUsage,
     };
     const receipt: SemanticDecisionReceiptV1 = { ...core, checksum: semanticDecisionChecksum(core) };
     const result = { value, receipt };
@@ -225,7 +241,10 @@ export async function runSemanticDecision<T>(request: SemanticDecisionRequest<T>
       model: String(config?.model || ""),
       confidence: 0,
       status: "failed" as const,
+      startedAt,
       decidedAt: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - startedMs),
+      usage: modelUsage,
     };
     const receipt: SemanticDecisionReceiptV1 = { ...core, checksum: semanticDecisionChecksum(core) };
     try { persistReceipt(receipt); } catch {}

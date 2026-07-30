@@ -17,6 +17,10 @@ interface McpToolResult {
     }>;
     isError?: boolean;
 }
+export declare function resolveMcpStdioCommand(command: string, args?: string[]): {
+    cmd: string;
+    args: string[];
+};
 export declare class McpClient {
     private command;
     private args;

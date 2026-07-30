@@ -50,6 +50,7 @@ const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const artifact_verifier_1 = require("../../test-agent/artifact-verifier");
+const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
 const RUN_DIR = path.join(utils_1.CCM_DIR, "test-agent-runs");
 const HANDOFF_DIR = path.join(utils_1.CCM_DIR, "test-agent-handoffs");
 const activeByKey = new Map();
@@ -267,26 +268,36 @@ function gitValue(workDir, args, maxBuffer = 8 * 1024 * 1024) {
         return "";
     }
 }
-function declaredFileHash(project, realWorkDir) {
+function declaredFileEvidence(project, realWorkDir) {
     const files = [...new Set((project?.changedFiles || project?.changed_files || []).map((item) => String(item)).filter(Boolean))].sort();
-    const digest = crypto.createHash("sha256");
+    const evidence = [];
     for (const relative of files.slice(0, 200)) {
-        const file = path.resolve(realWorkDir, relative);
-        const rel = path.relative(realWorkDir, file);
-        if (!rel || rel.startsWith("..") || path.isAbsolute(rel))
-            continue;
-        digest.update(relative);
         try {
-            const stat = fs.statSync(file);
-            digest.update(`${stat.size}:${stat.mtimeMs}`);
-            if (stat.isFile() && stat.size <= 25 * 1024 * 1024)
-                digest.update(fs.readFileSync(file));
+            const safe = (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(realWorkDir, relative, { allowLeafSymlink: true });
+            if (!fs.existsSync(safe.absolute)) {
+                evidence.push({ path: relative, state: "missing", size: 0, checksum: hash("missing"), verified: true });
+                continue;
+            }
+            const stat = fs.lstatSync(safe.absolute);
+            if (stat.isSymbolicLink()) {
+                const target = fs.readlinkSync(safe.absolute);
+                evidence.push({ path: relative, state: "symlink", size: stat.size, checksum: hash(`symlink:${target}`), verified: true });
+            }
+            else if (stat.isFile() && stat.size <= 25 * 1024 * 1024) {
+                evidence.push({ path: relative, state: "file", size: stat.size, checksum: crypto.createHash("sha256").update(fs.readFileSync(safe.absolute)).digest("hex"), verified: true });
+            }
+            else {
+                evidence.push({ path: relative, state: stat.isFile() ? "too_large" : "unsupported", size: stat.size, checksum: hash(`${stat.size}:${stat.mtimeMs}`), verified: false });
+            }
         }
         catch {
-            digest.update("missing");
+            evidence.push({ path: relative, state: "unsafe", size: 0, checksum: "", verified: false });
         }
     }
-    return digest.digest("hex");
+    return evidence;
+}
+function declaredFileHash(project, realWorkDir) {
+    return hash(declaredFileEvidence(project, realWorkDir));
 }
 function captureTestAgentSourceBinding(handoff) {
     const projects = (Array.isArray(handoff?.projects) ? handoff.projects : handoff?.project ? [handoff.project] : [])
@@ -301,7 +312,8 @@ function captureTestAgentSourceBinding(handoff) {
         const gitStatus = gitValue(realWorkDir, ["status", "--porcelain=v1", "--untracked-files=all"]);
         const gitStatusHash = hash(gitStatus);
         const declaredFiles = [...new Set((project?.changedFiles || project?.changed_files || []).map(String).filter(Boolean))].sort();
-        const fileHash = declaredFileHash(project, realWorkDir);
+        const fileEvidence = declaredFileEvidence(project, realWorkDir);
+        const fileHash = hash(fileEvidence);
         return {
             name: String(project?.name || `project-${index + 1}`),
             workDir,
@@ -310,6 +322,7 @@ function captureTestAgentSourceBinding(handoff) {
             gitStatusHash,
             declaredFiles,
             declaredFileHash: fileHash,
+            declaredFileEvidence: fileEvidence,
             fingerprint: hash({ realWorkDir: realWorkDir.toLowerCase(), gitHead, gitStatusHash, fileHash }),
         };
     });

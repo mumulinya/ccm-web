@@ -37,6 +37,7 @@ let resizeObserver = null
 let queued = ''
 let renderedContent = ''
 let fallbackPollTimer = null
+let snapshotController = null
 let activeBindingKey = ''
 let resizeStartY = 0
 let resizeStartHeight = 0
@@ -130,6 +131,8 @@ const stopFallbackPolling = () => {
 }
 const disposeStream = () => {
   stopFallbackPolling()
+  snapshotController?.abort()
+  snapshotController = null
   eventSource?.close()
   eventSource = null
   connection.value = 'disconnected'
@@ -138,10 +141,13 @@ let connectionGeneration = 0
 const loadSnapshot = async (params, generation, quiet = false) => {
   if (!quiet) snapshotState.value = 'loading'
   try {
+    snapshotController?.abort()
+    snapshotController = new AbortController()
     const response = await fetch(`/api/projects/runtime/logs?${params}&lines=2000`, {
       credentials: 'same-origin',
       cache: 'no-store',
       headers: { Accept: 'application/json' },
+      signal: snapshotController.signal,
     })
     const payload = await response.json().catch(() => ({}))
     if (generation !== connectionGeneration || !props.open) return false
@@ -152,6 +158,7 @@ const loadSnapshot = async (params, generation, quiet = false) => {
     connectionError.value = ''
     return true
   } catch (error) {
+    if (error?.name === 'AbortError') return false
     if (generation === connectionGeneration && props.open) {
       connectionError.value = error?.message || '读取日志失败'
       if (!hasContent.value) snapshotState.value = 'failed'
@@ -291,7 +298,7 @@ onBeforeUnmount(() => {
     </div>
     <header>
       <div class="console-title"><span class="run-mark"></span><strong>{{ title }}</strong><small>{{ project }}</small></div>
-      <div class="console-state" :class="[status, connection]"><span></span>{{ status === 'starting' ? '准备依赖' : status === 'running' ? '运行中' : status === 'failed' ? '已失败' : status === 'unknown' ? '待确认' : '已停止' }}</div>
+      <div class="console-state" :class="[status, connection]"><span></span>{{ status === 'starting' ? '准备依赖' : status === 'running' ? '运行中' : status === 'stopping' ? '正在停止' : status === 'failed' ? '已失败' : status === 'unknown' ? '归属待确认' : '已停止' }}</div>
       <div class="console-search" role="search">
         <Search :size="14" />
         <input v-model="query" type="text" aria-label="查找日志" placeholder="查找日志" autocomplete="off" spellcheck="false" @keydown.enter="findNext">
@@ -332,7 +339,9 @@ header { min-height:42px; flex:0 0 42px; display:flex; align-items:center; gap:1
 .console-state>span { width:6px; height:6px; border-radius:50%; background:#6b7280; }
 .console-state.running>span { background:#64c47b; box-shadow:0 0 0 3px rgba(100,196,123,.12); }
 .console-state.starting>span { background:#e0af68; box-shadow:0 0 0 3px rgba(224,175,104,.12); }
+.console-state.stopping>span { background:#e0af68; box-shadow:0 0 0 3px rgba(224,175,104,.12); animation:pulse-stop 1s ease-in-out infinite; }
 .console-state.failed>span { background:#f7768e; }
+@keyframes pulse-stop { 50% { opacity:.35; } }
 .console-search { margin-left:auto; width:min(230px,24vw); height:30px; box-sizing:border-box; display:flex; align-items:center; gap:7px; padding:0 4px 0 9px; overflow:hidden; border:1px solid #353b46; border-radius:5px; background:#12151a; color:#778191; transition:border-color .15s,background .15s,box-shadow .15s; }
 .console-search:focus-within { border-color:#4f8bd8; background:#171a20; box-shadow:0 0 0 2px rgba(79,139,216,.16); color:#8eb9ef; }
 .run-console .console-search input,.run-console .console-search input:focus { min-width:0; height:100%; flex:1; box-sizing:border-box; padding:0!important; border:0!important; border-radius:0!important; outline:0!important; background:transparent!important; box-shadow:none!important; color:#d7dae0!important; caret-color:#8eb9ef; font:10.5px 'JetBrains Mono',Consolas,monospace; }

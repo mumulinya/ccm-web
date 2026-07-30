@@ -71,6 +71,7 @@ const model_capability_cache_1 = require("./model-capability-cache");
 const group_session_maintenance_1 = require("./group-session-maintenance");
 const group_memory_context_1 = require("./group-memory-context");
 const group_test_targets_1 = require("./group-test-targets");
+const shared_files_v2_1 = require("../tools/shared-files-v2");
 const GROUP_MAIN_AGENT_PROGRESS_REFRESH_STALE_MS = 15 * 60 * 1000;
 const GROUP_MESSAGE_RUNTIME_MAX_BYTES = 4 * 1024 * 1024;
 const GROUP_MESSAGE_RUNTIME_OMIT_KEYS = new Set([
@@ -2244,7 +2245,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         return true;
     }
     if (pathname === "/api/groups/tools" && req.method === "GET") {
-        const groupId = parsed.query.id;
+        const groupId = String(parsed.query.id || "");
         if (!groupId)
             return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
         const groups = (0, storage_1.loadGroups)();
@@ -2333,18 +2334,15 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         return true;
     }
     if (pathname === "/api/groups/shared" && req.method === "GET") {
-        const groupId = parsed.query.id;
+        const groupId = String(parsed.query.id || "");
         if (!groupId)
             return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
         const groups = (0, storage_1.loadGroups)();
         const group = groups.find(g => g.id === groupId);
         if (!group)
             return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
-        const before = JSON.stringify(group.shared_files || []);
-        group.shared_files = ctx.normalizeSharedFileList(group.shared_files || []);
-        if (JSON.stringify(group.shared_files) !== before)
-            (0, storage_1.saveGroups)(groups);
-        (0, utils_1.sendJson)(res, { files: group.shared_files || [] });
+        (0, shared_files_v2_1.migrateLegacySharedFilesV2)("group", groupId, group.shared_files || [], "groups-v1");
+        (0, utils_1.sendJson)(res, { files: (0, shared_files_v2_1.listSharedFilesV2)("group", groupId) });
         return true;
     }
     if (pathname === "/api/groups/shared/add" && req.method === "POST") {
@@ -2352,34 +2350,16 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { group_id, name, content } = JSON.parse(body);
+                const { group_id, name: rawName, content } = JSON.parse(body);
+                const name = (0, shared_files_v2_1.validateSharedFileV2Name)(rawName);
                 if (!name || !content)
                     return (0, utils_1.sendJson)(res, { error: "文件名和内容不能为空" }, 400);
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
-                if (!group.shared_files)
-                    group.shared_files = [];
-                const existing = group.shared_files.findIndex((f) => f.name === name);
-                if (existing >= 0) {
-                    group.shared_files[existing].content = content;
-                    group.shared_files[existing].type = "text";
-                    group.shared_files[existing].readable = true;
-                    group.shared_files[existing].updated_at = new Date().toISOString();
-                }
-                else {
-                    group.shared_files.push({
-                        name,
-                        type: "text",
-                        readable: true,
-                        content,
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                    });
-                }
-                (0, storage_1.saveGroups)(groups);
-                (0, utils_1.sendJson)(res, { success: true, files: group.shared_files });
+                const file = (0, shared_files_v2_1.upsertSharedTextV2)("group", group_id, name, content);
+                (0, utils_1.sendJson)(res, { success: true, file, files: (0, shared_files_v2_1.listSharedFilesV2)("group", group_id) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -2392,16 +2372,16 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { group_id, name } = JSON.parse(body);
+                const { group_id, name: rawName } = JSON.parse(body);
+                const name = (0, shared_files_v2_1.validateSharedFileV2Name)(rawName);
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
-                if (!group.shared_files)
-                    group.shared_files = [];
-                group.shared_files = group.shared_files.filter((f) => f.name !== name);
-                (0, storage_1.saveGroups)(groups);
-                (0, utils_1.sendJson)(res, { success: true, files: group.shared_files });
+                const file = (0, shared_files_v2_1.listSharedFilesV2)("group", group_id).find((item) => item.name === name);
+                if (file)
+                    (0, shared_files_v2_1.deleteSharedFileV2)("group", group_id, file.id);
+                (0, utils_1.sendJson)(res, { success: true, files: (0, shared_files_v2_1.listSharedFilesV2)("group", group_id) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -2421,8 +2401,6 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
-                if (!group.shared_files)
-                    group.shared_files = [];
                 let imported = 0;
                 for (const name of file_names) {
                     const filePath = ctx.getSharedFilePath(name);
@@ -2430,23 +2408,11 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                         const record = ctx.createSharedFileRecord(name, "global");
                         if (!record)
                             continue;
-                        const existing = group.shared_files.findIndex((f) => f.name === name);
-                        if (existing >= 0) {
-                            group.shared_files[existing] = {
-                                ...group.shared_files[existing],
-                                ...record,
-                                created_at: group.shared_files[existing].created_at || record.created_at,
-                                updated_at: new Date().toISOString()
-                            };
-                        }
-                        else {
-                            group.shared_files.push(record);
-                        }
+                        (0, shared_files_v2_1.migrateLegacySharedFilesV2)("group", group_id, [record], "global-shared-v1");
                         imported++;
                     }
                 }
-                (0, storage_1.saveGroups)(groups);
-                (0, utils_1.sendJson)(res, { success: true, imported, files: group.shared_files });
+                (0, utils_1.sendJson)(res, { success: true, imported, files: (0, shared_files_v2_1.listSharedFilesV2)("group", group_id) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

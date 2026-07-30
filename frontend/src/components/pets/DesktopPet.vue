@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import PetSprite from './PetSprite.vue'
 
 const props = defineProps({
@@ -10,10 +10,11 @@ const props = defineProps({
   petType: { type: String, default: 'cat' },
   agentState: { type: String, default: 'idle' },
   initialX: { type: Number, default: null },
-  initialY: { type: Number, default: null }
+  initialY: { type: Number, default: null },
+  notification: { type: Object, default: null },
 })
 
-const emit = defineEmits(['menu', 'move'])
+const emit = defineEmits(['menu', 'move', 'activate'])
 
 const x = ref(props.initialX ?? (window.innerWidth - 120 - Math.random() * 100))
 const y = ref(props.initialY ?? (window.innerHeight - 160 - Math.random() * 100))
@@ -114,6 +115,10 @@ const showRandomBubble = () => {
 
 const handleClick = (e) => {
   if (isDragging.value) return
+  if (props.notification?.action) {
+    emit('activate', props.notification.action)
+    return
+  }
   showRandomBubble()
 }
 
@@ -178,6 +183,14 @@ const onTouchEnd = () => {
     setTimeout(() => { isDragging.value = false }, 50)
   }
 }
+
+watch(() => props.notification, notification => {
+  if (!notification) return
+  bubbleText.value = [notification.title, notification.summary].filter(Boolean).join('：')
+  showBubble.value = true
+  if (bubbleTimer.value) clearTimeout(bubbleTimer.value)
+  bubbleTimer.value = setTimeout(() => { showBubble.value = false }, notification.role === 'ask' ? 30_000 : 12_000)
+}, { immediate: true })
 
 onUnmounted(() => {
   if (bubbleTimer.value) clearTimeout(bubbleTimer.value)

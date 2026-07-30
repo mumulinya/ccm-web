@@ -1,46 +1,70 @@
 # 项目结构与业务流程覆盖矩阵
 
-本文依据生产代码、前端页面、公开 API、CLI 和 `scripts/test-domains.json` 对 CCM 进行全量盘点。它用于回答“一个业务域由什么代码实现、确认文档在哪里”，不是产品规划表。
+> 本文由 `scripts/project-coverage-manifest.json` 自动生成，请勿手工修改。
+> 清单版本：V1 · 清单 checksum：`4e96bb771f0e26fd`
+
+本矩阵只列出能够从页面、API、CLI或后台调度真实到达的生产能力。兼容与退役入口单独列出，不计入现行业务覆盖。
 
 ## 顶层结构
 
 | 目录 | 责任 |
 | --- | --- |
-| `backend/modules` | 全局、群聊、项目、知识、音乐、定时、搜索、认证和工具等业务模块 |
-| `backend/agents` | 主 Agent、开发 Agent、TestAgent 的执行内核、任务交接、续跑和交付回执 |
-| `backend/system` | 上下文、压缩、可靠性、任务附件、统一调度、清理和运行事件 |
-| `backend/integrations` | MCP、飞书、权限、任务证据和第三方 Agent 记忆 hydration |
-| `frontend/src/components` | 工作台及各业务页面；只投影服务端状态，不成为任务或记忆事实源 |
-| `ccm-package` | npm 安装包、`ccm` CLI、生产后端和前端资源 |
-| `scripts` | 按领域组织的自动化回归、发布验收和文档检查 |
+| `backend/agents` | 全局、群聊、项目主 Agent及开发 Agent执行内核 |
+| `backend/core` | 数据库、原子文件、凭据、任务存储和实例锁 |
+| `backend/integrations` | 第三方集成适配、MCP和外部通道共享能力 |
+| `backend/modules` | 认证、协作、项目、知识、音乐、调度和工具业务模块 |
+| `backend/projects` | 项目级Agent配置、工作区和项目运行支持 |
+| `backend/skills` | 内置Skill目录、角色Skill和调用边界 |
+| `backend/system` | 上下文、压缩、可靠性、清理、附件和运行事件 |
+| `backend/tasks` | 统一任务身份、队列、工作项和Agent会话 |
+| `backend/test-agent` | TestAgent结构化计划、浏览器验收和证据门禁 |
+| `backend/tools` | MCP客户端、工具目录、授权快照和运行时同步 |
+| `frontend/src` | 桌面和移动端页面、共享组件及服务端状态投影 |
+| `integrations` | 独立构建的飞书MCP等集成产物 |
+| `ccm-package` | npm生产包、CLI、后端构建和前端静态资源 |
+| `pet-assets-package` | 按需安装的桌宠资源包 |
+| `scripts` | 领域回归、覆盖审计、文档检查和发布验收 |
+| `docs` | 确认架构、完整业务流程和实施审计 |
 
-## 业务域覆盖
+## 现行业务覆盖
 
-| 业务域 | 主要实现 | 确认文档 |
-| --- | --- | --- |
-| 本地登录、注册与会话安全 | `system/local-auth.ts`、`AuthPage.vue` | [本地认证与访问安全](./LOCAL-AUTH-AND-SECURITY.md) |
-| 全局 Agent 普通问答、运行与任务监督 | `global/*`、`agents/global/*`、`GlobalAgent.vue` | [全局 Agent 运行体系](./GLOBAL-AGENT-OPERATIONS.md) |
-| 群聊/项目自动开发 | `collaboration/*`、`projects/project-main-agent.ts` | [自动开发](./AUTOMATIC-DEVELOPMENT.md)及端到端流程文档 |
-| 需求池、文档、图片和附件摄取 | `requirements/source-ingestion.ts`、`system/task-attachments.ts` | [需求资料摄取](./REQUIREMENT-INGESTION-AND-ATTACHMENTS.md) |
-| 任务、队列、权限、TestAgent、回放 | `collaboration/*`、`system/unified-task-scheduler.ts` | [自动开发](./AUTOMATIC-DEVELOPMENT.md)、[权限](./TASK-PERMISSION-APPROVAL.md)、[TestAgent](./TEST-AGENT.md)、[搜索与回放](./CONVERSATION-SEARCH-AND-TASK-REPLAY.md) |
-| 定时任务、日报与周报 | `scheduling/*`、`CronJobs.vue`、`AutoDevOps.vue` | [定时开发与工作报告](./SCHEDULING-AND-WORK-REPORTS.md) |
-| 项目身份、分组、归档、运行 | `projects/*`、`ProjectManager.vue` | [项目管理与运行](./PROJECT-MANAGEMENT.md) |
-| Git 仓库与代码协作 | `projects/project-git.ts`、`tools/git.ts`、`CodeChanges.vue` | [项目代码工作区](./PROJECT-CODE-WORKSPACE.md) |
-| 终端与运行控制台 | `tools/terminal.ts`、`project-runtime.ts`、`Terminal.vue` | [终端与运行控制台](./TERMINAL-AND-RUNTIME-CONSOLE.md) |
-| MCP、Skill、共享文件和市场 | `tools/tools.ts`、`tools/marketplace.ts` | [工具授权](./TOOL-AUTHORIZATION.md)、[工具市场](./TOOL-MARKETPLACE-AND-CATALOG.md)、[模板与命令](./TEMPLATES-SLASH-COMMANDS-AND-SHARED-FILES.md) |
-| 会话、长期记忆和上下文缓存 | `system/session-*`、`knowledge/memory-control-center-*` | [记忆系统](./MEMORY-SYSTEM.md) |
-| 知识库与 Embedding | `knowledge/*` | [知识库系统](./KNOWLEDGE-SYSTEM.md) |
-| 全局/项目飞书双向会话 | `global/*feishu*`、`projects/project-feishu-turn-queue.ts` | [飞书双向会话](./FEISHU-GLOBAL-AGENT.md) |
-| 音乐意图、媒体库和统一播放器 | `music/*`、`MusicPlayer.vue` | [音乐意图与播放](./MUSIC-PLAYBACK.md)、[音乐媒体平台](./MUSIC-LIBRARY-AND-MEDIA.md) |
-| 会话全文搜索 | `search/conversation-search.ts`、`SearchHistory.vue` | [会话搜索与任务回放](./CONVERSATION-SEARCH-AND-TASK-REPLAY.md) |
-| 性能、Trace、可靠性和清理 | `system/reliability-*`、`soak-test.ts`、`cleanup-center.ts` | [可靠性、监控与清理](./RELIABILITY-OBSERVABILITY-AND-CLEANUP.md) |
-| 桌面宠物和用户通知 | `pets/*`、`agent-notifications.ts`、`feishu-reaction-feedback.ts` | [桌面宠物与通知](./DESKTOP-PET-AND-USER-NOTIFICATIONS.md) |
-| 工作台和菜单布局 | `App.vue`、`Dashboard.vue`、`menuConfiguration.js` | [工作台与导航](./WORKSPACE-NAVIGATION-AND-MENU.md) |
-| npm 安装、CLI 和服务生命周期 | `ccm-package/bin/*`、`process-lifecycle.ts` | [CLI 与服务生命周期](./CLI-INSTALLATION-AND-SERVICE.md) |
+| 业务域 | 页面 | API / CLI | 生产实现 | 测试与确认文档 |
+| --- | --- | --- | --- | --- |
+| **本地认证、RBAC与访问安全**<br>首次安装、登录注册、会话、CSRF、角色能力和内部HMAC门禁。 | `auth` → `frontend/src/components/auth/AuthPage.vue` | `/api/auth`<br>CLI：`setup-code` | `backend/core`、`backend/modules/system`<br>`backend/modules/system/local-auth.ts`、`backend/modules/system/api-access-control.ts`、`backend/modules/system/internal-api-auth.ts` | 测试域：`core`、`frontend`<br>关键测试：`local-auth-selftest.mjs`、`local-auth-rbac-static-audit.mjs`、`local-auth-ui-selftest.mjs`<br>架构：[LOCAL AUTH AND SECURITY](./LOCAL-AUTH-AND-SECURITY.md)<br>流程：[LOCAL AUTH RBAC ACCESS SECURITY](./../confirmed-business-processes/LOCAL-AUTH-RBAC-ACCESS-SECURITY.md) |
+| **全局 Agent运行体系**<br>全局问答、语义路由、写授权、Mission监督、队列和终态投递。 | `global-agent` → `frontend/src/components/global/GlobalAgent.vue` | `/api/global-agent`、`/api/agent-runs`、`/api/conversation-turns` | `backend/agents`、`backend/tasks`<br>`backend/modules/global/global-agent-api.ts`、`backend/agents/global/mission-supervisor.ts` | 测试域：`agents`<br>关键测试：`global-agent-runtime-production-closure-selftest.mjs`、`unified-model-retry-selftest.mjs`<br>架构：[GLOBAL AGENT OPERATIONS](./GLOBAL-AGENT-OPERATIONS.md)<br>流程：[GLOBAL AGENT RUNTIME PRODUCTION V2](./../confirmed-business-processes/GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md) |
+| **群聊、项目与统一自动开发**<br>任务创建、源码规划、精确会话队列、子Agent执行、权限和自动验收。 | `groups` → `frontend/src/components/collaboration/GroupChat.vue`、`tasks` → `frontend/src/components/tasks/TaskManager.vue`、`autodev` → `frontend/src/components/tools/AutoDevOps.vue` | `/api/agent-collaboration`、`/api/agent-qa`、`/api/collaboration`、`/api/group-coordination`、`/api/groups`、`/api/send`、`/api/send-stream`、`/api/tasks` | `backend/modules/collaboration`、`backend/tasks`<br>`backend/modules/collaboration/collaboration-routes.ts`、`backend/modules/projects/project-main-agent.ts`、`backend/system/unified-task-scheduler.ts` | 测试域：`tasks`、`agents`<br>关键测试：`automatic-development-production-chain-selftest.mjs`、`automatic-development-unified-task-v2-audit.mjs`、`project-main-agent-orchestration-selftest.mjs`<br>架构：[AUTOMATIC DEVELOPMENT](./AUTOMATIC-DEVELOPMENT.md)、[TASK PERMISSION APPROVAL](./TASK-PERMISSION-APPROVAL.md)<br>流程：[AUTOMATIC DEVELOPMENT END TO END](./../confirmed-business-processes/AUTOMATIC-DEVELOPMENT-END-TO-END.md)、[AUTOMATIC DEVELOPMENT UNIFIED TASK SYSTEM V2](./../confirmed-business-processes/AUTOMATIC-DEVELOPMENT-UNIFIED-TASK-SYSTEM-V2.md)、[PROJECT CHILD AGENT COLLABORATION](./../confirmed-business-processes/PROJECT-CHILD-AGENT-COLLABORATION.md) |
+| **需求池、文档、图片与附件摄取**<br>流式上传、安全在线文档、完整Token分片、来源证据和需求池认领。 | — | `/api/requirements`、`/api/uploads` | `backend/modules/requirements`、`backend/system`<br>`backend/modules/requirements/source-ingestion.ts`、`backend/system/secure-multipart.ts`、`backend/system/task-attachments.ts` | 测试域：`tasks`<br>关键测试：`requirement-ingestion-v2-production-selftest.mjs`、`task-attachments-production-selftest.mjs`<br>架构：[REQUIREMENT INGESTION AND ATTACHMENTS](./REQUIREMENT-INGESTION-AND-ATTACHMENTS.md)<br>流程：[REQUIREMENT INGESTION END TO END V2](./../confirmed-business-processes/REQUIREMENT-INGESTION-END-TO-END-V2.md) |
+| **TestAgent独立验收与主Agent自验**<br>结构化测试计划、只读验证、验收覆盖、返工和关闭后的主Agent自验。 | — | — | `backend/test-agent`<br>`backend/test-agent/index.ts`、`backend/modules/collaboration/test-agent-runner.ts` | 测试域：`tasks`<br>关键测试：`test-agent-production-hardening-selftest.mjs`、`test-agent-acceptance-mode-production-selftest.mjs`<br>架构：[TEST AGENT](./TEST-AGENT.md)<br>流程：[TEST AGENT AND MAIN AGENT SELF VERIFICATION](./../confirmed-business-processes/TEST-AGENT-AND-MAIN-AGENT-SELF-VERIFICATION.md) |
+| **定时任务、AI日报与周报**<br>Cron调度、不可变工作证据、模型总结和固定飞书报告投递。 | `cron` → `frontend/src/components/tools/CronJobs.vue` | `/api/auto-dev`、`/api/cron` | `backend/modules/scheduling`<br>`backend/modules/scheduling/cron.ts`、`backend/modules/scheduling/cron-dev-reports.ts` | 测试域：`tasks`<br>关键测试：`work-report-ai-production-selftest.mjs`<br>架构：[SCHEDULING AND WORK REPORTS](./SCHEDULING-AND-WORK-REPORTS.md)<br>流程：[SCHEDULED TASKS AI WORK REPORTS](./../confirmed-business-processes/SCHEDULED-TASKS-AI-WORK-REPORTS.md) |
+| **项目身份、分组、会话与源码运行**<br>稳定项目ID、显示名称、Agent连接、项目会话和多配置源码运行。 | `projects` → `frontend/src/components/projects/ProjectManager.vue` | `/api/project-runs`、`/api/projects`、`/api/security`、`/api/sessions`、`/api/start`、`/api/stop`<br>CLI：`project list`、`project connect`、`project disconnect`、`project runtime`、`project init` | `backend/modules/projects`、`backend/projects`<br>`backend/modules/projects/projects.ts`、`backend/modules/projects/project-runtime.ts`、`backend/modules/projects/sessions.ts` | 测试域：`integrations`<br>关键测试：`project-runtime-workbench-selftest.mjs`、`project-java-toolchain-selftest.mjs`<br>架构：[PROJECT MANAGEMENT](./PROJECT-MANAGEMENT.md)<br>流程：— |
+| **项目Git与代码协作**<br>仓库身份、分页快照、显式提交范围、写入租约、克隆和验收归因。 | `changes` → `frontend/src/components/tools/CodeChanges.vue` | `/api/git` | `backend/modules/projects`、`backend/modules/tools`<br>`backend/modules/projects/project-git.ts`、`backend/modules/tools/git.ts` | 测试域：`core`<br>关键测试：`git-collaboration-production-v2-selftest.mjs`、`git-local-data-ignore-selftest.mjs`<br>架构：[PROJECT CODE WORKSPACE](./PROJECT-CODE-WORKSPACE.md)<br>流程：[PROJECT GIT CODE COLLABORATION V2](./../confirmed-business-processes/PROJECT-GIT-CODE-COLLABORATION-V2.md) |
+| **内置终端与项目运行控制台**<br>PTY与降级终端、危险命令门禁、项目源码进程和运行日志控制台。 | `terminal` → `frontend/src/components/tools/Terminal.vue` | `/api/terminal` | `backend/modules/tools`、`backend/modules/projects`<br>`backend/modules/tools/terminal.ts`、`backend/modules/projects/project-runtime.ts` | 测试域：`integrations`<br>关键测试：`terminal-runtime-production-closure-selftest.mjs`、`terminal-pty-workbench-selftest.mjs`<br>架构：[TERMINAL AND RUNTIME CONSOLE](./TERMINAL-AND-RUNTIME-CONSOLE.md)<br>流程：[BUILT IN TERMINAL AND PROJECT RUNTIME](./../confirmed-business-processes/BUILT-IN-TERMINAL-AND-PROJECT-RUNTIME.md) |
+| **MCP、Skill、共享文件与工具市场**<br>工具授权、原生注册、隔离安装、运行时同步、斜杠命令和共享文件。 | `tools` → `frontend/src/components/tools/ToolsConfig.vue` | `/api/filesystem`、`/api/marketplace`、`/api/mcp`、`/api/shared`、`/api/shared-files`、`/api/skills`、`/api/slash-commands`、`/api/smithery`、`/api/tools` | `backend/skills`、`backend/tools`、`backend/modules/tools`<br>`backend/modules/tools/tools.ts`、`backend/modules/tools/marketplace.ts`、`backend/modules/tools/slash-commands.ts`、`backend/tools/tool-manager.ts` | 测试域：`agents`<br>关键测试：`agent-tool-inheritance-selftest.mjs`、`marketplace-supply-chain-v2-selftest.mjs`、`shared-files-slash-production-selftest.mjs`<br>架构：[TOOL AUTHORIZATION](./TOOL-AUTHORIZATION.md)、[TOOL MARKETPLACE AND CATALOG](./TOOL-MARKETPLACE-AND-CATALOG.md)、[TEMPLATES SLASH COMMANDS AND SHARED FILES](./TEMPLATES-SLASH-COMMANDS-AND-SHARED-FILES.md)<br>流程：[AGENT MCP SKILL INHERITANCE](./../confirmed-business-processes/AGENT-MCP-SKILL-INHERITANCE.md)、[MCP SKILL MARKETPLACE SUPPLY CHAIN](./../confirmed-business-processes/MCP-SKILL-MARKETPLACE-SUPPLY-CHAIN.md)、[SLASH COMMANDS AND SHARED FILES V2](./../confirmed-business-processes/SLASH-COMMANDS-AND-SHARED-FILES-V2.md) |
+| **会话记忆、压缩与Context Engine**<br>精确会话、长期记忆、正式压缩、MicroCompact、缓存和MCP hydration。 | `memory-center` → `frontend/src/components/knowledge/MemoryCenter.vue` | `/api/context-engine`、`/api/memory-center`、`/api/orchestrator` | `backend/system`、`backend/modules/knowledge`<br>`backend/system/session-model-context.ts`、`backend/modules/knowledge/memory-control-center-handler.ts` | 测试域：`memory`<br>关键测试：`all-session-cc-compaction-alignment-selftest.mjs`、`context-engine-v2-selftest.mjs`、`third-party-memory-mcp-hydration-selftest.mjs`<br>架构：[MEMORY SYSTEM](./MEMORY-SYSTEM.md)<br>流程：[MEMORY SYSTEM END TO END](./../confirmed-business-processes/MEMORY-SYSTEM-END-TO-END.md) |
+| **知识库召回与本地Embedding**<br>安全文档、版本化索引、本地或远程向量、混合召回和作用域门禁。 | `knowledge` → `frontend/src/components/knowledge/KnowledgeBase.vue` | `/api/rag` | `backend/modules/knowledge`<br>`backend/modules/knowledge/rag.ts`、`backend/modules/knowledge/knowledge-index.ts` | 测试域：`knowledge`<br>关键测试：`knowledge-embedding-v3-selftest.mjs`、`agent-knowledge-retrieval-selftest.mjs`<br>架构：[KNOWLEDGE SYSTEM](./KNOWLEDGE-SYSTEM.md)<br>流程：[KNOWLEDGE RETRIEVAL EMBEDDING V3](./../confirmed-business-processes/KNOWLEDGE-RETRIEVAL-EMBEDDING-V3.md) |
+| **飞书全局与项目Agent双向会话**<br>全局和项目双入口、精确话题、跨传输幂等、串行处理和原路投递。 | — | `/api/feishu` | `backend/integrations`、`backend/modules/collaboration`<br>`backend/modules/collaboration/feishu-channel.ts`、`backend/modules/collaboration/feishu.ts`、`backend/modules/projects/project-feishu-turn-queue.ts` | 测试域：`integrations`<br>关键测试：`feishu-bidirectional-v2-production-selftest.mjs`、`feishu-global-agent-roundtrip-selftest.mjs`<br>架构：[FEISHU GLOBAL AGENT](./FEISHU-GLOBAL-AGENT.md)<br>流程：[FEISHU GLOBAL PROJECT BIDIRECTIONAL V2](./../confirmed-business-processes/FEISHU-GLOBAL-PROJECT-BIDIRECTIONAL-V2.md) |
+| **音乐意图、曲库、媒体平台与统一播放器**<br>模型点歌、三源搜索、媒体索引、下载、latest-wins队列和浏览器播放。 | `music` → `frontend/src/components/music/MusicPlayer.vue` | `/api/music` | `backend/modules/music`<br>`backend/modules/music/agent.ts`、`backend/modules/music/music.ts`、`backend/modules/music/library.ts` | 测试域：`media`<br>关键测试：`music-semantic-playback-selftest.mjs`、`music-media-platform-v4-selftest.mjs`<br>架构：[MUSIC PLAYBACK](./MUSIC-PLAYBACK.md)、[MUSIC LIBRARY AND MEDIA](./MUSIC-LIBRARY-AND-MEDIA.md)<br>流程：[MUSIC INTENT UNIFIED PLAYBACK V2](./../confirmed-business-processes/MUSIC-INTENT-UNIFIED-PLAYBACK-V2.md)、[MUSIC LIBRARY MEDIA PLATFORM V4](./../confirmed-business-processes/MUSIC-LIBRARY-MEDIA-PLATFORM-V4.md) |
+| **会话搜索与任务回放**<br>跨来源会话全文检索、精确消息跳转、分页任务证据和用户化验收回放。 | `search` → `frontend/src/components/workspace/SearchHistory.vue`、`trace-replay` → `frontend/src/components/system/TraceReplay.vue` | `/api/conversations`、`/api/search` | `backend/modules/search`、`backend/modules/collaboration`<br>`backend/modules/search/conversation-search.ts`、`backend/modules/collaboration/task-replay.ts` | 测试域：`knowledge`、`tasks`<br>关键测试：`conversation-search-selftest.mjs`、`task-replay-selftest.mjs`<br>架构：[CONVERSATION SEARCH AND TASK REPLAY](./CONVERSATION-SEARCH-AND-TASK-REPLAY.md)<br>流程：[CONVERSATION SEARCH AND TASK REPLAY V3](./../confirmed-business-processes/CONVERSATION-SEARCH-AND-TASK-REPLAY-V3.md) |
+| **性能监控、Trace、可靠性与清理中心**<br>结构化指标、脱敏Trace、跨进程租约、可靠性演练和可续跑清理事务。 | `metrics` → `frontend/src/components/agents/AgentMetrics.vue`、`cleanup-center` → `frontend/src/components/system/cleanup/CleanupCenter.vue` | `/api/cleanup`、`/api/metrics`、`/api/reliability` | `backend/system`<br>`backend/system/reliability-ledger.ts`、`backend/system/reliability-drills.ts`、`backend/system/cleanup-center.ts` | 测试域：`core`<br>关键测试：`observability-v3-production-selftest.mjs`、`cleanup-center-transaction-v2-selftest.mjs`<br>架构：[RELIABILITY OBSERVABILITY AND CLEANUP](./RELIABILITY-OBSERVABILITY-AND-CLEANUP.md)<br>流程：[PERFORMANCE TRACE RELIABILITY CLEANUP V2](./../confirmed-business-processes/PERFORMANCE-TRACE-RELIABILITY-CLEANUP-V2.md) |
+| **桌面宠物与用户通知**<br>持久通知、精确用户投递、Electron签名客户端和网页宠物接管。 | `pets` → `frontend/src/components/pets/PetMenu.vue` | `/api/notifications`、`/api/pets`<br>CLI：`pet` | `backend/modules/pets`<br>`backend/modules/pets/pets.ts`、`backend/server-pet-activity.ts` | 测试域：`media`、`tasks`<br>关键测试：`pet-notification-security-selftest.mjs`、`user-notification-pet-production-selftest.mjs`<br>架构：[DESKTOP PET AND USER NOTIFICATIONS](./DESKTOP-PET-AND-USER-NOTIFICATIONS.md)<br>流程：[DESKTOP PET AND USER NOTIFICATIONS](./../confirmed-business-processes/DESKTOP-PET-AND-USER-NOTIFICATIONS.md) |
+| **工作台与菜单管理**<br>只读分页工作台、结构化任务动作、工作区默认和个人菜单覆盖。 | `dashboard` → `frontend/src/components/common/UsabilityWorkbench.vue`、`menumanager` → `frontend/src/components/workspace/MenuManager.vue` | `/api/navigation`、`/api/usability` | `backend/modules/system`<br>`backend/modules/system/usability.ts`、`backend/modules/system/navigation-config.ts` | 测试域：`frontend`<br>关键测试：`workbench-navigation-production-selftest.mjs`、`workbench-homepage-selftest.mjs`<br>架构：[WORKSPACE NAVIGATION AND MENU](./WORKSPACE-NAVIGATION-AND-MENU.md)<br>流程：[WORKBENCH AND NAVIGATION END TO END](./../confirmed-business-processes/WORKBENCH-AND-NAVIGATION-END-TO-END.md) |
+| **开发Agent认证与运行配置**<br>Codex、Cursor、Gemini CLI、OpenCode和Claude Code的安装、登录、模型与可用性。 | — | `/api/agents`<br>CLI：`agents` | `backend/agents`、`backend/modules/system`<br>`backend/modules/system/agent-provider-settings.ts`、`backend/agents/execution-kernel.ts` | 测试域：`agents`、`frontend`<br>关键测试：`agent-provider-settings-selftest.mjs`、`gemini-opencode-agent-integration-selftest.mjs`、`agent-provider-account-model-render-selftest.mjs`<br>架构：[DEVELOPMENT AGENT AUTH](./DEVELOPMENT-AGENT-AUTH.md)<br>流程：[DEVELOPMENT AGENT AUTHENTICATION V2](./../confirmed-business-processes/DEVELOPMENT-AGENT-AUTHENTICATION-V2.md) |
+| **全链路模型语义路由**<br>统一结构化模型决策、失败关闭、作用域门禁和语义决策回执。 | — | — | `backend/system`<br>`backend/system/semantic-decision-runtime.ts` | 测试域：`agents`<br>关键测试：`model-semantic-routing-audit.mjs`、`semantic-decision-runtime-selftest.mjs`<br>架构：—<br>流程：[MODEL SEMANTIC ROUTING END TO END](./../confirmed-business-processes/MODEL-SEMANTIC-ROUTING-END-TO-END.md) |
+| **系统设置与Provider配置**<br>统一模型、缓存、网络、认证和工作区运行参数的管理入口。 | `settings` → `frontend/src/components/settings/Settings.vue` | `/api/system` | `backend/modules/system`<br>`backend/modules/system/settings.ts` | 测试域：`frontend`、`agents`<br>关键测试：`settings-render-regression.mjs`、`agent-provider-settings-selftest.mjs`<br>架构：—<br>流程：— |
+| **npm安装、CLI与服务生命周期**<br>可信产物、实例身份、启动停止、排空、更新事务和跨平台降级。 | — | `/api/health`、`/api/internal`、`/api/status`<br>CLI：`start`、`stop`、`restart`、`status`、`open`、`logs`、`doctor`、`update`、`version`、`help` | `backend/core`、`backend/system`<br>`ccm-package/bin/ccm.js`、`backend/system/process-lifecycle.ts`、`backend/core/server-instance-lock.ts` | 测试域：`release`<br>关键测试：`cli-service-lifecycle-v2-selftest.mjs`、`npm-package-install-release-selftest.mjs`<br>架构：[CLI INSTALLATION AND SERVICE](./CLI-INSTALLATION-AND-SERVICE.md)<br>流程：[NPM CLI SERVICE LIFECYCLE](./../confirmed-business-processes/NPM-CLI-SERVICE-LIFECYCLE.md) |
+| **全项目业务覆盖治理**<br>结构化业务清单、入口扫描、文档生成、测试归属和发布覆盖门禁。 | — | — | `scripts/project-coverage-manifest.json`、`scripts/project-coverage-lib.mjs`、`scripts/project-coverage-matrix-audit.mjs`、`scripts/generate-project-coverage-matrix.mjs` | 测试域：`core`<br>关键测试：`project-coverage-matrix-selftest.mjs`、`domain-test-catalog-selftest.mjs`<br>架构：—<br>流程：[PROJECT BUSINESS COVERAGE GOVERNANCE](./../confirmed-business-processes/PROJECT-BUSINESS-COVERAGE-GOVERNANCE.md) |
 
-## 确认边界
+## 兼容与退役入口
 
-- 表中只列生产代码已存在且有可达入口的能力。
-- canonical transcript、任务库、知识文档和长期记忆仍是事实源；前端缓存、搜索收藏和菜单偏好不是事实源。
-- 历史兼容接口可以继续读取，但新业务以各文档标出的 V2/V3 路径为准。
-- 新增业务域时必须同步更新本矩阵和本目录 `README.md`。
+| 条目 | 状态 | 接口 / 实现 | 保留原因 |
+| --- | --- | --- | --- |
+| 已移除模板接口 | `retired` | `/api/templates`、`backend/server.ts` | 模板功能已删除，旧接口只返回410，避免旧客户端误认为仍可使用。 |
+| 旧工作台代码审查接口 | `compatibility` | `/api/review`、`backend/modules/collaboration/collaboration-routes.ts` | 旧Dashboard已不可达；接口暂时保留兼容读取，不计入现行业务。 |
+| 内部诊断测试接口 | `compatibility` | `/api/test`、`backend/modules/collaboration/collaboration-routes.ts` | 只服务内部诊断和历史回归，不作为用户业务能力。 |
+
+## 维护门禁
+
+- 新增页面、API前缀、CLI命令、确认文档或专项测试时，必须先更新结构化清单。
+- 页面、API、CLI和确认文档必须有唯一主业务域；共享能力通过 `sharedBy` 表达。
+- `npm run coverage:check` 校验真实入口、精确路径、测试归属和生成文档一致性。
+- `npm run docs:check`、`npm run test:all` 与发布流水线均执行覆盖门禁。

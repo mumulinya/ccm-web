@@ -43,6 +43,8 @@ exports.sendFeishuMessageToUser = sendFeishuMessageToUser;
 exports.sendFeishuMessageToTarget = sendFeishuMessageToTarget;
 exports.probeFeishuControlBotApi = probeFeishuControlBotApi;
 exports.buildFeishuReportCard = buildFeishuReportCard;
+exports.generateFeishuWebhookSignature = generateFeishuWebhookSignature;
+exports.sendFeishuWebhookReportMessage = sendFeishuWebhookReportMessage;
 exports.sendFeishuReportMessage = sendFeishuReportMessage;
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
@@ -326,12 +328,15 @@ async function probeFeishuControlBotApi() {
     }
 }
 function buildFeishuReportCard(title, markdown, actions = []) {
+    const safeMarkdown = String(markdown || "暂无内容");
+    if (safeMarkdown.length > 12_000)
+        throw new Error(`飞书卡片正文超过安全容量：${safeMarkdown.length}/12000`);
     const card = {
         config: { wide_screen_mode: true },
         header: { title: { tag: "plain_text", content: String(title || "开发报告").slice(0, 80) }, template: "blue" },
         elements: [{
                 tag: "div",
-                text: { tag: "lark_md", content: String(markdown || "暂无内容").slice(0, 12000) },
+                text: { tag: "lark_md", content: safeMarkdown },
             }],
     };
     if (actions.length) {
@@ -347,6 +352,10 @@ function buildFeishuReportCard(title, markdown, actions = []) {
     }
     return card;
 }
+function generateFeishuWebhookSignature(timestamp, secret) {
+    const stringToSign = `${timestamp}\n${secret}`;
+    return crypto.createHmac("sha256", stringToSign).update("").digest("base64");
+}
 async function sendFeishuWebhookReportMessage(config, options) {
     const webhookUrl = String(config.webhook_url || "").trim();
     if (!webhookUrl)
@@ -356,22 +365,36 @@ async function sendFeishuWebhookReportMessage(config, options) {
     if (signKey && signKey !== "******") {
         const timestamp = Math.floor(Date.now() / 1000).toString();
         body.timestamp = timestamp;
-        body.sign = crypto.createHmac("sha256", signKey).update(`${timestamp}\n${signKey}`).digest("base64");
+        body.sign = generateFeishuWebhookSignature(timestamp, signKey);
     }
     try {
         const response = await fetch(webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
+            signal: AbortSignal.timeout(Math.max(1_000, Math.min(60_000, Number(options.timeoutMs || 20_000)))),
         });
-        const result = await response.json();
-        if (result.code === 0 || result.StatusCode === 0) {
+        let result = null;
+        try {
+            result = await response.json();
+        }
+        catch {
+            return { success: false, error: `飞书机器人响应无法确认 (${response.status})`, delivery_unknown: response.ok, retryable: !response.ok && response.status >= 500 };
+        }
+        if (response.ok && (result.code === 0 || result.StatusCode === 0)) {
             return { success: true, target_type: "webhook", target_id: webhookUrl.replace(/(hook|webhook)\/.+$/i, "$1/***") };
         }
-        return { success: false, error: result.msg || result.StatusMessage || `飞书机器人接口错误 ${result.code ?? result.StatusCode ?? response.status}`, code: result.code ?? result.StatusCode };
+        return { success: false, error: result.msg || result.StatusMessage || `飞书机器人接口错误 ${result.code ?? result.StatusCode ?? response.status}`, code: result.code ?? result.StatusCode, retryable: response.status === 429 || response.status >= 500 };
     }
     catch (error) {
-        return { success: false, error: error?.message || "飞书机器人发送失败" };
+        const code = String(error?.cause?.code || error?.code || "");
+        const definitelyNotConnected = /ENOTFOUND|ECONNREFUSED|UND_ERR_CONNECT_TIMEOUT|EAI_AGAIN/i.test(code);
+        return {
+            success: false,
+            error: error?.message || "飞书机器人发送失败",
+            retryable: definitelyNotConnected,
+            delivery_unknown: !definitelyNotConnected,
+        };
     }
 }
 async function sendFeishuReportMessage(options) {

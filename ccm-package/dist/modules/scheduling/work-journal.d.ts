@@ -37,21 +37,23 @@ export declare function syncWorkJournal(): {
     total: number;
     events: WorkJournalEvent[];
 };
-export declare function localWorkDateKey(date?: Date): string;
-export declare function parseWorkDay(dateKey?: string): {
+export declare function localWorkDateKey(date?: Date, timezone?: string): string;
+export declare function parseWorkDay(dateKey?: string, timezone?: string): {
     key: string;
+    timezone: string;
     start: Date;
     end: Date;
 };
-export declare function generateEvidenceDailyReport(dateKey?: string, inputEvents?: WorkJournalEvent[]): any;
-export declare function workWeekRange(dateKey?: string): {
+export declare function generateEvidenceDailyReport(dateKey?: string, inputEvents?: WorkJournalEvent[], timezone?: string): any;
+export declare function workWeekRange(dateKey?: string, timezone?: string): {
     id: string;
     start: Date;
     end: Date;
     start_key: string;
     end_key: string;
+    timezone: string;
 };
-export declare function generateEvidenceWeeklyReport(dateKey?: string): any;
+export declare function generateEvidenceWeeklyReport(dateKey?: string, inputEvents?: WorkJournalEvent[], timezone?: string): any;
 export declare function listWorkJournalEvents(options?: any): WorkJournalEvent[];
 export declare function getWorkJournalAudit(options?: {
     sync?: boolean;

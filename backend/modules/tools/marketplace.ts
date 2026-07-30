@@ -1,10 +1,7 @@
 // marketplace.ts — merged from 2 part files (behavior-freeze merge).
 
 import * as crypto from "crypto";
-import * as dns from "dns/promises";
 import * as fs from "fs";
-import * as https from "https";
-import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import {
@@ -45,9 +42,37 @@ import {
   assertCcmInternalSkillMutable,
 } from "../../skills/internal-skill-catalog";
 import {
+  buildBundledFilesystemMcpTool,
   buildBundledFetchWebMcpTool,
   isInternalMcpName,
 } from "../../tools/internal-mcp-registry";
+import {
+  deleteCredential,
+  isCredentialReference,
+  protectCredential,
+  protectObjectSecrets,
+  resolveCredential,
+  resolveObjectSecrets,
+} from "../../core/credential-store";
+import {
+  isBlockedNetworkAddress,
+  resolveSafePublicHttpsUrl,
+  securePublicBuffer,
+} from "../../tools/secure-public-network";
+import {
+  createMarketplaceTransaction,
+  listMarketplaceTransactions,
+  marketplaceTransactionChecksum,
+  publicMarketplaceTransaction,
+  readMarketplaceTransaction,
+  signMarketplaceActivation,
+  updateMarketplaceTransaction,
+  verifyMarketplaceActivation,
+  MARKETPLACE_ACTIVATION_LOCK_FILE,
+  MARKETPLACE_GLOBAL_LOCK_FILE,
+  type MarketplaceTransactionV2,
+} from "./marketplace-transactions";
+import { acquireFileLockAsync, releaseFileLock, withFileLock } from "../../core/atomic-json-file";
 
 // ===== merged from marketplace-part-01.ts =====
 
@@ -68,6 +93,7 @@ export const SKILLS_SH_SEARCH_URL = "https://skills.sh/api/search";
 export const SMITHERY_SERVERS_URL = "https://api.smithery.ai/servers";
 export const DEFAULT_MARKETPLACE_PAGE_SIZE = 12;
 export const MAX_MARKETPLACE_PAGE_SIZE = 50;
+export const CCM_OFFICIAL_MARKETPLACE_REVISION = "2026-07-30.2";
 
 export interface MarketplaceSource {
   id: string;
@@ -97,12 +123,23 @@ export interface InstallationRecord {
   packagePath?: string;
   installedAt: string;
   updatedAt: string;
+  schema?: "ccm-marketplace-installation-v2";
+  installationId?: string;
+  state?: "active" | "quarantined_legacy" | "resync_required" | "failed";
+  materialTreeHash?: string;
+  catalogRevision?: string;
+  transport?: "stdio" | "streamable_http" | "sse";
+  activatedBy?: string;
+  activatedAt?: string;
+  runtimeState?: string;
+  resyncState?: string;
 }
 
 interface MarketplaceSavedSource extends MarketplaceSource {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  credentialRef?: string;
 }
 
 export interface MarketplaceInstallStore {
@@ -142,12 +179,14 @@ export function writeJsonAtomic(file: string, value: any) {
 export function appendJsonlBounded(file: string, entry: any) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   try {
-    if (fs.existsSync(file) && fs.statSync(file).size > 2 * 1024 * 1024) {
-      const content = fs.readFileSync(file, "utf-8");
-      const tail = content.slice(-1024 * 1024);
-      fs.writeFileSync(file, tail.slice(Math.max(0, tail.indexOf("\n") + 1)), "utf-8");
-    }
-    fs.appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`, "utf-8");
+    withFileLock(file, () => {
+      if (fs.existsSync(file) && fs.statSync(file).size > 2 * 1024 * 1024) {
+        const content = fs.readFileSync(file, "utf-8");
+        const tail = content.slice(-1024 * 1024);
+        fs.writeFileSync(file, tail.slice(Math.max(0, tail.indexOf("\n") + 1)), "utf-8");
+      }
+      fs.appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`, "utf-8");
+    });
   } catch {}
 }
 
@@ -188,9 +227,9 @@ function sanitizeMarketplaceOperationAuditEntry(entry: any) {
   const source = entry?.source && typeof entry.source === "object" ? {
     id: cleanImpactText(entry.source.id || "", 120),
     label: cleanImpactText(entry.source.label || "", 160),
-    kind: ["builtin", "smithery", "catalog", "github", "direct"].includes(entry.source.kind) ? entry.source.kind : "",
+    kind: ["builtin", "skills-sh", "smithery", "catalog", "github", "direct"].includes(entry.source.kind) ? entry.source.kind : "",
     trust: ["official", "community", "custom"].includes(entry.source.trust) ? entry.source.trust : "",
-    url: cleanImpactText(entry.source.url || "", 500),
+    url: cleanImpactText(publicSourceUrl(entry.source.url), 500),
   } : undefined;
   return {
     schema: "ccm-marketplace-operation-v1",
@@ -630,11 +669,24 @@ export function loadInstallations(): InstallationRecord[] {
 }
 
 export function saveInstallations(items: InstallationRecord[]) {
-  writeJsonAtomic(INSTALLATIONS_FILE, { version: 1, items });
+  withFileLock(MARKETPLACE_GLOBAL_LOCK_FILE, () => writeJsonAtomic(INSTALLATIONS_FILE, { version: 2, items }));
 }
 
 export function marketplaceSourceId(url: string) {
   return `external-${sha256(url).slice(0, 12)}`;
+}
+
+function publicSourceUrl(value: any) {
+  try {
+    const url = new URL(String(value || ""));
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 export function normalizeSavedSource(value: any): MarketplaceSavedSource | null {
@@ -658,6 +710,7 @@ export function normalizeSavedSource(value: any): MarketplaceSavedSource | null 
     enabled: value?.enabled !== false,
     createdAt: String(value?.createdAt || now),
     updatedAt: String(value?.updatedAt || now),
+    credentialRef: isCredentialReference(value?.credentialRef) ? String(value.credentialRef) : undefined,
   };
 }
 
@@ -672,7 +725,148 @@ export function loadMarketplaceSources(): MarketplaceSavedSource[] {
 }
 
 export function saveMarketplaceSources(items: MarketplaceSavedSource[]) {
-  writeJsonAtomic(SOURCES_FILE, { version: 1, items });
+  withFileLock(MARKETPLACE_GLOBAL_LOCK_FILE, () => writeJsonAtomic(SOURCES_FILE, { version: 2, items }));
+}
+
+export function recoverMarketplaceProductionState() {
+  readSmitheryCredential();
+  const records = loadInstallations();
+  const mcp = loadMcpTools();
+  const skills = loadSkills();
+  const now = new Date().toISOString();
+  let quarantined = 0;
+  let changed = false;
+  let credentialsMigrated = 0;
+  let officialFilesystemRepaired = false;
+  const officialFilesystemItem = localMarketplaceItems().find(item => item.name === "filesystem-mcp");
+  const officialFilesystemProof = officialFilesystemItem ? buildMarketplaceSourceProof(officialFilesystemItem) : null;
+  for (const resource of mcp.filter(item => item?.marketplace)) {
+    const file = path.join(CCM_DIR, "mcp", String(resource.filename || `${safeSlug(resource.name)}.json`));
+    let stored: any = null;
+    try { stored = JSON.parse(fs.readFileSync(file, "utf-8")); } catch {}
+    const values = [
+      ...Object.values(stored?.headers || {}),
+      ...Object.values(stored?.env || {}),
+    ].map(value => String(value || "")).filter(Boolean);
+    if (values.some(value => !isCredentialReference(value))) {
+      saveMcpTool(resource);
+      credentialsMigrated += 1;
+    }
+  }
+  const next = records.map(record => {
+    if (
+      record.key === "mcp:filesystem-mcp"
+      && record.source?.id === "ccm-official"
+      && record.source?.trust === "official"
+      && officialFilesystemItem
+      && officialFilesystemProof
+      && (
+        record.version !== officialFilesystemItem.version
+        || record.catalogRevision !== CCM_OFFICIAL_MARKETPLACE_REVISION
+        || record.sourceProof?.materialHash !== officialFilesystemProof.materialHash
+        || record.resyncState !== "ready"
+      )
+    ) {
+      changed = true;
+      officialFilesystemRepaired = true;
+      return {
+        ...record,
+        schema: "ccm-marketplace-installation-v2" as const,
+        version: officialFilesystemItem.version,
+        checksum: officialFilesystemProof.materialHash,
+        sourceProof: officialFilesystemProof,
+        materialTreeHash: officialFilesystemProof.materialHash,
+        catalogRevision: CCM_OFFICIAL_MARKETPLACE_REVISION,
+        runtimeState: "bundled_dependency_ready",
+        resyncState: "pending",
+        updatedAt: now,
+      };
+    }
+    if (record.schema === "ccm-marketplace-installation-v2") return record;
+    changed = true;
+    if (record.source?.trust === "official") {
+      return {
+        ...record,
+        schema: "ccm-marketplace-installation-v2" as const,
+        installationId: record.installationId || `mkin_${sha256(`${record.key}:${record.installedAt}`).slice(0, 20)}`,
+        state: "active" as const,
+        materialTreeHash: record.checksum,
+        catalogRevision: record.checksum,
+        runtimeState: "legacy_official",
+        resyncState: "pending",
+      };
+    }
+    quarantined += 1;
+    const resource = record.type === "mcp"
+      ? mcp.find(item => item.name === record.name)
+      : skills.find(item => item.name === record.name);
+    if (resource?.enabled !== false) {
+      if (record.type === "mcp") saveMcpTool({ ...resource, enabled: false, marketplaceQuarantine: "quarantined_legacy" });
+      else saveSkill({ ...resource, enabled: false, marketplaceQuarantine: "quarantined_legacy" });
+    }
+    return {
+      ...record,
+      schema: "ccm-marketplace-installation-v2" as const,
+      installationId: record.installationId || `mkin_${sha256(`${record.key}:${record.installedAt}`).slice(0, 20)}`,
+      state: "quarantined_legacy" as const,
+      materialTreeHash: "",
+      catalogRevision: "",
+      runtimeState: "disabled_pending_review",
+      resyncState: "required",
+    };
+  });
+  if (changed) saveInstallations(next);
+
+  let staleStagingRemoved = 0;
+  try {
+    if (fs.existsSync(SKILL_PACKAGES_DIR)) {
+      for (const name of fs.readdirSync(SKILL_PACKAGES_DIR)) {
+        if (!name.startsWith(".staging-")) continue;
+        const candidate = path.join(SKILL_PACKAGES_DIR, name);
+        const age = Date.now() - fs.statSync(candidate).mtimeMs;
+        const referenced = listMarketplaceTransactions(2000).some(transaction => transaction.stagingPath === candidate && !["active", "rolled_back"].includes(transaction.state));
+        if (age > 24 * 60 * 60_000 && !referenced) {
+          fs.rmSync(candidate, { recursive: true, force: true });
+          staleStagingRemoved += 1;
+        }
+      }
+    }
+  } catch {}
+
+  let recoveredTransactions = 0;
+  for (const transaction of listMarketplaceTransactions(2000)) {
+    if (transaction.state !== "activating") continue;
+    updateMarketplaceTransaction(transaction.id, current => ({
+      ...current,
+      state: "recovery_required",
+      error: "服务在激活过程中退出，需要重新核验后继续",
+      checkpoints: [...current.checkpoints, "startup_recovery_required"],
+    }));
+    recoveredTransactions += 1;
+  }
+  let runtimeResync: any = null;
+  if (changed || quarantined) {
+    try {
+      runtimeResync = resyncRecentRuntimeToolSnapshots({ staleOnly: true, limit: 50 });
+    } catch (error: any) {
+      runtimeResync = { success: false, error: cleanImpactText(error?.message || error, 500) };
+    }
+  }
+  if (officialFilesystemRepaired && runtimeResync?.success !== false) {
+    saveInstallations(loadInstallations().map(record => record.key === "mcp:filesystem-mcp"
+      ? { ...record, runtimeState: "bundled_dependency_ready", resyncState: "ready" }
+      : record));
+  }
+  return {
+    at: now,
+    quarantined,
+    migrated: changed ? next.length : 0,
+    credentialsMigrated,
+    staleStagingRemoved,
+    recoveredTransactions,
+    officialFilesystemRepaired,
+    runtimeResync,
+  };
 }
 
 function isPathInside(root: string, candidate: string) {
@@ -704,13 +898,44 @@ function marketplaceEnvKeys(item: any) {
     .sort();
 }
 
+function marketplaceEnvObject(value: any) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [String(key), String(item ?? "")]));
+  }
+  const result: Record<string, string> = {};
+  for (const line of String(value || "").split(/\r?\n/)) {
+    const index = line.indexOf("=");
+    if (index <= 0) continue;
+    const key = line.slice(0, index).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`MCP 环境变量名称无效: ${key}`);
+    result[key] = line.slice(index + 1);
+  }
+  return result;
+}
+
+function protectMarketplaceEnv(name: string, value: any) {
+  return Object.fromEntries(Object.entries(marketplaceEnvObject(value)).map(([key, item]) => [
+    key,
+    protectCredential(`marketplace-mcp:${name}:env`, key, item),
+  ]));
+}
+
+function protectMarketplaceHeaders(name: string, value: any) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key,
+    protectCredential(`marketplace-mcp:${name}:headers`, key, item),
+  ]));
+}
+
 function marketplaceSourceSummary(source: any = {}) {
   return {
     id: cleanImpactText(source?.id || "", 120),
     label: cleanImpactText(source?.label || "", 160),
-    kind: ["builtin", "smithery", "catalog", "github", "direct"].includes(source?.kind) ? source.kind : "",
+    kind: ["builtin", "skills-sh", "smithery", "catalog", "github", "direct"].includes(source?.kind) ? source.kind : "",
     trust: ["official", "community", "custom"].includes(source?.trust) ? source.trust : "",
-    url: cleanImpactText(source?.url || "", 500),
+    url: cleanImpactText(publicSourceUrl(source?.url), 500),
+    credentialConfigured: !!source?.credentialRef || source?.credentialConfigured === true,
   };
 }
 
@@ -779,12 +1004,12 @@ export function sanitizeMarketplacePreviewItem(item: any) {
     author: cleanImpactText(item?.author || "", 160),
     version: cleanImpactText(item?.version || "", 80),
     source: marketplaceSourceSummary(item?.source || {}),
-    sourceUrl: cleanImpactText(item?.sourceUrl || "", 500),
-    downloadUrl: cleanImpactText(item?.downloadUrl || "", 500),
-    homepage: cleanImpactText(item?.homepage || "", 500),
+    sourceUrl: cleanImpactText(publicSourceUrl(item?.sourceUrl), 500),
+    downloadUrl: cleanImpactText(publicSourceUrl(item?.downloadUrl), 500),
+    homepage: cleanImpactText(publicSourceUrl(item?.homepage), 500),
     command: item?.type === "mcp" ? cleanImpactText(item?.command || "", 240) : "",
     args: item?.type === "mcp" && Array.isArray(item?.args) ? item.args.map((arg: any) => cleanImpactText(arg, 240)).slice(0, 80) : [],
-    url: item?.type === "mcp" ? cleanImpactText(item?.url || "", 500) : "",
+    url: item?.type === "mcp" ? cleanImpactText(publicSourceUrl(item?.url), 500) : "",
     envKeys: item?.type === "mcp" ? marketplaceEnvKeys(item) : [],
     headerKeys: item?.type === "mcp" ? objectKeys(item?.headers) : [],
   };
@@ -807,6 +1032,7 @@ export function sanitizeMarketplaceSourceProof(value: any) {
     packageStats: {
       files: safeNumber(packageStats.files),
       totalBytes: safeNumber(packageStats.totalBytes),
+      treeHash: cleanImpactText(packageStats.treeHash || "", 80),
     },
   };
 }
@@ -838,7 +1064,13 @@ export function baseMarketplaceSourceId(value: any) {
 }
 
 export function publicMarketplaceSources() {
-  return loadMarketplaceSources().filter(source => source.enabled !== false);
+  return loadMarketplaceSources()
+    .filter(source => source.enabled !== false)
+    .map(({ credentialRef, ...source }) => ({
+      ...source,
+      url: publicSourceUrl(source.url),
+      credentialConfigured: !!credentialRef,
+    }));
 }
 
 export function normalizeMarketplaceItem(item: any, fallbackSource: MarketplaceSource) {
@@ -1079,86 +1311,32 @@ export function decorateInstallState(items: any[]) {
   const installedSkills = new Map(loadSkills().map(item => [String(item.name), item]));
   return items.map(item => {
     const record = installations.find(entry => entry.key === installationKey(item.type, item.name));
-    const installed = item.type === "mcp" ? installedMcp.has(item.name) : installedSkills.has(item.name);
+    const resourcePresent = item.type === "mcp" ? installedMcp.has(item.name) : installedSkills.has(item.name);
+    const installed = resourcePresent && !!record && (record.state || "quarantined_legacy") === "active";
+    const installationState = record?.state || (resourcePresent ? "manual" : "not_installed");
     return {
       ...item,
       installed,
       installedVersion: record?.version || (item.type === "mcp" ? installedMcp.get(item.name)?.version : installedSkills.get(item.name)?.version) || "",
       updateAvailable: !!record && compareVersions(item.version, record.version) > 0,
-      installation: record || null,
+      installationState,
+      quarantinedLegacy: installationState === "quarantined_legacy",
+      manualResourcePresent: installationState === "manual",
+      installation: record ? publicInstallationRecord(record) : null,
     };
   });
 }
 
 export function isPrivateAddress(address: string) {
-  if (net.isIPv4(address)) {
-    const [a, b] = address.split(".").map(Number);
-    return a === 10
-      || a === 127
-      || a === 0
-      || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 168);
-  }
-  const value = address.toLowerCase();
-  return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:");
+  return isBlockedNetworkAddress(address);
 }
 
 export async function assertSafeHttpsUrl(value: string) {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error("外部来源 URL 无效");
-  }
-  if (parsed.protocol !== "https:") throw new Error("外部来源仅允许 HTTPS");
-  if (parsed.username || parsed.password) throw new Error("外部来源 URL 不允许内嵌凭据");
-  if (["localhost", "localhost.localdomain"].includes(parsed.hostname.toLowerCase())) throw new Error("外部来源不允许访问本机地址");
-  const addresses = await dns.lookup(parsed.hostname, { all: true });
-  if (!addresses.length || addresses.some(item => isPrivateAddress(item.address))) throw new Error("外部来源不允许访问内网地址");
-  return parsed;
+  return (await resolveSafePublicHttpsUrl(value)).url;
 }
 
 export async function fetchRemote(value: string, maxBytes: number, headers: Record<string, string> = {}, redirects = 0): Promise<{ body: Buffer; contentType: string; finalUrl: string }> {
-  if (redirects > 4) throw new Error("外部来源重定向次数过多");
-  const parsed = await assertSafeHttpsUrl(value);
-  return new Promise((resolve, reject) => {
-    const request = https.get(parsed, {
-      headers: { "User-Agent": "ccm-tool-marketplace/1.0", Accept: "application/json,text/markdown,text/plain,*/*", ...headers },
-      timeout: 15000,
-    }, response => {
-      const status = Number(response.statusCode || 0);
-      if ([301, 302, 303, 307, 308].includes(status) && response.headers.location) {
-        response.resume();
-        const next = new URL(response.headers.location, parsed).toString();
-        fetchRemote(next, maxBytes, headers, redirects + 1).then(resolve, reject);
-        return;
-      }
-      if (status < 200 || status >= 300) {
-        response.resume();
-        reject(new Error(`外部来源请求失败 (HTTP ${status})`));
-        return;
-      }
-      const chunks: Buffer[] = [];
-      let size = 0;
-      response.on("data", chunk => {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        size += buffer.length;
-        if (size > maxBytes) {
-          request.destroy(new Error(`外部来源内容超过 ${Math.round(maxBytes / 1024)}KB 限制`));
-          return;
-        }
-        chunks.push(buffer);
-      });
-      response.on("end", () => resolve({
-        body: Buffer.concat(chunks),
-        contentType: String(response.headers["content-type"] || ""),
-        finalUrl: parsed.toString(),
-      }));
-    });
-    request.on("timeout", () => request.destroy(new Error("外部来源请求超时")));
-    request.on("error", reject);
-  });
+  return securePublicBuffer(value, maxBytes, headers);
 }
 
 export function parseSkillMarkdown(content: string, fallbackName = "", fallbackDescription = "") {
@@ -1237,6 +1415,8 @@ export function validateSkillDirectory(root: string) {
   if (!fs.existsSync(skillFile)) throw new Error("Skill 包中未找到 SKILL.md");
   let files = 0;
   let totalBytes = 0;
+  const manifest: Array<{ path: string; type: "file"; size: number; checksum: string }> = [];
+  const realRoot = fs.realpathSync(root);
   const walk = (directory: string) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name);
@@ -1246,15 +1426,25 @@ export function validateSkillDirectory(root: string) {
         if (entry.name !== ".git") walk(file);
         continue;
       }
+      if (!stat.isFile()) throw new Error(`Skill 包包含不支持的文件类型: ${entry.name}`);
+      if (!isPathInside(realRoot, fs.realpathSync(file))) throw new Error("Skill 包文件路径越界");
       files += 1;
       totalBytes += stat.size;
       if (files > MAX_SKILL_PACKAGE_FILES) throw new Error(`Skill 包文件数超过 ${MAX_SKILL_PACKAGE_FILES}`);
       if (stat.size > MAX_SKILL_FILE_BYTES) throw new Error(`Skill 包文件 ${entry.name} 超过大小限制`);
       if (totalBytes > MAX_SKILL_PACKAGE_BYTES) throw new Error("Skill 包总体积超过 10MB");
+      manifest.push({
+        path: path.relative(root, file).replace(/\\/g, "/"),
+        type: "file",
+        size: stat.size,
+        checksum: sha256(fs.readFileSync(file)),
+      });
     }
   };
   walk(root);
-  return { files, totalBytes };
+  manifest.sort((left, right) => left.path.localeCompare(right.path));
+  const treeHash = sha256(manifest.map(item => `${item.path}\0${item.type}\0${item.size}\0${item.checksum}`).join("\n"));
+  return { files, totalBytes, treeHash, manifest };
 }
 
 export async function cloneGithubSkill(item: any, staging: string) {
@@ -1273,7 +1463,9 @@ export async function cloneGithubSkill(item: any, staging: string) {
     if (!candidates.length) throw new Error("GitHub 仓库中未找到 SKILL.md");
     const matched = candidates.find(candidate => safeSlug(path.basename(candidate)) === safeSlug(item.name)) || candidates[0];
     validateSkillDirectory(matched);
+    const commit = (await execFileAsync("git", ["-C", checkout, "rev-parse", "HEAD"], { timeout: 15_000, windowsHide: true })).stdout.trim();
     fs.cpSync(matched, staging, { recursive: true, dereference: false, filter: file => path.basename(file) !== ".git" });
+    return { commit };
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
   }
@@ -1285,10 +1477,11 @@ export async function stageSkillPackage(item: any, skillPackagesDir = SKILL_PACK
   const staging = path.join(skillPackagesDir, `.staging-${safeSlug(item.name)}-${process.pid}-${Date.now()}`);
   fs.mkdirSync(staging, { recursive: true });
   try {
+    let sourceRevision = "";
     if (item.prompt) {
       fs.writeFileSync(path.join(staging, "SKILL.md"), String(item.prompt || ""), "utf-8");
     } else if (parseGithubSkillSource(item.sourceUrl || item.downloadUrl)) {
-      await cloneGithubSkill(item, staging);
+      sourceRevision = (await cloneGithubSkill(item, staging))?.commit || "";
     } else if (item.downloadUrl || /^https:\/\//i.test(item.sourceUrl || "")) {
       const remote = await fetchRemote(item.downloadUrl || item.sourceUrl, MAX_SKILL_FILE_BYTES);
       fs.writeFileSync(path.join(staging, "SKILL.md"), remote.body);
@@ -1302,7 +1495,9 @@ export async function stageSkillPackage(item: any, skillPackagesDir = SKILL_PACK
       staging,
       skillFile,
       parsed: parseSkillMarkdown(normalizedContent, item.name, item.description),
-      checksum: sha256(normalizedContent),
+      checksum: packageStats.treeHash,
+      treeHash: packageStats.treeHash,
+      sourceRevision,
       packageStats,
     };
   } catch (error) {
@@ -1311,9 +1506,10 @@ export async function stageSkillPackage(item: any, skillPackagesDir = SKILL_PACK
   }
 }
 
-export function installStagedPackage(staging: string, name: string, skillPackagesDir = SKILL_PACKAGES_DIR) {
+export function installStagedPackage(staging: string, name: string, skillPackagesDir = SKILL_PACKAGES_DIR, identityChecksum = "") {
   assertCcmInternalSkillMutable(name, "从外部来源安装或覆盖");
-  const target = path.join(skillPackagesDir, safeSlug(name));
+  const identity = identityChecksum || sha256(`${name}:${Date.now()}`);
+  const target = path.join(skillPackagesDir, `${safeSlug(name)}-${identity.slice(0, 16)}`);
   if (!isPathInside(skillPackagesDir, target)) throw new Error("Skill 安装路径无效");
   const backup = `${target}.backup-${process.pid}-${Date.now()}`;
   if (fs.existsSync(target)) fs.renameSync(target, backup);
@@ -1347,15 +1543,15 @@ export function localMarketplaceItems() {
       env: "FEISHU_APP_ID=your_app_id\nFEISHU_APP_SECRET=your_app_secret",
       author: "CC-Connect",
       version: "1.0.2",
+      marketplaceRevision: CCM_OFFICIAL_MARKETPLACE_REVISION,
     }, source),
     normalizeMarketplaceItem({
-      name: "filesystem-mcp",
+      ...buildBundledFilesystemMcpTool({
+        enabled: true,
+        args: ["@modelcontextprotocol/server-filesystem@2026.7.10", filesystemRoot],
+      }),
       type: "mcp",
-      description: "Filesystem MCP server scoped to an explicit directory.",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-filesystem", filesystemRoot],
-      author: "Model Context Protocol",
-      version: "1.1.0",
+      marketplaceRevision: CCM_OFFICIAL_MARKETPLACE_REVISION,
     }, source),
     normalizeMarketplaceItem({
       ...buildBundledFetchWebMcpTool({ enabled: true }),
@@ -1364,6 +1560,7 @@ export function localMarketplaceItems() {
       description: "Fetch public web content and convert it into model-friendly text.",
       author: "CCM",
       version: "2.0.0",
+      marketplaceRevision: CCM_OFFICIAL_MARKETPLACE_REVISION,
     }, source),
     normalizeMarketplaceItem({
       name: "code-safety-auditor",
@@ -1372,6 +1569,7 @@ export function localMarketplaceItems() {
       prompt: "Review the supplied code as a senior application security engineer. Check authorization boundaries, input validation, injection risks, secret handling, async resource cleanup, and missing security tests. Return prioritized findings with concrete fixes.",
       author: "CC-Connect",
       version: "2.2.0",
+      marketplaceRevision: CCM_OFFICIAL_MARKETPLACE_REVISION,
     }, source),
     normalizeMarketplaceItem({
       name: "code-review",
@@ -1380,6 +1578,7 @@ export function localMarketplaceItems() {
       prompt: "Review the supplied code or diff as a senior software engineer. Prioritize correctness bugs, behavioral regressions, authorization mistakes, data loss risks, concurrency issues, and missing tests. Return findings first, ordered by severity, with concrete file or symbol references when available. If no issues are found, say that clearly and list any residual test gaps.",
       author: "CC-Connect",
       version: "1.0.0",
+      marketplaceRevision: CCM_OFFICIAL_MARKETPLACE_REVISION,
     }, source),
     normalizeMarketplaceItem({
       name: "frontend-design",
@@ -1388,6 +1587,7 @@ export function localMarketplaceItems() {
       prompt: "Use this skill for frontend UI design, implementation review, or redesign work. Focus on task-first workflows, responsive layout, visual hierarchy, accessibility, interaction states, and consistency with the existing design system. Avoid generic landing-page filler; provide concrete component, layout, and styling guidance tailored to the product context.",
       author: "CC-Connect",
       version: "1.0.0",
+      marketplaceRevision: CCM_OFFICIAL_MARKETPLACE_REVISION,
     }, source),
   ];
 }
@@ -1521,7 +1721,8 @@ export async function runMarketplaceSelfTest() {
     claudePluginMarketplaceSkillConverted: claudeCatalogSkill?.sourceUrl === "https://github.com/example/claude-market/tree/main/plugins/release-tools/skills/release-notes"
       && claudeCatalogSkill?.source?.label.includes("Claude Plugin"),
     bundledFeishuPathResolved: !!feishu?.args?.[0] && fs.existsSync(feishu.args[0]),
-    filesystemMcpUsesManagedSharedRoot: filesystem?.args?.[2] === path.join(CCM_DIR, "shared") && fs.existsSync(filesystem.args[2]),
+    filesystemMcpUsesManagedSharedRoot: filesystem?.args?.at(-1) === path.join(CCM_DIR, "shared")
+      && fs.existsSync(filesystem.args.at(-1)),
     localItemsCarryOfficialTrust: localItems.every(item => item.source?.trust === "official"),
     savedSourceIdIsStable: savedSource?.id === marketplaceSourceId("https://example.com/catalog.json"),
     externalSourceKeepsCommunityTrust: savedSource?.trust === "community",
@@ -1789,7 +1990,7 @@ async function loadSmitheryItems(rawOptions: MarketplaceListOptions = {}) {
   };
 }
 
-async function loadCatalogItems(url: string, source: MarketplaceSource) {
+async function loadCatalogItems(url: string, source: MarketplaceSource, headers: Record<string, string> = {}) {
   const github = parseGithubSkillSource(url);
   if (github) {
     const name = path.posix.basename(github.subpath || github.repository) || "github-skill";
@@ -1802,7 +2003,7 @@ async function loadCatalogItems(url: string, source: MarketplaceSource) {
       version: "0.0.0",
     }, { ...source, kind: "github" })];
   }
-  const remote = await fetchRemote(url, MAX_CATALOG_BYTES);
+  const remote = await fetchRemote(url, MAX_CATALOG_BYTES, headers);
   const text = remote.body.toString("utf-8");
   try {
     const parsed = JSON.parse(text);
@@ -1842,8 +2043,12 @@ async function loadMarketplaceItemsForSource(source: MarketplaceSource, requeste
       trust: "community",
     });
   }
-  const savedSource = publicMarketplaceSources().find(item => item.id === baseSourceId);
-  if (savedSource?.url) return loadCatalogItems(savedSource.url, savedSource);
+  const savedSource = loadMarketplaceSources().find(item => item.id === baseSourceId && item.enabled !== false);
+  if (savedSource?.url) {
+    const token = savedSource.credentialRef ? resolveCredential(savedSource.credentialRef) : "";
+    const headers = token ? { Authorization: /^Bearer\s/i.test(token) ? token : `Bearer ${token}` } : {};
+    return loadCatalogItems(savedSource.url, savedSource, headers);
+  }
   throw new Error("安装来源未保存或不可用；请先在工具商城保存外部来源再安装");
 }
 
@@ -1890,6 +2095,12 @@ async function saveMarketplaceSource(payload: any) {
   if (!url) throw new Error("外部来源 URL 不能为空");
   const parsed = await assertSafeHttpsUrl(url);
   const now = new Date().toISOString();
+  const existingSources = loadMarketplaceSources();
+  const existing = existingSources.find(item => item.id === marketplaceSourceId(parsed.toString()));
+  const token = String(payload?.token || payload?.authorization || "").trim();
+  const credentialRef = token
+    ? protectCredential(`marketplace-source:${marketplaceSourceId(parsed.toString())}`, "authorization", token)
+    : existing?.credentialRef;
   const source = normalizeSavedSource({
     id: marketplaceSourceId(parsed.toString()),
     label: payload?.label || parsed.hostname,
@@ -1898,27 +2109,39 @@ async function saveMarketplaceSource(payload: any) {
     createdAt: now,
     updatedAt: now,
     enabled: true,
+    credentialRef,
   });
   if (!source) throw new Error("外部来源配置无效");
-  const items = await loadCatalogItems(source.url || "", source);
-  const sources = loadMarketplaceSources();
-  const previous = sources.find(item => item.id === source.id);
-  const record = {
-    ...source,
-    createdAt: previous?.createdAt || source.createdAt,
-    updatedAt: now,
-  };
-  saveMarketplaceSources([...sources.filter(item => item.id !== record.id), record]);
-  return { source: record, itemCount: items.length };
+  const headers = credentialRef ? { Authorization: /^Bearer\s/i.test(resolveCredential(credentialRef)) ? resolveCredential(credentialRef) : `Bearer ${resolveCredential(credentialRef)}` } : {};
+  const items = await loadCatalogItems(source.url || "", source, headers);
+  let record: MarketplaceSavedSource;
+  withFileLock(MARKETPLACE_GLOBAL_LOCK_FILE, () => {
+    const sources = loadMarketplaceSources();
+    const previous = sources.find(item => item.id === source.id);
+    record = {
+      ...source,
+      createdAt: previous?.createdAt || source.createdAt,
+      updatedAt: now,
+    };
+    writeJsonAtomic(SOURCES_FILE, { version: 2, items: [...sources.filter(item => item.id !== record.id), record] });
+  });
+  return { source: marketplaceSourceSummary(record), itemCount: items.length };
 }
 
 function deleteMarketplaceSource(payload: any) {
   const id = String(payload?.id || "").trim();
   if (!id) throw new Error("外部来源 ID 不能为空");
-  const sources = loadMarketplaceSources();
-  const next = sources.filter(item => item.id !== id);
-  saveMarketplaceSources(next);
-  return { id, removed: next.length !== sources.length };
+  let removed: MarketplaceSavedSource | undefined;
+  let changed = false;
+  withFileLock(MARKETPLACE_GLOBAL_LOCK_FILE, () => {
+    const sources = loadMarketplaceSources();
+    removed = sources.find(item => item.id === id);
+    const next = sources.filter(item => item.id !== id);
+    changed = next.length !== sources.length;
+    writeJsonAtomic(SOURCES_FILE, { version: 2, items: next });
+  });
+  if (removed?.credentialRef) deleteCredential(removed.credentialRef);
+  return { id, removed: changed };
 }
 
 async function previewMarketplaceItem(rawItem: any) {
@@ -1993,21 +2216,68 @@ async function previewMarketplaceItem(rawItem: any) {
 }
 
 function buildMarketplaceMcpToolRecord(item: any, now: string) {
-  return {
+  const transport = item.url
+    ? (item.transport === "sse" ? "sse" : "streamable_http")
+    : "stdio";
+  const record = {
     name: item.name,
     type: "mcp",
     description: item.description,
     command: item.command,
     args: item.args,
     url: item.url,
-    headers: item.headers && typeof item.headers === "object" ? item.headers : undefined,
+    transport,
+    executablePath: item.executablePath || undefined,
+    headers: item.headers && typeof item.headers === "object" ? protectMarketplaceHeaders(item.name, item.headers) : undefined,
     env: item.env || "",
-    enabled: true,
+    enabled: item.enabled !== false,
     version: item.version,
     author: item.author,
-    marketplace: { source: item.source, itemId: item.id, homepage: item.homepage || item.sourceUrl || "" },
+    marketplace: {
+      source: item.source,
+      itemId: item.id,
+      homepage: item.homepage || item.sourceUrl || "",
+      catalogRevision: item.marketplaceRevision || item.sourceRevision || "",
+      materialHash: item.materialHash || "",
+      installationId: item.installationId || "",
+      installationRevision: item.marketplaceRevision || item.sourceRevision || item.materialHash || "",
+    },
     updated_at: now,
   };
+  return protectObjectSecrets(record, `marketplace-mcp:${item.name}`);
+}
+
+const FORBIDDEN_SHELL_FRAGMENT = /(?:&&|\|\||[;&`]|<|>|\$\(|\$\{|%\w+%)/;
+
+function resolveExecutable(command: string) {
+  const raw = String(command || "").trim();
+  if (!raw || /[\0\r\n]/.test(raw) || FORBIDDEN_SHELL_FRAGMENT.test(raw)) throw new Error("MCP 可执行命令无效或包含 Shell 语法");
+  if (/\s/.test(raw) && !path.isAbsolute(raw)) throw new Error("MCP command 必须是单一可执行文件，参数请放入 args");
+  const candidates: string[] = [];
+  if (path.isAbsolute(raw)) candidates.push(raw);
+  else {
+    const extensions = process.platform === "win32"
+      ? String(process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM").split(";")
+      : [""];
+    for (const directory of String(process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+      if (path.extname(raw)) candidates.push(path.join(directory, raw));
+      else for (const extension of extensions) candidates.push(path.join(directory, `${raw}${extension.toLowerCase()}`), path.join(directory, `${raw}${extension.toUpperCase()}`));
+    }
+  }
+  const matched = candidates.find(candidate => {
+    try { return fs.statSync(candidate).isFile(); } catch { return false; }
+  });
+  if (!matched) throw Object.assign(new Error(`找不到 MCP 可执行文件: ${raw}`), { code: "MCP_EXECUTABLE_NOT_FOUND" });
+  return fs.realpathSync(matched);
+}
+
+function validateStdioMarketplaceItem(item: any) {
+  if (item.url) return item;
+  const args = Array.isArray(item.args) ? item.args.map((value: any) => String(value)) : [];
+  if (args.some((value: string) => /[\0\r\n]/.test(value) || FORBIDDEN_SHELL_FRAGMENT.test(value))) {
+    throw new Error("MCP 参数包含禁止的 Shell 拼接或命令替换语法");
+  }
+  return { ...item, args, executablePath: resolveExecutable(item.command) };
 }
 
 function buildMarketplaceSkillRecord(item: any, staged: any, packagePath: string, checksum: string, now: string) {
@@ -2032,7 +2302,15 @@ function buildMarketplaceSkillRecord(item: any, staged: any, packagePath: string
     disableable: true,
     systemManaged: false,
     roleSkill: false,
-    marketplace: { source: item.source, itemId: item.id, homepage: item.homepage || item.sourceUrl || "" },
+    marketplace: {
+      source: item.source,
+      itemId: item.id,
+      homepage: item.homepage || item.sourceUrl || "",
+      catalogRevision: item.marketplaceRevision || item.sourceRevision || "",
+      materialHash: item.materialHash || checksum,
+      installationId: item.installationId || "",
+      installationRevision: item.marketplaceRevision || item.sourceRevision || item.materialHash || checksum,
+    },
     updated_at: now,
   };
 }
@@ -2046,6 +2324,8 @@ function buildMarketplaceInstallationRecord(
   sourceProof: any = null,
 ): InstallationRecord {
   return {
+    schema: "ccm-marketplace-installation-v2",
+    installationId: item.installationId || previous?.installationId || `mkin_${sha256(`${item.type}:${item.name}:${now}`).slice(0, 20)}`,
     key: installationKey(item.type, item.name),
     name: item.name,
     type: item.type,
@@ -2056,6 +2336,394 @@ function buildMarketplaceInstallationRecord(
     packagePath: packagePath || undefined,
     installedAt: previous?.installedAt || now,
     updatedAt: now,
+    state: "active",
+    materialTreeHash: checksum,
+    catalogRevision: sourceProof?.revision || sourceProof?.materialHash || checksum,
+    transport: item.type === "mcp" ? (item.url ? (item.transport === "sse" ? "sse" : "streamable_http") : "stdio") : undefined,
+    runtimeState: "pending",
+    resyncState: "pending",
+  };
+}
+
+function marketplacePrincipal(req: any) {
+  const auth = req?.ccmAuth;
+  if (auth?.kind !== "browser" || auth?.role !== "admin") {
+    throw Object.assign(new Error("工具市场操作仅允许 Admin"), { code: "ADMIN_REQUIRED", statusCode: 403 });
+  }
+  return { userId: String(auth.userId || ""), sessionId: String(auth.sessionId || "") };
+}
+
+function sanitizeTransactionItem(item: any) {
+  const protectedItem = protectObjectSecrets(item, `marketplace-transaction:${item.type}:${item.name}`);
+  return {
+    ...protectedItem,
+    source: marketplaceSourceSummary(item.source),
+    sourceUrl: publicSourceUrl(item.sourceUrl),
+    downloadUrl: publicSourceUrl(item.downloadUrl),
+    homepage: publicSourceUrl(item.homepage),
+  };
+}
+
+async function createMarketplaceInstallTransaction(rawItem: any, mode: "install" | "update", principal: { userId: string; sessionId: string }) {
+  const identity = marketplaceTransactionChecksum({
+    mode,
+    type: rawItem?.type,
+    name: rawItem?.name,
+    id: rawItem?.id,
+    sourceId: rawItem?.source?.id,
+    userId: principal.userId,
+    sessionId: principal.sessionId,
+  });
+  const lockTarget = path.join(CCM_DIR, "marketplace", `intake-${identity.slice(0, 24)}`);
+  const lock = await acquireFileLockAsync(lockTarget, { timeoutMs: 120_000, staleMs: 10 * 60_000 });
+  try {
+    return await createMarketplaceInstallTransactionUnderLock(rawItem, mode, principal);
+  } finally {
+    releaseFileLock(lock);
+  }
+}
+
+async function createMarketplaceInstallTransactionUnderLock(rawItem: any, mode: "install" | "update", principal: { userId: string; sessionId: string }) {
+  const canonical = await resolveMarketplaceItemForInstall(rawItem, mode);
+  const existingRecord = loadInstallations().find(record => record.key === installationKey(canonical.type, canonical.name));
+  const manualCollision = canonical.type === "mcp"
+    ? loadMcpTools().some(resource => resource.name === canonical.name)
+    : loadSkills().some(resource => resource.name === canonical.name);
+  if (manualCollision && !existingRecord) {
+    throw Object.assign(new Error(`同名${canonical.type === "mcp" ? " MCP" : " Skill"}由普通工具管理入口创建，市场不能覆盖`), {
+      code: "marketplace_ownership_required",
+      statusCode: 409,
+    });
+  }
+  const item = canonical.type === "mcp" ? validateStdioMarketplaceItem(canonical) : canonical;
+  if (item.type === "mcp" && item.url) await assertSafeHttpsUrl(item.url);
+  const now = new Date().toISOString();
+  let stagingPath = "";
+  let materialHash = "";
+  let sourceRevision = "";
+  let packageStats: any = null;
+  let fileManifest: any[] = [];
+  let itemSnapshot: any;
+
+  if (item.type === "skill") {
+    const staged = await stageSkillPackage(item);
+    stagingPath = staged.staging;
+    materialHash = staged.treeHash || staged.checksum;
+    sourceRevision = staged.sourceRevision || "";
+    packageStats = staged.packageStats;
+    fileManifest = Array.isArray(staged.packageStats?.manifest)
+      ? staged.packageStats.manifest.map((row: any) => ({ path: row.path, type: row.type, size: row.size, checksum: row.checksum }))
+      : [];
+    itemSnapshot = sanitizeTransactionItem({
+      ...item,
+      prompt: staged.parsed.content,
+      sourceRevision,
+    });
+  } else {
+    itemSnapshot = sanitizeTransactionItem({
+      ...item,
+      headers: protectMarketplaceHeaders(item.name, item.headers),
+      env: protectMarketplaceEnv(item.name, item.env),
+    });
+    materialHash = sha256(JSON.stringify({
+      name: item.name,
+      version: item.version,
+      url: item.url,
+      transport: item.url ? (item.transport === "sse" ? "sse" : "streamable_http") : "stdio",
+      executablePath: item.executablePath || "",
+      args: item.args,
+      envKeys: marketplaceEnvKeys(item),
+      headerKeys: objectKeys(item.headers),
+    }));
+  }
+
+  const source = marketplaceSourceSummary(item.source);
+  const commandChecksum = item.type === "mcp"
+    ? sha256(JSON.stringify({ executablePath: item.executablePath || "", args: item.args || [], url: item.url || "", transport: item.transport || "" }))
+    : "";
+  const catalogRevision = sourceRevision || materialHash;
+  const installationId = existingRecord?.installationId
+    || `mkin_${sha256(`${item.type}:${item.name}:${materialHash}`).slice(0, 20)}`;
+  itemSnapshot = {
+    ...itemSnapshot,
+    installationId,
+    installationRevision: catalogRevision,
+  };
+  const transaction = createMarketplaceTransaction({
+    action: mode,
+    type: item.type,
+    name: item.name,
+    source,
+    sourceFingerprint: marketplaceTransactionChecksum(source),
+    materialHash,
+    commandChecksum,
+    catalogRevision,
+    stagingPath,
+    itemSnapshot,
+    preview: {
+      trust: source.trust,
+      transport: item.type === "mcp" ? (item.url ? (item.transport === "sse" ? "sse" : "streamable_http") : "stdio") : "skill",
+      executablePath: item.executablePath || "",
+      command: item.command || "",
+      args: item.args || [],
+      remoteUrl: publicSourceUrl(item.url),
+      envKeys: marketplaceEnvKeys(item),
+      headerKeys: objectKeys(item.headers),
+      fileManifest,
+      packageStats: packageStats ? { files: packageStats.files, totalBytes: packageStats.totalBytes, treeHash: packageStats.treeHash } : undefined,
+      authorizationImpact: buildMarketplaceAuthorizationImpact({ action: mode, type: item.type, name: item.name }),
+      runtimeImpact: buildMarketplaceRuntimeImpact({ action: mode, type: item.type, name: item.name }),
+    },
+    principal,
+  });
+  if (stagingPath && transaction.stagingPath !== stagingPath) {
+    try { fs.rmSync(stagingPath, { recursive: true, force: true }); } catch {}
+  }
+  return {
+    transaction,
+    activationToken: signMarketplaceActivation(transaction),
+  };
+}
+
+function createMarketplaceUninstallTransaction(payload: any, principal: { userId: string; sessionId: string }) {
+  const type = String(payload?.type || "").toLowerCase() as "mcp" | "skill";
+  const name = String(payload?.name || "").trim();
+  if (!["mcp", "skill"].includes(type) || !name) throw new Error("卸载参数无效");
+  const record = loadInstallations().find(item => item.key === installationKey(type, name));
+  if (!record) {
+    throw Object.assign(new Error(`"${name}" 不是由工具市场管理的安装`), { code: "marketplace_ownership_required", statusCode: 409 });
+  }
+  const transaction = createMarketplaceTransaction({
+    action: "uninstall",
+    type,
+    name,
+    source: marketplaceSourceSummary(record.source),
+    sourceFingerprint: marketplaceTransactionChecksum(marketplaceSourceSummary(record.source)),
+    materialHash: record.materialTreeHash || record.checksum,
+    commandChecksum: "",
+    catalogRevision: record.catalogRevision || record.checksum,
+    itemSnapshot: { installationId: record.installationId || "", checksum: record.checksum },
+    preview: {
+      installationId: record.installationId || "",
+      checksum: record.checksum,
+      authorizationImpact: buildMarketplaceAuthorizationImpact({ action: "uninstall", type, name }),
+      runtimeImpact: buildMarketplaceRuntimeImpact({ action: "uninstall", type, name }),
+    },
+    principal,
+  });
+  return { transaction, activationToken: signMarketplaceActivation(transaction) };
+}
+
+function restoreMarketplaceResource(type: "mcp" | "skill", name: string, previous: any) {
+  if (type === "mcp") {
+    if (previous) saveMcpTool(previous);
+    else deleteMcpTool(name);
+  } else {
+    if (previous) saveSkill(previous);
+    else deleteSkill(name);
+  }
+}
+
+function restoreSkillQuarantine(packagePath: string, stagingPath: string | undefined, previousPackagePath = "") {
+  if (!packagePath || packagePath === previousPackagePath || !fs.existsSync(packagePath)) return;
+  if (stagingPath && isPathInside(SKILL_PACKAGES_DIR, stagingPath) && !fs.existsSync(stagingPath)) {
+    try {
+      fs.renameSync(packagePath, stagingPath);
+      return;
+    } catch {}
+  }
+  removeManagedPackage(packagePath);
+}
+
+async function activateMarketplaceTransaction(input: any, principal: { userId: string; sessionId: string }) {
+  const lock = await acquireFileLockAsync(MARKETPLACE_ACTIVATION_LOCK_FILE, { timeoutMs: 30_000, staleMs: 10 * 60_000 });
+  try {
+    return await activateMarketplaceTransactionUnderLock(input, principal);
+  } finally {
+    releaseFileLock(lock);
+  }
+}
+
+async function activateMarketplaceTransactionUnderLock(input: any, principal: { userId: string; sessionId: string }) {
+  const id = String(input?.transaction_id || input?.transactionId || "").trim();
+  const token = String(input?.activation_token || input?.activationToken || "").trim();
+  const transaction = readMarketplaceTransaction(id);
+  if (!transaction) throw Object.assign(new Error("市场事务不存在"), { code: "MARKETPLACE_TRANSACTION_NOT_FOUND", statusCode: 404 });
+  if (!verifyMarketplaceActivation(transaction, token, principal)) {
+    throw Object.assign(new Error("激活确认无效、已过期或物料已变化"), { code: "MARKETPLACE_ACTIVATION_INVALID", statusCode: 409 });
+  }
+  if (!["previewed", "quarantined", "failed", "recovery_required"].includes(transaction.state)) {
+    if (transaction.state === "active") return { transaction: publicMarketplaceTransaction(transaction), duplicate: true };
+    throw Object.assign(new Error(`当前事务状态不能激活: ${transaction.state}`), { code: "MARKETPLACE_STATE_CONFLICT", statusCode: 409 });
+  }
+
+  updateMarketplaceTransaction(id, current => ({ ...current, state: "activating", error: "", checkpoints: [...current.checkpoints, "activation_claimed"] }));
+  if (transaction.action === "uninstall") {
+    try {
+      const result = await uninstallMarketplaceItemWithStore({
+        type: transaction.type,
+        name: transaction.name,
+        installationId: transaction.itemSnapshot?.installationId,
+        autoResync: true,
+      });
+      const resyncFailed = result.runtimeResync?.success === false || Number(result.runtimeResync?.summary?.failed || 0) > 0;
+      const completed = updateMarketplaceTransaction(id, current => ({
+        ...current,
+        state: resyncFailed ? "recovery_required" : "active",
+        runtimeState: "removed",
+        resyncState: resyncFailed ? "failed" : "ready",
+        error: resyncFailed ? (result.runtimeResync?.error || "卸载后运行时重同步失败") : "",
+        checkpoints: [...current.checkpoints, "resource_removed", resyncFailed ? "resync_failed" : "runtime_resynced", resyncFailed ? "recovery_required" : "committed"],
+      }));
+      return { transaction: publicMarketplaceTransaction(completed), ...result };
+    } catch (error: any) {
+      updateMarketplaceTransaction(id, current => ({
+        ...current,
+        state: "failed",
+        error: cleanImpactText(error?.message || "卸载失败", 500),
+        checkpoints: [...current.checkpoints, "activation_failed"],
+      }));
+      throw error;
+    }
+  }
+  const item = resolveObjectSecrets(transaction.itemSnapshot || {});
+  const previousRecords = loadInstallations();
+  const previousRecord = previousRecords.find(record => record.key === installationKey(transaction.type, transaction.name));
+  const previousResource = transaction.type === "mcp"
+    ? loadMcpTools().find(row => row.name === transaction.name)
+    : loadSkills().find(row => row.name === transaction.name);
+  let packagePath = "";
+  let nextRecord: InstallationRecord | null = null;
+  try {
+    if (transaction.type === "mcp") {
+      const validated = validateStdioMarketplaceItem(item);
+      if (validated.url) await assertSafeHttpsUrl(validated.url);
+      saveMcpTool(buildMarketplaceMcpToolRecord({
+        ...validated,
+        enabled: true,
+        marketplaceRevision: transaction.catalogRevision,
+        materialHash: transaction.materialHash,
+      }, new Date().toISOString()));
+    } else {
+      if (!transaction.stagingPath || !fs.existsSync(transaction.stagingPath)) throw new Error("隔离物料已丢失，请重新创建安装事务");
+      const stats = validateSkillDirectory(transaction.stagingPath);
+      if (stats.treeHash !== transaction.materialHash) throw Object.assign(new Error("隔离物料已变化，旧确认失效"), { code: "MARKETPLACE_MATERIAL_DRIFT", statusCode: 409 });
+      packagePath = installStagedPackage(transaction.stagingPath, transaction.name, SKILL_PACKAGES_DIR, transaction.materialHash);
+      const skillFile = path.join(packagePath, "SKILL.md");
+      const content = fs.readFileSync(skillFile, "utf-8");
+      const staged = { parsed: parseSkillMarkdown(content, transaction.name, item.description), packageStats: stats };
+      saveSkill(buildMarketplaceSkillRecord({
+        ...item,
+        marketplaceRevision: transaction.catalogRevision,
+        materialHash: transaction.materialHash,
+      }, staged, packagePath, transaction.materialHash, new Date().toISOString()));
+    }
+
+    await toolManager.loadTools();
+    const toolState = transaction.type === "mcp"
+      ? toolManager.getToolList().servers.find((server: any) => server.name === transaction.name)
+      : { connected: true };
+    if (transaction.type === "mcp" && !toolState?.connected) {
+      throw Object.assign(new Error(toolState?.error || "MCP 初始化或 tools/list 测试失败"), { code: "MCP_ACTIVATION_TEST_FAILED" });
+    }
+
+    const sourceProof = buildMarketplaceSourceProof(item, {
+      checksum: transaction.materialHash,
+      packageStats: transaction.preview?.packageStats,
+    });
+    nextRecord = {
+      ...buildMarketplaceInstallationRecord(item, transaction.materialHash, packagePath, previousRecord, new Date().toISOString(), sourceProof),
+      activatedBy: principal.userId,
+      activatedAt: new Date().toISOString(),
+      runtimeState: "connected",
+      resyncState: "pending",
+    };
+    saveInstallations([...previousRecords.filter(record => record.key !== nextRecord!.key), nextRecord]);
+    const lifecycle = completeToolCatalogMutationLifecycle({ action: transaction.action, type: transaction.type, name: transaction.name, autoResync: true });
+    const resyncFailed = lifecycle.runtimeResync?.success === false || Number(lifecycle.runtimeResync?.summary?.failed || 0) > 0;
+    if (resyncFailed) {
+      restoreMarketplaceResource(transaction.type, transaction.name, previousResource);
+      if (transaction.type === "skill") restoreSkillQuarantine(packagePath, transaction.stagingPath, previousRecord?.packagePath || "");
+      saveInstallations(previousRecords);
+      try { await toolManager.loadTools(); } catch {}
+      const recovery = updateMarketplaceTransaction(id, current => ({
+        ...current,
+        state: "recovery_required",
+        installationId: previousRecord?.installationId,
+        runtimeState: previousRecord ? "previous_version_restored" : "disabled",
+        resyncState: "failed",
+        error: lifecycle.runtimeResync?.error || "运行时授权快照重同步失败",
+        checkpoints: [...current.checkpoints, "resource_installed", "tool_manager_ready", "resync_failed", "previous_version_restored"],
+      }));
+      return { transaction: publicMarketplaceTransaction(recovery), ...lifecycle };
+    }
+    nextRecord = { ...nextRecord, state: "active", resyncState: "ready" };
+    saveInstallations([...loadInstallations().filter(record => record.key !== nextRecord!.key), nextRecord]);
+    if (transaction.type === "skill" && previousRecord?.packagePath && previousRecord.packagePath !== packagePath) {
+      removeManagedPackage(previousRecord.packagePath);
+    }
+    const active = updateMarketplaceTransaction(id, current => ({
+      ...current,
+      state: "active",
+      installationId: nextRecord?.installationId,
+      runtimeState: "connected",
+      resyncState: "ready",
+      checkpoints: [...current.checkpoints, "resource_installed", "tool_manager_ready", "runtime_resynced", "committed"],
+    }));
+    appendMarketplaceOperationAudit({
+      action: transaction.action,
+      key: nextRecord.key,
+      type: transaction.type,
+      name: transaction.name,
+      source: transaction.source,
+      previousVersion: previousRecord?.version,
+      version: nextRecord.version,
+      previousChecksum: previousRecord?.checksum,
+      checksum: nextRecord.checksum,
+      changed: true,
+      packageManaged: transaction.type === "skill",
+      toolManagerReloaded: true,
+      ...lifecycle,
+      sourceProof,
+    });
+    return { transaction: publicMarketplaceTransaction(active), record: publicInstallationRecord(nextRecord), ...lifecycle };
+  } catch (error: any) {
+    restoreMarketplaceResource(transaction.type, transaction.name, previousResource);
+    if (transaction.type === "skill") restoreSkillQuarantine(packagePath, transaction.stagingPath, previousRecord?.packagePath || "");
+    saveInstallations(previousRecords);
+    try { await toolManager.loadTools(); } catch {}
+    const failed = updateMarketplaceTransaction(id, current => ({
+      ...current,
+      state: "failed",
+      error: cleanImpactText(error?.message || "激活失败", 500),
+      runtimeState: "failed",
+      checkpoints: [...current.checkpoints, "activation_failed"],
+    }));
+    throw Object.assign(new Error(failed.error || "激活失败"), { code: error?.code || "MARKETPLACE_ACTIVATION_FAILED", statusCode: error?.statusCode || 400 });
+  }
+}
+
+function publicInstallationRecord(record: InstallationRecord) {
+  return {
+    schema: record.schema || "ccm-marketplace-installation-v1",
+    installationId: record.installationId || "",
+    key: record.key,
+    name: record.name,
+    type: record.type,
+    version: record.version,
+    checksum: record.checksum,
+    source: marketplaceSourceSummary(record.source),
+    sourceProof: record.sourceProof ? sanitizeMarketplaceSourceProof(record.sourceProof) : null,
+    installedAt: record.installedAt,
+    updatedAt: record.updatedAt,
+    state: record.state || "quarantined_legacy",
+    materialTreeHash: record.materialTreeHash || "",
+    catalogRevision: record.catalogRevision || "",
+    transport: record.transport || "",
+    activatedBy: record.activatedBy || "",
+    activatedAt: record.activatedAt || "",
+    runtimeState: record.runtimeState || "unproven",
+    resyncState: record.resyncState || "unproven",
   };
 }
 
@@ -2144,7 +2812,8 @@ async function runMarketplaceInstallE2ESelfTest() {
       name: "e2e-market-mcp",
       type: "mcp",
       description: "Temporary E2E MCP",
-      command: "node",
+      command: process.execPath,
+      executablePath: process.execPath,
       args: ["server.js"],
       env: "TOKEN=secret",
       version: "1.0.0",
@@ -2519,6 +3188,13 @@ export async function uninstallMarketplaceItemWithStore(payload: any, store: Mar
   const records = loadRecords();
   const key = installationKey(type, name);
   const record = records.find(entry => entry.key === key);
+  const requestedInstallationId = String(payload?.installation_id || payload?.installationId || "").trim();
+  if (!record || (requestedInstallationId && record.installationId && requestedInstallationId !== record.installationId)) {
+    throw Object.assign(new Error(`"${name}" 不是由当前市场安装记录管理，不能从工具市场卸载`), {
+      code: "marketplace_ownership_required",
+      statusCode: 409,
+    });
+  }
   if (type === "mcp") deleteMcp(name);
   else {
     deleteInstalledSkill(name);
@@ -2586,26 +3262,157 @@ function readJsonBody(req: any, maxBytes = 2 * 1024 * 1024): Promise<any> {
   });
 }
 
+function readSmitheryCredential() {
+  let config: any = {};
+  try { config = JSON.parse(fs.readFileSync(SMITHERY_CONFIG_FILE, "utf-8")); } catch {}
+  let ref = String(config?.key_ref || "");
+  const legacy = String(config?.key || "").trim();
+  if (legacy && !isCredentialReference(legacy)) {
+    ref = protectCredential("marketplace:smithery", "api_key", legacy);
+    writeJsonAtomic(SMITHERY_CONFIG_FILE, { version: 2, key_ref: ref });
+  }
+  return ref;
+}
+
+function saveSmitheryCredential(value: any) {
+  const previous = readSmitheryCredential();
+  const plain = String(value || "").trim();
+  if (!plain) {
+    if (previous) deleteCredential(previous);
+    writeJsonAtomic(SMITHERY_CONFIG_FILE, { version: 2, key_ref: "" });
+    return "";
+  }
+  const ref = protectCredential("marketplace:smithery", "api_key", plain);
+  if (previous && previous !== ref) deleteCredential(previous);
+  writeJsonAtomic(SMITHERY_CONFIG_FILE, { version: 2, key_ref: ref });
+  return ref;
+}
+
+async function createAndMaybeActivateMarketplaceTransaction(payload: any, mode: "install" | "update", principal: { userId: string; sessionId: string }) {
+  const created = await createMarketplaceInstallTransaction(payload, mode, principal);
+  if (created.transaction.state === "active") {
+    return { transaction: publicMarketplaceTransaction(created.transaction), duplicate: true, action: mode };
+  }
+  if (created.transaction.source?.trust === "official") {
+    return activateMarketplaceTransaction({
+      transaction_id: created.transaction.id,
+      activation_token: created.activationToken,
+    }, principal);
+  }
+  return {
+    transaction: publicMarketplaceTransaction(created.transaction),
+    activation_token: created.activationToken,
+    action: mode,
+    quarantined: true,
+    requires_activation: true,
+  };
+}
+
+function retryMarketplaceTransaction(payload: any, principal: { userId: string; sessionId: string }) {
+  const id = String(payload?.transaction_id || payload?.transactionId || "").trim();
+  const transaction = readMarketplaceTransaction(id);
+  if (!transaction) throw Object.assign(new Error("市场事务不存在"), { statusCode: 404, code: "MARKETPLACE_TRANSACTION_NOT_FOUND" });
+  if (transaction.principal.userId !== principal.userId || transaction.principal.sessionId !== principal.sessionId) {
+    throw Object.assign(new Error("只能由创建该预览的 Admin 会话重新确认"), { statusCode: 403, code: "MARKETPLACE_PRINCIPAL_MISMATCH" });
+  }
+  if (transaction.type === "skill" && transaction.stagingPath) {
+    const stats = validateSkillDirectory(transaction.stagingPath);
+    if (stats.treeHash !== transaction.materialHash) throw Object.assign(new Error("隔离物料已变化，请重新预览"), { statusCode: 409, code: "MARKETPLACE_MATERIAL_DRIFT" });
+  }
+  const refreshed = updateMarketplaceTransaction(id, current => ({
+    ...current,
+    state: current.state === "active" ? "active" : (current.source?.trust === "official" ? "previewed" : "quarantined"),
+    activationExpiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    error: "",
+    checkpoints: [...current.checkpoints, "confirmation_refreshed"],
+  }));
+  return { transaction: publicMarketplaceTransaction(refreshed), activation_token: signMarketplaceActivation(refreshed) };
+}
+
+function rollbackMarketplaceTransaction(payload: any, principal: { userId: string; sessionId: string }) {
+  const id = String(payload?.transaction_id || payload?.transactionId || "").trim();
+  const transaction = readMarketplaceTransaction(id);
+  if (!transaction) throw Object.assign(new Error("市场事务不存在"), { statusCode: 404, code: "MARKETPLACE_TRANSACTION_NOT_FOUND" });
+  if (transaction.principal.userId !== principal.userId) throw Object.assign(new Error("无权回滚该市场事务"), { statusCode: 403, code: "MARKETPLACE_PRINCIPAL_MISMATCH" });
+  if (transaction.state === "active") throw Object.assign(new Error("已提交事务不能直接回滚，请创建卸载或更新事务"), { statusCode: 409, code: "MARKETPLACE_ROLLBACK_REQUIRES_NEW_TRANSACTION" });
+  if (transaction.stagingPath && isPathInside(SKILL_PACKAGES_DIR, transaction.stagingPath)) {
+    try { fs.rmSync(transaction.stagingPath, { recursive: true, force: true }); } catch {}
+  }
+  const rolledBack = updateMarketplaceTransaction(id, current => ({
+    ...current,
+    state: "rolled_back",
+    checkpoints: [...current.checkpoints, "staging_removed", "rolled_back"],
+  }));
+  return { transaction: publicMarketplaceTransaction(rolledBack) };
+}
+
 export function handleMarketplaceApi(pathname: string, req: any, res: any, parsed: any): boolean {
   if (pathname === "/api/smithery/config" && req.method === "GET") {
-    let key = "";
-    try { key = String(JSON.parse(fs.readFileSync(SMITHERY_CONFIG_FILE, "utf-8")).key || ""); } catch {}
-    sendJson(res, { success: true, configured: !!key, key: "" });
+    const ref = readSmitheryCredential();
+    sendJson(res, { success: true, configured: !!ref, key: "", credential_protected: !!ref });
     return true;
   }
 
   if (pathname === "/api/smithery/config" && req.method === "POST") {
     readJsonBody(req)
       .then(payload => {
-        writeJsonAtomic(SMITHERY_CONFIG_FILE, { key: String(payload.key || "") });
-        sendJson(res, { success: true });
+        const ref = saveSmitheryCredential(payload.key);
+        sendJson(res, { success: true, configured: !!ref, credential_protected: !!ref });
       })
       .catch(error => sendJson(res, { success: false, error: error.message }, 400));
     return true;
   }
 
   if (pathname === "/api/marketplace/installations" && req.method === "GET") {
-    sendJson(res, { success: true, items: loadInstallations() });
+    sendJson(res, { success: true, items: loadInstallations().map(publicInstallationRecord) });
+    return true;
+  }
+
+  if (pathname === "/api/marketplace/transactions" && req.method === "GET") {
+    const limit = Number(parsed.query.limit || 100);
+    sendJson(res, { success: true, items: listMarketplaceTransactions(limit).map(publicMarketplaceTransaction) });
+    return true;
+  }
+
+  if (pathname === "/api/marketplace/transactions" && req.method === "POST") {
+    let principal: any;
+    try { principal = marketplacePrincipal(req); } catch (error: any) { sendJson(res, { success: false, error: error.message, code: error.code }, error.statusCode || 403); return true; }
+    readJsonBody(req)
+      .then(async payload => {
+        const action = String(payload?.action || "install");
+        if (action === "uninstall") return createMarketplaceUninstallTransaction(payload, principal);
+        if (!["install", "update"].includes(action)) throw new Error("市场事务动作无效");
+        return createMarketplaceInstallTransaction(payload, action as "install" | "update", principal);
+      })
+      .then(result => sendJson(res, {
+        success: true,
+        transaction: publicMarketplaceTransaction(result.transaction),
+        activation_token: result.activationToken,
+      }))
+      .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
+    return true;
+  }
+
+  const transactionRoute = pathname.match(/^\/api\/marketplace\/transactions\/([^/]+)(?:\/(activate|retry|rollback))?$/);
+  if (transactionRoute && req.method === "GET" && !transactionRoute[2]) {
+    const transaction = readMarketplaceTransaction(decodeURIComponent(transactionRoute[1]));
+    if (!transaction) sendJson(res, { success: false, error: "市场事务不存在", code: "MARKETPLACE_TRANSACTION_NOT_FOUND" }, 404);
+    else sendJson(res, { success: true, transaction: publicMarketplaceTransaction(transaction) });
+    return true;
+  }
+  if (transactionRoute && req.method === "POST" && transactionRoute[2]) {
+    let principal: any;
+    try { principal = marketplacePrincipal(req); } catch (error: any) { sendJson(res, { success: false, error: error.message, code: error.code }, error.statusCode || 403); return true; }
+    const id = decodeURIComponent(transactionRoute[1]);
+    readJsonBody(req)
+      .then(payload => {
+        const merged = { ...payload, transaction_id: id };
+        if (transactionRoute[2] === "activate") return activateMarketplaceTransaction(merged, principal);
+        if (transactionRoute[2] === "retry") return retryMarketplaceTransaction(merged, principal);
+        return rollbackMarketplaceTransaction(merged, principal);
+      })
+      .then(result => sendJson(res, { success: true, ...result }))
+      .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
     return true;
   }
 
@@ -2712,25 +3519,37 @@ export function handleMarketplaceApi(pathname: string, req: any, res: any, parse
   }
 
   if (pathname === "/api/marketplace/install" && req.method === "POST") {
+    let principal: any;
+    try { principal = marketplacePrincipal(req); } catch (error: any) { sendJson(res, { success: false, error: error.message, code: error.code }, error.statusCode || 403); return true; }
     readJsonBody(req)
-      .then(installMarketplaceItem)
+      .then(payload => createAndMaybeActivateMarketplaceTransaction(payload, "install", principal))
       .then(result => sendJson(res, { success: true, ...result }))
       .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
     return true;
   }
 
   if (pathname === "/api/marketplace/update" && req.method === "POST") {
+    let principal: any;
+    try { principal = marketplacePrincipal(req); } catch (error: any) { sendJson(res, { success: false, error: error.message, code: error.code }, error.statusCode || 403); return true; }
     readJsonBody(req)
-      .then(updateMarketplaceItem)
+      .then(payload => createAndMaybeActivateMarketplaceTransaction(payload, "update", principal))
       .then(result => sendJson(res, { success: true, ...result }))
       .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
     return true;
   }
 
   if (pathname === "/api/marketplace/uninstall" && req.method === "POST") {
+    let principal: any;
+    try { principal = marketplacePrincipal(req); } catch (error: any) { sendJson(res, { success: false, error: error.message, code: error.code }, error.statusCode || 403); return true; }
     readJsonBody(req)
-      .then(uninstallMarketplaceItem)
-      .then(result => sendJson(res, { success: true, ...result }))
+      .then(payload => createMarketplaceUninstallTransaction(payload, principal))
+      .then(result => sendJson(res, {
+        success: true,
+        transaction: publicMarketplaceTransaction(result.transaction),
+        activation_token: result.activationToken,
+        quarantined: true,
+        requires_activation: true,
+      }))
       .catch(error => sendJson(res, { success: false, error: error.message, code: error.code }, Number(error.statusCode || 400)));
     return true;
   }

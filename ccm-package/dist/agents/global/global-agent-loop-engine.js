@@ -1317,6 +1317,7 @@ async function continueLoop(run, runtime) {
 async function startGlobalAgentRun(input, runtime) {
     const createdAt = nowIso(runtime);
     const id = `gar_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
+    const semanticUsage = input.workflowDecision?.semanticDecisionReceipt?.usage || null;
     const run = normalizeRun({
         id,
         trace_id: (0, reliability_ledger_1.ensureTraceId)(input.traceId, "global-agent"),
@@ -1346,7 +1347,7 @@ async function startGlobalAgentRun(input, runtime) {
         final_reply: "",
         error: "",
         resume_count: 0,
-        model_calls: 0,
+        model_calls: semanticUsage ? 1 : 0,
         tool_calls: 0,
         consecutive_failures: 0,
         client_effects: [],
@@ -1356,8 +1357,51 @@ async function startGlobalAgentRun(input, runtime) {
             assertions: [{ id: "goal", label: "用户目标得到回答或可核验交付", kind: "goal" }],
         }),
     });
+    if (semanticUsage) {
+        run.latest_context_usage = semanticUsage;
+        run.usage = {
+            inputTokens: Math.max(0, Number(semanticUsage.inputTokens || 0)),
+            outputTokens: Math.max(0, Number(semanticUsage.outputTokens || 0)),
+            totalTokens: Math.max(0, Number(semanticUsage.totalTokens || 0)),
+            reported: semanticUsage.reported === true,
+            directInputTokens: Math.max(0, Number(semanticUsage.directInputTokens ?? semanticUsage.inputTokens ?? 0)),
+            cacheCreationInputTokens: Math.max(0, Number(semanticUsage.cacheCreationInputTokens || 0)),
+            cacheReadInputTokens: Math.max(0, Number(semanticUsage.cacheReadInputTokens || 0)),
+            totalCostUsd: Math.max(0, Number(semanticUsage.costUsd || 0)),
+        };
+        run.input_tokens = run.usage.inputTokens;
+        run.output_tokens = run.usage.outputTokens;
+        run.total_cost_usd = run.usage.totalCostUsd;
+    }
     saveRun(run, runtime.persist !== false);
     (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:created`, type: "global_agent.run_created", status: "info", message: (input.originalMessage || input.message).slice(0, 1000), data: { session_id: run.session_id, source: run.source, explicit_write_authorization: run.explicit_write_authorization } });
+    const directReply = String(input.directReply || "").trim();
+    if (directReply) {
+        const workflowDecision = input.workflowDecision || null;
+        const intent = {
+            category: "conversation",
+            goal: String(input.originalMessage || input.message || "").trim(),
+            action_required: false,
+            target_refs: [],
+            impact_scope: [],
+            confidence: Number(workflowDecision?.confidence || 0),
+            authorization_basis: "none",
+            reason: String(workflowDecision?.reason || "模型确认当前消息可以直接回答"),
+        };
+        run.steps.push({
+            index: 1,
+            at: nowIso(runtime),
+            state: "answer",
+            message: directReply,
+            plan: [],
+            duration_ms: Math.max(0, Number(workflowDecision?.semanticDecisionReceipt?.durationMs || 0)),
+            decision: { intent, workflowDecision, direct_reply_fast_path: true },
+        });
+        run.decision_summary = { intent, workflowDecision };
+        run.direct_reply_fast_path = true;
+        run.directReplyFastPath = true;
+        return completeRun(run, runtime, "completed", directReply);
+    }
     return continueLoop(run, runtime);
 }
 async function resumeGlobalAgentRun(id, runtime, options = {}) {

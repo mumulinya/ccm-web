@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { startPlaywrightAppServer } from './playwright-app-server.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
+const appHost = process.env.CCM_BASE_URL ? null : await startPlaywrightAppServer(root, { port: 3082 })
+const baseUrl = String(process.env.CCM_BASE_URL || appHost.baseUrl).replace(/\/+$/, '')
 const outputDir = path.join(root, 'scratch', 'settings-render-regression')
 fs.mkdirSync(outputDir, { recursive: true })
 const candidates = [process.env.PLAYWRIGHT_BROWSER_PATH, 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'].filter(Boolean)
@@ -22,8 +24,11 @@ const adminSession = {
 }
 const mockBaseApi = async page => {
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
-  await page.route('**/api/**', route => {
+  await page.route('**/*', route => {
     const pathname = new URL(route.request().url()).pathname
+    if (!pathname.startsWith('/api/')) return route.continue()
+    const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
+    if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
     if (pathname === '/api/auth/session') return route.fulfill(json(adminSession))
     if (pathname === '/api/music/playback/commands/head') return route.fulfill(json({ success: true, command: null }))
     if (pathname === '/api/projects') return route.fulfill(json({ success: true, projects: [] }))
@@ -233,6 +238,7 @@ try {
   process.exitCode = 1
 } finally {
   await browser.close()
+  if (appHost) await appHost.server.close()
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report, null, 2))
 }

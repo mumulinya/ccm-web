@@ -264,6 +264,14 @@ function requireUser(req: IncomingMessage, res: ServerResponse, admin = false) {
 export function roleCapabilities(role: AuthRole) { return [...ROLE_CAPABILITIES[role]]; }
 export function hasAuthCapability(role: AuthRole, capability: AuthCapability) { return ROLE_CAPABILITIES[role].includes(capability); }
 export function browserApiAccessAllowed(req: IncomingMessage) { return sameOrigin(req) && !!resolveLocalAuthSession(req); }
+export function listActiveLocalAuthUsers() {
+  return peekUsers().users
+    .filter(user => !user.disabledAt)
+    .map(user => ({ id: user.id, username: user.username, role: user.role }));
+}
+export function listActiveAdminUserIds() {
+  return listActiveLocalAuthUsers().filter(user => user.role === "admin").map(user => user.id);
+}
 
 export function localAuthPublicState(req: IncomingMessage) { const users = peekUsers(); const auth = resolveLocalAuthSession(req); return { authenticated: !!auth, registration_enabled: users.registrationEnabled, first_install: users.users.length === 0, login_theme: users.loginTheme, user: publicUser(auth?.user), capabilities: auth?.capabilities || [], csrf: auth?.session.csrfToken || null, session_error: (req as any).ccmSessionError || null, session: auth ? { id: auth.session.id, created_at: auth.session.createdAt, last_seen_at: auth.session.lastSeenAt, expires_at: auth.session.expiresAt } : null }; }
 

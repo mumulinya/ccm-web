@@ -231,6 +231,8 @@ export function useProjectManager(props, emit) {
 
   // 弹窗状态
   const showCreate = ref(false)
+  const projectCreateBusy = ref(false)
+  const projectCloneStatus = ref(null)
   const showEdit = ref(false)
   const showSwitchAgent = ref(false)
   const showTools = ref(false)
@@ -242,6 +244,8 @@ export function useProjectManager(props, emit) {
   const projectRuntime = ref(null)
   const projectRuntimeLoading = ref(false)
   const projectRuntimeBusy = ref('')
+  let projectRuntimeLoadGeneration = 0
+  let projectRuntimeLoadController = null
   const selectedRuntimeProfileId = ref('')
   const showRuntimeConfig = ref(false)
   const projectToolchainTestResult = ref(null)
@@ -323,31 +327,41 @@ export function useProjectManager(props, emit) {
 
   const loadProjectRuntime = async (project = currentProject.value) => {
     if (!project) {
+      projectRuntimeLoadController?.abort()
+      projectRuntimeLoadGeneration += 1
       projectRuntime.value = null
       selectedRuntimeProfileId.value = ''
       return
     }
+    const generation = ++projectRuntimeLoadGeneration
+    projectRuntimeLoadController?.abort()
+    projectRuntimeLoadController = new AbortController()
     projectRuntimeLoading.value = true
     try {
-      const snapshot = await projectsApi.runtime(project)
-      if (project !== currentProject.value && currentProject.value) return
+      const snapshot = await projectsApi.runtime(project, { signal: projectRuntimeLoadController.signal })
+      if (generation !== projectRuntimeLoadGeneration || project !== currentProject.value) return
       projectRuntime.value = snapshot
       projectToolchainTestResult.value = null
       const currentExists = snapshot.profiles?.some(profile => profile.id === selectedRuntimeProfileId.value && profile.enabled !== false)
       if (!currentExists) selectedRuntimeProfileId.value = preferredRuntimeProfileId(snapshot)
     } catch (error) {
-      projectRuntime.value = null
-      toast.error(error?.message || '读取项目运行配置失败')
+      if (error?.name !== 'AbortError' && generation === projectRuntimeLoadGeneration && project === currentProject.value) {
+        projectRuntime.value = null
+        toast.error(error?.message || '读取项目运行配置失败')
+      }
     } finally {
-      projectRuntimeLoading.value = false
+      if (generation === projectRuntimeLoadGeneration) projectRuntimeLoading.value = false
     }
   }
 
   const rescanProjectRuntime = async () => {
     if (!currentProject.value || projectRuntimeBusy.value) return
+    const targetProject = currentProject.value
     projectRuntimeBusy.value = 'rescan'
     try {
-      projectRuntime.value = await projectsApi.runtimeRescan(currentProject.value)
+      const snapshot = await projectsApi.runtimeRescan(targetProject)
+      if (targetProject !== currentProject.value) return
+      projectRuntime.value = snapshot
       selectedRuntimeProfileId.value = preferredRuntimeProfileId(projectRuntime.value)
       toast.success(projectRuntime.value.profiles?.length ? `已识别 ${projectRuntime.value.profiles.length} 个运行配置` : '未识别到可靠命令，可手动添加')
     } catch (error) { toast.error(error?.message || '扫描运行配置失败') }
@@ -356,9 +370,12 @@ export function useProjectManager(props, emit) {
 
   const saveProjectRuntime = async data => {
     if (!currentProject.value || projectRuntimeBusy.value) return
+    const targetProject = currentProject.value
     projectRuntimeBusy.value = 'save'
     try {
-      projectRuntime.value = await projectsApi.runtimeSave(currentProject.value, data)
+      const snapshot = await projectsApi.runtimeSave(targetProject, data)
+      if (targetProject !== currentProject.value) return
+      projectRuntime.value = snapshot
       selectedRuntimeProfileId.value = projectRuntime.value.selected_profile_id || ''
       projectToolchainTestResult.value = null
       showRuntimeConfig.value = false
@@ -369,10 +386,13 @@ export function useProjectManager(props, emit) {
 
   const testProjectRuntimeToolchain = async toolchain => {
     if (!currentProject.value || projectRuntimeBusy.value) return
+    const targetProject = currentProject.value
     projectRuntimeBusy.value = 'toolchain-test'
     projectToolchainTestResult.value = null
     try {
-      projectToolchainTestResult.value = await projectsApi.runtimeToolchainTest(currentProject.value, toolchain)
+      const result = await projectsApi.runtimeToolchainTest(targetProject, toolchain)
+      if (targetProject !== currentProject.value) return
+      projectToolchainTestResult.value = result
       if (projectToolchainTestResult.value.success) toast.success('JDK 与 Maven 工具链验证通过')
       else toast.error('工具链验证未通过，请检查检测结果')
     } catch (error) {
@@ -386,13 +406,15 @@ export function useProjectManager(props, emit) {
   const runProjectRuntimeAction = async action => {
     if (!currentProject.value || !selectedRuntimeProfileId.value || projectRuntimeBusy.value) return
     const targetProfileId = selectedRuntimeProfileId.value
+    const targetProject = currentProject.value
     if (['start', 'restart', 'build'].includes(action)) {
       openProjectRuntimeLogs(action === 'build' ? 'build' : 'run', targetProfileId)
     }
     projectRuntimeBusy.value = action
     try {
-      const result = await projectsApi.runtimeAction(currentProject.value, targetProfileId, action)
-      await loadProjectRuntime(currentProject.value)
+      const result = await projectsApi.runtimeAction(targetProject, targetProfileId, action)
+      if (targetProject !== currentProject.value) return
+      await loadProjectRuntime(targetProject)
       await loadProjects()
       const labels = { start: '源码项目已启动', stop: '源码项目已暂停', restart: '源码项目已重新运行', build: '构建任务已开始' }
       toast.success(result.message || labels[action] || '项目运行操作已执行')
@@ -560,13 +582,17 @@ export function useProjectManager(props, emit) {
       || ''
     form.value = {
       name: '', display_name: '', work_dir: '', agent: defaultAgent, platform: 'feishu', source_type: 'local',
-      repository_url: '', repository_original_url: '', repository_branch: '', initialize_repository: false, git_loading: false, git_status: null
+      repository_url: '', repository_original_url: '', repository_branch: '', initialize_repository: false, git_loading: false, git_status: null,
+      clone_request_id: `clone_${crypto.randomUUID().replace(/-/g, '')}`
     }
+    projectCreateBusy.value = false
+    projectCloneStatus.value = null
     showCreate.value = true
   }
 
   // 提交创建
   const submitCreate = async () => {
+    if (projectCreateBusy.value) return
     if (!form.value.name || !form.value.work_dir) {
       toast.warning('请填写项目名称和目录')
       return
@@ -575,14 +601,54 @@ export function useProjectManager(props, emit) {
       toast.warning('请填写 GitHub 仓库地址')
       return
     }
-    const res = await projectsApi.create({ ...form.value, setup_token: feishuProjectSetupToken.value || undefined })
-    if (res.success) {
-      showCreate.value = false
-      feishuProjectSetupToken.value = ''
-      loadProjects()
-      toast.success('项目创建成功！')
-    } else {
-      toast.error('创建失败: ' + (res.error || '未知错误'))
+    projectCreateBusy.value = true
+    projectCloneStatus.value = form.value.source_type === 'github' ? { status: 'queued', stage: '等待克隆' } : null
+    let pollTimer = null
+    if (form.value.source_type === 'github') {
+      const requestId = form.value.clone_request_id
+      pollTimer = window.setInterval(async () => {
+        try {
+          const state = await projectsApi.cloneStatus(requestId)
+          if (state?.receipt) projectCloneStatus.value = state.receipt
+        } catch {}
+      }, 750)
+    }
+    try {
+      const res = await projectsApi.create({ ...form.value, setup_token: feishuProjectSetupToken.value || undefined })
+      if (res.success) {
+        showCreate.value = false
+        feishuProjectSetupToken.value = ''
+        await loadProjects()
+        toast.success('项目创建成功！')
+      } else {
+        throw new Error(res.error || '未知错误')
+      }
+    } catch (error) {
+      toast.error('创建失败: ' + (error?.message || '未知错误'))
+      if (form.value.source_type === 'github') {
+        try {
+          const state = await projectsApi.cloneStatus(form.value.clone_request_id)
+          projectCloneStatus.value = state?.receipt || projectCloneStatus.value
+        } catch {}
+      }
+    } finally {
+      if (pollTimer) window.clearInterval(pollTimer)
+      projectCreateBusy.value = false
+      if (form.value.source_type === 'github' && projectCloneStatus.value?.status !== 'recovery_required') {
+        form.value.clone_request_id = `clone_${crypto.randomUUID().replace(/-/g, '')}`
+      }
+    }
+  }
+
+  const cancelProjectClone = async () => {
+    const requestId = String(form.value.clone_request_id || '')
+    if (!requestId || !projectCreateBusy.value) return
+    try {
+      const result = await projectsApi.cloneCancel(requestId)
+      projectCloneStatus.value = result.receipt || { status: 'cancel_requested', stage: '正在取消' }
+      toast.success('已请求取消克隆，正在安全停止 Git 进程')
+    } catch (error) {
+      toast.error(error?.message || '取消克隆失败')
     }
   }
 
@@ -1784,6 +1850,7 @@ export function useProjectManager(props, emit) {
   })
 
   onUnmounted(() => {
+    projectRuntimeLoadController?.abort()
     stopStreaming()
     unsubscribeProjectRuntime?.()
     window.clearTimeout(loadProjectRuntime._eventTimer)
@@ -1817,11 +1884,12 @@ export function useProjectManager(props, emit) {
     chatFiles, diffViewer, pageInfo,
     agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,
     showCreate, showEdit, showSwitchAgent, showTools, showProjectTestTargets, showSharedFiles, showArchives,
+    projectCreateBusy, projectCloneStatus,
     mobileSessionsOpen, projectActionBusy, projectRuntime, projectRuntimeLoading, projectRuntimeBusy, selectedRuntimeProfileId, selectedRuntimeProcess, showRuntimeConfig, projectToolchainTestResult, showFeishuQr, editProject, feishuQrUrl, feishuQrStatus,
     feishuQrLoading, feishuProjectSetupToken, browsePath, browseItems, browseTarget, drives, browseHome, browseLoading, browseError,
     showFolderBrowser, form, updateProjectFormField, platforms, loadProjects, loadProjectRuntime, rescanProjectRuntime, saveProjectRuntime, testProjectRuntimeToolchain, runProjectRuntimeAction,
     selectProject, loadSessions, selectSession, startProject, stopProject,
-    deleteProject, handleArchiveNotify, openCreateModal, submitCreate, openEditModal, submitEdit, loadProjectGitStatus,
+    deleteProject, handleArchiveNotify, openCreateModal, submitCreate, cancelProjectClone, openEditModal, submitEdit, loadProjectGitStatus,
     openSwitchAgent, switchAgent, startProjectWithAgent, createSession, openProjectFeishuBinding, updateProjectFeishuBinding, renameSession, deleteSession,
     saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
     pendingProjectParentRunId, streamController, activeProjectRunId, activeProjectMainTaskId, stoppingProjectTurn, makeProjectMessageId,

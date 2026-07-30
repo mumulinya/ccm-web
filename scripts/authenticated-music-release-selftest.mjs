@@ -22,16 +22,22 @@ const runCli = args => execFileSync(process.execPath, [cli, ...args], { cwd: roo
 
 try {
   runCli(['start', '--background', '--port', String(port)])
+  const setupOutput = runCli(['setup-code'])
+  const setupCode = setupOutput.match(/Setup code\s+([A-Z0-9]{8,})/)?.[1]
+  if (!setupCode) throw new Error(`temporary setup code missing: ${setupOutput}`)
   const registration = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `music_${Date.now().toString(36)}`, password: `Music-${Date.now()}-Release-Safe` }),
+    body: JSON.stringify({ username: `music_${Date.now().toString(36)}`, password: `Music-${Date.now()}-Release-Safe`, setup_code: setupCode }),
   })
-  if (registration.status !== 201) throw new Error(`temporary registration failed: ${registration.status} ${await registration.text()}`)
+  const registrationData = await registration.json().catch(() => ({}))
+  if (registration.status !== 201) throw new Error(`temporary registration failed: ${registration.status} ${JSON.stringify(registrationData)}`)
   const cookie = String(registration.headers.get('set-cookie') || '').split(';')[0]
   if (!cookie) throw new Error('temporary auth cookie missing')
+  const csrf = String(registrationData.csrf || registrationData.session?.csrf || '')
+  if (!csrf) throw new Error('temporary csrf token missing')
   execFileSync(process.execPath, [path.join(root, 'scripts', 'music-production-selftest.mjs')], {
     cwd: root,
-    env: { ...env, CCM_MUSIC_URL: `http://127.0.0.1:${port}`, CCM_AUTH_COOKIE: cookie },
+    env: { ...env, CCM_MUSIC_URL: `http://127.0.0.1:${port}`, CCM_AUTH_COOKIE: cookie, CCM_AUTH_CSRF: csrf },
     timeout: 180_000,
     windowsHide: true,
     stdio: 'inherit',

@@ -8,12 +8,14 @@ const props = defineProps({
 
 const showMenu = ref(false)
 const petConfigs = ref({})
+const petConfigRevision = ref(0)
 
 // 加载宠物配置
 const loadConfigs = async () => {
   try {
     const res = await fetch('/api/pets/config')
     const data = await res.json()
+    petConfigRevision.value = Number(data.revision || 0)
     petConfigs.value = data.configs || {}
   } catch {
     petConfigs.value = {}
@@ -24,10 +26,14 @@ const loadConfigs = async () => {
 const saveConfigs = async () => {
   try {
     await fetch('/api/pets/config', {
-      method: 'POST',
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ configs: petConfigs.value })
+      body: JSON.stringify({
+        revision: petConfigRevision.value,
+        patch: { configs: petConfigs.value },
+      })
     })
+    await loadConfigs()
   } catch {}
 }
 

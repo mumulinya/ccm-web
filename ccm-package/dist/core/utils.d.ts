@@ -14,7 +14,6 @@ export declare const GROUP_LOGS_FILE_SHARED: string;
 export declare const PUBLIC_DIR: string;
 export declare const METRICS_FILE: string;
 export declare const FEISHU_CONFIG_FILE: string;
-export declare const TEMPLATES_FILE: string;
 export declare const PROJECT_CONFIGS_FILE: string;
 export declare const GROUP_LOGS_FILE: string;
 export declare const MUSIC_CONFIG_FILE: string;

@@ -36,6 +36,7 @@ export interface TaskReplayEventPageOptions {
     query?: string;
     preset?: string;
     includeSystemEvents?: boolean;
+    includeDetails?: boolean;
 }
 export interface TaskReplayIndexOptions {
     page?: number;
@@ -70,139 +71,7 @@ export declare function paginateReplayEventsForView(allEvents: TaskReplayEvent[]
         };
     };
 };
-export declare function buildCompleteTaskReplay(taskId: string, options?: TaskReplayEventPageOptions): {
-    schema: string;
-    generated_at: string;
-    selected_task_id: string;
-    root_task_id: string;
-    title: string;
-    goal: string;
-    status: string;
-    acceptance_state: string;
-    acceptance_decision: any;
-    terminal_state_receipt: any;
-    terminal_decision: any;
-    terminal_gate: any;
-    scheduler_state: any;
-    completed: boolean;
-    started_at: string;
-    finished_at: string;
-    tasks: {
-        id: string;
-        parent_task_id: string;
-        root_task_id: string;
-        title: string;
-        goal: string;
-        project: string;
-        group_id: string;
-        group_session_id: string;
-        project_session_id: string;
-        request_origin: string;
-        queue_scope: string;
-        queue_target_key: string;
-        queue_position: number;
-        queue_state: string;
-        scheduler_state: any;
-        workspace_lane: string;
-        trace_id: string;
-        status: string;
-        acceptance_state: string;
-        intake_identity_checksum: string;
-        terminal_state_receipt: any;
-        terminal_decision: any;
-        terminal_gate: any;
-        legacy_status_unverified: boolean;
-        semantic_decision_receipt: any;
-        route_decision: any;
-        created_at: string;
-        updated_at: string;
-        is_root: boolean;
-    }[];
-    actors: {
-        id: string;
-        label: string;
-        present: boolean;
-    }[];
-    summary: {
-        event_count: number;
-        issue_count: number;
-        failed_count: number;
-        task_count: number;
-        evidence_count: number;
-        test_run_count: number;
-        plan_count: number;
-        work_item_count: number;
-        user_event_count: number;
-        technical_event_count: number;
-        delivery_count: number;
-        model_call_count: number;
-        provider_retry_count: number;
-        input_token_count: number;
-        output_token_count: number;
-        token_count: number;
-    };
-    phases: {
-        id: TaskReplayStage;
-        status: "warning" | "info" | "failed" | "passed" | "running" | "blocked";
-        event_count: number;
-        started_at: string;
-        finished_at: string;
-    }[];
-    plans: any[];
-    work_items: any[];
-    deliveries: import("./task-replay-delivery").TaskReplayDeliveryView[];
-    events: TaskReplayEvent[];
-    event_page: {
-        mode: string;
-        offset: number;
-        limit: number;
-        returned: number;
-        total: number;
-        total_unfiltered: number;
-        has_previous: boolean;
-        has_more: boolean;
-        previous_offset: number;
-        next_offset: number;
-        first_cursor: {
-            at: string;
-            id: string;
-        };
-        last_cursor: {
-            at: string;
-            id: string;
-        };
-    };
-    evidence: any[];
-    retention: {
-        task_record: {
-            status: string;
-            policy: string;
-        };
-        trace: {
-            status: string;
-            policy: string;
-        };
-        test_agent: {
-            status: string;
-            policy: string;
-            earliest_expiry: string;
-        };
-    };
-    replay_capabilities: {
-        chronological: boolean;
-        filters: string[];
-        event_pagination: boolean;
-        incremental_cursor: boolean;
-        failure_navigation: boolean;
-        evidence_preview: boolean;
-        historical_line_diff: boolean;
-        plan_visibility: boolean;
-        work_item_visibility: boolean;
-        delivery_visibility: boolean;
-        duplicate_event_merging: boolean;
-        raw_machine_paths_exposed: boolean;
-    };
-};
+export declare function buildCompleteTaskReplay(taskId: string, options?: TaskReplayEventPageOptions): any;
 export declare function buildTaskReplayIndex(input?: number | TaskReplayIndexOptions): {
     schema: string;
     generated_at: string;

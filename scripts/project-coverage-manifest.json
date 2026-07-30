@@ -1,0 +1,1125 @@
+{
+  "schema": "ccm-project-coverage-manifest-v1",
+  "version": 1,
+  "title": "CCM 全项目业务覆盖矩阵",
+  "generatedDocument": "docs/confirmed-project-architecture/PROJECT-COVERAGE-MATRIX.md",
+  "topLevelStructure": [
+    {
+      "path": "backend/agents",
+      "responsibility": "全局、群聊、项目主 Agent及开发 Agent执行内核"
+    },
+    {
+      "path": "backend/core",
+      "responsibility": "数据库、原子文件、凭据、任务存储和实例锁"
+    },
+    {
+      "path": "backend/integrations",
+      "responsibility": "第三方集成适配、MCP和外部通道共享能力"
+    },
+    {
+      "path": "backend/modules",
+      "responsibility": "认证、协作、项目、知识、音乐、调度和工具业务模块"
+    },
+    {
+      "path": "backend/projects",
+      "responsibility": "项目级Agent配置、工作区和项目运行支持"
+    },
+    {
+      "path": "backend/skills",
+      "responsibility": "内置Skill目录、角色Skill和调用边界"
+    },
+    {
+      "path": "backend/system",
+      "responsibility": "上下文、压缩、可靠性、清理、附件和运行事件"
+    },
+    {
+      "path": "backend/tasks",
+      "responsibility": "统一任务身份、队列、工作项和Agent会话"
+    },
+    {
+      "path": "backend/test-agent",
+      "responsibility": "TestAgent结构化计划、浏览器验收和证据门禁"
+    },
+    {
+      "path": "backend/tools",
+      "responsibility": "MCP客户端、工具目录、授权快照和运行时同步"
+    },
+    {
+      "path": "frontend/src",
+      "responsibility": "桌面和移动端页面、共享组件及服务端状态投影"
+    },
+    {
+      "path": "integrations",
+      "responsibility": "独立构建的飞书MCP等集成产物"
+    },
+    {
+      "path": "ccm-package",
+      "responsibility": "npm生产包、CLI、后端构建和前端静态资源"
+    },
+    {
+      "path": "pet-assets-package",
+      "responsibility": "按需安装的桌宠资源包"
+    },
+    {
+      "path": "scripts",
+      "responsibility": "领域回归、覆盖审计、文档检查和发布验收"
+    },
+    {
+      "path": "docs",
+      "responsibility": "确认架构、完整业务流程和实施审计"
+    }
+  ],
+  "domains": [
+    {
+      "id": "local-auth-security",
+      "label": "本地认证、RBAC与访问安全",
+      "status": "active",
+      "summary": "首次安装、登录注册、会话、CSRF、角色能力和内部HMAC门禁。",
+      "frontendPages": [
+        {
+          "id": "auth",
+          "component": "frontend/src/components/auth/AuthPage.vue",
+          "entryType": "standalone"
+        }
+      ],
+      "backendRoots": [
+        "backend/core",
+        "backend/modules/system"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/system/local-auth.ts",
+        "backend/modules/system/api-access-control.ts",
+        "backend/modules/system/internal-api-auth.ts"
+      ],
+      "apiPrefixes": [
+        "/api/auth"
+      ],
+      "cliCommands": [
+        "setup-code"
+      ],
+      "testDomains": [
+        "core",
+        "frontend"
+      ],
+      "criticalTests": [
+        "local-auth-selftest.mjs",
+        "local-auth-rbac-static-audit.mjs",
+        "local-auth-ui-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/LOCAL-AUTH-AND-SECURITY.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/LOCAL-AUTH-RBAC-ACCESS-SECURITY.md"
+      ],
+      "sharedBy": [
+        "system-settings",
+        "npm-cli-lifecycle"
+      ]
+    },
+    {
+      "id": "global-agent-runtime",
+      "label": "全局 Agent运行体系",
+      "status": "active",
+      "summary": "全局问答、语义路由、写授权、Mission监督、队列和终态投递。",
+      "frontendPages": [
+        {
+          "id": "global-agent",
+          "component": "frontend/src/components/global/GlobalAgent.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/agents",
+        "backend/tasks"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/global/global-agent-api.ts",
+        "backend/agents/global/mission-supervisor.ts"
+      ],
+      "apiPrefixes": [
+        "/api/global-agent",
+        "/api/agent-runs",
+        "/api/conversation-turns"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "agents"
+      ],
+      "criticalTests": [
+        "global-agent-runtime-production-closure-selftest.mjs",
+        "unified-model-retry-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/GLOBAL-AGENT-OPERATIONS.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md"
+      ],
+      "sharedBy": [
+        "semantic-routing",
+        "memory-context-engine",
+        "automatic-development"
+      ]
+    },
+    {
+      "id": "automatic-development",
+      "label": "群聊、项目与统一自动开发",
+      "status": "active",
+      "summary": "任务创建、源码规划、精确会话队列、子Agent执行、权限和自动验收。",
+      "frontendPages": [
+        {
+          "id": "groups",
+          "component": "frontend/src/components/collaboration/GroupChat.vue"
+        },
+        {
+          "id": "tasks",
+          "component": "frontend/src/components/tasks/TaskManager.vue"
+        },
+        {
+          "id": "autodev",
+          "component": "frontend/src/components/tools/AutoDevOps.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/collaboration",
+        "backend/tasks"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/collaboration/collaboration-routes.ts",
+        "backend/modules/projects/project-main-agent.ts",
+        "backend/system/unified-task-scheduler.ts"
+      ],
+      "apiPrefixes": [
+        "/api/agent-collaboration",
+        "/api/agent-qa",
+        "/api/collaboration",
+        "/api/group-coordination",
+        "/api/groups",
+        "/api/send",
+        "/api/send-stream",
+        "/api/tasks"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "tasks",
+        "agents"
+      ],
+      "criticalTests": [
+        "automatic-development-production-chain-selftest.mjs",
+        "automatic-development-unified-task-v2-audit.mjs",
+        "project-main-agent-orchestration-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/AUTOMATIC-DEVELOPMENT.md",
+        "docs/confirmed-project-architecture/TASK-PERMISSION-APPROVAL.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/AUTOMATIC-DEVELOPMENT-END-TO-END.md",
+        "docs/confirmed-business-processes/AUTOMATIC-DEVELOPMENT-UNIFIED-TASK-SYSTEM-V2.md",
+        "docs/confirmed-business-processes/PROJECT-CHILD-AGENT-COLLABORATION.md"
+      ],
+      "sharedBy": [
+        "test-agent-acceptance",
+        "requirements-ingestion",
+        "workbench-navigation"
+      ]
+    },
+    {
+      "id": "requirements-ingestion",
+      "label": "需求池、文档、图片与附件摄取",
+      "status": "active",
+      "summary": "流式上传、安全在线文档、完整Token分片、来源证据和需求池认领。",
+      "frontendPages": [],
+      "backendRoots": [
+        "backend/modules/requirements",
+        "backend/system"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/requirements/source-ingestion.ts",
+        "backend/system/secure-multipart.ts",
+        "backend/system/task-attachments.ts"
+      ],
+      "apiPrefixes": [
+        "/api/requirements",
+        "/api/uploads"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "tasks"
+      ],
+      "criticalTests": [
+        "requirement-ingestion-v2-production-selftest.mjs",
+        "task-attachments-production-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/REQUIREMENT-INGESTION-AND-ATTACHMENTS.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/REQUIREMENT-INGESTION-END-TO-END-V2.md"
+      ],
+      "sharedBy": [
+        "automatic-development",
+        "knowledge-retrieval"
+      ]
+    },
+    {
+      "id": "test-agent-acceptance",
+      "label": "TestAgent独立验收与主Agent自验",
+      "status": "active",
+      "summary": "结构化测试计划、只读验证、验收覆盖、返工和关闭后的主Agent自验。",
+      "frontendPages": [],
+      "backendRoots": [
+        "backend/test-agent"
+      ],
+      "productionEntrypoints": [
+        "backend/test-agent/index.ts",
+        "backend/modules/collaboration/test-agent-runner.ts"
+      ],
+      "apiPrefixes": [],
+      "cliCommands": [],
+      "testDomains": [
+        "tasks"
+      ],
+      "criticalTests": [
+        "test-agent-production-hardening-selftest.mjs",
+        "test-agent-acceptance-mode-production-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/TEST-AGENT.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/TEST-AGENT-AND-MAIN-AGENT-SELF-VERIFICATION.md"
+      ],
+      "sharedBy": [
+        "automatic-development",
+        "project-git-collaboration"
+      ]
+    },
+    {
+      "id": "scheduled-work-reports",
+      "label": "定时任务、AI日报与周报",
+      "status": "active",
+      "summary": "Cron调度、不可变工作证据、模型总结和固定飞书报告投递。",
+      "frontendPages": [
+        {
+          "id": "cron",
+          "component": "frontend/src/components/tools/CronJobs.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/scheduling"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/scheduling/cron.ts",
+        "backend/modules/scheduling/cron-dev-reports.ts"
+      ],
+      "apiPrefixes": [
+        "/api/auto-dev",
+        "/api/cron"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "tasks"
+      ],
+      "criticalTests": [
+        "work-report-ai-production-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/SCHEDULING-AND-WORK-REPORTS.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/SCHEDULED-TASKS-AI-WORK-REPORTS.md"
+      ],
+      "sharedBy": [
+        "feishu-bidirectional",
+        "automatic-development"
+      ]
+    },
+    {
+      "id": "project-management",
+      "label": "项目身份、分组、会话与源码运行",
+      "status": "active",
+      "summary": "稳定项目ID、显示名称、Agent连接、项目会话和多配置源码运行。",
+      "frontendPages": [
+        {
+          "id": "projects",
+          "component": "frontend/src/components/projects/ProjectManager.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/projects",
+        "backend/projects"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/projects/projects.ts",
+        "backend/modules/projects/project-runtime.ts",
+        "backend/modules/projects/sessions.ts"
+      ],
+      "apiPrefixes": [
+        "/api/project-runs",
+        "/api/projects",
+        "/api/security",
+        "/api/sessions",
+        "/api/start",
+        "/api/stop"
+      ],
+      "cliCommands": [
+        "project list",
+        "project connect",
+        "project disconnect",
+        "project runtime",
+        "project init"
+      ],
+      "testDomains": [
+        "integrations"
+      ],
+      "criticalTests": [
+        "project-runtime-workbench-selftest.mjs",
+        "project-java-toolchain-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/PROJECT-MANAGEMENT.md"
+      ],
+      "businessProcessDocs": [],
+      "sharedBy": [
+        "automatic-development",
+        "project-git-collaboration",
+        "terminal-runtime"
+      ]
+    },
+    {
+      "id": "project-git-collaboration",
+      "label": "项目Git与代码协作",
+      "status": "active",
+      "summary": "仓库身份、分页快照、显式提交范围、写入租约、克隆和验收归因。",
+      "frontendPages": [
+        {
+          "id": "changes",
+          "component": "frontend/src/components/tools/CodeChanges.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/projects",
+        "backend/modules/tools"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/projects/project-git.ts",
+        "backend/modules/tools/git.ts"
+      ],
+      "apiPrefixes": [
+        "/api/git"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "core"
+      ],
+      "criticalTests": [
+        "git-collaboration-production-v2-selftest.mjs",
+        "git-local-data-ignore-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/PROJECT-CODE-WORKSPACE.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/PROJECT-GIT-CODE-COLLABORATION-V2.md"
+      ],
+      "sharedBy": [
+        "project-management",
+        "test-agent-acceptance"
+      ]
+    },
+    {
+      "id": "terminal-runtime",
+      "label": "内置终端与项目运行控制台",
+      "status": "active",
+      "summary": "PTY与降级终端、危险命令门禁、项目源码进程和运行日志控制台。",
+      "frontendPages": [
+        {
+          "id": "terminal",
+          "component": "frontend/src/components/tools/Terminal.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/tools",
+        "backend/modules/projects"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/tools/terminal.ts",
+        "backend/modules/projects/project-runtime.ts"
+      ],
+      "apiPrefixes": [
+        "/api/terminal"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "integrations"
+      ],
+      "criticalTests": [
+        "terminal-runtime-production-closure-selftest.mjs",
+        "terminal-pty-workbench-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/TERMINAL-AND-RUNTIME-CONSOLE.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/BUILT-IN-TERMINAL-AND-PROJECT-RUNTIME.md"
+      ],
+      "sharedBy": [
+        "project-management",
+        "local-auth-security"
+      ]
+    },
+    {
+      "id": "tool-runtime-marketplace",
+      "label": "MCP、Skill、共享文件与工具市场",
+      "status": "active",
+      "summary": "工具授权、原生注册、隔离安装、运行时同步、斜杠命令和共享文件。",
+      "frontendPages": [
+        {
+          "id": "tools",
+          "component": "frontend/src/components/tools/ToolsConfig.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/skills",
+        "backend/tools",
+        "backend/modules/tools"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/tools/tools.ts",
+        "backend/modules/tools/marketplace.ts",
+        "backend/modules/tools/slash-commands.ts",
+        "backend/tools/tool-manager.ts"
+      ],
+      "apiPrefixes": [
+        "/api/filesystem",
+        "/api/marketplace",
+        "/api/mcp",
+        "/api/shared",
+        "/api/shared-files",
+        "/api/skills",
+        "/api/slash-commands",
+        "/api/smithery",
+        "/api/tools"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "agents"
+      ],
+      "criticalTests": [
+        "agent-tool-inheritance-selftest.mjs",
+        "marketplace-supply-chain-v2-selftest.mjs",
+        "shared-files-slash-production-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/TOOL-AUTHORIZATION.md",
+        "docs/confirmed-project-architecture/TOOL-MARKETPLACE-AND-CATALOG.md",
+        "docs/confirmed-project-architecture/TEMPLATES-SLASH-COMMANDS-AND-SHARED-FILES.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/AGENT-MCP-SKILL-INHERITANCE.md",
+        "docs/confirmed-business-processes/MCP-SKILL-MARKETPLACE-SUPPLY-CHAIN.md",
+        "docs/confirmed-business-processes/SLASH-COMMANDS-AND-SHARED-FILES-V2.md"
+      ],
+      "sharedBy": [
+        "global-agent-runtime",
+        "automatic-development",
+        "development-agent-runtime"
+      ]
+    },
+    {
+      "id": "memory-context-engine",
+      "label": "会话记忆、压缩与Context Engine",
+      "status": "active",
+      "summary": "精确会话、长期记忆、正式压缩、MicroCompact、缓存和MCP hydration。",
+      "frontendPages": [
+        {
+          "id": "memory-center",
+          "component": "frontend/src/components/knowledge/MemoryCenter.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/system",
+        "backend/modules/knowledge"
+      ],
+      "productionEntrypoints": [
+        "backend/system/session-model-context.ts",
+        "backend/modules/knowledge/memory-control-center-handler.ts"
+      ],
+      "apiPrefixes": [
+        "/api/context-engine",
+        "/api/memory-center",
+        "/api/orchestrator"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "memory"
+      ],
+      "criticalTests": [
+        "all-session-cc-compaction-alignment-selftest.mjs",
+        "context-engine-v2-selftest.mjs",
+        "third-party-memory-mcp-hydration-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/MEMORY-SYSTEM.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/MEMORY-SYSTEM-END-TO-END.md"
+      ],
+      "sharedBy": [
+        "global-agent-runtime",
+        "automatic-development",
+        "music-platform"
+      ]
+    },
+    {
+      "id": "knowledge-retrieval",
+      "label": "知识库召回与本地Embedding",
+      "status": "active",
+      "summary": "安全文档、版本化索引、本地或远程向量、混合召回和作用域门禁。",
+      "frontendPages": [
+        {
+          "id": "knowledge",
+          "component": "frontend/src/components/knowledge/KnowledgeBase.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/knowledge"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/knowledge/rag.ts",
+        "backend/modules/knowledge/knowledge-index.ts"
+      ],
+      "apiPrefixes": [
+        "/api/rag"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "knowledge"
+      ],
+      "criticalTests": [
+        "knowledge-embedding-v3-selftest.mjs",
+        "agent-knowledge-retrieval-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/KNOWLEDGE-SYSTEM.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/KNOWLEDGE-RETRIEVAL-EMBEDDING-V3.md"
+      ],
+      "sharedBy": [
+        "global-agent-runtime",
+        "automatic-development"
+      ]
+    },
+    {
+      "id": "feishu-bidirectional",
+      "label": "飞书全局与项目Agent双向会话",
+      "status": "active",
+      "summary": "全局和项目双入口、精确话题、跨传输幂等、串行处理和原路投递。",
+      "frontendPages": [],
+      "backendRoots": [
+        "backend/integrations",
+        "backend/modules/collaboration"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/collaboration/feishu-channel.ts",
+        "backend/modules/collaboration/feishu.ts",
+        "backend/modules/projects/project-feishu-turn-queue.ts"
+      ],
+      "apiPrefixes": [
+        "/api/feishu"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "integrations"
+      ],
+      "criticalTests": [
+        "feishu-bidirectional-v2-production-selftest.mjs",
+        "feishu-global-agent-roundtrip-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/FEISHU-GLOBAL-AGENT.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/FEISHU-GLOBAL-PROJECT-BIDIRECTIONAL-V2.md"
+      ],
+      "sharedBy": [
+        "global-agent-runtime",
+        "project-management",
+        "scheduled-work-reports"
+      ]
+    },
+    {
+      "id": "music-platform",
+      "label": "音乐意图、曲库、媒体平台与统一播放器",
+      "status": "active",
+      "summary": "模型点歌、三源搜索、媒体索引、下载、latest-wins队列和浏览器播放。",
+      "frontendPages": [
+        {
+          "id": "music",
+          "component": "frontend/src/components/music/MusicPlayer.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/music"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/music/agent.ts",
+        "backend/modules/music/music.ts",
+        "backend/modules/music/library.ts"
+      ],
+      "apiPrefixes": [
+        "/api/music"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "media"
+      ],
+      "criticalTests": [
+        "music-semantic-playback-selftest.mjs",
+        "music-media-platform-v4-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/MUSIC-PLAYBACK.md",
+        "docs/confirmed-project-architecture/MUSIC-LIBRARY-AND-MEDIA.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/MUSIC-INTENT-UNIFIED-PLAYBACK-V2.md",
+        "docs/confirmed-business-processes/MUSIC-LIBRARY-MEDIA-PLATFORM-V4.md"
+      ],
+      "sharedBy": [
+        "global-agent-runtime",
+        "user-notifications"
+      ]
+    },
+    {
+      "id": "conversation-search-replay",
+      "label": "会话搜索与任务回放",
+      "status": "active",
+      "summary": "跨来源会话全文检索、精确消息跳转、分页任务证据和用户化验收回放。",
+      "frontendPages": [
+        {
+          "id": "search",
+          "component": "frontend/src/components/workspace/SearchHistory.vue"
+        },
+        {
+          "id": "trace-replay",
+          "component": "frontend/src/components/system/TraceReplay.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/search",
+        "backend/modules/collaboration"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/search/conversation-search.ts",
+        "backend/modules/collaboration/task-replay.ts"
+      ],
+      "apiPrefixes": [
+        "/api/conversations",
+        "/api/search"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "knowledge",
+        "tasks"
+      ],
+      "criticalTests": [
+        "conversation-search-selftest.mjs",
+        "task-replay-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/CONVERSATION-SEARCH-AND-TASK-REPLAY.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/CONVERSATION-SEARCH-AND-TASK-REPLAY-V3.md"
+      ],
+      "sharedBy": [
+        "observability-cleanup",
+        "automatic-development"
+      ]
+    },
+    {
+      "id": "observability-cleanup",
+      "label": "性能监控、Trace、可靠性与清理中心",
+      "status": "active",
+      "summary": "结构化指标、脱敏Trace、跨进程租约、可靠性演练和可续跑清理事务。",
+      "frontendPages": [
+        {
+          "id": "metrics",
+          "component": "frontend/src/components/agents/AgentMetrics.vue"
+        },
+        {
+          "id": "cleanup-center",
+          "component": "frontend/src/components/system/cleanup/CleanupCenter.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/system"
+      ],
+      "productionEntrypoints": [
+        "backend/system/reliability-ledger.ts",
+        "backend/system/reliability-drills.ts",
+        "backend/system/cleanup-center.ts"
+      ],
+      "apiPrefixes": [
+        "/api/cleanup",
+        "/api/metrics",
+        "/api/reliability"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "core"
+      ],
+      "criticalTests": [
+        "observability-v3-production-selftest.mjs",
+        "cleanup-center-transaction-v2-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/RELIABILITY-OBSERVABILITY-AND-CLEANUP.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/PERFORMANCE-TRACE-RELIABILITY-CLEANUP-V2.md"
+      ],
+      "sharedBy": [
+        "conversation-search-replay",
+        "npm-cli-lifecycle"
+      ]
+    },
+    {
+      "id": "user-notifications",
+      "label": "桌面宠物与用户通知",
+      "status": "active",
+      "summary": "持久通知、精确用户投递、Electron签名客户端和网页宠物接管。",
+      "frontendPages": [
+        {
+          "id": "pets",
+          "component": "frontend/src/components/pets/PetMenu.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/pets"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/pets/pets.ts",
+        "backend/server-pet-activity.ts"
+      ],
+      "apiPrefixes": [
+        "/api/notifications",
+        "/api/pets"
+      ],
+      "cliCommands": [
+        "pet"
+      ],
+      "testDomains": [
+        "media",
+        "tasks"
+      ],
+      "criticalTests": [
+        "pet-notification-security-selftest.mjs",
+        "user-notification-pet-production-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/DESKTOP-PET-AND-USER-NOTIFICATIONS.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/DESKTOP-PET-AND-USER-NOTIFICATIONS.md"
+      ],
+      "sharedBy": [
+        "automatic-development",
+        "local-auth-security"
+      ]
+    },
+    {
+      "id": "workbench-navigation",
+      "label": "工作台与菜单管理",
+      "status": "active",
+      "summary": "只读分页工作台、结构化任务动作、工作区默认和个人菜单覆盖。",
+      "frontendPages": [
+        {
+          "id": "dashboard",
+          "component": "frontend/src/components/common/UsabilityWorkbench.vue"
+        },
+        {
+          "id": "menumanager",
+          "component": "frontend/src/components/workspace/MenuManager.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/system"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/system/usability.ts",
+        "backend/modules/system/navigation-config.ts"
+      ],
+      "apiPrefixes": [
+        "/api/navigation",
+        "/api/usability"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "frontend"
+      ],
+      "criticalTests": [
+        "workbench-navigation-production-selftest.mjs",
+        "workbench-homepage-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/WORKSPACE-NAVIGATION-AND-MENU.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/WORKBENCH-AND-NAVIGATION-END-TO-END.md"
+      ],
+      "sharedBy": [
+        "automatic-development",
+        "project-management"
+      ]
+    },
+    {
+      "id": "development-agent-runtime",
+      "label": "开发Agent认证与运行配置",
+      "status": "active",
+      "summary": "Codex、Cursor、Gemini CLI、OpenCode和Claude Code的安装、登录、模型与可用性。",
+      "frontendPages": [],
+      "backendRoots": [
+        "backend/agents",
+        "backend/modules/system"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/system/agent-provider-settings.ts",
+        "backend/agents/execution-kernel.ts"
+      ],
+      "apiPrefixes": [
+        "/api/agents"
+      ],
+      "cliCommands": [
+        "agents"
+      ],
+      "testDomains": [
+        "agents",
+        "frontend"
+      ],
+      "criticalTests": [
+        "agent-provider-settings-selftest.mjs",
+        "gemini-opencode-agent-integration-selftest.mjs",
+        "agent-provider-account-model-render-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/DEVELOPMENT-AGENT-AUTH.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/DEVELOPMENT-AGENT-AUTHENTICATION-V2.md"
+      ],
+      "sharedBy": [
+        "automatic-development",
+        "tool-runtime-marketplace"
+      ]
+    },
+    {
+      "id": "semantic-routing",
+      "label": "全链路模型语义路由",
+      "status": "active",
+      "summary": "统一结构化模型决策、失败关闭、作用域门禁和语义决策回执。",
+      "frontendPages": [],
+      "backendRoots": [
+        "backend/system"
+      ],
+      "productionEntrypoints": [
+        "backend/system/semantic-decision-runtime.ts"
+      ],
+      "apiPrefixes": [],
+      "cliCommands": [],
+      "testDomains": [
+        "agents"
+      ],
+      "criticalTests": [
+        "model-semantic-routing-audit.mjs",
+        "semantic-decision-runtime-selftest.mjs"
+      ],
+      "architectureDocs": [],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/MODEL-SEMANTIC-ROUTING-END-TO-END.md"
+      ],
+      "sharedBy": [
+        "global-agent-runtime",
+        "automatic-development",
+        "test-agent-acceptance",
+        "music-platform"
+      ]
+    },
+    {
+      "id": "system-settings",
+      "label": "系统设置与Provider配置",
+      "status": "active",
+      "summary": "统一模型、缓存、网络、认证和工作区运行参数的管理入口。",
+      "frontendPages": [
+        {
+          "id": "settings",
+          "component": "frontend/src/components/settings/Settings.vue"
+        }
+      ],
+      "backendRoots": [
+        "backend/modules/system"
+      ],
+      "productionEntrypoints": [
+        "backend/modules/system/settings.ts"
+      ],
+      "apiPrefixes": [
+        "/api/system"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "frontend",
+        "agents"
+      ],
+      "criticalTests": [
+        "settings-render-regression.mjs",
+        "agent-provider-settings-selftest.mjs"
+      ],
+      "architectureDocs": [],
+      "businessProcessDocs": [],
+      "sharedBy": [
+        "local-auth-security",
+        "development-agent-runtime",
+        "memory-context-engine"
+      ]
+    },
+    {
+      "id": "npm-cli-lifecycle",
+      "label": "npm安装、CLI与服务生命周期",
+      "status": "active",
+      "summary": "可信产物、实例身份、启动停止、排空、更新事务和跨平台降级。",
+      "frontendPages": [],
+      "backendRoots": [
+        "backend/core",
+        "backend/system"
+      ],
+      "productionEntrypoints": [
+        "ccm-package/bin/ccm.js",
+        "backend/system/process-lifecycle.ts",
+        "backend/core/server-instance-lock.ts"
+      ],
+      "apiPrefixes": [
+        "/api/health",
+        "/api/internal",
+        "/api/status"
+      ],
+      "cliCommands": [
+        "start",
+        "stop",
+        "restart",
+        "status",
+        "open",
+        "logs",
+        "doctor",
+        "update",
+        "version",
+        "help"
+      ],
+      "testDomains": [
+        "release"
+      ],
+      "criticalTests": [
+        "cli-service-lifecycle-v2-selftest.mjs",
+        "npm-package-install-release-selftest.mjs"
+      ],
+      "architectureDocs": [
+        "docs/confirmed-project-architecture/CLI-INSTALLATION-AND-SERVICE.md"
+      ],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/NPM-CLI-SERVICE-LIFECYCLE.md"
+      ],
+      "sharedBy": [
+        "local-auth-security",
+        "observability-cleanup"
+      ]
+    },
+    {
+      "id": "coverage-governance",
+      "label": "全项目业务覆盖治理",
+      "status": "active",
+      "summary": "结构化业务清单、入口扫描、文档生成、测试归属和发布覆盖门禁。",
+      "frontendPages": [],
+      "backendRoots": [],
+      "productionEntrypoints": [
+        "scripts/project-coverage-manifest.json",
+        "scripts/project-coverage-lib.mjs",
+        "scripts/project-coverage-matrix-audit.mjs",
+        "scripts/generate-project-coverage-matrix.mjs"
+      ],
+      "apiPrefixes": [],
+      "cliCommands": [],
+      "testDomains": [
+        "core"
+      ],
+      "criticalTests": [
+        "project-coverage-matrix-selftest.mjs",
+        "domain-test-catalog-selftest.mjs"
+      ],
+      "architectureDocs": [],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/PROJECT-BUSINESS-COVERAGE-GOVERNANCE.md"
+      ],
+      "sharedBy": [
+        "npm-cli-lifecycle"
+      ]
+    }
+  ],
+  "compatibilityEntries": [
+    {
+      "id": "removed-template-api",
+      "label": "已移除模板接口",
+      "status": "retired",
+      "reason": "模板功能已删除，旧接口只返回410，避免旧客户端误认为仍可使用。",
+      "productionEntrypoints": [
+        "backend/server.ts"
+      ],
+      "apiPrefixes": [
+        "/api/templates"
+      ]
+    },
+    {
+      "id": "legacy-dashboard-review-api",
+      "label": "旧工作台代码审查接口",
+      "status": "compatibility",
+      "reason": "旧Dashboard已不可达；接口暂时保留兼容读取，不计入现行业务。",
+      "productionEntrypoints": [
+        "backend/modules/collaboration/collaboration-routes.ts"
+      ],
+      "apiPrefixes": [
+        "/api/review"
+      ]
+    },
+    {
+      "id": "internal-diagnostic-test-api",
+      "label": "内部诊断测试接口",
+      "status": "compatibility",
+      "reason": "只服务内部诊断和历史回归，不作为用户业务能力。",
+      "productionEntrypoints": [
+        "backend/modules/collaboration/collaboration-routes.ts"
+      ],
+      "apiPrefixes": [
+        "/api/test"
+      ]
+    }
+  ],
+  "testHelpers": [
+    {
+      "file": "domain-test-runner.mjs",
+      "reason": "领域测试统一执行器，不作为独立业务测试。"
+    },
+    {
+      "file": "cleanup-center-isolated-selftest-child.cjs",
+      "reason": "由清理中心生产回归在隔离进程中调用。"
+    },
+    {
+      "file": "attest-release-matrix.mjs",
+      "reason": "由发布矩阵工作流在平台证据完成后调用。"
+    },
+    {
+      "file": "release-live-acceptance.mjs",
+      "reason": "由显式release preflight和live验收入口调用。"
+    }
+  ]
+}

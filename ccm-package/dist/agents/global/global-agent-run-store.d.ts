@@ -30,6 +30,7 @@ export declare function listGlobalAgentRuns(options?: {
     status?: string;
     limit?: number;
 }): GlobalAgentRun[];
+export declare function findGlobalAgentRunsForTaskIds(taskIds: Iterable<string>): GlobalAgentRun[];
 export declare function findWaitingGlobalAgentRun(sessionId: string): GlobalAgentRun;
 export declare function findClarifyingGlobalAgentRun(sessionId: string, maxAgeMs?: number): GlobalAgentRun;
 export declare function getGlobalAgentToolSpec(name: string): GlobalAgentToolSpec;

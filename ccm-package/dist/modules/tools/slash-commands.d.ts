@@ -5,9 +5,7 @@ export declare function getSlashCommandSummary(): {
     total: number;
     builtin: number;
     custom: number;
-    skills: number;
-    customFile: string;
-    auditFile: string;
+    skills: string;
 };
 export declare function getSlashCommandContractSnapshot(): {
     commands: {
@@ -47,7 +45,7 @@ export declare function runSlashCommandSelfTest(): {
         aliasesAvailable: boolean;
         parameterSchemaPublished: boolean;
         permissionDerivedFromRisk: boolean;
-        skillsBecomeCommands: boolean;
+        skillsRequireScopeAuthorization: boolean;
         localQueriesDoNotInvokeModel: boolean;
         clientSessionCommandsAreExplicit: boolean;
         groupCompactIsDirectAndExactSession: boolean;

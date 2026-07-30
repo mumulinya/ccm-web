@@ -20,6 +20,7 @@ export function useAutoDevOps(emit) {
     weekly_enabled: false,
     weekly_day: 5,
     weekly_time: '18:40',
+    timezone: 'Asia/Shanghai',
     retry_limit: 3,
     retry_interval_minutes: 10,
     history: [],
@@ -57,6 +58,22 @@ export function useAutoDevOps(emit) {
   const enabledDailyDevJobs = computed(() => dailyDevJobs.value.filter(job => job.enabled !== false))
   const notificationHistory = computed(() => [...(notification.value.history || [])].reverse().slice(0, 6))
   const isBusy = computed(() => !!activeAction.value)
+  const reportGenerationStatus = computed(() => String(activeReport.value?.generation_status || (activeReport.value?.ai_summary ? 'generated' : 'evidence_ready')))
+  const reportStatusPresentation = computed(() => {
+    if (activeReport.value?.stale || reportGenerationStatus.value === 'stale') return { tone: 'warn', label: '证据已变化', detail: '工作记录发生变化，需要重新生成AI总结。' }
+    if (reportGenerationStatus.value === 'generating') return { tone: 'working', label: 'AI总结中', detail: '正在基于真实工作事件生成报告。' }
+    if (reportGenerationStatus.value === 'generation_failed') return { tone: 'error', label: '总结生成失败', detail: activeReport.value?.generation_error || '模型暂时不可用，原始证据仍已保留。' }
+    if (reportGenerationStatus.value === 'generated') {
+      const delivery = String(activeReport.value?.delivery_status || 'not_sent')
+      if (delivery === 'sent') return { tone: 'ready', label: '已发送', detail: 'AI总结已通过证据校验并发送到飞书。' }
+      if (delivery === 'queued' || delivery === 'pending' || delivery === 'sending') return { tone: 'working', label: '等待发送', detail: '报告已进入飞书持久发件箱。' }
+      if (delivery === 'delivery_unknown') return { tone: 'warn', label: '投递结果未知', detail: '为避免重复发送，系统已停止自动重试，可在投递记录中手动确认。' }
+      if (delivery === 'failed') return { tone: 'error', label: '发送失败', detail: activeReport.value?.delivery_error || '飞书投递已失败，可手动重试。' }
+      return { tone: 'ready', label: 'AI总结已生成', detail: '报告内容已通过真实事件证据校验。' }
+    }
+    return { tone: 'muted', label: '证据已就绪', detail: '点击刷新复盘后由大模型生成正式报告。' }
+  })
+  const reportCanSend = computed(() => reportGenerationStatus.value === 'generated' && !activeReport.value?.stale)
 
   const readinessTone = computed(() => {
     if (readinessLoading.value && !diagnostics.value) return 'checking'
@@ -124,6 +141,10 @@ export function useAutoDevOps(emit) {
     generated_at: activeReport.value?.generated_at || '',
     evidence_summary: reportEvidence.value,
     event_ids: activeReport.value?.event_ids || [],
+    evidence_checksum: activeReport.value?.evidence_checksum || '',
+    generation_status: activeReport.value?.generation_status || '',
+    delivery_status: activeReport.value?.delivery_status || '',
+    generation_receipt: activeReport.value?.generation_receipt || null,
   }, null, 2))
   const reportHasTechnicalDetails = computed(() => {
     const raw = String(activeReport.value?.markdown || '')
@@ -252,6 +273,7 @@ export function useAutoDevOps(emit) {
       toast.success('今日日报已更新')
     } catch (error) {
       toast.error(error.message || '生成开发日报失败')
+      await loadOverview({ silent: true })
     } finally {
       activeAction.value = ''
     }
@@ -270,6 +292,7 @@ export function useAutoDevOps(emit) {
       toast.success('本周周报已更新')
     } catch (error) {
       toast.error(error.message || '生成周报失败')
+      await loadOverview({ silent: true })
     } finally {
       activeAction.value = ''
     }
@@ -311,7 +334,10 @@ export function useAutoDevOps(emit) {
           weekly_reports: [data.report, ...weeklyReports.value.filter(item => item.id !== data.report.id)],
         }
       }
-      toast.success(kind === 'weekly' ? '周报已发送' : '今日日报已发送')
+      if (data.status === 'queued') toast.info('报告已进入飞书发送队列')
+      else if (data.status === 'delivery_unknown') toast.warning('飞书投递结果未知，请在投递记录中确认')
+      else toast.success(kind === 'weekly' ? '周报已发送' : '今日日报已发送')
+      await loadOverview({ silent: true })
     } catch (error) {
       toast.error(error.message || '飞书通知发送失败')
     } finally {
@@ -371,6 +397,8 @@ export function useAutoDevOps(emit) {
     enabledDailyDevJobs,
     notificationHistory,
     isBusy,
+    reportStatusPresentation,
+    reportCanSend,
     readinessTone,
     readinessTitle,
     readinessDescription,

@@ -27,7 +27,13 @@ export function useMusicDownloadJobs(options = {}) {
     const source = item.type === 'netease' ? 'netease' : 'bilibili'
     const res = await fetch('/api/music/download-jobs', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source, downloadToken: item.downloadToken, quality: settings.quality || 'high' })
+      body: JSON.stringify({
+        source,
+        downloadToken: item.downloadToken,
+        quality: settings.quality || 'high',
+        command_id: settings.commandId || '',
+        consumer_kind: settings.consumerKind || 'manual',
+      })
     })
     const data = await res.json()
     if (!res.ok || !data.success) throw new Error(data.error || '创建下载任务失败')
@@ -46,6 +52,14 @@ export function useMusicDownloadJobs(options = {}) {
 
   const cancelDownloadJob = (job) => updateJob(job, 'cancel')
   const retryDownloadJob = (job) => updateJob(job, 'retry')
+  const cancelPlaybackDownloads = async (commandId) => {
+    if (!commandId) return []
+    const res = await fetch(`/api/music/download-jobs/by-command/${encodeURIComponent(commandId)}/cancel`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok || !data.success) throw new Error(data.error || '取消播放下载失败')
+    await loadDownloadJobs()
+    return data.jobs || []
+  }
   const clearFinishedDownloadJobs = async () => {
     const res = await fetch('/api/music/download-jobs', { method: 'DELETE' })
     const data = await res.json()
@@ -72,5 +86,5 @@ export function useMusicDownloadJobs(options = {}) {
   })
 
   onUnmounted(() => clearTimeout(pollTimer))
-  return { downloadJobs, downloadCenterOpen, activeDownloadCount, loadDownloadJobs, createDownloadJob, cancelDownloadJob, retryDownloadJob, clearFinishedDownloadJobs, waitForJob }
+  return { downloadJobs, downloadCenterOpen, activeDownloadCount, loadDownloadJobs, createDownloadJob, cancelDownloadJob, cancelPlaybackDownloads, retryDownloadJob, clearFinishedDownloadJobs, waitForJob }
 }

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { startPlaywrightAppServer } from './playwright-app-server.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
+const appHost = process.env.CCM_BASE_URL ? null : await startPlaywrightAppServer(root, { port: 3082 })
+const baseUrl = String(process.env.CCM_BASE_URL || appHost.baseUrl).replace(/\/+$/, '')
 const outputDir = path.join(root, 'scratch', 'menu-configuration-render-regression')
 fs.rmSync(outputDir, { recursive: true, force: true })
 fs.mkdirSync(outputDir, { recursive: true })
@@ -13,14 +15,58 @@ const browser = await chromium.launch({ headless: true, ...(executablePath ? { e
 const report = { pass: false, generatedAt: new Date().toISOString(), checks: [], screenshots: [], errors: [] }
 
 const routeAppApis = async page => {
+  let workspaceRevision = 0
+  let personalRevision = 0
+  let workspaceConfiguration = null
+  let personalOverrides = { groups: null, items: {}, customLinks: [] }
   page.on('pageerror', error => report.errors.push(`page: ${error.message}`))
   page.on('console', message => {
     const value = message.text()
     if (message.type() === 'error' && !/^Failed to load resource: net::ERR_(CONNECTION_CLOSED|TIMED_OUT)$/.test(value)) report.errors.push(`console: ${value}`)
   })
+  // Keep the render fixture isolated from unrelated authenticated page boot APIs.
+  // More specific routes registered below take precedence over this fallback.
+  await page.route('**/api/**', route => {
+    const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
+    return route.fulfill(acceptsEvents
+      ? { status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"success":true}\n\n' }
+      : { status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) })
+  })
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }))
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
-  await page.route('**/api/auth/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, authenticated: true, user: { username: 'selftest' } }) }))
+  await page.route('**/api/auth/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, authenticated: true, csrf: 'selftest-csrf', capabilities: ['task.execute', 'project.runtime', 'project.git'], user: { id: 'selftest', username: 'selftest', role: 'admin' } }) }))
+  await page.route('**/api/navigation/default', async route => {
+    const request = route.request()
+    if (request.method() === 'PATCH') {
+      const payload = request.postDataJSON()
+      if (Number(payload.expected_revision || 0) !== workspaceRevision) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ success: false, code: 'state_drift' }) })
+      workspaceConfiguration = payload.configuration
+      workspaceRevision++
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, workspace_default: workspaceConfiguration ? { revision: workspaceRevision, configuration: workspaceConfiguration } : null }) })
+  })
+  await page.route('**/api/navigation/config*', async route => {
+    const request = route.request()
+    if (request.method() === 'PATCH') {
+      const payload = request.postDataJSON()
+      if (Number(payload.expected_revision || 0) !== personalRevision) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ success: false, code: 'state_drift' }) })
+      personalOverrides = payload.overrides
+      personalRevision++
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, personal: { revision: personalRevision, overrides: personalOverrides } }) })
+    }
+    if (request.method() === 'POST') {
+      personalOverrides = { groups: null, items: {}, customLinks: [] }
+      personalRevision++
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, personal: { revision: personalRevision, overrides: personalOverrides } }) })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      success: true,
+      schema: 'ccm-navigation-config-response-v3',
+      workspace_default: workspaceConfiguration ? { revision: workspaceRevision, configuration: workspaceConfiguration } : null,
+      personal: personalRevision ? { revision: personalRevision, overrides: personalOverrides } : null,
+      can_manage_workspace_default: true,
+    }) })
+  })
   await page.route('**/api/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ projects: [] }) }))
   await page.route('**/api/pets/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ agents: [] }) }))
   await page.route('**/api/status/stream*', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: {"type":"ready"}\n\n' }))
@@ -129,4 +175,5 @@ try {
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report, null, 2))
   await browser.close()
+  if (appHost) await appHost.server.close()
 }

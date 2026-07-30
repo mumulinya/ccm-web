@@ -242,8 +242,14 @@ function getGlobalAgentConversationMessages(sessionId: string) {
   return globalAgentHistoryRuntime.getGlobalAgentConversationMessages(sessionId)
 }
 
-function appendGlobalAgentConversationMessage(sessionId: string, role: "user" | "assistant", content: string, source = "feishu") {
-  return globalAgentHistoryRuntime.appendGlobalAgentConversationMessage(sessionId, role, content, source)
+function appendGlobalAgentConversationMessage(
+  sessionId: string,
+  role: "user" | "assistant",
+  content: string,
+  source = "feishu",
+  options: { extractMemory?: boolean } = {},
+) {
+  return globalAgentHistoryRuntime.appendGlobalAgentConversationMessage(sessionId, role, content, source, options)
 }
 
 function resolveFeishuGlobalAgentSessionId(payload: any, store?: any) {

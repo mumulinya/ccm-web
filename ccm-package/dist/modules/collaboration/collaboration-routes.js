@@ -241,7 +241,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         }
         return true;
     }
-    if (pathname === "/api/tasks/replay" && req.method === "GET") {
+    if ((pathname === "/api/tasks/replay" || pathname === "/api/tasks/replay/events") && req.method === "GET") {
         const taskId = String(parsed.query.id || parsed.query.task_id || parsed.query.taskId || "").trim();
         if (!taskId) {
             const requestedLimit = Number(parsed.query.limit || 40);
@@ -262,7 +262,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         const hasEventPage = parsed.query.event_limit != null || parsed.query.eventLimit != null;
         const requestedEventOffset = Number(parsed.query.event_offset || parsed.query.eventOffset || 0);
         const requestedEventLimit = Number(parsed.query.event_limit || parsed.query.eventLimit || 160);
-        const replay = (0, task_replay_1.buildCompleteTaskReplay)(taskId, hasEventPage ? {
+        const replay = (0, task_replay_1.buildCompleteTaskReplay)(taskId, hasEventPage || pathname.endsWith("/events") ? {
             eventOffset: Number.isFinite(requestedEventOffset) ? Math.max(0, requestedEventOffset) : 0,
             eventLimit: Number.isFinite(requestedEventLimit) ? Math.max(1, Math.min(500, requestedEventLimit)) : 160,
             eventTail: ["1", "true", "yes"].includes(String(parsed.query.event_tail || parsed.query.eventTail || "").toLowerCase()),
@@ -275,6 +275,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             query: String(parsed.query.event_query || parsed.query.eventQuery || ""),
             preset: String(parsed.query.preset || ""),
             includeSystemEvents: ["1", "true", "yes"].includes(String(parsed.query.include_system_events || parsed.query.includeSystemEvents || "").toLowerCase()),
+            includeDetails: pathname !== "/api/tasks/replay/events",
         } : {});
         if (!replay) {
             (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
@@ -331,14 +332,49 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         const traceId = String(parsed.query.id || parsed.query.trace_id || "").trim();
         const taskId = String(parsed.query.task_id || "").trim();
         if (traceId) {
-            const trace = (0, reliability_ledger_1.getTrace)(traceId);
+            const trace = (0, reliability_ledger_1.getTracePage)(traceId, { offset: parsed.query.offset, limit: parsed.query.limit });
             if (!trace)
                 return (0, utils_1.sendJson)(res, { success: false, error: "Trace 不存在" }, 404);
             (0, utils_1.sendJson)(res, { success: true, trace });
             return true;
         }
-        const traces = (0, reliability_ledger_1.listTraces)(Number(parsed.query.limit || 50)).filter((trace) => !taskId || trace.task_id === taskId || trace.events?.some((event) => event.task_id === taskId));
+        const traces = (0, reliability_ledger_1.listTraces)(Number(parsed.query.limit || 50)).filter((trace) => !taskId || trace.task_id === taskId);
         (0, utils_1.sendJson)(res, { success: true, traces });
+        return true;
+    }
+    if (pathname === "/api/reliability/diagnostics/run" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => {
+            body += chunk;
+            if (body.length > 64 * 1024)
+                req.destroy(new Error("诊断请求过大"));
+        });
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const kind = String(payload.kind || "reliability_ledger").trim();
+                const runners = {
+                    reliability_ledger: reliability_ledger_1.runReliabilityLedgerSelfTest,
+                    process_lifecycle: process_lifecycle_1.runProcessLifecycleSelfTest,
+                    soak: soak_test_1.runSoakTestSelfTest,
+                    task_replay: task_replay_1.runTaskReplayContractSelfTest,
+                };
+                const runner = runners[kind];
+                if (!runner)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "不支持的诊断类型", allowed: Object.keys(runners) }, 400);
+                const result = runner();
+                (0, utils_1.sendJson)(res, {
+                    success: result?.pass !== false,
+                    schema: "ccm-reliability-diagnostic-receipt-v2",
+                    kind,
+                    executed_at: new Date().toISOString(),
+                    result,
+                }, result?.pass === false ? 500 : 200);
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 500);
+            }
+        });
         return true;
     }
     if (pathname === "/api/reliability/self-test" && req.method === "GET") {
@@ -346,18 +382,66 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         return true;
     }
     if (pathname === "/api/reliability/drills/run" && req.method === "POST") {
-        try {
-            const outcome = (0, reliability_drills_1.runScheduledProductionReliabilityDrill)({ force: true });
-            const result = outcome.result;
-            (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
-        }
-        catch (error) {
-            (0, utils_1.sendJson)(res, { success: false, error: error.message || String(error) }, 500);
-        }
+        const auth = req.auth || req.ccmAuth || {};
+        const outcome = (0, reliability_drills_1.startReliabilityDrillRun)({ requestedBy: auth.username || auth.userId || "admin" });
+        (0, utils_1.sendJson)(res, { success: true, ...outcome }, outcome.accepted ? 202 : 200);
         return true;
     }
     if (pathname === "/api/reliability/drills/status" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, status: (0, reliability_drills_1.getReliabilityDrillStatus)() });
+        const runId = String(parsed.query.run_id || "").trim();
+        if (runId) {
+            const run = (0, reliability_drills_1.getReliabilityDrillRun)(runId);
+            if (!run)
+                return (0, utils_1.sendJson)(res, { success: false, error: "演练不存在" }, 404);
+            (0, utils_1.sendJson)(res, { success: true, run });
+            return true;
+        }
+        (0, utils_1.sendJson)(res, { success: true, status: (0, reliability_drills_1.getReliabilityDrillStatus)(), runs: (0, reliability_drills_1.listReliabilityDrillRuns)(Number(parsed.query.limit || 20)) });
+        return true;
+    }
+    if (pathname === "/api/reliability/drills/cancel" && req.method === "POST") {
+        let body = "";
+        req.on("data", chunk => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const result = await (0, reliability_drills_1.cancelReliabilityDrillRun)(String(payload.run_id || ""));
+                (0, utils_1.sendJson)(res, result, result.success ? 200 : 404);
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/reliability/drills/events" && req.method === "GET") {
+        const runId = String(parsed.query.run_id || "").trim();
+        if (!runId || !(0, reliability_drills_1.getReliabilityDrillRun)(runId))
+            return (0, utils_1.sendJson)(res, { success: false, error: "演练不存在" }, 404);
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+        });
+        let last = "";
+        const publish = () => {
+            const run = (0, reliability_drills_1.getReliabilityDrillRun)(runId);
+            if (!run)
+                return;
+            const checksum = JSON.stringify([run.status, run.checkpoint, run.updated_at]);
+            if (checksum !== last) {
+                last = checksum;
+                res.write(`event: drill\ndata: ${JSON.stringify(run)}\n\n`);
+            }
+            if (["completed", "failed", "cancelled", "blocked"].includes(run.status)) {
+                clearInterval(timer);
+                res.end();
+            }
+        };
+        const timer = setInterval(publish, 1_000);
+        timer.unref?.();
+        req.once("close", () => clearInterval(timer));
+        publish();
         return true;
     }
     if (pathname === "/api/reliability/soak/status" && req.method === "GET") {
@@ -530,6 +614,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         req.on("end", () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
+                if (payload.confirmed !== true)
+                    return (0, utils_1.sendJson)(res, { error: "该操作需要服务端确认回执" }, 409);
                 let result;
                 if (pathname.endsWith("/rollback"))
                     result = (0, execution_kernel_1.rollbackExecutionCheckpoint)(String(payload.checkpoint_id || payload.checkpointId || ""), String(payload.reason || ""), { allowShared: payload.allow_shared === true || payload.allowShared === true });

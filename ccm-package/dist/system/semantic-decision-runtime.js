@@ -96,6 +96,9 @@ async function runSemanticDecision(request) {
     if (existing)
         return existing;
     let resolvedConfig = request.config || null;
+    const startedAt = new Date().toISOString();
+    const startedMs = Date.now();
+    let modelUsage = null;
     const operation = (async () => {
         const config = resolvedConfig || (0, group_orchestrator_config_1.loadOrchestratorConfig)();
         resolvedConfig = config;
@@ -123,16 +126,20 @@ async function runSemanticDecision(request) {
                 ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, {
                     messages,
                     maxTokens,
+                    reasoningEffort: request.reasoningEffort,
                     defaultTimeoutMs: Number(config.timeoutMs || 120_000),
                     retryScope: `semantic:${request.kind}`,
                     providerContextCache: { scope: identity.scope, scopeId: identity.scopeId, sessionId: identity.sessionId, source: `semantic_${request.kind}` },
+                    onUsage: usage => { modelUsage = usage; },
                 })
                 : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, {
                     messages,
                     maxTokens,
+                    reasoningEffort: request.reasoningEffort,
                     defaultTimeoutMs: Number(config.timeoutMs || 120_000),
                     retryScope: `semantic:${request.kind}`,
                     providerContextCache: { scope: identity.scope, scopeId: identity.scopeId, sessionId: identity.sessionId, source: `semantic_${request.kind}` },
+                    onUsage: usage => { modelUsage = usage; },
                 });
         const value = request.validate(parsed);
         const confidence = Math.max(0, Math.min(1, Number(request.confidence?.(value) ?? value?.confidence ?? 1)));
@@ -147,7 +154,10 @@ async function runSemanticDecision(request) {
             model: String(config.model || ""),
             confidence,
             status: "confirmed",
+            startedAt,
             decidedAt: new Date().toISOString(),
+            durationMs: Math.max(0, Date.now() - startedMs),
+            usage: modelUsage,
         };
         const receipt = { ...core, checksum: semanticDecisionChecksum(core) };
         const result = { value, receipt };
@@ -170,7 +180,10 @@ async function runSemanticDecision(request) {
             model: String(config?.model || ""),
             confidence: 0,
             status: "failed",
+            startedAt,
             decidedAt: new Date().toISOString(),
+            durationMs: Math.max(0, Date.now() - startedMs),
+            usage: modelUsage,
         };
         const receipt = { ...core, checksum: semanticDecisionChecksum(core) };
         try {

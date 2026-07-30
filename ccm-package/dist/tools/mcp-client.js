@@ -1,7 +1,55 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.McpClient = void 0;
+exports.resolveMcpStdioCommand = resolveMcpStdioCommand;
 const child_process_1 = require("child_process");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+function resolveMcpStdioCommand(command, args = []) {
+    if (process.platform !== "win32")
+        return { cmd: command, args };
+    const executableName = path.basename(command).toLowerCase().replace(/\.(?:cmd|exe)$/i, "");
+    if (!["npm", "npx"].includes(executableName))
+        return { cmd: command, args };
+    const cliName = executableName === "npx" ? "npx-cli.js" : "npm-cli.js";
+    const cliFile = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", cliName);
+    if (!fs.existsSync(cliFile))
+        return { cmd: command, args };
+    return { cmd: process.execPath, args: [cliFile, ...args] };
+}
 class McpClient {
     command;
     args;
@@ -32,12 +80,12 @@ class McpClient {
     }
     parseCommand() {
         if (this.args.length > 0) {
-            return { cmd: this.command, args: this.args };
+            return resolveMcpStdioCommand(this.command, this.args);
         }
         const parts = this.command.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
         const cmd = (parts[0] || this.command).replace(/^"|"$/g, "");
         const args = parts.slice(1).map(p => p.replace(/^"|"$/g, ""));
-        return { cmd, args };
+        return resolveMcpStdioCommand(cmd, args);
     }
     async connect() {
         try {
@@ -45,7 +93,7 @@ class McpClient {
             const envVars = { ...process.env, ...this.env };
             this.process = (0, child_process_1.spawn)(cmd, args, {
                 stdio: ["pipe", "pipe", "pipe"],
-                shell: true,
+                shell: false,
                 env: envVars,
                 windowsHide: true,
             });
@@ -62,6 +110,15 @@ class McpClient {
                 for (const [id, pending] of this.pending) {
                     clearTimeout(pending.timer);
                     pending.reject(new Error("MCP process exited"));
+                }
+                this.pending.clear();
+            });
+            this.process.on("error", (error) => {
+                this.connected = false;
+                this.lastError = this.safeErrorDetail(error.message || "MCP process failed to start");
+                for (const [, pending] of this.pending) {
+                    clearTimeout(pending.timer);
+                    pending.reject(new Error(this.lastError));
                 }
                 this.pending.clear();
             });
@@ -85,7 +142,7 @@ class McpClient {
             const primary = e.message || "MCP connect failed";
             const stderr = this.safeErrorDetail(this.stderrBuffer);
             this.lastError = this.safeErrorDetail(stderr && !stderr.includes(primary) ? `${primary}: ${stderr}` : primary);
-            console.error(`[MCP] 连接失败: ${this.command}`, this.lastError, this.stderrBuffer);
+            console.error(`[MCP] 连接失败: ${this.command}`, this.lastError);
             this.connected = false;
             this.disconnect();
             return false;
@@ -191,7 +248,7 @@ class McpClient {
     getDiagnostics() {
         return {
             lastError: this.lastError,
-            stderr: this.stderrBuffer,
+            stderr: this.safeErrorDetail(this.stderrBuffer),
             elicitationRequired: this.elicitationRequired,
             elicitationMessage: this.elicitationMessage,
             serverInstructions: this.serverInstructions,

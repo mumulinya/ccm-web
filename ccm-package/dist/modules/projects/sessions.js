@@ -65,6 +65,7 @@ const project_main_agent_1 = require("./project-main-agent");
 const runtime_events_1 = require("../../system/runtime-events");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
+const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 exports.WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
 function getProjectSessionDir(projectName) {
     return (0, project_validation_1.resolveContainedPath)(exports.WEB_SESSIONS_DIR, (0, project_validation_1.validateProjectName)(projectName));
@@ -458,6 +459,7 @@ function createProjectSessionRecord(projectName, name = "", source = "web") {
         source: normalizedSource,
     };
     fs.writeFileSync(getSessionFilePath(safeProject, sessionId), JSON.stringify(sessionData, null, 2));
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${sessionId}`);
     syncToFilesystemToCc(safeProject);
     return { project: safeProject, sessionId, name: sessionName, created: true };
 }
@@ -532,6 +534,7 @@ function appendProjectSessionTaskMessage(projectName, sessionId, message) {
         data.history.push(normalized);
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
     syncToFilesystemToCc(safeProject);
     if (normalized.role === "assistant" && String(normalized.content || "").trim()) {
         void scheduleProjectSessionAutoTitle(safeProject, safeSessionId).catch((error) => {
@@ -572,6 +575,7 @@ function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
     }
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
     syncToFilesystemToCc(safeProject);
     (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_messages_changed", {
         project: safeProject,
@@ -631,6 +635,7 @@ function scheduleProjectSessionAutoTitle(project, sessionId, options = {}) {
         latest.title_generated_at = new Date().toISOString();
         latest.updated_at = latest.title_generated_at;
         fs.writeFileSync(filePath, JSON.stringify(latest, null, 2));
+        (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
         syncToFilesystemToCc(safeProject);
         (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_title_changed", {
             project: safeProject,

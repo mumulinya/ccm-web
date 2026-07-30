@@ -70,8 +70,12 @@ const checks = {
   reports_are_scheduled_retried_and_audited:
     reportsSource.includes('daily_time: normalizeClock(input.daily_time, "18:30")')
     && reportsSource.includes('weekly_time: normalizeClock(input.weekly_time, "18:40")')
-    && reportsSource.includes('retry_limit')
-    && reportsSource.includes('recordFeishuReportDelivery'),
+    && reportsSource.includes('enqueueFeishuReportDelivery')
+    && channelSource.includes('schema: "ccm-feishu-report-delivery-v2"')
+    && channelSource.includes('attempts >= 5')
+    && channelSource.includes('delivery_unknown')
+    && channelSource.includes('row.status === "sent" : row.success === true')
+    && channelSource.includes('row.status === "delivery_unknown"'),
   attachment_boundary_is_explicit:
     acpSource.includes('promptCapabilities: { image: false, audio: false')
     && acpSource.includes('附件不会被当作已读取或已验收'),

@@ -22,10 +22,31 @@ export declare function inspectGitRemoteState(workDir: string, changedFiles?: nu
     pushTarget: string;
     pullTarget: string;
 };
+export declare function inspectGitRemoteStateAsync(workDir: string, changedFiles?: number): Promise<{
+    remoteUrl: string;
+    remoteName: string;
+    branch: string;
+    detached: boolean;
+    upstream: string;
+    comparisonRef: string;
+    ahead: number;
+    behind: number;
+    dirty: boolean;
+    changedFiles: number;
+    canFetch: boolean;
+    canPull: boolean;
+    canPush: boolean;
+    canCommitAndPush: boolean;
+    pushState: string;
+    pushTarget: string;
+    pullTarget: string;
+}>;
 export declare function normalizeRepoPath(filePath: any): string;
 export declare function resolveSafeProjectFile(workDir: string, filePath: any): {
     normalized: string;
     absolute: string;
+    realRoot: string;
+    leafSymlink: boolean;
 };
 export declare function parseGitStatus(output: string): any[];
 export declare function parseNumstat(output: string): Map<string, FileStats>;

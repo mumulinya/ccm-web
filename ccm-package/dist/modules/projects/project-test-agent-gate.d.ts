@@ -91,7 +91,7 @@ export declare function runProjectTaskTestAgentReview(input: {
     };
     failureRoute: import("../collaboration/test-agent-review-policy").TestAgentFailureRoute;
     canAccept: boolean;
-    status: "completed" | "cancelled" | "failed" | "passed" | "running" | "partial" | "blocked" | "interrupted" | "rejected" | "queued" | "runtime_error";
+    status: "completed" | "failed" | "cancelled" | "blocked" | "passed" | "running" | "partial" | "interrupted" | "rejected" | "queued" | "runtime_error";
     error: string;
     plan: any;
     invocation: import("../../test-agent").TestAgentInvocationResult;

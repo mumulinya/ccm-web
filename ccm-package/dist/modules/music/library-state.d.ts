@@ -28,26 +28,26 @@ export type MusicLibraryState = {
     updatedAt: string;
 };
 declare class LibraryStateStore {
-    private state;
-    constructor();
     get(): any;
-    toggleFavorite(filename: string, favorite?: boolean): any;
-    createPlaylist(name: string): any;
+    toggleFavorite(filename: string, favorite?: boolean, expectedRevision?: number): any;
+    createPlaylist(name: string, expectedRevision?: number): any;
     updatePlaylist(id: string, input: {
         name?: string;
         tracks?: string[];
+        expectedRevision?: number;
     }): any;
-    deletePlaylist(id: string): any;
+    deletePlaylist(id: string, expectedRevision?: number): any;
     setQueue(tracks: string[], input?: {
         currentFilename?: string;
         playMode?: MusicPlayMode;
         queueSources?: Record<string, MusicQueueSource | string>;
+        expectedRevision?: number;
     }): any;
-    recordHistory(filename: string, source?: string): any;
-    clearHistory(): any;
-    removeTrack(filename: string): void;
-    private load;
-    private save;
+    recordHistory(filename: string, source?: string, expectedRevision?: number): any;
+    clearHistory(expectedRevision?: number): any;
+    removeTrack(filename: string, expectedRevision?: number): any;
+    replaceTrackReferences(keepFilename: string, removeFilenames: string[], expectedRevision?: number): any;
+    restoreSnapshot(snapshot: any, expectedRevision?: number): any;
 }
 export declare const musicLibraryState: LibraryStateStore;
 export {};

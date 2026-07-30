@@ -4,7 +4,8 @@ import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
 const gitSource = fs.readFileSync(path.join(root, 'backend', 'modules', 'tools', 'git.ts'), 'utf8')
-assert.match(gitSource, /execFileSync\("git", args,[\s\S]*?windowsHide:\s*true/, 'Git child processes must stay hidden on Windows')
+const gitRuntimeSource = fs.readFileSync(path.join(root, 'backend', 'modules', 'tools', 'git-workspace-runtime.ts'), 'utf8')
+assert.match(gitRuntimeSource, /spawn\("git", remoteArgs,[\s\S]*?windowsHide:\s*true/, 'Git child processes must be asynchronous and hidden on Windows')
 
 const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
 const requestedProject = String(process.env.CCM_GIT_TEST_PROJECT || '')
@@ -34,7 +35,11 @@ assert.ok(selected && status, 'a real Git project should expose status')
 assert.equal(typeof status.summary?.additions, 'number')
 assert.equal(typeof status.summary?.deletions, 'number')
 assert.equal(Array.isArray(status.summary?.modules), true)
-assert.equal(['exact', 'project_recent', 'none'].includes(status.context?.attribution), true)
+assert.equal(typeof status.workspace_snapshot_checksum, 'string')
+assert.equal(status.workspace_snapshot_checksum.length, 64)
+const contextResult = await request(`/api/git/context?project=${encodeURIComponent(selected.name)}&workspace_snapshot_checksum=${encodeURIComponent(status.workspace_snapshot_checksum)}`)
+assert.equal(contextResult.response.ok, true)
+assert.equal(['exact', 'project_recent', 'historical_unverified', 'none'].includes(contextResult.data.context?.attribution), true)
 assert.equal(status.files.every(file => typeof file.staged === 'boolean' && typeof file.unstaged === 'boolean' && typeof file.conflict === 'boolean'), true)
 assert.equal(typeof status.repository?.ahead, 'number')
 assert.equal(typeof status.repository?.behind, 'number')
@@ -42,7 +47,7 @@ assert.equal(typeof status.repository?.canFetch, 'boolean')
 
 const textFile = status.files.find(file => !file.binary)
 if (textFile) {
-  const diffResult = await request(`/api/git/diff?project=${encodeURIComponent(selected.name)}&file=${encodeURIComponent(textFile.path)}`)
+  const diffResult = await request(`/api/git/diff?project=${encodeURIComponent(selected.name)}&file=${encodeURIComponent(textFile.path)}&workspace_snapshot_checksum=${encodeURIComponent(status.workspace_snapshot_checksum)}`)
   assert.equal(diffResult.response.ok, true)
   assert.equal(diffResult.data.success, true)
   assert.equal(typeof diffResult.data.additions, 'number')
@@ -53,7 +58,7 @@ const chosen = status.files.filter(file => !file.conflict).slice(0, 2).map(file 
 if (chosen.length) {
   const previewResult = await request('/api/git/commit-preview', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project: selected.name, files: chosen }),
+    body: JSON.stringify({ project: selected.name, files: chosen, expected_snapshot_checksum: status.workspace_snapshot_checksum }),
   })
   assert.equal(previewResult.response.ok, true)
   assert.equal(previewResult.data.success, true)
@@ -67,7 +72,7 @@ assert.match(traversalResult.data.error, /非法文件路径|项目目录/)
 
 const patchTraversal = await request('/api/git/apply-patch', {
   method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ project: selected.name, patchText: '--- a/../outside.txt\n+++ b/../outside.txt\n@@ -1 +1 @@\n-a\n+b' }),
+  body: JSON.stringify({ project: selected.name, expected_snapshot_checksum: status.workspace_snapshot_checksum, patchText: '--- a/../outside.txt\n+++ b/../outside.txt\n@@ -1 +1 @@\n-a\n+b' }),
 })
 assert.equal(patchTraversal.data.success, false)
 assert.match(patchTraversal.data.error, /非法文件路径/)
@@ -91,7 +96,7 @@ console.log(JSON.stringify({
   branch: status.branch,
   files: status.files.length,
   summary: status.summary,
-  attribution: status.context.attribution,
+  attribution: contextResult.data.context.attribution,
   checks: {
     realStatusAndStats: true,
     realDiffRead: !!textFile,

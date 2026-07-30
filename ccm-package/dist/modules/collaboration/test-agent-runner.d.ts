@@ -9,6 +9,13 @@ export interface TestAgentSourceProjectBinding {
     gitStatusHash: string;
     declaredFiles: string[];
     declaredFileHash: string;
+    declaredFileEvidence?: Array<{
+        path: string;
+        state: string;
+        size: number;
+        checksum: string;
+        verified: boolean;
+    }>;
     fingerprint: string;
 }
 export interface TestAgentSourceBinding {

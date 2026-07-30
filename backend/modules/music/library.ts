@@ -128,6 +128,8 @@ export function parseMusicFilename(filename: string) {
 
 export function getMp3Cover(filePath: string): { mimeType: string, data: Buffer } | null {
   try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size < 10) return null;
     const fd = fs.openSync(filePath, "r");
     const tagSizeHeader = Buffer.alloc(10);
     fs.readSync(fd, tagSizeHeader, 0, 10, 0);
@@ -139,6 +141,10 @@ export function getMp3Cover(filePath: string): { mimeType: string, data: Buffer 
 
     const version = tagSizeHeader[3];
     const tagSize = (tagSizeHeader[6] << 21) | (tagSizeHeader[7] << 14) | (tagSizeHeader[8] << 7) | tagSizeHeader[9];
+    if (tagSize <= 0 || tagSize > 16 * 1024 * 1024 || tagSize + 10 > stat.size) {
+      fs.closeSync(fd);
+      return null;
+    }
     const tagBuffer = Buffer.alloc(tagSize);
     fs.readSync(fd, tagBuffer, 0, tagSize, 10);
     fs.closeSync(fd);
@@ -179,6 +185,7 @@ export function getMp3Cover(filePath: string): { mimeType: string, data: Buffer 
 
       const isAPIC = frameId === "APIC" || frameId === "PIC";
       if (isAPIC) {
+        if (frameSize > 8 * 1024 * 1024) return null;
         const frameContent = tagBuffer.subarray(offset + headerSize, offset + headerSize + frameSize);
         let mimeType = "";
         let pictureDataOffset = 0;
@@ -225,6 +232,7 @@ export function getMp3Cover(filePath: string): { mimeType: string, data: Buffer 
         }
 
         const pictureData = frameContent.subarray(pictureDataOffset);
+        if (!pictureData.length || pictureData.length > 8 * 1024 * 1024) return null;
         return { mimeType, data: pictureData };
       }
 

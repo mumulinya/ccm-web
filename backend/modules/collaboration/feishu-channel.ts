@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { loadAutoDevNotifyConfig, loadFeishuConfig } from "../../core/db";
-import { sendFeishuMessageToTarget } from "./feishu";
+import { sendFeishuMessageToTarget, sendFeishuReportMessage } from "./feishu";
 import { publishRuntimeEvent } from "../../system/runtime-events";
 import { extractFeishuInboundIdentity, publicFeishuUserMapping, signFeishuCardAction } from "./feishu-access";
 import { buildFeishuConversationIdentityV2, type FeishuAgentTargetType } from "./feishu-conversation-v2";
@@ -86,7 +86,7 @@ function saveState(state: any) {
     deliveries: (state.deliveries || []).slice(-MAX_DELIVERIES),
     cards: (state.cards || []).slice(-500),
     identities: (state.identities || []).slice(-500),
-    report_deliveries: (state.report_deliveries || []).slice(-240),
+    report_deliveries: (state.report_deliveries || []).slice(-500),
     updated_at: new Date().toISOString(),
   };
   const temp = `${STATE_FILE}.${process.pid}.${Date.now()}.tmp`;
@@ -592,6 +592,139 @@ async function attemptDelivery(deliveryId: string) {
   }
 }
 
+export interface FeishuReportDeliveryV2 {
+  schema: "ccm-feishu-report-delivery-v2";
+  version: 2;
+  id: string;
+  dedupe_key: string;
+  kind: "daily" | "weekly";
+  report_id: string;
+  report_checksum: string;
+  webhook_fingerprint: string;
+  title: string;
+  markdown: string;
+  status: "pending" | "sending" | "sent" | "failed" | "delivery_unknown";
+  attempts: number;
+  created_at: string;
+  last_attempt_at: string;
+  next_attempt_at: string;
+  sent_at: string;
+  error: string;
+  retryable: boolean;
+  manual_retry_required: boolean;
+}
+
+function reportWebhookFingerprint() {
+  const value = String(loadFeishuConfig()?.webhook_url || "").trim();
+  return value ? crypto.createHash("sha256").update(value).digest("hex").slice(0, 20) : "missing";
+}
+
+function publicReportDeliveryStatus(delivery: any) {
+  if (!delivery) return "failed";
+  if (delivery.status === "sent") return "sent";
+  if (delivery.status === "delivery_unknown") return "delivery_unknown";
+  if (delivery.status === "pending" || delivery.status === "sending" || (delivery.status === "failed" && delivery.retryable && Number(delivery.attempts || 0) < 5)) return "queued";
+  return "failed";
+}
+
+async function attemptReportDelivery(deliveryId: string) {
+  const releaseLease = acquireDeliveryLease(`report_${deliveryId}`);
+  if (!releaseLease) return loadState().report_deliveries.find((row: any) => row.id === deliveryId) || null;
+  try {
+    let state = loadState();
+    let delivery = state.report_deliveries.find((row: any) => row.id === deliveryId);
+    if (!delivery || delivery.schema !== "ccm-feishu-report-delivery-v2" || ["sent", "delivery_unknown"].includes(delivery.status)) return delivery || null;
+    delivery.status = "sending";
+    delivery.last_attempt_at = new Date().toISOString();
+    saveState(state);
+    const result = await sendFeishuReportMessage({ title: delivery.title, markdown: delivery.markdown, timeoutMs: 20_000 });
+    state = loadState();
+    delivery = state.report_deliveries.find((row: any) => row.id === deliveryId);
+    if (!delivery) return null;
+    delivery.attempts = Number(delivery.attempts || 0) + 1;
+    delivery.last_attempt_at = new Date().toISOString();
+    delivery.error = result.success ? "" : safeText(result.error || "发送失败", 300);
+    if (result.success) {
+      delivery.status = "sent";
+      delivery.sent_at = delivery.last_attempt_at;
+      delivery.next_attempt_at = "";
+      delivery.retryable = false;
+      delivery.manual_retry_required = false;
+    } else if (result.delivery_unknown) {
+      delivery.status = "delivery_unknown";
+      delivery.next_attempt_at = "";
+      delivery.retryable = false;
+      delivery.manual_retry_required = true;
+    } else {
+      delivery.status = "failed";
+      delivery.retryable = result.retryable === true && delivery.attempts < 5;
+      delivery.next_attempt_at = delivery.retryable ? retryAt(delivery.attempts) : "";
+      delivery.manual_retry_required = !delivery.retryable;
+    }
+    saveState(state);
+    publishRuntimeEvent("feishu", "feishu.report_delivery_changed", {
+      deliveryId: delivery.id,
+      reportId: delivery.report_id,
+      kind: delivery.kind,
+      status: delivery.status,
+      reason: delivery.error,
+      source: "feishu-report-outbox",
+    });
+    return delivery;
+  } finally {
+    releaseLease();
+  }
+}
+
+export async function enqueueFeishuReportDelivery(input: { kind: "daily" | "weekly"; reportId: string; reportChecksum: string; title: string; markdown: string }) {
+  if (String(input.markdown || "").length > 10_000) throw new Error(`飞书报告正文超过安全容量：${String(input.markdown || "").length}/10000`);
+  const fingerprint = reportWebhookFingerprint();
+  const dedupeKey = `work-report:${input.kind}:${input.reportId}:${input.reportChecksum}:${fingerprint}`;
+  const dedupeLock = acquireDeliveryLease(`report_dedupe_${crypto.createHash("sha256").update(dedupeKey).digest("hex").slice(0, 24)}`);
+  if (!dedupeLock) return { success: false, queued: true, duplicate: true, status: "queued" };
+  let delivery: FeishuReportDeliveryV2;
+  try {
+    const state = loadState();
+    const existing = state.report_deliveries.find((row: any) => row.schema === "ccm-feishu-report-delivery-v2" && row.dedupe_key === dedupeKey);
+    if (existing) return { success: existing.status === "sent", queued: publicReportDeliveryStatus(existing) === "queued", duplicate: true, status: publicReportDeliveryStatus(existing), delivery: existing };
+    const now = new Date().toISOString();
+    delivery = {
+      schema: "ccm-feishu-report-delivery-v2",
+      version: 2,
+      id: `fsr2_${crypto.randomBytes(10).toString("hex")}`,
+      dedupe_key: dedupeKey,
+      kind: input.kind,
+      report_id: safeText(input.reportId, 120),
+      report_checksum: safeText(input.reportChecksum, 80),
+      webhook_fingerprint: fingerprint,
+      title: safeText(input.title, 80),
+      markdown: String(input.markdown || ""),
+      status: "pending",
+      attempts: 0,
+      created_at: now,
+      last_attempt_at: "",
+      next_attempt_at: now,
+      sent_at: "",
+      error: "",
+      retryable: true,
+      manual_retry_required: false,
+    };
+    state.report_deliveries.push(delivery);
+    saveState(state);
+  } finally {
+    dedupeLock();
+  }
+  const attempted = await attemptReportDelivery(delivery.id);
+  const status = publicReportDeliveryStatus(attempted);
+  return { success: status === "sent", queued: status === "queued", status, delivery: attempted };
+}
+
+export function getFeishuReportDelivery(deliveryId: string) {
+  const id = String(deliveryId || "").trim();
+  if (!id) return null;
+  return loadState().report_deliveries.find((row: any) => row.id === id && row.schema === "ccm-feishu-report-delivery-v2") || null;
+}
+
 export async function notifyFeishuTaskStage(input: {
   stage: string;
   title: string;
@@ -677,6 +810,18 @@ export async function notifyFeishuTaskStage(input: {
 export async function retryFeishuNotificationDelivery(deliveryId: string) {
   const id = String(deliveryId || "").trim();
   const state = loadState();
+  const reportDelivery = state.report_deliveries.find((row: any) => row.id === id && row.schema === "ccm-feishu-report-delivery-v2");
+  if (reportDelivery) {
+    if (reportDelivery.status === "sent") return reportDelivery;
+    reportDelivery.status = "pending";
+    reportDelivery.attempts = 0;
+    reportDelivery.error = "";
+    reportDelivery.next_attempt_at = new Date().toISOString();
+    reportDelivery.retryable = true;
+    reportDelivery.manual_retry_required = false;
+    saveState(state);
+    return attemptReportDelivery(id);
+  }
   const delivery = state.deliveries.find((row: any) => row.id === id);
   if (!delivery) throw new Error("飞书投递记录不存在");
   if (delivery.status === "sent") return delivery;
@@ -694,7 +839,16 @@ export async function tickFeishuNotificationOutbox(now = new Date()) {
   const due = state.deliveries.filter((row: any) => row.status !== "sent" && Number(row.attempts || 0) < 5 && Date.parse(row.next_attempt_at || row.created_at || "") <= now.getTime()).slice(0, 10);
   const results = [];
   for (const row of due) results.push(await attemptDelivery(row.id));
-  return { due: due.length, sent: results.filter((row: any) => row?.status === "sent").length, failed: results.filter((row: any) => row?.status === "failed").length };
+  const reportState = loadState();
+  const reportDue = reportState.report_deliveries.filter((row: any) => row.schema === "ccm-feishu-report-delivery-v2" && ["pending", "failed", "sending"].includes(row.status) && row.retryable !== false && Number(row.attempts || 0) < 5 && Date.parse(row.next_attempt_at || row.created_at || "") <= now.getTime()).slice(0, 10);
+  const reportResults = [];
+  for (const row of reportDue) reportResults.push(await attemptReportDelivery(row.id));
+  return {
+    due: due.length + reportDue.length,
+    sent: results.filter((row: any) => row?.status === "sent").length + reportResults.filter((row: any) => row?.status === "sent").length,
+    failed: results.filter((row: any) => row?.status === "failed").length + reportResults.filter((row: any) => ["failed", "delivery_unknown"].includes(row?.status)).length,
+    report_due: reportDue.length,
+  };
 }
 
 export function recordFeishuReportDelivery(input: {
@@ -935,8 +1089,10 @@ export function getFeishuChannelHealth(expectedPort = Number(process.env.CCM_POR
     },
     reports: { daily_enabled: reports.daily_enabled === true, weekly_enabled: reports.weekly_enabled === true },
     report_deliveries: {
-      sent: state.report_deliveries.filter((row: any) => row.success === true).length,
-      failed: state.report_deliveries.filter((row: any) => row.success !== true).length,
+      sent: state.report_deliveries.filter((row: any) => row.schema === "ccm-feishu-report-delivery-v2" ? row.status === "sent" : row.success === true).length,
+      pending: state.report_deliveries.filter((row: any) => row.schema === "ccm-feishu-report-delivery-v2" && ["pending", "sending"].includes(row.status)).length,
+      unknown: state.report_deliveries.filter((row: any) => row.schema === "ccm-feishu-report-delivery-v2" && row.status === "delivery_unknown").length,
+      failed: state.report_deliveries.filter((row: any) => row.schema === "ccm-feishu-report-delivery-v2" ? row.status === "failed" : row.success !== true).length,
       last: state.report_deliveries.at(-1) || null,
     },
   };

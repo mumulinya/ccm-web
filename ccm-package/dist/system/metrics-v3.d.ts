@@ -1,0 +1,83 @@
+export declare function metricsTimezone(): string;
+export declare function metricDateKey(value?: Date | string | number, timezone?: string): string;
+export declare function recordMetricV3(agent: string, data: any, now?: Date | string | number): {
+    inserted: boolean;
+    event: {
+        eventId: string;
+        at: string;
+        dateKey: string;
+        timezone: string;
+        scopeType: string;
+        scopeId: string;
+        groupId: string;
+        projectId: string;
+        agent: string;
+        role: string;
+        source: string;
+        runtime: string;
+        status: string;
+        durationMs: number;
+        fileChangeCount: number;
+        inputTokens: number;
+        outputTokens: number;
+        totalCostUsd: number;
+        traceId: string;
+        taskId: string;
+        executionId: string;
+        error: string;
+        usageReported: boolean;
+    };
+};
+export declare function ensureLegacyMetricsMigrated(store: any): {
+    migrated: boolean;
+    count: number;
+};
+export declare function loadMetricsDashboardV3(): any;
+export declare function queryMetricEventsV3(filters?: any): {
+    events: {
+        id: any;
+        at: any;
+        date: any;
+        timezone: any;
+        scopeType: any;
+        scopeId: any;
+        groupId: any;
+        projectId: any;
+        agent: any;
+        role: any;
+        source: any;
+        runtime: any;
+        status: any;
+        resolvedStatus: any;
+        success: boolean;
+        durationMs: number;
+        fileChangeCount: number;
+        inputTokens: number;
+        outputTokens: number;
+        totalCostUsd: number;
+        traceId: any;
+        taskId: any;
+        executionId: any;
+        error: any;
+        usageReported: boolean;
+    }[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    status: string;
+    statusCounts: any;
+    retentionDays: number;
+    timezone: string;
+    range: {
+        days: number;
+        fromDate: string;
+        toDate: string;
+    };
+};
+export declare function pruneMetricEventsV3(force?: boolean): any;
+export declare function resetMetricsV3(): {
+    events: any;
+    aggregates: any;
+    reset_at: string;
+};

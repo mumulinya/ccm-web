@@ -54,6 +54,7 @@ const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
 const storage_1 = require("../collaboration/storage");
+const cron_job_store_1 = require("./cron-job-store");
 const WORK_JOURNAL_FILE = path.join(utils_1.CCM_DIR, "work-journal.jsonl");
 const GLOBAL_AGENT_HISTORY_FILE = path.join(utils_1.CCM_DIR, "global-agent-history.json");
 const PROJECT_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
@@ -614,14 +615,20 @@ function syncWorkJournal() {
         events: merged.events,
     };
 }
-function localWorkDateKey(date = new Date()) {
-    const pad = (value) => String(value).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+function localWorkDateKey(date = new Date(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+    return (0, cron_job_store_1.dateKeyInTimezone)(date, (0, cron_job_store_1.normalizeCronTimezone)(timezone));
 }
-function parseWorkDay(dateKey = localWorkDateKey()) {
-    const safe = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKey)) ? String(dateKey) : localWorkDateKey();
+function parseWorkDay(dateKey = localWorkDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+    const normalizedTimezone = (0, cron_job_store_1.normalizeCronTimezone)(timezone);
+    const safe = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKey)) ? String(dateKey) : localWorkDateKey(new Date(), normalizedTimezone);
     const [year, month, day] = safe.split("-").map(Number);
-    return { key: safe, start: new Date(year, month - 1, day, 0, 0, 0, 0), end: new Date(year, month - 1, day + 1, 0, 0, 0, 0) };
+    const next = new Date(Date.UTC(year, month - 1, day + 1));
+    return {
+        key: safe,
+        timezone: normalizedTimezone,
+        start: (0, cron_job_store_1.zonedDateTimeToDate)({ year, month, day }, normalizedTimezone),
+        end: (0, cron_job_store_1.zonedDateTimeToDate)({ year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() }, normalizedTimezone),
+    };
 }
 function inSpan(at, span) {
     const time = Date.parse(at);
@@ -780,10 +787,10 @@ function buildDailyMarkdown(report) {
         `- 工作归属：你 ${report.ownership.user_actions} 条、Agent ${report.ownership.agent_actions} 条、TestAgent ${report.ownership.test_agent_actions} 条、系统自动化 ${report.ownership.system_actions} 条`,
     ].join("\n");
 }
-function generateEvidenceDailyReport(dateKey = localWorkDateKey(), inputEvents) {
+function generateEvidenceDailyReport(dateKey = localWorkDateKey(), inputEvents, timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
     const sync = inputEvents ? null : syncWorkJournal();
     const events = inputEvents || sync.events;
-    const day = parseWorkDay(dateKey);
+    const day = parseWorkDay(dateKey, timezone);
     const dayEvents = events.filter(item => inSpan(item.at, day) && isReportableEvent(item));
     const activities = groupActivities(dayEvents, events, day);
     const stateMap = stateAtEnd(events, day.end);
@@ -817,6 +824,7 @@ function generateEvidenceDailyReport(dateKey = localWorkDateKey(), inputEvents) 
         type: "daily",
         date: day.key,
         generated_at: new Date().toISOString(),
+        timezone: day.timezone,
         immutable_source: true,
         summary: {
             total_activities: activities.length,
@@ -856,12 +864,19 @@ function addDays(date, days) {
     next.setDate(next.getDate() + days);
     return next;
 }
-function workWeekRange(dateKey = localWorkDateKey()) {
-    const day = parseWorkDay(dateKey);
-    const weekday = day.start.getDay();
-    const start = addDays(day.start, weekday === 0 ? -6 : 1 - weekday);
-    const end = addDays(start, 7);
-    return { id: `week-${localWorkDateKey(start)}`, start, end, start_key: localWorkDateKey(start), end_key: localWorkDateKey(addDays(end, -1)) };
+function workWeekRange(dateKey = localWorkDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+    const day = parseWorkDay(dateKey, timezone);
+    const [year, month, date] = day.key.split("-").map(Number);
+    const calendarDay = new Date(Date.UTC(year, month - 1, date));
+    const weekday = calendarDay.getUTCDay();
+    const startCalendar = addDays(calendarDay, weekday === 0 ? -6 : 1 - weekday);
+    const endCalendar = addDays(startCalendar, 7);
+    const startKey = `${startCalendar.getUTCFullYear()}-${String(startCalendar.getUTCMonth() + 1).padStart(2, "0")}-${String(startCalendar.getUTCDate()).padStart(2, "0")}`;
+    const lastCalendar = addDays(endCalendar, -1);
+    const endKey = `${lastCalendar.getUTCFullYear()}-${String(lastCalendar.getUTCMonth() + 1).padStart(2, "0")}-${String(lastCalendar.getUTCDate()).padStart(2, "0")}`;
+    const start = parseWorkDay(startKey, day.timezone).start;
+    const end = parseWorkDay(`${endCalendar.getUTCFullYear()}-${String(endCalendar.getUTCMonth() + 1).padStart(2, "0")}-${String(endCalendar.getUTCDate()).padStart(2, "0")}`, day.timezone).start;
+    return { id: `week-${startKey}`, start, end, start_key: startKey, end_key: endKey, timezone: day.timezone };
 }
 function uniqueBy(items, keyOf) {
     const seen = new Set();
@@ -903,13 +918,19 @@ function buildWeeklyMarkdown(report) {
         `- 工作归属：你 ${report.ownership.user_actions} 条、Agent ${report.ownership.agent_actions} 条、TestAgent ${report.ownership.test_agent_actions} 条、系统自动化 ${report.ownership.system_actions} 条`,
     ].join("\n");
 }
-function generateEvidenceWeeklyReport(dateKey = localWorkDateKey()) {
-    const sync = syncWorkJournal();
-    const events = sync.events;
-    const range = workWeekRange(dateKey);
+function generateEvidenceWeeklyReport(dateKey = localWorkDateKey(), inputEvents, timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+    const sync = inputEvents ? null : syncWorkJournal();
+    const events = inputEvents || sync.events;
+    const range = workWeekRange(dateKey, timezone);
     const span = { start: range.start, end: range.end };
     const weekEvents = events.filter(item => inSpan(item.at, span) && isReportableEvent(item));
-    const days = Array.from({ length: 7 }, (_, index) => generateEvidenceDailyReport(localWorkDateKey(addDays(range.start, index)), events));
+    const [startYear, startMonth, startDay] = range.start_key.split("-").map(Number);
+    const days = Array.from({ length: 7 }, (_, index) => {
+        const base = new Date(Date.UTC(startYear, startMonth - 1, startDay));
+        const current = addDays(base, index);
+        const key = `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, "0")}-${String(current.getUTCDate()).padStart(2, "0")}`;
+        return generateEvidenceDailyReport(key, events, range.timezone);
+    });
     const activities = uniqueBy(days.flatMap(day => day.activities || []), (item) => String(item.task_id || item.id)).slice(0, 180);
     const completed = uniqueBy(days.flatMap(day => day.completed || []), (item) => String(item.task_id || item.id)).slice(0, 80);
     const lastDay = days[6];
@@ -930,6 +951,7 @@ function generateEvidenceWeeklyReport(dateKey = localWorkDateKey()) {
         start_date: range.start_key,
         end_date: range.end_key,
         generated_at: new Date().toISOString(),
+        timezone: range.timezone,
         immutable_source: true,
         summary: {
             total_activities: activities.length,

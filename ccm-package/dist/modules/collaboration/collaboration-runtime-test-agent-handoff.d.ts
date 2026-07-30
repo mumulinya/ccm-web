@@ -27,7 +27,7 @@ export declare function testAgentStatusToReceiptStatus(status: any): "done" | "f
 export declare function readTestAgentVerdictArtifact(report: TestAgentReport): TestAgentVerdict | null;
 export declare function resolveTestAgentDecisionVerdict(report: TestAgentReport, artifactVerdict?: TestAgentVerdict | null): TestAgentVerdict;
 export declare function testAgentDecisionReceiptStatus(report: TestAgentReport, verdict: TestAgentVerdict | null): any;
-export declare function testAgentDecisionReviewVerdict(report: TestAgentReport, verdict: TestAgentVerdict | null): "failed" | "unknown" | "passed" | "blocked" | "partial" | "needs_recheck" | "needs_environment";
+export declare function testAgentDecisionReviewVerdict(report: TestAgentReport, verdict: TestAgentVerdict | null): "failed" | "blocked" | "unknown" | "passed" | "partial" | "needs_recheck" | "needs_environment";
 export declare function testAgentDecisionLabel(report: TestAgentReport, verdict: TestAgentVerdict | null): "待确认" | "需要返工" | "可以接受" | "需要人工确认" | "需要重新复验" | "需要补齐环境条件" | "未给出";
 export declare function collectTestAgentVerdictGapLines(verdict: TestAgentVerdict | null): string[];
 export declare function collectTestAgentVerdictNextActions(verdict: TestAgentVerdict | null): string[];

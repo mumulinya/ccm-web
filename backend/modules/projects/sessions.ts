@@ -19,6 +19,7 @@ import { cancelProjectMainTasksForSession } from "./project-main-agent";
 import { publishRuntimeEvent } from "../../system/runtime-events";
 import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
 import { buildFeishuConversationIdentityV2 } from "../collaboration/feishu-conversation-v2";
+import { markConversationSearchIndexDirty } from "../../system/conversation-search-dirty";
 
 export const WEB_SESSIONS_DIR = path.join(CCM_DIR, "web-sessions");
 
@@ -398,6 +399,7 @@ export function createProjectSessionRecord(projectName: string, name = "", sourc
     source: normalizedSource,
   };
   fs.writeFileSync(getSessionFilePath(safeProject, sessionId), JSON.stringify(sessionData, null, 2));
+  markConversationSearchIndexDirty(`project:${safeProject}:${sessionId}`);
   syncToFilesystemToCc(safeProject);
   return { project: safeProject, sessionId, name: sessionName, created: true };
 }
@@ -465,6 +467,7 @@ export function appendProjectSessionTaskMessage(projectName: string, sessionId: 
   if (!data.history.some((item: any) => String(item.id || "") === normalized.id)) data.history.push(normalized);
   data.updated_at = new Date().toISOString();
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  markConversationSearchIndexDirty(`project:${safeProject}:${safeSessionId}`);
   syncToFilesystemToCc(safeProject);
   if (normalized.role === "assistant" && String(normalized.content || "").trim()) {
     void scheduleProjectSessionAutoTitle(safeProject, safeSessionId).catch((error: any) => {
@@ -502,6 +505,7 @@ export function upsertProjectSessionTaskMessage(projectName: string, sessionId: 
   }
   data.updated_at = new Date().toISOString();
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  markConversationSearchIndexDirty(`project:${safeProject}:${safeSessionId}`);
   syncToFilesystemToCc(safeProject);
   publishRuntimeEvent("project", "project.session_messages_changed", {
     project: safeProject,
@@ -560,6 +564,7 @@ export function scheduleProjectSessionAutoTitle(project: string, sessionId: stri
     latest.title_generated_at = new Date().toISOString();
     latest.updated_at = latest.title_generated_at;
     fs.writeFileSync(filePath, JSON.stringify(latest, null, 2));
+    markConversationSearchIndexDirty(`project:${safeProject}:${safeSessionId}`);
     syncToFilesystemToCc(safeProject);
     publishRuntimeEvent("project", "project.session_title_changed", {
       project: safeProject,

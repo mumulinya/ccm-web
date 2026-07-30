@@ -100,15 +100,20 @@ try {
   const projectSource = fs.readFileSync(path.join(root, 'backend/modules/projects/sessions.ts'), 'utf8')
   const queueSource = fs.readFileSync(path.join(root, 'backend/modules/collaboration/collaboration-runtime-task-queue.ts'), 'utf8')
   const serverSource = fs.readFileSync(path.join(root, 'backend/server.ts'), 'utf8')
+  const projectsRuntimeSource = fs.readFileSync(path.join(root, 'backend/modules/projects/projects.ts'), 'utf8')
   assert.match(channelSource, /feishu_context_v2/)
   assert.match(channelSource, /queuedContext\?\.payload/)
   assert.doesNotMatch(channelSource, /channel: "configured_fallback"/)
   assert.doesNotMatch(globalApiSource, /processedFeishuMessageIds/)
   assert.match(globalApiSource, /feishu-global-inbound-v2/)
+  assert.match(globalApiSource, /req\.ccmAuth\?\.kind === "internal" && req\.ccmAuth\?\.caller === "feishu-acp"/)
+  assert.doesNotMatch(globalApiSource, /x-ccm-acp/)
   assert.doesNotMatch(projectSource, /resolution: "single_bound_target"/)
   assert.match(queueSource, /must never fall back to the generic webhook/)
   assert.match(serverSource, /enqueueCurrentProjectFeishuTurn/)
   assert.match(serverSource, /startProjectFeishuTurnRecoveryForServer/)
+  assert.match(projectsRuntimeSource, /discoverOwnedProjectChannelRootPid/)
+  assert.match(projectsRuntimeSource, /if \(channelStopped\)/)
 
   console.log(JSON.stringify({
     pass: true,
@@ -125,6 +130,8 @@ try {
       project_single_target_fallback_removed: true,
       project_turn_fifo_and_exact_payload: true,
       project_turn_restart_recovery_registered: true,
+      signed_acp_is_the_only_internal_global_ingress: true,
+      stale_project_channel_recovery_registered: true,
     },
     paid_provider_calls: 0,
   }, null, 2))

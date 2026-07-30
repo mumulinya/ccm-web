@@ -116,10 +116,7 @@ export declare function diffRequirementDecompositionPlans(previous: RequirementD
 export declare function htmlToText(html: string): string;
 export declare function assertPublicUrl(value: string): Promise<{
     url: import("node:url").URL;
-    addresses: {
-        address: string;
-        family: number;
-    }[];
+    addresses: import("node:dns").LookupAddress[];
 }>;
 export declare function fetchPublicDocument(urlValue: string): Promise<{
     response: any;

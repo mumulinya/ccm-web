@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { startPlaywrightAppServer } from './playwright-app-server.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3080').replace(/\/+$/, '')
+const appHost = process.env.CCM_BASE_URL ? null : await startPlaywrightAppServer(root, { port: 3082 })
+const baseUrl = String(process.env.CCM_BASE_URL || appHost.baseUrl).replace(/\/+$/, '')
 const outputDir = path.join(root, 'scratch', 'global-page-loading-render-regression')
 fs.rmSync(outputDir, { recursive: true, force: true })
 fs.mkdirSync(outputDir, { recursive: true })
@@ -31,8 +33,11 @@ const prepare = async (page, { authDelay = 0, projectDelay = 0, groupDelay = 0 }
     localStorage.setItem('app-low-perf', 'true')
   })
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
-  await page.route('**/api/**', async route => {
+  await page.route('**/*', async route => {
     const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
+    if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
     if (url.pathname === '/api/auth/session') {
       if (authDelay) await delay(authDelay)
       return route.fulfill(json({ success: true, authenticated: true, user: { username: 'loading-selftest' } }))
@@ -123,6 +128,7 @@ try {
   report.errors.push(error?.stack || String(error))
 } finally {
   await browser.close()
+  if (appHost) await appHost.server.close()
   fs.writeFileSync(path.join(outputDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
 }
 

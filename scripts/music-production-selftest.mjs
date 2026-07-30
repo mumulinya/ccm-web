@@ -4,6 +4,7 @@ const require = createRequire(import.meta.url)
 const { runMusicSearchResultSelfTest, signSearchResults } = require('../ccm-package/dist/modules/music/search-results.js')
 const baseUrl = (process.env.CCM_MUSIC_URL || 'http://127.0.0.1:3082').replace(/\/$/, '')
 const authCookie = String(process.env.CCM_AUTH_COOKIE || '').trim()
+const authCsrf = String(process.env.CCM_AUTH_CSRF || '').trim()
 const unique = `ccm-music-test-${Date.now()}`
 const filename = `${unique}.wav`
 let playlistId = ''
@@ -19,7 +20,15 @@ function makeWav() {
 }
 
 async function json(url, init) {
-  const response = await fetch(`${baseUrl}${url}`, { ...(init || {}), headers: { ...(init?.headers || {}), ...(authCookie ? { Cookie: authCookie } : {}) } })
+  const method = String(init?.method || 'GET').toUpperCase()
+  const response = await fetch(`${baseUrl}${url}`, {
+    ...(init || {}),
+    headers: {
+      ...(init?.headers || {}),
+      ...(authCookie ? { Cookie: authCookie } : {}),
+      ...(!['GET', 'HEAD', 'OPTIONS'].includes(method) && authCsrf ? { 'X-CCM-CSRF': authCsrf } : {}),
+    },
+  })
   const data = await response.json().catch(() => ({}))
   return { response, data }
 }

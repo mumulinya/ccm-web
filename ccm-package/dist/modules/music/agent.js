@@ -21,7 +21,9 @@ function normalizeMusicSourceMode(value) {
         return "local";
     if (mode === "netease")
         return "netease";
-    return "bilibili";
+    if (mode === "bilibili")
+        return "bilibili";
+    return "auto";
 }
 function validateMusicIntentDecision(value, requestText, mode) {
     const actions = new Set(["none", "search", "play", "convert"]);
@@ -55,9 +57,7 @@ function validateMusicIntentDecision(value, requestText, mode) {
         artist,
         mood,
         genre,
-        // The model may describe a preferred source, but it cannot expand the source
-        // authorized by the caller. Source switching is a deterministic UI decision.
-        sourceMode: normalizeMusicSourceMode(mode),
+        sourceMode: normalizeMusicSourceMode(value?.sourceMode || mode),
         randomize: strategy === "artist_random" || strategy === "mood_recommendation" || strategy === "genre_recommendation" || strategy === "random",
         strictMatch: strategy === "exact_song",
         confidence: Math.max(0, Math.min(1, Number(value?.confidence || 0))),
@@ -83,8 +83,9 @@ async function resolveMusicIntentDecisionV2(input) {
 - 只要求查找、推荐列表或询问有没有：search。
 - 下载、转码或转换：convert。
 - 闲聊、歌词问题、播放器说明：none。
-sourceMode 根据当前模式选择 local、netease 或 bilibili，不得从自然语言扩大来源权限。
-返回：{"action":"none|search|play|convert","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"local|netease|bilibili","confidence":0.0,"reason":""}`;
+sourceMode 默认必须为 auto；只有用户在当前消息中明确指定“本地、网易或B站”时才返回 local、netease 或 bilibili。
+页面当前浏览标签不是来源限制，不得据此缩小AI点歌来源。
+返回：{"action":"none|search|play|convert","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili","confidence":0.0,"reason":""}`;
     const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
         kind: "music_intent",
         identity: {
@@ -138,7 +139,7 @@ function normalizeMusicPlaybackPlan(value, requestText, keyword = "", source = "
 }
 async function resolveMusicPlaybackRequest(cfg, requestText, keyword = "") {
     try {
-        const decision = await resolveMusicIntentDecisionV2({ config: cfg, message: requestText || keyword, mode: "bilibili" });
+        const decision = await resolveMusicIntentDecisionV2({ config: cfg, message: requestText || keyword, mode: "auto" });
         if (decision.action !== "play" || decision.strategy === "none")
             throw new Error("模型没有确认这是播放请求");
         return normalizeMusicPlaybackPlan(decision, requestText, keyword, "model");

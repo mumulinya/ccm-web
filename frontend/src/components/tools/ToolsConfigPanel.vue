@@ -75,6 +75,7 @@ const selectedSource = ref('local')
 const marketplaceFilter = ref('all')
 const customSourceUrl = ref('')
 const customSourceLabel = ref('')
+const customSourceToken = ref('')
 const loadedCustomSourceUrl = ref('')
 const loadedCustomSourceLabel = ref('')
 const isSavingSource = ref(false)
@@ -85,6 +86,8 @@ const marketplaceLastImpact = ref(null)
 const marketplaceLastRuntimeImpact = ref(null)
 const marketplaceLastRuntimeResync = ref(null)
 const marketplaceOperations = ref([])
+const marketplaceTransactions = ref([])
+const marketplaceTransactionsLoading = ref(false)
 const marketplaceOperationsSummary = ref({ totalReturned: 0, actionCounts: {}, impactedScopes: 0, impactedRuntimeSnapshots: 0, runtimeResynced: 0, runtimeResyncFailed: 0, truncated: false })
 const marketplaceOperationsLoading = ref(false)
 const marketplaceLoading = ref(false)
@@ -250,6 +253,7 @@ const loadTools = async () => {
 
   await loadMarketplaceSources()
   await loadMarketplaceOperations()
+  await loadMarketplaceTransactions()
   if (!['local', 'github', 'skills-sh', 'smithery', 'custom'].includes(selectedSource.value)
     && !marketplaceSources.value.some(source => source.id === selectedSource.value)) {
     selectedSource.value = 'local'
@@ -338,6 +342,18 @@ const loadMarketplaceOperations = async () => {
     console.error('加载商城操作审计失败:', e)
   } finally {
     marketplaceOperationsLoading.value = false
+  }
+}
+
+const loadMarketplaceTransactions = async () => {
+  marketplaceTransactionsLoading.value = true
+  try {
+    const res = await toolsApi.marketplace.transactions(50)
+    if (res.success) marketplaceTransactions.value = res.items || []
+  } catch (e) {
+    console.error('加载商城事务失败:', e)
+  } finally {
+    marketplaceTransactionsLoading.value = false
   }
 }
 
@@ -908,12 +924,14 @@ const saveCustomMarketplaceSource = async () => {
   try {
     const res = await toolsApi.marketplace.saveSource({
       label: sourceLabel,
-      url: sourceUrl
+      url: sourceUrl,
+      token: customSourceToken.value.trim()
     })
     if (!res.success) throw new Error(res.error || '保存来源失败')
     selectedSource.value = res.source.id
     customSourceUrl.value = ''
     customSourceLabel.value = ''
+    customSourceToken.value = ''
     loadedCustomSourceUrl.value = ''
     loadedCustomSourceLabel.value = ''
     toast.success(`已保存外部来源，读取到 ${res.itemCount || 0} 个条目`)
@@ -941,6 +959,7 @@ const sameMarketplaceItem = (left, right) => {
 
 const installButtonText = (item) => {
   if (item.installing) return item.sourceNeedsSave || customSourceNeedsSave.value ? '保存中' : '处理中'
+  if (item.quarantinedLegacy) return '复核并启用'
   if (item.sourceNeedsSave || customSourceNeedsSave.value) return item.updateAvailable ? '保存来源并更新' : '保存来源并安装'
   if (item.updateAvailable) return '更新'
   if (marketplaceCanRefresh(item)) return '重新同步'
@@ -1080,6 +1099,93 @@ const marketplaceRuntimeResyncPayload = (impact = null) => {
   }
 }
 
+const marketplaceTransactionStateLabel = (state) => ({
+  previewed: '待确认',
+  quarantined: '隔离中',
+  activating: '连接测试',
+  active: '已启用',
+  failed: '激活失败',
+  recovery_required: '待恢复',
+  rolled_back: '已回滚'
+}[state] || state || '未知')
+
+const marketplaceActivationPreview = (transaction) => {
+  const preview = transaction?.preview || {}
+  const lines = [
+    `${transaction?.action === 'uninstall' ? '卸载' : transaction?.action === 'update' ? '更新' : '安装'} ${transaction?.type === 'mcp' ? 'MCP' : 'Skill'}：${transaction?.name || '-'}`,
+    `来源：${transaction?.source?.label || transaction?.source?.id || '-'}（${transaction?.source?.trust === 'official' ? '官方' : transaction?.source?.trust === 'community' ? '社区' : '自定义'}）`,
+    `物料校验：${transaction?.materialHash || '-'}`,
+  ]
+  if (transaction?.type === 'mcp') {
+    lines.push(`传输：${preview.transport || '-'}`)
+    if (preview.executablePath || preview.command) lines.push(`程序：${preview.executablePath || preview.command}`)
+    if (Array.isArray(preview.args) && preview.args.length) lines.push(`参数：${preview.args.join(' ')}`)
+    if (preview.remoteUrl) lines.push(`网络目标：${preview.remoteUrl}`)
+    if (Array.isArray(preview.envKeys) && preview.envKeys.length) lines.push(`环境变量 Key：${preview.envKeys.join(', ')}`)
+    if (Array.isArray(preview.headerKeys) && preview.headerKeys.length) lines.push(`Header Key：${preview.headerKeys.join(', ')}`)
+  } else {
+    lines.push(`文件：${preview.packageStats?.files || 0} 个，共 ${preview.packageStats?.totalBytes || 0} Bytes`)
+  }
+  const scopeCount = preview.authorizationImpact?.summary?.scopeCount || 0
+  const runtimeCount = preview.runtimeImpact?.summary?.runtimeSnapshots || 0
+  lines.push(`授权影响：${scopeCount} 个范围；运行时影响：${runtimeCount} 个快照`)
+  lines.push('确认后将执行连接测试和授权重同步。')
+  return lines.join('\n')
+}
+
+const finishMarketplaceTransaction = async (response, item) => {
+  const transaction = response?.transaction
+  if (!transaction) throw new Error('服务端没有返回市场事务')
+  if (transaction.state === 'active') return response
+  if (!response.activation_token) throw new Error(transaction.error || `事务状态：${marketplaceTransactionStateLabel(transaction.state)}`)
+  const confirmed = await confirmDialog(marketplaceActivationPreview(transaction))
+  if (!confirmed) {
+    toast.warning(`"${transaction.name}" 已保存在隔离区，尚未启用`)
+    await loadMarketplaceTransactions()
+    return null
+  }
+  const activated = await toolsApi.marketplace.activateTransaction(transaction.id, response.activation_token)
+  if (!activated.success) throw new Error(activated.error || '激活失败')
+  const state = activated.transaction?.state
+  if (state !== 'active') {
+    await loadMarketplaceTransactions()
+    throw new Error(activated.transaction?.error || `激活未完成：${marketplaceTransactionStateLabel(state)}`)
+  }
+  if (item) {
+    item.marketplaceTransaction = activated.transaction
+    item.installation = activated.record || item.installation
+  }
+  return activated
+}
+
+const resumeMarketplaceTransaction = async (transaction) => {
+  try {
+    const refreshed = await toolsApi.marketplace.retryTransaction(transaction.id)
+    if (!refreshed.success) throw new Error(refreshed.error || '重新核验失败')
+    const activated = await finishMarketplaceTransaction(refreshed)
+    if (activated) {
+      toast.success(`"${transaction.name}" 已完成激活`)
+      await loadTools()
+    }
+  } catch (e) {
+    toast.error('恢复市场事务失败: ' + e.message)
+    await loadMarketplaceTransactions()
+  }
+}
+
+const rollbackMarketplaceTransaction = async (transaction) => {
+  const confirmed = await confirmDialog(`确定清理 "${transaction.name}" 的隔离物料并回滚这次操作？`)
+  if (!confirmed) return
+  try {
+    const result = await toolsApi.marketplace.rollbackTransaction(transaction.id)
+    if (!result.success) throw new Error(result.error || '回滚失败')
+    toast.success('隔离事务已回滚')
+    await loadMarketplaceTransactions()
+  } catch (e) {
+    toast.error('回滚失败: ' + e.message)
+  }
+}
+
 const resyncRuntimeTools = async (impact = null) => {
   runtimeResyncing.value = true
   try {
@@ -1106,11 +1212,12 @@ const saveCustomSourceAndInstall = async (item) => {
   try {
     const preflightImpact = isUpdate ? await fetchMarketplaceAuthorizationImpact(item, 'update') : null
     if (isUpdate && !(await confirmMarketplaceActionWithImpact(item, 'update', preflightImpact))) return
-    const saved = await toolsApi.marketplace.saveSource({ label: sourceLabel, url: sourceUrl })
+    const saved = await toolsApi.marketplace.saveSource({ label: sourceLabel, url: sourceUrl, token: customSourceToken.value.trim() })
     if (!saved.success) throw new Error(saved.error || '保存来源失败')
     selectedSource.value = saved.source.id
     customSourceUrl.value = ''
     customSourceLabel.value = ''
+    customSourceToken.value = ''
     loadedCustomSourceUrl.value = ''
     loadedCustomSourceLabel.value = ''
     await loadMarketplaceSources()
@@ -1119,15 +1226,17 @@ const saveCustomSourceAndInstall = async (item) => {
     if (!listed.success) throw new Error(listed.error || '重新读取来源失败')
     const canonical = (listed.items || []).find(candidate => sameMarketplaceItem(candidate, item))
     if (!canonical) throw new Error('保存后的来源中未找到该条目')
-    const res = isUpdate
+    const prepared = isUpdate
       ? await toolsApi.marketplace.update(marketplaceInstallPayload(canonical))
       : await toolsApi.marketplace.install(marketplaceInstallPayload(canonical))
-    if (!res.success) throw new Error(res.error || `${isUpdate ? '更新' : '安装'}失败`)
+    if (!prepared.success) throw new Error(prepared.error || `${isUpdate ? '更新' : '安装'}失败`)
+    const res = await finishMarketplaceTransaction(prepared, item)
+    if (!res) return
     const impact = res.authorizationImpact || preflightImpact
     const runtimeImpact = res.runtimeImpact || null
     const runtimeResync = res.runtimeResync || null
     rememberMarketplaceImpact(item, impact, runtimeImpact, runtimeResync)
-    toast.success(`"${item.name}" ${isUpdate || res.action === 'update' ? '更新' : '安装'}成功${marketplaceImpactToastSuffix(impact)}${marketplaceRuntimeToastSuffix(runtimeImpact)}${marketplaceRuntimeResyncToastSuffix(runtimeResync)}`, 6000)
+    toast.success(`"${item.name}" ${isUpdate || res.action === 'update' ? '更新' : '安装'}并启用成功${marketplaceImpactToastSuffix(impact)}${marketplaceRuntimeToastSuffix(runtimeImpact)}${marketplaceRuntimeResyncToastSuffix(runtimeResync)}`, 6000)
     await loadTools()
   } catch (e) {
     toast.error(`${isUpdate ? '更新' : '安装'}失败: ` + e.message)
@@ -1172,6 +1281,8 @@ const isInstalled = (item) => {
   }
 }
 
+const isManualMarketplaceCollision = (item) => item?.manualResourcePresent === true || item?.installationState === 'manual'
+
 const installMarketTool = async (item) => {
   if (item.sourceNeedsSave || customSourceNeedsSave.value) {
     await saveCustomSourceAndInstall(item)
@@ -1182,18 +1293,20 @@ const installMarketTool = async (item) => {
     const isUpdate = item.updateAvailable === true || marketplaceCanRefresh(item)
     const preflightImpact = isUpdate ? await fetchMarketplaceAuthorizationImpact(item, 'update') : null
     if (isUpdate && !(await confirmMarketplaceActionWithImpact(item, 'update', preflightImpact))) return
-    const res = isUpdate
+    const prepared = isUpdate
       ? await toolsApi.marketplace.update(marketplaceInstallPayload(item))
       : await toolsApi.marketplace.install(marketplaceInstallPayload(item))
-    if (res.success) {
+    if (prepared.success) {
+      const res = await finishMarketplaceTransaction(prepared, item)
+      if (!res) return
       const impact = res.authorizationImpact || preflightImpact
       const runtimeImpact = res.runtimeImpact || null
       const runtimeResync = res.runtimeResync || null
       rememberMarketplaceImpact(item, impact, runtimeImpact, runtimeResync)
-      toast.success(`"${item.name}" ${isUpdate || res.action === 'update' ? '更新' : '安装'}成功${marketplaceImpactToastSuffix(impact)}${marketplaceRuntimeToastSuffix(runtimeImpact)}${marketplaceRuntimeResyncToastSuffix(runtimeResync)}`, 6000)
+      toast.success(`"${item.name}" ${isUpdate || res.action === 'update' ? '更新' : '安装'}并启用成功${marketplaceImpactToastSuffix(impact)}${marketplaceRuntimeToastSuffix(runtimeImpact)}${marketplaceRuntimeResyncToastSuffix(runtimeResync)}`, 6000)
       await loadTools()
     } else {
-      toast.error(`${isUpdate ? '更新' : '安装'}失败: ` + (res.error || '未知错误'))
+      toast.error(`${isUpdate ? '更新' : '安装'}失败: ` + (prepared.error || '未知错误'))
     }
   } catch (e) {
     toast.error('请求失败: ' + e.message)
@@ -1229,8 +1342,15 @@ const uninstallMarketTool = async (item) => {
   if (!confirmed) return
   item.uninstalling = true
   try {
-    const res = await toolsApi.marketplace.uninstall({ name: item.name, type: item.type, autoResync: true })
-    if (!res.success) throw new Error(res.error || '卸载失败')
+    const prepared = await toolsApi.marketplace.uninstall({
+      name: item.name,
+      type: item.type,
+      installation_id: item.installation?.installationId || '',
+      autoResync: true
+    })
+    if (!prepared.success) throw new Error(prepared.error || '卸载失败')
+    const res = await finishMarketplaceTransaction(prepared, item)
+    if (!res) return
     const impact = res.authorizationImpact || preflightImpact
     const runtimeImpact = res.runtimeImpact || null
     const runtimeResync = res.runtimeResync || null

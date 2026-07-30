@@ -234,9 +234,9 @@ watch(() => props.active, active => {
 })
 
 onUnmounted(() => {
-  disposed = true
   clearTimeout(inputTimer)
   flushInput()
+  disposed = true
   eventSource?.close()
   resizeObserver?.disconnect()
   xterm?.dispose()

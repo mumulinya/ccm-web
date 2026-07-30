@@ -33,20 +33,25 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FETCH_WEB_BUNDLED_MCP = exports.FEISHU_INTERNAL_MCP = exports.GROUP_COORDINATOR_INTERNAL_MCP = void 0;
+exports.FILESYSTEM_BUNDLED_MCP = exports.FETCH_WEB_BUNDLED_MCP = exports.FEISHU_INTERNAL_MCP = exports.GROUP_COORDINATOR_INTERNAL_MCP = void 0;
 exports.findCcmPackageRoot = findCcmPackageRoot;
 exports.discoverBundledInternalMcpManifests = discoverBundledInternalMcpManifests;
 exports.isInternalMcpName = isInternalMcpName;
 exports.buildBundledFeishuMcpTool = buildBundledFeishuMcpTool;
 exports.isLegacyFetchWebMcpDefinition = isLegacyFetchWebMcpDefinition;
 exports.buildBundledFetchWebMcpTool = buildBundledFetchWebMcpTool;
+exports.resolveBundledFilesystemMcpEntry = resolveBundledFilesystemMcpEntry;
+exports.isLegacyOfficialFilesystemMcpDefinition = isLegacyOfficialFilesystemMcpDefinition;
+exports.buildBundledFilesystemMcpTool = buildBundledFilesystemMcpTool;
 exports.buildInternalMcpCatalog = buildInternalMcpCatalog;
 exports.runInternalMcpRegistrySelfTest = runInternalMcpRegistrySelfTest;
 const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 exports.GROUP_COORDINATOR_INTERNAL_MCP = "ccm__group_coordinator";
 exports.FEISHU_INTERNAL_MCP = "mcp-feishu";
 exports.FETCH_WEB_BUNDLED_MCP = "fetch-web-mcp";
+exports.FILESYSTEM_BUNDLED_MCP = "filesystem-mcp";
 function packageRootCandidates() {
     return Array.from(new Set([
         path.resolve(__dirname, "../.."),
@@ -179,6 +184,53 @@ function buildBundledFetchWebMcpTool(fallback = {}) {
         enabled: fallback?.enabled !== false && fs.existsSync(entryPath),
         version: "2.0.0",
         author: "CCM",
+        origin: "builtin",
+        bundled: true,
+    };
+}
+function resolveBundledFilesystemMcpEntry() {
+    try {
+        const packageJson = require.resolve("@modelcontextprotocol/server-filesystem/package.json");
+        const entryPath = path.join(path.dirname(packageJson), "dist", "index.js");
+        if (fs.existsSync(entryPath))
+            return entryPath;
+    }
+    catch { }
+    const candidates = [
+        path.join(findCcmPackageRoot(), "node_modules", "@modelcontextprotocol", "server-filesystem", "dist", "index.js"),
+        path.resolve(process.cwd(), "node_modules", "@modelcontextprotocol", "server-filesystem", "dist", "index.js"),
+    ];
+    return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
+}
+function isLegacyOfficialFilesystemMcpDefinition(value = {}) {
+    if (String(value?.name || "") !== exports.FILESYSTEM_BUNDLED_MCP)
+        return false;
+    const source = value?.marketplace?.source || {};
+    if (String(source?.id || "") !== "ccm-official" || String(source?.trust || "") !== "official")
+        return false;
+    const command = path.basename(String(value?.command || "")).toLowerCase();
+    const args = Array.isArray(value?.args) ? value.args.map((item) => String(item || "").trim().toLowerCase()) : [];
+    return ["npx", "npx.cmd"].includes(command)
+        && args.some((item) => /^@modelcontextprotocol\/server-filesystem(?:@|$)/.test(item));
+}
+function buildBundledFilesystemMcpTool(fallback = {}) {
+    const entryPath = resolveBundledFilesystemMcpEntry();
+    const oldArgs = Array.isArray(fallback?.args) ? fallback.args.map(String) : [];
+    const configuredRoot = oldArgs.find((item) => (item
+        && item !== "-y"
+        && item !== "--yes"
+        && !/^@modelcontextprotocol\/server-filesystem(?:@|$)/i.test(item)));
+    const root = configuredRoot || path.join(os.homedir(), ".cc-connect", "shared");
+    return {
+        ...fallback,
+        name: exports.FILESYSTEM_BUNDLED_MCP,
+        description: "Filesystem MCP server scoped to an explicit directory.",
+        command: process.execPath,
+        args: [entryPath, root],
+        env: {},
+        enabled: fallback?.enabled !== false && fs.existsSync(entryPath),
+        version: "2026.7.10",
+        author: "Model Context Protocol",
         origin: "builtin",
         bundled: true,
     };

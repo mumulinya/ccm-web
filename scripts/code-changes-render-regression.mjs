@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { startPlaywrightAppServer } from './playwright-app-server.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
+const appHost = process.env.CCM_BASE_URL ? null : await startPlaywrightAppServer(root, { port: 3082 })
+const baseUrl = String(process.env.CCM_BASE_URL || appHost.baseUrl).replace(/\/+$/, '')
 const outputDir = path.join(root, 'scratch', 'code-changes-render-regression')
 fs.rmSync(outputDir, { recursive: true, force: true })
 fs.mkdirSync(outputDir, { recursive: true })
@@ -32,6 +34,8 @@ const files = [
   })),
 ]
 const effectiveFileCount = files.filter(file => !file.indexResidual).length
+const workspaceSnapshotChecksum = 'a'.repeat(64)
+const changeContext = { attribution: 'exact', tasks: [{ taskId: 'task-code-workbench', title: '完善代码变更工作台', status: 'in_progress', agent: 'codex', traceId: 'trace-code-workbench', exactFiles: files.filter(file => !file.indexResidual).map(file => file.path), association: 'exact', verification: ['npm run build:frontend'] }], latestTestAgent: { status: 'passed', recommendation: 'accept', summary: '浏览器与接口检查通过', browserChecks: 4 } }
 const raw = `diff --git a/frontend/src/components/tools/CodeChanges.vue b/frontend/src/components/tools/CodeChanges.vue\nindex 123..456 100644\n--- a/frontend/src/components/tools/CodeChanges.vue\n+++ b/frontend/src/components/tools/CodeChanges.vue\n@@ -10,3 +10,4 @@\n const files = ref([])\n-const message = ref('提交')\n+const message = ref('检查并提交')\n+const preview = ref(null)\n const branch = ref('main')`
 const hunks = [{ header: '@@ -10,83 +10,84 @@', oldStart: 10, oldLines: 83, newStart: 10, newLines: 84, context: '', changes: [{ type: 'context', content: 'const files = ref([])' }, { type: 'remove', content: "const message = ref('提交')" }, { type: 'add', content: "const message = ref('检查并提交')" }, { type: 'add', content: 'const preview = ref(null)' }, ...Array.from({ length: 80 }, (_, index) => ({ type: 'context', content: `const retainedLine${index + 1} = '用于验证独立 Diff 滚动区域'` })), { type: 'context', content: "const branch = ref('main')" }] }]
 
@@ -43,6 +47,14 @@ const prepare = async page => {
     if (response.status() >= 400) report.errors.push(`http ${response.status()}: ${response.url()}`)
   })
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
+  await page.route('**/*', route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (!pathname.startsWith('/api/')) return route.continue()
+    const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
+    return route.fulfill(acceptsEvents
+      ? { status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' }
+      : json({ success: true, items: [], data: [] }))
+  })
   await page.route('**/api/auth/session', route => route.fulfill(json(adminSession)))
   await page.route('**/api/music/playback/commands/head', route => route.fulfill(json({ success: true, command: null })))
   await page.route('**/api/pets/agents', route => route.fulfill(json({ success: true, agents: [] })))
@@ -60,7 +72,8 @@ const prepare = async page => {
     { name: 'coordinator', display_name: '协作中台', agent: 'codex', running: true },
     { name: 'secondary', display_name: '业务后台', agent: 'cursor', running: false },
   ] })))
-  await page.route('**/api/git/status*', route => route.fulfill(json({ success: true, branch: 'feature/code-workbench', files, summary: { total: effectiveFileCount, additions: 178, deletions: 43, staged: 1, unstaged: effectiveFileCount, untracked: 1, indexResidual: 1, conflicts: 0, modules: ['frontend', 'backend', 'docs', 'modules'], riskLevel: 'medium', warnings: ['1 个索引残留已单独归类'] }, repository: { remoteUrl: 'https://github.com/example/ccm.git', remoteName: 'origin', branch: 'feature/code-workbench', upstream: 'origin/feature/code-workbench', pushTarget: 'origin/feature/code-workbench', ahead: 2, behind: 1, dirty: true, changedFiles: effectiveFileCount, indexResidualFiles: 1, canFetch: true, canPull: false, canPush: true, canCommitAndPush: true }, context: { attribution: 'exact', tasks: [{ taskId: 'task-code-workbench', title: '完善代码变更工作台', status: 'in_progress', agent: 'codex', traceId: 'trace-code-workbench', exactFiles: files.filter(file => !file.indexResidual).map(file => file.path), association: 'exact', verification: ['npm run build:frontend'] }], latestTestAgent: { status: 'passed', recommendation: 'accept', summary: '浏览器与接口检查通过', browserChecks: 4 } } })))
+  await page.route('**/api/git/status*', route => route.fulfill(json({ success: true, branch: 'feature/code-workbench', files, total: files.length, next_cursor: '', truncated: false, workspace_snapshot_checksum: workspaceSnapshotChecksum, summary: { total: effectiveFileCount, additions: 178, deletions: 43, staged: 1, unstaged: effectiveFileCount, untracked: 1, indexResidual: 1, conflicts: 0, modules: ['frontend', 'backend', 'docs', 'modules'], riskLevel: 'medium', warnings: ['1 个索引残留已单独归类'] }, repository: { remoteUrl: 'https://github.com/example/ccm.git', remoteName: 'origin', branch: 'feature/code-workbench', upstream: 'origin/feature/code-workbench', pushTarget: 'origin/feature/code-workbench', ahead: 2, behind: 1, dirty: true, changedFiles: effectiveFileCount, indexResidualFiles: 1, canFetch: true, canPull: false, canPush: true, canCommitAndPush: true } })))
+  await page.route('**/api/git/context*', route => route.fulfill(json({ success: true, workspace_snapshot_checksum: workspaceSnapshotChecksum, context: changeContext })))
   await page.route('**/api/git/remote-operation', async route => route.fulfill(json({ success: true, message: '远端引用已拉取', operation: 'fetch' })))
   await page.route('**/api/git/diff*', route => route.fulfill(json({ success: true, raw, hunks, additions: 2, deletions: 1 })))
   await page.route('**/api/git/commit-preview', route => route.fulfill(json({ success: true, preview: { files: [files[0], files[1]], outsideStaged: ['README.md'], conflicts: [], blocked: false, warnings: ['暂存区还有 1 个未选文件，本次不会提交'] } })))
@@ -166,7 +179,7 @@ try {
   report.checks.push({ name: 'desktop uses equal-height file and Diff panels with isolated vertical scrolling', pass: true })
   await capture(desktop, 'desktop-independent-dual-pane-scroll')
   assert.equal(await desktop.getByText('TestAgent 已通过', { exact: true }).isVisible(), true)
-  assert.equal(await desktop.getByText('文件记录精确匹配', { exact: false }).isVisible(), true)
+  assert.equal(await desktop.getByText('HEAD与文件内容证据一致', { exact: false }).isVisible(), true)
   assert.equal(await desktop.locator('.grouping-switch').getByRole('button', { name: '目录' }).getAttribute('class').then(value => value.includes('active')), true)
   assert.equal(await desktop.getByRole('button', { name: '收起 backend', exact: true }).isVisible(), true)
   const backendDirectoryCheckbox = desktop.getByRole('checkbox', { name: '选择目录 backend', exact: true })
@@ -251,4 +264,5 @@ try {
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report, null, 2))
   await browser.close()
+  if (appHost) await appHost.server.close()
 }

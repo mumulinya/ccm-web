@@ -270,14 +270,14 @@ export declare function buildContractInjectionEvent(input: {
 export declare function replayAgentTrace(traceId: string): {
     success: boolean;
     trace_id: string;
-    event_count: any;
-    lifecycle_count: any;
-    tool_or_dispatch_count: any;
-    blocked_count: any;
-    contract_injection_count: any;
-    ack_signal_count: any;
+    event_count: number;
+    lifecycle_count: number;
+    tool_or_dispatch_count: number;
+    blocked_count: number;
+    contract_injection_count: number;
+    ack_signal_count: number;
     verdict: string;
-    latest_events: any;
+    latest_events: any[];
 };
 export declare function buildTraceReplaySuite(limit?: number): {
     pass: boolean;
@@ -286,14 +286,14 @@ export declare function buildTraceReplaySuite(limit?: number): {
     replays: {
         success: boolean;
         trace_id: string;
-        event_count: any;
-        lifecycle_count: any;
-        tool_or_dispatch_count: any;
-        blocked_count: any;
-        contract_injection_count: any;
-        ack_signal_count: any;
+        event_count: number;
+        lifecycle_count: number;
+        tool_or_dispatch_count: number;
+        blocked_count: number;
+        contract_injection_count: number;
+        ack_signal_count: number;
         verdict: string;
-        latest_events: any;
+        latest_events: any[];
     }[];
 };
 export declare function runAgentRuntimeKernelSelfTest(): {
@@ -320,14 +320,14 @@ export declare function runAgentRuntimeKernelSelfTest(): {
         replays: {
             success: boolean;
             trace_id: string;
-            event_count: any;
-            lifecycle_count: any;
-            tool_or_dispatch_count: any;
-            blocked_count: any;
-            contract_injection_count: any;
-            ack_signal_count: any;
+            event_count: number;
+            lifecycle_count: number;
+            tool_or_dispatch_count: number;
+            blocked_count: number;
+            contract_injection_count: number;
+            ack_signal_count: number;
             verdict: string;
-            latest_events: any;
+            latest_events: any[];
         }[];
     };
 };

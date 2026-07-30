@@ -103,6 +103,53 @@ export declare function createFeishuPermissionActions(request: any): ({
     type: "danger";
     value: any;
 })[];
+export interface FeishuReportDeliveryV2 {
+    schema: "ccm-feishu-report-delivery-v2";
+    version: 2;
+    id: string;
+    dedupe_key: string;
+    kind: "daily" | "weekly";
+    report_id: string;
+    report_checksum: string;
+    webhook_fingerprint: string;
+    title: string;
+    markdown: string;
+    status: "pending" | "sending" | "sent" | "failed" | "delivery_unknown";
+    attempts: number;
+    created_at: string;
+    last_attempt_at: string;
+    next_attempt_at: string;
+    sent_at: string;
+    error: string;
+    retryable: boolean;
+    manual_retry_required: boolean;
+}
+export declare function enqueueFeishuReportDelivery(input: {
+    kind: "daily" | "weekly";
+    reportId: string;
+    reportChecksum: string;
+    title: string;
+    markdown: string;
+}): Promise<{
+    success: boolean;
+    queued: boolean;
+    duplicate: boolean;
+    status: string;
+    delivery?: undefined;
+} | {
+    success: boolean;
+    queued: boolean;
+    duplicate: boolean;
+    status: string;
+    delivery: any;
+} | {
+    success: boolean;
+    queued: boolean;
+    status: string;
+    delivery: any;
+    duplicate?: undefined;
+}>;
+export declare function getFeishuReportDelivery(deliveryId: string): any;
 export declare function notifyFeishuTaskStage(input: {
     stage: string;
     title: string;
@@ -143,6 +190,7 @@ export declare function tickFeishuNotificationOutbox(now?: Date): Promise<{
     due: any;
     sent: number;
     failed: number;
+    report_due: any;
 }>;
 export declare function recordFeishuReportDelivery(input: {
     kind: "daily" | "weekly";
@@ -215,6 +263,8 @@ export declare function getFeishuChannelHealth(expectedPort?: number): {
     };
     report_deliveries: {
         sent: any;
+        pending: any;
+        unknown: any;
         failed: any;
         last: any;
     };

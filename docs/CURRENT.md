@@ -1,5 +1,21 @@
 # CCM 当前状态
 
+- npm安装、CLI与服务生命周期已升级为V2：服务实例由锁文件、进程启动指纹、入口checksum和HMAC身份接口共同证明；并发启动只有一个所有者，端口占用和归属不明均失败关闭。停止先进入`draining`，关闭HTTP接入并完成项目运行、终端、SQLite和生命周期回执后才释放锁。更新先固定精确npm产物并在隔离数据目录完成doctor与启动停止验证，新版本失败自动回滚，双重失败进入`recovery_required`。核心包当前受20MB/35MB/700文件预算保护，默认月薪喵离线可用，其他官方宠物由同版本资源包按需下载。本轮只生成发布候选，不发布npm。完整流程见[npm安装、CLI与服务生命周期](./confirmed-business-processes/NPM-CLI-SERVICE-LIFECYCLE.md)。
+
+- 桌面宠物与用户通知已升级为V2：任务终态、权限和Agent正式事件先写入SQLite持久通知，再由网页通知中心、Electron桌宠、网页宠物或精确飞书渠道投递。桌宠只显示最多240字的脱敏摘要，窗口实际展示后才确认送达；Electron离线时网页宠物自动接管。配置使用revision/PATCH，支持图形桌面自动启动；PNG/SVG资源经过签名、尺寸、脚本、外部引用和路径边界校验。已读普通通知默认180天后由清理中心事务化清理，未解决权限和阻塞通知持续保留。完整流程见[桌面宠物与用户通知](./confirmed-business-processes/DESKTOP-PET-AND-USER-NOTIFICATIONS.md)。
+
+- MCP/Skill工具市场已升级为V2受控供应链：社区与自定义工具先进入隔离区，Admin查看完整命令、网络、文件和授权影响后使用绑定会话的一次性回执激活；Skill使用完整树哈希和不可变隔离物料，stdio MCP使用`shell:false`，远程MCP由主Agent ToolManager统一支持Streamable HTTP与SSE。私有来源、Smithery与远程MCP凭据进入AES仓库，市场卸载不能删除手工工具；旧外部记录缺少证明时转为`quarantined_legacy`。完整流程见[MCP/Skill工具市场完整业务流程](./confirmed-business-processes/MCP-SKILL-MARKETPLACE-SUPPLY-CHAIN.md)。
+
+- 斜杠命令与共享文件已升级为V2：全局、群聊和项目文件使用带checksum、revision及完整Token分片的精确作用域清单，上传走流式安全门禁，路径逃逸和符号链接读取被拒绝；全局、群聊、项目主Agent及对应项目子Agent消费正确作用域并记录隐藏回执。Skill命令只从当前作用域授权生成，本地修改与高风险命令使用服务端挑战和单次确认回执。对话模板运行代码已经移除，历史数据保留但不读取，旧接口返回410。完整流程见[斜杠命令与共享文件完整业务流程V2](./confirmed-business-processes/SLASH-COMMANDS-AND-SHARED-FILES-V2.md)。
+
+- 性能监控、Trace、可靠性与清理中心已升级为V2/V3：幂等、租约和Trace进入SQLite事务账本并使用fencing token支持多进程；Trace统一脱敏和限长。性能事件按全局、群聊、项目作用域服务端分页，项目内区分项目主Agent、开发Agent和TestAgent。可靠性演练改为异步受管子进程，清理中心使用持久预览、逐项幂等事务、崩溃续跑和后台存储索引；任务回放按来源checksum物化并拒绝跨任务旧响应。完整流程见[性能监控、Trace、可靠性与清理中心完整链路V2](./confirmed-business-processes/PERFORMANCE-TRACE-RELIABILITY-CLEANUP-V2.md)。
+
+- 内置终端与项目运行控制台已完成生产化收口：终端命令、端口清单和进程查询改为异步执行，超时、取消、断开及服务关闭统一终止完整进程树并返回可核验回执；项目源码运行使用精确配置Singleflight与跨进程租约，停止先进入`stopping`且无法证明时保持`unknown`。日志采用脱敏异步写队列、SSE背压和尾部快照恢复，前端通过AbortController与generation拒绝跨项目旧响应。完整流程见[内置终端与项目运行控制台完整链路](./confirmed-business-processes/BUILT-IN-TERMINAL-AND-PROJECT-RUNTIME.md)。
+
+- 项目Git与代码协作已升级为V2：工作区使用真实仓库身份和内容级不可变快照，文件读取逐段拒绝符号链接/Junction逃逸；状态最多500项分页，项目和Diff请求使用AbortController与generation隔离。同一Git common directory的写操作跨进程串行，提交必须给出精确文件清单，全量提交需要管理员显式确认；预检后HEAD、索引、状态或文件内容变化均以`state_drift`拒绝。TestAgent验收由HEAD与文件checksum证明，路径重合只显示历史证据。GitHub克隆使用同级临时目录、原子切换、进程取消和恢复回执。完整流程见[项目Git与代码协作完整链路V2](./confirmed-business-processes/PROJECT-GIT-CODE-COLLABORATION-V2.md)。
+
+- 定时任务与工作报告已升级为V3：日报和周报从不可变工作事件生成指定时区证据快照，再由统一模型运行时输出带事件引用的结构化总结；虚构引用、错误状态、分片缺失或模型失败均不会发送模板报告。概览读取不再隐式调用模型，证据变化会标记旧总结过期。飞书报告使用独立持久发件箱、checksum去重、20秒超时和最多5次明确失败重试，不确定结果进入人工处理且不自动重发。完整流程见[定时任务与AI日报周报完整链路](./confirmed-business-processes/SCHEDULED-TASKS-AI-WORK-REPORTS.md)。
+
 - 全局Agent运行体系已升级为V2：Web、兼容聊天接口和飞书统一进入服务端权威精确会话队列；普通写操作使用绑定用户、来源、会话、消息、目标和工具范围的单轮授权回执，高风险始终等待用户确认。超大上下文按完整轮次执行正式模型分段压缩，任一失败不推进边界；Mission终态先持久化，再由发件箱向Web、飞书、回放和长期记忆分别投递并支持跨重启重试。完整流程见[全局Agent运行体系V2](./confirmed-business-processes/GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md)。
 
 本文只记录当前可依赖的产品结构。详细协议和业务边界以 [确认项目结构](./confirmed-project-architecture/README.md) 为准，历史实现过程从 [归档索引](./archive/README.md) 查找。
@@ -24,7 +40,7 @@
 
 - 自动开发统一任务系统V2已收口：所有新任务绑定精确来源、目标、会话和客户端消息身份；项目主Agent、群聊任务及旧拆分入口进入同一持久任务链。精确会话严格串行，不同会话修改同一源码目录时继续经过共享工作区互斥；高优先级只调整等待顺序，不打断当前任务。自动开发任务不能再通过通用状态接口直接完成，自由文本不能推断终态，最终状态必须通过结构化验收门禁。完整流程见 [自动开发统一任务系统V2](./confirmed-business-processes/AUTOMATIC-DEVELOPMENT-UNIFIED-TASK-SYSTEM-V2.md)。
 
-- 全局、群聊、项目主Agent与项目子Agent的MCP/Skill链路已生产化收口：项目主Agent可在计划、修订和分析中使用项目Skill与只读MCP；子Agent使用签名V2快照分离用户配置和任务角色Skill，六种第三方运行时按原生或代理方式注册；内置`fetch-web-mcp`已改为包内Node实现。完整口径见[Agent MCP与Skill注册继承流程](./confirmed-business-processes/AGENT-MCP-SKILL-INHERITANCE.md)。
+- 全局、群聊、项目主Agent与项目子Agent的MCP/Skill链路已生产化收口：项目主Agent可在计划、修订和分析中使用项目Skill与只读MCP；子Agent使用签名V2快照分离用户配置和任务角色Skill，六种第三方运行时按原生或代理方式注册；内置`fetch-web-mcp`使用包内Node实现，官方`filesystem-mcp`随核心依赖安装并直接启动，不再在首次运行时通过`npx`下载。完整口径见[Agent MCP与Skill注册继承流程](./confirmed-business-processes/AGENT-MCP-SKILL-INHERITANCE.md)。
 
 - 全局、群聊和项目任务计划书已完成生产化收口：摘要卡保持精简，一级详情从任务回放惰性读取完整模型计划、源码依据、影响范围、全部步骤、验收标准和修订历史；长计划不截断并独立滚动。
 - 项目任务使用稳定 `project-main-task:<task_id>` 服务端权威消息，刷新、SSE断线和切换页面后恢复同一任务卡，Web/飞书不会产生重复任务气泡。
@@ -164,6 +180,9 @@
 
 ## 代码协作
 
+- Git状态、Diff、提交、拉取、推送、Patch和回滚共用V2仓库身份、工作区快照与写入租约；提交并推送保留真实部分成功，任务回放可读取实际提交文件与Blob ID。
+- 项目创建页对GitHub克隆展示真实阶段并允许安全停止；超时或失败只清理由本次CCM回执拥有的临时目录。
+
 - 桌面端文件树与 Diff 是等高独立面板，外层页面固定；滚动任意一侧不会改变另一侧的位置。
 - 文件筛选和 Diff 工具栏固定在各自面板顶部，长文件目录和长代码只在对应面板内滚动。
 - 移动端使用上下等高面板，并保留工作台纵向导航能力。
@@ -235,3 +254,34 @@
 - 正式压缩前自动创建精确会话恢复点，支持无写入演练和管理员确认恢复。
 - 第二模型摘要抽检默认关闭；开启后按精确摘要稳定抽样、单次调用、失败关闭。
 - 实施审计：[ccm-context-engine-v21-quality-observability-recovery-2026-07-28](group-memory-cc-parity/ccm-context-engine-v21-quality-observability-recovery-2026-07-28/README.md)。
+# 2026-07-30 会话搜索与任务回放V3
+
+- 会话搜索已升级为SQLite不可变generation，覆盖全局、群聊、项目、音乐和飞书来源，支持last-good、短词索引、服务端收藏与精确消息窗口跳转。
+- 任务回放已增加来源manifest、结构化终态、无文本状态猜测、全量历史关联和轻量事件刷新；`blocked`按终态处理。
+- 详情首次完整加载，实时轮询仅取分页事件，避免反复传输计划、证据和Diff。
+
+# 2026-07-30 工作台与菜单管理V3
+
+- 我的工作台首屏改为服务端只读V3快照，任务、项目、群聊和定时任务支持游标分页；请求按用户缓存并使用AbortController与generation隔离旧响应。
+- 任务恢复、重试、补充、暂停、取消和归档统一通过阻塞感知动作接口，绑定任务revision、用户和幂等回执。
+- 项目卡明确拆分Agent连接与源码运行配置；断开Agent只影响当前项目，并停止该项目的源码运行和构建进程。
+- 菜单改为Admin工作区默认与用户个人覆盖，支持revision CAS、多标签广播、旧V2配置惰性导入和受控Lucide/Unicode图标。
+- 导航布局不会扩大RBAC权限；Viewer只读，Operator执行普通任务和项目运行，Admin维护工作区默认与定时任务。
+
+# 2026-07-30 音乐曲库与媒体平台V4
+
+- 播放命令、曲库状态、下载任务、媒体资产和曲库generation进入SQLite，旧JSON保持惰性兼容。
+- 曲库列表改为异步索引与游标分页，上传改为流式隔离校验；媒体访问拒绝符号链接、Junction和目录逃逸。
+- 同源歌曲只保留一个正式资产，高音质请求在真实解码和码率验证后原位升级，失败保留旧文件。
+- 网易、B站、歌词、字幕、评论和封面统一使用有超时、大小限制、Host门禁和请求级代理的平台客户端。
+- AI点歌默认并行检索本地、网易和B站，用户明确指定平台时才锁源；回复、下载、队列和播放共享同一决定checksum。
+- 完整流程见 [音乐曲库、媒体平台与统一播放器V4](confirmed-business-processes/MUSIC-LIBRARY-MEDIA-PLATFORM-V4.md)。
+
+# 2026-07-30 全项目业务覆盖矩阵V1
+
+- `scripts/project-coverage-manifest.json` 成为页面、API、CLI、生产入口、测试和确认文档覆盖关系的唯一事实来源。
+- 确认架构中的覆盖矩阵改为确定性生成；页面、API、CLI和确认文档必须有唯一主业务域。
+- 测试目录已覆盖selftest、audit、regression、E2E、soak、acceptance和production脚本，Runner与子进程夹具使用带原因的helper清单。
+- 已删除不可达的旧 `Dashboard.vue`，工作台统一指向生产使用的 `UsabilityWorkbench.vue`。
+- `coverage:check` 已接入文档、完整测试和发布候选门禁；当前入口与确认文档覆盖率为100%。
+- 完整流程见 [全项目业务覆盖矩阵完整治理流程](confirmed-business-processes/PROJECT-BUSINESS-COVERAGE-GOVERNANCE.md)。

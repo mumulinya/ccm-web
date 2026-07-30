@@ -33,6 +33,7 @@ const privateDecision = {
 const publicDecision = decisionModule.publicMusicPlaybackDecision(privateDecision)
 
 const stateSource = source('backend/modules/music/state.ts')
+const persistenceSource = source('backend/modules/music/music-persistence.ts')
 const apiSource = source('backend/modules/music/music.ts')
 const agentSource = source('backend/modules/music/agent.ts')
 const playerSource = source('frontend/src/components/music/useMusicPlayer.js')
@@ -45,7 +46,7 @@ const checks = {
   latestSupersedesClaimed: queue.checks?.latestSupersedesClaimed === true,
   heartbeatAndTerminalPersist: queue.checks?.heartbeatRenewsLease === true && queue.checks?.terminalReceiptPersisted === true,
   publicDecisionHidesDownloadToken: !publicDecision.selectedCandidate?.downloadToken && publicDecision.candidates.every(item => !item?.downloadToken),
-  shortClaimLease: stateSource.includes('const CLAIM_LEASE_MS = 15_000'),
+  shortClaimLease: persistenceSource.includes('Number(input.leaseMs || 15_000)'),
   commandStatesComplete: ['resolving', 'ready', 'claimed', 'playing', 'needs_user_gesture', 'completed', 'superseded', 'cancelled'].every(status => stateSource.includes(`"${status}"`)),
   v2ApiSurfaceComplete: [
     '/api/music/intent/resolve',
@@ -57,10 +58,10 @@ const checks = {
   noFrontendSemanticFallback: !playerSource.includes('frontend-fallback') && !playerSource.includes('sendToSimpleAgent'),
   peekBeforeClaim: remoteSource.indexOf("fetch('/api/music/playback/commands/head')") < remoteSource.indexOf('claimMusicRemoteCommandV2(pending)'),
   leaseHeartbeatCancelsSupersededDownload: remoteSource.includes('__cc_global_cancel_music_command') && playerSource.includes("source: 'server-superseded'"),
-  terminalStateCannotBeOverwritten: stateSource.includes('播放指令已经进入不可修改的终态'),
+  terminalStateCannotBeOverwritten: persistenceSource.includes('播放指令已经进入不可修改的终态'),
   userGestureCompletesReceipt: remoteSource.includes('__cc_complete_music_gesture') && playbackSource.includes('__cc_complete_music_gesture'),
   oneAuthoritativeMusicReply: !playerSource.includes('已自动播放'),
-  sourceAuthorizationLocked: agentSource.includes('sourceMode: normalizeMusicSourceMode(mode)'),
+  sourceAuthorizationLocked: agentSource.includes('只有用户在当前消息中明确指定') && agentSource.includes('sourceMode: normalizeMusicSourceMode(value?.sourceMode || mode)'),
 }
 
 const pass = Object.values(checks).every(Boolean)

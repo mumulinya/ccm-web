@@ -10,6 +10,8 @@ const CURRENT_FILE = path.join(ROOT, "current.json");
 const EVENTS_FILE = path.join(ROOT, "events.jsonl");
 const INTENT_FILE = path.join(ROOT, "restart-intent.json");
 const BOOT_ID = `${os.hostname()}:${process.pid}:${crypto.randomBytes(4).toString("hex")}`;
+const MAX_EVENT_FILE_BYTES = 10 * 1024 * 1024;
+const EVENT_FILE_RETENTION = 5;
 let initialized = false;
 let shutdownRecorded = false;
 
@@ -30,6 +32,19 @@ function writeJsonAtomic(file: string, value: any) {
 
 function appendEvent(event: any) {
   ensureRoot();
+  try {
+    if (fs.existsSync(EVENTS_FILE) && fs.statSync(EVENTS_FILE).size >= MAX_EVENT_FILE_BYTES) {
+      for (let index = EVENT_FILE_RETENTION - 1; index >= 1; index -= 1) {
+        const source = `${EVENTS_FILE}.${index}`;
+        const target = `${EVENTS_FILE}.${index + 1}`;
+        if (!fs.existsSync(source)) continue;
+        try { fs.unlinkSync(target); } catch {}
+        fs.renameSync(source, target);
+      }
+      try { fs.unlinkSync(`${EVENTS_FILE}.1`); } catch {}
+      fs.renameSync(EVENTS_FILE, `${EVENTS_FILE}.1`);
+    }
+  } catch {}
   const next = {
     id: event.id || `ple_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
     at: event.at || new Date().toISOString(),
@@ -83,8 +98,10 @@ function normalizeCategory(value: any) {
 }
 
 function readEvents(limit = 5000) {
-  if (!fs.existsSync(EVENTS_FILE)) return [];
-  const lines = fs.readFileSync(EVENTS_FILE, "utf-8").split(/\r?\n/).filter(Boolean).slice(-Math.max(1, limit));
+  const files = Array.from({ length: EVENT_FILE_RETENTION }, (_, index) => index === 0 ? EVENTS_FILE : `${EVENTS_FILE}.${EVENT_FILE_RETENTION - index}`)
+    .filter(file => fs.existsSync(file));
+  if (!files.length) return [];
+  const lines = files.flatMap(file => fs.readFileSync(file, "utf-8").split(/\r?\n/).filter(Boolean)).slice(-Math.max(1, limit));
   return lines.map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
 }
 
@@ -216,9 +233,16 @@ export function recordProcessFault(error: any, type = "uncaught_exception") {
   }
 }
 
-export function installProcessLifecycleFaultHandlers() {
+export function installProcessLifecycleFaultHandlers(onFatal?: (reason: any, type: string) => void) {
   process.on("uncaughtExceptionMonitor", error => recordProcessFault(error, "uncaught_exception"));
-  process.on("unhandledRejection", reason => recordProcessFault(reason, "unhandled_rejection"));
+  process.on("unhandledRejection", reason => {
+    recordProcessFault(reason, "unhandled_rejection");
+    if (onFatal) onFatal(reason, "unhandled_rejection");
+    else {
+      process.exitCode = 1;
+      setImmediate(() => process.exit(1));
+    }
+  });
 }
 
 export function getProcessLifecycleSnapshot(options: any = {}) {

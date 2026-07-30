@@ -28,7 +28,6 @@ import GroupMembersModal from './GroupMembersModal.vue'
 import GroupCreateModal from './GroupCreateModal.vue'
 import GroupRenameModal from './GroupRenameModal.vue'
 import UnifiedDiffModal from '../common/UnifiedDiffModal.vue'
-import TemplateVariablesModal from '../common/TemplateVariablesModal.vue'
 import AgentPipelineModal from '../agents/AgentPipelineModal.vue'
 import { useGroupChat } from './useGroupChat.js'
 import { useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
@@ -48,10 +47,7 @@ const {
   isGroupMessagesPinnedToBottom, updateGroupMessageScrollState, scrollToBottom,
   attachGroupMessagesResizeObserver, detachGroupMessagesResizeObserver, navMessages, scrollToMessage,
   newMessage, slashNavigate, runGroupClientCommand, pendingDirectMemoryCommand, slash, focusGroupInput,
-  showTemplateSelector, allTemplates, templateSearchQuery, activeTemplateIndex, recommendedTemplate,
-  activeTemplate, templateVariables, showVariableModal, openTemplateSelector, selectChatTemplate,
-  applyTemplateVariables, detectRecommendation, applyRecommendation, handleTemplateKeydown,
-  hideTemplateAssist, messageFiles, messageMode, pendingGroupTaskInput,
+  messageFiles, messageMode, pendingGroupTaskInput,
   pendingGroupClarificationInput, isTaskSupplementMode, isClarificationResponseMode,
   isDirectedGroupInputMode, groupComposerPlaceholder, groupComposerSendLabel, cancelTaskSupplementInput,
   beginTaskSupplementInput, getGroupClarificationContext, getGroupClarificationSummary,
@@ -93,7 +89,7 @@ const {
   saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,
   loadGroupTestTargets, saveGroupTestTarget, deleteGroupTestTarget, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
   getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
-  startGroupPolling, stopGroupPolling, origSelectGroup, activeSelectedTemplate, pendingTemplateToApply,
+  startGroupPolling, stopGroupPolling, origSelectGroup,
 } = useGroupChat(props, emit)
 
 const groupSessionSidebarOpen = ref(typeof window === 'undefined' || window.innerWidth > 768)

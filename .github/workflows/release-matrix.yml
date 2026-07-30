@@ -7,12 +7,56 @@ on:
       - "backend/**"
       - "frontend/**"
       - "ccm-package/**"
+      - "pet-assets-package/**"
       - "scripts/**"
+      - "docs/**"
       - "package*.json"
       - ".github/workflows/release-matrix.yml"
 
 jobs:
-  install-and-runtime:
+  coverage-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run coverage:check
+      - run: npm run docs:check
+      - run: node scripts/domain-test-catalog-selftest.mjs
+      - run: node scripts/project-coverage-matrix-selftest.mjs
+
+  build-candidate:
+    needs: coverage-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix frontend ci
+      - run: npm run release:artifact
+      - run: node scripts/cli-service-lifecycle-v2-selftest.mjs
+      - run: node scripts/package-update-transaction-selftest.mjs
+      - run: node scripts/pet-asset-delivery-selftest.mjs
+      - run: node scripts/node-pty-cross-platform-release-selftest.mjs
+      - run: node scripts/node-pty-degraded-runtime-selftest.mjs
+      - run: node scripts/cli-release-selftest.mjs
+      - run: node scripts/release-acceptance-framework-selftest.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ccm-release-candidate
+          path: release-artifacts/**
+          if-no-files-found: error
+
+  test-candidate:
+    needs: build-candidate
     strategy:
       fail-fast: false
       matrix:
@@ -25,13 +69,51 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - run: npm --prefix frontend ci
-      - run: npm run check
-      - run: npm run build
-      - run: node scripts/node-pty-cross-platform-release-selftest.mjs
-      - run: node scripts/node-pty-degraded-runtime-selftest.mjs
-      - run: node scripts/cli-release-selftest.mjs
-      - run: node scripts/npm-package-install-release-selftest.mjs
-      - run: node scripts/release-acceptance-framework-selftest.mjs
+      - uses: actions/download-artifact@v4
+        with:
+          name: ccm-release-candidate
+          path: release-artifacts
+      - name: Install and run the exact attested tarball
+        shell: pwsh
+        run: |
+          $manifestPath = Get-ChildItem release-artifacts -Recurse -Filter release-artifact-manifest.json | Select-Object -First 1
+          if (-not $manifestPath) { throw "Release artifact manifest not found" }
+          $data = Get-Content $manifestPath.FullName -Raw | ConvertFrom-Json
+          $tarball = Join-Path $manifestPath.DirectoryName $data.tarball
+          $evidence = Join-Path $PWD "release-evidence/evidence-${{ matrix.os }}-node${{ matrix.node }}.json"
+          $env:CCM_RELEASE_EVIDENCE_FILE = $evidence
+          node scripts/npm-package-install-release-selftest.mjs $tarball
+      - uses: actions/upload-artifact@v4
+        with:
+          name: matrix-evidence-${{ matrix.os }}-node${{ matrix.node }}
+          path: release-evidence/*.json
+          if-no-files-found: error
+
+  attest-candidate:
+    needs: test-candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: ccm-release-candidate
+          path: release-artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: matrix-evidence-*
+          path: release-evidence
+          merge-multiple: true
+      - name: Attach the complete platform evidence
+        shell: pwsh
+        run: |
+          $manifestPath = Get-ChildItem release-artifacts -Recurse -Filter release-artifact-manifest.json | Select-Object -First 1
+          if (-not $manifestPath) { throw "Release artifact manifest not found" }
+          node scripts/attest-release-matrix.mjs $manifestPath.FullName release-evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ccm-release-tested
+          path: release-artifacts/**
+          if-no-files-found: error

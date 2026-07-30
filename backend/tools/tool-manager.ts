@@ -1,4 +1,5 @@
 import { McpClient } from "./mcp-client";
+import { McpRemoteClient } from "./mcp-remote-client";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -275,7 +276,7 @@ function contentHash(value: any) {
 }
 
 export class ToolManager {
-  private clients = new Map<string, McpClient>(); // serverName -> client
+  private clients = new Map<string, McpClient | McpRemoteClient>(); // serverName -> client
   private serverConfigs = new Map<string, any>();
   private serverStatuses = new Map<string, McpServerStatus>();
   private tools: ToolDef[] = [];
@@ -285,7 +286,7 @@ export class ToolManager {
   // 加载所有启用的 MCP 服务器和 Skills
   async loadTools() {
     for (const client of this.clients.values()) {
-      try { client.disconnect(); } catch {}
+      try { await client.disconnect(); } catch {}
     }
     this.clients.clear();
     this.serverConfigs.clear();
@@ -294,7 +295,7 @@ export class ToolManager {
     // 加载 MCP 工具配置
     const mcpConfigs = this.loadMcpConfigs();
     for (const config of mcpConfigs) {
-      if (!config.enabled || !config.command) continue;
+      if (!config.enabled || (!config.command && !config.url)) continue;
       this.serverConfigs.set(config.name, config);
       const auth = deriveMcpAuthStatus(config);
       this.serverStatuses.set(config.name, {
@@ -319,7 +320,21 @@ export class ToolManager {
       }
       if (this.clients.has(config.name)) continue;
 
-      const client = new McpClient(config.command, this.parseArgs(config.args), this.parseEnv(config.env));
+      let client: McpClient | McpRemoteClient;
+      try {
+        client = this.createClient(config);
+      } catch (error: any) {
+        this.serverStatuses.set(config.name, {
+          name: config.name,
+          state: "failed",
+          toolsCount: 0,
+          error: String(error?.message || error).slice(0, 500),
+          lastErrorAt: new Date().toISOString(),
+          retryCount: 0,
+          auth,
+        });
+        continue;
+      }
       const connected = await client.connect();
       if (connected) {
         this.clients.set(config.name, client);
@@ -361,6 +376,27 @@ export class ToolManager {
     // 加载 Skills
     this.skills = this.loadSkillConfigs().filter(s => s.enabled);
     this.initialized = true;
+  }
+
+  private createClient(config: any): McpClient | McpRemoteClient {
+    if (config?.url) {
+      return new McpRemoteClient(
+        String(config.url),
+        config.headers && typeof config.headers === "object" ? config.headers : {},
+        config.transport === "sse" ? "sse" : "streamable_http",
+      );
+    }
+    const command = String(config.executablePath || config.command || "");
+    if (config.executablePath) {
+      try {
+        if (fs.realpathSync(command) !== command && fs.realpathSync(command).toLowerCase() !== command.toLowerCase()) {
+          throw new Error("approved executable path drift");
+        }
+      } catch {
+        throw new Error(`MCP approved executable is unavailable: ${command}`);
+      }
+    }
+    return new McpClient(command, this.parseArgs(config.args), this.parseEnv(config.env));
   }
 
   // 生成工具 prompt 注入文本
@@ -626,7 +662,7 @@ export class ToolManager {
 
   private async reconnectServer(serverName: string) {
     const config = this.serverConfigs.get(serverName) || this.loadMcpConfigs().find(item => item?.name === serverName);
-    if (!config?.enabled || !config?.command) {
+    if (!config?.enabled || (!config?.command && !config?.url)) {
       const auth = deriveMcpAuthStatus(config || {});
       this.serverStatuses.set(serverName, {
         name: serverName,
@@ -653,9 +689,23 @@ export class ToolManager {
       return false;
     }
     const previous = this.clients.get(serverName);
-    try { previous?.disconnect(); } catch {}
+    try { await previous?.disconnect(); } catch {}
     const retryCount = Number(this.serverStatuses.get(serverName)?.retryCount || 0) + 1;
-    const client = new McpClient(config.command, this.parseArgs(config.args), this.parseEnv(config.env));
+    let client: McpClient | McpRemoteClient;
+    try {
+      client = this.createClient(config);
+    } catch (error: any) {
+      this.serverStatuses.set(serverName, {
+        name: serverName,
+        state: "failed",
+        toolsCount: 0,
+        error: String(error?.message || error).slice(0, 500),
+        lastErrorAt: new Date().toISOString(),
+        retryCount,
+        auth,
+      });
+      return false;
+    }
     const connected = await client.connect();
     if (!connected) {
       const diagnostics = client.getDiagnostics();
@@ -791,6 +841,9 @@ export class ToolManager {
           lastConnectedAt: status?.lastConnectedAt || "",
           lastErrorAt: status?.lastErrorAt || "",
           retryCount: status?.retryCount || 0,
+          transport: (client?.getDiagnostics?.() as any)?.transport
+            || this.serverConfigs.get(name)?.transport
+            || (this.serverConfigs.get(name)?.url ? "streamable_http" : "stdio"),
           instructions: client?.isConnected() ? String(client.getServerInstructions?.() || "") : "",
           auth: status?.auth || deriveMcpAuthStatus(this.serverConfigs.get(name) || {}),
         };
@@ -820,7 +873,10 @@ export class ToolManager {
   // 关闭所有连接
   disconnect() {
     for (const [, client] of this.clients) {
-      client.disconnect();
+      try {
+        const result = client.disconnect();
+        if (result && typeof (result as any).catch === "function") (result as Promise<any>).catch(() => {});
+      } catch {}
     }
     this.clients.clear();
     for (const [name, status] of this.serverStatuses.entries()) {

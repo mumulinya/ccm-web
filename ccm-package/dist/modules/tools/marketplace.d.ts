@@ -7,6 +7,7 @@ export declare const SKILLS_SH_SEARCH_URL = "https://skills.sh/api/search";
 export declare const SMITHERY_SERVERS_URL = "https://api.smithery.ai/servers";
 export declare const DEFAULT_MARKETPLACE_PAGE_SIZE = 12;
 export declare const MAX_MARKETPLACE_PAGE_SIZE = 50;
+export declare const CCM_OFFICIAL_MARKETPLACE_REVISION = "2026-07-30.2";
 export interface MarketplaceSource {
     id: string;
     label: string;
@@ -33,11 +34,22 @@ export interface InstallationRecord {
     packagePath?: string;
     installedAt: string;
     updatedAt: string;
+    schema?: "ccm-marketplace-installation-v2";
+    installationId?: string;
+    state?: "active" | "quarantined_legacy" | "resync_required" | "failed";
+    materialTreeHash?: string;
+    catalogRevision?: string;
+    transport?: "stdio" | "streamable_http" | "sse";
+    activatedBy?: string;
+    activatedAt?: string;
+    runtimeState?: string;
+    resyncState?: string;
 }
 interface MarketplaceSavedSource extends MarketplaceSource {
     enabled: boolean;
     createdAt: string;
     updatedAt: string;
+    credentialRef?: string;
 }
 export interface MarketplaceInstallStore {
     skillPackagesDir?: string;
@@ -143,6 +155,7 @@ export declare function readMarketplaceOperationAudit(input?: any, store?: Marke
                 kind: any;
                 trust: any;
                 url: string;
+                credentialConfigured: boolean;
             };
             materialKind: string;
             materialHash: string;
@@ -152,6 +165,7 @@ export declare function readMarketplaceOperationAudit(input?: any, store?: Marke
             packageStats: {
                 files: number;
                 totalBytes: number;
+                treeHash: string;
             };
         };
     }[];
@@ -338,6 +352,16 @@ export declare function marketplaceSourceId(url: string): string;
 export declare function normalizeSavedSource(value: any): MarketplaceSavedSource | null;
 export declare function loadMarketplaceSources(): MarketplaceSavedSource[];
 export declare function saveMarketplaceSources(items: MarketplaceSavedSource[]): void;
+export declare function recoverMarketplaceProductionState(): {
+    at: string;
+    quarantined: number;
+    migrated: number;
+    credentialsMigrated: number;
+    staleStagingRemoved: number;
+    recoveredTransactions: number;
+    officialFilesystemRepaired: boolean;
+    runtimeResync: any;
+};
 export declare function removeManagedPackage(packagePath: string, skillPackagesDir?: string): void;
 export declare function sha256(value: Buffer | string): string;
 export declare function buildMarketplaceSourceProof(item: any, input?: any): {
@@ -352,6 +376,7 @@ export declare function buildMarketplaceSourceProof(item: any, input?: any): {
         kind: any;
         trust: any;
         url: string;
+        credentialConfigured: boolean;
     };
     materialKind: string;
     materialHash: string;
@@ -361,6 +386,7 @@ export declare function buildMarketplaceSourceProof(item: any, input?: any): {
     packageStats: {
         files: number;
         totalBytes: number;
+        treeHash: string;
     };
 };
 export declare function sanitizeMarketplacePreviewItem(item: any): {
@@ -377,6 +403,7 @@ export declare function sanitizeMarketplacePreviewItem(item: any): {
         kind: any;
         trust: any;
         url: string;
+        credentialConfigured: boolean;
     };
     sourceUrl: string;
     downloadUrl: string;
@@ -399,6 +426,7 @@ export declare function sanitizeMarketplaceSourceProof(value: any): {
         kind: any;
         trust: any;
         url: string;
+        credentialConfigured: boolean;
     };
     materialKind: string;
     materialHash: string;
@@ -408,11 +436,22 @@ export declare function sanitizeMarketplaceSourceProof(value: any): {
     packageStats: {
         files: number;
         totalBytes: number;
+        treeHash: string;
     };
 };
 export declare function compareVersions(left: string, right: string): number;
 export declare function baseMarketplaceSourceId(value: any): string;
-export declare function publicMarketplaceSources(): MarketplaceSavedSource[];
+export declare function publicMarketplaceSources(): {
+    url: string;
+    credentialConfigured: boolean;
+    enabled: boolean;
+    createdAt: string;
+    updatedAt: string;
+    id: string;
+    label: string;
+    kind: "builtin" | "skills-sh" | "smithery" | "catalog" | "github" | "direct";
+    trust: "official" | "community" | "custom";
+}[];
 export declare function normalizeMarketplaceItem(item: any, fallbackSource: MarketplaceSource): any;
 export declare function normalizeMarketplaceInstallRequest(item: any, fallbackSource: MarketplaceSource): {
     id: string;
@@ -445,8 +484,17 @@ export declare function parseGithubSkillSource(value: string): {
 export declare function validateSkillDirectory(root: string): {
     files: number;
     totalBytes: number;
+    treeHash: string;
+    manifest: {
+        path: string;
+        type: "file";
+        size: number;
+        checksum: string;
+    }[];
 };
-export declare function cloneGithubSkill(item: any, staging: string): Promise<void>;
+export declare function cloneGithubSkill(item: any, staging: string): Promise<{
+    commit: string;
+}>;
 export declare function stageSkillPackage(item: any, skillPackagesDir?: string): Promise<{
     staging: string;
     skillFile: string;
@@ -457,12 +505,21 @@ export declare function stageSkillPackage(item: any, skillPackagesDir?: string):
         content: string;
     };
     checksum: string;
+    treeHash: string;
+    sourceRevision: string;
     packageStats: {
         files: number;
         totalBytes: number;
+        treeHash: string;
+        manifest: {
+            path: string;
+            type: "file";
+            size: number;
+            checksum: string;
+        }[];
     };
 }>;
-export declare function installStagedPackage(staging: string, name: string, skillPackagesDir?: string): string;
+export declare function installStagedPackage(staging: string, name: string, skillPackagesDir?: string, identityChecksum?: string): string;
 export declare function localMarketplaceItems(): any[];
 export declare function runMarketplaceSelfTest(): Promise<{
     pass: boolean;

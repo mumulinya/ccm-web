@@ -1,4 +1,3 @@
-import { execFileSync } from "child_process";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -32,6 +31,7 @@ import {
   recordFeishuInbound as recordFeishuInboundDirect,
 } from "../collaboration/feishu-channel";
 import { requestAccessPrincipal, requestIsReadOnly } from "../system/api-access-control";
+import { runGitCommand, tryGitCommand } from "../tools/git-workspace-runtime";
 import { listGlobalTerminalDeliveries, retryGlobalTerminalDelivery } from "../../agents/global/global-terminal-delivery";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 
@@ -336,7 +336,7 @@ export function createGlobalAgentApi(deps: any) {
           reactionInput = null;
         };
         try {
-          const isAcp = req.headers["x-ccm-acp"] === "1";
+          const isAcp = req.ccmAuth?.kind === "internal" && req.ccmAuth?.caller === "feishu-acp";
           const config = loadFeishuConfig();
           if (!isAcp) {
             const expected = String(config.control_bot_hook_token || "").trim();
@@ -1544,11 +1544,13 @@ export function createGlobalAgentApi(deps: any) {
           let status = "";
           let diff = "";
           try {
-            status = execFileSync("git", ["status", "--porcelain"], { encoding: "utf-8", cwd: workDir });
-            diff = execFileSync("git", ["diff"], { encoding: "utf-8", cwd: workDir, maxBuffer: 10 * 1024 * 1024 });
+            status = (await runGitCommand(workDir, ["status", "--porcelain"], { maxOutputBytes: 10 * 1024 * 1024 })).stdout;
+            diff = (await runGitCommand(workDir, ["diff"], { maxOutputBytes: 10 * 1024 * 1024 })).stdout;
             // 如果工作区干净，尝试对比暂存区
             if (!diff.trim()) {
-              diff = execFileSync("git", ["diff", "--staged"], { encoding: "utf-8", cwd: workDir, maxBuffer: 10 * 1024 * 1024 });
+              const staged = await tryGitCommand(workDir, ["diff", "--staged"], { maxOutputBytes: 10 * 1024 * 1024 });
+              if (!staged.ok) throw new Error(staged.error || "读取暂存区差异失败");
+              diff = staged.output;
             }
           } catch (gitErr: any) {
             return sendJson(res, { error: "获取 Git 变更失败，请确保该项目是 Git 仓库且本地安装了 Git: " + gitErr.message }, 500);

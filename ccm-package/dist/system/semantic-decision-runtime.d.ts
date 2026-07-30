@@ -1,5 +1,6 @@
+import { type LlmTokenUsage } from "../modules/collaboration/group-orchestrator-llm-client";
 export type SemanticDecisionScope = "global" | "group" | "project" | "music" | "test_agent";
-export type SemanticDecisionKind = "workflow" | "music_intent" | "music_selection" | "agent_collaboration_route" | "test_agent_plan" | "memory_extraction" | "acceptance_projection" | "main_agent_self_verification" | "requirement_intake_quality";
+export type SemanticDecisionKind = "workflow" | "music_intent" | "music_selection" | "agent_collaboration_route" | "test_agent_plan" | "memory_extraction" | "acceptance_projection" | "main_agent_self_verification" | "requirement_intake_quality" | "work_report_summary";
 export interface SemanticDecisionIdentityV1 {
     scope: SemanticDecisionScope;
     scopeId: string;
@@ -18,7 +19,10 @@ export interface SemanticDecisionReceiptV1 {
     model: string;
     confidence: number;
     status: "confirmed" | "failed";
+    startedAt?: string;
     decidedAt: string;
+    durationMs?: number;
+    usage?: LlmTokenUsage | null;
     checksum: string;
 }
 export interface AgentCollaborationRouteDecisionV1 {
@@ -69,6 +73,7 @@ type SemanticDecisionRequest<T> = {
     validate: (value: any) => T;
     confidence?: (value: T) => number;
     maxTokens?: number;
+    reasoningEffort?: "low" | "medium" | "high" | "off";
     modelCall?: (request: {
         config: any;
         messages: any[];

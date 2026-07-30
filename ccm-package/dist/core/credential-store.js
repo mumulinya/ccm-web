@@ -54,7 +54,7 @@ const ROOT = path.join(os.homedir(), ".cc-connect", "private");
 const KEY_FILE = path.join(ROOT, "credential-master.key");
 const STORE_FILE = path.join(ROOT, "credentials.enc.json");
 const REF_PREFIX = "ccm-secret://";
-const SECRET_KEY_PATTERN = /(?:secret|token|password|api[_-]?key|hook[_-]?token|webhook[_-]?url)$/i;
+const SECRET_KEY_PATTERN = /(?:secret|token|password|api[_-]?key|hook[_-]?token|webhook[_-]?url|authorization|cookie|private[_-]?key)$/i;
 function ensurePrivateDir() {
     fs.mkdirSync(ROOT, { recursive: true });
     try {
@@ -223,7 +223,8 @@ function credentialStoreStatus() {
 }
 function redactSensitiveText(value) {
     return String(value || "")
-        .replace(/((?:app_secret|api_key|access_token|refresh_token|password|hook_token)\s*[=:]\s*)[^\s"']+/gi, "$1***")
-        .replace(/("(?:app_secret|api_key|access_token|refresh_token|password|hook_token)"\s*:\s*")[^"]+("?)/gi, "$1***$2");
+        .replace(/((?:app_secret|api_key|access_token|refresh_token|password|hook_token|authorization|cookie|private_key)\s*[=:]\s*)[^\s"']+/gi, "$1***")
+        .replace(/("(?:app_secret|api_key|access_token|refresh_token|password|hook_token|authorization|cookie|private_key)"\s*:\s*")[^"]+("?)/gi, "$1***$2")
+        .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "[redacted authorization]");
 }
 //# sourceMappingURL=credential-store.js.map

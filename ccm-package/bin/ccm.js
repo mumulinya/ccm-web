@@ -3,9 +3,26 @@
 const { execFileSync, spawn, spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
-const net = require("net");
 const os = require("os");
 const path = require("path");
+const {
+  canTerminateVerifiedProcess,
+  inspectService,
+  portAcceptsConnections,
+  processAlive,
+  processIdentityFingerprint,
+  readJson,
+  readTail,
+  rotateLogFiles,
+  waitForVerifiedReady,
+  writeJsonAtomic,
+} = require("./service-runtime");
+const {
+  prepareUpdate,
+  readUpdateTransaction,
+  rollbackInstalledUpdate,
+  switchPreparedUpdate,
+} = require("./update-runtime");
 
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
 const PACKAGE_FILE = path.join(PACKAGE_ROOT, "package.json");
@@ -22,7 +39,12 @@ const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
 const SERVER_LOCK_FILE = path.resolve(process.env.CCM_SERVER_LOCK_FILE || path.join(RUN_DIR, "ccm-server-instance.lock"));
 const SERVER_LOG_FILE = path.join(LOG_DIR, "ccm-server.log");
+const SERVICE_CONFIG_FILE = path.join(RUN_DIR, "service-config-v2.json");
+const UPDATE_DIR = path.join(CCM_DIR, "updates");
+const UPDATE_TRANSACTION_FILE = path.join(UPDATE_DIR, "current.json");
+const UPDATE_LOCK_FILE = path.join(UPDATE_DIR, "update.lock");
 const INTERNAL_SECRET_FILE = path.join(CCM_DIR, "auth", "internal-api-secret");
+const PROCESS_LIFECYCLE_FILE = path.join(CCM_DIR, "reliability", "process-lifecycle", "current.json");
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const color = (code, value) => useColor ? `\u001b[${code}m${value}\u001b[0m` : String(value);
 const style = {
@@ -34,33 +56,20 @@ const style = {
   danger: value => color("31", value),
   link: value => color("4;36", value),
 };
+const STARTUP_TIMEOUT_MS = Math.min(
+  180_000,
+  Math.max(10_000, Number(process.env.CCM_STARTUP_TIMEOUT_MS || 60_000)),
+);
 
 function ensureRuntimeDirs() {
   for (const dir of [CCM_DIR, RUN_DIR, LOG_DIR, CONFIGS_DIR, PID_DIR]) fs.mkdirSync(dir, { recursive: true });
 }
 
-function processAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
-
-function readJson(file, fallback = null) {
-  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return fallback; }
-}
-
-function readServerState() {
-  const owner = readJson(SERVER_LOCK_FILE, null);
-  const pid = Number(owner?.pid || 0);
-  const active = !!owner && (!owner.hostname || owner.hostname === os.hostname()) && processAlive(pid);
-  return {
-    active,
-    pid: active ? pid : 0,
-    port: Number(owner?.port || 3080),
-    host: String(owner?.listen_host || "127.0.0.1"),
-    acquiredAt: owner?.acquired_at || "",
-    lockFile: SERVER_LOCK_FILE,
-    stale: !!owner && !active,
-  };
+async function readServerState() {
+  return inspectService(SERVER_LOCK_FILE, internalApiHeaders, {
+    defaultPort: 3080,
+    defaultHost: "127.0.0.1",
+  });
 }
 
 function validPort(value, fallback = 3080) {
@@ -102,6 +111,27 @@ function optionValue(args, name, fallback = "") {
 
 function hasFlag(args, ...names) {
   return names.some(name => args.includes(name));
+}
+
+async function terminateSpawnedChild(child) {
+  const pid = Number(child?.pid || 0);
+  if (!pid || !processAlive(pid)) {
+    child?.unref?.();
+    return;
+  }
+  try { child.kill("SIGTERM"); } catch {}
+  await new Promise(resolve => setTimeout(resolve, 1_000));
+  if (processAlive(pid)) {
+    if (process.platform === "win32") {
+      spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    } else {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+  }
+  child?.unref?.();
 }
 
 function internalApiHeaders(caller, method, pathname) {
@@ -146,37 +176,18 @@ function printHelp() {
   console.log("  setup-code [--rotate]                        Show or rotate first-install code\n");
   console.log(style.strong("Projects and extensions"));
   console.log("  project list                                 List projects");
-  console.log("  project start <name> [agent]                 Start one project");
-  console.log("  project stop <name|all>                      Stop project processes");
+  console.log("  project connect <name> [agent]               Connect project Agent");
+  console.log("  project disconnect <name|all>                Disconnect project Agent");
+  console.log("  project runtime <start|stop|restart|build> <name> --profile ID");
   console.log("  project init                                 Create a legacy config");
   console.log("  agents                                      List supported Agents");
   console.log("  pet [stop]                                  Control desktop pet\n");
   console.log(style.strong("Package"));
-  console.log("  update --check                              Check npm latest");
-  console.log("  update                                      Install npm latest globally");
+  console.log("  update [--check|--prepare|--switch]          Verify and transactionally update");
+  console.log("  update --status | --rollback                 Inspect or roll back an update");
   console.log("  version                                     Print version");
   console.log("  help                                        Show this help\n");
   console.log(style.muted("Compatibility: start/stop <project>, start/stop all, --list and --init remain available."));
-}
-
-function canConnect(port, timeoutMs = 600) {
-  return new Promise(resolve => {
-    const socket = net.createConnection({ host: "127.0.0.1", port });
-    const done = result => { socket.destroy(); resolve(result); };
-    socket.setTimeout(timeoutMs);
-    socket.once("connect", () => done(true));
-    socket.once("timeout", () => done(false));
-    socket.once("error", () => done(false));
-  });
-}
-
-async function waitForPort(port, timeoutMs = 20_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await canConnect(port)) return true;
-    await new Promise(resolve => setTimeout(resolve, 350));
-  }
-  return false;
 }
 
 function openBrowser(url) {
@@ -201,7 +212,7 @@ async function startWorkspace(args = []) {
   const requestedPort = validPort(optionValue(args, "--port", 3080));
   const requestedHost = validHost(optionValue(args, "--host", process.env.CCM_HOST || "127.0.0.1"));
   const publicOrigin = optionValue(args, "--public-origin", process.env.CCM_PUBLIC_ORIGIN || "");
-  const existing = readServerState();
+  const existing = await readServerState();
   if (existing.active) {
     const urls = serviceUrls(existing.host, existing.port);
     printHeader("Workspace service");
@@ -211,13 +222,27 @@ async function startWorkspace(args = []) {
     if (hasFlag(args, "--open")) openBrowser(urls.localUrl);
     return 0;
   }
+  if (existing.ownershipState === "ownership_unproven") {
+    printHeader("Workspace service");
+    console.error(`${style.danger("BLOCKED")}  发现存活进程但无法证明它属于当前CCM实例`);
+    console.error(`${style.muted("Code")}     ownership_unproven`);
+    console.error(`${style.muted("Lock")}     ${SERVER_LOCK_FILE}`);
+    return 1;
+  }
   if (!fs.existsSync(SERVER_FILE) || !fs.existsSync(PUBLIC_INDEX)) {
     console.error(style.danger("CCM 运行文件不完整，请重新安装或执行 npm run build。"));
     return 1;
   }
   const urls = serviceUrls(requestedHost, requestedPort);
   const background = hasFlag(args, "--background", "-d");
+  if (await portAcceptsConnections(requestedHost, requestedPort)) {
+    printHeader("Workspace service");
+    console.error(`${style.danger("FAILED")}   端口 ${requestedPort} 已被其他服务占用`);
+    console.error(`${style.muted("Code")}     port_in_use`);
+    return 1;
+  }
   if (background) {
+    rotateLogFiles(SERVER_LOG_FILE);
     const logFd = fs.openSync(SERVER_LOG_FILE, "a");
     fs.writeSync(logFd, `\n[${new Date().toISOString()}] ccm start --background\n`);
     const child = spawn(process.execPath, [SERVER_FILE, String(requestedPort)], {
@@ -229,19 +254,42 @@ async function startWorkspace(args = []) {
         ...process.env,
         CCM_HOST: requestedHost,
         CCM_PUBLIC_ORIGIN: publicOrigin,
+        CCM_LAUNCH_MODE: "background",
+        CCM_RUNTIME_VERSION: VERSION,
         CCM_STARTUP_PREPARE_LOCAL_EMBEDDING: process.env.CCM_STARTUP_PREPARE_LOCAL_EMBEDDING || "1",
       },
     });
-    child.unref();
     fs.closeSync(logFd);
-    const ready = await waitForPort(requestedPort);
+    const readiness = await waitForVerifiedReady(
+      SERVER_LOCK_FILE,
+      { port: requestedPort, host: requestedHost, packageVersion: VERSION },
+      internalApiHeaders,
+      child,
+      STARTUP_TIMEOUT_MS,
+    );
     printHeader("Workspace service");
-    if (!ready) {
-      console.error(`${style.danger("FAILED")}   服务没有在 20 秒内就绪`);
+    if (!readiness.ready) {
+      console.error(`${style.danger("FAILED")}   服务未通过身份与就绪校验（${readiness.code || "not_ready"}）`);
+      if (readiness.state) {
+        console.error(`${style.muted("Identity")} ${readiness.state.ownershipState || "unknown"}`);
+        console.error(`${style.muted("Lifecycle")} ${readiness.state.lifecycleState || "unknown"}`);
+      }
       console.error(`${style.muted("Log")}      ${SERVER_LOG_FILE}`);
+      await terminateSpawnedChild(child);
       return 1;
     }
-    const state = readServerState();
+    child.unref();
+    const state = readiness.state;
+    writeJsonAtomic(SERVICE_CONFIG_FILE, {
+      schema: "ccm-service-launch-config-v2",
+      revision: Number(readJson(SERVICE_CONFIG_FILE, {})?.revision || 0) + 1,
+      host: requestedHost,
+      port: requestedPort,
+      public_origin: publicOrigin,
+      launch_mode: "background",
+      package_version: VERSION,
+      updated_at: new Date().toISOString(),
+    });
     console.log(`${style.success("STARTED")}  PID ${state.pid || child.pid}`);
     console.log(`${style.muted("Listen")}   ${requestedHost}:${requestedPort}`);
     console.log(`${style.muted("URL")}      ${style.link(urls.url)}`);
@@ -252,7 +300,6 @@ async function startWorkspace(args = []) {
     return 0;
   }
 
-  if (hasFlag(args, "--open")) void waitForPort(requestedPort).then(ready => { if (ready) openBrowser(urls.localUrl); });
   const child = spawn(process.execPath, [SERVER_FILE, String(requestedPort), requestedHost], {
     cwd: PACKAGE_ROOT,
     windowsHide: false,
@@ -261,9 +308,34 @@ async function startWorkspace(args = []) {
       ...process.env,
       CCM_HOST: requestedHost,
       CCM_PUBLIC_ORIGIN: publicOrigin,
+      CCM_LAUNCH_MODE: "foreground",
+      CCM_RUNTIME_VERSION: VERSION,
       CCM_STARTUP_PREPARE_LOCAL_EMBEDDING: process.env.CCM_STARTUP_PREPARE_LOCAL_EMBEDDING || "1",
     },
   });
+  const readiness = await waitForVerifiedReady(
+    SERVER_LOCK_FILE,
+    { port: requestedPort, host: requestedHost, packageVersion: VERSION },
+    internalApiHeaders,
+    child,
+    STARTUP_TIMEOUT_MS,
+  );
+  if (!readiness.ready) {
+    console.error(style.danger(`启动失败：${readiness.code || "服务未通过身份校验"}`));
+    await terminateSpawnedChild(child);
+    return 1;
+  }
+  writeJsonAtomic(SERVICE_CONFIG_FILE, {
+    schema: "ccm-service-launch-config-v2",
+    revision: Number(readJson(SERVICE_CONFIG_FILE, {})?.revision || 0) + 1,
+    host: requestedHost,
+    port: requestedPort,
+    public_origin: publicOrigin,
+    launch_mode: "foreground",
+    package_version: VERSION,
+    updated_at: new Date().toISOString(),
+  });
+  if (hasFlag(args, "--open")) openBrowser(urls.localUrl);
   return await new Promise(resolve => {
     child.once("error", error => {
       console.error(style.danger(`启动失败：${error.message}`));
@@ -274,38 +346,48 @@ async function startWorkspace(args = []) {
 }
 
 async function stopWorkspace({ quiet = false } = {}) {
-  const state = readServerState();
+  const state = await readServerState();
   if (!state.active) {
-    if (state.stale) { try { fs.unlinkSync(SERVER_LOCK_FILE); } catch {} }
     if (!quiet) {
       printHeader("Workspace service");
-      console.log(style.muted("STOPPED  当前没有运行中的 CCM 服务"));
+      if (state.ownershipState === "ownership_unproven") {
+        console.error(style.danger("BLOCKED  存活进程身份无法证明，已拒绝停止以避免误杀"));
+        console.error(`${style.muted("Code")}     ownership_unproven`);
+      } else {
+        console.log(style.muted("STOPPED  当前没有经过身份验证的CCM服务"));
+      }
     }
-    return 0;
+    return state.ownershipState === "ownership_unproven" ? 1 : 0;
   }
   try {
-    const response = await fetch(`http://127.0.0.1:${state.port}/api/projects/runtime/shutdown`, {
+    const identityPath = "/api/internal/lifecycle/drain";
+    const host = ["0.0.0.0", "::"].includes(state.host) ? (state.host === "::" ? "[::1]" : "127.0.0.1") : (state.host.includes(":") ? `[${state.host}]` : state.host);
+    const response = await fetch(`http://${host}:${state.port}${identityPath}`, {
       method: "POST",
-      headers: internalApiHeaders("ccm-cli", "POST", "/api/projects/runtime/shutdown"),
+      headers: internalApiHeaders("ccm-cli", "POST", identityPath),
       signal: AbortSignal.timeout(3000),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch (error) {
-    if (!quiet) console.warn(style.warning(`WARN     源码运行清理接口不可用，将继续执行服务停止：${error.message}`));
+    if (!quiet) console.error(style.danger(`停止请求未被经过验证的服务接受：${error.message}`));
+    return 1;
   }
-  try { process.kill(state.pid, "SIGTERM"); } catch {}
-  const deadline = Date.now() + 6_000;
+  const deadline = Date.now() + 12_000;
   while (processAlive(state.pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 200));
   if (processAlive(state.pid)) {
+    if (!canTerminateVerifiedProcess(state)) {
+      if (!quiet) console.error(style.danger("服务排空超时，且进程身份已无法再次证明；已拒绝强制结束"));
+      return 1;
+    }
     try {
       if (process.platform === "win32") execFileSync("taskkill.exe", ["/PID", String(state.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
       else process.kill(state.pid, "SIGKILL");
     } catch {}
   }
-  if (!processAlive(state.pid)) { try { fs.unlinkSync(SERVER_LOCK_FILE); } catch {} }
   if (!quiet) {
     printHeader("Workspace service");
-    console.log(`${style.success("STOPPED")}  PID ${state.pid}`);
+    if (!processAlive(state.pid)) console.log(`${style.success("STOPPED")}  PID ${state.pid}`);
+    else console.error(`${style.danger("FAILED")}   PID ${state.pid} 仍在运行`);
   }
   return processAlive(state.pid) ? 1 : 0;
 }
@@ -315,26 +397,53 @@ function configuredProjects() {
   return fs.readdirSync(CONFIGS_DIR).filter(file => file.endsWith(".toml")).sort().map(file => {
     const name = file.replace(/^config-/, "").replace(/\.toml$/, "");
     const pidFile = path.join(PID_DIR, `${name}.pid`);
-    const pid = Number(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf-8").trim() : 0);
-    return { name, running: processAlive(pid), pid: processAlive(pid) ? pid : 0, config: path.join(CONFIGS_DIR, file) };
+    const identity = readJson(pidFile, null);
+    const pid = Number(identity?.pid || 0);
+    const fingerprint = processIdentityFingerprint(pid);
+    const running = identity?.schema === "ccm-project-process-v2"
+      && processAlive(pid)
+      && !!fingerprint
+      && fingerprint === identity.process_fingerprint;
+    return {
+      name,
+      running,
+      pid: running ? pid : 0,
+      ownershipState: processAlive(pid) && !running ? "ownership_unproven" : running ? "verified" : "stopped",
+      config: path.join(CONFIGS_DIR, file),
+    };
   });
 }
 
-function statusPayload() {
-  const service = readServerState();
+async function statusPayload() {
+  const service = await readServerState();
+  const publicOwner = service.owner ? {
+    schema: service.owner.schema,
+    instance_id: service.owner.instance_id,
+    boot_id: service.owner.boot_id,
+    pid: service.owner.pid,
+    process_fingerprint: service.owner.process_fingerprint,
+    entry_checksum: service.owner.entry_checksum,
+    port: service.owner.port,
+    listen_host: service.owner.listen_host,
+    public_origin: service.owner.public_origin,
+    launch_mode: service.owner.launch_mode,
+    package_version: service.owner.package_version,
+    acquired_at: service.owner.acquired_at,
+    data_directory: service.owner.data_directory,
+  } : null;
   const urls = serviceUrls(service.host, service.port);
   const projects = configuredProjects();
   return {
     package: { name: PACKAGE_NAME, version: VERSION },
-    service: { ...service, ...urls },
+    service: { ...service, owner: publicOwner, ...urls },
     projects,
     summary: { projects: projects.length, runningProjects: projects.filter(project => project.running).length },
     dataDirectory: CCM_DIR,
   };
 }
 
-function showStatus(args = []) {
-  const payload = statusPayload();
+async function showStatus(args = []) {
+  const payload = await statusPayload();
   if (hasFlag(args, "--json")) {
     console.log(JSON.stringify(payload, null, 2));
     return 0;
@@ -377,7 +486,7 @@ function persistentPtyProbe() {
   }
 }
 
-function doctorPayload() {
+async function doctorPayload() {
   ensureRuntimeDirs();
   const major = Number(process.versions.node.split(".")[0]);
   const pty = persistentPtyProbe();
@@ -391,11 +500,43 @@ function doctorPayload() {
     { id: "cc-connect", label: bundledCcConnect ? `cc-connect v${bundledCcConnect} (bundled)` : "cc-connect CLI", ok: !!bundledCcConnect || executableAvailable("cc-connect"), required: false },
     ...["claude", "codex", "cursor", "gemini", "opencode"].map(name => ({ id: name, label: `${name} CLI`, ok: executableAvailable(name), required: false })),
   ];
-  return { success: checks.filter(check => check.required).every(check => check.ok), checks, service: readServerState(), dataDirectory: CCM_DIR };
+  const service = await readServerState();
+  if (service.owner) service.owner = { ...service.owner, token: undefined };
+  const update = readUpdateTransaction(UPDATE_TRANSACTION_FILE);
+  const lifecycle = readJson(PROCESS_LIFECYCLE_FILE, null);
+  return {
+    success: checks.filter(check => check.required).every(check => check.ok),
+    checks,
+    service,
+    update: update ? {
+      id: update.id,
+      state: update.state,
+      previous_version: update.previous_version,
+      target_version: update.target_version,
+      updated_at: update.updated_at,
+      failure: update.failure || update.switch_error || update.rollback_error || null,
+      recovery_action: update.state === "recovery_required"
+        ? "ccm update --rollback"
+        : update.state === "staged"
+          ? "ccm update --switch"
+          : "",
+    } : null,
+    lifecycle: lifecycle ? {
+      status: lifecycle.status,
+      boot_id: lifecycle.boot_id,
+      pid: lifecycle.pid,
+      started_at: lifecycle.started_at,
+      shutdown_at: lifecycle.shutdown_at,
+      shutdown_category: lifecycle.shutdown_category,
+      shutdown_reason: lifecycle.shutdown_reason,
+      exit_code: lifecycle.exit_code,
+    } : null,
+    dataDirectory: CCM_DIR,
+  };
 }
 
-function showDoctor(args = []) {
-  const payload = doctorPayload();
+async function showDoctor(args = []) {
+  const payload = await doctorPayload();
   if (hasFlag(args, "--json")) {
     console.log(JSON.stringify(payload, null, 2));
     return payload.success ? 0 : 1;
@@ -417,8 +558,7 @@ function showLogs(args = []) {
     return 0;
   }
   const printTail = () => {
-    const rows = fs.readFileSync(SERVER_LOG_FILE, "utf-8").split(/\r?\n/);
-    console.log(rows.slice(-lines).join("\n"));
+    console.log(readTail(SERVER_LOG_FILE, lines));
   };
   printTail();
   if (hasFlag(args, "--follow", "-f")) {
@@ -442,11 +582,65 @@ function delegateLegacy(args) {
   return Number(result.status || 0);
 }
 
-function projectCommand(args) {
+async function callInternalJson(pathname, method, body) {
+  const state = await readServerState();
+  if (!state.active) throw new Error("CCM服务未运行或身份无法证明");
+  const host = ["0.0.0.0", "::"].includes(state.host)
+    ? (state.host === "::" ? "[::1]" : "127.0.0.1")
+    : (state.host.includes(":") ? `[${state.host}]` : state.host);
+  const response = await fetch(`http://${host}:${state.port}${pathname}`, {
+    method,
+    headers: {
+      ...internalApiHeaders("ccm-cli", method, pathname),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const payload = await response.json().catch(() => ({ success: false, error: `HTTP ${response.status}` }));
+  if (!response.ok || payload?.success === false) {
+    const error = new Error(payload?.error || `HTTP ${response.status}`);
+    error.code = payload?.code || "";
+    throw error;
+  }
+  return payload;
+}
+
+async function projectCommand(args) {
   const [action = "list", ...rest] = args;
   if (["list", "ls"].includes(action)) return delegateLegacy(["--list"]);
-  if (action === "start") return delegateLegacy(["start", ...rest]);
-  if (action === "stop") return delegateLegacy(["stop", ...rest]);
+  if (["connect", "start"].includes(action)) {
+    if (action === "start") console.warn(style.warning('DEPRECATED  请改用 "ccm project connect"'));
+    return delegateLegacy(["start", ...rest]);
+  }
+  if (["disconnect", "stop"].includes(action)) {
+    if (action === "stop") console.warn(style.warning('DEPRECATED  请改用 "ccm project disconnect"'));
+    return delegateLegacy(["stop", ...rest]);
+  }
+  if (action === "runtime") {
+    const [runtimeAction, project] = rest;
+    if (!["start", "stop", "restart", "build"].includes(runtimeAction) || !project) {
+      console.error(style.danger("用法：ccm project runtime <start|stop|restart|build> <project> --profile <id>"));
+      return 1;
+    }
+    const profileId = optionValue(rest, "--profile", "");
+    if (!profileId) {
+      console.error(style.danger("必须使用 --profile 指定精确运行配置"));
+      return 1;
+    }
+    try {
+      const result = await callInternalJson("/api/projects/runtime/action", "POST", {
+        project,
+        profile_id: profileId,
+        action: runtimeAction,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return 0;
+    } catch (error) {
+      console.error(style.danger(`项目运行操作失败：${error.message}`));
+      return 1;
+    }
+  }
   if (action === "init") return delegateLegacy(["--init"]);
   if (action === "agents") return delegateLegacy(["agents"]);
   if (action === "interactive") return delegateLegacy(["interactive"]);
@@ -489,8 +683,71 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function updatePackage(args = []) {
-  const latest = latestVersion();
+function acquireUpdateLock() {
+  fs.mkdirSync(UPDATE_DIR, { recursive: true });
+  try {
+    const fd = fs.openSync(UPDATE_LOCK_FILE, "wx", 0o600);
+    fs.writeFileSync(fd, `${JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() })}\n`, "utf-8");
+    fs.closeSync(fd);
+    return () => { try { fs.unlinkSync(UPDATE_LOCK_FILE); } catch {} };
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const owner = readJson(UPDATE_LOCK_FILE, null);
+    if (owner?.pid && !processAlive(Number(owner.pid))) {
+      try { fs.unlinkSync(UPDATE_LOCK_FILE); } catch {}
+      return acquireUpdateLock();
+    }
+    const locked = new Error("已有更新事务正在执行");
+    locked.code = "update_busy";
+    throw locked;
+  }
+}
+
+async function startInstalledPackage(packageRoot, launchConfiguration) {
+  const cli = path.join(packageRoot, "bin", "ccm.js");
+  const packageVersion = String(readJson(path.join(packageRoot, "package.json"), {})?.version || "");
+  const config = launchConfiguration?.schema === "ccm-service-launch-config-v2" ? launchConfiguration : {};
+  const host = validHost(config.host || "127.0.0.1");
+  const port = validPort(config.port || 3080);
+  const args = ["start", "--host", host, "--port", String(port)];
+  if (config.public_origin) args.push("--public-origin", String(config.public_origin));
+  const env = { ...process.env, CCM_TASK_STORE_DIR: CCM_DIR };
+  if (config.launch_mode !== "foreground") {
+    const result = spawnSync(process.execPath, [cli, ...args, "--background"], {
+      stdio: "inherit",
+      windowsHide: true,
+      env,
+      timeout: 60_000,
+    });
+    return Number(result.status || 0);
+  }
+  const launcher = spawn(process.execPath, [cli, ...args], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env,
+  });
+  launcher.unref();
+  const ready = await waitForVerifiedReady(
+    SERVER_LOCK_FILE,
+    { host, port, packageVersion },
+    internalApiHeaders,
+    null,
+    30_000,
+  );
+  return ready.ready ? 0 : 1;
+}
+
+async function updatePackage(args = []) {
+  if (hasFlag(args, "--status")) {
+    printHeader("Package update");
+    console.log(JSON.stringify(readUpdateTransaction(UPDATE_TRANSACTION_FILE), null, 2));
+    return 0;
+  }
+  const existingTransaction = readUpdateTransaction(UPDATE_TRANSACTION_FILE);
+  const transactionAction = hasFlag(args, "--switch", "--rollback");
+  const latest = optionValue(args, "--target", "")
+    || (transactionAction ? String(existingTransaction?.target_version || "") : latestVersion());
   printHeader("Package update");
   if (!latest) {
     console.error(style.danger("无法读取 npm registry 版本。"));
@@ -499,7 +756,7 @@ function updatePackage(args = []) {
   console.log(`${style.muted("Current")}  ${VERSION}`);
   console.log(`${style.muted("Latest")}   ${latest}`);
   const comparison = compareVersions(latest, VERSION);
-  if (comparison <= 0) {
+  if (!transactionAction && comparison <= 0) {
     console.log(comparison === 0 ? style.success("Already up to date.") : style.muted("Current build is newer than the npm registry."));
     return 0;
   }
@@ -507,9 +764,54 @@ function updatePackage(args = []) {
     console.log(style.warning(`Run "ccm update" to install ${latest}.`));
     return 0;
   }
-  const npm = npmInvocation();
-  const result = spawnSync(npm.command, [...npm.prefix, "install", "-g", `${PACKAGE_NAME}@latest`], { stdio: "inherit", windowsHide: false });
-  return Number(result.status || 0);
+  const releaseLock = acquireUpdateLock();
+  const launchConfiguration = readJson(SERVICE_CONFIG_FILE, {
+    schema: "ccm-service-launch-config-v2",
+    host: "127.0.0.1",
+    port: 3080,
+    public_origin: "",
+    launch_mode: "background",
+  });
+  const context = {
+    ccmDir: CCM_DIR,
+    currentVersion: VERSION,
+    npm: npmInvocation(),
+    packageName: PACKAGE_NAME,
+    transactionFile: UPDATE_TRANSACTION_FILE,
+    launchConfiguration,
+    stopService: () => stopWorkspace({ quiet: true }),
+    startService: startInstalledPackage,
+  };
+  try {
+    if (hasFlag(args, "--rollback")) {
+      const transaction = readUpdateTransaction(UPDATE_TRANSACTION_FILE);
+      const result = await rollbackInstalledUpdate(context, transaction);
+      console.log(JSON.stringify(result, null, 2));
+      return result.state === "rolled_back" ? 0 : 1;
+    }
+    let transaction = hasFlag(args, "--switch") ? readUpdateTransaction(UPDATE_TRANSACTION_FILE) : null;
+    if (!transaction || !hasFlag(args, "--switch")) transaction = await prepareUpdate(context, latest);
+    if (hasFlag(args, "--prepare")) {
+      console.log(`${style.success("STAGED")}   ${transaction.target_version}`);
+      console.log(style.muted('Run "ccm update --switch" to activate the verified package.'));
+      return 0;
+    }
+    const result = await switchPreparedUpdate(context, transaction);
+    console.log(`${result.state === "completed" ? style.success("UPDATED") : result.state === "rolled_back" ? style.warning("ROLLED BACK") : style.danger("RECOVERY REQUIRED")}  ${result.target_version}`);
+    return result.state === "completed" ? 0 : 1;
+  } catch (error) {
+    const transaction = readUpdateTransaction(UPDATE_TRANSACTION_FILE);
+    if (transaction) {
+      transaction.state = "recovery_required";
+      transaction.failure = { at: new Date().toISOString(), message: String(error?.message || error).slice(0, 2000) };
+      transaction.updated_at = transaction.failure.at;
+      writeJsonAtomic(UPDATE_TRANSACTION_FILE, transaction);
+    }
+    console.error(style.danger(`更新失败：${error?.message || error}`));
+    return 1;
+  } finally {
+    releaseLock();
+  }
 }
 
 async function main() {
@@ -524,7 +826,7 @@ async function main() {
   if (command === "doctor") return showDoctor(rest);
   if (command === "setup-code") return showSetupCode(rest);
   if (command === "open") {
-    const state = readServerState();
+    const state = await readServerState();
     const port = validPort(optionValue(rest, "--port", state.port || 3080));
     openBrowser(`http://localhost:${port}`);
     console.log(`Opening ${style.link(`http://localhost:${port}`)}`);
@@ -549,9 +851,17 @@ async function main() {
     return stopWorkspace();
   }
   if (command === "restart") {
+    const previous = readJson(SERVICE_CONFIG_FILE, null);
     const stopped = await stopWorkspace({ quiet: true });
     if (stopped !== 0) return stopped;
-    return startWorkspace(rest);
+    const inherited = [...rest];
+    if (previous?.schema === "ccm-service-launch-config-v2") {
+      if (!hasFlag(inherited, "--port")) inherited.push("--port", String(previous.port || 3080));
+      if (!hasFlag(inherited, "--host")) inherited.push("--host", String(previous.host || "127.0.0.1"));
+      if (!hasFlag(inherited, "--public-origin") && previous.public_origin) inherited.push("--public-origin", String(previous.public_origin));
+      if (!hasFlag(inherited, "--background", "-d") && previous.launch_mode === "background") inherited.push("--background");
+    }
+    return startWorkspace(inherited);
   }
 
   return delegateLegacy(args);

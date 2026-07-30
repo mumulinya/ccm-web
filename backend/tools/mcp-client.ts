@@ -1,4 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 
 interface McpTool {
   name: string;
@@ -16,6 +18,16 @@ interface McpTool {
 interface McpToolResult {
   content: Array<{ type: string; text?: string }>;
   isError?: boolean;
+}
+
+export function resolveMcpStdioCommand(command: string, args: string[] = []) {
+  if (process.platform !== "win32") return { cmd: command, args };
+  const executableName = path.basename(command).toLowerCase().replace(/\.(?:cmd|exe)$/i, "");
+  if (!["npm", "npx"].includes(executableName)) return { cmd: command, args };
+  const cliName = executableName === "npx" ? "npx-cli.js" : "npm-cli.js";
+  const cliFile = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", cliName);
+  if (!fs.existsSync(cliFile)) return { cmd: command, args };
+  return { cmd: process.execPath, args: [cliFile, ...args] };
 }
 
 export class McpClient {
@@ -44,13 +56,13 @@ export class McpClient {
 
   private parseCommand() {
     if (this.args.length > 0) {
-      return { cmd: this.command, args: this.args };
+      return resolveMcpStdioCommand(this.command, this.args);
     }
 
     const parts = this.command.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
     const cmd = (parts[0] || this.command).replace(/^"|"$/g, "");
     const args = parts.slice(1).map(p => p.replace(/^"|"$/g, ""));
-    return { cmd, args };
+    return resolveMcpStdioCommand(cmd, args);
   }
 
   async connect(): Promise<boolean> {
@@ -61,7 +73,7 @@ export class McpClient {
 
       this.process = spawn(cmd, args, {
         stdio: ["pipe", "pipe", "pipe"],
-        shell: true,
+        shell: false,
         env: envVars,
         windowsHide: true,
       });
@@ -81,6 +93,15 @@ export class McpClient {
         for (const [id, pending] of this.pending) {
           clearTimeout(pending.timer);
           pending.reject(new Error("MCP process exited"));
+        }
+        this.pending.clear();
+      });
+      this.process.on("error", (error: Error) => {
+        this.connected = false;
+        this.lastError = this.safeErrorDetail(error.message || "MCP process failed to start");
+        for (const [, pending] of this.pending) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error(this.lastError));
         }
         this.pending.clear();
       });
@@ -108,7 +129,7 @@ export class McpClient {
       const primary = (e as Error).message || "MCP connect failed";
       const stderr = this.safeErrorDetail(this.stderrBuffer);
       this.lastError = this.safeErrorDetail(stderr && !stderr.includes(primary) ? `${primary}: ${stderr}` : primary);
-      console.error(`[MCP] 连接失败: ${this.command}`, this.lastError, this.stderrBuffer);
+      console.error(`[MCP] 连接失败: ${this.command}`, this.lastError);
       this.connected = false;
       this.disconnect();
       return false;
@@ -222,7 +243,7 @@ export class McpClient {
   getDiagnostics() {
     return {
       lastError: this.lastError,
-      stderr: this.stderrBuffer,
+      stderr: this.safeErrorDetail(this.stderrBuffer),
       elicitationRequired: this.elicitationRequired,
       elicitationMessage: this.elicitationMessage,
       serverInstructions: this.serverInstructions,

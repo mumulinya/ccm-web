@@ -36,6 +36,8 @@ const actionsLoading = ref(false)
 const paneRefs = new Map()
 let persistTimer = null
 let processTimer = null
+let projectActionsGeneration = 0
+let projectActionsController = null
 
 const makeId = () => `pty-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 const createTerminal = (index = terminals.value.length + 1) => ({
@@ -213,9 +215,22 @@ const runFallbackCommand = async (command = fallbackCommand.value) => {
   fallbackRunning.value = true
   fallbackOutput.value = `${fallbackOutput.value}${fallbackOutput.value ? '\n\n' : ''}> ${value}\n`
   try {
-    const result = await terminalApi.exec({ command: value, cwd: activeTerminal.value?.currentCwd || systemInfo.value?.home || '' })
+    const cwd = activeTerminal.value?.currentCwd || systemInfo.value?.home || ''
+    let response = await terminalApi.exec({ command: value, cwd })
+    let result = await response.json().catch(() => ({}))
+    if (response.status === 409 && result.code === 'confirmation_required') {
+      const accepted = await confirmDialog(`该命令会修改或删除本地状态，确定继续？\n\n${result.command}`)
+      if (!accepted) {
+        fallbackOutput.value += '已取消高风险命令'
+        return
+      }
+      response = await terminalApi.exec({ command: value, cwd, challenge: result.challenge })
+      result = await response.json().catch(() => ({}))
+    }
+    if (!response.ok && response.status !== 200) throw new Error(result.error || `命令执行失败（HTTP ${response.status}）`)
     fallbackOutput.value += String(result.output || result.error || '命令执行完成')
     if (result.cwd && activeTerminal.value) activeTerminal.value.currentCwd = result.cwd
+    if (result.success === false) toast.error(result.error || `命令执行失败${result.exitCode !== null ? `（退出码 ${result.exitCode}）` : ''}`)
   } catch (error) {
     fallbackOutput.value += String(error?.message || '命令执行失败')
   } finally {
@@ -237,10 +252,21 @@ const runCommand = (command, terminal = activeTerminal.value) => {
 const loadProjectActions = async () => {
   const terminal = activeTerminal.value
   if (!terminal?.currentCwd) return
+  const terminalId = terminal.id
+  const cwd = terminal.currentCwd
+  const generation = ++projectActionsGeneration
+  projectActionsController?.abort()
+  projectActionsController = new AbortController()
   actionsLoading.value = true
-  try { projectActions.value = await terminalApi.projectActions(terminal.currentCwd) }
-  catch { projectActions.value = { scripts: [], repository: null } }
-  finally { actionsLoading.value = false }
+  try {
+    const result = await terminalApi.projectActions(cwd, { signal: projectActionsController.signal })
+    if (generation !== projectActionsGeneration || activeTerminal.value?.id !== terminalId || activeTerminal.value?.currentCwd !== cwd) return
+    projectActions.value = result
+  } catch (error) {
+    if (error?.name !== 'AbortError' && generation === projectActionsGeneration) projectActions.value = { scripts: [], repository: null }
+  } finally {
+    if (generation === projectActionsGeneration) actionsLoading.value = false
+  }
 }
 
 const refreshProcesses = async () => {
@@ -351,6 +377,7 @@ onMounted(async () => {
   processTimer = setInterval(refreshProcesses, 5000)
 })
 onUnmounted(() => {
+  projectActionsController?.abort()
   clearTimeout(persistTimer)
   clearInterval(processTimer)
   void saveWorkspace()

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { startPlaywrightAppServer } from './playwright-app-server.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3080').replace(/\/+$/, '')
+const appHost = process.env.CCM_BASE_URL ? null : await startPlaywrightAppServer(root, { port: 3082 })
+const baseUrl = String(process.env.CCM_BASE_URL || appHost.baseUrl).replace(/\/+$/, '')
 const outputDir = path.join(root, 'scratch', 'workbench-full-width-render-regression')
 fs.rmSync(outputDir, { recursive: true, force: true })
 fs.mkdirSync(outputDir, { recursive: true })
@@ -40,6 +42,8 @@ const prepare = async page => {
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
   await page.route('**/api/**', route => {
     const pathname = new URL(route.request().url()).pathname
+    const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
+    if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
     if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'workbench-selftest' } }))
     if (pathname === '/api/usability/workbench') return route.fulfill(json(snapshot))
     if (pathname === '/api/projects') return route.fulfill(json({ success: true, projects: snapshot.resources.projects }))
@@ -52,7 +56,7 @@ const prepare = async page => {
   })
   await page.goto(`${baseUrl}/?tab=dashboard`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.locator('.workbench').waitFor({ state: 'visible', timeout: 20_000 })
-  await page.getByRole('button', { name: /^workspace-5 claudecode/ }).waitFor({ state: 'attached', timeout: 10_000 })
+  await page.getByRole('button', { name: /^workspace-5/ }).waitFor({ state: 'attached', timeout: 10_000 })
   await page.locator('[data-page-loading="dashboard"]').waitFor({ state: 'detached', timeout: 10_000 })
 }
 
@@ -119,6 +123,7 @@ try {
   report.errors.push(error?.stack || String(error))
 } finally {
   await browser.close()
+  if (appHost) await appHost.server.close()
   fs.writeFileSync(path.join(outputDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
 }
 

@@ -157,7 +157,6 @@
           :send-label="projectComposerSendLabel"
           :files="chatFiles"
           :slash="slash"
-          :show-template-button="false"
           :disabled="!currentProject || !hasProjectConversation"
           :busy="isStreaming"
           :allow-input-while-busy="true"
@@ -215,11 +214,14 @@
       :form="form"
       :agent-options="agentOptions"
       :platforms="platforms"
+      :submitting="projectCreateBusy"
+      :clone-status="projectCloneStatus"
       @update-field="updateProjectFormField"
       @browse="openFolderBrowser"
       @open-feishu="openFeishuQr"
       @refresh-git="loadProjectGitStatus"
-      @close="showCreate = false"
+      @close="projectCreateBusy ? null : (showCreate = false)"
+      @cancel-clone="cancelProjectClone"
       @submit="submitCreate"
     />
 

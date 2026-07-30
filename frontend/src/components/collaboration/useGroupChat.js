@@ -6,7 +6,6 @@ import { shouldShowGroupMainAgentStatus } from '../../utils/groupStatusVisibilit
 import { useSlashCommands } from '../../composables/useSlashCommands.js'
 import { createSlashCommandClientActions } from '../../composables/useSlashCommandClientActions.js'
 import { buildGroupClarificationResponseFields, buildWaitingUserTaskContinuationFields, createGroupTaskCardActionHandler } from '../../composables/useGroupTaskCardActions.js'
-import { useChatTemplates } from '../../composables/useChatTemplates.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
@@ -91,7 +90,17 @@ export function useGroupChat(props, emit) {
       if (target.groupSessionId && target.groupSessionId !== currentGroupSessionId.value) {
         await selectGroupSession(target.groupSessionId)
       }
-      if (target.messageId || Number.isInteger(target.messageIndex)) await loadMessages(1000)
+      if (Array.isArray(target.messageWindow?.messages) && target.messageWindow.messages.length) {
+        messages.value = target.messageWindow.messages.map(row => ({
+          id: row.messageId || row.id,
+          message_id: row.messageId || row.id,
+          role: row.role,
+          content: row.content,
+          timestamp: row.timestamp,
+          task_id: row.taskId || '',
+          agent: row.agent || '',
+        }))
+      } else if (target.messageId || Number.isInteger(target.messageIndex)) await loadMessages()
       
       if (target.draftMessage) {
         await nextTick()
@@ -236,27 +245,6 @@ export function useGroupChat(props, emit) {
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }
-  const {
-    showTemplateSelector,
-    allTemplates,
-    templateSearchQuery,
-    activeTemplateIndex,
-    recommendedTemplate,
-    activeTemplate,
-    templateVariables,
-    showVariableModal,
-    openTemplateSelector,
-    selectChatTemplate,
-    applyTemplateVariables,
-    detectRecommendation,
-    applyRecommendation,
-    handleTemplateKeydown,
-    hideTemplateAssist,
-  } = useChatTemplates({
-    input: newMessage,
-    focusInput: focusGroupInput,
-    onError: (message) => toast.error(message),
-  })
   const messageFiles = ref([])
   const messageMode = ref('conversation')
   const pendingGroupTaskInput = ref(null)
@@ -293,7 +281,6 @@ export function useGroupChat(props, emit) {
     newMessage.value = ''
     messageFiles.value = []
     messageMode.value = 'project_task'
-    hideTemplateAssist()
     nextTick(focusGroupInput)
   }
   const beginGroupClarificationInput = (msg, { focus = true, clear = true } = {}) => {
@@ -313,7 +300,6 @@ export function useGroupChat(props, emit) {
       messageFiles.value = []
     }
     messageMode.value = pendingGroupClarificationInput.value.messageMode
-    hideTemplateAssist()
     if (focus) nextTick(focusGroupInput)
     return true
   }
@@ -640,14 +626,6 @@ export function useGroupChat(props, emit) {
     }
     isGroupMessagesPinnedToBottom.value = true
     await loadMessages()
-    // 如果有挂起的待使用模板，在此应用
-    if (pendingTemplateToApply.value) {
-      selectChatTemplate(pendingTemplateToApply.value)
-      pendingTemplateToApply.value = null
-      if (activeSelectedTemplate) {
-        activeSelectedTemplate.value = null
-      }
-    }
   }
 
   // 加载消息
@@ -811,21 +789,10 @@ export function useGroupChat(props, emit) {
   const handleInput = (e) => {
     const value = e.target.value
 
-    if (isDirectedGroupInputMode.value) {
-      hideTemplateAssist()
-      return
-    }
+    if (isDirectedGroupInputMode.value) return
 
-    if (slash.onInput()) {
-      hideTemplateAssist()
-      return
-    }
-    if (value.startsWith('/')) {
-      hideTemplateAssist()
-      return
-    }
-    showTemplateSelector.value = false
-    detectRecommendation(value)
+    if (slash.onInput()) return
+    if (value.startsWith('/')) return
   }
 
   const handleKeydown = async (e) => {
@@ -837,8 +804,6 @@ export function useGroupChat(props, emit) {
       return
     }
     if (await slash.onKeydown(e)) return
-    if (handleTemplateKeydown(e)) return
-
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       sendMessage()
@@ -890,23 +855,6 @@ export function useGroupChat(props, emit) {
     if (currentGroup.value) startGroupPolling()
   })
 
-  // --- 对话模板相关逻辑开始 ---
-  const activeSelectedTemplate = inject('activeSelectedTemplate', null)
-  const pendingTemplateToApply = ref(null)
-
-  if (activeSelectedTemplate) {
-    watch(activeSelectedTemplate, (newVal) => {
-      if (newVal && newVal.targetTab === 'groups' && newVal.targetId) {
-        if (currentGroup.value?.id === newVal.targetId) {
-          selectChatTemplate(newVal.template)
-          activeSelectedTemplate.value = null
-        } else {
-          pendingTemplateToApply.value = newVal.template
-        }
-      }
-    })
-  }
-
   return {
     GROUP_VISIBLE_INTERNAL_TEXT_PATTERN, GROUP_INTERNAL_PROTOCOL_FALLBACK, GROUP_STREAM_ERROR_FALLBACK,
     sanitizeGroupVisibleText, buildGroupStreamErrorText, getVisibleGroupMessageContent,
@@ -915,10 +863,7 @@ export function useGroupChat(props, emit) {
     groupMessagesEl, groupMessagesContentEl, isGroupMessagesPinnedToBottom, updateGroupMessageScrollState,
     scrollToBottom, attachGroupMessagesResizeObserver, detachGroupMessagesResizeObserver, navMessages,
     scrollToMessage, newMessage, slashNavigate, runGroupClientCommand, pendingDirectMemoryCommand, slash,
-    focusGroupInput, showTemplateSelector, allTemplates, templateSearchQuery, activeTemplateIndex,
-    recommendedTemplate, activeTemplate, templateVariables, showVariableModal, openTemplateSelector,
-    selectChatTemplate, applyTemplateVariables, detectRecommendation, applyRecommendation,
-    handleTemplateKeydown, hideTemplateAssist, messageFiles, messageMode, pendingGroupTaskInput,
+    focusGroupInput, messageFiles, messageMode, pendingGroupTaskInput,
     pendingGroupClarificationInput, isTaskSupplementMode, isClarificationResponseMode,
     isDirectedGroupInputMode, groupComposerPlaceholder, groupComposerSendLabel, cancelTaskSupplementInput,
     beginTaskSupplementInput, getGroupClarificationContext, getGroupClarificationSummary,
@@ -960,6 +905,6 @@ export function useGroupChat(props, emit) {
     saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,
     loadGroupTestTargets, saveGroupTestTarget, deleteGroupTestTarget, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
     getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
-    startGroupPolling, stopGroupPolling, origSelectGroup, activeSelectedTemplate, pendingTemplateToApply,
+    startGroupPolling, stopGroupPolling, origSelectGroup,
   }
 }

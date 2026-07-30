@@ -1,0 +1,9 @@
+public/pets/**
+!public/pets/yuexinmiao.svg
+!public/pets/yuexinmiao-*.svg
+!public/pets/yuexinmiao1/
+!public/pets/yuexinmiao1/**
+!public/pets/clawd.svg
+pet/assets/**
+*.tgz
+.release-attestation.json

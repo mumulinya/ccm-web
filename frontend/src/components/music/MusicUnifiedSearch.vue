@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { Download, ListMusic, ListPlus, LoaderCircle, Play, Search, X } from '@lucide/vue'
 import { toast } from '../../utils/toast.js'
 
@@ -15,6 +15,8 @@ const activeSource = ref('all')
 const result = ref({ local: [], netease: [], bilibili: [], errors: {} })
 const busyKey = ref('')
 const inputRef = ref(null)
+let searchGeneration = 0
+let searchController = null
 
 const sources = [
   { id: 'all', label: '全部' },
@@ -43,18 +45,23 @@ const itemKey = item => `${item.type}:${item.track?.filename || item.songId || i
 const search = async () => {
   const value = query.value.trim()
   if (!value) return
+  const generation = ++searchGeneration
+  searchController?.abort()
+  searchController = new AbortController()
   loading.value = true
   try {
-    const res = await fetch(`/api/music/search-unified?q=${encodeURIComponent(value)}`)
+    const res = await fetch(`/api/music/search-unified?q=${encodeURIComponent(value)}`, { signal: searchController.signal })
     const data = await res.json()
     if (!res.ok || !data.success) throw new Error(data.error || '统一音乐搜索失败')
-    result.value = data
+    if (generation === searchGeneration) result.value = data
   } catch (error) {
-    toast.error(error?.message || '统一音乐搜索失败')
+    if (error?.name !== 'AbortError') toast.error(error?.message || '统一音乐搜索失败')
   } finally {
-    loading.value = false
+    if (generation === searchGeneration) loading.value = false
   }
 }
+
+onUnmounted(() => searchController?.abort())
 
 const runAction = async (action, item) => {
   const key = `${itemKey(item)}:${action}`

@@ -6,6 +6,7 @@ const source = fs.readFileSync(path.join(process.cwd(), 'frontend/src/App.vue'),
 const authSource = fs.readFileSync(path.join(process.cwd(), 'frontend/src/components/auth/AuthPage.vue'), 'utf8')
 const bootSource = fs.readFileSync(path.join(process.cwd(), 'frontend/index.html'), 'utf8')
 const favicon = fs.readFileSync(path.join(process.cwd(), 'frontend/public/favicon.svg'), 'utf8')
+const appIcon = fs.readFileSync(path.join(process.cwd(), 'frontend/public/ccm-app-icon.png'))
 const checks = [
   ['CCM 品牌名称', '<strong>CCM</strong>'],
   ['产品副标题', '<small>Agent Workspace</small>'],
@@ -19,9 +20,16 @@ const missing = checks.filter(([, marker]) => !source.includes(marker))
 const sharedBrandMissing = !authSource.includes('<img src="/favicon.svg" alt="" />')
   || !bootSource.includes('src="/favicon.svg"')
   || !favicon.includes('aria-label="CCM"')
-if (missing.length || sharedBrandMissing || source.includes('class="menu-edit-btn"') || source.includes('title="打开导航配置中心"')) {
+  || !favicon.includes('stroke-linecap="round"')
+  || !favicon.includes('#42d6a4')
+  || !favicon.includes('#39b8d0')
+const appIconInvalid = appIcon.length < 24
+  || appIcon.toString('ascii', 1, 4) !== 'PNG'
+  || appIcon.readUInt32BE(16) !== 1024
+  || appIcon.readUInt32BE(20) !== 1024
+if (missing.length || sharedBrandMissing || appIconInvalid || source.includes('class="menu-edit-btn"') || source.includes('title="打开导航配置中心"')) {
   console.error(`Sidebar brand self-test failed: ${missing.map(([name]) => name).join(', ') || '旧菜单管理快捷入口仍存在'}`)
   process.exit(1)
 }
 
-console.log(JSON.stringify({ success: true, checks: checks.length + 5, paid_provider_calls: 0 }, null, 2))
+console.log(JSON.stringify({ success: true, checks: checks.length + 9, paid_provider_calls: 0 }, null, 2))

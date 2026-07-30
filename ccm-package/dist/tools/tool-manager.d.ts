@@ -68,6 +68,7 @@ export declare class ToolManager {
     private skills;
     private initialized;
     loadTools(): Promise<void>;
+    private createClient;
     buildToolPrompt(scope?: ToolScope): string;
     buildScopeAudit(scope?: ToolScope): {
         mcp: {
@@ -208,6 +209,7 @@ export declare class ToolManager {
             lastConnectedAt: string;
             lastErrorAt: string;
             retryCount: number;
+            transport: any;
             instructions: string;
             auth: McpAuthStatus;
         }[];

@@ -2044,12 +2044,20 @@ function ingestGlobalAgentConversation(input) {
     else
         memory.sessions.push(session);
     saveMemory(memory);
-    if (assistantAdded) {
+    if (assistantAdded && input.extractMemory !== false) {
         scheduleGlobalLongTermMemoryExtraction(sessionId);
         scheduleGlobalAgentSessionMemoryExtraction(sessionId);
     }
     const compaction = input.compact === false ? null : scheduleGlobalAgentModelCompaction(sessionId);
-    return { transcript: { sessionId, messageCount: transcript.messages.length, updatedAt: transcript.updatedAt }, extracted: 0, extraction: assistantAdded ? "model_semantic_scheduled" : "awaiting_complete_turn", rejected: 0, compaction };
+    return {
+        transcript: { sessionId, messageCount: transcript.messages.length, updatedAt: transcript.updatedAt },
+        extracted: 0,
+        extraction: assistantAdded
+            ? input.extractMemory === false ? "skipped_for_model_confirmed_direct_reply" : "model_semantic_scheduled"
+            : "awaiting_complete_turn",
+        rejected: 0,
+        compaction,
+    };
 }
 function queryTerms(text) {
     const lower = String(text || "").toLowerCase();

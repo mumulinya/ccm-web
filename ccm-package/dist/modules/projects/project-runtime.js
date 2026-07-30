@@ -51,19 +51,23 @@ exports.stopAllProjectRuntimes = stopAllProjectRuntimes;
 exports.restartProjectRuntime = restartProjectRuntime;
 exports.buildProjectRuntime = buildProjectRuntime;
 exports.getProjectRuntimeLogs = getProjectRuntimeLogs;
+exports.getProjectRuntimeLogsAsync = getProjectRuntimeLogsAsync;
 exports.subscribeProjectRuntimeLogs = subscribeProjectRuntimeLogs;
 exports.getProjectRuntimeSnapshot = getProjectRuntimeSnapshot;
 exports.getProjectRuntimeSummary = getProjectRuntimeSummary;
+exports.getProjectRuntimeSummaryReadOnly = getProjectRuntimeSummaryReadOnly;
 exports.executeProjectRuntimeAction = executeProjectRuntimeAction;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
+const atomic_json_file_1 = require("../../core/atomic-json-file");
 const db_1 = require("../../core/db");
 const runtime_events_1 = require("../../system/runtime-events");
 const utils_2 = require("../../test-agent/utils");
 const project_validation_1 = require("./project-validation");
+const managed_process_tree_1 = require("../../system/managed-process-tree");
 const RUNTIME_DIR = path.join(utils_1.CCM_DIR, "project-runtime");
 const STATE_FILE = path.join(RUNTIME_DIR, "state.json");
 const RUNTIME_LOG_DIR = path.join(utils_1.LOG_DIR, "project-runtime");
@@ -84,7 +88,10 @@ const DEFAULT_JAVA_TOOLCHAIN = {
 };
 const liveProcesses = new Map();
 const liveBuilds = new Map();
+const runtimeActionSingleflight = new Map();
 const runtimeLogListeners = new Map();
+const runtimeLogWriteQueues = new Map();
+const runtimeLogFailures = new Map();
 function ensureRuntimeDirs() {
     fs.mkdirSync(RUNTIME_DIR, { recursive: true });
     fs.mkdirSync(RUNTIME_LOG_DIR, { recursive: true });
@@ -104,11 +111,17 @@ function readState() {
 }
 function writeState(state) {
     ensureRuntimeDirs();
-    const temp = `${STATE_FILE}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(state, null, 2), "utf-8");
-    if (fs.existsSync(STATE_FILE))
-        fs.unlinkSync(STATE_FILE);
-    fs.renameSync(temp, STATE_FILE);
+    (0, atomic_json_file_1.withFileLock)(STATE_FILE, () => {
+        let current = { processes: {}, builds: {} };
+        try {
+            current = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
+        }
+        catch { }
+        (0, atomic_json_file_1.writeJsonAtomic)(STATE_FILE, {
+            processes: { ...(current?.processes || {}), ...(state.processes || {}) },
+            builds: { ...(current?.builds || {}), ...(state.builds || {}) },
+        });
+    }, { timeoutMs: 10_000, staleMs: 2 * 60_000 });
 }
 function resolveProjectIdentifier(project) {
     const requested = String(project || "").trim();
@@ -641,7 +654,7 @@ function processExists(pid) {
 function normalizeProcessStates(project, state) {
     let changed = false;
     for (const [key, row] of Object.entries(state.processes)) {
-        if (row.project !== project || !["starting", "running"].includes(row.status))
+        if (row.project !== project || !["starting", "running", "stopping"].includes(row.status))
             continue;
         if (liveProcesses.has(key))
             continue;
@@ -673,28 +686,57 @@ function logFile(project, profileId, kind) {
 function redactOutput(value) {
     return String(value || "")
         .replace(/(\b(?:api[_-]?key|token|secret|password|authorization|cookie)\b\s*[=:]\s*)([^\s,;]+)/gi, "$1[REDACTED]")
-        .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]");
+        .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]")
+        .replace(/(https?:\/\/)([^\s/@:]+):([^\s/@]+)@/gi, "$1[REDACTED]@")
+        .replace(/-----BEGIN [^-]+ PRIVATE KEY-----[\s\S]*?-----END [^-]+ PRIVATE KEY-----/gi, "[PRIVATE KEY REDACTED]")
+        .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[AWS KEY REDACTED]");
+}
+function queueLogWrite(file, operation) {
+    const previous = runtimeLogWriteQueues.get(file) || Promise.resolve();
+    const next = previous.catch(() => { }).then(operation).catch(error => {
+        runtimeLogFailures.set(file, String(error?.message || error || "日志写入失败").slice(0, 500));
+    }).finally(() => {
+        if (runtimeLogWriteQueues.get(file) === next)
+            runtimeLogWriteQueues.delete(file);
+    });
+    runtimeLogWriteQueues.set(file, next);
 }
 function appendLog(file, chunk) {
     ensureRuntimeDirs();
     const max = 4 * 1024 * 1024;
-    try {
-        if (fs.existsSync(file) && fs.statSync(file).size > max) {
-            const content = fs.readFileSync(file);
-            fs.writeFileSync(file, content.subarray(Math.max(0, content.length - Math.floor(max / 2))));
+    const content = redactOutput(chunk);
+    for (const listener of runtimeLogListeners.get(file) || [])
+        listener({ type: "chunk", content });
+    queueLogWrite(file, async () => {
+        let size = 0;
+        try {
+            size = (await fs.promises.stat(file)).size;
         }
-        const content = redactOutput(chunk);
-        fs.appendFileSync(file, content, "utf-8");
-        for (const listener of runtimeLogListeners.get(file) || [])
-            listener({ type: "chunk", content });
-    }
-    catch { }
+        catch { }
+        if (size > max) {
+            const handle = await fs.promises.open(file, "r");
+            try {
+                const keep = Math.floor(max / 2);
+                const buffer = Buffer.alloc(Math.min(size, keep));
+                await handle.read(buffer, 0, buffer.length, Math.max(0, size - buffer.length));
+                await fs.promises.writeFile(file, buffer);
+            }
+            finally {
+                await handle.close();
+            }
+        }
+        await fs.promises.appendFile(file, content, "utf-8");
+        runtimeLogFailures.delete(file);
+    });
 }
 function replaceLog(file, content) {
     const safeContent = redactOutput(content);
-    fs.writeFileSync(file, safeContent, "utf-8");
     for (const listener of runtimeLogListeners.get(file) || [])
         listener({ type: "reset", content: safeContent });
+    queueLogWrite(file, async () => {
+        await fs.promises.writeFile(file, safeContent, "utf-8");
+        runtimeLogFailures.delete(file);
+    });
 }
 function attachProcessLogs(child, file, profile, observe) {
     const javaConsole = process.platform === "win32" && ["maven", "gradle"].includes(profile.projectType);
@@ -954,38 +996,12 @@ function spawnProfileCommand(project, profile, command) {
     return { child, cwd, toolchainChecksum: toolchain.checksum };
 }
 function stopProcessTree(child) {
-    const pid = Number(child.pid || 0);
-    stopProcessPidTree(pid, child);
+    return (0, managed_process_tree_1.terminateManagedProcessTree)(child, { gracefulTimeoutMs: 8_000, forceTimeoutMs: 3_000 });
 }
-function stopProcessPidTree(pid, child) {
-    if (!pid)
-        return;
-    if (process.platform === "win32") {
-        const script = [
-            `$rootPid=${pid}`,
-            "$all=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId)",
-            "$ids=New-Object System.Collections.Generic.List[int]",
-            "$ids.Add([int]$rootPid)",
-            "$changed=$true",
-            "while($changed){$changed=$false;foreach($p in $all){if($ids.Contains([int]$p.ParentProcessId)-and -not $ids.Contains([int]$p.ProcessId)){$ids.Add([int]$p.ProcessId);$changed=$true}}}",
-            "for($i=$ids.Count-1;$i-ge 0;$i--){Stop-Process -Id $ids[$i] -Force -ErrorAction SilentlyContinue}",
-        ].join(";");
-        const powershell = (0, child_process_1.spawnSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, stdio: "ignore", timeout: 15_000 });
-        if (powershell.error || powershell.status !== 0)
-            (0, child_process_1.spawnSync)("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-        return;
-    }
-    try {
-        process.kill(-pid, "SIGTERM");
-    }
-    catch {
-        try {
-            child?.kill("SIGTERM");
-        }
-        catch { }
-    }
+function stopProcessPidTree(pid) {
+    return (0, managed_process_tree_1.terminateManagedProcessTree)(pid, { gracefulTimeoutMs: 8_000, forceTimeoutMs: 3_000 });
 }
-function stopManagedProjectRuntimesForShutdown() {
+async function stopManagedProjectRuntimesForShutdown() {
     const state = readState();
     const stoppedAt = new Date().toISOString();
     const processTargets = new Map();
@@ -1000,7 +1016,7 @@ function stopManagedProjectRuntimesForShutdown() {
         if (pid)
             processTargets.set(key, pid);
         if (row && row.pid === pid) {
-            row.status = "stopped";
+            row.status = "stopping";
             row.stopReason = "user";
             row.exitCode = null;
             row.stoppedAt = stoppedAt;
@@ -1010,7 +1026,7 @@ function stopManagedProjectRuntimesForShutdown() {
         const row = state.processes[key];
         if (!row || row.pid !== pid)
             continue;
-        row.status = "stopped";
+        row.status = "stopping";
         row.stopReason = "user";
         row.exitCode = null;
         row.stoppedAt = stoppedAt;
@@ -1025,7 +1041,7 @@ function stopManagedProjectRuntimesForShutdown() {
         if (pid)
             buildTargets.set(key, pid);
         if (row && row.pid === pid) {
-            row.status = "failed";
+            row.status = "cancelling";
             row.exitCode = null;
             row.finishedAt = stoppedAt;
             row.error = "CCM 服务正常关闭，构建任务已停止";
@@ -1035,21 +1051,46 @@ function stopManagedProjectRuntimesForShutdown() {
         const row = state.builds[key];
         if (!row || row.pid !== pid)
             continue;
-        row.status = "failed";
+        row.status = "cancelling";
         row.exitCode = null;
         row.finishedAt = stoppedAt;
         row.error = "CCM 服务正常关闭，构建任务已停止";
     }
-    // Commit ownership release before process termination so a forced server
-    // shutdown cannot leave a dead PID marked as running.
+    // Persist the stopping intent first, but only claim a terminal state after
+    // the complete process tree has been verified as gone.
     writeState(state);
-    for (const pid of processTargets.values())
-        stopProcessPidTree(pid);
-    for (const pid of buildTargets.values())
-        stopProcessPidTree(pid);
+    const processReceipts = new Map();
+    const buildReceipts = new Map();
+    await Promise.all([
+        ...[...processTargets].map(async ([key, pid]) => processReceipts.set(key, await stopProcessPidTree(pid))),
+        ...[...buildTargets].map(async ([key, pid]) => buildReceipts.set(key, await stopProcessPidTree(pid))),
+    ]);
+    const finalState = readState();
+    for (const [key, receipt] of processReceipts) {
+        const row = finalState.processes[key];
+        if (!row || row.pid !== receipt.pid)
+            continue;
+        row.stopReceipt = receipt;
+        row.status = receipt.exited ? "stopped" : "unknown";
+        row.error = receipt.exited ? undefined : receipt.error || "CCM关闭时无法证明源码进程已经停止";
+        row.stoppedAt = receipt.finished_at;
+    }
+    for (const [key, receipt] of buildReceipts) {
+        const row = finalState.builds[key];
+        if (!row || row.pid !== receipt.pid)
+            continue;
+        row.status = "failed";
+        row.error = receipt.exited ? "CCM 服务正常关闭，构建任务已停止" : receipt.error || "CCM关闭时构建进程停止失败";
+        row.finishedAt = receipt.finished_at;
+    }
+    writeState(finalState);
     liveProcesses.clear();
     liveBuilds.clear();
-    return { stoppedProcesses: processTargets.size, stoppedBuilds: buildTargets.size };
+    return {
+        stoppedProcesses: [...processReceipts.values()].filter(receipt => receipt.exited).length,
+        stoppedBuilds: [...buildReceipts.values()].filter(receipt => receipt.exited).length,
+        failures: [...processReceipts.values(), ...buildReceipts.values()].filter(receipt => !receipt.exited),
+    };
 }
 function collectArtifacts(root, patterns, startedAt) {
     const results = [];
@@ -1094,8 +1135,8 @@ function startProjectRuntime(project, profileId) {
     const key = runtimeKey(safeProject, profile.id);
     const initialState = normalizeProcessStates(safeProject, readState());
     const previous = initialState.processes[key];
-    if (["starting", "running", "unknown"].includes(previous?.status || ""))
-        throw new Error(previous?.status === "unknown" ? previous.error : "当前运行配置已经启动或正在准备依赖");
+    if (["starting", "running", "stopping", "unknown"].includes(previous?.status || ""))
+        throw new Error(previous?.status === "unknown" ? previous.error : previous?.status === "stopping" ? "当前运行配置正在停止" : "当前运行配置已经启动或正在准备依赖");
     const file = logFile(safeProject, profile.id, "run");
     replaceLog(file, `[${new Date().toISOString()}] START ${profile.label}\n`);
     const row = { project: safeProject, profileId: profile.id, status: "running", pid: 0, managerPid: process.pid, commandChecksum: "", workDir: "", startedAt: new Date().toISOString() };
@@ -1178,7 +1219,7 @@ function startProjectRuntime(project, profileId) {
     launch(profile.runCommand, "run", false);
     return { success: true, profile, state: row };
 }
-function stopProjectRuntime(project, profileId) {
+async function stopProjectRuntime(project, profileId) {
     const safeProject = projectConfig(project).project;
     const profile = profileForAction(safeProject, profileId);
     const key = runtimeKey(safeProject, profile.id);
@@ -1190,14 +1231,27 @@ function stopProjectRuntime(project, profileId) {
         throw new Error(row.error || "无法证明 PID 归属，已拒绝停止");
     row.stoppedAt = new Date().toISOString();
     row.stopReason = "user";
+    row.status = "stopping";
     writeState(state);
-    stopProcessTree(liveProcesses.get(key));
-    row.status = "stopped";
-    writeState(state);
-    (0, runtime_events_1.publishRuntimeEvent)("project", "project.runtime.stopped", { project: safeProject, profileId: profile.id, status: "stopped" });
-    return { success: true, profile, state: row };
+    (0, runtime_events_1.publishRuntimeEvent)("project", "project.runtime.stopping", { project: safeProject, profileId: profile.id, status: "stopping" });
+    const child = liveProcesses.get(key);
+    const stopReceipt = await stopProcessTree(child);
+    if (liveProcesses.get(key) === child)
+        liveProcesses.delete(key);
+    const latest = readState();
+    const current = latest.processes[key] || row;
+    if (current.pid === Number(child.pid || 0)) {
+        current.stopReceipt = stopReceipt;
+        current.stoppedAt = stopReceipt.finished_at;
+        current.status = stopReceipt.exited ? "stopped" : "unknown";
+        current.error = stopReceipt.exited ? undefined : stopReceipt.error || "无法证明进程树已经停止";
+        latest.processes[key] = current;
+        writeState(latest);
+    }
+    (0, runtime_events_1.publishRuntimeEvent)("project", stopReceipt.exited ? "project.runtime.stopped" : "project.runtime.stop_failed", { project: safeProject, profileId: profile.id, status: current.status });
+    return { success: stopReceipt.exited, profile, state: current, transition_receipt: stopReceipt };
 }
-function stopAllProjectRuntimes(project) {
+async function stopAllProjectRuntimes(project) {
     const safeProject = projectConfig(project).project;
     const state = normalizeProcessStates(safeProject, readState());
     const stoppedAt = new Date().toISOString();
@@ -1215,6 +1269,7 @@ function stopAllProjectRuntimes(project) {
         row.stoppedAt = stoppedAt;
         row.stopReason = "user";
         row.exitCode = null;
+        row.status = "stopping";
         processTargets.push({ key, row, child });
     }
     for (const [key, row] of Object.entries(state.builds)) {
@@ -1225,7 +1280,7 @@ function stopAllProjectRuntimes(project) {
             failures.push({ profileId: row.profileId, kind: "build", error: "无法证明构建进程归属，已拒绝停止" });
             continue;
         }
-        row.status = "failed";
+        row.status = "cancelling";
         row.finishedAt = stoppedAt;
         row.exitCode = null;
         row.error = "项目已断开，构建任务已停止";
@@ -1233,18 +1288,39 @@ function stopAllProjectRuntimes(project) {
     }
     // 先持久化用户停止意图，避免 close 事件把主动断开误记成运行失败。
     writeState(state);
-    for (const target of processTargets) {
-        stopProcessTree(target.child);
-        liveProcesses.delete(target.key);
-        target.row.status = "stopped";
-        (0, runtime_events_1.publishRuntimeEvent)("project", "project.runtime.stopped", { project: safeProject, profileId: target.row.profileId, status: "stopped", reason: "project_disconnected" });
+    const results = await Promise.all([
+        ...processTargets.map(async (target) => ({ target, kind: "run", receipt: await stopProcessTree(target.child) })),
+        ...buildTargets.map(async (target) => ({ target, kind: "build", receipt: await stopProcessTree(target.child) })),
+    ]);
+    const latest = readState();
+    for (const result of results) {
+        if (result.kind === "run") {
+            if (liveProcesses.get(result.target.key) === result.target.child)
+                liveProcesses.delete(result.target.key);
+            const row = latest.processes[result.target.key] || result.target.row;
+            row.stopReceipt = result.receipt;
+            row.status = result.receipt.exited ? "stopped" : "unknown";
+            row.error = result.receipt.exited ? undefined : result.receipt.error || "项目断开后无法证明进程树已经停止";
+            row.stoppedAt = result.receipt.finished_at;
+            latest.processes[result.target.key] = row;
+            if (!result.receipt.exited)
+                failures.push({ profileId: row.profileId, kind: "run", error: row.error || "停止失败" });
+            (0, runtime_events_1.publishRuntimeEvent)("project", result.receipt.exited ? "project.runtime.stopped" : "project.runtime.stop_failed", { project: safeProject, profileId: row.profileId, status: row.status, reason: "project_disconnected" });
+        }
+        else {
+            if (liveBuilds.get(result.target.key) === result.target.child)
+                liveBuilds.delete(result.target.key);
+            const row = latest.builds[result.target.key] || result.target.row;
+            row.status = "failed";
+            row.finishedAt = result.receipt.finished_at;
+            row.error = result.receipt.exited ? "项目已断开，构建任务已停止" : result.receipt.error || "项目断开后构建进程停止失败";
+            latest.builds[result.target.key] = row;
+            if (!result.receipt.exited)
+                failures.push({ profileId: row.profileId, kind: "build", error: row.error });
+            (0, runtime_events_1.publishRuntimeEvent)("project", "project.runtime.build_failed", { project: safeProject, profileId: row.profileId, status: "failed", reason: "project_disconnected" });
+        }
     }
-    for (const target of buildTargets) {
-        stopProcessTree(target.child);
-        liveBuilds.delete(target.key);
-        (0, runtime_events_1.publishRuntimeEvent)("project", "project.runtime.build_failed", { project: safeProject, profileId: target.row.profileId, status: "failed", reason: "project_disconnected" });
-    }
-    writeState(state);
+    writeState(latest);
     return {
         success: failures.length === 0,
         project: safeProject,
@@ -1253,10 +1329,12 @@ function stopAllProjectRuntimes(project) {
         failures,
     };
 }
-function restartProjectRuntime(project, profileId) {
+async function restartProjectRuntime(project, profileId) {
     const safeProject = projectConfig(project).project;
     const profile = profileForAction(safeProject, profileId);
-    stopProjectRuntime(safeProject, profile.id);
+    const stopped = await stopProjectRuntime(safeProject, profile.id);
+    if (!stopped.success)
+        throw new Error(stopped.state?.error || "旧运行进程没有完全停止，已拒绝重新运行");
     const result = startProjectRuntime(safeProject, profile.id);
     (0, runtime_events_1.publishRuntimeEvent)("project", "project.runtime.restarted", { project: safeProject, profileId: profile.id, status: "running" });
     return result;
@@ -1269,6 +1347,10 @@ function buildProjectRuntime(project, profileId) {
     const key = runtimeKey(safeProject, profile.id);
     if (liveBuilds.has(key))
         throw new Error("当前运行配置正在构建");
+    const persistedBuild = readState().builds[key];
+    if (["building", "cancelling"].includes(persistedBuild?.status || "") && processExists(Number(persistedBuild?.pid || 0))) {
+        throw new Error("当前运行配置正在构建或停止构建");
+    }
     const { child } = spawnProfileCommand(safeProject, profile, profile.buildCommand);
     const file = logFile(safeProject, profile.id, "build");
     const startedAt = Date.now();
@@ -1284,10 +1366,11 @@ function buildProjectRuntime(project, profileId) {
             liveBuilds.delete(key);
         const latest = readState();
         const current = latest.builds[key] || row;
-        current.status = code === 0 ? "succeeded" : "failed";
-        current.exitCode = code;
+        const cancelled = current.status === "cancelling" || /已停止|停止失败/.test(String(current.error || ""));
+        current.status = cancelled ? "failed" : code === 0 ? "succeeded" : "failed";
+        current.exitCode = cancelled ? null : code;
         current.finishedAt = new Date().toISOString();
-        current.artifacts = code === 0 ? collectArtifacts(workDir, profile.artifactPatterns, startedAt) : [];
+        current.artifacts = !cancelled && code === 0 ? collectArtifacts(workDir, profile.artifactPatterns, startedAt) : [];
         latest.builds[key] = current;
         writeState(latest);
         (0, runtime_events_1.publishRuntimeEvent)("project", code === 0 ? "project.runtime.build_succeeded" : "project.runtime.build_failed", { project: safeProject, profileId: profile.id, status: current.status });
@@ -1299,8 +1382,42 @@ function getProjectRuntimeLogs(project, profileId, kind, lines = 300) {
     const { safeProject, profileId: id, safeKind, file } = runtimeLogTarget(project, profileId, kind);
     if (!fs.existsSync(file))
         return { project: safeProject, profileId: id, kind: safeKind, logs: "" };
-    const content = fs.readFileSync(file, "utf-8").split(/\r?\n/).slice(-Math.max(1, Math.min(2000, Number(lines) || 300))).join("\n");
-    return { project: safeProject, profileId: id, kind: safeKind, logs: content };
+    const maxBytes = 1024 * 1024;
+    const size = fs.statSync(file).size;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    const handle = fs.openSync(file, "r");
+    try {
+        fs.readSync(handle, buffer, 0, length, Math.max(0, size - length));
+    }
+    finally {
+        fs.closeSync(handle);
+    }
+    const content = buffer.toString("utf-8").replace(/^\uFFFD+/, "").split(/\r?\n/).slice(-Math.max(1, Math.min(2000, Number(lines) || 300))).join("\n");
+    return { project: safeProject, profileId: id, kind: safeKind, logs: content, truncated: size > length };
+}
+async function getProjectRuntimeLogsAsync(project, profileId, kind, lines = 300) {
+    const { safeProject, profileId: id, safeKind, file } = runtimeLogTarget(project, profileId, kind);
+    try {
+        const handle = await fs.promises.open(file, "r");
+        try {
+            const stat = await handle.stat();
+            const maxBytes = 1024 * 1024;
+            const length = Math.min(stat.size, maxBytes);
+            const buffer = Buffer.alloc(length);
+            await handle.read(buffer, 0, length, Math.max(0, stat.size - length));
+            const content = buffer.toString("utf-8").replace(/^\uFFFD+/, "").split(/\r?\n/).slice(-Math.max(1, Math.min(2000, Number(lines) || 300))).join("\n");
+            return { project: safeProject, profileId: id, kind: safeKind, logs: content, truncated: stat.size > length };
+        }
+        finally {
+            await handle.close();
+        }
+    }
+    catch (error) {
+        if (String(error?.code || "") === "ENOENT")
+            return { project: safeProject, profileId: id, kind: safeKind, logs: "", truncated: false };
+        throw error;
+    }
 }
 function subscribeProjectRuntimeLogs(project, profileId, kind, listener) {
     const { file } = runtimeLogTarget(project, profileId, kind);
@@ -1329,6 +1446,11 @@ function getProjectRuntimeSnapshot(project) {
         toolchain_candidates: toolchainCandidates,
         processes: config.profiles.map(profile => state.processes[runtimeKey(safeProject, profile.id)] || { project: safeProject, profileId: profile.id, status: "stopped", pid: 0 }),
         builds: config.profiles.map(profile => state.builds[runtimeKey(safeProject, profile.id)]).filter(Boolean),
+        log_failures: config.profiles.flatMap(profile => ["run", "build"].map(kind => ({
+            profile_id: profile.id,
+            kind,
+            error: runtimeLogFailures.get(logFile(safeProject, profile.id, kind)) || "",
+        }))).filter(item => item.error),
     };
 }
 function getProjectRuntimeSummary(project) {
@@ -1341,16 +1463,88 @@ function getProjectRuntimeSummary(project) {
         selected_profile_id: snapshot.selected_profile_id,
     };
 }
-function executeProjectRuntimeAction(project, profileId, action) {
+function getProjectRuntimeSummaryReadOnly(project) {
+    const safeProject = projectConfig(project).project;
+    const config = getProjectRuntimeConfig(safeProject);
+    const state = readState();
+    const processes = config.profiles.map(profile => {
+        const row = state.processes[runtimeKey(safeProject, profile.id)];
+        if (!row)
+            return { profileId: profile.id, status: "stopped" };
+        if (!["starting", "running", "stopping"].includes(row.status))
+            return { profileId: profile.id, status: row.status };
+        if (row.managerPid && row.managerPid !== process.pid && processExists(row.managerPid) && processExists(row.pid)) {
+            return { profileId: profile.id, status: row.status };
+        }
+        if (!processExists(row.pid))
+            return { profileId: profile.id, status: "stopped" };
+        if (!liveProcesses.has(runtimeKey(safeProject, profile.id)))
+            return { profileId: profile.id, status: "unknown" };
+        return { profileId: profile.id, status: row.status };
+    });
+    const builds = config.profiles
+        .map(profile => state.builds[runtimeKey(safeProject, profile.id)])
+        .filter(Boolean);
+    return {
+        profile_count: config.profiles.length,
+        running_count: processes.filter(row => row.status === "running").length,
+        unknown_count: processes.filter(row => row.status === "unknown").length,
+        building_count: builds.filter(row => row.status === "building").length,
+        selected_profile_id: config.selectedProfileId,
+        profiles: config.profiles.map(profile => ({
+            id: profile.id,
+            label: profile.label,
+            project_type: profile.projectType,
+            environment: profile.environment,
+            module_path: profile.modulePath,
+            enabled: profile.enabled !== false,
+            runnable: !!profile.runCommand,
+            buildable: !!profile.buildCommand,
+        })),
+        processes,
+    };
+}
+async function executeProjectRuntimeAction(project, profileId, action) {
     const operation = String(action || "").trim();
-    if (operation === "start")
-        return startProjectRuntime(project, profileId);
-    if (operation === "stop")
-        return stopProjectRuntime(project, profileId);
-    if (operation === "restart")
-        return restartProjectRuntime(project, profileId);
-    if (operation === "build")
-        return buildProjectRuntime(project, profileId);
-    throw new Error("不支持的项目运行操作");
+    if (!new Set(["start", "stop", "restart", "build"]).has(operation))
+        throw new Error("不支持的项目运行操作");
+    const safeProject = projectConfig(project).project;
+    const profile = profileForAction(safeProject, profileId);
+    const key = runtimeKey(safeProject, profile.id);
+    if (runtimeActionSingleflight.has(key)) {
+        const error = new Error("当前运行配置正在执行其他操作");
+        error.code = "RUNTIME_BUSY";
+        throw error;
+    }
+    const task = (async () => {
+        const lockTarget = path.join(RUNTIME_DIR, "locks", crypto.createHash("sha256").update(key).digest("hex"));
+        let lock;
+        try {
+            lock = (0, atomic_json_file_1.acquireFileLock)(lockTarget, { timeoutMs: 100, retryMs: 20, staleMs: 60_000 });
+        }
+        catch {
+            const error = new Error("当前运行配置正在被另一个CCM实例操作");
+            error.code = "RUNTIME_BUSY";
+            throw error;
+        }
+        try {
+            const result = operation === "start" ? startProjectRuntime(safeProject, profile.id)
+                : operation === "stop" ? await stopProjectRuntime(safeProject, profile.id)
+                    : operation === "restart" ? await restartProjectRuntime(safeProject, profile.id)
+                        : buildProjectRuntime(safeProject, profile.id);
+            return { ...result, operation_id: `runtime_${crypto.randomBytes(10).toString("hex")}` };
+        }
+        finally {
+            (0, atomic_json_file_1.releaseFileLock)(lock);
+        }
+    })();
+    runtimeActionSingleflight.set(key, task);
+    try {
+        return await task;
+    }
+    finally {
+        if (runtimeActionSingleflight.get(key) === task)
+            runtimeActionSingleflight.delete(key);
+    }
 }
 //# sourceMappingURL=project-runtime.js.map

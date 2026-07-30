@@ -58,10 +58,16 @@ const ROUTE_ALLOWLIST = {
         /^\/api\/send-stream(?:\?|$)/,
     ],
     "project-feishu-queue": [/^\/api\/send-stream(?:\?|$)/],
-    "ccm-cli": [/^\/api\/projects\/runtime\/shutdown(?:\?|$)/],
+    "ccm-cli": [
+        /^\/api\/internal\/(?:lifecycle\/(?:identity|ready|drain)|update\/status)(?:\?|$)/,
+        /^\/api\/projects\/(?:runtime\/(?:shutdown|action)|agent-connection)(?:\?|$)/,
+    ],
     "server-recovery": [
         /^\/api\/(?:tasks|projects|global-agent|feishu)(?:\/|\?|$)/,
         /^\/api\/send-stream(?:\?|$)/,
+    ],
+    "desktop-pet": [
+        /^\/api\/pets\/(?:runtime\/(?:bootstrap|stream|deliveries\/[^/?]+\/ack)|config|agents|navigate|action-strategy|status)(?:\/|\?|$)/,
     ],
 };
 function ensureSecret() {

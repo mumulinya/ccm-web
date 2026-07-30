@@ -14,6 +14,11 @@ import { appendTaskTimelineEvent } from "./logs";
 import { runManagedCommand } from "../../agents/execution-kernel";
 import { withFileLock, writeJsonAtomic } from "../../core/atomic-json-file";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import {
+  createUserNotification,
+  resolveUserNotificationsByDedupeKey,
+  setNotificationDeliveryState,
+} from "../../system/user-notifications";
 
 export type PermissionRisk = "low" | "medium" | "high";
 export type PermissionState = "approved" | "awaiting_user" | "rejected" | "expired" | "consumed";
@@ -41,6 +46,7 @@ export type TaskPermissionRequest = {
   nextNotificationAt: string;
   notificationPetSent: boolean;
   notificationFeishuSent: boolean;
+  notificationV2Ids?: string[];
   operation: string;
   command: string;
   paths: string[];
@@ -340,6 +346,7 @@ export function decideTaskPermission(requestId: string, input: any) {
     state: updated.state,
     operation: updated.operation,
   });
+  resolveUserNotificationsByDedupeKey(`permission:${updated.id}`);
   return publicRequest(updated);
 }
 
@@ -438,17 +445,34 @@ export async function deliverPendingTaskPermissionNotifications(ctx: any, depend
       const title = "开发任务需要权限确认";
       const originLabel = request.originType === "global" ? "全局会话" : request.originType === "group" ? "群聊会话" : request.originType === "project" ? "项目会话" : "任务派发";
       const text = `${request.project} 请求 ${request.operation} 权限，需要你确认`;
-      let petSent = request.notificationPetSent === true;
-      const petAvailable = typeof ctx?.broadcastPetSpeech === "function";
-      if (!petSent && petAvailable) try {
-        ctx.broadcastPetSpeech(request.notificationAgent || "global-agent", { role: "attention", text, source: "permission-approval", mode: "replace" });
-        petSent = true;
-      } catch {}
       const channel = require("./feishu-channel");
       const hasExactFeishuBinding = dependencies.hasFeishuTaskBinding || channel.hasFeishuTaskBinding;
       const feishuEligible = ["global", "project"].includes(request.originType)
         && !!request.originSessionId
         && hasExactFeishuBinding({ runId: request.globalRunId, missionId: request.globalMissionId, taskId: request.taskId.startsWith("project-session:") ? "" : request.taskId, sessionId: request.originSessionId });
+      const notifications = createUserNotification({
+        source_type: "permission_request",
+        source_channel: request.originType,
+        scope_type: request.originType === "global" ? "global" : request.originType === "group" ? "group" : request.originType === "project" ? "project" : "task",
+        scope_id: request.originProject || request.originGroupId || request.taskId,
+        exact_session_id: request.originSessionId || request.groupSessionId || request.projectSessionId,
+        task_id: request.taskId,
+        notification_type: "permission_required",
+        severity: request.risk === "high" ? "critical" : "warning",
+        title,
+        summary: `${text}。风险等级：${request.risk}`,
+        action: {
+          kind: "permission",
+          permission_id: request.id,
+          task_id: request.taskId,
+          session_id: request.originSessionId,
+          project_id: request.originProject,
+          group_id: request.originGroupId,
+        },
+        dedupe_key: `permission:${request.id}`,
+        channels: feishuEligible ? ["web", "desktop_pet", "web_pet", "feishu"] : ["web", "desktop_pet", "web_pet"],
+      });
+      const notificationV2Ids = notifications.map(item => item.notification_id);
       let feishuSent = !feishuEligible || request.notificationFeishuSent === true;
       if (feishuEligible && !feishuSent) try {
         const approvalHint = `可以直接点击卡片按钮审批；全局 Agent 来源也可以回复“批准权限 ${request.id}”或“拒绝权限 ${request.id}”。`;
@@ -456,17 +480,23 @@ export async function deliverPendingTaskPermissionNotifications(ctx: any, depend
         const notifyFeishuTaskStage = dependencies.notifyFeishuTaskStage || channel.notifyFeishuTaskStage;
         const actions = (dependencies.createFeishuPermissionActions || channel.createFeishuPermissionActions)(request);
         const bound = await notifyFeishuTaskStage({ stage: "permission_approval", title, markdown, actions, forceNewMessage: true, dedupeKey: `permission:${request.id}`, runId: request.globalRunId, missionId: request.globalMissionId, taskId: request.taskId.startsWith("project-session:") ? "" : request.taskId, sessionId: request.originSessionId });
-        if (bound?.success || bound?.queued) feishuSent = true;
-      } catch {}
+        if (bound?.success || bound?.queued) {
+          feishuSent = true;
+          notificationV2Ids.forEach(id => setNotificationDeliveryState(id, "feishu", bound?.success ? "delivered" : "sending"));
+        }
+      } catch (error) {
+        notificationV2Ids.forEach(id => setNotificationDeliveryState(id, "feishu", "failed", { error }));
+      }
       const attempts = Number(request.notificationAttempts || 0) + 1;
-      const complete = (petSent || !petAvailable) && feishuSent;
+      const complete = notificationV2Ids.length > 0 && feishuSent;
       updatePermissionNotification(request.id, {
         notificationState: complete ? "sent" : "partial",
         notificationAt: complete ? now() : request.notificationAt || "",
         notificationAttempts: attempts,
         nextNotificationAt: complete || attempts >= 5 ? "" : new Date(Date.now() + Math.min(60_000, 5_000 * 2 ** attempts)).toISOString(),
-        notificationPetSent: petSent,
+        notificationPetSent: false,
         notificationFeishuSent: feishuSent,
+        notificationV2Ids,
       });
       if (complete) sent += 1;
     }

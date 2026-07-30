@@ -1545,7 +1545,7 @@ export declare function mergeReplayRepairTimelineBinding(current?: any, incoming
 export declare function replayRepairConsumptionStringListForCoordinator(value: any): string[];
 export declare function replayRepairConsumptionRowsForCoordinator(receipt?: any): any[];
 export declare function replayRepairConsumptionMatchesBriefForCoordinator(row?: any, brief?: any): boolean;
-export declare function normalizeReplayRepairConsumptionStatusForCoordinator(value: any, fallback?: string): "" | "verified" | "blocked" | "used" | "ignored" | "strong";
+export declare function normalizeReplayRepairConsumptionStatusForCoordinator(value: any, fallback?: string): "" | "blocked" | "verified" | "used" | "ignored" | "strong";
 export declare function postCompactCandidateUsageRowsForCoordinator(receipt?: any): any[];
 export declare function normalizePostCompactCandidateUsageStateForCoordinator(value: any): "" | "verified" | "used" | "ignored";
 export declare function postCompactReinjectionReceiptProofForCoordinator(brief?: any, receipt?: any): {

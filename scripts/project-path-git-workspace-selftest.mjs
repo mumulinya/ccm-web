@@ -91,6 +91,18 @@ try {
   assert.equal(status.data.repository.canPull, true)
   assert.equal(status.data.repository.canPush, false)
   assert.equal(status.data.repository.pushState, 'up_to_date')
+  assert.equal(typeof status.data.workspace_snapshot_checksum, 'string')
+  assert.equal(status.data.workspace_snapshot_checksum.length, 64)
+
+  const outsideLink = path.join(workDir, 'linked-outside')
+  try {
+    fs.symlinkSync(seedDir, outsideLink, process.platform === 'win32' ? 'junction' : 'dir')
+    const escapedRead = await request(`/api/git/file?project=${encodeURIComponent(project)}&file=${encodeURIComponent('linked-outside/README.md')}`)
+    assert.equal(escapedRead.response.status, 400)
+    assert.match(escapedRead.data.error, /符号链接|目录联接|真实路径/)
+  } finally {
+    try { fs.unlinkSync(outsideLink) } catch {}
+  }
 
   const noOpPush = await post('/api/git/remote-operation', { project, operation: 'push', confirmed: true })
   assert.equal(noOpPush.data.success, true)
@@ -122,6 +134,13 @@ try {
   assert.equal(detailedStatus.data.rawTotal, 3)
   assert.equal(detailedStatus.data.repository.changedFiles, 2)
   assert.equal(detailedStatus.data.repository.indexResidualFiles, 1)
+  const firstPage = await request(`/api/git/status?project=${encodeURIComponent(project)}&limit=1&include_context=false`)
+  assert.equal(firstPage.data.files.length, 1)
+  assert.equal(firstPage.data.truncated, true)
+  assert.ok(firstPage.data.next_cursor)
+  const secondPage = await request(`/api/git/status?project=${encodeURIComponent(project)}&limit=1&include_context=false&cursor=${encodeURIComponent(firstPage.data.next_cursor)}`)
+  assert.equal(secondPage.data.workspace_snapshot_checksum, firstPage.data.workspace_snapshot_checksum)
+  assert.equal(secondPage.data.files.length, 1)
   const unconfirmedResidualCleanup = await post('/api/git/index-residuals/cleanup', { project, files: ['staged-then-deleted.txt'] })
   assert.equal(unconfirmedResidualCleanup.response.status, 409)
   const cleanedResidual = await post('/api/git/index-residuals/cleanup', { project, files: ['staged-then-deleted.txt'], confirmed: true })
@@ -166,6 +185,16 @@ try {
   assert.equal(emptyCommit.response.status, 400)
   assert.match(emptyCommit.data.error, /明确选择/)
 
+  fs.writeFileSync(path.join(workDir, 'drift.txt'), 'first\n')
+  const driftStatus = await request(`/api/git/status?project=${encodeURIComponent(project)}&include_context=false`)
+  const driftPreview = await post('/api/git/commit-preview', { project, files: ['drift.txt'] })
+  assert.equal(driftPreview.data.success, true)
+  fs.appendFileSync(path.join(workDir, 'drift.txt'), 'second\n')
+  const driftCommit = await post('/api/git/commit', { project, message: 'must reject stale preview', files: ['drift.txt'], expected_snapshot_checksum: driftPreview.data.workspace_snapshot_checksum })
+  assert.equal(driftCommit.response.status, 409)
+  assert.equal(driftCommit.data.errorCode, 'state_drift')
+  fs.rmSync(path.join(workDir, 'drift.txt'))
+
   fs.writeFileSync(path.join(workDir, 'local.txt'), 'from local\n')
   const committed = await post('/api/git/commit', { project, message: 'local commit', files: ['local.txt'], action: 'commit', verification: 'passed', reviewed: true })
   assert.equal(committed.data.success, true)
@@ -186,6 +215,9 @@ try {
   assert.equal(git(workDir, ['rev-parse', 'HEAD']), git(tempHome, ['--git-dir', remoteDir, 'rev-parse', 'refs/heads/main']))
 
   fs.appendFileSync(path.join(workDir, 'README.md'), 'dirty\n')
+  const unconfirmedDiscard = await post('/api/git/rollback', { project, file: 'README.md', staged: false })
+  assert.equal(unconfirmedDiscard.response.status, 409)
+  assert.equal(unconfirmedDiscard.data.confirmationRequired, true)
   const blockedPull = await post('/api/git/remote-operation', { project, operation: 'pull', confirmed: true })
   assert.equal(blockedPull.response.status, 409)
   assert.match(blockedPull.data.error, /未提交文件/)
@@ -224,6 +256,10 @@ try {
       commitsAndPushesInOneFlow: true,
       blocksPullWithDirtyWorktree: true,
       preservesCommitWhenCombinedPushFails: true,
+      rejectsSymlinkTraversal: true,
+      paginatesStableWorkspaceSnapshot: true,
+      rejectsStaleCommitPreview: true,
+      requiresDiscardConfirmation: true,
     },
   }, null, 2))
 } finally {

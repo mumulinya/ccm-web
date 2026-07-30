@@ -49,6 +49,12 @@ const ADMIN_GET = [
     /^\/api\/(?:settings|orchestrator|agent-provider|development-agents)(?:\/|$)/,
     /^\/api\/system\/settings-status(?:\/|$)/,
     /^\/api\/tools\/(?:marketplace|catalog|authorization-inventory)(?:\/|$)/,
+    /^\/api\/(?:marketplace|smithery)(?:\/|$)/,
+    /^\/api\/reliability(?:\/|$)/,
+    /^\/api\/navigation\/default(?:\/|$)/,
+];
+const OPERATOR_GET = [
+    /^\/api\/metrics\/events(?:\/|$)/,
 ];
 const VIEWER_CHAT = [
     /^\/api\/global-agent\/(?:chat|send|message)(?:\/|$)/,
@@ -57,8 +63,16 @@ const VIEWER_CHAT = [
     /^\/api\/groups\/[^/]+\/(?:send|chat|message)(?:\/|$)/,
     /^\/api\/rag\/chat(?:\/|$)/,
 ];
+const SELF_SERVICE_MUTATIONS = [
+    /^\/api\/search\/favorites(?:\/|$)/,
+    /^\/api\/slash-commands\/(?:resolve|confirm)$/,
+    /^\/api\/notifications\/(?:[^/]+\/(?:read|dismiss)|read-all)$/,
+    /^\/api\/pets\/runtime\/deliveries\/[^/]+\/ack$/,
+    /^\/api\/navigation\/config(?:\/|$)/,
+];
 const OPERATOR_MUTATIONS = [
     /^\/api\/(?:tasks|requirements|workbench|missions|agent-qa|auto-dev|conversation-turns)(?:\/|$)/,
+    /^\/api\/usability(?:\/|$)/,
     /^\/api\/(?:agent-runs|project-runs)\/(?:cancel|rollback)(?:\/|$)/,
     /^\/api\/global-agent\/(?:chat|send|message|missions|task)(?:\/|$)/,
     /^\/api\/send(?:-stream)?(?:\/|$)/,
@@ -75,11 +89,13 @@ const ADMIN_ONLY_MUTATIONS = [
     /^\/api\/tasks\/permission-requests\/(?:decide|approve|reject)(?:\/|$)/,
     /^\/api\/permissions(?:\/|$)/,
     /^\/api\/tasks\/(?:purge|logs\/clear|runtime-debt\/cleanup)(?:\/|$)/,
+    /^\/api\/(?:reliability|cleanup)(?:\/|$)/,
 ];
 const CAPABILITY_BY_OPERATOR_ROUTE = [
     { pattern: /^\/api\/projects\/runtime(?:\/|$)/, capability: "project.runtime" },
     { pattern: /^\/api\/(?:projects\/git|git|code-changes)(?:\/|$)/, capability: "project.git" },
     { pattern: /^\/api\/(?:attachments|uploads|shared-files)(?:\/|$)/, capability: "attachment.manage" },
+    { pattern: /^\/api\/usability(?:\/|$)/, capability: "task.execute" },
 ];
 function normalizedPath(pathname) {
     try {
@@ -115,8 +131,12 @@ function authorizeApiRequest(req, res, pathnameWithQuery) {
     const role = auth.user.role;
     let allowed = role === "admin";
     let readOnly = false;
-    if (SAFE_METHODS.has(method))
-        allowed = role === "admin" || !matches(ADMIN_GET, pathname);
+    if (SAFE_METHODS.has(method)) {
+        allowed = role === "admin"
+            || (!matches(ADMIN_GET, pathname) && (!matches(OPERATOR_GET, pathname) || role === "operator"));
+    }
+    else if (matches(SELF_SERVICE_MUTATIONS, pathname))
+        allowed = true;
     else if (role === "operator" && !matches(ADMIN_ONLY_MUTATIONS, pathname) && matches(OPERATOR_MUTATIONS, pathname))
         allowed = true;
     else if (role === "viewer" && matches(VIEWER_CHAT, pathname)) {

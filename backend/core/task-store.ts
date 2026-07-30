@@ -334,6 +334,91 @@ export function updateTaskByIdInSqlite(id: string, patchOrMutator: any): any | n
   return next;
 }
 
+export type TaskCasMutationResult = {
+  updated: boolean;
+  conflict: boolean;
+  task: any | null;
+  previous: any | null;
+};
+
+/**
+ * Performs a single-row compare-and-swap while holding SQLite's write lock.
+ * The predicate is evaluated against the latest payload, so a scheduler cannot
+ * overwrite a task that changed after its read snapshot.
+ */
+export function updateTaskByIdCasInSqlite(
+  id: string,
+  predicate: (current: any) => boolean,
+  mutator: (current: any) => any,
+): TaskCasMutationResult {
+  const taskId = String(id || "").trim();
+  if (!taskId) return { updated: false, conflict: false, task: null, previous: null };
+  const db = getDatabase();
+  const transaction = db.transaction((): TaskCasMutationResult => {
+    const existing = db.prepare("SELECT id, position, payload_json FROM tasks WHERE id = ?").get(taskId) as
+      | { id: string; position: number; payload_json: string }
+      | undefined;
+    if (!existing) return { updated: false, conflict: false, task: null, previous: null };
+    const current = parseJson(existing.payload_json, null);
+    if (!current) return { updated: false, conflict: false, task: null, previous: null };
+    if (!predicate(current)) return { updated: false, conflict: true, task: current, previous: current };
+    const next = mutator({ ...current });
+    if (!next || String(next.id) !== taskId) throw new Error("CAS更新不能改变任务 id");
+    const row = taskColumns(next, Number(existing.position) || 0);
+    db.prepare(`
+      UPDATE tasks SET
+        position = ?, status = ?, group_id = ?, target_project = ?, workflow_type = ?,
+        created_at = ?, updated_at = ?, archived = ?, payload_json = ?, payload_hash = ?
+      WHERE id = ?
+    `).run(
+      row.position, row.status, row.groupId, row.targetProject, row.workflowType,
+      row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, taskId,
+    );
+    return { updated: true, conflict: false, task: next, previous: current };
+  });
+  return transaction.immediate();
+}
+
+export function listUsabilityTaskCandidatesFromSqlite(recentCutoff: string): any[] {
+  const rows = getDatabase().prepare(`
+    SELECT payload_json
+    FROM tasks
+    WHERE archived = 0
+      AND (
+        status NOT IN ('done', 'completed', 'succeeded', 'cancelled', 'archived', 'deleted')
+        OR updated_at >= ?
+        OR json_extract(payload_json, '$.intake_state') = 'awaiting_confirmation'
+      )
+    ORDER BY updated_at DESC, position ASC
+  `).all(String(recentCutoff || "")) as Array<{ payload_json: string }>;
+  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+}
+
+export function listUsabilityArchiveCandidatesFromSqlite(historyCutoff: string, intakeCutoff: string): any[] {
+  const rows = getDatabase().prepare(`
+    SELECT payload_json
+    FROM tasks
+    WHERE archived = 0
+      AND (
+        (
+          status IN ('done', 'cancelled')
+          AND COALESCE(
+            NULLIF(json_extract(payload_json, '$.completed_at'), ''),
+            NULLIF(json_extract(payload_json, '$.cancelled_at'), ''),
+            NULLIF(updated_at, ''),
+            created_at
+          ) < ?
+        )
+        OR (
+          json_extract(payload_json, '$.intake_state') = 'awaiting_confirmation'
+          AND created_at < ?
+        )
+      )
+    ORDER BY updated_at ASC
+  `).all(String(historyCutoff || ""), String(intakeCutoff || "")) as Array<{ payload_json: string }>;
+  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+}
+
 export function saveTasksToSqlite(tasks: any[]) {
   if (!Array.isArray(tasks)) throw new Error("任务存储只接受数组");
   const db = getDatabase();

@@ -15,6 +15,16 @@
 
     <div v-if="configsLoading" class="pet-loading-bar"><i></i><span>正在同步宠物配置</span></div>
     <div v-if="configsError" class="pet-error-banner" role="status"><span><strong>宠物配置暂时不可用</strong><small>{{ configsError }}</small></span><button @click="loadConfigs">重新加载</button></div>
+    <section class="pet-runtime-settings" aria-label="桌面宠物运行设置">
+      <label>
+        <span><strong>随 CCM 启动</strong><small>仅在检测到图形桌面时自动启动 Electron 桌宠</small></span>
+        <input type="checkbox" :checked="petSettings.autoStart" @change="updatePetSetting('autoStart', $event.target.checked)">
+      </label>
+      <label>
+        <span><strong>网页宠物兜底</strong><small>Electron 离线时由网页宠物继续显示持久通知</small></span>
+        <input type="checkbox" :checked="petSettings.webFallback" @change="updatePetSetting('webFallback', $event.target.checked)">
+      </label>
+    </section>
 
     <section class="companion-overview" aria-label="当前工作伴侣">
       <button

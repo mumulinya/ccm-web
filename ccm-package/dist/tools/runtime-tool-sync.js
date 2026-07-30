@@ -645,18 +645,43 @@ function parseEnvironment(value) {
 }
 function toMcpServer(tool) {
     const url = String(tool?.url || "").trim();
-    if (url)
-        return { url, ...(tool?.headers && typeof tool.headers === "object" ? { headers: tool.headers } : {}) };
+    if (url) {
+        const transport = String(tool?.transport || tool?.transportType || "streamable_http").trim().toLowerCase();
+        if (!["streamable_http", "sse"].includes(transport)) {
+            throw new Error(`远程 MCP transport 不受支持: ${transport || "<empty>"}`);
+        }
+        return {
+            url,
+            ...(tool?.headers && typeof tool.headers === "object" ? { headers: tool.headers } : {}),
+        };
+    }
     const configuredArgs = Array.isArray(tool?.args) ? tool.args.map((item) => String(item)) : [];
     const commandParts = tokenizeCommand(String(tool?.command || "").trim());
-    const command = commandParts.shift() || "";
+    const configuredCommand = commandParts.shift() || "";
+    const approvedExecutable = String(tool?.executablePath || "").trim();
+    const command = approvedExecutable || configuredCommand;
     if (!command)
         throw new Error("缺少 command");
+    if (tool?.marketplace && !approvedExecutable) {
+        throw new Error("市场 MCP 缺少已批准的可执行文件路径，需要重新复核");
+    }
+    if (approvedExecutable && (!path.isAbsolute(approvedExecutable) || !fs.existsSync(approvedExecutable))) {
+        throw new Error("市场 MCP 已批准的可执行文件路径不存在或已变化，需要重新复核");
+    }
     const server = { command, args: [...commandParts, ...configuredArgs] };
     const env = parseEnvironment(tool?.env);
     if (Object.keys(env).length)
         server.env = env;
     return server;
+}
+function runtimeMcpInstallationIdentity(tool) {
+    const marketplace = tool?.marketplace && typeof tool.marketplace === "object" ? tool.marketplace : {};
+    return {
+        transport: String(tool?.url ? (tool?.transport || tool?.transportType || "streamable_http") : "stdio"),
+        installationId: String(marketplace?.installationId || marketplace?.installation_id || ""),
+        installationRevision: String(marketplace?.installationRevision || marketplace?.revision || tool?.installationRevision || ""),
+        materialHash: String(marketplace?.materialHash || tool?.materialHash || ""),
+    };
 }
 function safeSlug(value) {
     const slug = String(value || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -1450,6 +1475,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
                     delivery: "proxy",
                     grants,
                     tools,
+                    ...runtimeMcpInstallationIdentity(tool),
                 });
                 audit.warnings.push(`MCP ${tool.name} 仅授权子工具${tools.length ? `：${tools.join(", ")}` : ""}；原生 MCP 无法安全过滤工具列表，已改由 CCM 代理执行`);
                 continue;
@@ -1464,6 +1490,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
                     delivery: "native",
                     grants,
                     tools,
+                    ...runtimeMcpInstallationIdentity(tool),
                 });
             }
             catch (error) {
@@ -1474,6 +1501,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
                     state: "config_error",
                     grants,
                     tools,
+                    ...runtimeMcpInstallationIdentity(tool),
                     error: error?.message || String(error),
                 });
             }

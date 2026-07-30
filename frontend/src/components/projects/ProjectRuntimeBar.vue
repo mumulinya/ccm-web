@@ -21,9 +21,10 @@ const processState = computed(() => (props.snapshot?.processes || []).find(row =
 const buildState = computed(() => (props.snapshot?.builds || []).find(row => row.profileId === selected.value?.id) || null)
 const starting = computed(() => processState.value.status === 'starting')
 const running = computed(() => processState.value.status === 'running')
-const active = computed(() => starting.value || running.value)
+const stopping = computed(() => processState.value.status === 'stopping')
+const active = computed(() => starting.value || running.value || stopping.value)
 const unknown = computed(() => processState.value.status === 'unknown')
-const building = computed(() => buildState.value?.status === 'building')
+const building = computed(() => ['building', 'cancelling'].includes(buildState.value?.status))
 const buildLabel = computed(() => ['maven', 'gradle'].includes(selected.value?.projectType) ? '打包 JAR' : '构建')
 const durationText = computed(() => {
   if (!running.value || !processState.value.startedAt) return ''
@@ -34,6 +35,7 @@ const durationText = computed(() => {
 })
 const statusText = computed(() => {
   if (unknown.value) return '进程归属待确认'
+  if (stopping.value) return '正在停止进程树'
   if (starting.value) return '正在准备项目依赖'
   if (running.value) return `运行中${durationText.value ? ` ${durationText.value}` : ''}${processState.value.pid ? ` · PID ${processState.value.pid}` : ''}`
   if (processState.value.status === 'failed') return '运行失败'
@@ -66,7 +68,7 @@ const statusText = computed(() => {
 
       <div class="runtime-actions">
         <button v-if="!active" class="primary" :disabled="!!busyAction || unknown || !selected?.runCommand" title="启动所选源码项目" @click="emit('action', 'start')"><Play :size="15" />{{ busyAction === 'start' ? '启动中' : '启动' }}</button>
-        <button v-else class="pause" :disabled="!!busyAction" :title="starting ? '停止依赖准备' : '暂停所选源码项目'" @click="emit('action', 'stop')"><Pause :size="15" />{{ busyAction === 'stop' ? '停止中' : starting ? '停止准备' : '暂停' }}</button>
+        <button v-else class="pause" :disabled="!!busyAction || stopping" :title="starting ? '停止依赖准备' : '暂停所选源码项目'" @click="emit('action', 'stop')"><Pause :size="15" />{{ stopping || busyAction === 'stop' ? '停止中' : starting ? '停止准备' : '暂停' }}</button>
         <button :disabled="!!busyAction || starting || unknown || !selected?.runCommand" title="重新运行所选源码项目" @click="emit('action', 'restart')"><RotateCcw :size="15" /></button>
         <button :disabled="!!busyAction || building || !selected?.buildCommand" :title="buildLabel" @click="emit('action', 'build')"><Box :size="15" />{{ building ? '构建中' : buildLabel }}</button>
         <button title="查看运行日志" @click="emit('logs', 'run')"><FileText :size="15" /></button>
@@ -102,6 +104,7 @@ select { width:100%; height:34px; padding:0 30px 0 10px; border:1px solid var(--
 .state-dot { width:8px; height:8px; border-radius:50%; background:#94a3b8; }
 .runtime-state.running .state-dot { background:#16a34a; box-shadow:0 0 0 3px color-mix(in srgb,#16a34a 14%,transparent); }
 .runtime-state.starting .state-dot { background:#d97706; box-shadow:0 0 0 3px color-mix(in srgb,#d97706 14%,transparent); }
+.runtime-state.stopping .state-dot { background:#d97706; box-shadow:0 0 0 3px color-mix(in srgb,#d97706 14%,transparent); animation:pulse-stop 1s ease-in-out infinite; }
 .runtime-state.failed .state-dot,.runtime-state.unknown .state-dot { background:#dc2626; }
 .runtime-actions { display:flex; align-items:center; gap:5px; }
 button { min-width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 9px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-primary); cursor:pointer; font-size:10.5px; white-space:nowrap; }
@@ -118,6 +121,7 @@ button.pause { border-color:#dc2626; color:#dc2626; }
 .build-result button { width:28px; min-width:28px; height:28px; padding:0; }
 .spin { animation:spin 1s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
+@keyframes pulse-stop { 50% { opacity:.35; } }
 @media(max-width:1180px) { .build-result { display:none; } .runtime-state { min-width:125px; } }
 @media(max-width:900px) { .runtime-bar { flex-wrap:wrap; } .runtime-heading { min-width:104px; } .profile-select { min-width:min(340px,calc(100vw - 165px)); } .runtime-actions { margin-left:auto; } }
 @media(max-width:620px) { .runtime-bar { padding:9px 12px; gap:9px; } .runtime-heading { display:none; } .profile-select { width:100%; max-width:none; min-width:0; grid-template-columns:1fr; } .profile-select span { display:none; } .runtime-state { width:100%; min-width:0; padding:0; border-left:0; } .runtime-actions { width:100%; margin-left:0; overflow-x:auto; padding-bottom:2px; } .runtime-actions button { flex:0 0 auto; } }

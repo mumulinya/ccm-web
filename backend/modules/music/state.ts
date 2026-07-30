@@ -1,23 +1,29 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import { CCM_DIR } from "../../core/utils";
 import { loadMusicConfig } from "../../core/db";
 import { loadOrchestratorConfig, publicOrchestratorConfig } from "../collaboration/group-orchestrator";
 import { notifyFeishuTaskStage } from "../collaboration/feishu-channel";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import {
+  claimPersistedMusicCommand,
+  completePersistedMusicCommand,
+  enqueuePersistedMusicCommand,
+  heartbeatPersistedMusicCommand,
+  listPersistedMusicCommands,
+  peekPersistedMusicCommand,
+  requeuePersistedMusicCommand,
+  replacePersistedMusicCommandsForTest,
+} from "./music-persistence";
 
 export const MUSIC_REMOTE_COMMAND_FILE = path.join(CCM_DIR, "music-remote-command.json");
 export const MUSIC_REMOTE_COMMANDS_FILE = path.join(CCM_DIR, "music-remote-commands.json");
 /** The browser renews a short lease while preparing/downloading/playing. */
-const CLAIM_LEASE_MS = 15_000;
-const MAX_QUEUE = 50;
-
 export type MusicPlaybackCommandStatusV2 = "pending" | "resolving" | "ready" | "claimed" | "playing" | "needs_user_gesture" | "completed" | "failed" | "superseded" | "cancelled";
 
 export type MusicRemoteCommand = {
-  schema?: "ccm-music-playback-command-v2";
-  version?: 2;
+  schema?: "ccm-music-playback-command-v2" | "ccm-music-playback-command-v3";
+  version?: 2 | 3;
   id: string;
   type: string;
   keyword: string;
@@ -35,6 +41,8 @@ export type MusicRemoteCommand = {
   last_error?: string;
   terminal_at?: string;
   result?: any;
+  lease_id?: string;
+  fencing_token?: number;
   consumed?: boolean;
   consumed_at?: string;
 };
@@ -96,106 +104,12 @@ function emitPlaybackCommandEvent(command: MusicRemoteCommand) {
   }).catch(() => {});
 }
 
-function ensureDir() {
-  fs.mkdirSync(path.dirname(MUSIC_REMOTE_COMMANDS_FILE), { recursive: true });
-}
-
 function readQueue(): MusicRemoteCommand[] {
-  try {
-    if (fs.existsSync(MUSIC_REMOTE_COMMANDS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(MUSIC_REMOTE_COMMANDS_FILE, "utf-8"));
-      const rows = Array.isArray(data?.commands) ? data.commands : Array.isArray(data) ? data : [];
-      return rows.map((item: any, index: number) => normalizeRemoteCommand(item, index)).filter(Boolean) as MusicRemoteCommand[];
-    }
-  } catch {}
-  // Migrate legacy single-command file into the queue once.
-  try {
-    if (fs.existsSync(MUSIC_REMOTE_COMMAND_FILE)) {
-      const legacy = JSON.parse(fs.readFileSync(MUSIC_REMOTE_COMMAND_FILE, "utf-8"));
-      if (legacy?.id && legacy?.keyword && !legacy.consumed) {
-        const migrated: MusicRemoteCommand = {
-          id: String(legacy.id),
-          type: String(legacy.type || "play"),
-          keyword: String(legacy.keyword),
-          request_text: String(legacy.request_text || legacy.requestText || legacy.keyword || ""),
-          mode: String(legacy.mode || ""),
-          source: String(legacy.source || "legacy"),
-          created_at: String(legacy.created_at || nowIso()),
-          status: "pending",
-          attempts: 0,
-        };
-        writeQueue([migrated]);
-        return [migrated];
-      }
-    }
-  } catch {}
-  return [];
-}
-
-function normalizeRemoteCommand(item: any, index = 0): MusicRemoteCommand | null {
-  if (!item?.id || !item?.keyword) return null;
-  const legacyStatus = String(item.status || (item.consumed ? "completed" : "pending"));
-  const status: MusicPlaybackCommandStatusV2 = legacyStatus === "stale"
-    ? "failed"
-    : (["pending", "resolving", "ready", "claimed", "playing", "needs_user_gesture", "completed", "failed", "superseded", "cancelled"].includes(legacyStatus)
-      ? legacyStatus as MusicPlaybackCommandStatusV2
-      : "pending");
-  return {
-    ...item,
-    schema: "ccm-music-playback-command-v2",
-    version: 2,
-    type: String(item.type || "play"),
-    keyword: String(item.keyword || ""),
-    request_text: String(item.request_text || item.requestText || item.keyword || ""),
-    created_at: String(item.created_at || nowIso()),
-    status,
-    generation: Math.max(1, Number(item.generation || index + 1)),
-    attempts: Math.max(0, Number(item.attempts || 0)),
-  };
+  return listPersistedMusicCommands() as MusicRemoteCommand[];
 }
 
 function writeQueue(commands: MusicRemoteCommand[]) {
-  ensureDir();
-  const trimmed = commands.slice(-MAX_QUEUE);
-  const temp = `${MUSIC_REMOTE_COMMANDS_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify({ version: 2, updated_at: nowIso(), commands: trimmed }, null, 2), "utf-8");
-  fs.renameSync(temp, MUSIC_REMOTE_COMMANDS_FILE);
-  // Keep a pointer file for older diagnostics that still read the single-command path.
-  const head = trimmed.find(item => ["pending", "resolving", "ready", "claimed", "playing", "needs_user_gesture"].includes(item.status)) || trimmed[trimmed.length - 1] || null;
-  if (head) {
-    fs.writeFileSync(MUSIC_REMOTE_COMMAND_FILE, JSON.stringify(head, null, 2), "utf-8");
-  } else if (fs.existsSync(MUSIC_REMOTE_COMMAND_FILE)) {
-    // 队列空时清掉旧 pointer，避免误以为仍有 claimed 指令
-    try { fs.unlinkSync(MUSIC_REMOTE_COMMAND_FILE); } catch {}
-  }
-}
-
-function markStale(commands: MusicRemoteCommand[]) {
-  const now = Date.now();
-  let changed = false;
-  for (const item of commands) {
-    if (!["claimed", "playing"].includes(item.status)) continue;
-    const created = Date.parse(item.created_at || "") || 0;
-    if (item.status === "claimed" || item.status === "playing") {
-      const leaseExpires = Date.parse(item.lease_expires_at || "") || ((Date.parse(item.claimed_at || "") || created) + CLAIM_LEASE_MS);
-      if (leaseExpires && now > leaseExpires) {
-        // Lease expired: requeue for another single owner instead of re-delivering the same claim.
-        if ((item.attempts || 0) >= 3) {
-          item.status = "failed";
-          item.last_error = item.last_error || "播放指令超时未完成，请确认 CCM Web 已打开";
-          item.terminal_at = nowIso();
-        } else {
-          item.status = item.decision ? "ready" : "pending";
-          item.claimed_at = undefined;
-          item.lease_expires_at = undefined;
-          item.last_error = item.last_error || "播放指令租约过期，等待重新领取";
-        }
-        changed = true;
-      }
-    }
-  }
-  if (changed) writeQueue(commands);
-  return commands;
+  replacePersistedMusicCommandsForTest(commands);
 }
 
 /** @deprecated Prefer enqueueMusicRemoteCommand; kept for import compatibility. */
@@ -206,79 +120,24 @@ export function saveMusicRemoteCommand(command: any) {
 export const STOP_MUSIC_KEYWORD = "__stop__";
 
 export function enqueueMusicRemoteCommand(command: any) {
-  let commands = markStale(readQueue());
-  const type = String(command?.type || "play").trim() || "play";
-  const payload: MusicRemoteCommand = {
-    schema: "ccm-music-playback-command-v2",
-    version: 2,
-    id: `music_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`,
-    type,
-    keyword: String(command?.keyword || "").trim() || (type === "stop" ? STOP_MUSIC_KEYWORD : ""),
-    request_text: String(command?.request_text || command?.requestText || command?.keyword || "").trim() || undefined,
-    mode: String(command?.mode || "").trim() || undefined,
-    source: String(command?.source || "global-agent"),
-    created_at: nowIso(),
-    status: command?.decision ? "ready" : "pending",
-    generation: Math.max(1, ...commands.map(item => Number(item.generation || 0))) + 1,
-    decision: command?.decision || undefined,
-    origin: command?.origin || undefined,
-    attempts: 0,
-  };
-  if (!payload.keyword) throw new Error("缺少音乐关键词");
-  const active = new Set<MusicPlaybackCommandStatusV2>(["pending", "resolving", "ready", "claimed", "playing", "needs_user_gesture"]);
-  // A new command invalidates every older active play generation. Late downloads may finish,
-  // but their completion receipt cannot regain playback ownership.
-  if (type === "stop") {
-    for (const item of commands) {
-      if (item.type === "play" && active.has(item.status)) {
-        item.status = "cancelled";
-        item.terminal_at = nowIso();
-        item.last_error = "已由停止指令取消";
-        emitPlaybackCommandEvent(item);
-      }
-    }
-  } else if (type === "play") {
-    for (const item of commands) {
-      if (item.type === "play" && active.has(item.status)) {
-        item.status = "superseded";
-        item.terminal_at = nowIso();
-        item.last_error = "已被更新的点歌请求替代";
-        emitPlaybackCommandEvent(item);
-      }
-    }
+  const before = readQueue();
+  const payload = enqueuePersistedMusicCommand(command) as MusicRemoteCommand;
+  const after = readQueue();
+  for (const previous of before) {
+    const updated = after.find(item => item.id === previous.id);
+    if (updated && updated.status !== previous.status) emitPlaybackCommandEvent(updated);
   }
-  commands.push(payload);
-  writeQueue(commands);
   emitPlaybackCommandEvent(payload);
   return payload;
 }
 
 export function peekMusicRemoteCommand() {
-  const commands = markStale(readQueue());
-  return commands.find(item => item.status === "ready" || item.status === "pending") || null;
+  return peekPersistedMusicCommand() as MusicRemoteCommand | null;
 }
 
-export function claimMusicRemoteCommand(commandId = "") {
-  const commands = markStale(readQueue());
-  const next = commandId
-    ? commands.find(item => item.id === commandId)
-    : commands.find(item => item.status === "ready" || item.status === "pending");
-  if (!next) return null;
-  if (next.status !== "ready" && next.status !== "pending") return null;
-  if (next.decision?.expiresAt && Date.parse(String(next.decision.expiresAt)) <= Date.now()) {
-    next.status = "failed";
-    next.last_error = "播放决定已过期，请重新点歌";
-    next.terminal_at = nowIso();
-    writeQueue(commands);
-    emitPlaybackCommandEvent(next);
-    return null;
-  }
-  next.status = "claimed";
-  next.claimed_at = nowIso();
-  next.lease_expires_at = new Date(Date.now() + CLAIM_LEASE_MS).toISOString();
-  next.attempts = Number(next.attempts || 0) + 1;
-  writeQueue(commands);
-  emitPlaybackCommandEvent(next);
+export function claimMusicRemoteCommand(commandId = "", generation?: number) {
+  const next = claimPersistedMusicCommand({ id: commandId || undefined, generation }) as MusicRemoteCommand | null;
+  if (next) emitPlaybackCommandEvent(next);
   return next;
 }
 
@@ -290,41 +149,17 @@ export function takeMusicRemoteCommand(id: string) {
   return claimMusicRemoteCommand(String(id || "").trim());
 }
 
-export function heartbeatMusicRemoteCommand(input: { id: string; generation?: number; status?: "claimed" | "playing" | "needs_user_gesture" }) {
-  const commands = markStale(readQueue());
-  const item = commands.find(row => row.id === String(input.id || ""));
-  if (!item) return { success: false, error: "指令不存在" };
-  if (Number(input.generation || item.generation) !== Number(item.generation)) return { success: false, error: "播放generation不匹配" };
-  if (!["claimed", "playing", "needs_user_gesture"].includes(item.status)) return { success: false, error: `当前状态不能续租：${item.status}` };
-  const previousStatus = item.status;
-  if (input.status) item.status = input.status;
-  item.lease_expires_at = new Date(Date.now() + CLAIM_LEASE_MS).toISOString();
-  writeQueue(commands);
-  if (item.status !== previousStatus) emitPlaybackCommandEvent(item);
-  return { success: true, command: item };
+export function heartbeatMusicRemoteCommand(input: { id: string; generation?: number; lease_id?: string; fencing_token?: number; status?: "claimed" | "playing" | "needs_user_gesture" }) {
+  const previous = readQueue().find(item => item.id === input.id);
+  const result = heartbeatPersistedMusicCommand(input);
+  if (result.success && result.command?.status !== previous?.status) emitPlaybackCommandEvent(result.command as MusicRemoteCommand);
+  return result;
 }
 
-export function completeMusicRemoteCommand(input: { id: string; generation?: number; status: "completed" | "failed" | "superseded" | "cancelled" | "needs_user_gesture"; error?: string; result?: any }) {
-  const commands = markStale(readQueue());
-  const item = commands.find(row => row.id === String(input.id || ""));
-  if (!item) return { success: false, error: "指令不存在" };
-  if (Number(input.generation || item.generation) !== Number(item.generation)) return { success: false, error: "播放generation不匹配" };
-  const terminal = new Set<MusicPlaybackCommandStatusV2>(["completed", "failed", "superseded", "cancelled"]);
-  if (terminal.has(item.status)) {
-    if (item.status === input.status) return { success: true, duplicate: true, command: item };
-    return { success: false, error: "播放指令已经进入不可修改的终态" };
-  }
-  if (["completed", "failed", "needs_user_gesture"].includes(input.status) && !["claimed", "playing", "needs_user_gesture"].includes(item.status)) {
-    return { success: false, error: `当前状态不能提交播放结果：${item.status}` };
-  }
-  item.status = input.status;
-  item.result = input.result || undefined;
-  item.last_error = String(input.error || "").slice(0, 500) || undefined;
-  item.lease_expires_at = undefined;
-  if (input.status !== "needs_user_gesture") item.terminal_at = nowIso();
-  writeQueue(commands);
-  emitPlaybackCommandEvent(item);
-  return { success: true, command: item };
+export function completeMusicRemoteCommand(input: { id: string; generation?: number; lease_id?: string; fencing_token?: number; status: "completed" | "failed" | "superseded" | "cancelled" | "needs_user_gesture"; error?: string; result?: any }) {
+  const result = completePersistedMusicCommand(input);
+  if (result.success && result.command) emitPlaybackCommandEvent(result.command as MusicRemoteCommand);
+  return result;
 }
 
 export function ackMusicRemoteCommand(input: { id: string; status: "success" | "failed"; error?: string }) {
@@ -334,26 +169,22 @@ export function ackMusicRemoteCommand(input: { id: string; status: "success" | "
   if (!current) return { success: false, error: "指令不存在" };
   if (input.status === "success") return { ...completeMusicRemoteCommand({ id, generation: current.generation, status: "completed" }), removed: false };
   if ((current.attempts || 0) < 3 && !["superseded", "cancelled"].includes(current.status)) {
-    const commands = readQueue();
-    const item = commands.find(row => row.id === id)!;
-    item.status = item.decision ? "ready" : "pending";
-    item.last_error = String(input.error || "播放失败");
-    item.claimed_at = undefined;
-    item.lease_expires_at = undefined;
-    writeQueue(commands);
-    return { success: true, removed: false, command: item };
+    return {
+      ...requeuePersistedMusicCommand({ id, generation: current.generation, error: input.error || "播放失败" }),
+      removed: false,
+    };
   }
   return { ...completeMusicRemoteCommand({ id, generation: current.generation, status: "failed", error: input.error || "播放失败" }), removed: false };
 }
 
 /** Legacy single-command reader used by old GET path; returns claimed/pending head. */
 export function loadMusicRemoteCommand() {
-  const commands = markStale(readQueue());
+  const commands = readQueue();
   return commands.find(item => ["pending", "ready", "claimed", "playing", "needs_user_gesture"].includes(item.status)) || null;
 }
 
 export function listMusicRemoteCommands() {
-  return markStale(readQueue());
+  return readQueue();
 }
 
 export function runMusicRemoteCommandQueueSelfTest() {

@@ -1981,7 +1981,7 @@ function scheduleGlobalLongTermMemoryExtraction(sessionId: string) {
   return { scheduled: true, mode: "model_semantic" };
 }
 
-export function ingestGlobalAgentConversation(input: { sessionId: string; source?: string; messages: any[]; compact?: boolean }) {
+export function ingestGlobalAgentConversation(input: { sessionId: string; source?: string; messages: any[]; compact?: boolean; extractMemory?: boolean }) {
   const sessionId = String(input.sessionId || "default");
   const transcript = loadGlobalAgentTranscript(sessionId);
   transcript.source = input.source || transcript.source || "global-agent";
@@ -2004,12 +2004,20 @@ export function ingestGlobalAgentConversation(input: { sessionId: string; source
   const session = { ...(sessionIndex >= 0 ? memory.sessions[sessionIndex] : {}), sessionId, source: transcript.source, messageCount: transcript.messages.length, transcriptUpdatedAt: transcript.updatedAt };
   if (sessionIndex >= 0) memory.sessions[sessionIndex] = session; else memory.sessions.push(session);
   saveMemory(memory);
-  if (assistantAdded) {
+  if (assistantAdded && input.extractMemory !== false) {
     scheduleGlobalLongTermMemoryExtraction(sessionId);
     scheduleGlobalAgentSessionMemoryExtraction(sessionId);
   }
   const compaction = input.compact === false ? null : scheduleGlobalAgentModelCompaction(sessionId);
-  return { transcript: { sessionId, messageCount: transcript.messages.length, updatedAt: transcript.updatedAt }, extracted: 0, extraction: assistantAdded ? "model_semantic_scheduled" : "awaiting_complete_turn", rejected: 0, compaction };
+  return {
+    transcript: { sessionId, messageCount: transcript.messages.length, updatedAt: transcript.updatedAt },
+    extracted: 0,
+    extraction: assistantAdded
+      ? input.extractMemory === false ? "skipped_for_model_confirmed_direct_reply" : "model_semantic_scheduled"
+      : "awaiting_complete_turn",
+    rejected: 0,
+    compaction,
+  };
 }
 
 function queryTerms(text: string) {

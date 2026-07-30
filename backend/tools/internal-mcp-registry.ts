@@ -1,9 +1,11 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 
 export const GROUP_COORDINATOR_INTERNAL_MCP = "ccm__group_coordinator";
 export const FEISHU_INTERNAL_MCP = "mcp-feishu";
 export const FETCH_WEB_BUNDLED_MCP = "fetch-web-mcp";
+export const FILESYSTEM_BUNDLED_MCP = "filesystem-mcp";
 
 type InternalMcpTool = {
   name: string;
@@ -152,6 +154,54 @@ export function buildBundledFetchWebMcpTool(fallback: any = {}) {
     enabled: fallback?.enabled !== false && fs.existsSync(entryPath),
     version: "2.0.0",
     author: "CCM",
+    origin: "builtin",
+    bundled: true,
+  };
+}
+
+export function resolveBundledFilesystemMcpEntry() {
+  try {
+    const packageJson = require.resolve("@modelcontextprotocol/server-filesystem/package.json");
+    const entryPath = path.join(path.dirname(packageJson), "dist", "index.js");
+    if (fs.existsSync(entryPath)) return entryPath;
+  } catch {}
+  const candidates = [
+    path.join(findCcmPackageRoot(), "node_modules", "@modelcontextprotocol", "server-filesystem", "dist", "index.js"),
+    path.resolve(process.cwd(), "node_modules", "@modelcontextprotocol", "server-filesystem", "dist", "index.js"),
+  ];
+  return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
+}
+
+export function isLegacyOfficialFilesystemMcpDefinition(value: any = {}) {
+  if (String(value?.name || "") !== FILESYSTEM_BUNDLED_MCP) return false;
+  const source = value?.marketplace?.source || {};
+  if (String(source?.id || "") !== "ccm-official" || String(source?.trust || "") !== "official") return false;
+  const command = path.basename(String(value?.command || "")).toLowerCase();
+  const args = Array.isArray(value?.args) ? value.args.map((item: any) => String(item || "").trim().toLowerCase()) : [];
+  return ["npx", "npx.cmd"].includes(command)
+    && args.some((item: string) => /^@modelcontextprotocol\/server-filesystem(?:@|$)/.test(item));
+}
+
+export function buildBundledFilesystemMcpTool(fallback: any = {}) {
+  const entryPath = resolveBundledFilesystemMcpEntry();
+  const oldArgs = Array.isArray(fallback?.args) ? fallback.args.map(String) : [];
+  const configuredRoot = oldArgs.find((item: string) => (
+    item
+    && item !== "-y"
+    && item !== "--yes"
+    && !/^@modelcontextprotocol\/server-filesystem(?:@|$)/i.test(item)
+  ));
+  const root = configuredRoot || path.join(os.homedir(), ".cc-connect", "shared");
+  return {
+    ...fallback,
+    name: FILESYSTEM_BUNDLED_MCP,
+    description: "Filesystem MCP server scoped to an explicit directory.",
+    command: process.execPath,
+    args: [entryPath, root],
+    env: {},
+    enabled: fallback?.enabled !== false && fs.existsSync(entryPath),
+    version: "2026.7.10",
+    author: "Model Context Protocol",
     origin: "builtin",
     bundled: true,
   };

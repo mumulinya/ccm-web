@@ -443,6 +443,7 @@
 
 .check-indicator.ok,
 .history-dot.ok { background: #22c55e; }
+.history-dot.pending { background: var(--accent-blue); }
 .check-indicator.warn,
 .history-dot.fail { background: #ef4444; }
 .check-indicator.active { background: var(--accent-blue); }
@@ -572,6 +573,31 @@
   min-height: 460px;
   padding: 22px 26px;
 }
+
+.report-generation-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.report-generation-state strong { color: var(--text-primary); }
+.report-generation-state.ready { border-color: color-mix(in srgb, var(--success-color, #16a34a) 35%, var(--border-color)); }
+.report-generation-state.working { border-color: color-mix(in srgb, var(--accent-blue) 38%, var(--border-color)); }
+.report-generation-state.warn { border-color: color-mix(in srgb, #d97706 40%, var(--border-color)); }
+.report-generation-state.error { border-color: color-mix(in srgb, #dc2626 40%, var(--border-color)); }
+
+.timezone-field-row label {
+  display: grid;
+  gap: 3px;
+}
+
+.timezone-field-row small { color: var(--text-muted); }
 
 .technical-details {
   margin-top: 24px;

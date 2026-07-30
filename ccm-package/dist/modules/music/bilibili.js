@@ -41,7 +41,7 @@ exports.biliSearch = biliSearch;
 exports.getBiliAudioUrl = getBiliAudioUrl;
 exports.getBiliCookieHeader = getBiliCookieHeader;
 const crypto = __importStar(require("crypto"));
-const db_1 = require("../../core/db");
+const platform_http_1 = require("./platform-http");
 // B站相关常量与模块级变量
 exports.BILI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 let wbiMixinKey = "";
@@ -60,22 +60,17 @@ async function ensureBuvid3() {
     if (buvid3)
         return buvid3;
     try {
-        const res = await fetch("https://www.bilibili.com", {
+        const res = await (0, platform_http_1.musicPlatformRequest)({
+            url: "https://www.bilibili.com",
             method: "GET",
             headers: { "User-Agent": exports.BILI_UA },
-            redirect: "follow",
-            signal: AbortSignal.timeout(8_000),
+            timeoutMs: 8_000,
+            maxBytes: 512 * 1024,
+            retries: 1,
         });
         let cookieStrings = [];
-        if (typeof res.headers.getSetCookie === "function") {
-            cookieStrings = res.headers.getSetCookie();
-        }
-        else {
-            const rawCookie = res.headers.get("set-cookie");
-            if (rawCookie) {
-                cookieStrings = rawCookie.split(/,\s*/);
-            }
-        }
+        const rawCookie = res.headers["set-cookie"];
+        cookieStrings = Array.isArray(rawCookie) ? rawCookie : rawCookie ? [String(rawCookie)] : [];
         for (const c of cookieStrings) {
             const match = c.match(/buvid3=([^;]+)/);
             if (match) {
@@ -94,16 +89,12 @@ async function ensureBuvid3() {
 async function refreshWbiKey() {
     try {
         await ensureBuvid3();
-        const res = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+        const data = await (0, platform_http_1.musicPlatformJson)({
+            url: "https://api.bilibili.com/x/web-interface/nav",
             headers: { "User-Agent": exports.BILI_UA, "Referer": "https://www.bilibili.com", "Cookie": `buvid3=${buvid3}` },
-            signal: AbortSignal.timeout(8_000),
+            timeoutMs: 8_000,
+            maxBytes: 1024 * 1024,
         });
-        const text = await res.text();
-        if (!text.trim().startsWith("{")) {
-            console.log("[WBI] nav 返回非 JSON:", text.substring(0, 80));
-            return;
-        }
-        const data = JSON.parse(text);
         const img = data?.data?.wbi_img?.img_url || "";
         const sub = data?.data?.wbi_img?.sub_url || "";
         const imgKey = img.split("/").pop()?.split(".")[0] || "";
@@ -130,94 +121,51 @@ function signBiliParams(params) {
     return Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join("&");
 }
 async function biliSearch(keyword) {
-    try {
-        await ensureBuvid3();
-        await ensureWbiKey();
-        const params = {
-            search_type: "video",
-            keyword: keyword,
-            page: "1",
-            order: "totalrank"
-        };
-        const signedQs = signBiliParams(params);
-        const cfg = (0, db_1.loadMusicConfig)();
-        let oldHttpProxy = process.env.HTTP_PROXY;
-        let oldHttpsProxy = process.env.HTTPS_PROXY;
-        if (cfg.proxy) {
-            process.env.HTTP_PROXY = cfg.proxy;
-            process.env.HTTPS_PROXY = cfg.proxy;
-        }
-        const url = `https://api.bilibili.com/x/web-interface/search/type?${signedQs}`;
-        try {
-            const res = await fetch(url, {
-                method: "GET",
-                headers: {
-                    "User-Agent": exports.BILI_UA,
-                    "Referer": "https://www.bilibili.com/",
-                    "Cookie": `buvid3=${buvid3}`,
-                    "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                    "Origin": "https://www.bilibili.com",
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "same-site"
-                },
-                signal: AbortSignal.timeout(10_000),
-            });
-            if (cfg.proxy) {
-                if (oldHttpProxy)
-                    process.env.HTTP_PROXY = oldHttpProxy;
-                else
-                    delete process.env.HTTP_PROXY;
-                if (oldHttpsProxy)
-                    process.env.HTTPS_PROXY = oldHttpsProxy;
-                else
-                    delete process.env.HTTPS_PROXY;
-            }
-            const text = await res.text();
-            if (!text.trim().startsWith("{")) {
-                console.log("[BiliSearch] non-JSON:", text.substring(0, 100));
-                return [];
-            }
-            const data = JSON.parse(text);
-            if (data.code !== 0) {
-                console.log("[BiliSearch] API error:", data.code, data.message);
-                return [];
-            }
-            const resultList = data.data?.result;
-            if (!Array.isArray(resultList)) {
-                console.log("[BiliSearch] result is not an array");
-                return [];
-            }
-            const results = resultList.map((item) => ({
-                bvid: item.bvid,
-                title: (item.title || "").replace(/<[^>]*>/g, ""),
-                author: item.author || "",
-                duration: item.duration || "",
-                play: item.play || 0,
-                pic: item.pic ? (item.pic.startsWith("//") ? "https:" + item.pic : item.pic) : "",
-            }));
-            console.log("[BiliSearch] found", results.length, "results");
-            return results;
-        }
-        catch (err) {
-            if (cfg.proxy) {
-                if (oldHttpProxy)
-                    process.env.HTTP_PROXY = oldHttpProxy;
-                else
-                    delete process.env.HTTP_PROXY;
-                if (oldHttpsProxy)
-                    process.env.HTTPS_PROXY = oldHttpsProxy;
-                else
-                    delete process.env.HTTPS_PROXY;
-            }
-            throw err;
-        }
+    await ensureBuvid3();
+    await ensureWbiKey();
+    const params = {
+        search_type: "video",
+        keyword: keyword,
+        page: "1",
+        order: "totalrank"
+    };
+    const signedQs = signBiliParams(params);
+    const url = `https://api.bilibili.com/x/web-interface/search/type?${signedQs}`;
+    const data = await (0, platform_http_1.musicPlatformJson)({
+        url,
+        method: "GET",
+        headers: {
+            "User-Agent": exports.BILI_UA,
+            "Referer": "https://www.bilibili.com/",
+            "Cookie": `buvid3=${buvid3}`,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Origin": "https://www.bilibili.com",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site"
+        },
+        timeoutMs: 10_000,
+        maxBytes: 4 * 1024 * 1024,
+        retries: 1,
+    });
+    if (data.code !== 0) {
+        throw new Error(`B站搜索失败：${data.message || data.code}`);
     }
-    catch (e) {
-        console.log("[BiliSearch] error:", e.message);
-        return [];
+    const resultList = data.data?.result;
+    if (!Array.isArray(resultList)) {
+        throw new Error("B站搜索返回结构无效");
     }
+    const results = resultList.map((item) => ({
+        bvid: item.bvid,
+        title: (item.title || "").replace(/<[^>]*>/g, ""),
+        author: item.author || "",
+        duration: item.duration || "",
+        play: item.play || 0,
+        pic: item.pic ? (item.pic.startsWith("//") ? "https:" + item.pic : item.pic) : "",
+    }));
+    console.log("[BiliSearch] found", results.length, "results");
+    return results;
 }
 async function getBiliAudioUrl(bvid) {
     await ensureBuvid3();
@@ -225,15 +173,17 @@ async function getBiliAudioUrl(bvid) {
     const params = { bvid };
     const signedQs = signBiliParams(params);
     const viewUrl = `https://api.bilibili.com/x/web-interface/view?${signedQs}`;
-    const viewRes = await fetch(viewUrl, {
+    const viewData = await (0, platform_http_1.musicPlatformJson)({
+        url: viewUrl,
         headers: {
             "User-Agent": exports.BILI_UA,
             "Referer": "https://www.bilibili.com/",
             "Cookie": `buvid3=${buvid3}`,
             "Accept": "application/json, text/plain, */*"
-        }
+        },
+        timeoutMs: 10_000,
+        maxBytes: 2 * 1024 * 1024,
     });
-    const viewData = await viewRes.json();
     if (viewData?.code !== 0) {
         throw new Error(`获取视频信息失败: ${viewData?.message || "未知错误"}`);
     }
@@ -251,15 +201,17 @@ async function getBiliAudioUrl(bvid) {
     };
     const playQs = signBiliParams(playParams);
     const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${playQs}`;
-    const playRes = await fetch(playUrl, {
+    const playData = await (0, platform_http_1.musicPlatformJson)({
+        url: playUrl,
         headers: {
             "User-Agent": exports.BILI_UA,
             "Referer": "https://www.bilibili.com/",
             "Cookie": `buvid3=${buvid3}`,
             "Accept": "application/json, text/plain, */*"
-        }
+        },
+        timeoutMs: 10_000,
+        maxBytes: 4 * 1024 * 1024,
     });
-    const playData = await playRes.json();
     if (playData?.code !== 0) {
         throw new Error(`获取播放地址失败: ${playData?.message || "未知错误"}`);
     }

@@ -33,8 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getReliabilityDrillRun = getReliabilityDrillRun;
+exports.listReliabilityDrillRuns = listReliabilityDrillRuns;
 exports.getReliabilityDrillStatus = getReliabilityDrillStatus;
 exports.runProductionReliabilityDrills = runProductionReliabilityDrills;
+exports.startReliabilityDrillRun = startReliabilityDrillRun;
+exports.cancelReliabilityDrillRun = cancelReliabilityDrillRun;
+exports.recoverReliabilityDrillRuns = recoverReliabilityDrillRuns;
 exports.runScheduledProductionReliabilityDrill = runScheduledProductionReliabilityDrill;
 exports.startReliabilityDrillScheduler = startReliabilityDrillScheduler;
 exports.stopReliabilityDrillScheduler = stopReliabilityDrillScheduler;
@@ -44,33 +49,75 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../core/utils");
+const atomic_json_file_1 = require("../core/atomic-json-file");
 const worktree_1 = require("../agents/worktree");
 const collaboration_resilience_1 = require("../modules/collaboration/collaboration-resilience");
 const agent_sessions_1 = require("../tasks/agent-sessions");
 const reliability_ledger_1 = require("./reliability-ledger");
+const observability_database_1 = require("./observability-database");
+const managed_process_tree_1 = require("./managed-process-tree");
 const DRILL_STATUS_FILE = path.join(utils_1.CCM_DIR, "reliability", "drill-status.json");
 let drillScheduler = null;
-function readDrillStatus() {
+const activeDrillProcesses = new Map();
+const DRILL_LEASE_TASK = "reliability-drill:production";
+const DRILL_TIMEOUT_MS = 20 * 60_000;
+const DRILL_OUTPUT_LIMIT = 256 * 1024;
+function isoNow() { return new Date().toISOString(); }
+function parseJson(value, fallback = null) {
     try {
-        return JSON.parse(fs.readFileSync(DRILL_STATUS_FILE, "utf-8"));
+        return value ? JSON.parse(String(value)) : fallback;
     }
     catch {
-        return {};
+        return fallback;
     }
 }
+function publicDrillRun(row) {
+    if (!row)
+        return null;
+    return {
+        schema: "ccm-reliability-drill-run-v2",
+        run_id: row.run_id,
+        kind: row.kind,
+        status: row.status,
+        checkpoint: row.checkpoint,
+        pid: Number(row.pid || 0) || null,
+        requested_by: row.requested_by || "",
+        created_at: row.created_at,
+        started_at: row.started_at || null,
+        completed_at: row.completed_at || null,
+        updated_at: row.updated_at,
+        result: parseJson(row.result_json),
+        error: row.error_summary || "",
+        log_summary: row.log_summary || "",
+        cleanup_status: row.cleanup_status || "",
+        cancel_requested: row.cancel_requested === 1,
+    };
+}
+function getReliabilityDrillRun(runId) {
+    const row = (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT * FROM reliability_drill_runs_v2 WHERE run_id = ?").get(String(runId || ""));
+    return publicDrillRun(row);
+}
+function listReliabilityDrillRuns(limit = 20) {
+    const rows = (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT * FROM reliability_drill_runs_v2 ORDER BY created_at DESC LIMIT ?").all(Math.max(1, Math.min(100, Number(limit) || 20)));
+    return rows.map(publicDrillRun);
+}
+function readDrillStatus() {
+    return (0, atomic_json_file_1.readJsonWithBackup)(DRILL_STATUS_FILE, {});
+}
 function writeDrillStatus(value) {
-    fs.mkdirSync(path.dirname(DRILL_STATUS_FILE), { recursive: true });
-    const temp = `${DRILL_STATUS_FILE}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
-    fs.renameSync(temp, DRILL_STATUS_FILE);
+    (0, atomic_json_file_1.withFileLock)(DRILL_STATUS_FILE, () => (0, atomic_json_file_1.writeJsonAtomic)(DRILL_STATUS_FILE, value));
 }
 function getReliabilityDrillStatus() {
     const status = readDrillStatus();
     const lastRunAt = Date.parse(status.last_run_at || 0);
+    const latest = listReliabilityDrillRuns(1)[0] || null;
+    const active = (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT * FROM reliability_drill_runs_v2 WHERE status IN ('queued','running','cancelling') ORDER BY created_at DESC LIMIT 1").get();
     return {
         ...status,
         scheduler_running: !!drillScheduler,
         next_run_at: Number.isFinite(lastRunAt) ? new Date(lastRunAt + 24 * 60 * 60 * 1000).toISOString() : null,
+        active_run: publicDrillRun(active),
+        latest_run: latest,
     };
 }
 function run(command, args, cwd) {
@@ -173,6 +220,120 @@ function runProductionReliabilityDrills() {
         catch { }
     }
 }
+function finalizeDrillRun(runId, status, values = {}) {
+    const now = isoNow();
+    (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    UPDATE reliability_drill_runs_v2
+    SET status = ?, checkpoint = ?, completed_at = ?, updated_at = ?, result_json = ?,
+        error_summary = ?, log_summary = ?, cleanup_status = ?, pid = NULL
+    WHERE run_id = ?
+  `).run(status, values.checkpoint || (status === "completed" ? "completed" : status), now, now, values.result ? JSON.stringify(values.result) : null, String(values.error || "").slice(0, 2000), String(values.log || "").slice(-DRILL_OUTPUT_LIMIT), values.cleanupStatus || "completed", runId);
+}
+function launchReliabilityDrillWorker(runId) {
+    const db = (0, observability_database_1.getObservabilityDatabase)();
+    const row = db.prepare("SELECT * FROM reliability_drill_runs_v2 WHERE run_id = ?").get(runId);
+    if (!row || !["queued", "recovering"].includes(String(row.status)))
+        return false;
+    const lease = (0, reliability_ledger_1.acquireTaskLease)(DRILL_LEASE_TASK, `drill:${runId}`, DRILL_TIMEOUT_MS + 60_000);
+    if (!lease.acquired) {
+        finalizeDrillRun(runId, "blocked", { error: "同类可靠性演练正在运行", checkpoint: "singleflight_blocked", cleanupStatus: "not_started" });
+        return false;
+    }
+    const child = (0, child_process_1.spawn)(process.execPath, [__filename, "--reliability-drill-worker", runId], {
+        cwd: process.cwd(),
+        windowsHide: true,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, CCM_RELIABILITY_DRILL_WORKER: "1" },
+    });
+    const startedAt = isoNow();
+    db.prepare(`UPDATE reliability_drill_runs_v2 SET status='running', checkpoint='worker_started', pid=?, lease_id=?, fencing_token=?, started_at=?, updated_at=? WHERE run_id=?`)
+        .run(child.pid || null, lease.lease?.lease_id || "", Number(lease.lease?.fencing_token || 0), startedAt, startedAt, runId);
+    activeDrillProcesses.set(runId, child);
+    let output = "";
+    let stderr = "";
+    const append = (current, chunk) => `${current}${String(chunk || "")}`.slice(-DRILL_OUTPUT_LIMIT);
+    child.stdout?.on("data", chunk => { output = append(output, chunk); });
+    child.stderr?.on("data", chunk => { stderr = append(stderr, chunk); });
+    const timeout = setTimeout(() => {
+        db.prepare("UPDATE reliability_drill_runs_v2 SET status='cancelling', checkpoint='timeout', updated_at=? WHERE run_id=?").run(isoNow(), runId);
+        (0, managed_process_tree_1.terminateManagedProcessTree)(child, { gracefulTimeoutMs: 2_000 }).catch(() => { });
+    }, DRILL_TIMEOUT_MS);
+    timeout.unref?.();
+    child.once("error", error => {
+        clearTimeout(timeout);
+        activeDrillProcesses.delete(runId);
+        (0, reliability_ledger_1.releaseTaskLease)(DRILL_LEASE_TASK, "failed");
+        finalizeDrillRun(runId, "failed", { error: error.message, log: stderr || output, cleanupStatus: "ownership_unproven" });
+    });
+    child.once("exit", (code, signal) => {
+        clearTimeout(timeout);
+        activeDrillProcesses.delete(runId);
+        (0, reliability_ledger_1.releaseTaskLease)(DRILL_LEASE_TASK, code === 0 ? "done" : "failed");
+        const latest = (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT cancel_requested FROM reliability_drill_runs_v2 WHERE run_id=?").get(runId);
+        const marker = output.split(/\r?\n/).reverse().find(line => line.startsWith("CCM_DRILL_RESULT="));
+        const result = marker ? parseJson(marker.slice("CCM_DRILL_RESULT=".length)) : null;
+        const cancelled = latest?.cancel_requested === 1;
+        const finalStatus = cancelled ? "cancelled" : (code === 0 && result?.pass === true ? "completed" : "failed");
+        finalizeDrillRun(runId, finalStatus, {
+            result,
+            error: finalStatus === "failed" ? (result?.error || stderr || `worker exited ${code ?? signal ?? "unknown"}`) : "",
+            log: [output, stderr].filter(Boolean).join("\n"),
+            cleanupStatus: result?.cleanup_status || (code === 0 ? "completed" : "recovery_required"),
+        });
+        const status = readDrillStatus();
+        writeDrillStatus({
+            ...status,
+            last_run_at: row.created_at,
+            last_completed_at: isoNow(),
+            last_result: result || { pass: false, status: finalStatus },
+            consecutive_failures: finalStatus === "completed" ? 0 : Number(status.consecutive_failures || 0) + 1,
+        });
+    });
+    return true;
+}
+function startReliabilityDrillRun(options = {}) {
+    const now = isoNow();
+    return (0, observability_database_1.withImmediateObservabilityTransaction)((db) => {
+        const active = db.prepare("SELECT run_id FROM reliability_drill_runs_v2 WHERE status IN ('queued','running','cancelling','recovering') LIMIT 1").get();
+        if (active)
+            return { accepted: false, duplicate: true, run: getReliabilityDrillRun(active.run_id) };
+        const runId = `drill_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+        db.prepare(`INSERT INTO reliability_drill_runs_v2(run_id,kind,status,checkpoint,requested_by,created_at,updated_at,cleanup_status) VALUES(?,?,'queued','queued',?,?,?,'pending')`)
+            .run(runId, String(options.kind || "production"), String(options.requestedBy || "scheduler"), now, now);
+        setImmediate(() => launchReliabilityDrillWorker(runId));
+        return { accepted: true, run: getReliabilityDrillRun(runId) };
+    });
+}
+async function cancelReliabilityDrillRun(runId) {
+    const id = String(runId || "").trim();
+    const db = (0, observability_database_1.getObservabilityDatabase)();
+    const row = db.prepare("SELECT * FROM reliability_drill_runs_v2 WHERE run_id=?").get(id);
+    if (!row)
+        return { success: false, error: "演练不存在" };
+    if (["completed", "failed", "cancelled", "blocked"].includes(String(row.status)))
+        return { success: true, run: publicDrillRun(row) };
+    db.prepare("UPDATE reliability_drill_runs_v2 SET cancel_requested=1,status='cancelling',checkpoint='cancel_requested',updated_at=? WHERE run_id=?").run(isoNow(), id);
+    const child = activeDrillProcesses.get(id);
+    if (child)
+        await (0, managed_process_tree_1.terminateManagedProcessTree)(child, { gracefulTimeoutMs: 2_000 }).catch(() => { });
+    return { success: true, run: getReliabilityDrillRun(id) };
+}
+function recoverReliabilityDrillRuns() {
+    const db = (0, observability_database_1.getObservabilityDatabase)();
+    const rows = db.prepare("SELECT * FROM reliability_drill_runs_v2 WHERE status IN ('queued','running','cancelling','recovering') ORDER BY created_at").all();
+    let recovered = 0;
+    for (const row of rows) {
+        if (row.status === "queued") {
+            setImmediate(() => launchReliabilityDrillWorker(row.run_id));
+            recovered += 1;
+            continue;
+        }
+        db.prepare("UPDATE reliability_drill_runs_v2 SET status='blocked',checkpoint='ownership_unproven',error_summary=?,completed_at=?,updated_at=?,pid=NULL WHERE run_id=?")
+            .run("服务重启后无法证明旧演练子进程归属，已安全终止恢复", isoNow(), isoNow(), row.run_id);
+    }
+    return { scanned: rows.length, recovered };
+}
 function runScheduledProductionReliabilityDrill(options = {}) {
     const minIntervalMs = Math.max(60_000, Number(options.minIntervalMs || 24 * 60 * 60 * 1000));
     const status = readDrillStatus();
@@ -197,10 +358,13 @@ function startReliabilityDrillScheduler() {
         return false;
     if (drillScheduler)
         clearInterval(drillScheduler);
+    recoverReliabilityDrillRuns();
     const runIfDue = () => {
-        const outcome = runScheduledProductionReliabilityDrill();
-        if (!outcome.skipped && outcome.result?.pass === false)
-            console.error("[Reliability Drill]", outcome.result.error || "故障演练失败");
+        const status = readDrillStatus();
+        const lastRunAt = Date.parse(status.last_run_at || 0);
+        if (Number.isFinite(lastRunAt) && Date.now() - lastRunAt < 24 * 60 * 60 * 1000)
+            return;
+        startReliabilityDrillRun({ requestedBy: "scheduler" });
     };
     setTimeout(runIfDue, 30_000).unref?.();
     drillScheduler = setInterval(runIfDue, 6 * 60 * 60 * 1000);
@@ -211,5 +375,16 @@ function stopReliabilityDrillScheduler() {
     if (drillScheduler)
         clearInterval(drillScheduler);
     drillScheduler = null;
+}
+if (require.main === module && process.argv[2] === "--reliability-drill-worker") {
+    try {
+        const result = runProductionReliabilityDrills();
+        process.stdout.write(`\nCCM_DRILL_RESULT=${JSON.stringify({ ...result, cleanup_status: "completed" })}\n`);
+        process.exitCode = result.pass ? 0 : 1;
+    }
+    catch (error) {
+        process.stdout.write(`\nCCM_DRILL_RESULT=${JSON.stringify({ pass: false, error: error?.message || String(error), cleanup_status: "recovery_required" })}\n`);
+        process.exitCode = 1;
+    }
 }
 //# sourceMappingURL=reliability-drills.js.map

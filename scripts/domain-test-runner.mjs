@@ -4,6 +4,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const root = path.resolve(import.meta.dirname, '..')
+const repositoryNodeModules = path.join(root, 'node_modules')
 const config = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'test-domains.json'), 'utf8'))
 const legacyFile = path.join(import.meta.dirname, 'legacy-test-aliases.json')
 const args = process.argv.slice(2)
@@ -96,7 +97,10 @@ for (const file of tests) {
   console.log(`\n[domain-test] ${file}`)
   const result = run(process.execPath, [absolute], {
     timeout: 5 * 60_000,
-    env: isolatedBackendDist ? { CCM_BACKEND_DIST_DIR: isolatedBackendDist } : {},
+    env: isolatedBackendDist ? {
+      CCM_BACKEND_DIST_DIR: isolatedBackendDist,
+      NODE_PATH: [repositoryNodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter),
+    } : {},
   })
   report.tests.push({ file, ...result })
   if (result.ok) report.passed++

@@ -39,6 +39,7 @@ exports.buildGlobalMissionFinalReport = buildGlobalMissionFinalReport;
 exports.formatGlobalMissionFinalReport = formatGlobalMissionFinalReport;
 exports.getGlobalMissionSupervisor = getGlobalMissionSupervisor;
 exports.listGlobalMissionSupervisors = listGlobalMissionSupervisors;
+exports.findGlobalMissionSupervisorsForTaskIds = findGlobalMissionSupervisorsForTaskIds;
 exports.startGlobalMissionSupervisor = startGlobalMissionSupervisor;
 exports.checkGlobalMissionSupervisorNow = checkGlobalMissionSupervisorNow;
 exports.normalizeGlobalMissionSupervisorOperation = normalizeGlobalMissionSupervisorOperation;
@@ -292,6 +293,11 @@ function listGlobalMissionSupervisors(options = {}) {
     return loadStore()
         .filter(item => !options.status || item.status === options.status)
         .slice(0, Math.max(1, Math.min(200, Number(options.limit || 50))));
+}
+function findGlobalMissionSupervisorsForTaskIds(taskIds, globalRunIds = []) {
+    const ids = new Set([...taskIds].map(String).filter(Boolean));
+    const runIds = new Set([...globalRunIds].map(String).filter(Boolean));
+    return loadStore().filter(item => ids.has(String(item.mission_id || "")) || runIds.has(String(item.global_run_id || "")));
 }
 function startGlobalMissionSupervisor(input) {
     const existing = loadStore().find(item => item.mission_id === String(input.mission_id || input.missionId || "") && !["failed", "cancelled"].includes(item.status));

@@ -49,7 +49,10 @@ const replayFile = path.join(ccmDir, 'reliability', 'task-replay-journal', `${ta
 fs.mkdirSync(path.dirname(replayFile), { recursive: true })
 fs.writeFileSync(replayFile, `${JSON.stringify({ schema: 'ccm-task-replay-journal-event-v1', task_id: taskId, recorded_at: oldAt, event: { type: 'task.completed' } })}\n`, 'utf8')
 
-const cleanup = require(path.join(root, 'ccm-package', 'dist', 'system', 'cleanup-center.js'))
+const distRoot = process.env.CCM_BACKEND_DIST_DIR || path.join(root, 'ccm-package', 'dist')
+const cleanup = require(path.join(distRoot, 'system', 'cleanup-center.js'))
+
+const main = async () => {
 const preview = cleanup.previewCleanupAction('purge_archived_tasks', { retention_days: 0 })
 assert.equal(preview.success, true)
 assert.equal(preview.preview.items.length, 1)
@@ -59,6 +62,7 @@ assert.equal('fingerprint' in preview.preview.items[0], false)
 const invalidSelection = cleanup.runCleanupAction('purge_archived_tasks', {
   preview_token: preview.preview_token,
   selected_ids: ['not-in-preview'],
+  confirmation_phrase: '永久删除',
 })
 assert.equal(invalidSelection.success, false)
 assert.match(invalidSelection.error, /不属于本次预览/)
@@ -67,10 +71,17 @@ const freshPreview = cleanup.previewCleanupAction('purge_archived_tasks', { rete
 const result = cleanup.runCleanupAction('purge_archived_tasks', {
   preview_token: freshPreview.preview_token,
   selected_ids: [taskId],
+  confirmation_phrase: '永久删除',
 })
 assert.equal(result.success, true)
-assert.equal(result.receipt.processed_count, 1)
-assert.equal(result.receipt.status, 'success')
+assert.ok(result.transaction_id)
+let transaction = result.transaction
+for (let attempt = 0; attempt < 100 && !['completed', 'partial', 'failed', 'cancelled'].includes(transaction?.status); attempt += 1) {
+  await new Promise(resolve => setTimeout(resolve, 20))
+  transaction = cleanup.getCleanupTransaction(result.transaction_id, { limit: 20 })
+}
+assert.equal(transaction.processed_count, 1)
+assert.equal(transaction.status, 'completed')
 const remainingTaskFile = path.join(ccmDir, 'tasks.json')
 const remainingTasks = fs.existsSync(remainingTaskFile) ? JSON.parse(fs.readFileSync(remainingTaskFile, 'utf8')) : []
 assert.equal(remainingTasks.length, 0)
@@ -78,7 +89,7 @@ for (const target of [executionFile, checkpointFile, outputFile, artifactDir, te
   assert.equal(fs.existsSync(target), false, `${target} should be removed`)
 }
 const history = cleanup.getCleanupHistory()
-assert.equal(history[0].schema, 'ccm-cleanup-receipt-v1')
+assert.equal(history[0].schema, 'ccm-cleanup-transaction-v2')
 assert.equal(history[0].processed_count, 1)
 
 process.stdout.write(JSON.stringify({
@@ -92,3 +103,9 @@ process.stdout.write(JSON.stringify({
     auditReceiptPersisted: true,
   },
 }))
+}
+
+main().catch(error => {
+  console.error(error?.stack || String(error))
+  process.exitCode = 1
+})

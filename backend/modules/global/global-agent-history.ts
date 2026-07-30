@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { sanitizeGlobalHistoryAttachments } from "./global-agent-attachments";
 import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
 import { buildFeishuConversationIdentityV2 } from "../collaboration/feishu-conversation-v2";
+import { markConversationSearchIndexDirty } from "../../system/conversation-search-dirty";
 
 // Persistent Web/Feishu conversation history and session routing.
 export function createGlobalAgentHistoryRuntime(deps: any) {
@@ -229,6 +230,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       .sort((a: any, b: any) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
       .slice(0, GLOBAL_AGENT_SESSION_LIMIT);
     writeGlobalJsonAtomic(GLOBAL_AGENT_HISTORY_FILE, store);
+    markConversationSearchIndexDirty("global:history");
   }
 
   function scheduleGlobalSessionAutoTitle(sessionId: string) {
@@ -404,7 +406,13 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     return getBaseGlobalAgentMessages(store);
   }
   
-  function appendGlobalAgentConversationMessage(sessionId: string, role: "user" | "assistant", content: string, source = "feishu") {
+  function appendGlobalAgentConversationMessage(
+    sessionId: string,
+    role: "user" | "assistant",
+    content: string,
+    source = "feishu",
+    options: { extractMemory?: boolean } = {},
+  ) {
     const store = loadGlobalAgentHistoryStore();
     const sessions = Array.isArray(store.sessions) ? store.sessions : [];
     let session = sessions.find((item: any) => item.id === sessionId);
@@ -421,7 +429,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     }
     const message = { role, content, timestamp: new Date().toISOString(), source };
     try {
-      ingestGlobalAgentConversation({ sessionId, source, messages: [message] });
+      ingestGlobalAgentConversation({ sessionId, source, messages: [message], extractMemory: options.extractMemory });
     } catch (error: any) {
       console.warn(`[全局记忆] 会话消息写入失败 (${sessionId})：${error?.message || error}`);
     }

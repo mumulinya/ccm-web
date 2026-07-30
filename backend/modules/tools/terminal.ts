@@ -2,11 +2,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { randomUUID } from "crypto";
-import { execFileSync, spawn } from "child_process";
+import { execFile, spawn } from "child_process";
 import { createRequire } from "module";
 import { CCM_DIR, sendJson } from "../../core/utils";
 import { readJsonWithBackup, writeJsonAtomic } from "../../core/atomic-json-file";
-import { inspectGitRemoteState } from "./git";
+import { inspectGitRemoteStateAsync } from "./git";
+import { terminateManagedProcessTree } from "../../system/managed-process-tree";
 
 const TERMINAL_STATE_FILE = path.join(CCM_DIR, "terminal-workspace.json");
 const TERMINAL_TEMP_DIR = path.join(CCM_DIR, "temp", "terminal");
@@ -19,6 +20,13 @@ const MAX_INPUT_BYTES = 64 * 1024;
 const MAX_SCROLLBACK_CHARS = 1_500_000;
 const activeRuns = new Map<string, any>();
 const activePtySessions = new Map<string, PersistentTerminalSession>();
+const fallbackCommandChallenges = new Map<string, { command: string; cwd: string; expiresAt: number }>();
+let processInventoryCache: { expiresAt: number; rows: any[] } = { expiresAt: 0, rows: [] };
+let processInventorySingleflight: Promise<any[]> | null = null;
+
+function invalidateProcessInventory() {
+  processInventoryCache = { expiresAt: 0, rows: [] };
+}
 const runtimeRequire = createRequire(__filename);
 let cachedPtyModule: any | null | undefined;
 
@@ -40,6 +48,8 @@ export function persistentTerminalCapability() {
     schema: "ccm-persistent-terminal-capability-v1",
     available,
     mode: available ? "pty" : "command_fallback",
+    securityMode: available ? "admin_unrestricted_shell" : "confirmed_command_runner",
+    perCommandGuard: available ? "advisory" : "enforced_for_detected_high_risk_commands",
     reason: available ? "" : process.env.CCM_DISABLE_NODE_PTY === "1" ? "disabled_for_compatibility" : "node_pty_unavailable",
     fallback: available ? "" : "terminal_exec",
   };
@@ -71,8 +81,9 @@ function requestBody(req: any): Promise<any> {
     req.on("data", (chunk: any) => {
       if (settled) return;
       body += chunk;
-      if (body.length > 2 * 1024 * 1024) {
+      if (Buffer.byteLength(body, "utf-8") > 2 * 1024 * 1024) {
         settled = true;
+        req.pause?.();
         reject(new Error("请求内容过大"));
       }
     });
@@ -123,7 +134,12 @@ function sanitizeWorkspace(input: any) {
 }
 
 function writeSse(res: any, payload: any) {
-  if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  if (res.writableEnded || res.destroyed) return;
+  if (Number(res.writableLength || 0) > 1024 * 1024) {
+    try { res.end(); } catch {}
+    return;
+  }
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function terminalScript(command: string, cwdReceiptFile: string) {
@@ -146,7 +162,15 @@ function readFinalCwd(receiptFile: string, fallback: string) {
   return fallback;
 }
 
-function startTerminalStream(payload: any, res: any) {
+async function stopTerminalRun(run: any, reason: "user" | "disconnect" | "shutdown" = "user") {
+  if (!run) return null;
+  run.stopped = true;
+  run.stopReason = reason;
+  if (!run.stopPromise) run.stopPromise = terminateManagedProcessTree(run.child, { gracefulTimeoutMs: 2_000, forceTimeoutMs: 2_000 });
+  return run.stopPromise;
+}
+
+function startTerminalStream(payload: any, req: any, res: any) {
   const command = String(payload?.command || "").trim();
   if (!command) return sendJson(res, { error: "命令不能为空" }, 400);
   if (command.length > MAX_COMMAND_LENGTH) return sendJson(res, { error: "命令过长" }, 400);
@@ -162,14 +186,19 @@ function startTerminalStream(payload: any, res: any) {
   if (typeof res.flushHeaders === "function") res.flushHeaders();
 
   const child = spawn(script.executable, script.args, { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], env: process.env });
-  const run = { id: runId, child, command, cwd, startedAt, stopped: false };
+  const run = { id: runId, child, command, cwd, startedAt, stopped: false, stopReason: "", stopPromise: null as Promise<any> | null };
   activeRuns.set(runId, run);
+  const cancelDisconnectedRun = () => {
+    if (activeRuns.get(runId) === run && !res.writableEnded) void stopTerminalRun(run, "disconnect");
+  };
+  req.once("aborted", cancelDisconnectedRun);
+  res.once("close", cancelDisconnectedRun);
   writeSse(res, { type: "started", runId, cwd, startedAt: new Date(startedAt).toISOString() });
   child.stdout.on("data", (chunk: Buffer) => writeSse(res, { type: "stdout", text: chunk.toString("utf-8") }));
   child.stderr.on("data", (chunk: Buffer) => writeSse(res, { type: "stderr", text: chunk.toString("utf-8") }));
   child.on("error", (error: any) => writeSse(res, { type: "stderr", text: error?.message || String(error) }));
   child.on("close", (code: number | null, signal: string | null) => {
-    activeRuns.delete(runId);
+    if (activeRuns.get(runId) === run) activeRuns.delete(runId);
     const finalCwd = readFinalCwd(cwdReceiptFile, cwd);
     try { fs.unlinkSync(cwdReceiptFile); } catch {}
     writeSse(res, { type: "done", runId, exitCode: typeof code === "number" ? code : (run.stopped ? 130 : 1), signal: signal || "", stopped: run.stopped, cwd: finalCwd, durationMs: Date.now() - startedAt });
@@ -234,11 +263,23 @@ function sessionPublicState(session: PersistentTerminalSession) {
   };
 }
 
-function sessionStatesWithPorts() {
+function execFileText(executable: string, args: string[], timeout: number) {
+  return new Promise<string>((resolve, reject) => {
+    execFile(executable, args, { encoding: "utf-8", timeout, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(String(stdout || ""));
+    });
+  });
+}
+
+async function loadSessionStatesWithPorts() {
   const states = [...activePtySessions.values()].map(sessionPublicState).map(state => ({ ...state, ports: [] as number[] }));
   if (process.platform !== "win32" || !states.some(state => state.status === "running" && state.pid > 0)) return states;
   try {
-    const processJson = String(execFileSync("powershell.exe", ["-NoLogo", "-NoProfile", "-Command", "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress"], { encoding: "utf-8", timeout: 5_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }) || "[]");
+    const [processJson, netstat] = await Promise.all([
+      execFileText("powershell.exe", ["-NoLogo", "-NoProfile", "-Command", "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress"], 5_000),
+      execFileText("netstat.exe", ["-ano", "-p", "tcp"], 5_000),
+    ]);
     const processRows = JSON.parse(processJson);
     const rows = Array.isArray(processRows) ? processRows : [processRows];
     const children = new Map<number, number[]>();
@@ -256,7 +297,6 @@ function sessionStatesWithPorts() {
       }
       return found;
     };
-    const netstat = String(execFileSync("netstat.exe", ["-ano", "-p", "tcp"], { encoding: "utf-8", timeout: 5_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }) || "");
     for (const state of states) {
       const pids = descendants(state.pid);
       const ports = new Set<number>();
@@ -268,6 +308,18 @@ function sessionStatesWithPorts() {
     }
   } catch {}
   return states;
+}
+
+async function sessionStatesWithPorts() {
+  if (processInventoryCache.expiresAt > Date.now()) return processInventoryCache.rows;
+  if (processInventorySingleflight) return processInventorySingleflight;
+  processInventorySingleflight = loadSessionStatesWithPorts()
+    .then(rows => {
+      processInventoryCache = { expiresAt: Date.now() + 4_000, rows };
+      return rows;
+    })
+    .finally(() => { processInventorySingleflight = null; });
+  return processInventorySingleflight;
 }
 
 function broadcastPty(session: PersistentTerminalSession, payload: any) {
@@ -326,6 +378,7 @@ function spawnPersistentSession(payload: any) {
     pendingConfirmation: null,
   };
   activePtySessions.set(id, session);
+  invalidateProcessInventory();
   processHandle.onData((data: string) => appendPtyOutput(session, data));
   processHandle.onExit(({ exitCode }: any) => {
     session.status = "exited";
@@ -334,6 +387,7 @@ function spawnPersistentSession(payload: any) {
     broadcastPty(session, { type: "exit", exitCode: session.exitCode });
     for (const client of session.clients) { try { client.end(); } catch {} }
     session.clients.clear();
+    invalidateProcessInventory();
   });
   return session;
 }
@@ -354,6 +408,23 @@ function waitForPtyReady(session: PersistentTerminalSession, timeoutMs = 2_000) 
 
 function dangerousCommand(command: string) {
   return /(?:^|[;&|]\s*|\s)(?:rm\s+-rf|del\s+\/?[a-z]*[qfs]|rmdir\s+\/?s|remove-item\b[^\r\n]*(?:-recurse|-force)|format(?:\.com)?\s+|shutdown\s+|stop-process\s+|taskkill\s+|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|git\s+restore\s+(?:--staged\s+)?[.\\/*]|ccm\s+stop\s+all)(?:\s|$)/i.test(command);
+}
+
+export function authorizeTerminalCommandExecution(commandValue: any, cwdValue: any, challengeValue?: any) {
+  const command = String(commandValue || "").trim();
+  const cwd = normalizeCwd(cwdValue);
+  const now = Date.now();
+  for (const [key, item] of fallbackCommandChallenges) if (item.expiresAt < now) fallbackCommandChallenges.delete(key);
+  if (!dangerousCommand(command)) return { allowed: true, cwd };
+  const challenge = String(challengeValue || "");
+  const pending = fallbackCommandChallenges.get(challenge);
+  if (pending && pending.expiresAt >= now && pending.command === command && pending.cwd === cwd) {
+    fallbackCommandChallenges.delete(challenge);
+    return { allowed: true, cwd, confirmed: true };
+  }
+  const nextChallenge = randomUUID();
+  fallbackCommandChallenges.set(nextChallenge, { command, cwd, expiresAt: now + 60_000 });
+  return { allowed: false, cwd, challenge: nextChallenge, command, code: "confirmation_required" };
 }
 
 function writePtyInput(session: PersistentTerminalSession, data: string) {
@@ -401,20 +472,23 @@ function writePtyInput(session: PersistentTerminalSession, data: string) {
   return blocked;
 }
 
-function terminatePtySession(session: PersistentTerminalSession) {
-  session.status = "exited";
+async function terminatePtySession(session: PersistentTerminalSession) {
   session.lastActiveAt = Date.now();
   const pid = Number(session.process?.pid || 0);
-  if (process.platform === "win32" && pid > 0) {
-    try { spawn("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).unref(); } catch {}
-  }
+  const stopReceipt = await terminateManagedProcessTree(pid, { gracefulTimeoutMs: 2_000, forceTimeoutMs: 2_000 });
+  // node-pty keeps its native handle until kill/dispose is invoked even when
+  // the OS process tree has already gone.
   try { session.process?.kill(); } catch {}
+  session.status = stopReceipt.exited ? "exited" : session.status;
+  if (!stopReceipt.exited) throw new Error(stopReceipt.error || "终端进程树停止失败");
   for (const client of session.clients) { try { client.end(); } catch {} }
   session.clients.clear();
   activePtySessions.delete(session.id);
+  invalidateProcessInventory();
+  return stopReceipt;
 }
 
-function projectActions(cwdValue: any) {
+async function projectActions(cwdValue: any) {
   const cwd = normalizeCwd(cwdValue);
   const packageFile = path.join(cwd, "package.json");
   let scripts: Array<{ name: string; command: string }> = [];
@@ -423,30 +497,28 @@ function projectActions(cwdValue: any) {
     scripts = Object.keys(packageJson?.scripts || {}).slice(0, 40).map(name => ({ name, command: `npm run ${name}` }));
   } catch {}
   let repository: any = null;
-  try { repository = inspectGitRemoteState(cwd); } catch {}
+  try { repository = await inspectGitRemoteStateAsync(cwd); } catch {}
   return { cwd, scripts, repository };
 }
 
-export function stopAllTerminalRuns() {
-  for (const run of activeRuns.values()) {
-    run.stopped = true;
-    try { run.child.kill(); } catch {}
-  }
-  for (const session of [...activePtySessions.values()]) terminatePtySession(session);
+export async function stopAllTerminalRuns() {
+  await Promise.all([
+    ...[...activeRuns.values()].map(run => stopTerminalRun(run, "shutdown")),
+    ...[...activePtySessions.values()].map(session => terminatePtySession(session).catch(() => null)),
+  ]);
 }
 
 export function handleTerminalApi(pathname: string, req: any, res: any): boolean {
   if (pathname === "/api/terminal/stream" && req.method === "POST") {
-    requestBody(req).then(payload => startTerminalStream(payload, res)).catch(error => sendJson(res, { error: error.message }, 400));
+    requestBody(req).then(payload => startTerminalStream(payload, req, res)).catch(error => sendJson(res, { error: error.message }, 400));
     return true;
   }
   if (pathname === "/api/terminal/stop" && req.method === "POST") {
-    requestBody(req).then(payload => {
+    requestBody(req).then(async payload => {
       const run = activeRuns.get(String(payload?.runId || ""));
       if (!run) return sendJson(res, { success: false, error: "运行已结束或不存在" }, 404);
-      run.stopped = true;
-      try { run.child.kill(); } catch {}
-      sendJson(res, { success: true, runId: run.id });
+      const stopReceipt = await stopTerminalRun(run, "user");
+      sendJson(res, { success: !!stopReceipt?.exited, runId: run.id, stop_receipt: stopReceipt }, stopReceipt?.exited ? 200 : 409);
     }).catch(error => sendJson(res, { error: error.message }, 400));
     return true;
   }
@@ -459,7 +531,9 @@ export function handleTerminalApi(pathname: string, req: any, res: any): boolean
     return true;
   }
   if (pathname === "/api/terminal/sessions" && req.method === "GET") {
-    sendJson(res, { success: true, sessions: sessionStatesWithPorts(), persistent: persistentTerminalCapability() });
+    sessionStatesWithPorts()
+      .then(sessions => sendJson(res, { success: true, sessions, persistent: persistentTerminalCapability() }))
+      .catch(error => sendJson(res, { success: false, error: error?.message || "读取终端进程失败" }, 500));
     return true;
   }
   if (pathname === "/api/terminal/session" && req.method === "POST") {
@@ -472,12 +546,12 @@ export function handleTerminalApi(pathname: string, req: any, res: any): boolean
   }
   if (pathname === "/api/terminal/session" && req.method === "DELETE") {
     const parsed = new URL(req.url || pathname, "http://localhost");
-    try {
+    Promise.resolve().then(async () => {
       const id = sessionId(parsed.searchParams.get("id"));
       const session = activePtySessions.get(id);
-      if (session) terminatePtySession(session);
-      sendJson(res, { success: true, id });
-    } catch (error: any) { sendJson(res, { error: error.message }, 400); }
+      const stopReceipt = session ? await terminatePtySession(session) : null;
+      sendJson(res, { success: true, id, already_stopped: !session, stop_receipt: stopReceipt });
+    }).catch((error: any) => sendJson(res, { success: false, error: error.message }, 409));
     return true;
   }
   if (pathname === "/api/terminal/session/events" && req.method === "GET") {
@@ -540,7 +614,9 @@ export function handleTerminalApi(pathname: string, req: any, res: any): boolean
   }
   if (pathname === "/api/terminal/project-actions" && req.method === "GET") {
     const parsed = new URL(req.url || pathname, "http://localhost");
-    sendJson(res, { success: true, ...projectActions(parsed.searchParams.get("cwd")) });
+    projectActions(parsed.searchParams.get("cwd"))
+      .then(actions => sendJson(res, { success: true, ...actions }))
+      .catch(error => sendJson(res, { error: error?.message || String(error) }, 400));
     return true;
   }
   if (pathname === "/api/terminal/workspace" && req.method === "GET") {
@@ -596,7 +672,7 @@ export async function runPersistentTerminalSelfTest() {
       },
     };
   } finally {
-    terminatePtySession(session);
+    await terminatePtySession(session).catch(() => null);
     await new Promise(resolve => setTimeout(resolve, 150));
   }
 }

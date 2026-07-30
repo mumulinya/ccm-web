@@ -8,17 +8,23 @@ import { assertCcmInternalSkillMutable, isCcmInternalSkillName } from "../skills
 import {
   buildBundledFeishuMcpTool,
   buildBundledFetchWebMcpTool,
+  buildBundledFilesystemMcpTool,
+  isLegacyOfficialFilesystemMcpDefinition,
   isLegacyFetchWebMcpDefinition,
 } from "../tools/internal-mcp-registry";
 import { publishRuntimeEvent } from "../system/runtime-events";
 import {
   getTaskByIdFromSqlite,
+  listUsabilityArchiveCandidatesFromSqlite,
+  listUsabilityTaskCandidatesFromSqlite,
   listTasksByParentIdFromSqlite,
   loadTasksFromSqlite,
   saveTasksToSqlite,
   updateTaskByIdInSqlite,
+  updateTaskByIdCasInSqlite,
 } from "./task-store";
 import { readJsonWithBackup, withFileLock, writeJsonAtomic } from "./atomic-json-file";
+import { ensureLegacyMetricsMigrated, recordMetricV3 } from "../system/metrics-v3";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -30,7 +36,6 @@ const DEV_WEEKLY_REPORTS_FILE = path.join(CCM_DIR, "dev-weekly-reports.json");
 const AUTO_DEV_NOTIFY_FILE = path.join(CCM_DIR, "auto-dev-notify.json");
 const METRICS_FILE = path.join(CCM_DIR, "metrics.json");
 const FEISHU_CONFIG_FILE = path.join(CCM_DIR, "feishu-config.json");
-const TEMPLATES_FILE = path.join(CCM_DIR, "prompt-templates.json");
 const PROJECT_CONFIGS_FILE = path.join(CCM_DIR, "project-configs.json");
 const MUSIC_CONFIG_FILE = path.join(CCM_DIR, "music-config.json");
 const RAG_WATCH_PATHS_FILE = path.join(CCM_DIR, "rag-watch-paths.json");
@@ -122,6 +127,19 @@ export function isRunning(name: string): boolean {
   }
 }
 
+export function isRunningReadOnly(name: string): boolean {
+  const pidFile = path.join(PID_DIR, `${name}.pid`);
+  if (!fs.existsSync(pidFile)) return false;
+  const pid = Number(fs.readFileSync(pidFile, "utf-8").trim());
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getPid(name: string): string | null {
   const pidFile = path.join(PID_DIR, `${name}.pid`);
   if (!fs.existsSync(pidFile)) return null;
@@ -168,6 +186,12 @@ export function loadMcpTools(): any[] {
       const migrated = buildBundledFetchWebMcpTool(storedTools[storedFetchIndex]);
       saveMcpTool(migrated);
       storedTools[storedFetchIndex] = { ...migrated, filename: "fetch-web-mcp.json" };
+    }
+    const storedFilesystemIndex = storedTools.findIndex(tool => String(tool?.name || "") === "filesystem-mcp");
+    if (storedFilesystemIndex >= 0 && isLegacyOfficialFilesystemMcpDefinition(storedTools[storedFilesystemIndex])) {
+      const migrated = buildBundledFilesystemMcpTool(storedTools[storedFilesystemIndex]);
+      saveMcpTool(migrated);
+      storedTools[storedFilesystemIndex] = { ...migrated, filename: "filesystem-mcp.json" };
     }
     const storedFeishu = storedTools.find(tool => String(tool?.name || "") === "mcp-feishu") || null;
     const bundledFeishu = buildBundledFeishuMcpTool(loadFeishuConfig(), storedFeishu || {});
@@ -392,10 +416,8 @@ export function applyMetricToStore(value: any, agent: string, data: any = {}, no
   const aggregate = scope.agents[cleanAgent];
   const success = data.success === true;
   const explicitStatus = String(data.status || "").trim().toLowerCase();
-  const inferredStatus = success
-    ? "completed"
-    : (/cancell?ed/i.test(String(data.error || data.message || "")) ? "cancelled" : "failed");
-  const status = ["completed", "failed", "cancelled"].includes(explicitStatus) ? explicitStatus : inferredStatus;
+  const inferredStatus = data.success === true ? "completed" : data.success === false ? "failed" : "unknown";
+  const status = ["completed", "failed", "cancelled", "blocked", "unknown"].includes(explicitStatus) ? explicitStatus : inferredStatus;
   metrics.events.push({
     id: String(data.eventId || data.event_id || `metric_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`),
     at,
@@ -458,11 +480,11 @@ export function queryMetricEvents(value: any, filters: any = {}) {
     })
     .map((event: any) => {
       const explicit = String(event?.status || "").trim().toLowerCase();
-      const resolvedStatus = ["completed", "failed", "cancelled"].includes(explicit)
+      const resolvedStatus = ["completed", "failed", "cancelled", "blocked", "unknown"].includes(explicit)
         ? explicit
         : event?.success === true
           ? "completed"
-          : (/cancell?ed/i.test(String(event?.error || "")) ? "cancelled" : "failed");
+          : event?.success === false ? "failed" : "unknown";
       return { ...event, resolvedStatus };
     })
     .sort((a: any, b: any) => String(b.at || "").localeCompare(String(a.at || "")));
@@ -470,8 +492,8 @@ export function queryMetricEvents(value: any, filters: any = {}) {
     result.all += 1;
     result[event.resolvedStatus] = Number(result[event.resolvedStatus] || 0) + 1;
     return result;
-  }, { all: 0, completed: 0, failed: 0, cancelled: 0 });
-  const filtered = ["completed", "failed", "cancelled"].includes(status)
+  }, { all: 0, completed: 0, failed: 0, cancelled: 0, blocked: 0, unknown: 0 });
+  const filtered = ["completed", "failed", "cancelled", "blocked", "unknown"].includes(status)
     ? scoped.filter((event: any) => event.resolvedStatus === status)
     : scoped;
   const total = filtered.length;
@@ -484,7 +506,7 @@ export function queryMetricEvents(value: any, filters: any = {}) {
     page,
     pageSize,
     totalPages,
-    status: ["completed", "failed", "cancelled"].includes(status) ? status : "all",
+    status: ["completed", "failed", "cancelled", "blocked", "unknown"].includes(status) ? status : "all",
     statusCounts,
     retentionLimit: METRICS_EVENT_LIMIT,
     range: { days, fromDate: fromDate || null, toDate: toDate || null },
@@ -497,9 +519,8 @@ export function saveMetrics(metrics: any) {
 
 export function recordMetric(agent: string, data: any) {
   try {
-    withFileLock(METRICS_FILE, () => {
-      saveMetrics(applyMetricToStore(loadMetrics(), agent, data));
-    }, { timeoutMs: 5000 });
+    ensureLegacyMetricsMigrated(loadMetrics());
+    recordMetricV3(agent, data);
     return true;
   } catch (error: any) {
     console.warn("[性能指标] 写入失败:", error?.message || error);
@@ -578,18 +599,22 @@ export function updateTaskById(id: string, patchOrMutator: any) {
   return result;
 }
 
+export function updateTaskByIdCas(id: string, predicate: (current: any) => boolean, mutator: (current: any) => any) {
+  const result = updateTaskByIdCasInSqlite(id, predicate, mutator);
+  if (result.updated) publishRuntimeEvent("task", "task.changed", { taskId: id });
+  return result;
+}
+
+export function listUsabilityTaskCandidates(recentCutoff: string) {
+  return listUsabilityTaskCandidatesFromSqlite(recentCutoff);
+}
+
+export function listUsabilityArchiveCandidates(historyCutoff: string, intakeCutoff: string) {
+  return listUsabilityArchiveCandidatesFromSqlite(historyCutoff, intakeCutoff);
+}
+
 export function listTasksByParentId(parentId: string) {
   return listTasksByParentIdFromSqlite(parentId);
-}
-
-// === Dialogue Templates ===
-export function loadTemplates(): any[] {
-  const parsed = readJsonWithBackup<any>(TEMPLATES_FILE, []);
-  return Array.isArray(parsed) ? parsed : [];
-}
-
-export function saveTemplates(templates: any[]) {
-  writeJsonAtomic(TEMPLATES_FILE, templates);
 }
 
 // === Project Configs ===

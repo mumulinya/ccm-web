@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "http";
-export type InternalApiCaller = "global-agent" | "feishu-acp" | "project-feishu-queue" | "ccm-cli" | "server-recovery";
+export type InternalApiCaller = "global-agent" | "feishu-acp" | "project-feishu-queue" | "ccm-cli" | "server-recovery" | "desktop-pet";
 export declare function buildInternalApiHeaders(caller: InternalApiCaller, method: string, pathname: string): {
     "X-CCM-Internal-Caller": InternalApiCaller;
     "X-CCM-Internal-Timestamp": string;

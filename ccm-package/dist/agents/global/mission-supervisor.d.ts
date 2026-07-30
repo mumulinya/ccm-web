@@ -62,6 +62,7 @@ export declare function listGlobalMissionSupervisors(options?: {
     status?: string;
     limit?: number;
 }): GlobalMissionSupervisorRecord[];
+export declare function findGlobalMissionSupervisorsForTaskIds(taskIds: Iterable<string>, globalRunIds?: Iterable<string>): GlobalMissionSupervisorRecord[];
 export declare function startGlobalMissionSupervisor(input: any): GlobalMissionSupervisorRecord;
 export declare function checkGlobalMissionSupervisorNow(id: string, runtime: GlobalMissionSupervisorRuntime): Promise<GlobalMissionSupervisorRecord>;
 export declare function normalizeGlobalMissionSupervisorOperation(operation: any): string;

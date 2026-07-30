@@ -654,6 +654,7 @@
               <div v-if="selectedSource === 'custom'" class="marketplace-custom-source">
                 <input v-model="customSourceLabel" placeholder="来源名称，可选">
                 <input v-model="customSourceUrl" placeholder="HTTPS 商城 JSON、GitHub Skill 目录或 SKILL.md" @keyup.enter="loadTools">
+                <input v-model="customSourceToken" type="password" autocomplete="off" placeholder="私有来源 Token，可选（加密保存）">
                 <button class="btn btn-primary btn-sm" @click="loadTools">加载</button>
                 <button class="btn btn-outline btn-sm" :disabled="isSavingSource" @click="saveCustomMarketplaceSource">
                   {{ isSavingSource ? '保存中' : '保存为来源' }}
@@ -772,6 +773,8 @@
                       <span v-if="tool.useCount">{{ formatMarketplaceCount(tool.useCount) }} 次使用</span>
                       <span :class="`trust-${tool.source?.trust || 'custom'}`">{{ sourceTrustLabel(tool) }}来源</span>
                       <span v-if="isBundledInternalMcp(tool)" class="marketplace-verified"><ShieldCheck :size="12" aria-hidden="true" /> 项目内置</span>
+                      <span v-else-if="tool.quarantinedLegacy" class="update-ready">历史配置待复核</span>
+                      <span v-else-if="isManualMarketplaceCollision(tool)">由普通工具管理</span>
                       <span v-else-if="tool.installedVersion">已安装</span>
                       <span v-if="tool.updateAvailable" class="update-ready">可更新</span>
                       <a v-if="tool.homepage || tool.sourceUrl" :href="tool.homepage || tool.sourceUrl" target="_blank" rel="noreferrer">
@@ -785,6 +788,9 @@
                     {{ tool.previewing ? '读取中' : '预览' }}
                   </button>
                   <button v-if="isBundledInternalMcp(tool)" class="btn btn-outline btn-sm" @click="currentFilter = 'internal-mcp'">查看内部 MCP</button>
+                  <button v-else-if="isManualMarketplaceCollision(tool)" class="btn btn-outline btn-sm" @click="currentFilter = tool.type === 'mcp' ? 'mcp' : 'skill'">
+                    前往普通管理
+                  </button>
                   <button v-else-if="!isInstalled(tool) || tool.updateAvailable || marketplaceCanRefresh(tool)" class="btn btn-primary btn-sm" :disabled="tool.installing" @click="installMarketTool(tool)">
                     {{ installButtonText(tool) }}
                   </button>
@@ -831,6 +837,37 @@
                 <ChevronRight :size="16" aria-hidden="true" />
               </button>
             </div>
+            <details v-if="marketplaceTransactions.length || marketplaceTransactionsLoading" class="marketplace-operations-panel marketplace-operations-after-results" open>
+              <summary class="marketplace-operations-header">
+                <div>
+                  <strong>安装与隔离事务</strong>
+                  <span>社区和自定义工具必须在隔离校验后由 Admin 激活</span>
+                </div>
+                <span class="marketplace-operations-toggle">{{ marketplaceTransactions.length }} 条</span>
+              </summary>
+              <div class="marketplace-operations-actions">
+                <button class="btn btn-outline btn-sm" :disabled="marketplaceTransactionsLoading" @click="loadMarketplaceTransactions">
+                  {{ marketplaceTransactionsLoading ? '刷新中' : '刷新状态' }}
+                </button>
+              </div>
+              <div class="marketplace-operation-list">
+                <div v-for="transaction in marketplaceTransactions.slice(0, 8)" :key="transaction.id" class="marketplace-operation-row">
+                  <div class="marketplace-operation-main">
+                    <span class="marketplace-operation-title">{{ transaction.type === 'mcp' ? 'MCP' : 'Skill' }} · {{ transaction.name }}</span>
+                    <span class="marketplace-operation-time">{{ marketplaceTransactionStateLabel(transaction.state) }}</span>
+                  </div>
+                  <div class="marketplace-operation-meta">
+                    <span>{{ transaction.source?.label || transaction.source?.id || '未知来源' }}</span>
+                    <span>{{ transaction.preview?.transport || '-' }}</span>
+                    <span v-if="transaction.error" class="warn">{{ transaction.error }}</span>
+                  </div>
+                  <div v-if="['quarantined', 'previewed', 'failed', 'recovery_required'].includes(transaction.state)" class="marketplace-operations-actions">
+                    <button class="btn btn-primary btn-sm" @click="resumeMarketplaceTransaction(transaction)">复核并激活</button>
+                    <button class="btn btn-outline btn-sm" @click="rollbackMarketplaceTransaction(transaction)">回滚</button>
+                  </div>
+                </div>
+              </div>
+            </details>
             <details v-if="marketplaceOperations.length || marketplaceOperationsLoading" class="marketplace-operations-panel marketplace-operations-after-results">
               <summary class="marketplace-operations-header">
                 <div>

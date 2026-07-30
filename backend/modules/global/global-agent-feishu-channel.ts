@@ -400,7 +400,9 @@ export function createGlobalAgentFeishuChannel(deps: any) {
       });
       const markdown = formatFeishuTaskJourney(run, missionSnapshot, sourceIngestion, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK);
       appendGlobalActionAudit({ ...auditBase, action: { type: "agentic_loop", params: { run_id: run.id } }, status: run.status, result: { summary: markdown, trace_id: run.trace_id, steps: run.steps.length } });
-      appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+      appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu", {
+        extractMemory: (run as any).direct_reply_fast_path !== true,
+      });
       if (sendReport) await sendFeishuConversationReply({
         conversationId,
         title: run.status === "waiting_confirmation"

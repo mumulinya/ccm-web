@@ -8,6 +8,7 @@ export declare const AGENTS: {
 export declare function getConfigs(): any[];
 export declare function getConfigInfo(configPath: string): any[];
 export declare function isRunning(name: string): boolean;
+export declare function isRunningReadOnly(name: string): boolean;
 export declare function getPid(name: string): string | null;
 export declare function loadMcpTools(): any[];
 export declare function saveMcpTool(tool: any): void;
@@ -57,9 +58,10 @@ export declare function saveTasks(tasks: any[]): {
 };
 export declare function getTaskById(id: string): any;
 export declare function updateTaskById(id: string, patchOrMutator: any): any;
+export declare function updateTaskByIdCas(id: string, predicate: (current: any) => boolean, mutator: (current: any) => any): import("./task-store").TaskCasMutationResult;
+export declare function listUsabilityTaskCandidates(recentCutoff: string): any[];
+export declare function listUsabilityArchiveCandidates(historyCutoff: string, intakeCutoff: string): any[];
 export declare function listTasksByParentId(parentId: string): any[];
-export declare function loadTemplates(): any[];
-export declare function saveTemplates(templates: any[]): void;
 export declare function loadProjectConfigs(): any;
 export declare function saveProjectConfigs(configs: any): void;
 export declare function loadMusicConfig(): any;

@@ -104,6 +104,11 @@ assert.match(frontendSource, /自定义日期/);
 assert.match(frontendSource, /params\.set\('from'/);
 assert.match(frontendSource, /params\.set\('to'/);
 assert.match(frontendSource, /class="event-time"[^>]*:title="formatTime\(event\.at\)"/);
+assert.match(frontendSource, /project:\$\{project\.id\}/);
+assert.match(frontendSource, /value: 'blocked'/);
+assert.match(frontendSource, /value: 'unknown'/);
+assert.match(frontendSource, /reliability\/drills\/status/);
+assert.doesNotMatch(frontendSource, /cancell\?ed/);
 assert.doesNotMatch(frontendSource, /<p v-else>\{\{ event\.runtime \|\| '默认运行时' \}\} · \{\{ formatTime\(event\.at\) \}\}<\/p>/);
 
 console.log(JSON.stringify({

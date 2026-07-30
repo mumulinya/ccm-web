@@ -14,6 +14,7 @@ const executableEntries = new Set([
   'package/bin/ccm.js',
   'package/bin/legacy-project-cli.js',
   'package/bin/postinstall.js',
+  'package/bin/prepublish-guard.js',
   'package/bin/setup.js',
 ])
 const output = `${input}.normalized`

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ArrowDown, ArrowUp, Clipboard, CloudDownload, CloudUpload, Columns2, Download, FileDiff,
   GitBranch, GitCommitHorizontal, GitPullRequestArrow, History, List, RefreshCw, RotateCcw,
@@ -30,6 +30,15 @@ const statusLoading = ref(false)
 const statusError = ref('')
 const remoteBusy = ref('')
 const residualCleanupBusy = ref(false)
+const workspaceSnapshotChecksum = ref('')
+const nextStatusCursor = ref('')
+const totalStatusFiles = ref(0)
+const statusLoadingMore = ref(false)
+let statusRequestGeneration = 0
+let diffRequestGeneration = 0
+let statusController = null
+let diffController = null
+let contextController = null
 
 const diffRaw = ref('')
 const diffHunks = ref([])
@@ -104,37 +113,55 @@ const resetDiff = () => {
 
 const loadDiff = async filePath => {
   if (!selectedProject.value || !filePath) return resetDiff()
+  diffController?.abort()
+  diffController = new AbortController()
+  const generation = ++diffRequestGeneration
+  const project = selectedProject.value
+  const stagedMode = showStaged.value
+  const snapshotChecksum = workspaceSnapshotChecksum.value
   selectedFile.value = filePath
   diffLoading.value = true
   resetDiff()
   try {
-    const staged = showStaged.value ? '&staged=true' : ''
-    const data = await fetchJson(`/api/git/diff?project=${encodeURIComponent(selectedProject.value)}&file=${encodeURIComponent(filePath)}${staged}`)
-    if (selectedFile.value !== filePath) return
+    const staged = stagedMode ? '&staged=true' : ''
+    const snapshot = snapshotChecksum ? `&workspace_snapshot_checksum=${encodeURIComponent(snapshotChecksum)}` : ''
+    const data = await fetchJson(`/api/git/diff?project=${encodeURIComponent(project)}&file=${encodeURIComponent(filePath)}${staged}${snapshot}`, { signal: diffController.signal })
+    if (generation !== diffRequestGeneration || selectedProject.value !== project || selectedFile.value !== filePath || showStaged.value !== stagedMode) return
     diffRaw.value = data.raw || ''
     diffHunks.value = data.hunks || []
     diffReason.value = data.reason || ''
     diffTruncated.value = !!data.truncated
   } catch (error) {
+    if (error.name === 'AbortError' || generation !== diffRequestGeneration) return
     diffReason.value = error.message || '代码差异加载失败'
     toast.error(diffReason.value)
   } finally {
-    diffLoading.value = false
+    if (generation === diffRequestGeneration) diffLoading.value = false
   }
 }
 
 const loadGitStatus = async ({ preserveSelection = false } = {}) => {
   if (!selectedProject.value) return
+  statusController?.abort()
+  contextController?.abort()
+  diffController?.abort()
+  statusController = new AbortController()
+  const generation = ++statusRequestGeneration
+  const project = selectedProject.value
   statusLoading.value = true
   statusError.value = ''
   const previousFile = preserveSelection ? selectedFile.value : ''
   try {
-    const data = await fetchJson(`/api/git/status?project=${encodeURIComponent(selectedProject.value)}`)
+    const data = await fetchJson(`/api/git/status?project=${encodeURIComponent(project)}&limit=500&include_context=false`, { signal: statusController.signal })
+    if (generation !== statusRequestGeneration || selectedProject.value !== project) return
     files.value = data.files || []
     branch.value = data.branch || ''
     summary.value = data.summary || {}
     repository.value = data.repository || {}
-    changeContext.value = data.context || { tasks: [], latestTestAgent: null, attribution: 'none' }
+    workspaceSnapshotChecksum.value = data.workspace_snapshot_checksum || ''
+    nextStatusCursor.value = data.next_cursor || ''
+    totalStatusFiles.value = Number(data.rawTotal || data.total || files.value.length)
+    changeContext.value = { tasks: [], latestTestAgent: null, attribution: 'pending' }
     selectedFiles.value = new Set([...selectedFiles.value].filter(file => files.value.some(item => item.path === file && !item.indexResidual)))
     let areaFiles = filesForFilter(fileFilter.value)
     if (!areaFiles.length) {
@@ -155,26 +182,66 @@ const loadGitStatus = async ({ preserveSelection = false } = {}) => {
       await loadDiff(nextFile)
     }
     else resetDiff()
+    contextController = new AbortController()
+    fetchJson(`/api/git/context?project=${encodeURIComponent(project)}&workspace_snapshot_checksum=${encodeURIComponent(workspaceSnapshotChecksum.value)}`, { signal: contextController.signal })
+      .then(contextData => {
+        if (generation === statusRequestGeneration && selectedProject.value === project && contextData.workspace_snapshot_checksum === workspaceSnapshotChecksum.value) changeContext.value = contextData.context || { tasks: [], latestTestAgent: null, attribution: 'none' }
+      })
+      .catch(error => { if (error.name !== 'AbortError' && generation === statusRequestGeneration) changeContext.value = { tasks: [], latestTestAgent: null, attribution: 'unavailable' } })
   } catch (error) {
+    if (error.name === 'AbortError' || generation !== statusRequestGeneration) return
     files.value = []
     summary.value = {}
     repository.value = {}
     changeContext.value = { tasks: [], latestTestAgent: null, attribution: 'none' }
     branch.value = ''
     selectedFile.value = ''
+    workspaceSnapshotChecksum.value = ''
+    nextStatusCursor.value = ''
+    totalStatusFiles.value = 0
     resetDiff()
     statusError.value = error.message || 'Git 状态加载失败'
     toast.error(statusError.value)
   } finally {
-    statusLoading.value = false
+    if (generation === statusRequestGeneration) statusLoading.value = false
   }
 }
 
+const loadMoreGitStatus = async () => {
+  if (!selectedProject.value || !nextStatusCursor.value || statusLoadingMore.value) return
+  const generation = statusRequestGeneration
+  const project = selectedProject.value
+  const cursor = nextStatusCursor.value
+  statusLoadingMore.value = true
+  try {
+    const data = await fetchJson(`/api/git/status?project=${encodeURIComponent(project)}&limit=500&include_context=false&cursor=${encodeURIComponent(cursor)}`)
+    if (generation !== statusRequestGeneration || project !== selectedProject.value || data.workspace_snapshot_checksum !== workspaceSnapshotChecksum.value) return
+    const known = new Set(files.value.map(file => file.path))
+    files.value = [...files.value, ...(data.files || []).filter(file => !known.has(file.path))]
+    nextStatusCursor.value = data.next_cursor || ''
+  } catch (error) {
+    if (generation === statusRequestGeneration) toast.error(error.message || '继续加载变更文件失败')
+  } finally { if (generation === statusRequestGeneration) statusLoadingMore.value = false }
+}
+
 const changeProject = projectName => {
+  statusController?.abort()
+  contextController?.abort()
+  diffController?.abort()
+  statusRequestGeneration += 1
+  diffRequestGeneration += 1
   selectedProject.value = projectName
   selectedFiles.value = new Set()
   showStaged.value = false
   fileFilter.value = 'all'
+  files.value = []
+  selectedFile.value = ''
+  workspaceSnapshotChecksum.value = ''
+  nextStatusCursor.value = ''
+  totalStatusFiles.value = 0
+  commitPanelVisible.value = false
+  historyVisible.value = false
+  resetDiff()
   loadGitStatus()
 }
 
@@ -203,7 +270,7 @@ const runRemoteOperation = async operation => {
     const data = await fetchJson('/api/git/remote-operation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: selectedProject.value, operation, confirmed: true }),
+      body: JSON.stringify({ project: selectedProject.value, operation, confirmed: true, expected_snapshot_checksum: workspaceSnapshotChecksum.value }),
     })
     toast.success(data.message || 'Git 远端操作完成')
     await loadGitStatus({ preserveSelection: true })
@@ -273,7 +340,7 @@ const cleanupIndexResiduals = async () => {
     const data = await fetchJson('/api/git/index-residuals/cleanup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: selectedProject.value, files: residuals.map(file => file.path), confirmed: true }),
+      body: JSON.stringify({ project: selectedProject.value, files: residuals.map(file => file.path), confirmed: true, expected_snapshot_checksum: workspaceSnapshotChecksum.value }),
     })
     toast.success(data.message || '索引残留已清理')
     fileFilter.value = 'all'
@@ -317,7 +384,7 @@ const rollbackFile = async () => {
   try {
     const data = await fetchJson('/api/git/rollback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: selectedProject.value, file: file.path, staged: showStaged.value }),
+      body: JSON.stringify({ project: selectedProject.value, file: file.path, staged: showStaged.value, confirmed: true, expected_snapshot_checksum: workspaceSnapshotChecksum.value }),
     })
     toast.success(data.message || `${action}完成`)
     await loadGitStatus({ preserveSelection: true })
@@ -340,7 +407,7 @@ const applyHunkAction = async ({ hunk, action }) => {
   try {
     const data = await fetchJson('/api/git/apply-patch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: selectedProject.value, file: selectedFile.value, patchText: hunkPatch(hunk), ...options }),
+      body: JSON.stringify({ project: selectedProject.value, file: selectedFile.value, patchText: hunkPatch(hunk), expected_snapshot_checksum: workspaceSnapshotChecksum.value, ...options }),
     })
     toast.success(data.message || '代码块操作完成')
     await loadGitStatus({ preserveSelection: true })
@@ -355,7 +422,7 @@ const openCommitPanel = async () => {
   try {
     const data = await fetchJson('/api/git/commit-preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: selectedProject.value, files: [...selectedFiles.value] }),
+      body: JSON.stringify({ project: selectedProject.value, files: [...selectedFiles.value], expected_snapshot_checksum: workspaceSnapshotChecksum.value }),
     })
     commitPreview.value = data.preview
   } catch (error) {
@@ -370,7 +437,7 @@ const commitChanges = async ({ verification, action = 'commit' }) => {
   try {
     const data = await fetchJson('/api/git/commit', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: selectedProject.value, message: commitMessage.value.trim(), files: [...selectedFiles.value], verification, reviewed: true, action }),
+      body: JSON.stringify({ project: selectedProject.value, message: commitMessage.value.trim(), files: [...selectedFiles.value], verification, reviewed: true, action, expected_snapshot_checksum: commitPreview.value?.workspace_snapshot_checksum || workspaceSnapshotChecksum.value }),
     })
     if (data.partialSuccess) {
       const suggestion = data.push?.suggestion ? `；${data.push.suggestion}` : ''
@@ -409,6 +476,7 @@ const openReplay = task => {
 }
 
 onMounted(loadProjects)
+onBeforeUnmount(() => { statusController?.abort(); contextController?.abort(); diffController?.abort() })
 </script>
 
 <template>
@@ -467,7 +535,7 @@ onMounted(loadProjects)
     <div v-if="statusError" class="status-error"><ShieldAlert :size="16" />{{ statusError }}</div>
 
     <div class="changes-layout">
-      <CodeChangeFileList :files="files" :selected-path="selectedFile" :checked-paths="selectedFiles" :filter="fileFilter" @select="selectFileFromList" @filter-change="changeFileFilter" @toggle="toggleSelectedFile" @toggle-visible="toggleVisibleFiles" />
+      <CodeChangeFileList :files="files" :total-count="totalStatusFiles" :has-more="!!nextStatusCursor" :loading-more="statusLoadingMore" :selected-path="selectedFile" :checked-paths="selectedFiles" :filter="fileFilter" @select="selectFileFromList" @filter-change="changeFileFilter" @toggle="toggleSelectedFile" @toggle-visible="toggleVisibleFiles" @load-more="loadMoreGitStatus" />
       <section class="diff-pane">
         <header class="diff-toolbar">
           <div class="file-title"><FileDiff :size="15" /><strong :title="selectedFile">{{ selectedFile || '选择文件查看差异' }}</strong><span v-if="selectedFile" class="line-stats"><b>+{{ selectedAreaStats.additions }}</b><i>-{{ selectedAreaStats.deletions }}</i></span></div>

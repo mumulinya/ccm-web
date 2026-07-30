@@ -31,14 +31,14 @@ const legacySessions = read('backend/modules/projects/sessions.ts')
 const checks = {
   safeRendering: !page.includes('v-html') && !result.includes('v-html') && !highlighter.includes('v-html') && highlighter.includes('{{ segment.text }}'),
   completeFiltersAndPagination: ['source', 'role', 'agent', 'timeRange', 'matchMode', 'response.page_count'].every(value => page.includes(value)),
-  recentAndFavoritesPersist: page.includes('ccm-conversation-search-recent-v2') && page.includes('ccm-conversation-search-favorites-v2'),
+  recentAndFavoritesPersist: page.includes('ccm-conversation-search-recent-v2') && page.includes('/api/search/favorites') && !page.includes('ccm-conversation-search-favorites-v2'),
   sourceToolbarIsIntegrated: page.includes('class="source-toolbar"') && page.includes('class="source-filter-group"') && page.includes('sourceCounts'),
   sourceSwitchLeavesFavorites: page.includes("viewMode.value = 'results'") && page.includes('const selectSource'),
   contextTaskAttachmentResult: result.includes('查看前后文') && result.includes('item.taskId') && result.includes('item.attachments'),
   unifiedRouteRegistered: server.includes('handleConversationSearchApi') && !legacySessions.includes('pathname === "/api/search"'),
-  appRoutesAllConversationTypes: app.includes("item.conversationType === 'global'") && app.includes("item.conversationType === 'group'") && app.includes("item.conversationType === 'task'"),
+  appRoutesAllConversationTypes: app.includes("item.conversationType === 'global'") && app.includes("item.conversationType === 'group'") && app.includes("item.conversationType === 'music'") && app.includes("item.conversationType === 'task'"),
   exactProjectMessageNavigation: projectManager.includes('target.messageId') && projectManager.includes('target.messageIndex'),
-  exactGroupSessionMessageNavigation: groupChat.includes('target.groupSessionId') && groupChat.includes('target.messageId') && groupChat.includes('loadMessages(1000)'),
+  exactGroupSessionMessageNavigation: groupChat.includes('target.groupSessionId') && groupChat.includes('target.messageId') && groupChat.includes('target.messageWindow?.messages') && !groupChat.includes('loadMessages(1000)'),
   exactGlobalSessionMessageNavigation: globalAgent.includes('handleSearchNavigation') && globalAgent.includes('target.messageId') && globalMessageList.includes("'search-hit'"),
   emptyGlobalWelcomeSessionNotPersistedAfterSync: globalSessions.includes('isDisposableDefaultSession(sessions.value[0]')
     && __globalAgentSessionTestHooks.isDisposableDefaultSession({ name: '默认会话', messages: [welcome] }, welcome),

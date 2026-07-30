@@ -300,6 +300,12 @@ export function listGlobalMissionSupervisors(options: { status?: string; limit?:
     .slice(0, Math.max(1, Math.min(200, Number(options.limit || 50))));
 }
 
+export function findGlobalMissionSupervisorsForTaskIds(taskIds: Iterable<string>, globalRunIds: Iterable<string> = []) {
+  const ids = new Set([...taskIds].map(String).filter(Boolean));
+  const runIds = new Set([...globalRunIds].map(String).filter(Boolean));
+  return loadStore().filter(item => ids.has(String(item.mission_id || "")) || runIds.has(String(item.global_run_id || "")));
+}
+
 export function startGlobalMissionSupervisor(input: any) {
   const existing = loadStore().find(item => item.mission_id === String(input.mission_id || input.missionId || "") && !["failed", "cancelled"].includes(item.status));
   if (existing) {

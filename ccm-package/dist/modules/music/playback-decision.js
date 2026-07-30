@@ -5,11 +5,12 @@ exports.publicMusicPlaybackDecision = publicMusicPlaybackDecision;
 exports.sameMusicPlaybackCandidate = sameMusicPlaybackCandidate;
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
 const bilibili_1 = require("./bilibili");
-const library_1 = require("./library");
+const music_catalog_1 = require("./music-catalog");
 const netease_1 = require("./netease");
 const search_results_1 = require("./search-results");
 const select_track_1 = require("./select-track");
 const state_1 = require("./state");
+const platform_http_1 = require("./platform-http");
 function cleanText(value, limit) {
     return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, limit);
 }
@@ -19,7 +20,9 @@ function sourceMode(value) {
         return "local";
     if (mode === "netease")
         return "netease";
-    return "bilibili";
+    if (mode === "bilibili")
+        return "bilibili";
+    return "auto";
 }
 function candidateIdentity(candidate) {
     return `${candidate.source}:${candidate.sourceId}`;
@@ -43,36 +46,64 @@ function makeDecision(input) {
 async function searchCandidates(decision) {
     const mode = sourceMode(decision.sourceMode);
     const query = decision.strategy === "random"
-        ? (mode === "netease" ? "热门 华语" : mode === "bilibili" ? "音乐 推荐" : "")
+        ? "热门 华语 音乐 推荐"
         : decision.searchQuery;
-    if (mode === "local") {
-        return (0, library_1.searchLocalMusic)(query).slice(0, 20).map((item) => ({
-            source: "local",
-            sourceId: String(item.filename || ""),
-            filename: String(item.filename || ""),
-            title: cleanText(item.title || item.filename, 200),
-            artist: cleanText(item.artist || "未知歌手", 120),
-            duration: cleanText(item.duration || "", 40),
-        })).filter(item => item.sourceId);
+    const requested = new Set(mode === "auto" ? ["local", "netease", "bilibili"] : [mode]);
+    const statuses = {
+        local: { status: requested.has("local") ? "unavailable" : "not_requested", resultCount: 0 },
+        netease: { status: requested.has("netease") ? "unavailable" : "not_requested", resultCount: 0 },
+        bilibili: { status: requested.has("bilibili") ? "unavailable" : "not_requested", resultCount: 0 },
+    };
+    const jobs = [];
+    if (requested.has("local"))
+        jobs.push({ source: "local", promise: Promise.resolve().then(() => ({
+                source: "local",
+                candidates: (0, music_catalog_1.queryMusicCatalog)({ query: decision.strategy === "random" ? "" : query, limit: 20 }).tracks.map((item) => ({
+                    source: "local",
+                    sourceId: String(item.filename || ""),
+                    filename: String(item.filename || ""),
+                    title: cleanText(item.title || item.filename, 200),
+                    artist: cleanText(item.artist || "未知歌手", 120),
+                    duration: cleanText(item.duration || "", 40),
+                })).filter(item => item.sourceId),
+            })) });
+    if (requested.has("netease"))
+        jobs.push({ source: "netease", promise: (0, netease_1.neteaseSearch)(query).then(results => ({
+                source: "netease",
+                candidates: (0, search_results_1.signSearchResults)("netease", query, results, 12).map((item) => ({
+                    source: "netease",
+                    sourceId: String(item.songId || ""),
+                    title: cleanText(item.title || item.songId, 200),
+                    artist: cleanText(item.artist || "未知歌手", 120),
+                    duration: cleanText(item.duration || "", 40),
+                    downloadToken: String(item.downloadToken || ""),
+                })).filter(item => item.sourceId),
+            })) });
+    if (requested.has("bilibili"))
+        jobs.push({ source: "bilibili", promise: (0, bilibili_1.biliSearch)(query).then(results => ({
+                source: "bilibili",
+                candidates: (0, search_results_1.signSearchResults)("bilibili", query, results, 12).map((item) => ({
+                    source: "bilibili",
+                    sourceId: String(item.bvid || ""),
+                    title: cleanText(item.title || item.bvid, 200),
+                    artist: cleanText(item.author || "未知UP主", 120),
+                    duration: cleanText(item.duration || "", 40),
+                    downloadToken: String(item.downloadToken || ""),
+                })).filter(item => item.sourceId),
+            })) });
+    const settled = await Promise.allSettled(jobs.map(job => job.promise));
+    const candidates = [];
+    for (const [index, item] of settled.entries()) {
+        if (item.status === "fulfilled") {
+            statuses[item.value.source] = { status: "success", resultCount: item.value.candidates.length };
+            candidates.push(...item.value.candidates);
+            continue;
+        }
+        const platformError = (0, platform_http_1.publicMusicPlatformError)(item.reason);
+        statuses[jobs[index].source] = { ...platformError, resultCount: 0 };
     }
-    if (mode === "netease") {
-        return (0, search_results_1.signSearchResults)("netease", query, await (0, netease_1.neteaseSearch)(query), 12).map((item) => ({
-            source: "netease",
-            sourceId: String(item.songId || ""),
-            title: cleanText(item.title || item.songId, 200),
-            artist: cleanText(item.artist || "未知歌手", 120),
-            duration: cleanText(item.duration || "", 40),
-            downloadToken: String(item.downloadToken || ""),
-        })).filter(item => item.sourceId);
-    }
-    return (0, search_results_1.signSearchResults)("bilibili", query, await (0, bilibili_1.biliSearch)(query), 12).map((item) => ({
-        source: "bilibili",
-        sourceId: String(item.bvid || ""),
-        title: cleanText(item.title || item.bvid, 200),
-        artist: cleanText(item.author || "未知UP主", 120),
-        duration: cleanText(item.duration || "", 40),
-        downloadToken: String(item.downloadToken || ""),
-    })).filter(item => item.sourceId);
+    const unique = Array.from(new Map(candidates.map(candidate => [candidateIdentity(candidate), candidate])).values());
+    return { candidates: unique, sourceStatuses: statuses };
 }
 async function resolveMusicPlaybackDecisionV2(input) {
     const intent = input.intent;
@@ -85,6 +116,11 @@ async function resolveMusicPlaybackDecisionV2(input) {
         sourceMode: sourceMode(intent.sourceMode),
         searchQuery: intent.searchQuery,
         intentReceipt: intent.semanticDecisionReceipt || null,
+        sourceStatuses: {
+            local: { status: "not_requested", resultCount: 0 },
+            netease: { status: "not_requested", resultCount: 0 },
+            bilibili: { status: "not_requested", resultCount: 0 },
+        },
     };
     if (intent.action === "none") {
         return makeDecision({ ...base, status: "resolved", candidates: [], selectedCandidate: null, reply: "这条消息不需要操作播放器。", reason: intent.reason, selectionReceipt: null });
@@ -92,9 +128,20 @@ async function resolveMusicPlaybackDecisionV2(input) {
     if ((intent.strategy === "mood_recommendation" || intent.strategy === "genre_recommendation") && input.aiRecommendationEnabled === false) {
         return makeDecision({ ...base, status: "rejected", candidates: [], selectedCandidate: null, reply: "AI推荐已关闭，当前不会根据心情或场景自动选歌。", reason: "ai_recommendation_disabled", selectionReceipt: null });
     }
-    const candidates = await searchCandidates(intent);
+    const searched = await searchCandidates(intent);
+    const candidates = searched.candidates;
+    base.sourceStatuses = searched.sourceStatuses;
     if (!candidates.length) {
-        return makeDecision({ ...base, status: "rejected", candidates: [], selectedCandidate: null, reply: "没有找到符合这次要求的歌曲。", reason: "no_candidates", selectionReceipt: null });
+        const failed = Object.values(searched.sourceStatuses).some(status => !["success", "not_requested"].includes(status.status));
+        return makeDecision({
+            ...base,
+            status: "rejected",
+            candidates: [],
+            selectedCandidate: null,
+            reply: failed ? "音乐平台暂时不可用，未执行播放，请稍后重试。" : "没有找到符合这次要求的歌曲。",
+            reason: failed ? "all_sources_unavailable" : "no_candidates",
+            selectionReceipt: null,
+        });
     }
     if (intent.action === "search") {
         return makeDecision({ ...base, status: "resolved", candidates, selectedCandidate: null, reply: `找到 ${candidates.length} 个结果。`, reason: intent.reason, selectionReceipt: null });
@@ -109,11 +156,7 @@ async function resolveMusicPlaybackDecisionV2(input) {
     let reply = "";
     let reason = intent.reason;
     let selectionReceipt = null;
-    if (intent.strategy === "random") {
-        selected = candidates[Math.floor(Math.random() * candidates.length)] || null;
-        reason = "explicit_random_request";
-    }
-    else if (intent.strictMatch) {
+    if (intent.strictMatch) {
         const strong = candidates
             .map(candidate => ({ candidate, score: (0, select_track_1.scoreMusicCandidate)(intent.searchQuery, candidate) }))
             .filter(item => item.score >= 80);

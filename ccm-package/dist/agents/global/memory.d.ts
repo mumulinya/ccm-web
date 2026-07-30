@@ -205,6 +205,7 @@ export declare function ingestGlobalAgentConversation(input: {
     source?: string;
     messages: any[];
     compact?: boolean;
+    extractMemory?: boolean;
 }): {
     transcript: {
         sessionId: string;

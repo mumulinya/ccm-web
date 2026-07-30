@@ -39,12 +39,16 @@ exports.buildUsabilityWorkbench = buildUsabilityWorkbench;
 exports.startUsabilityArchiveScheduler = startUsabilityArchiveScheduler;
 exports.stopUsabilityArchiveScheduler = stopUsabilityArchiveScheduler;
 exports.handleUsabilityApi = handleUsabilityApi;
+const crypto = __importStar(require("crypto"));
 const runtime_events_1 = require("../../system/runtime-events");
 const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
 const collaboration_1 = require("../collaboration/collaboration");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const project_runtime_1 = require("../projects/project-runtime");
+const api_access_control_1 = require("./api-access-control");
+const execution_kernel_1 = require("../../agents/execution-kernel");
+const reliability_ledger_1 = require("../../system/reliability-ledger");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const DAY = 24 * 60 * 60 * 1000;
@@ -159,6 +163,46 @@ function taskAttentionKind(task, phase) {
         return "confirmation";
     return phase === "needs_user" ? "supplement" : "";
 }
+function taskRevision(task) {
+    return crypto.createHash("sha256").update(JSON.stringify({
+        id: task?.id || "",
+        status: task?.status || "",
+        updated_at: task?.updated_at || "",
+        intake_state: task?.intake_state || "",
+        acceptance_state: task?.acceptance_state || "",
+        archived: task?.archived === true,
+    })).digest("hex");
+}
+function taskBlockerKind(task, phase) {
+    if (task?.intake_state === "awaiting_confirmation")
+        return "waiting_confirmation";
+    const permissionState = String(task?.permission_state || task?.permission_request?.state || "").toLowerCase();
+    if (task?.permission_required === true || ["awaiting_user", "permission_required", "waiting_permission"].includes(permissionState))
+        return "permission_required";
+    const status = String(task?.status || "").toLowerCase();
+    if (status === "paused" || task?.paused === true || task?.is_paused === true)
+        return "paused";
+    if (phase === "failed")
+        return "failed";
+    if (["waiting_confirmation", "needs_confirmation"].includes(status))
+        return "waiting_confirmation";
+    if (["waiting_user", "waiting_input", "needs_input", "awaiting_user", "needs_user", "blocked"].includes(status)
+        || task?.collaboration_state?.needs_user === true)
+        return "needs_user";
+    return "";
+}
+function taskActionsForBlocker(task, phase) {
+    const blocker = taskBlockerKind(task, phase);
+    if (blocker === "waiting_confirmation")
+        return ["confirm", "edit", "cancel"];
+    if (blocker === "permission_required")
+        return ["view_permission", "cancel"];
+    if (blocker === "paused")
+        return ["resume", "cancel"];
+    if (blocker === "needs_user")
+        return ["supplement", "cancel"];
+    return taskActions(task, phase);
+}
 function publicTask(task) {
     const phase = taskPhase(task);
     const delivery = task.delivery_summary || {};
@@ -166,7 +210,7 @@ function publicTask(task) {
     const verified = Array.isArray(delivery.verification_executed) ? delivery.verification_executed.length : 0;
     return {
         id: task.id,
-        trace_id: task.trace_id || "",
+        revision: taskRevision(task),
         title: task.title || task.business_goal || "未命名任务",
         goal: task.business_goal || task.description || "",
         phase,
@@ -176,43 +220,70 @@ function publicTask(task) {
         group_id: task.group_id || "",
         updated_at: task.updated_at || task.created_at || "",
         created_at: task.created_at || "",
-        actions: taskActions(task, phase),
+        actions: taskActionsForBlocker(task, phase),
+        blocker_kind: taskBlockerKind(task, phase),
         attention_kind: taskAttentionKind(task, phase),
         progress: taskProgress(task, phase),
         delivery: { files_changed: changed, verification_count: verified, report: delivery.user_report || task.final_report || "" },
         intake: task.intake_draft || null,
+        technical: {
+            trace_available: !!task.trace_id,
+            source: task.source || task.request_origin || "",
+        },
     };
 }
 function archiveOldUsabilityHistory(now = Date.now()) {
-    const tasks = (0, db_1.loadTasks)();
     let changed = 0;
+    let conflicts = 0;
     const cutoff = now - AUTO_ARCHIVE_DAYS * DAY;
+    const tasks = (0, db_1.listUsabilityArchiveCandidates)(new Date(cutoff).toISOString(), new Date(now - DAY).toISOString());
     for (const task of tasks) {
         if (task.archived || task.deleted_at || !["done", "cancelled"].includes(String(task.status || "")))
             continue;
         if (timeOf(task.completed_at || task.cancelled_at || task.updated_at || task.created_at) >= cutoff)
             continue;
-        task.archived = true;
-        task.archived_at = new Date(now).toISOString();
-        task.archive_reason = `日常工作台自动归档：终态超过 ${AUTO_ARCHIVE_DAYS} 天`;
-        changed++;
+        const expectedStatus = String(task.status || "");
+        const expectedUpdatedAt = String(task.updated_at || "");
+        const result = (0, db_1.updateTaskByIdCas)(task.id, current => (current.archived !== true
+            && !current.deleted_at
+            && String(current.status || "") === expectedStatus
+            && String(current.updated_at || "") === expectedUpdatedAt
+            && timeOf(current.completed_at || current.cancelled_at || current.updated_at || current.created_at) < cutoff), current => ({
+            ...current,
+            archived: true,
+            archived_at: new Date(now).toISOString(),
+            archive_reason: `日常工作台自动归档：终态超过 ${AUTO_ARCHIVE_DAYS} 天`,
+        }));
+        if (result.updated)
+            changed++;
+        else if (result.conflict)
+            conflicts++;
     }
     for (const task of tasks) {
         if (task.archived || task.deleted_at || task.intake_state !== "awaiting_confirmation")
             continue;
         if (timeOf(task.created_at) >= now - DAY)
             continue;
-        task.archived = true;
-        task.status = "archived";
-        task.archived_at = new Date(now).toISOString();
-        task.archive_reason = "执行前确认卡超过 24 小时未确认，自动归档";
-        changed++;
+        const expectedUpdatedAt = String(task.updated_at || "");
+        const result = (0, db_1.updateTaskByIdCas)(task.id, current => (current.archived !== true
+            && !current.deleted_at
+            && current.intake_state === "awaiting_confirmation"
+            && String(current.updated_at || "") === expectedUpdatedAt
+            && timeOf(current.created_at) < now - DAY), current => ({
+            ...current,
+            archived: true,
+            status: "archived",
+            archived_at: new Date(now).toISOString(),
+            archive_reason: "执行前确认卡超过 24 小时未确认，自动归档",
+        }));
+        if (result.updated)
+            changed++;
+        else if (result.conflict)
+            conflicts++;
     }
-    if (changed)
-        (0, db_1.saveTasks)(tasks);
-    if (changed)
-        appendGovernanceAudit({ type: "automatic_task_archive", changed, retention_days: AUTO_ARCHIVE_DAYS });
-    return { changed, retention_days: AUTO_ARCHIVE_DAYS };
+    if (changed || conflicts)
+        appendGovernanceAudit({ type: "automatic_task_archive", changed, conflicts, retention_days: AUTO_ARCHIVE_DAYS });
+    return { changed, conflicts, retention_days: AUTO_ARCHIVE_DAYS };
 }
 function runUsabilityGovernance() {
     const archive = archiveOldUsabilityHistory();
@@ -221,9 +292,64 @@ function runUsabilityGovernance() {
         appendGovernanceAudit({ type: "stale_session_cleanup", closed: sessions.closed, session_ids: sessions.sessions.map((item) => item.id) });
     return { archive, sessions: { closed: sessions.closed }, audit_file: GOVERNANCE_AUDIT_FILE };
 }
+function readProjectResources() {
+    return (0, db_1.getConfigs)().map((config) => {
+        const info = (0, db_1.getConfigInfo)(config.path)?.[0] || {};
+        const agentConnected = (0, db_1.isRunningReadOnly)(config.name);
+        let runtimeSummary = {
+            profile_count: 0,
+            running_count: 0,
+            unknown_count: 0,
+            building_count: 0,
+            selected_profile_id: "",
+            profiles: [],
+            processes: [],
+        };
+        try {
+            runtimeSummary = (0, project_runtime_1.getProjectRuntimeSummaryReadOnly)(config.name);
+        }
+        catch { }
+        return {
+            name: config.name,
+            display_name: (0, project_runtime_1.projectDisplayName)(config.name),
+            agent: info.agent || "claudecode",
+            agent_connection: { connected: agentConnected },
+            runtime_summary: runtimeSummary,
+            actions: {
+                agent: agentConnected ? ["open", "disconnect"] : ["open", "connect"],
+                runtime: runtimeSummary.profile_count ? ["start", "stop", "restart", "build"] : ["configure"],
+            },
+        };
+    });
+}
+function pageMeta(total, pageSize) {
+    return {
+        total,
+        page_size: pageSize,
+        next_cursor: total > pageSize ? Buffer.from(String(pageSize), "utf-8").toString("base64url") : "",
+        truncated: total > pageSize,
+    };
+}
+function workbenchCapabilities(principal) {
+    const capabilities = new Set(Array.isArray(principal?.capabilities) ? principal.capabilities : []);
+    const role = principal?.role || "viewer";
+    return {
+        role,
+        task_execute: role === "admin" || capabilities.has("task.execute"),
+        project_runtime: role === "admin" || capabilities.has("project.runtime"),
+        project_git: role === "admin" || capabilities.has("project.git"),
+        cron_manage: role === "admin",
+        required_roles: {
+            task_execute: "operator",
+            project_runtime: "operator",
+            cron_manage: "admin",
+        },
+    };
+}
 function buildUsabilityWorkbench(options = {}) {
-    const archive = options.runArchive === false ? { changed: 0, retention_days: AUTO_ARCHIVE_DAYS } : archiveOldUsabilityHistory();
-    const tasks = (0, db_1.loadTasks)().filter((item) => !item.archived && !item.deleted_at).map(publicTask)
+    const archive = options.runArchive === false ? { changed: 0, conflicts: 0, retention_days: AUTO_ARCHIVE_DAYS } : archiveOldUsabilityHistory();
+    const recentCutoff = new Date(Date.now() - DAY).toISOString();
+    const tasks = (0, db_1.listUsabilityTaskCandidates)(recentCutoff).filter((item) => !item.archived && !item.deleted_at).map(publicTask)
         .sort((a, b) => timeOf(b.updated_at) - timeOf(a.updated_at));
     const buckets = { needs_user: [], failed: [], in_progress: [], queued: [], recently_completed: [], history: [] };
     tasks.forEach((task) => (buckets[task.phase] || buckets.history).push(task));
@@ -232,11 +358,7 @@ function buildUsabilityWorkbench(options = {}) {
         level: task.phase === "failed" ? "error" : task.phase === "needs_user" ? "decision" : "success",
         task,
     }));
-    const projects = (0, db_1.getConfigs)().map((config) => {
-        const info = (0, db_1.getConfigInfo)(config.path)?.[0] || {};
-        const running = (0, db_1.isRunning)(config.name);
-        return { name: config.name, display_name: (0, project_runtime_1.projectDisplayName)(config.name), running, agent: info.agent || "claudecode", work_dir: info.workDir || "", actions: running ? ["open", "stop"] : ["open", "start"] };
-    });
+    const projects = readProjectResources();
     const groups = (0, collaboration_1.loadGroups)().map((group) => ({ id: group.id, name: group.name, members: Array.isArray(group.members) ? group.members.length : 0 }));
     const cron = (0, db_1.loadCronJobs)().filter((job) => !job.archived && !job.deleted_at).map((job) => ({
         id: job.id, name: job.name || job.title || "定时任务", enabled: job.enabled !== false && job.status !== "paused", next_run: job.next_run || job.nextRun || "", last_status: job.last_status || job.lastStatus || "", actions: ["open", "toggle"],
@@ -247,18 +369,79 @@ function buildUsabilityWorkbench(options = {}) {
         if (key && key in attentionCounts)
             attentionCounts[key]++;
     });
-    return {
-        generated_at: new Date().toISOString(),
-        archive,
+    const active = [...buckets.in_progress, ...buckets.queued];
+    const completed = buckets.recently_completed;
+    const pageSize = 12;
+    const stable = {
         counts: Object.fromEntries(Object.entries(buckets).map(([key, value]) => [key, value.length])),
         attention_counts: attentionCounts,
         attention: [...buckets.failed, ...buckets.needs_user].slice(0, 5),
-        active: [...buckets.in_progress, ...buckets.queued],
-        completed: buckets.recently_completed,
+        active: active.slice(0, pageSize),
+        completed: completed.slice(0, pageSize),
+        resources: {
+            projects: projects.slice(0, 50),
+            groups: groups.slice(0, 50),
+            cron: cron.slice(0, 50),
+        },
+    };
+    return {
+        schema: "ccm-usability-workbench-snapshot-v3",
+        version: 3,
+        generated_at: new Date().toISOString(),
+        archive,
+        checksum: crypto.createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
+        ...stable,
         notifications,
-        resources: { projects, groups, cron },
+        pages: {
+            active: pageMeta(active.length, pageSize),
+            completed: pageMeta(completed.length, pageSize),
+            projects: pageMeta(projects.length, 50),
+            groups: pageMeta(groups.length, 50),
+            cron: pageMeta(cron.length, 50),
+        },
+        capabilities: workbenchCapabilities(options.principal),
         onboarding: { empty: projects.length === 0 && groups.length === 0, has_tasks: tasks.length > 0 },
     };
+}
+function decodeCursor(value) {
+    if (!value)
+        return 0;
+    try {
+        const offset = Number(Buffer.from(String(value), "base64url").toString("utf-8"));
+        return Number.isInteger(offset) && offset >= 0 ? offset : 0;
+    }
+    catch {
+        return 0;
+    }
+}
+function encodeCursor(value) {
+    return Buffer.from(String(value), "utf-8").toString("base64url");
+}
+function workbenchSectionItems(section) {
+    if (["active", "completed", "attention"].includes(section)) {
+        const tasks = (0, db_1.listUsabilityTaskCandidates)(new Date(Date.now() - DAY).toISOString())
+            .filter((item) => !item.archived && !item.deleted_at)
+            .map(publicTask)
+            .sort((a, b) => timeOf(b.updated_at) - timeOf(a.updated_at));
+        if (section === "active")
+            return tasks.filter(task => ["in_progress", "queued"].includes(task.phase));
+        if (section === "completed")
+            return tasks.filter(task => task.phase === "recently_completed");
+        return tasks.filter(task => ["failed", "needs_user"].includes(task.phase));
+    }
+    if (section === "projects")
+        return readProjectResources();
+    if (section === "groups")
+        return (0, collaboration_1.loadGroups)().map((group) => ({ id: group.id, name: group.name, members: Array.isArray(group.members) ? group.members.length : 0 }));
+    if (section === "cron")
+        return (0, db_1.loadCronJobs)().filter((job) => !job.archived && !job.deleted_at).map((job) => ({
+            id: job.id,
+            name: job.name || job.title || "定时任务",
+            enabled: job.enabled !== false && job.status !== "paused",
+            next_run: job.next_run || job.nextRun || "",
+            last_status: job.last_status || job.lastStatus || "",
+        }));
+    throw new Error("不支持的工作台分页区域");
 }
 function sendWorkbenchEvent(res, payload) {
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -279,10 +462,231 @@ function stopUsabilityArchiveScheduler() {
         clearInterval(archiveTimer);
     archiveTimer = null;
 }
-function handleUsabilityApi(pathname, req, res) {
+function readActionBody(req) {
+    return new Promise((resolve, reject) => {
+        let body = "";
+        let rejected = false;
+        req.on("data", chunk => {
+            if (rejected)
+                return;
+            body += chunk;
+            if (Buffer.byteLength(body, "utf-8") > 256 * 1024) {
+                rejected = true;
+                reject(new Error("任务操作内容过大"));
+            }
+        });
+        req.on("end", () => {
+            if (rejected)
+                return;
+            try {
+                resolve(body ? JSON.parse(body) : {});
+            }
+            catch {
+                reject(new Error("任务操作JSON无效"));
+            }
+        });
+        req.on("error", reject);
+    });
+}
+function workbenchActionReceipt(task, revisionBefore, action, principal, clientMessageId, result) {
+    const value = {
+        schema: "ccm-workbench-task-action-receipt-v1",
+        task_id: task.id,
+        action,
+        actor_id: principal?.userId || "",
+        actor_role: principal?.role || "internal",
+        client_message_id: clientMessageId,
+        task_revision_before: revisionBefore,
+        task_revision_after: taskRevision(task),
+        result_status: result?.task?.status || result?.status || task.status || "",
+        created_at: new Date().toISOString(),
+    };
+    return {
+        ...value,
+        checksum: crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex"),
+    };
+}
+function assertTaskRevision(task, expected) {
+    const supplied = String(expected || "").trim();
+    if (!supplied)
+        return;
+    if (supplied !== taskRevision(task)) {
+        const error = new Error("任务状态已经变化，请刷新工作台后重试");
+        error.code = "state_drift";
+        throw error;
+    }
+}
+async function executeWorkbenchTaskAction(taskId, payload, req, deps) {
+    const principal = (0, api_access_control_1.requestAccessPrincipal)(req);
+    if (!principal || principal.kind !== "browser")
+        throw new Error("任务操作需要已登录用户");
+    const action = String(payload.action || "").trim();
+    const clientMessageId = String(payload.client_message_id || payload.clientMessageId || "").trim();
+    if (!clientMessageId)
+        throw new Error("缺少client_message_id");
+    let task = (0, db_1.getTaskById)(taskId);
+    if (!task || task.archived || task.deleted_at) {
+        const error = new Error("任务不存在或已归档");
+        error.status = 404;
+        throw error;
+    }
+    assertTaskRevision(task, payload.expected_revision);
+    const revisionBefore = taskRevision(task);
+    const phase = taskPhase(task);
+    const blocker = taskBlockerKind(task, phase);
+    const allowed = new Set(taskActionsForBlocker(task, phase));
+    if (!allowed.has(action)) {
+        const error = new Error(`当前任务状态不允许“${action}”操作`);
+        error.code = "action_not_allowed";
+        error.status = 409;
+        throw error;
+    }
+    const operationKey = `${taskId}:${action}:${clientMessageId}`;
+    const operation = (0, reliability_ledger_1.acquireIdempotency)({ scope: "workbench-task-action", key: operationKey, traceId: task.trace_id, leaseMs: 60_000 });
+    if (!operation.acquired)
+        return { success: true, duplicate: true, ...(operation.record?.result || {}) };
+    try {
+        let result = null;
+        if (action === "pause") {
+            deps.removeTaskFromQueues(taskId);
+            const changed = (0, db_1.updateTaskByIdCas)(taskId, current => (taskRevision(current) === taskRevision(task)
+                && ["pending", "queued", "waiting", "in_progress", "running"].includes(String(current.status || ""))), current => ({
+                ...current,
+                status: "paused",
+                paused: true,
+                is_paused: true,
+                auto_execute: false,
+                paused_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                status_detail: "用户从工作台暂停任务",
+            }));
+            if (!changed.updated)
+                throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
+            result = { task: changed.task };
+        }
+        else if (action === "resume") {
+            if (blocker !== "paused")
+                throw Object.assign(new Error("只有已暂停任务可以直接恢复"), { code: "resume_gate_failed" });
+            const changed = (0, db_1.updateTaskByIdCas)(taskId, current => (taskRevision(current) === taskRevision(task)
+                && (String(current.status || "") === "paused" || current.paused === true || current.is_paused === true)), current => ({
+                ...current,
+                status: "pending",
+                paused: false,
+                is_paused: false,
+                auto_execute: true,
+                resumed_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                status_detail: "用户从工作台恢复任务",
+            }));
+            if (!changed.updated)
+                throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
+            result = { task: changed.task, queue_result: deps.enqueueTask(taskId, deps.ctx) };
+        }
+        else if (action === "retry") {
+            if (blocker !== "failed")
+                throw Object.assign(new Error("只有失败任务可以重试"), { code: "retry_gate_failed" });
+            result = deps.retryTask(taskId, deps.ctx, String(payload.message || payload.reason || "用户从工作台按失败缺口重试"), true);
+            if (result?.success === false)
+                throw new Error(result.error || "任务重试失败");
+        }
+        else if (action === "start") {
+            if (blocker)
+                throw Object.assign(new Error("任务仍有未处理的确认或阻塞，不能直接开始"), { code: "start_gate_failed" });
+            result = { task, queue_result: deps.enqueueTask(taskId, deps.ctx) };
+        }
+        else if (action === "supplement") {
+            const message = String(payload.message || "").trim();
+            if (blocker !== "needs_user")
+                throw Object.assign(new Error("当前任务不在等待补充状态"), { code: "supplement_gate_failed" });
+            if (!message)
+                throw new Error("请填写补充说明");
+            result = deps.continueTaskWithMessage(taskId, message, deps.ctx, {
+                source: "workbench",
+                resolve_waiting_user: true,
+                client_message_id: clientMessageId,
+            });
+            if (result?.success === false)
+                throw new Error(result.error || "补充说明提交失败");
+        }
+        else if (action === "archive") {
+            if (!["recently_completed", "history"].includes(phase))
+                throw Object.assign(new Error("只有终态任务可以归档"), { code: "archive_gate_failed" });
+            result = { task: deps.archiveTask(taskId, "用户从工作台归档已完成任务") };
+        }
+        else if (action === "cancel") {
+            deps.removeTaskFromQueues(taskId);
+            (0, execution_kernel_1.requestTaskCancellation)(taskId, "用户从工作台取消任务", "usability-workbench");
+            const changed = (0, db_1.updateTaskByIdCas)(taskId, current => taskRevision(current) === taskRevision(task), current => ({
+                ...current,
+                status: "cancelled",
+                acceptance_state: "cancelled",
+                auto_execute: false,
+                cancelled_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                status_detail: "用户从工作台取消任务",
+            }));
+            if (!changed.updated)
+                throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
+            (0, agent_sessions_1.closeTaskAgentSessions)({ taskId }, "用户从工作台取消任务");
+            (0, reliability_ledger_1.releaseTaskLease)(taskId, "cancelled");
+            result = { task: changed.task };
+        }
+        else if (action === "view_permission") {
+            result = { task, navigate: { tab: "tasks", task_id: taskId, permission_required: true } };
+        }
+        else {
+            throw Object.assign(new Error("该操作需要在任务详情中完成"), { code: "detail_action_required", status: 409 });
+        }
+        task = (0, db_1.getTaskById)(taskId) || result?.task || task;
+        const receipt = workbenchActionReceipt(task, revisionBefore, action, principal, clientMessageId, result);
+        const response = { success: true, task: publicTask(task), action_receipt: receipt, queue_result: result?.queue_result || null, navigate: result?.navigate || null };
+        (0, reliability_ledger_1.completeIdempotency)("workbench-task-action", operationKey, response);
+        appendGovernanceAudit({ type: "workbench_task_action", task_id: taskId, action, actor_id: principal.userId, receipt_checksum: receipt.checksum });
+        return response;
+    }
+    catch (error) {
+        (0, reliability_ledger_1.failIdempotency)("workbench-task-action", operationKey, error?.message || "工作台任务操作失败");
+        throw error;
+    }
+}
+function handleUsabilityApi(pathname, req, res, parsed = null, actionDeps) {
     if (pathname === "/api/usability/workbench" && req.method === "GET") {
         // Archival governance runs on its scheduler, not on a user-facing read path.
-        (0, utils_1.sendJson)(res, buildUsabilityWorkbench({ runArchive: false }));
+        (0, utils_1.sendJson)(res, buildUsabilityWorkbench({ runArchive: false, principal: (0, api_access_control_1.requestAccessPrincipal)(req) }));
+        return true;
+    }
+    if (pathname === "/api/usability/workbench/items" && req.method === "GET") {
+        try {
+            const section = String(parsed?.query?.section || "");
+            const limit = Math.max(1, Math.min(100, Number(parsed?.query?.limit || 25)));
+            const offset = decodeCursor(parsed?.query?.cursor);
+            const rows = workbenchSectionItems(section);
+            const items = rows.slice(offset, offset + limit);
+            (0, utils_1.sendJson)(res, {
+                success: true,
+                schema: "ccm-usability-workbench-page-v3",
+                section,
+                items,
+                total: rows.length,
+                next_cursor: offset + items.length < rows.length ? encodeCursor(offset + items.length) : "",
+                checksum: crypto.createHash("sha256").update(JSON.stringify(items)).digest("hex"),
+            });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "读取工作台分页失败" }, 400);
+        }
+        return true;
+    }
+    const taskActionMatch = pathname.match(/^\/api\/usability\/tasks\/([^/]+)\/action$/);
+    if (taskActionMatch && req.method === "POST") {
+        if (!actionDeps) {
+            (0, utils_1.sendJson)(res, { success: false, error: "工作台任务运行时尚未就绪" }, 503);
+            return true;
+        }
+        void readActionBody(req)
+            .then(payload => executeWorkbenchTaskAction(decodeURIComponent(taskActionMatch[1]), payload, req, actionDeps))
+            .then(result => (0, utils_1.sendJson)(res, result))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "工作台任务操作失败", code: error?.code || "" }, Number(error?.status || (error?.code === "state_drift" ? 409 : 400))));
         return true;
     }
     if (pathname === "/api/usability/workbench/stream" && req.method === "GET") {
@@ -292,13 +696,13 @@ function handleUsabilityApi(pathname, req, res) {
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         });
-        let snapshot = buildUsabilityWorkbench({ runArchive: false });
+        let snapshot = buildUsabilityWorkbench({ runArchive: false, principal: (0, api_access_control_1.requestAccessPrincipal)(req) });
         let signature = workbenchSignature(snapshot);
         let refreshTimer = null;
         sendWorkbenchEvent(res, { type: "snapshot", data: snapshot });
         const refresh = () => {
             try {
-                const next = buildUsabilityWorkbench({ runArchive: false });
+                const next = buildUsabilityWorkbench({ runArchive: false, principal: (0, api_access_control_1.requestAccessPrincipal)(req) });
                 const nextSignature = workbenchSignature(next);
                 if (nextSignature !== signature) {
                     snapshot = next;

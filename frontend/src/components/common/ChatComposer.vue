@@ -2,7 +2,6 @@
 import { computed, ref, useSlots } from 'vue'
 import AttachmentChips from './AttachmentChips.vue'
 import SlashCommandMenu from './SlashCommandMenu.vue'
-import TemplatePicker from './TemplatePicker.vue'
 import OnlineDocumentReferences from './OnlineDocumentReferences.vue'
 import {
   countNewAttachmentFiles,
@@ -17,19 +16,12 @@ const props = defineProps({
   placeholder: { type: String, default: '输入消息...' },
   rows: { type: Number, default: 1 },
   slash: { type: Object, default: null },
-  templatesOpen: { type: Boolean, default: false },
-  templates: { type: Array, default: () => [] },
-  templateSearchQuery: { type: String, default: '' },
-  activeTemplateIndex: { type: Number, default: 0 },
-  recommendedTemplate: { type: Object, default: null },
   disabled: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
   allowInputWhileBusy: { type: Boolean, default: false },
   sendLabel: { type: String, default: '发送' },
   attachTitle: { type: String, default: '添加附件' },
   accept: { type: String, default: 'image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx' },
-  templateTitle: { type: String, default: '插入对话模板' },
-  showTemplateButton: { type: Boolean, default: true },
 })
 
 const emit = defineEmits([
@@ -39,10 +31,6 @@ const emit = defineEmits([
   'files-selected',
   'files-pasted',
   'remove-file',
-  'open-template',
-  'update:template-search-query',
-  'select-template',
-  'apply-recommendation',
   'send',
   'stop',
 ])
@@ -85,17 +73,7 @@ const onInput = (event) => {
     <slot name="prefix" />
     <input ref="fileInput" type="file" multiple class="hidden-file-input" :accept="props.accept" @change="onFilesSelected">
     <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.attachTitle" @click="chooseFiles">📎</button>
-    <button v-if="props.showTemplateButton" class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.templateTitle" @click="emit('open-template')">📚</button>
     <div class="chat-input-wrap" :class="{ 'has-context-usage': !!slots.context }">
-      <div
-        v-if="props.recommendedTemplate"
-        class="recommendation-bubble"
-        @click="emit('apply-recommendation')"
-      >
-        <span class="bulb">💡</span>
-        <span class="text">意图检测：建议使用模板 <strong>{{ props.recommendedTemplate.name }}</strong></span>
-        <span class="action">一键格式化提示词</span>
-      </div>
       <AttachmentChips :files="props.files" @remove="emit('remove-file', $event)" />
       <OnlineDocumentReferences :text="props.modelValue" compact />
       <textarea
@@ -121,14 +99,6 @@ const onInput = (event) => {
       <div v-if="slots.context" class="composer-context-slot">
         <slot name="context" />
       </div>
-      <TemplatePicker
-        :open="props.templatesOpen"
-        :templates="props.templates"
-        :search-query="props.templateSearchQuery"
-        :active-index="props.activeTemplateIndex"
-        @update:search-query="emit('update:template-search-query', $event)"
-        @select="emit('select-template', $event)"
-      />
     </div>
     <button :class="['send-button', { stopping: props.busy && !props.allowInputWhileBusy }]" type="button" :disabled="props.disabled || (props.busy && props.allowInputWhileBusy && !props.modelValue.trim())" @click="emit(props.busy && !props.allowInputWhileBusy ? 'stop' : 'send')">
       {{ props.busy && !props.allowInputWhileBusy ? '停止' : props.sendLabel }}
@@ -231,37 +201,6 @@ textarea {
 textarea:focus {
   border-color: rgba(59, 130, 246, 0.32);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
-}
-
-.recommendation-bubble {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  max-width: 100%;
-  padding: 7px 10px;
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  border-radius: 9px;
-  background: rgba(245, 158, 11, 0.12);
-  color: #92400e;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.recommendation-bubble .text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recommendation-bubble .action {
-  flex: 0 0 auto;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: var(--surface-subtle);
-  font-weight: 700;
 }
 
 :global([data-theme="dark"] .chat-composer){

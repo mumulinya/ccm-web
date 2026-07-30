@@ -503,6 +503,7 @@ export declare function startGlobalAgentRun(input: {
     queueScope?: string;
     writeAuthorizationReceipt?: any;
     authorizationMessage?: string;
+    directReply?: string;
 }, runtime: GlobalAgentLoopRuntime): Promise<GlobalAgentRun>;
 export declare function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoopRuntime, options?: {
     approved?: boolean;
@@ -575,6 +576,7 @@ export declare const runGlobalAgentLoopSelfTest: () => Promise<{
     executionRunsHaveUnifiedDeliveryReport: boolean;
     executionRunsHaveCompletionCard: boolean;
     ordinaryAnswerDoesNotShowDeliveryReport: boolean;
+    modelConfirmedDirectReplySkipsFullLoop: boolean;
     globalDispatchLaunchSummaryVisible: boolean;
     globalDispatchLaunchSummaryStreamsLive: boolean;
     globalDispatchLaunchSummaryDoesNotCallDoneTargetCompleted: boolean;

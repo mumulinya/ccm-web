@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { startPlaywrightAppServer } from './playwright-app-server.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
+const appHost = process.env.CCM_BASE_URL ? null : await startPlaywrightAppServer(root, { port: 3082 })
+const baseUrl = String(process.env.CCM_BASE_URL || appHost.baseUrl).replace(/\/+$/, '')
 const outputDir = path.join(root, 'scratch', 'project-management-render-regression')
 fs.rmSync(outputDir, { recursive: true, force: true })
 fs.mkdirSync(outputDir, { recursive: true })
@@ -61,6 +63,14 @@ const prepare = async (page, options = {}) => {
     report.errors.push(`console: ${message.text()}${location ? ` (${location})` : ''}`)
   })
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
+  await page.route('**/*', route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (!pathname.startsWith('/api/')) return route.continue()
+    const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
+    return route.fulfill(acceptsEvents
+      ? { status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' }
+      : { status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, items: [], data: [] }) })
+  })
   await page.route('**/api/auth/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(adminSession) }))
   await page.route('**/api/music/playback/commands/head', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, command: null }) }))
   await page.route('**/api/pets/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, agents: [] }) }))
@@ -426,4 +436,5 @@ try {
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report, null, 2))
   await browser.close()
+  if (appHost) await appHost.server.close()
 }

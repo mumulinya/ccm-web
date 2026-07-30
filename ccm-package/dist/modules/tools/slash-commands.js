@@ -39,10 +39,98 @@ exports.runSlashCommandSelfTest = runSlashCommandSelfTest;
 exports.handleSlashCommandsApi = handleSlashCommandsApi;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
+const storage_1 = require("../collaboration/storage");
+const global_agent_tool_authorization_1 = require("../global/global-agent-tool-authorization");
+const atomic_json_file_1 = require("../../core/atomic-json-file");
 const CUSTOM_COMMANDS_FILE = path.join(utils_1.CCM_DIR, "configs", "slash-commands.json");
 const AUDIT_FILE = path.join(utils_1.CCM_DIR, "logs", "slash-command-audit.jsonl");
+const CONFIRMATION_SECRET = crypto.randomBytes(32);
+const usedConfirmationReceipts = new Map();
+const CONFIRMATION_TTL_MS = 2 * 60_000;
+function pruneConfirmationReceipts() {
+    const cutoff = Date.now() - CONFIRMATION_TTL_MS;
+    for (const [id, usedAt] of usedConfirmationReceipts)
+        if (usedAt < cutoff)
+            usedConfirmationReceipts.delete(id);
+    while (usedConfirmationReceipts.size > 1000)
+        usedConfirmationReceipts.delete(usedConfirmationReceipts.keys().next().value);
+}
+function principalIdentity(req) {
+    const auth = req?.ccmAuth;
+    if (!auth)
+        throw new Error("缺少已认证主体");
+    return {
+        id: auth.kind === "browser" ? String(auth.userId || "") : `internal:${String(auth.caller || "")}`,
+        session: auth.kind === "browser" ? String(auth.sessionId || "") : "",
+        role: String(auth.role || ""),
+    };
+}
+function signConfirmationPayload(payload) {
+    const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    const signature = crypto.createHmac("sha256", CONFIRMATION_SECRET).update(encoded).digest("base64url");
+    return `${encoded}.${signature}`;
+}
+function readConfirmationPayload(token, expectedKind) {
+    const [encoded, signature] = String(token || "").split(".");
+    if (!encoded || !signature)
+        throw new Error("确认凭据无效");
+    const expected = crypto.createHmac("sha256", CONFIRMATION_SECRET).update(encoded).digest();
+    const actual = Buffer.from(signature, "base64url");
+    if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected))
+        throw new Error("确认凭据签名无效");
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    if (payload.kind !== expectedKind || Number(payload.expires_at || 0) < Date.now())
+        throw new Error("确认凭据已过期");
+    return payload;
+}
+function confirmationBinding(req, scope, command, invocation, context) {
+    const principal = principalIdentity(req);
+    return {
+        principal_id: principal.id,
+        session_id: principal.session,
+        role: principal.role,
+        scope,
+        command: command.name,
+        invocation_checksum: crypto.createHash("sha256").update(JSON.stringify({ args: invocation.args || "", context: context || {} })).digest("hex"),
+    };
+}
+function confirmationRequired(command) {
+    return command.risk === "high" || command.action.type === "mutation";
+}
+function assertCommandRole(req, command) {
+    const principal = principalIdentity(req);
+    if (!confirmationRequired(command))
+        return;
+    if (command.risk === "high" && principal.role !== "admin")
+        throw new Error("该高风险命令只能由 Admin 确认");
+    if (command.action.type === "mutation" && !["admin", "operator", "internal"].includes(principal.role))
+        throw new Error("当前账户无权执行本地修改命令");
+}
+function createConfirmationChallenge(req, scope, command, invocation, context) {
+    assertCommandRole(req, command);
+    return signConfirmationPayload({
+        schema: "ccm-slash-command-confirmation-v1",
+        kind: "challenge",
+        id: `slash_ch_${crypto.randomUUID()}`,
+        ...confirmationBinding(req, scope, command, invocation, context),
+        expires_at: Date.now() + CONFIRMATION_TTL_MS,
+    });
+}
+function consumeConfirmationReceipt(req, token, scope, command, invocation, context) {
+    const payload = readConfirmationPayload(token, "receipt");
+    const binding = confirmationBinding(req, scope, command, invocation, context);
+    for (const key of ["principal_id", "session_id", "role", "scope", "command", "invocation_checksum"]) {
+        if (String(payload[key] || "") !== String(binding[key] || ""))
+            throw new Error("确认凭据与当前命令或会话不匹配");
+    }
+    pruneConfirmationReceipts();
+    if (usedConfirmationReceipts.has(payload.id))
+        throw new Error("确认凭据已使用");
+    usedConfirmationReceipts.set(payload.id, Date.now());
+}
 const COMMANDS = [
     { name: "help", aliases: ["commands", "?", "帮助"], description: "列出当前入口全部可用命令和执行方式", category: "基础", icon: "⌘", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "client", clientAction: "command_inventory" } },
     { name: "status", aliases: ["状态"], description: "查看当前会话、选择对象和消息状态", category: "基础", icon: "◉", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "client", clientAction: "status" } },
@@ -93,10 +181,10 @@ const COMMANDS = [
     { name: "task", aliases: ["任务详情"], description: "直接读取任务状态、结果说明和验收结论", category: "任务追踪", icon: "☑", scopes: ["global", "project", "group"], argumentHint: "<任务 ID>", requiresArgs: true, risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/tasks" } },
     { name: "agents", aliases: ["agent-health", "执行器健康"], description: "直接读取 Agent 与执行器健康状态", category: "任务追踪", icon: "◉", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/orchestrator/resilience" } },
     { name: "checkpoint", aliases: ["检查点"], description: "为指定执行创建 Git 安全检查点", category: "开发现场", icon: "◆", scopes: ["project", "group"], argumentHint: "<Execution ID>", requiresArgs: true, risk: "guarded", source: "ccm", action: { type: "mutation", endpoint: "/api/tasks/execution/checkpoint", method: "POST", body: { execution_id: "$ARGS", label: "用户通过 /checkpoint 创建" } } },
-    { name: "rollback", aliases: ["回滚检查点"], description: "回滚到指定执行检查点（仅隔离 worktree）", category: "开发现场", icon: "↶", scopes: ["project", "group"], argumentHint: "<Checkpoint ID>", requiresArgs: true, risk: "high", source: "ccm", action: { type: "mutation", endpoint: "/api/tasks/execution/rollback", method: "POST", body: { checkpoint_id: "$ARGS", reason: "用户通过 /rollback 明确确认回滚", allow_shared: false } } },
+    { name: "rollback", aliases: ["回滚检查点"], description: "回滚到指定执行检查点（仅隔离 worktree）", category: "开发现场", icon: "↶", scopes: ["project", "group"], argumentHint: "<Checkpoint ID>", requiresArgs: true, risk: "high", source: "ccm", action: { type: "mutation", endpoint: "/api/tasks/execution/rollback", method: "POST", body: { checkpoint_id: "$ARGS", reason: "用户通过 /rollback 明确确认回滚", allow_shared: false, confirmed: true } } },
     { name: "logs", aliases: ["日志"], description: "读取当前群聊或任务的近期日志", category: "开发现场", icon: "≡", scopes: ["global", "project", "group"], argumentHint: "[任务 ID]", risk: "safe", source: "ccm", action: { type: "query", endpointByScope: { global: "/api/tasks", project: "/api/tasks", group: "/api/groups/logs?id=$GROUP_ID&limit=50" } } },
     { name: "knowledge", aliases: ["kb", "知识库"], description: "直接检索本地知识库，不调用模型", category: "知识", icon: "⌕", scopes: ["global", "project", "group"], argumentHint: "<关键词>", requiresArgs: true, risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/rag/query", method: "POST", body: { query: "$ARGS" } } },
-    { name: "files", aliases: ["共享文件"], description: "读取当前作用域的共享文件列表", category: "知识", icon: "▤", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpointByScope: { global: "/api/shared", project: "/api/projects/shared?project=$PROJECT", group: "/api/shared" } } },
+    { name: "files", aliases: ["共享文件"], description: "读取当前作用域的共享文件列表", category: "知识", icon: "▤", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpointByScope: { global: "/api/shared-files?scope=global", project: "/api/shared-files?scope=project&scope_id=$PROJECT", group: "/api/shared-files?scope=group&scope_id=$GROUP_ID" } } },
     { name: "cron", aliases: ["定时任务"], description: "直接读取定时任务和调度器状态", category: "运维", icon: "◷", scopes: ["global", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/cron" } },
     { name: "soak", aliases: ["稳定性"], description: "读取 24 小时稳定性运行状态和报告", category: "运维", icon: "≈", scopes: ["global", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/reliability/soak/status" } },
     { name: "permissions", aliases: ["权限"], description: "读取全局 Agent 能力与授权边界", category: "治理", icon: "⚿", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/global-agent/capabilities" } },
@@ -140,16 +228,28 @@ function loadCustomCommands() {
         return [];
     }
 }
-function loadSkillCommands() {
+function authorizedSkillNames(scope, context = {}) {
+    if (scope === "global")
+        return new Set(((0, global_agent_tool_authorization_1.loadGlobalAgentToolAuthorization)()?.tools?.skill || []).map((name) => String(name).trim()).filter(Boolean));
+    if (scope === "project") {
+        const project = String(context?.project || "").trim();
+        return new Set(((0, db_1.loadProjectConfigs)()?.[project]?.tools?.skill || []).map((name) => String(name).trim()).filter(Boolean));
+    }
+    const groupId = String(context?.groupId || "").trim();
+    const group = (0, storage_1.loadGroups)().find((item) => String(item.id) === groupId);
+    return new Set((group?.tools?.skill || []).map((name) => String(name).trim()).filter(Boolean));
+}
+function loadSkillCommands(scope, context = {}) {
+    const authorized = authorizedSkillNames(scope, context);
     return (0, db_1.loadSkills)()
-        .filter((skill) => skill && skill.enabled !== false && skill.name && skill.prompt)
+        .filter((skill) => skill && skill.enabled !== false && skill.name && skill.prompt && authorized.has(String(skill.name)))
         .map((skill) => ({
         name: `skill:${String(skill.name).trim().replace(/\s+/g, "-")}`,
         aliases: [],
         description: String(skill.description || `调用 ${skill.name} Skill`),
         category: "Skill",
         icon: "✦",
-        scopes: ["global", "project", "group"],
+        scopes: [scope],
         argumentHint: "[补充要求]",
         risk: "guarded",
         source: "skill",
@@ -159,8 +259,8 @@ function loadSkillCommands() {
         },
     }));
 }
-function commandsForScope(scope) {
-    const merged = [...COMMANDS, ...loadCustomCommands(), ...loadSkillCommands()];
+function commandsForScope(scope, context = {}) {
+    const merged = [...COMMANDS, ...loadCustomCommands(), ...loadSkillCommands(scope, context)];
     const seen = new Set();
     return merged.filter(command => {
         const key = command.name.toLowerCase();
@@ -258,12 +358,10 @@ function publicCommand(command, scope = "global", context = {}) {
 }
 function getSlashCommandSummary() {
     return {
-        total: COMMANDS.length + loadCustomCommands().length + loadSkillCommands().length,
+        total: COMMANDS.length + loadCustomCommands().length,
         builtin: COMMANDS.length,
         custom: loadCustomCommands().length,
-        skills: loadSkillCommands().length,
-        customFile: CUSTOM_COMMANDS_FILE,
-        auditFile: AUDIT_FILE,
+        skills: "scope_authorized",
     };
 }
 function getSlashCommandContractSnapshot() {
@@ -302,7 +400,7 @@ function runSlashCommandSelfTest() {
         aliasesAvailable: globalCommands.find(command => command.name === "status")?.aliases?.includes("状态") === true,
         parameterSchemaPublished: publicCommand(globalCommands.find(command => command.name === "plan")).parameterSchema[0]?.required === true,
         permissionDerivedFromRisk: publicCommand(globalCommands.find(command => command.name === "project-stop")).permission === "manage",
-        skillsBecomeCommands: (0, db_1.loadSkills)().filter((skill) => skill?.enabled !== false).length === 0 || globalCommands.some(command => command.source === "skill"),
+        skillsRequireScopeAuthorization: !globalCommands.some(command => command.source === "skill") || authorizedSkillNames("global").size > 0,
         localQueriesDoNotInvokeModel: projectCommands.find(command => command.name === "diff")?.action.type === "query" && globalCommands.find(command => command.name === "agents")?.action.type === "query",
         clientSessionCommandsAreExplicit: globalCommands.find(command => command.name === "new")?.action.clientAction === "new_session" && globalCommands.find(command => command.name === "clear")?.risk === "high",
         groupCompactIsDirectAndExactSession: commandsForScope("group").find(command => command.name === "compact")?.action.clientAction === "compact_session",
@@ -328,11 +426,12 @@ function handleSlashCommandsApi(pathname, req, res, parsed) {
     if (pathname === "/api/slash-commands" && req.method === "GET") {
         const scope = normalizeScope(parsed.query.scope);
         const context = { project: parsed.query.project || "", group: parsed.query.group || "", groupId: parsed.query.groupId || "" };
-        (0, utils_1.sendJson)(res, { scope, commands: commandsForScope(scope).map(command => publicCommand(command, scope, context)), ...getSlashCommandSummary() });
+        const commands = commandsForScope(scope, context);
+        (0, utils_1.sendJson)(res, { scope, commands: commands.map(command => publicCommand(command, scope, context)), ...getSlashCommandSummary(), skills: commands.filter(command => command.source === "skill").length });
         return true;
     }
     if (pathname === "/api/slash-commands/custom" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { commands: loadCustomCommands().map(command => ({ ...command, source: undefined })), path: CUSTOM_COMMANDS_FILE });
+        (0, utils_1.sendJson)(res, { commands: loadCustomCommands().map(command => ({ ...command, source: undefined })) });
         return true;
     }
     if (pathname === "/api/slash-commands/custom" && req.method === "PUT") {
@@ -355,17 +454,42 @@ function handleSlashCommandsApi(pathname, req, res, parsed) {
                         return (0, utils_1.sendJson)(res, { error: `自定义命令 /${value.name} 重复` }, 409);
                     names.add(name);
                 }
-                fs.mkdirSync(path.dirname(CUSTOM_COMMANDS_FILE), { recursive: true });
-                const tempFile = `${CUSTOM_COMMANDS_FILE}.${process.pid}.${Date.now()}.tmp`;
-                fs.writeFileSync(tempFile, JSON.stringify({ commands: values }, null, 2), "utf8");
-                fs.renameSync(tempFile, CUSTOM_COMMANDS_FILE);
+                (0, atomic_json_file_1.withFileLock)(CUSTOM_COMMANDS_FILE, () => (0, atomic_json_file_1.writeJsonAtomic)(CUSTOM_COMMANDS_FILE, { schema: "ccm-slash-command-registry-v2", revision: Date.now(), commands: values }));
                 recordAudit({ command: "custom-registry:update", scope: "global", source: "custom", risk: "guarded", actionType: "registry", count: values.length });
-                (0, utils_1.sendJson)(res, { success: true, count: values.length, path: CUSTOM_COMMANDS_FILE });
+                (0, utils_1.sendJson)(res, { success: true, count: values.length });
             }
             catch (error) {
                 (0, utils_1.sendJson)(res, { error: error?.message || "保存自定义命令失败" }, 400);
             }
         }).catch((error) => (0, utils_1.sendJson)(res, { error: error?.message || "读取请求失败" }, 400));
+        return true;
+    }
+    if (pathname === "/api/slash-commands/confirm" && req.method === "POST") {
+        (0, utils_1.collectRequestBuffer)(req).then(buffer => {
+            try {
+                const body = JSON.parse(buffer.toString("utf8") || "{}");
+                if (body.confirmed !== true)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "用户未确认命令" }, 409);
+                const challenge = readConfirmationPayload(body.challenge, "challenge");
+                const principal = principalIdentity(req);
+                if (String(challenge.principal_id || "") !== principal.id || String(challenge.session_id || "") !== principal.session || String(challenge.role || "") !== principal.role) {
+                    return (0, utils_1.sendJson)(res, { success: false, error: "确认挑战不属于当前登录会话" }, 403);
+                }
+                const receipt = signConfirmationPayload({
+                    ...challenge,
+                    kind: "receipt",
+                    id: `slash_rcpt_${crypto.randomUUID()}`,
+                    challenge_id: challenge.id,
+                    confirmed_at: Date.now(),
+                    expires_at: Date.now() + CONFIRMATION_TTL_MS,
+                });
+                recordAudit({ command: challenge.command, scope: challenge.scope, source: "confirmation", risk: "high", actionType: "confirm", principal: principal.id });
+                (0, utils_1.sendJson)(res, { success: true, confirmation_receipt: receipt, expires_in_ms: CONFIRMATION_TTL_MS });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "命令确认失败" }, 400);
+            }
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "读取请求失败" }, 400));
         return true;
     }
     if (pathname === "/api/slash-commands/resolve" && req.method === "POST") {
@@ -377,7 +501,7 @@ function handleSlashCommandsApi(pathname, req, res, parsed) {
                 if (!invocation)
                     return (0, utils_1.sendJson)(res, { error: "不是有效的斜杠命令" }, 400);
                 const lowerName = invocation.name.toLowerCase();
-                const command = commandsForScope(scope).find(item => item.name.toLowerCase() === lowerName || (item.aliases || []).some(alias => alias.toLowerCase() === lowerName));
+                const command = commandsForScope(scope, body.context || {}).find(item => item.name.toLowerCase() === lowerName || (item.aliases || []).some(alias => alias.toLowerCase() === lowerName));
                 if (!command)
                     return (0, utils_1.sendJson)(res, { error: `当前入口不支持 /${invocation.name}` }, 404);
                 if (command.requiresArgs && !invocation.args) {
@@ -387,6 +511,20 @@ function handleSlashCommandsApi(pathname, req, res, parsed) {
                 if (!availability.enabled)
                     return (0, utils_1.sendJson)(res, { error: availability.reason }, 409);
                 const context = body.context || {};
+                if (confirmationRequired(command)) {
+                    assertCommandRole(req, command);
+                    if (!body.confirmation_receipt) {
+                        return (0, utils_1.sendJson)(res, {
+                            success: false,
+                            error: "该命令需要服务端确认",
+                            code: "SLASH_CONFIRMATION_REQUIRED",
+                            confirmation_required: true,
+                            confirmation_challenge: createConfirmationChallenge(req, scope, command, invocation, context),
+                            command: publicCommand(command, scope, context),
+                        }, 409);
+                    }
+                    consumeConfirmationReceipt(req, body.confirmation_receipt, scope, command, invocation, context);
+                }
                 let result;
                 if (command.action.type === "navigate")
                     result = { type: "navigate", tab: command.action.tab };

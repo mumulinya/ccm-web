@@ -23,6 +23,7 @@ import { resolveGroupModelContextCapacity } from "../collaboration/group-compact
 import { evaluateSessionSummaryQuality } from "../../system/session-summary-quality-gate";
 import { reviewSessionSummaryIfSelected } from "../../system/session-summary-secondary-review";
 import { MemorySemanticExtractionV1, runSemanticDecision } from "../../system/semantic-decision-runtime";
+import { markConversationSearchIndexDirty } from "../../system/conversation-search-dirty";
 
 export const MUSIC_AGENT_MEMORY_FILE = path.join(CCM_DIR, "music-agent-memory.json");
 export const MUSIC_AGENT_MEMORY_SCHEMA = "ccm-music-agent-memory-v1";
@@ -100,6 +101,7 @@ export function loadMusicAgentMemory() {
 
 function saveMusicAgentMemory(value: any) {
   writeJsonAtomic(MUSIC_AGENT_MEMORY_FILE, { ...normalizeStore(value), updatedAt: nowIso() });
+  markConversationSearchIndexDirty("music:music-agent");
 }
 
 function mutateStore<T>(operation: (store: any) => T) {

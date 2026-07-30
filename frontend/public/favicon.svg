@@ -1,8 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CCM">
-  <rect x="64" y="64" width="896" height="896" rx="208" fill="#081416"/>
-  <rect x="65.5" y="65.5" width="893" height="893" rx="206.5" fill="none" stroke="#1f3435" stroke-width="3"/>
-  <path d="M454 292H350c-70 0-110 40-110 110v220c0 70 40 110 110 110h104" fill="none" stroke="#3fd3a0" stroke-width="88" stroke-linecap="square" stroke-linejoin="round"/>
-  <path d="M570 292h104c70 0 110 40 110 110v220c0 70-40 110-110 110H570" fill="none" stroke="#35b7cf" stroke-width="88" stroke-linecap="square" stroke-linejoin="round"/>
-  <path d="M394 672V368l118 142 118-142v304" fill="none" stroke="#edf6f2" stroke-width="76" stroke-linecap="square" stroke-linejoin="miter"/>
-  <rect x="486" y="484" width="52" height="52" rx="12" fill="#081416" transform="rotate(45 512 510)"/>
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="#071719"/>
+  <rect x="73" y="73" width="878" height="878" rx="211" fill="none" stroke="#1a363a" stroke-width="18"/>
+  <path d="M430 300h-76c-74 0-118 48-118 122v180c0 74 44 122 118 122h76" fill="none" stroke="#42d6a4" stroke-width="86" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M594 300h76c74 0 118 48 118 122v180c0 74-44 122-118 122h-76" fill="none" stroke="#39b8d0" stroke-width="86" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M374 682V350l138 170 138-170v332" fill="none" stroke="#edf8f4" stroke-width="74" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="520" r="31" fill="#071719"/>
+  <circle cx="512" cy="520" r="12" fill="#77e4c0"/>
 </svg>

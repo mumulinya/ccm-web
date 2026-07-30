@@ -214,6 +214,27 @@
   justify-content: center;
 }
 .qi-action:hover { color: #A58BFF; }
+.qi-action-next {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  border: 1px solid rgba(165, 139, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(165, 139, 255, 0.06);
+  color: #c6b9ee;
+  flex: 0 0 28px;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+.qi-action-next:hover {
+  border-color: rgba(165, 139, 255, 0.42);
+  background: rgba(165, 139, 255, 0.14);
+  color: #efeaff;
+}
+.qi-action-next.confirmed {
+  border-color: rgba(71, 211, 157, 0.36);
+  background: rgba(71, 211, 157, 0.12);
+  color: #8be3bd;
+}
 .qi-reorder-controls {
   width: 22px;
   height: 22px;

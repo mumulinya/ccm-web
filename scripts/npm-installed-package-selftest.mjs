@@ -17,12 +17,14 @@ const packageInfo = JSON.parse(fs.readFileSync(packageFile, 'utf8'))
 assert.equal(packageInfo.version, expectedVersion)
 assert.equal(packageInfo.dependencies?.electron, undefined)
 assert.equal(packageInfo.dependencies?.['node-pty'], undefined)
+assert.equal(packageInfo.dependencies?.['@modelcontextprotocol/server-filesystem'], '2026.7.10')
 assert.equal(packageInfo.optionalDependencies['node-pty'], '1.2.0-beta.14')
 assert.equal(packageInfo.scripts?.postinstall, 'node bin/postinstall.js')
 assert.match(fs.readFileSync(cli, 'utf8'), /^#!\/usr\/bin\/env node/)
 assert.match(fs.readFileSync(path.join(packageRoot, 'bin', 'postinstall.js'), 'utf8'), /chmodSync\(filePath, 0o755\)/)
 const requireFromPackage = createRequire(packageFile)
 assert.ok(requireFromPackage.resolve('node-pty'))
+assert.ok(requireFromPackage.resolve('@modelcontextprotocol/server-filesystem/package.json'))
 assert.throws(() => requireFromPackage.resolve('electron'))
 const petSource = fs.readFileSync(path.join(packageRoot, 'dist', 'modules', 'pets', 'pets.js'), 'utf8')
 assert.match(petSource, /--yes/)
@@ -109,6 +111,7 @@ try {
     version: expectedVersion,
     checks: {
       packageDependencies: true,
+      bundledFilesystemMcpDependency: true,
       defaultInstallSkipsElectron: true,
       petElectronOnDemand: true,
       cliVersionAndDoctor: true,

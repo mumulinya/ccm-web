@@ -36,7 +36,14 @@ export declare function buildFeishuReportCard(title: string, markdown: string, a
     type?: "primary" | "default" | "danger";
     value: Record<string, any>;
 }>): any;
+export declare function generateFeishuWebhookSignature(timestamp: string | number, secret: string): string;
+export declare function sendFeishuWebhookReportMessage(config: any, options: {
+    title: string;
+    markdown: string;
+    timeoutMs?: number;
+}): Promise<any>;
 export declare function sendFeishuReportMessage(options: {
     title: string;
     markdown: string;
+    timeoutMs?: number;
 }): Promise<any>;

@@ -12,13 +12,26 @@ const outputDir = path.join(root, 'scratch', 'local-auth-selftest')
 fs.mkdirSync(outputDir, { recursive: true })
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-local-auth-v2-'))
 const dataDir = path.join(tempHome, '.cc-connect')
-const serverPath = path.join(root, 'ccm-package', 'dist', 'server.js')
+const serverPath = process.env.CCM_BACKEND_DIST_DIR
+  ? path.join(path.resolve(process.env.CCM_BACKEND_DIST_DIR), 'server.js')
+  : path.join(root, 'ccm-package', 'dist', 'server.js')
 const checks = []
 const browserHeaders = userAgent => ({ 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors', 'User-Agent': userAgent, 'Accept-Language': 'zh-CN' })
 
 const freePort = () => new Promise((resolve, reject) => { const server = net.createServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const address = server.address(); server.close(() => resolve(address.port)); }); })
-const waitForServer = async (baseUrl, child) => { const deadline = Date.now() + 45_000; while (Date.now() < deadline) { if (child.exitCode !== null) throw new Error(`server exited (${child.exitCode})`); try { if ((await fetch(`${baseUrl}/`)).ok) return; } catch {} await new Promise(resolve => setTimeout(resolve, 200)); } throw new Error('server startup timed out'); }
+const waitForServer = async (baseUrl, child) => { const deadline = Date.now() + 45_000; while (Date.now() < deadline) { if (child.exitCode !== null) throw new Error(`server exited (${child.exitCode})`); try { if ((await fetch(`${baseUrl}/api/auth/session`)).ok) return; } catch {} await new Promise(resolve => setTimeout(resolve, 200)); } throw new Error('server startup timed out'); }
 const stopServer = async child => { if (!child || child.exitCode !== null) return; child.kill('SIGTERM'); await new Promise(resolve => { const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 5_000); child.once('exit', () => { clearTimeout(timer); resolve(); }); }); }
+const removeTreeWithRetry = async target => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code) || attempt === 7) throw error
+      await new Promise(resolve => setTimeout(resolve, 80 * (attempt + 1)))
+    }
+  }
+}
 const cookieFrom = response => (response.headers.get('set-cookie') || '').split(';')[0]
 const json = (body, method = 'POST', headers = {}) => ({ method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) })
 const requestWithHost = (port, host) => new Promise((resolve, reject) => { const request = http.request({ hostname: '127.0.0.1', port, path: '/api/auth/session', headers: { Host: host } }, response => { response.resume(); response.once('end', () => resolve(response.statusCode)); }); request.once('error', reject); request.end(); })
@@ -136,7 +149,7 @@ const run = async () => {
     return { pass: true, generatedAt: new Date().toISOString(), checks }
   } finally {
     await stopServer(child)
-    if (!process.env.CCM_KEEP_TEST_ARTIFACTS) fs.rmSync(tempHome, { recursive: true, force: true })
+    if (!process.env.CCM_KEEP_TEST_ARTIFACTS) await removeTreeWithRetry(tempHome)
   }
 }
 

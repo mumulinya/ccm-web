@@ -39,6 +39,8 @@ export interface WorkflowDecision {
   authorizationDirective: "preserve" | "grant" | "revoke";
   riskLevel: "low" | "write" | "high";
   requiresUserConfirmation: boolean;
+  directReplyReady: boolean;
+  directReply: string;
   source: "model" | "explicit_user_choice";
   semanticDecisionReceipt?: any;
 }
@@ -99,6 +101,10 @@ export function normalizeWorkflowDecision(value: any, source: WorkflowDecision["
   const continuationKind = ["supplement", "revise_goal"].includes(rawContinuation)
     ? rawContinuation as "supplement" | "revise_goal"
     : "new_task";
+  const directReply = String(value?.directReply || value?.direct_reply || "").trim().slice(0, 4_000);
+  const directReplyReady = rawMode === "answer"
+    && value?.directReplyReady === true
+    && !!directReply;
   return {
     schema: "ccm-model-workflow-decision-v1",
     mode: rawMode,
@@ -135,6 +141,8 @@ export function normalizeWorkflowDecision(value: any, source: WorkflowDecision["
       ? String(value?.riskLevel || value?.risk_level) as "write" | "high"
       : "low",
     requiresUserConfirmation: value?.requiresUserConfirmation === true || value?.requires_user_confirmation === true,
+    directReplyReady,
+    directReply: directReplyReady ? directReply : "",
     source,
   };
 }
@@ -181,12 +189,15 @@ export async function decideWorkflowWithModel(input: {
 - authorizationDirective 表示本轮是否明确授予或撤销已有执行授权；没有明确改变时必须为 preserve。
 - riskLevel 根据用户要求的实际操作选择 low/write/high；requiresUserConfirmation 只表示语义上需要确认，最终权限仍由服务端工具门禁决定。
 - 模型无法可靠判断时通过 clarificationQuestions 提问，不得用本地规则补选。
+- 当且仅当当前消息本身已经足够回答、不需要会话历史、记忆、知识库、Skill、MCP、项目状态或任何工具时，可以设置 directReplyReady=true，并在 directReply 中直接给出面向用户的完整自然语言回复。
+- 问候、致谢等自包含普通交流通常可以直接回复；存在指代不明、需要历史上下文、需要查证事实、状态查询、项目分析或任何执行动作时，directReplyReady 必须为 false。
+- directReplyReady 只是减少重复模型调用，不能绕过语义判断、权限、上下文或工具门禁。
 
 可用 Skill 目录：
 ${CCM_INTERNAL_SKILL_CATALOG.map(item => `- ${item.name}: ${item.description}`).join("\n")}
 
 只输出合法 JSON：
-{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","sourcePolicy":"require_read|ignore_unread","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false}`,
+{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","sourcePolicy":"require_read|ignore_unread","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false,"directReplyReady":false,"directReply":""}`,
     },
     {
       role: "user",
@@ -211,6 +222,7 @@ ${CCM_INTERNAL_SKILL_CATALOG.map(item => `- ${item.name}: ${item.description}`).
     system: String(messages[0].content || ""),
     input: JSON.parse(String(messages[1].content || "{}")),
     maxTokens: 900,
+    reasoningEffort: "low",
     validate: value => normalizeWorkflowDecision(value, "model"),
     confidence: value => value.confidence,
   });
@@ -225,6 +237,18 @@ export function runWorkflowDecisionContractSelfTest() {
     normalizeWorkflowDecision({ mode: "plan_task", reason: "复杂实现" }),
     normalizeWorkflowDecision({ mode: "decompose_epic", reason: "多目标需求", clarificationQuestions: ["边界？"] }),
   ];
+  const direct = normalizeWorkflowDecision({
+    mode: "answer",
+    reason: "自包含问候",
+    directReplyReady: true,
+    directReply: "你好！有什么可以帮你？",
+  });
+  const unsafeDirect = normalizeWorkflowDecision({
+    mode: "project_analysis",
+    reason: "需要读取项目",
+    directReplyReady: true,
+    directReply: "不应直接回答",
+  });
   return {
     success: cases.length === 5
       && cases[0].actionRequired === false
@@ -233,7 +257,13 @@ export function runWorkflowDecisionContractSelfTest() {
       && cases[2].requiresCodeChanges === true
       && cases[2].verificationModes.join(",") === "commands"
       && cases[3].needsPlanning === true
-      && cases[4].needsEpicDecomposition === true,
+      && cases[4].needsEpicDecomposition === true
+      && direct.directReplyReady === true
+      && direct.directReply === "你好！有什么可以帮你？"
+      && unsafeDirect.directReplyReady === false
+      && unsafeDirect.directReply === "",
     cases,
+    direct,
+    unsafeDirect,
   };
 }

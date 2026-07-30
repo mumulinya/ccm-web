@@ -73,9 +73,11 @@ assert.match(toolsCss, /\.drawer[^}]*background:\s*var\(--surface-translucent\)\
 assert.match(toolsCss, /\.marketplace-source-selector select[^}]*background:\s*var\(--control-bg\)/)
 checks.push('tool drawers, modals and marketplace controls use theme surfaces')
 
-const dashboard = fs.readFileSync(path.join(componentsRoot, 'workspace', 'Dashboard.vue'), 'utf8')
-assert.doesNotMatch(dashboard, fixedLightPattern)
-checks.push('workbench dashboard has no fixed light panels')
+const workbench = fs.readFileSync(path.join(componentsRoot, 'common', 'UsabilityWorkbench.vue'), 'utf8')
+assert.doesNotMatch(workbench, fixedLightPattern)
+assert.match(workbench, /\.workbench\{[^}]*color:var\(--text-primary/)
+assert.match(workbench, /\.command-surface\{[^}]*background:var\(--surface/)
+checks.push('production workbench follows the active workspace palette')
 
 const taskExperience = fs.readFileSync(path.join(componentsRoot, 'tasks', 'TaskExperienceCard.css'), 'utf8')
 const mainDecision = fs.readFileSync(path.join(componentsRoot, 'agents', 'MainAgentDecisionCard.vue'), 'utf8')

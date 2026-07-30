@@ -6,11 +6,17 @@
 //       cc-web stop all     停止所有项目
 //       cc-web status       查看运行状态
 
-const { execSync, spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
 const os = require("os");
+const {
+  processAlive,
+  processIdentityFingerprint,
+  readJson,
+  writeJsonAtomic,
+} = require("./service-runtime");
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -152,13 +158,16 @@ function getRunningStatus() {
     if (!f.endsWith(".pid")) continue;
     const name = f.replace(".pid", "");
     const pidFile = path.join(PID_DIR, f);
-    const pid = fs.readFileSync(pidFile, "utf-8").trim();
-    try {
-      process.kill(parseInt(pid), 0);
-      status[name] = { running: true, pid };
-    } catch {
-      try { fs.unlinkSync(pidFile); } catch {}
-    }
+    const identity = readJson(pidFile, null);
+    const pid = Number(identity?.pid || 0);
+    const fingerprint = processIdentityFingerprint(pid);
+    if (
+      identity?.schema === "ccm-project-process-v2"
+      && processAlive(pid)
+      && fingerprint
+      && fingerprint === identity.process_fingerprint
+    ) status[name] = { running: true, pid, identity_verified: true };
+    else if (processAlive(pid)) status[name] = { running: false, pid, identity_verified: false, ownership_state: "ownership_unproven" };
   }
   return status;
 }
@@ -166,14 +175,13 @@ function getRunningStatus() {
 function isRunning(name) {
   const pidFile = path.join(PID_DIR, `${name}.pid`);
   if (!fs.existsSync(pidFile)) return false;
-  const pid = fs.readFileSync(pidFile, "utf-8").trim();
-  try {
-    process.kill(parseInt(pid), 0);
-    return true;
-  } catch {
-    try { fs.unlinkSync(pidFile); } catch {}
-    return false;
-  }
+  const identity = readJson(pidFile, null);
+  const pid = Number(identity?.pid || 0);
+  const fingerprint = processIdentityFingerprint(pid);
+  return identity?.schema === "ccm-project-process-v2"
+    && processAlive(pid)
+    && !!fingerprint
+    && fingerprint === identity.process_fingerprint;
 }
 
 function startProject(config, agentType) {
@@ -206,8 +214,22 @@ function startProject(config, agentType) {
     windowsHide: true,
   });
 
+  const fingerprint = processIdentityFingerprint(Number(child.pid || 0));
+  if (!fingerprint) {
+    console.log(`  ✗ ${displayName} 无法建立进程身份，已拒绝写入运行回执`);
+    try { child.kill("SIGTERM"); } catch {}
+    return;
+  }
+  writeJsonAtomic(path.join(PID_DIR, `${config.name}.pid`), {
+    schema: "ccm-project-process-v2",
+    project: config.name,
+    pid: Number(child.pid || 0),
+    process_fingerprint: fingerprint,
+    command: launcher.command,
+    config_checksum: require("crypto").createHash("sha256").update(fs.readFileSync(configPath)).digest("hex"),
+    started_at: new Date().toISOString(),
+  });
   child.unref();
-  fs.writeFileSync(path.join(PID_DIR, `${config.name}.pid`), String(child.pid));
 
   setTimeout(() => {
     if (isRunning(config.name)) {
@@ -227,12 +249,23 @@ function stopProject(name) {
     console.log(`  ⚠ ${name} 未在运行`);
     return;
   }
-  const pid = fs.readFileSync(pidFile, "utf-8").trim();
+  const identity = readJson(pidFile, null);
+  const pid = Number(identity?.pid || 0);
+  const fingerprint = processIdentityFingerprint(pid);
+  if (
+    identity?.schema !== "ccm-project-process-v2"
+    || !processAlive(pid)
+    || !fingerprint
+    || fingerprint !== identity.process_fingerprint
+  ) {
+    console.log(`  ✗ ${name} 的进程身份无法证明，已拒绝停止以避免误杀`);
+    return;
+  }
   try {
     if (process.platform === "win32") {
-      execSync(`taskkill /T /F /PID ${pid}`, { stdio: "ignore" });
+      spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     } else {
-      process.kill(parseInt(pid), "SIGTERM");
+      process.kill(pid, "SIGTERM");
     }
     console.log(`  ✓ ${name} 已停止`);
   } catch {
@@ -654,45 +687,16 @@ if (args[0] === "interactive") {
   });
   console.log();
 } else if (args[0] === "pet") {
-  const petDir = path.join(__dirname, "..", "pet");
-  const petPidFile = path.join(CCM_DIR, "pids", "pet.pid");
   const ccmPort = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
+  const { launchPet, stopPet } = require("../dist/modules/pets/pets.js");
   if (args[1] === "stop") {
-    if (!fs.existsSync(petPidFile)) { console.log("桌面宠物未在运行"); process.exit(0); }
-    const pid = fs.readFileSync(petPidFile, "utf-8").trim();
-    try {
-      if (process.platform === "win32") execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
-      else process.kill(parseInt(pid), "SIGTERM");
-    } catch {}
-    try { fs.unlinkSync(petPidFile); } catch {}
-    console.log("桌面宠物已关闭");
+    const result = stopPet();
+    console.log(result.success ? "桌面宠物已关闭" : result.error);
+    if (!result.success && result.error !== "桌面宠物未在运行") process.exitCode = 1;
   } else {
-    if (fs.existsSync(petPidFile)) {
-      const pid = fs.readFileSync(petPidFile, "utf-8").trim();
-      try { process.kill(parseInt(pid), 0); console.log("桌面宠物已在运行"); process.exit(0); } catch {}
-    }
-    if (!fs.existsSync(path.join(petDir, "main.js"))) {
-      console.log("宠物应用未安装，请先运行: cd pet && npm install");
-      process.exit(1);
-    }
-    const petExe = path.join(petDir, "node_modules", "electron", "dist", "electron.exe");
-    const mainExe = path.join(__dirname, "..", "node_modules", "electron", "dist", "electron.exe");
-    const petBin = path.join(petDir, "node_modules", ".bin", "electron");
-    const mainBin = path.join(__dirname, "..", "node_modules", ".bin", "electron");
-    const electronBin = fs.existsSync(petExe) ? petExe : fs.existsSync(mainExe) ? mainExe : fs.existsSync(petBin) ? petBin : fs.existsSync(mainBin) ? mainBin : null;
-    const cmd = electronBin || "npx";
-    const args2 = electronBin ? [petDir] : ["--yes", "electron@35.7.5", petDir];
-    const child = spawn(cmd, args2, {
-      detached: true,
-      stdio: "ignore",
-      shell: !electronBin,
-      windowsHide: true,
-      env: { ...process.env, CCM_PORT: String(ccmPort) }
-    });
-    child.unref();
-    if (!fs.existsSync(path.dirname(petPidFile))) fs.mkdirSync(path.dirname(petPidFile), { recursive: true });
-    fs.writeFileSync(petPidFile, String(child.pid));
-    console.log("桌面宠物已启动！");
+    const result = launchPet(ccmPort);
+    console.log(result.success ? "桌面宠物正在启动" : result.error);
+    if (!result.success && result.error !== "桌面宠物已在运行") process.exitCode = 1;
   }
 } else if (args[0] === "web") {
   const port = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
@@ -725,11 +729,6 @@ if (args[0] === "interactive") {
   if (args[1] === "all") {
     console.log("\n停止所有项目...\n");
     for (const config of configs) stopProject(config.name);
-    try {
-      if (process.platform === "win32") {
-        execSync("taskkill /F /IM cc-connect.exe", { stdio: "ignore" });
-      }
-    } catch {}
   } else {
     const idx = parseInt(args[1]);
     const config = configs.find((c) => c.index === idx || c.name === args[1]);

@@ -329,7 +329,16 @@
               <div class="qi-duration-col">{{ track.duration || '--:--' }}</div>
               <div class="qi-actions-group" @click.stop>
                 <button class="qi-like-btn" :class="{ liked: isFavorite(track.filename) }" :title="isFavorite(track.filename) ? '取消收藏' : '收藏'" @click="toggleTrackFavorite(track)">{{ isFavorite(track.filename) ? '♥' : '♡' }}</button>
-                <button class="qi-action" title="下一首播放" @click="playTrackNext(track)">下一首</button>
+                <button
+                  class="qi-action qi-action-next"
+                  :class="{ confirmed: nextQueueFeedbackFilename === track.filename }"
+                  :title="nextQueueFeedbackFilename === track.filename ? '已设为下一首' : '下一首播放'"
+                  :aria-label="nextQueueFeedbackFilename === track.filename ? '已设为下一首' : '下一首播放'"
+                  @click="queueTrackAsNext(track)"
+                >
+                  <Check v-if="nextQueueFeedbackFilename === track.filename" :size="14" stroke-width="2.5" />
+                  <ListPlus v-else :size="14" />
+                </button>
                 <button class="qi-action" title="加入播放队列" @click="addTrackToQueue(track)">＋</button>
                 <button class="qi-action" title="添加到歌单" @click="openPlaylistPicker(track)"><ListMusic :size="13" /></button>
                 <template v-if="activePlaylist">

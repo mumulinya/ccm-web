@@ -7,7 +7,7 @@ import MusicPlaybackQueueDrawer from './MusicPlaybackQueueDrawer.vue'
 import MusicDuplicateManager from './MusicDuplicateManager.vue'
 import MusicLyricsPanel from './MusicLyricsPanel.vue'
 import MusicUnifiedSearch from './MusicUnifiedSearch.vue'
-import { ChevronDown, ChevronUp, Download, Files, Globe2, Heart, History, Languages, ListMusic, Maximize2, MessageCircle, Minimize2, MoreHorizontal, PanelRightClose, Pause, Pencil, Play, Plus, RefreshCw, Repeat1, Repeat2, Search, Shuffle, SkipBack, SkipForward, Sparkles, Trash2, Upload, Volume2, VolumeX, X } from '@lucide/vue'
+import { Check, ChevronDown, ChevronUp, Download, Files, Globe2, Heart, History, Languages, ListMusic, ListPlus, Maximize2, MessageCircle, Minimize2, MoreHorizontal, PanelRightClose, Pause, Pencil, Play, Plus, RefreshCw, Repeat1, Repeat2, Search, Shuffle, SkipBack, SkipForward, Sparkles, Trash2, Upload, Volume2, VolumeX, X } from '@lucide/vue'
 
 const props = defineProps({
   agentLabel: { type: String, default: '乖乖' },
@@ -231,6 +231,8 @@ const playbackQueueOpen = ref(false)
 const duplicateManagerOpen = ref(false)
 const unifiedSearchOpen = ref(false)
 const lyricsPanelOpen = ref(false)
+const nextQueueFeedbackFilename = ref('')
+let nextQueueFeedbackTimer = null
 const isAgentMessageVisible = (msg) => (
   String(msg?.content || '').trim()
   || getMessageResults(msg)?.length
@@ -258,6 +260,17 @@ const openPlaybackQueueFromPlayer = () => {
   playbackQueueOpen.value = !playbackQueueOpen.value
 }
 
+const queueTrackAsNext = async (track) => {
+  const updated = await playTrackNext(track)
+  if (!updated) return
+  nextQueueFeedbackFilename.value = track.filename
+  if (nextQueueFeedbackTimer) clearTimeout(nextQueueFeedbackTimer)
+  nextQueueFeedbackTimer = setTimeout(() => {
+    if (nextQueueFeedbackFilename.value === track.filename) nextQueueFeedbackFilename.value = ''
+    nextQueueFeedbackTimer = null
+  }, 1400)
+}
+
 const toggleLyricTranslation = () => {
   showLyricTranslation.value = !showLyricTranslation.value
 }
@@ -282,7 +295,10 @@ const handleExperienceKeydown = (event) => {
 }
 
 onMounted(() => window.addEventListener('keydown', handleExperienceKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleExperienceKeydown))
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleExperienceKeydown)
+  if (nextQueueFeedbackTimer) clearTimeout(nextQueueFeedbackTimer)
+})
 </script>
 
 <template src="./MusicPlayer.template.html"></template>

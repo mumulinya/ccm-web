@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.paginateReplayEventsForView = paginateReplayEventsForView;
 exports.buildCompleteTaskReplay = buildCompleteTaskReplay;
@@ -6,9 +39,10 @@ exports.buildTaskReplayIndex = buildTaskReplayIndex;
 exports.buildTaskReplayIndexFromRecords = buildTaskReplayIndexFromRecords;
 exports.resolveTaskReplayArtifact = resolveTaskReplayArtifact;
 exports.runTaskReplayContractSelfTest = runTaskReplayContractSelfTest;
+const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const execution_kernel_1 = require("../../agents/execution-kernel");
-const loop_1 = require("../../agents/global/loop");
+const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
 const mission_supervisor_1 = require("../../agents/global/mission-supervisor");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
@@ -20,8 +54,9 @@ const task_replay_delivery_1 = require("./task-replay-delivery");
 const task_replay_plan_1 = require("./task-replay-plan");
 const task_replay_shared_1 = require("./task-replay-shared");
 const test_agent_runner_1 = require("./test-agent-runner");
+const observability_database_1 = require("../../system/observability-database");
 const STAGE_ORDER = ["intake", "planning", "dispatch", "execution", "change", "test", "rework", "review", "completion", "system"];
-const TERMINAL = new Set(["done", "completed", "failed", "cancelled", "reverted"]);
+const TERMINAL = new Set(["done", "completed", "failed", "blocked", "cancelled", "reverted"]);
 function safeTechnical(value, depth = 0) {
     if (depth > 5 || value == null)
         return value == null ? value : "[详情已收起]";
@@ -137,27 +172,28 @@ function replayTaskChanges(task) {
         const key = `${String(change.project || fallbackProject).toLowerCase()}|${change.path.toLowerCase()}`;
         byFile.set(key, byFile.has(key) ? mergeReplayChange(byFile.get(key), change) : change);
     }
-    return [...byFile.values()].slice(0, 200);
+    return [...byFile.values()];
 }
-function inferStage(value) {
-    const text = String(value || "").toLowerCase();
-    if (/rework|retry|repair|fix|返工|修复/.test(text))
-        return "rework";
-    if (/test.?agent|playwright|browser|screenshot|verify|verification|测试|验证/.test(text))
+function inferStage(sourceValue, categoryValue) {
+    const source = String(sourceValue || "").toLowerCase();
+    const category = String(categoryValue || "").toLowerCase();
+    const exact = {
+        task: "intake", message: "intake", plan: "planning", plan_mode: "planning", plan_revision: "planning", plan_confirmed: "planning",
+        work_item: "dispatch", dispatch: "dispatch", execution: "execution", agent_session: "execution",
+        code_changes: "change", file_change: "change", commit: "change", test_run: "test", test_plan: "test", test_evidence: "test",
+        rework: "rework", retry: "rework", acceptance: "review", review: "review", task_status: "completion", global_summary: "completion", delivery: "completion",
+    };
+    if (exact[category])
+        return exact[category];
+    if (source === "test_agent_runner" || source === "test_agent_artifacts")
         return "test";
-    if (/review|accept|spot.?check|验收|抽查/.test(text))
-        return "review";
-    if (/complete|delivery|final|summary|report|done|交付|完成|总结/.test(text))
-        return "completion";
-    if (/file|change|diff|commit|merge|代码|改动/.test(text))
-        return "change";
-    if (/dispatch|assign|handoff|work.?item|派发|分配|接单/.test(text))
-        return "dispatch";
-    if (/execute|runtime|session|agent\.run|执行/.test(text))
+    if (source === "execution" || source === "agent_session")
         return "execution";
-    if (/plan|todo|decompos|计划|拆解/.test(text))
+    if (source === "work_item")
+        return "dispatch";
+    if (source === "plan")
         return "planning";
-    if (/intake|request|created|user|需求|创建/.test(text))
+    if (source === "group_message" || source === "project_message")
         return "intake";
     return "system";
 }
@@ -189,7 +225,7 @@ function event(input) {
     return {
         id: String(input.id || (0, task_replay_shared_1.stableId)("tre", { source, at, title: input.title, task: input.task_id })),
         at,
-        stage: input.stage || inferStage(`${source} ${input.category || ""} ${input.title}`),
+        stage: input.stage || inferStage(source, input.category),
         category: String(input.category || "event"),
         status,
         audience: input.audience || eventAudience({ source, status, title, summary }),
@@ -312,6 +348,137 @@ function timelineTechnical(item) {
         } : {}),
     };
 }
+function replayTaskMessages(tasks) {
+    const rows = [];
+    for (const task of tasks) {
+        let messages = [];
+        let source = "group_message";
+        if (task.group_id) {
+            messages = (0, storage_1.getGroupMessages)(task.group_id, String(task.group_session_id || task.groupSessionId || "default"));
+        }
+        else if (task.project_session_id && task.target_project) {
+            try {
+                const session = require("../projects/sessions").getSessionDetail(task.target_project, task.project_session_id);
+                messages = Array.isArray(session?.history) ? session.history : [];
+                source = "project_message";
+            }
+            catch { }
+        }
+        for (const message of messages) {
+            if (String(message?.task_id || message?.taskExperience?.task_id || message?.task?.id || "") === String(task.id))
+                rows.push({ task, source, message });
+        }
+    }
+    return rows;
+}
+function replayMutableSourceIdentity(family, extraTraceIds) {
+    const traceIds = [...new Set([...family.tasks.map((task) => String(task.trace_id || "")), ...extraTraceIds].filter(Boolean))];
+    const traces = traceIds.map(traceId => {
+        const rows = (0, reliability_ledger_1.getTrace)(traceId)?.events || [];
+        const last = rows.at(-1) || {};
+        return { trace_id: traceId, event_count: rows.length, last_id: last.id || "", last_at: last.at || "", last_status: last.status || "" };
+    });
+    const journals = (0, task_replay_journal_1.listTaskReplayJournalEvents)(family.tasks.map((task) => String(task.id)));
+    const executions = family.tasks.flatMap((task) => (0, execution_kernel_1.listExecutions)({ taskId: task.id }).map((execution) => ({
+        id: execution.id,
+        state: execution.state,
+        updated_at: execution.updatedAt || execution.updated_at,
+        event_count: Array.isArray(execution.events) ? execution.events.length : 0,
+        last_event_id: Array.isArray(execution.events) ? execution.events.at(-1)?.id || "" : "",
+    })));
+    const sessions = family.tasks.flatMap((task) => (0, agent_sessions_1.listTaskAgentSessions)({ taskId: task.id }).map((session) => ({
+        id: session.id,
+        status: session.status,
+        last_used_at: session.lastUsedAt,
+        turn_count: session.turnCount,
+    })));
+    const messages = replayTaskMessages(family.tasks).map(({ task, source, message }) => ({
+        task_id: String(task.id), source, id: String(message.id || ""), at: message.timestamp || message.created_at || "",
+        role: message.role || "", status: message.status || "",
+        checksum: crypto.createHash("sha256").update(String(message.content || message.summary || "")).digest("hex"),
+    }));
+    return {
+        traces,
+        journals: {
+            count: journals.length,
+            checksum: crypto.createHash("sha256").update(JSON.stringify(journals.map((row) => ({
+                task_id: row.task_id,
+                recorded_at: row.recorded_at,
+                id: row.event?.id || "",
+                status: row.event?.status || "",
+            })))).digest("hex"),
+        },
+        executions,
+        sessions,
+        messages: { count: messages.length, checksum: crypto.createHash("sha256").update(JSON.stringify(messages)).digest("hex") },
+    };
+}
+function replaySourceChecksum(family, globalRecords, artifactRuns, mutableSources) {
+    const payload = {
+        tasks: family.tasks.map((task) => ({
+            id: task.id,
+            updated_at: task.updated_at,
+            status: task.status,
+            acceptance_state: task.acceptance_state,
+            timeline_size: Array.isArray(task.timeline) ? task.timeline.length : 0,
+            logs_size: Array.isArray(task.logs) ? task.logs.length : 0,
+            result_checksum: task.result_checksum || task.terminal_state_receipt?.checksum || "",
+        })),
+        global_runs: globalRecords.runs.map((run) => ({ id: run.id, status: run.status, updated_at: run.updated_at, trace_id: run.trace_id })),
+        supervisors: globalRecords.supervisors.map((item) => ({ id: item.id, status: item.status, updated_at: item.updated_at, trace_id: item.trace_id })),
+        artifacts: artifactRuns.map((run) => ({ run_id: run.run_id, task_id: run.task_id, status: run.status, updated_at: run.updated_at, artifacts: run.artifacts?.length || 0 })),
+        mutable_sources: mutableSources,
+    };
+    return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+function readMaterializedReplayEvents(taskId, sourceChecksum) {
+    const db = (0, observability_database_1.getObservabilityDatabase)();
+    const snapshot = db.prepare("SELECT event_count FROM task_replay_event_snapshots_v2 WHERE task_id=? AND source_checksum=?").get(taskId, sourceChecksum);
+    if (!snapshot)
+        return null;
+    const rows = db.prepare("SELECT event_json FROM task_replay_events_v2 WHERE task_id=? AND source_checksum=? ORDER BY sequence").all(taskId, sourceChecksum);
+    if (rows.length !== Number(snapshot.event_count || 0))
+        return null;
+    try {
+        return rows.map(row => JSON.parse(row.event_json));
+    }
+    catch {
+        return null;
+    }
+}
+function storeMaterializedReplayEvents(taskId, sourceChecksum, events) {
+    (0, observability_database_1.withImmediateObservabilityTransaction)((db) => {
+        const insert = db.prepare("INSERT OR REPLACE INTO task_replay_events_v2(task_id,source_checksum,sequence,event_id,at,stage,status,actor_type,event_json) VALUES(?,?,?,?,?,?,?,?,?)");
+        events.forEach((event, index) => insert.run(taskId, sourceChecksum, index, event.id, event.at, event.stage, event.status, event.actor?.type || "", JSON.stringify(event)));
+        db.prepare("INSERT OR REPLACE INTO task_replay_event_snapshots_v2(task_id,source_checksum,generated_at,event_count,summary_json) VALUES(?,?,?,?,?)")
+            .run(taskId, sourceChecksum, new Date().toISOString(), events.length, JSON.stringify({ first: events[0]?.id || "", last: events.at(-1)?.id || "" }));
+        db.prepare("DELETE FROM task_replay_events_v2 WHERE task_id=? AND source_checksum<>?").run(taskId, sourceChecksum);
+    });
+}
+function storeReplaySourceManifest(taskId, sourceChecksum, eventCount, mutableSources) {
+    const generation = `trv3_${sourceChecksum.slice(0, 24)}`;
+    const now = new Date().toISOString();
+    const manifest = {
+        schema: "ccm-task-replay-source-manifest-v3",
+        generation,
+        task_id: taskId,
+        source_checksum: sourceChecksum,
+        sources: {
+            traces: mutableSources.traces?.length || 0,
+            journal_events: mutableSources.journals?.count || 0,
+            executions: mutableSources.executions?.length || 0,
+            agent_sessions: mutableSources.sessions?.length || 0,
+            conversation_messages: mutableSources.messages?.count || 0,
+        },
+    };
+    (0, observability_database_1.withImmediateObservabilityTransaction)((db) => {
+        db.prepare("INSERT OR REPLACE INTO task_replay_source_manifests_v3(task_id,generation,source_checksum,source_manifest_json,event_count,created_at,active) VALUES(?,?,?,?,?,?,0)")
+            .run(taskId, generation, sourceChecksum, JSON.stringify(manifest), eventCount, now);
+        db.prepare("UPDATE task_replay_source_manifests_v3 SET active=0 WHERE task_id=?").run(taskId);
+        db.prepare("UPDATE task_replay_source_manifests_v3 SET active=1 WHERE task_id=? AND generation=?").run(taskId, generation);
+        db.prepare("DELETE FROM task_replay_source_manifests_v3 WHERE task_id=? AND active=0 AND generation NOT IN (SELECT generation FROM task_replay_source_manifests_v3 WHERE task_id=? ORDER BY created_at DESC LIMIT 3)").run(taskId, taskId);
+    });
+}
 function buildTaskEvents(tasks) {
     const events = [];
     for (const task of tasks) {
@@ -396,29 +563,13 @@ function buildPlanAndWorkItemData(tasks) {
 }
 function buildMessageEvents(tasks) {
     const events = [];
-    for (const task of tasks) {
-        let messages = [];
-        let source = "group_message";
-        if (task.group_id) {
-            const sessionId = String(task.group_session_id || task.groupSessionId || "default");
-            messages = (0, storage_1.getGroupMessages)(task.group_id, sessionId);
-        }
-        else if (task.project_session_id && task.target_project) {
-            try {
-                const session = require("../projects/sessions").getSessionDetail(task.target_project, task.project_session_id);
-                messages = Array.isArray(session?.history) ? session.history : [];
-                source = "project_message";
-            }
-            catch { }
-        }
-        messages = messages.filter((message) => String(message?.task_id || message?.taskExperience?.task_id || message?.task?.id || "") === String(task.id));
-        for (const [index, message] of messages.entries()) {
-            const content = (0, task_replay_shared_1.safeText)(message.content || message.summary, 1000);
-            if (!content || /CCM_AGENT_RECEIPT/i.test(String(message.content || "")))
-                continue;
-            const who = messageActor(message);
-            events.push(event({ id: `message:${message.id || (0, task_replay_shared_1.stableId)("msg", { index, content })}`, at: message.timestamp || message.created_at, stage: message.role === "user" ? "intake" : undefined, category: "message", status: (0, task_replay_shared_1.normalizeStatus)(message.status), title: who.type === "user" ? "用户补充任务要求" : source === "project_message" ? "项目主 Agent 更新进展" : who.type === "project_agent" ? `${who.label} 返回工作结果` : "群聊主 Agent 更新进展", summary: content, actor: source === "project_message" && message.role !== "user" ? actor("project_agent", "项目主 Agent") : who, task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: message.trace_id || task.trace_id, project: message.project || message.agent || task.target_project, source }));
-        }
+    for (const [index, row] of replayTaskMessages(tasks).entries()) {
+        const { task, source, message } = row;
+        const content = (0, task_replay_shared_1.safeText)(message.content || message.summary, 1000);
+        if (!content || /CCM_AGENT_RECEIPT/i.test(String(message.content || "")))
+            continue;
+        const who = messageActor(message);
+        events.push(event({ id: `message:${message.id || (0, task_replay_shared_1.stableId)("msg", { index, content })}`, at: message.timestamp || message.created_at, stage: message.role === "user" ? "intake" : undefined, category: "message", status: (0, task_replay_shared_1.normalizeStatus)(message.status), title: who.type === "user" ? "用户补充任务要求" : source === "project_message" ? "项目主 Agent 更新进展" : who.type === "project_agent" ? `${who.label} 返回工作结果` : "群聊主 Agent 更新进展", summary: content, actor: source === "project_message" && message.role !== "user" ? actor("project_agent", "项目主 Agent") : who, task_id: String(task.id), parent_task_id: task.parent_task_id, trace_id: message.trace_id || task.trace_id, project: message.project || message.agent || task.target_project, source }));
     }
     return events;
 }
@@ -476,9 +627,9 @@ function buildJournalEvents(tasks) {
     });
 }
 function relatedGlobalRecords(ids) {
-    const runs = (0, loop_1.listGlobalAgentRuns)({ limit: 100 }).filter(run => ids.has(String(run.mission_id || "")) || run.steps.some(step => ids.has(String(step?.observation?.task_id || step?.observation?.mission_id || ""))));
+    const runs = (0, global_agent_run_store_1.findGlobalAgentRunsForTaskIds)(ids);
     const runIds = new Set(runs.map(run => run.id));
-    const supervisors = (0, mission_supervisor_1.listGlobalMissionSupervisors)({ limit: 200 }).filter(record => ids.has(String(record.mission_id || "")) || runIds.has(record.global_run_id));
+    const supervisors = (0, mission_supervisor_1.findGlobalMissionSupervisorsForTaskIds)(ids, runIds);
     return { runs, supervisors };
 }
 function buildGlobalEvents(records, fallbackTask) {
@@ -691,18 +842,27 @@ function buildCompleteTaskReplay(taskId, options = {}) {
     const artifactRuns = (0, artifact_retention_1.listTestAgentArtifactCatalogForTasks)(ids);
     const extraTraceIds = [...globalRecords.runs.map(run => run.trace_id), ...globalRecords.supervisors.map(record => record.trace_id)].filter(Boolean);
     const planData = buildPlanAndWorkItemData(family.tasks);
-    const deliveries = family.tasks.map((task) => (0, task_replay_delivery_1.buildTaskReplayDeliveryView)(task)).filter(Boolean);
-    const allEvents = dedupeAndSort([
-        ...buildTaskEvents(family.tasks),
-        ...planData.events,
-        ...buildMessageEvents(family.tasks),
-        ...buildExecutionEvents(family.tasks),
-        ...buildGlobalEvents(globalRecords, family.root),
-        ...buildTestAgentEvents(ids, artifactRuns),
-        ...buildJournalEvents(family.tasks),
-        ...buildTraceEvents(family.tasks, extraTraceIds),
-    ]);
-    const evidence = taskEvidence(family.tasks, artifactRuns);
+    const includeDetails = options.includeDetails !== false;
+    const deliveries = includeDetails ? family.tasks.map((task) => (0, task_replay_delivery_1.buildTaskReplayDeliveryView)(task)).filter(Boolean) : [];
+    const mutableSources = replayMutableSourceIdentity(family, extraTraceIds);
+    const sourceChecksum = replaySourceChecksum(family, globalRecords, artifactRuns, mutableSources);
+    let allEvents = readMaterializedReplayEvents(String(family.root.id), sourceChecksum);
+    const materializedCacheHit = !!allEvents;
+    if (!allEvents) {
+        allEvents = dedupeAndSort([
+            ...buildTaskEvents(family.tasks),
+            ...planData.events,
+            ...buildMessageEvents(family.tasks),
+            ...buildExecutionEvents(family.tasks),
+            ...buildGlobalEvents(globalRecords, family.root),
+            ...buildTestAgentEvents(ids, artifactRuns),
+            ...buildJournalEvents(family.tasks),
+            ...buildTraceEvents(family.tasks, extraTraceIds),
+        ]);
+        storeMaterializedReplayEvents(String(family.root.id), sourceChecksum, allEvents);
+    }
+    storeReplaySourceManifest(String(family.root.id), sourceChecksum, allEvents.length, mutableSources);
+    const evidence = includeDetails ? taskEvidence(family.tasks, artifactRuns) : [];
     // 文件改动与验证命令的明细由证据面板唯一承载，工作单只留计数并挂上跳转用的 evidence_ids，避免同一批数据两处各列一遍。
     const evidenceByTaskProject = new Map();
     for (const item of evidence) {
@@ -710,14 +870,14 @@ function buildCompleteTaskReplay(taskId, options = {}) {
             continue;
         evidenceByTaskProject.set(`${item.task_id}|${item.type}|${String(item.project || "").toLowerCase()}`, item.id);
     }
-    const workItems = planData.workItems.map((row) => {
+    const workItems = includeDetails ? planData.workItems.map((row) => {
         const project = String(row.target || row.owner || "").toLowerCase();
         const ids = [
             evidenceByTaskProject.get(`${row.task_id}|code_changes|${project}`) || evidenceByTaskProject.get(`${row.task_id}|code_changes|`),
             evidenceByTaskProject.get(`${row.task_id}|verification|${project}`) || evidenceByTaskProject.get(`${row.task_id}|verification|`),
         ].filter(Boolean);
         return { ...row, verification_count: row.verification.length, evidence_ids: [...new Set(ids)] };
-    });
+    }) : [];
     const issueEvents = allEvents.filter(item => ["failed", "blocked", "warning"].includes(item.status));
     const phases = STAGE_ORDER.map(stage => {
         const rows = allEvents.filter(item => item.stage === stage);
@@ -747,9 +907,11 @@ function buildCompleteTaskReplay(taskId, options = {}) {
     const replayTokenCount = replayInputTokens !== null || replayOutputTokens !== null
         ? Number(replayInputTokens || 0) + Number(replayOutputTokens || 0)
         : null;
-    return {
+    const result = {
         schema: "ccm-complete-task-replay-v1",
         generated_at: new Date().toISOString(),
+        replay_source_checksum: sourceChecksum,
+        replay_event_index: { schema: "ccm-task-replay-event-index-v2", materialized: true, cache_hit: materializedCacheHit, event_count: allEvents.length },
         selected_task_id: String(family.selected.id),
         root_task_id: String(family.root.id),
         title: taskLabel(family.root),
@@ -773,19 +935,18 @@ function buildCompleteTaskReplay(taskId, options = {}) {
         ],
         summary: { event_count: allEvents.length, issue_count: issueEvents.length, failed_count: issueEvents.filter(item => item.status === "failed").length, task_count: family.tasks.length, evidence_count: evidence.length, test_run_count: artifactRuns.length, plan_count: planData.plans.length, work_item_count: workItems.length, user_event_count: allEvents.filter(item => item.audience === "user").length, technical_event_count: allEvents.filter(item => item.audience === "technical").length, delivery_count: deliveries.length, model_call_count: replayModelCalls, provider_retry_count: replayRetryCount, input_token_count: replayInputTokens, output_token_count: replayOutputTokens, token_count: replayTokenCount },
         phases,
-        plans: planData.plans,
-        work_items: workItems,
-        deliveries,
         events,
         event_page: eventPage,
-        evidence,
         retention: {
             task_record: { status: "available", policy: "任务删除前保留" },
             trace: { status: "available", policy: "完整任务日志保留到任务删除；快速 Trace 保留最近 1200 条" },
             test_agent: { status: artifactRuns.some(run => run.retention_status === "available") ? "available" : artifactRuns.length ? "expired" : "not_created", policy: "默认保留 14 天，且受 200 次运行和 2GB 上限约束", earliest_expiry: artifactRuns.map(run => run.retained_until).filter(Boolean).sort()[0] || "" },
         },
-        replay_capabilities: { chronological: true, filters: ["stage", "status", "actor", "task", "search"], event_pagination: true, incremental_cursor: true, failure_navigation: true, evidence_preview: true, historical_line_diff: true, plan_visibility: true, work_item_visibility: true, delivery_visibility: true, duplicate_event_merging: true, raw_machine_paths_exposed: false },
+        replay_capabilities: { chronological: true, filters: ["stage", "status", "actor", "task", "search"], event_pagination: true, materialized_event_index: true, incremental_cursor: true, failure_navigation: true, evidence_preview: true, historical_line_diff: true, plan_visibility: true, work_item_visibility: true, delivery_visibility: true, duplicate_event_merging: true, raw_machine_paths_exposed: false },
     };
+    if (includeDetails)
+        Object.assign(result, { plans: planData.plans, work_items: workItems, deliveries, evidence });
+    return result;
 }
 function buildTaskReplayIndex(input = 40) {
     return buildTaskReplayIndexFromRecords((0, db_1.loadTasks)(), (0, storage_1.loadGroups)(), input);
@@ -914,7 +1075,7 @@ function runTaskReplayContractSelfTest() {
         secrets_redacted: secret.includes("[已隐藏]"),
         paths_redacted: secret.includes("[本机路径]"),
         status_normalized: (0, task_replay_shared_1.normalizeStatus)("failed") === "failed",
-        browser_stage: inferStage("TestAgent browser screenshot") === "test",
+        browser_stage: inferStage("test_agent_runner", "test_run") === "test",
         complete_journal: journal.pass,
         historical_line_diff_preserved: change?.diff?.available === true && change.diff.diff.includes("@@ -4,1 +4,1 @@"),
         missing_historical_diff_explained: unavailableChange?.diff?.available === false && /无法还原逐行代码内容/.test(unavailableChange.diff.reason),

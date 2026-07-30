@@ -3,6 +3,20 @@ export declare function getTaskByIdFromSqlite(id: string): any | null;
 export declare function listTasksByParentIdFromSqlite(parentId: string): any[];
 /** 行级更新：只读写单条任务，避免整表进出。 */
 export declare function updateTaskByIdInSqlite(id: string, patchOrMutator: any): any | null;
+export type TaskCasMutationResult = {
+    updated: boolean;
+    conflict: boolean;
+    task: any | null;
+    previous: any | null;
+};
+/**
+ * Performs a single-row compare-and-swap while holding SQLite's write lock.
+ * The predicate is evaluated against the latest payload, so a scheduler cannot
+ * overwrite a task that changed after its read snapshot.
+ */
+export declare function updateTaskByIdCasInSqlite(id: string, predicate: (current: any) => boolean, mutator: (current: any) => any): TaskCasMutationResult;
+export declare function listUsabilityTaskCandidatesFromSqlite(recentCutoff: string): any[];
+export declare function listUsabilityArchiveCandidatesFromSqlite(historyCutoff: string, intakeCutoff: string): any[];
 export declare function saveTasksToSqlite(tasks: any[]): {
     total: number;
     inserted: number;

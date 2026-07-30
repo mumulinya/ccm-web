@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { MUSIC_DIR } from "./library";
+import { mutatePersistedLibraryState, readPersistedLibraryState } from "./music-persistence";
 
 export type MusicPlaylist = { id: string; name: string; tracks: string[]; createdAt: string; updatedAt: string };
 export type MusicPlayMode = "list" | "random" | "single";
@@ -83,129 +84,153 @@ function emptyState(): MusicLibraryState {
 }
 
 class LibraryStateStore {
-  private state: MusicLibraryState = emptyState();
-
-  constructor() { this.load(); }
-
   get() {
-    this.state.favorites = uniqueTracks(this.state.favorites);
-    this.state.queue = uniqueTracks(this.state.queue);
-    this.state.queueSources = normalizeQueueSources(this.state.queueSources, this.state.queue);
-    this.state.playlists = this.state.playlists.slice(0, 100).map(list => ({ ...list, tracks: uniqueTracks(list.tracks) }));
-    this.state.currentFilename = validTrack(this.state.currentFilename) ? this.state.currentFilename : "";
-    this.state.playMode = normalizePlayMode(this.state.playMode);
-    this.state.history = normalizeHistory(this.state.history);
-    return JSON.parse(JSON.stringify(this.state));
+    const state: any = readPersistedLibraryState();
+    state.favorites = uniqueTracks(state.favorites);
+    state.queue = uniqueTracks(state.queue);
+    state.queueSources = normalizeQueueSources(state.queueSources, state.queue);
+    state.playlists = (state.playlists || []).slice(0, 100).map((list: any) => ({ ...list, tracks: uniqueTracks(list.tracks) }));
+    state.currentFilename = validTrack(state.currentFilename) ? state.currentFilename : "";
+    state.playMode = normalizePlayMode(state.playMode);
+    state.history = normalizeHistory(state.history);
+    return JSON.parse(JSON.stringify(state));
   }
 
-  toggleFavorite(filename: string, favorite?: boolean) {
+  toggleFavorite(filename: string, favorite?: boolean, expectedRevision?: number) {
     if (!validTrack(filename)) throw new Error("歌曲不存在");
-    const set = new Set(this.state.favorites);
-    const shouldFavorite = favorite === undefined ? !set.has(filename) : !!favorite;
-    if (shouldFavorite) set.add(filename); else set.delete(filename);
-    this.state.favorites = Array.from(set).slice(0, MAX_ITEMS);
-    this.save();
-    return this.get();
+    return mutatePersistedLibraryState(state => {
+      const set = new Set<string>(state.favorites || []);
+      const shouldFavorite = favorite === undefined ? !set.has(filename) : !!favorite;
+      if (shouldFavorite) set.add(filename); else set.delete(filename);
+      state.favorites = Array.from(set).slice(0, MAX_ITEMS);
+      return state;
+    }, expectedRevision);
   }
 
-  createPlaylist(name: string) {
+  createPlaylist(name: string, expectedRevision?: number) {
     const clean = cleanName(name);
     if (!clean) throw new Error("歌单名称不能为空");
-    if (this.state.playlists.some(item => item.name.toLowerCase() === clean.toLowerCase())) throw new Error("已有同名歌单");
-    const timestamp = now();
-    this.state.playlists.push({ id: `playlist_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`, name: clean, tracks: [], createdAt: timestamp, updatedAt: timestamp });
-    this.save();
-    return this.get();
+    return mutatePersistedLibraryState(state => {
+      state.playlists = Array.isArray(state.playlists) ? state.playlists : [];
+      if (state.playlists.some((item: any) => item.name.toLowerCase() === clean.toLowerCase())) throw new Error("已有同名歌单");
+      const timestamp = now();
+      state.playlists.push({ id: `playlist_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`, name: clean, tracks: [], createdAt: timestamp, updatedAt: timestamp });
+      return state;
+    }, expectedRevision);
   }
 
-  updatePlaylist(id: string, input: { name?: string; tracks?: string[] }) {
-    const item = this.state.playlists.find(list => list.id === id);
-    if (!item) throw new Error("歌单不存在");
-    if (input.name !== undefined) {
-      const clean = cleanName(input.name);
-      if (!clean) throw new Error("歌单名称不能为空");
-      if (this.state.playlists.some(list => list.id !== id && list.name.toLowerCase() === clean.toLowerCase())) throw new Error("已有同名歌单");
-      item.name = clean;
-    }
-    if (input.tracks !== undefined) item.tracks = uniqueTracks(input.tracks);
-    item.updatedAt = now();
-    this.save();
-    return this.get();
+  updatePlaylist(id: string, input: { name?: string; tracks?: string[]; expectedRevision?: number }) {
+    return mutatePersistedLibraryState(state => {
+      state.playlists = Array.isArray(state.playlists) ? state.playlists : [];
+      const item = state.playlists.find((list: any) => list.id === id);
+      if (!item) throw new Error("歌单不存在");
+      if (input.name !== undefined) {
+        const clean = cleanName(input.name);
+        if (!clean) throw new Error("歌单名称不能为空");
+        if (state.playlists.some((list: any) => list.id !== id && list.name.toLowerCase() === clean.toLowerCase())) throw new Error("已有同名歌单");
+        item.name = clean;
+      }
+      if (input.tracks !== undefined) item.tracks = uniqueTracks(input.tracks);
+      item.updatedAt = now();
+      return state;
+    }, input.expectedRevision);
   }
 
-  deletePlaylist(id: string) {
-    const before = this.state.playlists.length;
-    this.state.playlists = this.state.playlists.filter(item => item.id !== id);
-    if (before === this.state.playlists.length) throw new Error("歌单不存在");
-    this.save();
-    return this.get();
+  deletePlaylist(id: string, expectedRevision?: number) {
+    return mutatePersistedLibraryState(state => {
+      state.playlists = Array.isArray(state.playlists) ? state.playlists : [];
+      const before = state.playlists.length;
+      state.playlists = state.playlists.filter((item: any) => item.id !== id);
+      if (before === state.playlists.length) throw new Error("歌单不存在");
+      return state;
+    }, expectedRevision);
   }
 
-  setQueue(tracks: string[], input: { currentFilename?: string; playMode?: MusicPlayMode; queueSources?: Record<string, MusicQueueSource | string> } = {}) {
-    this.state.queue = uniqueTracks(tracks);
-    this.state.queueSources = normalizeQueueSources({
-      ...this.state.queueSources,
-      ...(input.queueSources || {}),
-    }, this.state.queue);
-    if (input.currentFilename !== undefined) {
-      this.state.currentFilename = validTrack(input.currentFilename) ? String(input.currentFilename) : "";
-    }
-    if (input.playMode !== undefined) this.state.playMode = normalizePlayMode(input.playMode);
-    this.save();
-    return this.get();
+  setQueue(tracks: string[], input: { currentFilename?: string; playMode?: MusicPlayMode; queueSources?: Record<string, MusicQueueSource | string>; expectedRevision?: number } = {}) {
+    return mutatePersistedLibraryState(state => {
+      state.queue = uniqueTracks(tracks);
+      state.queueSources = normalizeQueueSources({
+        ...(state.queueSources || {}),
+        ...(input.queueSources || {}),
+      }, state.queue);
+      if (input.currentFilename !== undefined) {
+        state.currentFilename = validTrack(input.currentFilename) ? String(input.currentFilename) : "";
+      }
+      if (input.playMode !== undefined) state.playMode = normalizePlayMode(input.playMode);
+      return state;
+    }, input.expectedRevision);
   }
 
-  recordHistory(filename: string, source?: string) {
+  recordHistory(filename: string, source?: string, expectedRevision?: number) {
     if (!validTrack(filename)) throw new Error("歌曲不存在");
-    this.state.history.push({
-      id: `history_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
-      filename,
-      playedAt: now(),
-      source: cleanName(source, 40) || "播放器",
-    });
-    this.state.history = this.state.history.slice(-MAX_HISTORY_EVENTS);
-    this.save();
-    return this.get();
+    return mutatePersistedLibraryState(state => {
+      state.history = Array.isArray(state.history) ? state.history : [];
+      state.history.push({
+        id: `history_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
+        filename,
+        playedAt: now(),
+        source: cleanName(source, 40) || "播放器",
+      });
+      state.history = state.history.slice(-MAX_HISTORY_EVENTS);
+      return state;
+    }, expectedRevision);
   }
 
-  clearHistory() {
-    this.state.history = [];
-    this.save();
-    return this.get();
+  clearHistory(expectedRevision?: number) {
+    return mutatePersistedLibraryState(state => {
+      state.history = [];
+      return state;
+    }, expectedRevision);
   }
 
-  removeTrack(filename: string) {
-    this.state.favorites = this.state.favorites.filter(item => item !== filename);
-    this.state.queue = this.state.queue.filter(item => item !== filename);
-    delete this.state.queueSources[filename];
-    this.state.history = this.state.history.filter(item => item.filename !== filename);
-    if (this.state.currentFilename === filename) this.state.currentFilename = "";
-    for (const list of this.state.playlists) list.tracks = list.tracks.filter(item => item !== filename);
-    this.save();
+  removeTrack(filename: string, expectedRevision?: number) {
+    return mutatePersistedLibraryState(state => {
+      state.favorites = (state.favorites || []).filter((item: string) => item !== filename);
+      state.queue = (state.queue || []).filter((item: string) => item !== filename);
+      state.queueSources = state.queueSources || {};
+      delete state.queueSources[filename];
+      state.history = (state.history || []).filter((item: any) => item.filename !== filename);
+      if (state.currentFilename === filename) state.currentFilename = "";
+      for (const list of state.playlists || []) list.tracks = (list.tracks || []).filter((item: string) => item !== filename);
+      return state;
+    }, expectedRevision);
   }
 
-  private load() {
-    try {
-      if (!fs.existsSync(FILE)) return;
-      const value = JSON.parse(fs.readFileSync(FILE, "utf-8"));
-      this.state = {
-        ...emptyState(),
-        ...value,
-        version: 3,
-        queueSources: normalizeQueueSources(value?.queueSources, uniqueTracks(value?.queue)),
-        history: normalizeHistory(value?.history),
-        currentFilename: validTrack(value?.currentFilename) ? String(value.currentFilename) : "",
-        playMode: normalizePlayMode(value?.playMode),
-      };
-    } catch (error: any) { console.warn("[MusicLibraryState] failed to load:", error?.message); }
+  replaceTrackReferences(keepFilename: string, removeFilenames: string[], expectedRevision?: number) {
+    const removed = new Set(removeFilenames.filter(Boolean));
+    const replace = (items: string[]) => Array.from(new Set((items || []).map(item => (
+      removed.has(item) ? keepFilename : item
+    )).filter(Boolean)));
+    return mutatePersistedLibraryState(state => {
+      state.favorites = replace(state.favorites || []);
+      state.queue = replace(state.queue || []);
+      state.queueSources = state.queueSources || {};
+      for (const filename of removed) {
+        if (state.queueSources[filename] && !state.queueSources[keepFilename]) {
+          state.queueSources[keepFilename] = state.queueSources[filename];
+        }
+        delete state.queueSources[filename];
+      }
+      state.history = (state.history || []).map((item: any) => (
+        removed.has(item.filename) ? { ...item, filename: keepFilename } : item
+      ));
+      if (removed.has(state.currentFilename)) state.currentFilename = keepFilename;
+      for (const list of state.playlists || []) list.tracks = replace(list.tracks || []);
+      return state;
+    }, expectedRevision);
   }
 
-  private save() {
-    this.state.updatedAt = now();
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    const temp = `${FILE}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(this.state, null, 2), "utf-8");
-    fs.renameSync(temp, FILE);
+  restoreSnapshot(snapshot: any, expectedRevision?: number) {
+    return mutatePersistedLibraryState(state => ({
+      ...state,
+      favorites: Array.isArray(snapshot?.favorites) ? snapshot.favorites : state.favorites,
+      playlists: Array.isArray(snapshot?.playlists) ? snapshot.playlists : state.playlists,
+      queue: Array.isArray(snapshot?.queue) ? snapshot.queue : state.queue,
+      queueSources: snapshot?.queueSources && typeof snapshot.queueSources === "object" ? snapshot.queueSources : state.queueSources,
+      currentFilename: typeof snapshot?.currentFilename === "string" ? snapshot.currentFilename : state.currentFilename,
+      playMode: typeof snapshot?.playMode === "string" ? snapshot.playMode : state.playMode,
+      history: Array.isArray(snapshot?.history) ? snapshot.history : state.history,
+    }), expectedRevision);
   }
 }
 

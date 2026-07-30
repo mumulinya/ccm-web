@@ -33,231 +33,109 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.collapseGeneratedGlobalWelcomeSessions = collapseGeneratedGlobalWelcomeSessions;
-exports.collectConversationSearchRecords = collectConversationSearchRecords;
+exports.collapseGeneratedGlobalWelcomeSessions = void 0;
 exports.parseConversationSearchQuery = parseConversationSearchQuery;
+exports.searchConversationIndex = searchConversationIndex;
 exports.searchConversationRecords = searchConversationRecords;
+exports.collectConversationSearchRecords = collectConversationSearchRecords;
 exports.runConversationSearchSelfTest = runConversationSearchSelfTest;
 exports.handleConversationSearchApi = handleConversationSearchApi;
 const crypto = __importStar(require("crypto"));
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
-const storage_1 = require("../collaboration/storage");
-const WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
-const GLOBAL_AGENT_HISTORY_FILE = path.join(utils_1.CCM_DIR, "global-agent-history.json");
-const SEARCH_SCHEMA = "ccm-conversation-search-v2";
+const observability_database_1 = require("../../system/observability-database");
+const conversation_search_index_1 = require("./conversation-search-index");
+var conversation_search_index_2 = require("./conversation-search-index");
+Object.defineProperty(exports, "collapseGeneratedGlobalWelcomeSessions", { enumerable: true, get: function () { return conversation_search_index_2.collapseGeneratedGlobalWelcomeSessions; } });
 function hash(value, length = 20) {
     return crypto.createHash("sha256").update(String(value || "")).digest("hex").slice(0, length);
 }
-function readJson(file, fallback) {
-    try {
-        return JSON.parse(fs.readFileSync(file, "utf-8"));
-    }
-    catch {
-        return fallback;
-    }
-}
-function text(value, max = 12_000) {
+function text(value, max = 500) {
     const result = typeof value === "string" ? value : value == null ? "" : JSON.stringify(value);
     return String(result || "").slice(0, max);
-}
-function timestamp(value, fallback = "") {
-    const time = Date.parse(String(value || fallback || ""));
-    return Number.isFinite(time) ? new Date(time).toISOString() : "";
-}
-function messageSource(message, fallback) {
-    const raw = String(message?.source_channel || message?.sourceChannel || message?.channel || message?.source || message?.origin || message?.metadata?.source || "").toLowerCase();
-    return raw.includes("feishu") ? "feishu" : fallback;
-}
-function sourceLabel(source, conversationType) {
-    if (source === "feishu")
-        return "飞书会话";
-    if (conversationType === "global")
-        return "全局助手";
-    if (conversationType === "group")
-        return "群聊协作";
-    return "项目会话";
-}
-function normalizeAttachments(message) {
-    const values = [message?.attachments, message?.files, message?.source_attachments].flatMap(value => Array.isArray(value) ? value : []);
-    const seen = new Set();
-    return values.flatMap((item) => {
-        const name = text(typeof item === "string" ? path.basename(item) : item?.name || item?.filename || item?.path || item?.url, 220).trim();
-        if (!name || seen.has(name))
-            return [];
-        seen.add(name);
-        return [{ name, type: text(item?.type || item?.mime_type || item?.mimeType, 100), size: Number(item?.size || 0) }];
-    }).slice(0, 12);
-}
-function contextRows(messages, index, direction) {
-    const indexes = direction === "before" ? [index - 2, index - 1] : [index + 1, index + 2];
-    return indexes.filter(value => value >= 0 && value < messages.length).map(value => ({
-        messageId: String(messages[value]?.id || messages[value]?.message_id || messages[value]?.messageId || ""),
-        role: String(messages[value]?.role || "unknown"),
-        agent: text(messages[value]?.agent || "", 100),
-        content: text(messages[value]?.content, 500),
-        timestamp: timestamp(messages[value]?.timestamp || messages[value]?.created_at || messages[value]?.createdAt),
-    }));
-}
-function recordFromMessage(input, message, index, messages, tasks) {
-    const content = text(message?.content).trim();
-    if (!content)
-        return null;
-    const conversationType = input.conversationType;
-    const source = messageSource(message, conversationType);
-    const taskId = String(message?.task_id || message?.taskId || message?.metadata?.task_id || "");
-    const explicitMessageId = String(message?.id || message?.message_id || message?.messageId || "");
-    return {
-        conversationType,
-        source,
-        sourceLabel: sourceLabel(source, conversationType),
-        project: String(input.project || ""),
-        groupId: String(input.groupId || ""),
-        groupName: String(input.groupName || ""),
-        sessionId: String(input.sessionId || ""),
-        sessionName: String(input.sessionName || input.sessionId || "会话"),
-        messageId: explicitMessageId,
-        messageIndex: index,
-        role: String(message?.role || "unknown"),
-        agent: text(message?.agent || message?.agent_name || message?.project || "", 120),
-        content,
-        timestamp: timestamp(message?.timestamp || message?.created_at || message?.createdAt, input.updatedAt),
-        taskId,
-        taskTitle: text(tasks.get(taskId)?.title || "", 180),
-        attachments: normalizeAttachments(message),
-        context: { before: contextRows(messages, index, "before"), after: contextRows(messages, index, "after") },
-    };
-}
-function collectProjectRecords(tasks) {
-    const records = [];
-    if (!fs.existsSync(WEB_SESSIONS_DIR))
-        return records;
-    for (const project of fs.readdirSync(WEB_SESSIONS_DIR)) {
-        const projectDir = path.join(WEB_SESSIONS_DIR, project);
-        try {
-            if (!fs.statSync(projectDir).isDirectory())
-                continue;
-        }
-        catch {
-            continue;
-        }
-        for (const file of fs.readdirSync(projectDir).filter(name => name.endsWith(".json"))) {
-            const session = readJson(path.join(projectDir, file), null);
-            if (!session)
-                continue;
-            const messages = Array.isArray(session.history) ? session.history : Array.isArray(session.messages) ? session.messages : [];
-            const sessionId = String(session.id || file.replace(/\.json$/i, ""));
-            for (let index = 0; index < messages.length; index += 1) {
-                const record = recordFromMessage({ conversationType: "project", project, sessionId, sessionName: session.name || sessionId, updatedAt: session.updated_at }, messages[index], index, messages, tasks);
-                if (record)
-                    records.push(record);
-            }
-        }
-    }
-    return records;
-}
-function collectGroupRecords(tasks) {
-    const records = [];
-    for (const group of (0, storage_1.loadGroups)()) {
-        const groupId = String(group.id || "");
-        if (!groupId)
-            continue;
-        const manifest = (0, storage_1.listGroupChatSessions)(groupId);
-        for (const session of manifest.sessions || []) {
-            const messages = (0, storage_1.getGroupMessages)(groupId, session.id);
-            for (let index = 0; index < messages.length; index += 1) {
-                const record = recordFromMessage({ conversationType: "group", groupId, groupName: group.name || groupId, sessionId: session.id, sessionName: session.title || session.id, updatedAt: session.updatedAt }, messages[index], index, messages, tasks);
-                if (record)
-                    records.push(record);
-            }
-        }
-    }
-    return records;
-}
-function collectGlobalRecords(tasks) {
-    const records = [];
-    const history = readJson(GLOBAL_AGENT_HISTORY_FILE, { sessions: [] });
-    const sessions = collapseGeneratedGlobalWelcomeSessions(Array.isArray(history.sessions) ? history.sessions : []);
-    for (const session of sessions) {
-        const messages = Array.isArray(session.messages) ? session.messages : Array.isArray(session.history) ? session.history : [];
-        const sessionId = String(session.id || "");
-        for (let index = 0; index < messages.length; index += 1) {
-            const record = recordFromMessage({ conversationType: "global", sessionId, sessionName: session.name || "全局助手会话", updatedAt: session.updated_at || session.updatedAt }, messages[index], index, messages, tasks);
-            if (record)
-                records.push(record);
-        }
-    }
-    return records;
-}
-function collapseGeneratedGlobalWelcomeSessions(sessions) {
-    const rows = Array.isArray(sessions) ? sessions : [];
-    const keepBySignature = new Map();
-    for (let index = 0; index < rows.length; index += 1) {
-        const session = rows[index];
-        const messages = Array.isArray(session?.messages) ? session.messages : Array.isArray(session?.history) ? session.history : [];
-        const message = messages[0];
-        const isGeneratedEmptySession = messages.length === 1
-            && String(session?.name || "") === "默认会话"
-            && String(message?.role || "") === "assistant"
-            && !String(message?.id || message?.message_id || message?.messageId || "")
-            && !String(message?.task_id || message?.taskId || "")
-            && String(message?.content || "").trim().startsWith("你好！我是您的全局助手");
-        if (!isGeneratedEmptySession)
-            continue;
-        const signature = `${String(session.name)}\u0001${String(message.content || "").trim()}`;
-        const time = validTime(message?.timestamp || session?.updated_at || session?.updatedAt || session?.created_at || session?.createdAt, index);
-        const previous = keepBySignature.get(signature);
-        if (!previous || time > previous.time)
-            keepBySignature.set(signature, { index, time });
-    }
-    const keepIndexes = new Set([...keepBySignature.values()].map(item => item.index));
-    return rows.filter((session, index) => {
-        const messages = Array.isArray(session?.messages) ? session.messages : Array.isArray(session?.history) ? session.history : [];
-        const message = messages[0];
-        const signature = messages.length === 1
-            && String(session?.name || "") === "默认会话"
-            && String(message?.role || "") === "assistant"
-            && !String(message?.id || message?.message_id || message?.messageId || "")
-            && !String(message?.task_id || message?.taskId || "")
-            && String(message?.content || "").trim().startsWith("你好！我是您的全局助手")
-            ? `${String(session.name)}\u0001${String(message.content || "").trim()}`
-            : "";
-        return !signature || keepIndexes.has(index);
-    });
-}
-function collectConversationSearchRecords() {
-    const tasks = new Map((0, db_1.loadTasks)().map((task) => [String(task.id || ""), task]));
-    return [...collectProjectRecords(tasks), ...collectGroupRecords(tasks), ...collectGlobalRecords(tasks)];
-}
-function parseConversationSearchQuery(value, match = "all") {
-    const query = text(value, 500).trim();
-    const quoted = [];
-    const remainder = query.replace(/["“”]([^"“”]+)["“”]/g, (_, phrase) => {
-        quoted.push(String(phrase).trim().toLowerCase());
-        return " ";
-    });
-    const words = remainder.split(/\s+/).map(item => item.trim().toLowerCase()).filter(Boolean);
-    const terms = Array.from(new Set([...quoted, ...words])).slice(0, 20);
-    return { query, terms, match: match === "phrase" ? "phrase" : match === "any" ? "any" : "all" };
-}
-function matchesTerms(content, parsed) {
-    const haystack = content.toLowerCase();
-    if (!parsed.terms.length)
-        return false;
-    if (parsed.match === "phrase")
-        return haystack.includes(parsed.query.toLowerCase().replace(/^["“”]|["“”]$/g, ""));
-    if (parsed.match === "any")
-        return parsed.terms.some((term) => haystack.includes(term));
-    return parsed.terms.every((term) => haystack.includes(term));
 }
 function validTime(value, fallback) {
     const parsed = Date.parse(String(value || ""));
     return Number.isFinite(parsed) ? parsed : fallback;
 }
-function searchConversationRecords(records, options = {}) {
+function parseConversationSearchQuery(value, match = "all") {
+    const query = text(value, 500).trim();
+    const quoted = [];
+    const remainder = query.replace(/["“”]([^"“”]+)["“”]/g, (_, phrase) => {
+        quoted.push(String(phrase).trim().normalize("NFKC").toLowerCase());
+        return " ";
+    });
+    const words = remainder.split(/\s+/).map(item => item.trim().normalize("NFKC").toLowerCase()).filter(Boolean);
+    const terms = Array.from(new Set([...quoted, ...words])).slice(0, 20);
+    return { query, terms, match: match === "phrase" ? "phrase" : match === "any" ? "any" : "all" };
+}
+function matchesTerms(content, parsed) {
+    const haystack = String(content || "").normalize("NFKC").toLowerCase();
+    if (!parsed.terms.length)
+        return false;
+    if (parsed.match === "phrase")
+        return haystack.includes(parsed.query.normalize("NFKC").toLowerCase().replace(/^["“”]|["“”]$/g, ""));
+    if (parsed.match === "any")
+        return parsed.terms.some((term) => haystack.includes(term));
+    return parsed.terms.every((term) => haystack.includes(term));
+}
+function intersectSets(sets) {
+    if (!sets.length)
+        return new Set();
+    const [smallest, ...others] = [...sets].sort((a, b) => a.size - b.size);
+    return new Set([...smallest].filter(value => others.every(set => set.has(value))));
+}
+function unionSets(sets) {
+    return new Set(sets.flatMap(set => [...set]));
+}
+function normalizedDbRow(row) {
+    let attachments = [];
+    try {
+        attachments = JSON.parse(String(row.attachments_json || "[]"));
+    }
+    catch { }
+    return {
+        rowId: String(row.row_id || ""),
+        conversationType: String(row.conversation_type || ""),
+        source: String(row.source || ""),
+        sourceLabel: String(row.source_label || ""),
+        project: String(row.project_id || ""),
+        groupId: String(row.group_id || ""),
+        groupName: String(row.group_name || ""),
+        sessionId: String(row.session_id || ""),
+        sessionName: String(row.session_name || ""),
+        messageId: String(row.message_id || ""),
+        messageIndex: Number(row.message_index || 0),
+        role: String(row.role || "unknown"),
+        agent: String(row.agent || ""),
+        content: String(row.content || ""),
+        timestamp: String(row.timestamp || ""),
+        taskId: String(row.task_id || ""),
+        taskTitle: String(row.task_title || ""),
+        attachments,
+        sourceChecksum: String(row.source_checksum || ""),
+    };
+}
+function contextForRow(generation, row) {
+    const window = (0, conversation_search_index_1.conversationMessageWindow)({ generation, rowId: row.rowId, before: 2, after: 2 });
+    const rows = window?.messages || [];
+    const format = (item) => ({ messageId: item.messageId, messageIndex: item.messageIndex, role: item.role, agent: item.agent, content: item.content.slice(0, 1000), timestamp: item.timestamp });
+    return {
+        before: rows.filter((item) => item.messageIndex < row.messageIndex).map(format),
+        after: rows.filter((item) => item.messageIndex > row.messageIndex).map(format),
+    };
+}
+function searchConversationIndex(options = {}) {
+    const started = Date.now();
     const parsed = parseConversationSearchQuery(options.q, options.match);
+    const status = (0, conversation_search_index_1.getConversationSearchIndexStatus)();
+    const generation = (0, conversation_search_index_1.activeConversationSearchGeneration)();
+    if (!generation) {
+        (0, conversation_search_index_1.startConversationSearchIndexBuild)({ reason: "first_search" });
+        return { schema: conversation_search_index_1.CONVERSATION_SEARCH_SCHEMA, success: false, code: "index_building", error: "会话搜索索引正在建立", retryable: true, index: status };
+    }
+    const sourceTerms = parsed.match === "phrase" ? [parsed.query.replace(/^["“”]|["“”]$/g, "")] : parsed.terms;
+    const sets = sourceTerms.map(term => new Set((0, conversation_search_index_1.candidateRowsForTerm)(generation, term)));
+    const candidates = parsed.match === "any" ? unionSets(sets) : intersectSets(sets);
     const source = String(options.source || "all");
     const conversationType = String(options.conversation_type || options.conversationType || "");
     const project = String(options.project || "");
@@ -271,7 +149,7 @@ function searchConversationRecords(records, options = {}) {
     const requestedPageSize = Number(options.page_size || options.pageSize || options.limit || 30);
     const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
     const pageSize = Number.isFinite(requestedPageSize) ? Math.max(1, Math.min(100, Math.floor(requestedPageSize))) : 30;
-    const matched = records.filter(record => {
+    const matched = (0, conversation_search_index_1.conversationSearchRecordRows)(generation, [...candidates]).map(normalizedDbRow).filter((record) => {
         const time = validTime(record.timestamp, 0);
         return matchesTerms(record.content, parsed)
             && (source === "all" || !source || record.source === source || record.conversationType === source)
@@ -293,14 +171,16 @@ function searchConversationRecords(records, options = {}) {
         return result;
     }, {});
     const offset = (page - 1) * pageSize;
-    const results = matched.slice(offset, offset + pageSize).map(record => ({
+    const results = matched.slice(offset, offset + pageSize).map((record) => ({
         ...record,
         id: `search:${hash(`${record.conversationType}|${record.project}|${record.groupId}|${record.sessionId}|${record.messageId || record.messageIndex}|${record.timestamp}`)}`,
         stableMessageId: !!record.messageId,
         matchTerms: parsed.terms,
+        context: contextForRow(generation, record),
+        indexGeneration: generation,
     }));
     return {
-        schema: SEARCH_SCHEMA,
+        schema: conversation_search_index_1.CONVERSATION_SEARCH_SCHEMA,
         success: true,
         query: parsed,
         page,
@@ -317,56 +197,122 @@ function searchConversationRecords(records, options = {}) {
             projects: counts("project"),
             groups: counts("groupName"),
         },
+        index: { ...status, active_generation: generation, stale_served: status.stale === true },
+        audit: { candidate_messages: candidates.size, elapsed_ms: Date.now() - started, sources: ["global", "group", "project", "music", "feishu"] },
     };
+}
+// Pure compatibility helper used by fixtures and tests. Production queries use the SQLite index above.
+function searchConversationRecords(records, options = {}) {
+    const parsed = parseConversationSearchQuery(options.q, options.match);
+    const source = String(options.source || "all");
+    const requestedPage = Number(options.page || 1);
+    const requestedPageSize = Number(options.page_size || options.pageSize || options.limit || 30);
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
+    const pageSize = Number.isFinite(requestedPageSize) ? Math.max(1, Math.min(100, Math.floor(requestedPageSize))) : 30;
+    const matched = records.filter(record => matchesTerms(record.content, parsed)
+        && (source === "all" || !source || record.source === source || record.conversationType === source)
+        && (!options.role || record.role === options.role));
+    matched.sort((a, b) => validTime(b.timestamp, 0) - validTime(a.timestamp, 0));
+    const offset = (page - 1) * pageSize;
+    const results = matched.slice(offset, offset + pageSize).map(record => ({ ...record, id: `search:${hash(`${record.sessionId}|${record.messageId || record.messageIndex}`)}`, matchTerms: parsed.terms }));
+    const counts = (field) => matched.reduce((result, item) => { const key = String(item[field] || "未标记"); result[key] = Number(result[key] || 0) + 1; return result; }, {});
+    return { schema: conversation_search_index_1.CONVERSATION_SEARCH_SCHEMA, success: true, query: parsed, page, page_size: pageSize, total: matched.length, page_count: Math.ceil(matched.length / pageSize), has_more: offset + results.length < matched.length, results, facets: { sources: counts("source"), conversation_types: counts("conversationType"), roles: counts("role"), agents: counts("agent"), projects: counts("project"), groups: counts("groupName") } };
+}
+function collectConversationSearchRecords() {
+    return (0, conversation_search_index_1.collectConversationSearchSources)().flatMap(source => source.records.map(record => ({ ...record, context: { before: [], after: [] } })));
 }
 function runConversationSearchSelfTest() {
-    const base = (overrides) => ({
-        conversationType: "project", source: "project", sourceLabel: "项目会话", project: "shop", groupId: "", groupName: "", sessionId: "s1", sessionName: "订单开发", messageId: "m1", messageIndex: 0, role: "user", agent: "", content: "修复 飞书 周报 的日期范围", timestamp: "2026-07-13T08:00:00.000Z", taskId: "task-1", taskTitle: "修复周报", attachments: [{ name: "需求.png" }], context: { before: [], after: [] }, ...overrides,
-    });
-    const records = [
-        base({}),
-        base({ conversationType: "global", source: "global", sourceLabel: "全局助手", project: "", sessionId: "g1", messageId: "g1", role: "assistant", agent: "全局 Agent", content: "飞书通知已发送", timestamp: "2026-07-13T09:00:00.000Z" }),
-        base({ conversationType: "group", source: "feishu", sourceLabel: "飞书会话", project: "", groupId: "team", groupName: "开发群", sessionId: "gs1", messageId: "gm1", content: "飞书 周报 已验收", timestamp: "2026-07-12T09:00:00.000Z" }),
-    ];
-    const andResult = searchConversationRecords(records, { q: "飞书 周报", page_size: 1 });
-    const phraseResult = searchConversationRecords(records, { q: "飞书通知", match: "phrase" });
-    const filtered = searchConversationRecords(records, { q: "飞书", source: "feishu", role: "user" });
-    const welcome = { role: "assistant", content: "你好！我是您的全局助手。这里是欢迎说明。", timestamp: "2026-07-13T08:00:00.000Z" };
-    const collapsedWelcomes = collapseGeneratedGlobalWelcomeSessions([
-        { id: "welcome-old", name: "默认会话", messages: [welcome] },
-        { id: "welcome-new", name: "默认会话", messages: [{ ...welcome, timestamp: "2026-07-13T09:00:00.000Z" }] },
-        { id: "real-repeat", name: "真实会话", messages: [welcome] },
-    ]);
-    const checks = {
-        multiWordAndSearch: andResult.total === 2,
-        accuratePagination: andResult.results.length === 1 && andResult.page_count === 2 && andResult.has_more === true,
-        phraseSearch: phraseResult.total === 1 && phraseResult.results[0]?.conversationType === "global",
-        sourceAndRoleFilters: filtered.total === 1 && filtered.results[0]?.groupId === "team",
-        exactNavigationIdentity: filtered.results[0]?.messageId === "gm1" && filtered.results[0]?.sessionId === "gs1",
-        taskAndAttachmentRelation: searchConversationRecords(records, { q: "日期范围" }).results[0]?.taskId === "task-1" && searchConversationRecords(records, { q: "日期范围" }).results[0]?.attachments?.length === 1,
-        completeFacets: andResult.facets.conversation_types.project === 1 && andResult.facets.conversation_types.group === 1,
-        generatedWelcomeNoiseCollapsed: collapsedWelcomes.length === 2
-            && collapsedWelcomes.some((session) => session.id === "welcome-new")
-            && collapsedWelcomes.some((session) => session.id === "real-repeat"),
-    };
+    const base = { conversationType: "project", source: "project", sourceLabel: "项目会话", project: "shop", groupId: "", groupName: "", sessionId: "s1", sessionName: "订单开发", messageId: "m1", messageIndex: 0, role: "user", agent: "", content: "修复 飞书 周报 的日期范围", timestamp: "2026-07-13T08:00:00.000Z", taskId: "task-1", taskTitle: "修复周报", attachments: [{ name: "需求.png" }], context: { before: [], after: [] } };
+    const records = [base, { ...base, conversationType: "global", source: "global", sessionId: "g1", messageId: "g1", role: "assistant", content: "飞书通知已发送" }, { ...base, conversationType: "music", source: "music", sessionId: "music-agent", messageId: "music-1", content: "播放适合雨天的音乐" }];
+    const result = searchConversationRecords(records, { q: "飞书 周报", page_size: 1 });
+    const music = searchConversationRecords(records, { q: "雨天", source: "music" });
+    const collapsed = (0, conversation_search_index_1.collapseGeneratedGlobalWelcomeSessions)([{ id: "old", name: "默认会话", messages: [{ role: "assistant", content: "你好！我是您的全局助手。", timestamp: "2026-01-01" }] }, { id: "new", name: "默认会话", messages: [{ role: "assistant", content: "你好！我是您的全局助手。", timestamp: "2026-02-01" }] }]);
+    const checks = { multiWordSearch: result.total === 1, pagination: result.results.length === 1, musicCovered: music.total === 1, generatedWelcomeCollapsed: collapsed.length === 1 && collapsed[0].id === "new", fullTextNotTruncated: searchConversationRecords([{ ...base, content: `${"a".repeat(13_000)}终点词` }], { q: "终点词" }).total === 1 };
     return { pass: Object.values(checks).every(Boolean), checks };
 }
+function readJsonBody(req, max = 256 * 1024) {
+    return new Promise((resolve, reject) => {
+        let body = "";
+        req.on("data", (chunk) => { body += String(chunk); if (body.length > max)
+            reject(new Error("请求内容过大")); });
+        req.on("end", () => { try {
+            resolve(body ? JSON.parse(body) : {});
+        }
+        catch {
+            reject(new Error("JSON格式无效"));
+        } });
+        req.on("error", reject);
+    });
+}
+function publicFavoriteRow(row) {
+    return normalizedDbRow(row);
+}
 function handleConversationSearchApi(pathname, req, res, parsed) {
+    if (pathname === "/api/search/status" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, index: (0, conversation_search_index_1.getConversationSearchIndexStatus)() });
+        return true;
+    }
+    if (pathname === "/api/search/rebuild" && req.method === "POST") {
+        (0, utils_1.sendJson)(res, { success: true, build: (0, conversation_search_index_1.startConversationSearchIndexBuild)({ force: true, reason: "manual" }) }, 202);
+        return true;
+    }
+    if (pathname === "/api/conversations/message-window" && req.method === "GET") {
+        const window = (0, conversation_search_index_1.conversationMessageWindow)({ generation: String(parsed.query.generation || ""), rowId: String(parsed.query.row_id || parsed.query.rowId || ""), conversationType: String(parsed.query.conversation_type || parsed.query.conversationType || ""), project: String(parsed.query.project || ""), groupId: String(parsed.query.group_id || parsed.query.groupId || ""), sessionId: String(parsed.query.session_id || parsed.query.sessionId || ""), messageId: String(parsed.query.message_id || parsed.query.messageId || ""), messageIndex: Number(parsed.query.message_index || parsed.query.messageIndex), before: Number(parsed.query.before || 12), after: Number(parsed.query.after || 12) });
+        if (!window)
+            (0, utils_1.sendJson)(res, { success: false, error: "消息不存在或索引已更新", code: "message_anchor_stale" }, 404);
+        else
+            (0, utils_1.sendJson)(res, { success: true, window });
+        return true;
+    }
+    if (pathname === "/api/search/favorites" && req.method === "GET") {
+        const userId = String(req.ccmAuth?.userId || "");
+        const generation = (0, conversation_search_index_1.activeConversationSearchGeneration)();
+        const db = (0, observability_database_1.getObservabilityDatabase)();
+        const rows = db.prepare(`SELECT m.*,f.favorite_id,f.created_at AS favorite_at FROM conversation_search_favorites_v3 f
+      JOIN conversation_search_messages_v3 m ON m.generation=? AND m.row_id=f.row_id AND m.source_checksum=f.source_checksum
+      WHERE f.user_id=? ORDER BY f.created_at DESC LIMIT 100`).all(generation, userId);
+        (0, utils_1.sendJson)(res, { success: true, favorites: rows.map(row => ({ ...publicFavoriteRow(row), id: row.favorite_id, favoriteAt: row.favorite_at, indexGeneration: generation, context: { before: [], after: [] } })) });
+        return true;
+    }
+    if (pathname === "/api/search/favorites" && req.method === "POST") {
+        void readJsonBody(req).then(body => {
+            const userId = String(req.ccmAuth?.userId || "");
+            const generation = (0, conversation_search_index_1.activeConversationSearchGeneration)();
+            const rowId = String(body.row_id || body.rowId || "");
+            const row = (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT row_id,source_checksum FROM conversation_search_messages_v3 WHERE generation=? AND row_id=?").get(generation, rowId);
+            if (!row)
+                return (0, utils_1.sendJson)(res, { success: false, error: "消息不存在或索引已更新" }, 404);
+            const favoriteId = `favorite:${hash(`${userId}|${rowId}`)}`;
+            (0, observability_database_1.getObservabilityDatabase)().prepare("INSERT INTO conversation_search_favorites_v3(user_id,favorite_id,row_id,source_checksum,created_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,favorite_id) DO UPDATE SET source_checksum=excluded.source_checksum,created_at=excluded.created_at")
+                .run(userId, favoriteId, rowId, row.source_checksum, new Date().toISOString());
+            (0, utils_1.sendJson)(res, { success: true, favorite_id: favoriteId });
+        }).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/search/favorites" && req.method === "DELETE") {
+        const userId = String(req.ccmAuth?.userId || "");
+        const favoriteId = String(parsed.query.favorite_id || parsed.query.favoriteId || "");
+        const rowId = String(parsed.query.row_id || parsed.query.rowId || "");
+        if (favoriteId)
+            (0, observability_database_1.getObservabilityDatabase)().prepare("DELETE FROM conversation_search_favorites_v3 WHERE user_id=? AND favorite_id=?").run(userId, favoriteId);
+        else if (rowId)
+            (0, observability_database_1.getObservabilityDatabase)().prepare("DELETE FROM conversation_search_favorites_v3 WHERE user_id=? AND row_id=?").run(userId, rowId);
+        (0, utils_1.sendJson)(res, { success: true });
+        return true;
+    }
     if (pathname !== "/api/search" || req.method !== "GET")
         return false;
-    const started = Date.now();
     const query = String(parsed.query?.q || "").trim();
     if (!query) {
-        (0, utils_1.sendJson)(res, { schema: SEARCH_SCHEMA, success: true, query: { query: "", terms: [], match: "all" }, page: 1, page_size: 30, total: 0, page_count: 0, has_more: false, results: [], facets: {}, audit: { scanned_messages: 0, elapsed_ms: 0 } });
+        (0, utils_1.sendJson)(res, { schema: conversation_search_index_1.CONVERSATION_SEARCH_SCHEMA, success: true, query: { query: "", terms: [], match: "all" }, page: 1, page_size: 30, total: 0, page_count: 0, has_more: false, results: [], facets: {}, index: (0, conversation_search_index_1.getConversationSearchIndexStatus)() });
         return true;
     }
     try {
-        const records = collectConversationSearchRecords();
-        const result = searchConversationRecords(records, parsed.query || {});
-        (0, utils_1.sendJson)(res, { ...result, audit: { scanned_messages: records.length, elapsed_ms: Date.now() - started, sources: ["global", "group", "project", "feishu"] } });
+        const result = searchConversationIndex(parsed.query || {});
+        (0, utils_1.sendJson)(res, result, result.success === false ? 503 : 200);
     }
     catch (error) {
-        (0, utils_1.sendJson)(res, { success: false, error: error?.message || "对话搜索失败" }, 500);
+        (0, utils_1.sendJson)(res, { success: false, error: error?.message || "对话搜索失败", code: "search_failed" }, 500);
     }
     return true;
 }

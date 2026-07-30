@@ -60,6 +60,10 @@ export interface RuntimeMcpStatus {
     grants: string[];
     tools: string[];
     delivery?: "native" | "proxy";
+    transport?: "stdio" | "streamable_http" | "sse";
+    installationId?: string;
+    installationRevision?: string;
+    materialHash?: string;
     availableTools?: string[];
     missingTools?: string[];
     error?: string;

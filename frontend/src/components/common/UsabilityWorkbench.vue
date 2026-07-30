@@ -16,7 +16,7 @@ import {
 const emit = defineEmits(['navigate'])
 const {
   data, loading, refreshing, realtimeConnected, stale, lastError, cachedAt,
-  hydrateCache, load, connect, disconnect,
+  hydrateCache, load, loadPage, connect, disconnect,
 } = useUsabilityWorkbenchLive()
 const requirement = ref('')
 const target = ref('')
@@ -31,6 +31,8 @@ const intakeFiles = ref([])
 const intakeClientMessageId = ref('')
 const intakeFileInput = ref(null)
 const resourceBusy = ref('')
+const pageBusy = ref('')
+const selectedRuntimeProfiles = ref({})
 const attentionFilter = ref('all')
 const now = ref(Date.now())
 let elapsedTimer = null
@@ -44,7 +46,10 @@ const updatedLabel = computed(() => data.value?.generated_at
   ? new Date(data.value.generated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   : '--:--')
 const enabledCron = computed(() => resources.value.cron.filter(item => item.enabled))
-const runningProjects = computed(() => resources.value.projects.filter(item => item.running))
+const runningProjects = computed(() => resources.value.projects.filter(item => (
+  item.agent_connection?.connected || Number(item.runtime_summary?.running_count || 0) > 0
+)))
+const capabilities = computed(() => data.value?.capabilities || {})
 const groupTargetOptions = computed(() => resources.value.groups.map(item => ({
   value: `group:${item.id}`,
   label: item.name,
@@ -193,24 +198,49 @@ const discardIntake = async () => {
 const navigateTask = task => emit('navigate', { tab: 'tasks', taskId: task.id })
 const navigateResource = (tab, extra = {}) => emit('navigate', { tab, ...extra })
 
-const toggleProject = async project => {
-  const operation = project.running ? 'stop' : 'start'
-  if (project.running) {
-    const confirmed = await confirmDialog(`确定停止项目“${project.name}”吗？正在运行的 Agent 会停止。`)
+const selectedRuntimeProfile = project => selectedRuntimeProfiles.value[project.name]
+  || project.runtime_summary?.selected_profile_id
+  || project.runtime_summary?.profiles?.find(profile => profile.enabled)?.id
+  || ''
+const runtimeProcess = project => project.runtime_summary?.processes?.find(row => row.profileId === selectedRuntimeProfile(project))
+const runtimeRunning = project => ['starting', 'running', 'stopping'].includes(runtimeProcess(project)?.status)
+
+const toggleAgentConnection = async project => {
+  if (!capabilities.value.project_runtime) return toast.warning('需要 Operator 或 Admin 权限')
+  const connected = project.agent_connection?.connected === true
+  const operation = connected ? 'disconnect' : 'connect'
+  if (connected) {
+    const confirmed = await confirmDialog(`断开“${project.display_name || project.name}”的 Agent 后，也会停止该项目的全部源码运行和构建进程。是否继续？`)
     if (!confirmed) return
   }
-  resourceBusy.value = `project:${project.name}`
+  resourceBusy.value = `agent:${project.name}`
   try {
-    await api(operation === 'start' ? '/api/start' : '/api/stop', operation === 'start'
-      ? { project: project.name, agent: project.agent }
-      : { project: project.name })
-    toast.success(operation === 'start' ? '项目已启动' : '项目已停止')
+    await api('/api/projects/agent-connection', { project: project.name, action: operation, agent: project.agent })
+    toast.success(operation === 'connect' ? 'Agent 协作通道已连接' : 'Agent 协作通道已断开，项目源码进程已停止')
+    await load(true)
+  } catch (error) { toast.error(error.message) }
+  finally { resourceBusy.value = '' }
+}
+
+const runProjectSource = async (project, action) => {
+  if (!capabilities.value.project_runtime) return toast.warning('需要 Operator 或 Admin 权限')
+  const profileId = selectedRuntimeProfile(project)
+  if (!profileId) return navigateResource('projects', { project: project.name, configureRuntime: true })
+  if (action === 'stop') {
+    const confirmed = await confirmDialog(`确定暂停“${project.display_name || project.name}”的当前运行配置吗？`)
+    if (!confirmed) return
+  }
+  resourceBusy.value = `runtime:${project.name}:${profileId}:${action}`
+  try {
+    await api('/api/projects/runtime/action', { project: project.name, profile_id: profileId, action })
+    toast.success(({ start: '源码已启动', stop: '源码已暂停', restart: '源码已重新运行', build: '构建任务已开始' })[action])
     await load(true)
   } catch (error) { toast.error(error.message) }
   finally { resourceBusy.value = '' }
 }
 
 const toggleCron = async job => {
+  if (!capabilities.value.cron_manage) return toast.warning('管理定时任务需要 Admin 权限')
   resourceBusy.value = `cron:${job.id}`
   try {
     await api('/api/cron/update', { id: job.id, enabled: !job.enabled })
@@ -226,7 +256,8 @@ const actionLabel = action => ({
 })[action] || action
 
 const runAction = async (task, action) => {
-  if (['supplement', 'switch_executor', 'view_report', 'view'].includes(action)) return navigateTask(task)
+  if (!capabilities.value.task_execute && !['view_report', 'view', 'view_permission'].includes(action)) return toast.warning('执行任务操作需要 Operator 或 Admin 权限')
+  if (['switch_executor', 'view_report', 'view', 'view_permission'].includes(action)) return navigateTask(task)
   actionBusy.value = `${task.id}:${action}`
   try {
     if (action === 'confirm') {
@@ -237,20 +268,48 @@ const runAction = async (task, action) => {
       const feedback = window.prompt('希望我怎么调整这份执行前计划？', '')
       if (!feedback?.trim()) return
       await api('/api/usability/intake/revise', { task_id: task.id, feedback: feedback.trim() })
+      toast.success('计划调整已提交')
+      await load(true)
+      return
     }
-    if (action === 'retry') await api('/api/tasks/retry', { task_id: task.id, reason: '用户从工作台重试', auto_execute: true })
-    if (action === 'start') await api('/api/tasks/queue', { task_id: task.id })
-    if (action === 'pause' || action === 'resume') await api('/api/tasks/bulk', { ids: [task.id], action })
-    if (action === 'archive') await api('/api/tasks/delete', { id: task.id, reason: '用户从工作台归档已完成任务' })
+    let message = ''
+    if (action === 'supplement') {
+      message = window.prompt('请补充任务继续执行所需的信息', '')?.trim() || ''
+      if (!message) return
+    }
     if (action === 'cancel') {
       const ok = await confirmDialog(`确定取消“${task.title}”吗？已产生的执行证据会保留。`)
       if (!ok) return
-      await api('/api/tasks/cancel', { task_id: task.id, reason: '用户从工作台取消任务' })
     }
+    await api(`/api/usability/tasks/${encodeURIComponent(task.id)}/action`, {
+      action,
+      expected_revision: task.revision,
+      client_message_id: createClientMessageId(),
+      message,
+    })
     toast.success(`${actionLabel(action)}操作已提交`)
     await load(true)
   } catch (error) { toast.error(error.message) }
   finally { actionBusy.value = '' }
+}
+
+const loadMore = async section => {
+  const cursor = data.value?.pages?.[section]?.next_cursor
+  if (!cursor) return
+  pageBusy.value = section
+  try {
+    const result = await loadPage(section, cursor, 25)
+    const existing = Array.isArray(data.value?.[section]) ? data.value[section] : []
+    const seen = new Set(existing.map(item => item.id || item.name))
+    data.value[section] = [...existing, ...(result.items || []).filter(item => !seen.has(item.id || item.name))]
+    data.value.pages[section] = {
+      ...data.value.pages[section],
+      total: result.total,
+      next_cursor: result.next_cursor || '',
+      truncated: !!result.next_cursor,
+    }
+  } catch (error) { toast.error(error.message) }
+  finally { pageBusy.value = '' }
 }
 
 const phaseMeta = phase => ({
@@ -435,7 +494,7 @@ onUnmounted(() => {
           <section v-if="sections.active" class="section-block active-section">
             <div class="section-title"><div><span class="eyebrow">执行流</span><h2>正在推进</h2><p>运行中与等待开始的任务</p></div><button class="text-btn" @click="navigateResource('tasks')">全部任务<ChevronRight :size="15" /></button></div>
             <div v-if="active.length" class="task-grid">
-              <article v-for="task in active.slice(0, 6)" :key="task.id" class="task-card compact">
+              <article v-for="task in active" :key="task.id" class="task-card compact">
                 <div class="task-meta"><span class="status" :class="phaseMeta(task.phase)[1]">{{ phaseMeta(task.phase)[0] }}</span><small>{{ formatTime(task.updated_at) }}</small></div>
                 <h3>{{ task.title }}</h3><p>{{ task.progress?.current_step || task.reason }}</p>
                 <div class="progress-row" :class="{ indeterminate: task.progress?.percent == null }"><i :style="task.progress?.percent == null ? {} : { width: `${task.progress.percent}%` }"></i></div>
@@ -443,6 +502,9 @@ onUnmounted(() => {
                 <div class="task-bottom"><small>{{ task.target_project || task.intake?.group_name || '协作任务' }}</small><button class="text-btn" @click="navigateTask(task)">查看进度<ChevronRight :size="14" /></button></div>
               </article>
             </div>
+            <button v-if="data?.pages?.active?.next_cursor" class="load-more" :disabled="pageBusy === 'active'" @click="loadMore('active')">
+              <LoaderCircle v-if="pageBusy === 'active'" :size="14" />{{ pageBusy === 'active' ? '正在加载' : '加载更多执行任务' }}
+            </button>
             <div v-else class="compact-empty">
               <EmptyState icon="◎" title="当前执行队列为空" hint="可以从上方发起目标，或进入任务中心处理待启动事项。" />
               <button class="ghost small" @click="navigateResource('tasks')">打开任务中心</button>
@@ -452,10 +514,13 @@ onUnmounted(() => {
           <section v-if="sections.completed" class="section-block completed-section">
             <div class="section-title"><div><span class="eyebrow success-text">最近交付</span><h2>刚刚完成</h2><p>24 小时内形成的可查看交付</p></div></div>
             <div v-if="completed.length" class="completed-list">
-              <button v-for="task in completed.slice(0, 5)" :key="task.id" @click="navigateTask(task)">
+              <button v-for="task in completed" :key="task.id" @click="navigateTask(task)">
                 <CheckCircle2 :size="18" /><div><strong>{{ task.title }}</strong><small>{{ task.delivery.files_changed }} 个文件 · {{ task.delivery.verification_count }} 项验证</small></div><time>{{ formatTime(task.updated_at) }}</time><ChevronRight :size="15" />
               </button>
             </div>
+            <button v-if="data?.pages?.completed?.next_cursor" class="load-more" :disabled="pageBusy === 'completed'" @click="loadMore('completed')">
+              <LoaderCircle v-if="pageBusy === 'completed'" :size="14" />{{ pageBusy === 'completed' ? '正在加载' : '加载更多交付记录' }}
+            </button>
             <div v-else class="inline-empty"><CheckCircle2 :size="18" /><span><strong>暂无最近交付</strong><small>完成的任务会在这里保留快捷入口。</small></span></div>
           </section>
         </main>
@@ -465,20 +530,44 @@ onUnmounted(() => {
             <div class="rail-heading"><div><span class="eyebrow">工作资源</span><h2>项目</h2></div><button class="text-btn" title="查看全部项目" @click="navigateResource('projects')"><ChevronRight :size="17" /></button></div>
             <div class="resource-list">
               <div v-for="project in resources.projects.slice(0, 5)" :key="project.name" class="resource-row">
-                <button class="resource-link" @click="navigateResource('projects', { project: project.name })"><span class="resource-icon project-icon"><FolderKanban :size="16" /></span><span><strong>{{ project.name }}</strong><small>{{ project.agent }} · {{ project.running ? '正在运行' : '当前空闲' }}</small></span></button>
-                <button
-                  class="resource-command project-command"
-                  :class="{ stop: project.running, busy: resourceBusy === `project:${project.name}` }"
-                  :disabled="resourceBusy === `project:${project.name}`"
-                  :aria-busy="resourceBusy === `project:${project.name}`"
-                  :aria-label="resourceBusy === `project:${project.name}` ? `正在${project.running ? '停止' : '启动'}项目 ${project.name}` : `${project.running ? '停止' : '启动'}项目 ${project.name}`"
-                  :title="resourceBusy === `project:${project.name}` ? (project.running ? '正在停止项目' : '正在启动项目') : (project.running ? '停止项目' : '启动项目')"
-                  @click="toggleProject(project)"
-                >
-                  <LoaderCircle v-if="resourceBusy === `project:${project.name}`" :size="16" />
-                  <Square v-else-if="project.running" :size="14" />
-                  <Play v-else :size="16" fill="currentColor" />
+                <button class="resource-link" @click="navigateResource('projects', { project: project.name })">
+                  <span class="resource-icon project-icon"><FolderKanban :size="16" /></span>
+                  <span><strong>{{ project.display_name || project.name }}</strong><small>Agent {{ project.agent_connection?.connected ? '已连接' : '未连接' }} · 源码 {{ project.runtime_summary?.running_count ? `${project.runtime_summary.running_count} 项运行中` : '未运行' }}</small></span>
                 </button>
+                <div class="project-controls">
+                  <button
+                    class="resource-command"
+                    :class="{ stop: project.agent_connection?.connected }"
+                    :disabled="!capabilities.project_runtime || resourceBusy.startsWith(`agent:${project.name}`)"
+                    :title="capabilities.project_runtime ? (project.agent_connection?.connected ? '断开 Agent（同时停止本项目源码）' : '连接 Agent') : '需要 Operator 或 Admin 权限'"
+                    @click="toggleAgentConnection(project)"
+                  >
+                    <LoaderCircle v-if="resourceBusy.startsWith(`agent:${project.name}`)" :size="14" />
+                    <WifiOff v-else-if="project.agent_connection?.connected" :size="14" />
+                    <Wifi v-else :size="14" />
+                  </button>
+                  <select
+                    v-if="project.runtime_summary?.profiles?.length"
+                    v-model="selectedRuntimeProfiles[project.name]"
+                    :aria-label="`${project.display_name || project.name} 运行配置`"
+                    title="选择源码运行配置"
+                  >
+                    <option v-for="profile in project.runtime_summary.profiles" :key="profile.id" :value="profile.id">{{ profile.label }}</option>
+                  </select>
+                  <button
+                    v-if="project.runtime_summary?.profiles?.length"
+                    class="resource-command project-command"
+                    :class="{ stop: runtimeRunning(project) }"
+                    :disabled="!capabilities.project_runtime || resourceBusy.startsWith(`runtime:${project.name}:`)"
+                    :title="capabilities.project_runtime ? (runtimeRunning(project) ? '暂停源码' : '启动源码') : '需要 Operator 或 Admin 权限'"
+                    @click="runProjectSource(project, runtimeRunning(project) ? 'stop' : 'start')"
+                  >
+                    <LoaderCircle v-if="resourceBusy.startsWith(`runtime:${project.name}:`)" :size="14" />
+                    <Square v-else-if="runtimeRunning(project)" :size="13" />
+                    <Play v-else :size="14" fill="currentColor" />
+                  </button>
+                  <button v-else class="resource-command" title="配置运行命令" @click="navigateResource('projects', { project: project.name, configureRuntime: true })"><Settings2 :size="14" /></button>
+                </div>
               </div>
               <div v-if="!resources.projects.length" class="rail-empty">还没有项目</div>
             </div>
@@ -501,7 +590,7 @@ onUnmounted(() => {
             <div class="cron-list">
               <div v-for="job in resources.cron.slice(0, 4)" :key="job.id" class="resource-row cron-row">
                 <button class="resource-link" @click="navigateResource('cron')"><span><strong>{{ job.name }}</strong><small>{{ job.enabled ? `下次 ${formatNextRun(job.next_run)}` : '当前已停用' }}</small></span></button>
-                <button class="resource-command" :class="{ stop: job.enabled }" :disabled="resourceBusy === `cron:${job.id}`" :title="job.enabled ? '停用定时任务' : '启用定时任务'" @click="toggleCron(job)"><Square v-if="job.enabled" :size="12" /><Play v-else :size="12" /></button>
+                <button class="resource-command" :class="{ stop: job.enabled }" :disabled="!capabilities.cron_manage || resourceBusy === `cron:${job.id}`" :title="capabilities.cron_manage ? (job.enabled ? '停用定时任务' : '启用定时任务') : '需要 Admin 权限'" @click="toggleCron(job)"><Square v-if="job.enabled" :size="12" /><Play v-else :size="12" /></button>
               </div>
               <div v-if="!resources.cron.length" class="rail-empty">还没有定时任务</div>
             </div>
@@ -529,6 +618,7 @@ button{font:inherit;cursor:pointer}.primary,.ghost{display:inline-flex;align-ite
 .attention-tabs{display:flex;gap:5px;margin:-2px 0 10px;overflow-x:auto}.attention-tabs button{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;padding:6px 8px;border:1px solid var(--border-color,#dfe4ec);border-radius:6px;background:transparent;color:#667085;font-size:11px}.attention-tabs button.active{border-color:#fdb022;background:#fffaeb;color:#b54708;font-weight:800}.attention-tabs span{min-width:17px;padding:1px 4px;border-radius:9px;background:var(--bg-secondary,#f2f4f7);text-align:center;font-size:9px}.progress-row{position:relative;height:3px;margin:1px 0 8px;overflow:hidden;border-radius:2px;background:#e8edf5}.progress-row i{display:block;height:100%;min-width:4px;border-radius:inherit;background:#3157c8}.progress-row.indeterminate i{width:35%;animation:workbench-progress 1.6s ease-in-out infinite}@keyframes workbench-progress{0%{transform:translateX(-110%)}100%{transform:translateX(310%)}}.progress-facts{display:grid;gap:3px;margin-bottom:9px;color:#7a8496;font-size:10px}.progress-facts span{display:flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rail-section{padding:0 0 22px;margin-bottom:22px;border-bottom:1px solid var(--border-color,#e5e9f2)}.rail-heading{justify-content:space-between;gap:10px;margin-bottom:10px}.resource-list,.cron-list{display:grid;gap:4px}.resource-list button,.cron-list button{width:100%;min-width:0;gap:9px;padding:8px;border:0;border-radius:7px;background:transparent;color:inherit;text-align:left}.resource-list button:hover,.cron-list button:hover,.quick-actions button:hover{background:var(--bg-secondary,#f5f7fb)}.resource-icon{flex:0 0 auto;width:30px;height:30px;display:grid;place-items:center;border-radius:7px}.project-icon{background:#e8f0fe;color:#3157c8}.group-icon{background:#e6f6f3;color:#0f766e}.resource-list button>span:nth-child(2),.cron-list button>span{min-width:0;display:grid;gap:2px}.resource-list strong,.resource-list small,.cron-list strong,.cron-list small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.resource-list strong,.cron-list strong{font-size:12px}.resource-list small,.cron-list small{color:#98a2b3;font-size:10px}.resource-list button>i{width:7px;height:7px;margin-left:auto;border-radius:50%;background:#cbd5e1}.resource-list button>i.online{background:#12b76a}.resource-list button>svg{margin-left:auto;color:#98a2b3}.cron-summary{gap:9px;padding:10px;margin-bottom:6px;border-radius:7px;background:var(--bg-secondary,#f5f7fb);color:#9a6700}.cron-summary span{display:grid;gap:2px}.cron-summary strong{font-size:12px;color:var(--text-primary,#172033)}.cron-summary small{font-size:10px;color:#7a8496}.cron-list button>i{width:6px;height:6px;margin-left:auto;border-radius:50%;background:#f79009}.rail-empty{padding:10px;color:#98a2b3;font-size:11px}.technical{padding:2px 0;color:#667085;font-size:11px}.technical summary{cursor:pointer;font-weight:700}.technical p{margin:10px 0 0;line-height:1.6}
 .resource-row{display:flex;align-items:center;gap:3px;min-width:0;border-radius:7px}.resource-row:hover{background:var(--bg-secondary,#f5f7fb)}.resource-row .resource-link{flex:1;display:flex;align-items:center;min-width:0}.resource-row .resource-command{flex:0 0 auto;display:grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid var(--border-color,#dfe4ec);border-radius:6px;background:var(--surface,#fff);color:#067647}.resource-row .resource-command.stop{color:#b54708}.resource-row .resource-command:disabled{opacity:.45;cursor:wait}.cron-row .resource-link>span{min-width:0;display:grid;gap:2px}.technical p{display:flex;align-items:flex-start;gap:6px}.technical p svg{flex:0 0 auto;margin-top:2px}
+.project-controls{display:flex;align-items:center;gap:4px}.project-controls select{width:96px;height:30px;padding:0 5px;border:1px solid var(--border-color,#dfe4ec);border-radius:6px;background:var(--surface,#fff);color:var(--text-secondary,#667085);font-size:10px}.load-more{width:100%;min-height:34px;margin-top:9px;display:flex;align-items:center;justify-content:center;gap:6px;border:1px dashed var(--border-color,#dfe4ec);border-radius:7px;background:transparent;color:var(--accent-blue,#2563eb);font-size:11px;font-weight:700}.load-more:disabled{opacity:.55}.load-more svg{animation:project-command-spin .8s linear infinite}
 .resource-row .project-command{position:relative;width:36px;height:36px;margin-right:3px;border-color:color-mix(in srgb,var(--accent-blue,#2563eb) 34%,var(--border-color,#dfe4ec));background:color-mix(in srgb,var(--accent-blue,#2563eb) 9%,var(--surface,#fff));color:var(--accent-blue,#2563eb);transition:border-color .16s ease,background-color .16s ease,color .16s ease,box-shadow .16s ease,transform .16s ease}.resource-row .project-command:hover:not(:disabled){border-color:var(--accent-blue,#2563eb);background:var(--accent-blue,#2563eb);color:#fff;box-shadow:0 5px 14px color-mix(in srgb,var(--accent-blue,#2563eb) 24%,transparent);transform:translateY(-1px)}.resource-row .project-command:active:not(:disabled){box-shadow:none;transform:translateY(0)}.resource-row .project-command:focus-visible{outline:2px solid color-mix(in srgb,var(--accent-blue,#2563eb) 56%,#fff);outline-offset:2px}.resource-row .project-command.stop{border-color:color-mix(in srgb,var(--accent-yellow,#f79009) 38%,var(--border-color,#dfe4ec));background:color-mix(in srgb,var(--accent-yellow,#f79009) 10%,var(--surface,#fff));color:var(--accent-yellow,#b54708)}.resource-row .project-command.stop:hover:not(:disabled){border-color:var(--accent-yellow,#f79009);background:var(--accent-yellow,#f79009);color:#fff;box-shadow:0 5px 14px color-mix(in srgb,var(--accent-yellow,#f79009) 22%,transparent)}.resource-row .project-command.busy{border-color:var(--border-color,#dfe4ec);background:var(--bg-secondary,#f5f7fb);color:var(--text-muted,#98a2b3);opacity:1}.resource-row .project-command.busy svg{animation:project-command-spin .8s linear infinite}@keyframes project-command-spin{to{transform:rotate(360deg)}}
 @media(max-width:1050px){.quick-actions{grid-template-columns:repeat(3,minmax(0,1fr))}.workspace-grid{grid-template-columns:1fr}.workspace-rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;padding:22px 0 0;border-top:1px solid var(--border-color,#e5e9f2);border-left:0}.rail-section{margin:0;padding:0;border:0}.technical{grid-column:1/-1}}
 @media(max-width:760px){.workbench{padding:18px 14px 42px}.workbench-header{align-items:flex-start}.header-copy h1{font-size:24px}.header-copy p{font-size:12px}.header-actions{flex-wrap:wrap;justify-content:flex-end}.sync-state,.attention-counter{display:none}.layout-popover{position:fixed;top:60px;right:12px;left:12px;width:auto}.stale-banner{align-items:flex-start}.stale-banner button{white-space:nowrap}.pulse-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.pulse-item:nth-child(2){border-right:0}.pulse-item:nth-child(-n+2){border-bottom:1px solid var(--border-color,#e5e9f2)}.command-heading small,.keyboard-hint{display:none}.intake-footer,.intake-tools{align-items:stretch;flex-direction:column}.target-select{padding:0;border-left:0}.target-select span{display:none}.target-select select{width:100%}.intake-submit{width:100%}.quick-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.quick-actions button:last-child:nth-child(odd){grid-column:1/-1}.confirm-grid,.task-grid{grid-template-columns:1fr}.task-list .task-card{display:block}.task-actions{justify-content:flex-start;margin-top:12px}.compact-empty{align-items:flex-start;flex-direction:column}.completed-list button{grid-template-columns:22px minmax(0,1fr) 15px}.completed-list time{display:none}.workspace-rail{grid-template-columns:1fr}.technical{grid-column:auto}}

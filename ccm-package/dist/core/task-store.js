@@ -40,6 +40,9 @@ exports.loadTasksFromSqlite = loadTasksFromSqlite;
 exports.getTaskByIdFromSqlite = getTaskByIdFromSqlite;
 exports.listTasksByParentIdFromSqlite = listTasksByParentIdFromSqlite;
 exports.updateTaskByIdInSqlite = updateTaskByIdInSqlite;
+exports.updateTaskByIdCasInSqlite = updateTaskByIdCasInSqlite;
+exports.listUsabilityTaskCandidatesFromSqlite = listUsabilityTaskCandidatesFromSqlite;
+exports.listUsabilityArchiveCandidatesFromSqlite = listUsabilityArchiveCandidatesFromSqlite;
 exports.saveTasksToSqlite = saveTasksToSqlite;
 exports.runTaskStoreAtomicBatchSelfTest = runTaskStoreAtomicBatchSelfTest;
 exports.appendTaskLogRecord = appendTaskLogRecord;
@@ -380,6 +383,77 @@ function updateTaskByIdInSqlite(id, patchOrMutator) {
     WHERE id = ?
   `).run(row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, taskId);
     return next;
+}
+/**
+ * Performs a single-row compare-and-swap while holding SQLite's write lock.
+ * The predicate is evaluated against the latest payload, so a scheduler cannot
+ * overwrite a task that changed after its read snapshot.
+ */
+function updateTaskByIdCasInSqlite(id, predicate, mutator) {
+    const taskId = String(id || "").trim();
+    if (!taskId)
+        return { updated: false, conflict: false, task: null, previous: null };
+    const db = getDatabase();
+    const transaction = db.transaction(() => {
+        const existing = db.prepare("SELECT id, position, payload_json FROM tasks WHERE id = ?").get(taskId);
+        if (!existing)
+            return { updated: false, conflict: false, task: null, previous: null };
+        const current = parseJson(existing.payload_json, null);
+        if (!current)
+            return { updated: false, conflict: false, task: null, previous: null };
+        if (!predicate(current))
+            return { updated: false, conflict: true, task: current, previous: current };
+        const next = mutator({ ...current });
+        if (!next || String(next.id) !== taskId)
+            throw new Error("CAS更新不能改变任务 id");
+        const row = taskColumns(next, Number(existing.position) || 0);
+        db.prepare(`
+      UPDATE tasks SET
+        position = ?, status = ?, group_id = ?, target_project = ?, workflow_type = ?,
+        created_at = ?, updated_at = ?, archived = ?, payload_json = ?, payload_hash = ?
+      WHERE id = ?
+    `).run(row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, taskId);
+        return { updated: true, conflict: false, task: next, previous: current };
+    });
+    return transaction.immediate();
+}
+function listUsabilityTaskCandidatesFromSqlite(recentCutoff) {
+    const rows = getDatabase().prepare(`
+    SELECT payload_json
+    FROM tasks
+    WHERE archived = 0
+      AND (
+        status NOT IN ('done', 'completed', 'succeeded', 'cancelled', 'archived', 'deleted')
+        OR updated_at >= ?
+        OR json_extract(payload_json, '$.intake_state') = 'awaiting_confirmation'
+      )
+    ORDER BY updated_at DESC, position ASC
+  `).all(String(recentCutoff || ""));
+    return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+}
+function listUsabilityArchiveCandidatesFromSqlite(historyCutoff, intakeCutoff) {
+    const rows = getDatabase().prepare(`
+    SELECT payload_json
+    FROM tasks
+    WHERE archived = 0
+      AND (
+        (
+          status IN ('done', 'cancelled')
+          AND COALESCE(
+            NULLIF(json_extract(payload_json, '$.completed_at'), ''),
+            NULLIF(json_extract(payload_json, '$.cancelled_at'), ''),
+            NULLIF(updated_at, ''),
+            created_at
+          ) < ?
+        )
+        OR (
+          json_extract(payload_json, '$.intake_state') = 'awaiting_confirmation'
+          AND created_at < ?
+        )
+      )
+    ORDER BY updated_at ASC
+  `).all(String(historyCutoff || ""), String(intakeCutoff || ""));
+    return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
 }
 function saveTasksToSqlite(tasks) {
     if (!Array.isArray(tasks))

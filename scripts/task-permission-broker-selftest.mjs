@@ -7,16 +7,36 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const root = path.resolve(import.meta.dirname, '..')
+const distRoot = process.env.CCM_BACKEND_DIST_DIR || path.join(root, 'ccm-package', 'dist')
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-permission-broker-'))
 const workDir = path.join(tempHome, 'project-a')
 fs.mkdirSync(workDir, { recursive: true })
 process.env.USERPROFILE = tempHome
 process.env.HOME = tempHome
+const authDir = path.join(tempHome, '.cc-connect', 'auth')
+fs.mkdirSync(authDir, { recursive: true })
+fs.writeFileSync(path.join(authDir, 'users.json'), JSON.stringify({
+  schema: 'ccm-local-auth-users-v2',
+  users: [{
+    id: 'usr_permission_admin',
+    username: 'permission-admin',
+    normalizedUsername: 'permission-admin',
+    role: 'admin',
+    password: { algorithm: 'scrypt', salt: 'test', hash: 'test' },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    securityAudit: [],
+  }],
+  registrationEnabled: false,
+  onboardingCompleted: true,
+  updatedAt: new Date().toISOString(),
+}, null, 2))
 
-const db = require(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))
-const taskStore = require(path.join(root, 'ccm-package', 'dist', 'core', 'task-store.js'))
-const broker = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'task-permission-broker.js'))
-const orchestratorConfig = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-orchestrator-config.js'))
+const db = require(path.join(distRoot, 'core', 'db.js'))
+const taskStore = require(path.join(distRoot, 'core', 'task-store.js'))
+const observability = require(path.join(distRoot, 'system', 'observability-database.js'))
+const broker = require(path.join(distRoot, 'modules', 'collaboration', 'task-permission-broker.js'))
+const orchestratorConfig = require(path.join(distRoot, 'modules', 'collaboration', 'group-orchestrator-config.js'))
 let mockModelCalls = 0
 const mockServer = http.createServer((req, res) => {
   mockModelCalls += 1
@@ -172,14 +192,15 @@ try {
   const notificationIds = new Set([outside.id, globalRequest.id])
   check('only exact global or project Feishu origins receive permission cards', () => {
     assert.equal(notificationResult.sent, 2)
-    assert.equal(petNotifications.length, 2)
+    assert.equal(petNotifications.length, 0)
     assert.equal(feishuNotifications.length, 1)
     const globalNotification = feishuNotifications.find(item => item.sessionId === 'global-session-selftest')
     assert.match(globalNotification?.markdown || '', new RegExp(`批准权限 ${globalRequest.id}`))
     assert.match(globalNotification?.markdown || '', new RegExp(`拒绝权限 ${globalRequest.id}`))
     for (const request of broker.listTaskPermissionRequests().filter(item => notificationIds.has(item.id))) {
       assert.equal(request.notificationState, 'sent')
-      assert.equal(request.notificationPetSent, true)
+      assert.equal(request.notificationPetSent, false)
+      assert.ok(Array.isArray(request.notificationV2Ids) && request.notificationV2Ids.length > 0)
       assert.equal(request.notificationFeishuSent, true)
     }
   })
@@ -189,7 +210,7 @@ try {
     notifyFeishuTaskStage: async payload => { feishuNotifications.push(payload); return { success: true } },
   })
   check('successful notification channels are not sent twice', () => {
-    assert.equal(petNotifications.length, 2)
+    assert.equal(petNotifications.length, 0)
     assert.equal(feishuNotifications.length, 1)
   })
 
@@ -202,5 +223,6 @@ try {
 } finally {
   await new Promise(resolve => mockServer.close(resolve))
   taskStore.closeSqliteTaskStore()
-  fs.rmSync(tempHome, { recursive: true, force: true })
+  observability.closeObservabilityDatabaseForTests()
+  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }

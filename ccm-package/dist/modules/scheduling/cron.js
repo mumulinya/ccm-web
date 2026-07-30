@@ -824,6 +824,8 @@ function cancelCronRun(jobId, runId, reason = "用户取消本轮定时任务") 
 }
 // ===== merged from cron-part-02.ts =====
 let schedulerTimer = null;
+let schedulerTickPromise = null;
+const CRON_SCHEDULER_TICK_LOCK = path.join(utils_1.CCM_DIR, "scheduler", "cron-tick");
 function syncCronTaskStatus(task, status, result = "") {
     const cronJobId = task?.cron_job_id;
     if (!cronJobId)
@@ -1161,7 +1163,7 @@ async function runCronJob(id, ctx, trigger, options = {}) {
         throw error;
     }
 }
-async function retryCronRun(jobId, runId, ctx, trigger = "retry") {
+async function retryCronRunCore(jobId, runId, ctx, trigger = "retry") {
     const job = (0, db_1.loadCronJobs)().find(item => item.id === jobId);
     if (!job)
         throw new Error("定时任务不存在");
@@ -1211,6 +1213,25 @@ async function retryCronRun(jobId, runId, ctx, trigger = "retry") {
     if (status === "failed")
         scheduleFailedCronRunRetry((0, db_1.loadCronJobs)().find(item => item.id === jobId), updated);
     return { success: status !== "failed", run: updated, results };
+}
+async function retryCronRun(jobId, runId, ctx, trigger = "retry") {
+    const lockTarget = path.join(utils_1.CCM_DIR, "scheduler", `cron-retry-${String(jobId).replace(/[^a-zA-Z0-9_-]/g, "_")}-${String(runId).replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+    let lock = null;
+    try {
+        lock = (0, atomic_json_file_1.acquireFileLock)(lockTarget, { timeoutMs: 50, retryMs: 10, staleMs: 2 * 60_000 });
+    }
+    catch (error) {
+        if (/file lock timeout/i.test(String(error?.message || "")))
+            return { success: true, duplicate: true, queued: true, message: "同一轮定时任务正在恢复或重试" };
+        throw error;
+    }
+    try {
+        return await retryCronRunCore(jobId, runId, ctx, trigger);
+    }
+    finally {
+        if (lock)
+            (0, atomic_json_file_1.releaseFileLock)(lock);
+    }
 }
 function reconcileCronRunsOnStartup(now = new Date()) {
     const jobs = (0, db_1.loadCronJobs)();
@@ -1264,7 +1285,7 @@ async function processDueCronRetries(ctx, now) {
         }
     }
 }
-async function tickCronScheduler(ctx) {
+async function tickCronSchedulerCore(ctx) {
     const now = new Date();
     await processDueCronRetries(ctx, now);
     const jobs = (0, db_1.loadCronJobs)();
@@ -1311,12 +1332,40 @@ async function tickCronScheduler(ctx) {
     }
     await (0, cron_dev_reports_1.tickAutoDevReportNotifications)(now);
     await (0, feishu_channel_1.tickFeishuNotificationOutbox)(now);
+    (0, cron_dev_reports_1.reconcileAutoDevReportDeliveryStatuses)();
     try {
         runConflictResolutionMemoryMaintenanceSchedulerTick({ at: now.toISOString() });
     }
     catch (error) {
         console.error("[Cron][MemoryMaintenance]", error?.message || error);
     }
+}
+async function tickCronScheduler(ctx) {
+    if (schedulerTickPromise)
+        return schedulerTickPromise;
+    const operation = (async () => {
+        let lock = null;
+        try {
+            lock = (0, atomic_json_file_1.acquireFileLock)(CRON_SCHEDULER_TICK_LOCK, { timeoutMs: 20, retryMs: 5, staleMs: 2 * 60_000 });
+        }
+        catch (error) {
+            if (/file lock timeout/i.test(String(error?.message || "")))
+                return { skipped: true, reason: "scheduler_tick_owned_elsewhere" };
+            throw error;
+        }
+        try {
+            return await tickCronSchedulerCore(ctx);
+        }
+        finally {
+            if (lock)
+                (0, atomic_json_file_1.releaseFileLock)(lock);
+        }
+    })().finally(() => {
+        if (schedulerTickPromise === operation)
+            schedulerTickPromise = null;
+    });
+    schedulerTickPromise = operation;
+    return operation;
 }
 function startCronScheduler(ctx) {
     if (schedulerTimer)
@@ -1350,6 +1399,8 @@ function getConflictResolutionMemoryMaintenanceSchedulerStatus() {
 function schedulerStatus() {
     return {
         running: !!schedulerTimer,
+        tick_in_progress: !!schedulerTickPromise,
+        cross_process_singleflight: true,
         interval_ms: 30 * 1000,
         running_job_ids: Array.from(exports.runningCronJobs),
         conflict_resolution_memory_maintenance: exports.latestConflictResolutionMaintenanceTick || {
@@ -1559,8 +1610,13 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
         return true;
     }
     if (pathname === "/api/auto-dev/overview" && req.method === "GET") {
-        const today = String(parsed.query.date || (0, cron_dev_reports_1.localDateKey)());
-        const report = (0, cron_dev_reports_1.upsertAutoDevDailyReport)(today);
+        const notification = (0, cron_dev_reports_1.normalizeAutoDevNotifyConfig)((0, db_1.loadAutoDevNotifyConfig)());
+        const today = String(parsed.query.date || (0, cron_dev_reports_1.localDateKey)(new Date(), notification.timezone));
+        const preview = (0, cron_dev_reports_1.buildAutoDevReportPreview)("daily", today, notification.timezone);
+        const stored = (0, db_1.loadDevReports)().find((item) => item.date === today || item.id === today);
+        const report = stored
+            ? { ...stored, stale: stored.evidence_checksum !== preview.evidence_checksum, generation_status: stored.evidence_checksum !== preview.evidence_checksum ? "stale" : stored.generation_status || (stored.ai_summary ? "generated" : "evidence_ready"), live_evidence_checksum: preview.evidence_checksum }
+            : preview;
         const reports = (0, db_1.loadDevReports)().slice(0, 30);
         const jobs = (0, db_1.loadCronJobs)().map(cron_job_store_1.normalizeCronJob).filter((job) => job.workflow_type === "daily_dev");
         const journalAudit = (0, work_journal_1.getWorkJournalAudit)({ sync: false });
@@ -1570,7 +1626,7 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
             today: report,
             reports,
             weekly_reports: (0, db_1.loadDevWeeklyReports)().slice(0, 20),
-            notification: (0, cron_dev_reports_1.normalizeAutoDevNotifyConfig)((0, db_1.loadAutoDevNotifyConfig)()),
+            notification,
             daily_dev_jobs: jobs,
             backlog: report.backlog,
             journal: {
@@ -1633,13 +1689,10 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     }
     if (pathname === "/api/auto-dev/weekly-report/generate" && req.method === "POST") {
         readJsonBody(req, (payload) => {
-            try {
-                const report = (0, cron_dev_reports_1.upsertAutoDevWeeklyReport)(payload.date || (0, cron_dev_reports_1.localDateKey)(), { force: payload.force === true });
-                (0, utils_1.sendJson)(res, { success: true, report, reports: (0, db_1.loadDevWeeklyReports)().slice(0, 20) });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
+            const config = (0, cron_dev_reports_1.normalizeAutoDevNotifyConfig)((0, db_1.loadAutoDevNotifyConfig)());
+            (0, cron_dev_reports_1.generateAndUpsertAutoDevReport)("weekly", payload.date || (0, cron_dev_reports_1.localDateKey)(new Date(), config.timezone), { force: payload.force === true, timezone: config.timezone })
+                .then(report => (0, utils_1.sendJson)(res, { success: true, report, reports: (0, db_1.loadDevWeeklyReports)().slice(0, 20) }))
+                .catch((e) => (0, utils_1.sendJson)(res, { success: false, error: e.message, report: e.report || null, retryable: true }, 503));
         }, (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
         return true;
     }
@@ -1658,6 +1711,7 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
                     weekly_enabled: payload.weekly_enabled === true,
                     weekly_day: payload.weekly_day ?? current.weekly_day,
                     weekly_time: payload.weekly_time ?? current.weekly_time,
+                    timezone: payload.timezone ?? current.timezone,
                     retry_limit: payload.retry_limit ?? current.retry_limit,
                     retry_interval_minutes: payload.retry_interval_minutes ?? current.retry_interval_minutes,
                     target_type: "user",
@@ -1674,7 +1728,8 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/auto-dev/notification/send" && req.method === "POST") {
         readJsonBody(req, (payload) => {
             const kind = payload.kind === "weekly" ? "weekly" : "daily";
-            (0, cron_dev_reports_1.dispatchAutoDevReport)(kind, { date: payload.date || (0, cron_dev_reports_1.localDateKey)() })
+            const config = (0, cron_dev_reports_1.normalizeAutoDevNotifyConfig)((0, db_1.loadAutoDevNotifyConfig)());
+            (0, cron_dev_reports_1.dispatchAutoDevReport)(kind, { date: payload.date || (0, cron_dev_reports_1.localDateKey)(new Date(), config.timezone) })
                 .then(result => (0, utils_1.sendJson)(res, result, result.success ? 200 : 400))
                 .catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 500));
         }, (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
@@ -1682,13 +1737,10 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     }
     if (pathname === "/api/auto-dev/report/generate" && req.method === "POST") {
         readJsonBody(req, (payload) => {
-            try {
-                const report = (0, cron_dev_reports_1.upsertAutoDevDailyReport)(payload.date || (0, cron_dev_reports_1.localDateKey)(), { force: payload.force === true });
-                (0, utils_1.sendJson)(res, { success: true, report, reports: (0, db_1.loadDevReports)().slice(0, 30) });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
+            const config = (0, cron_dev_reports_1.normalizeAutoDevNotifyConfig)((0, db_1.loadAutoDevNotifyConfig)());
+            (0, cron_dev_reports_1.generateAndUpsertAutoDevReport)("daily", payload.date || (0, cron_dev_reports_1.localDateKey)(new Date(), config.timezone), { force: payload.force === true, timezone: config.timezone })
+                .then(report => (0, utils_1.sendJson)(res, { success: true, report, reports: (0, db_1.loadDevReports)().slice(0, 30) }))
+                .catch((e) => (0, utils_1.sendJson)(res, { success: false, error: e.message, report: e.report || null, retryable: true }, 503));
         }, (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
         return true;
     }
