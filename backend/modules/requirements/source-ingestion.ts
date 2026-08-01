@@ -537,22 +537,25 @@ export async function assertPublicUrl(value: string) {
 
 async function requestPinnedPublicDocument(checked: Awaited<ReturnType<typeof assertPublicUrl>>) {
   const target = checked.url;
-  const selected = checked.addresses[0];
+  const selected = checked.addresses.find(item => net.isIPv4(item.address)) || checked.addresses[0];
+  if (!selected?.address || !net.isIP(selected.address)) throw new Error("在线文档 DNS 解析结果无效");
+  const family = net.isIPv6(selected.address) ? 6 : 4;
   const transport = target.protocol === "https:" ? https : http;
-  return await new Promise<{ response: any; buffer: Buffer }>((resolve, reject) => {
+  return await new Promise<{ response: any; buffer: Buffer; resolvedAddress: string }>((resolve, reject) => {
     const request = transport.request({
       protocol: target.protocol,
-      hostname: target.hostname,
+      hostname: selected.address,
+      family,
       port: target.port || (target.protocol === "https:" ? 443 : 80),
       path: `${target.pathname}${target.search}`,
       method: "GET",
       headers: {
+        "Host": target.host,
         "User-Agent": "CCM-Requirement-Ingestion/2.0",
         "Accept": "text/html,text/plain,application/pdf,application/json;q=0.9,*/*;q=0.5",
         "Accept-Encoding": "identity",
       },
       servername: target.protocol === "https:" ? target.hostname : undefined,
-      lookup: (_hostname: string, _options: any, callback: any) => callback(null, selected.address, selected.family),
     } as any, response => {
       const contentEncoding = String(response.headers["content-encoding"] || "identity").toLowerCase();
       if (contentEncoding !== "identity") {
@@ -584,6 +587,7 @@ async function requestPinnedPublicDocument(checked: Awaited<ReturnType<typeof as
         resolve({
           response: { status: response.statusCode || 0, ok: Number(response.statusCode || 0) >= 200 && Number(response.statusCode || 0) < 300, headers },
           buffer: Buffer.concat(chunks),
+          resolvedAddress: selected.address,
         });
       });
     });
@@ -597,14 +601,14 @@ export async function fetchPublicDocument(urlValue: string) {
   let current = urlValue;
   for (let redirect = 0; redirect < 5; redirect++) {
     const checked = await assertPublicUrl(current);
-    const { response, buffer } = await requestPinnedPublicDocument(checked);
+    const { response, buffer, resolvedAddress } = await requestPinnedPublicDocument(checked);
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
         if (!location) throw new Error("在线文档重定向缺少目标地址");
         current = new URL(location, checked.url).toString();
         continue;
       }
-      return { response, buffer, finalUrl: checked.url.toString(), resolvedAddress: checked.addresses[0].address, redirectCount: redirect };
+      return { response, buffer, finalUrl: checked.url.toString(), resolvedAddress, redirectCount: redirect };
   }
   throw new Error("在线文档重定向次数过多");
 }
