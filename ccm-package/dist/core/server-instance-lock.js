@@ -60,9 +60,8 @@ function executableIdentity(pid) {
     try {
         if (process.platform === "win32") {
             const script = [
-                `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
-                "if($null -eq $p){exit 3}",
-                "$v=[ordered]@{created=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;command=$p.CommandLine}|ConvertTo-Json -Compress",
+                `$p=Get-Process -Id ${pid} -ErrorAction Stop`,
+                "$v=[ordered]@{created=$p.StartTime.ToUniversalTime().ToString('o');executable=$p.Path}|ConvertTo-Json -Compress",
                 "Write-Output $v",
             ].join(";");
             return String((0, child_process_1.execFileSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
