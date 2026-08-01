@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "1.0.27",
+  "version": "2.0.0",
   "description": "CCM 本地多 Agent 协作工作区，支持会话记忆、项目执行、代码协作、TestAgent 与持久终端",
   "main": "dist/server.js",
   "bin": {
@@ -70,14 +70,16 @@
   },
   "dependencies": {
     "@huggingface/transformers": "4.2.0",
-    "@modelcontextprotocol/server-filesystem": "2026.7.10",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/server-filesystem": "2026.7.10",
     "better-sqlite3": "^12.11.1",
     "busboy": "1.6.0",
     "cc-connect": "^1.4.1",
     "js-tiktoken": "1.0.21",
+    "music-metadata": "10.9.1",
     "pdf-parse": "^1.1.1",
     "playwright": "^1.61.1",
+    "undici": "^6.21.3",
     "zod": "^3.25.76"
   },
   "optionalDependencies": {

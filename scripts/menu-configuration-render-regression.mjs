@@ -111,6 +111,7 @@ try {
   assert.equal(await desktop.locator('.nav-sidebar .nav-group-items').filter({ hasText: '代码协作' }).count() > 0, true)
   const metricsRow = desktop.locator('[data-menu-id="metrics"]')
   await metricsRow.getByTitle('隐藏菜单').click()
+  await desktop.locator('.nav-sidebar .nav-item').filter({ hasText: '性能监控' }).waitFor({ state: 'detached' })
   assert.equal(await desktop.locator('.nav-sidebar .nav-item').filter({ hasText: '性能监控' }).count(), 0)
   report.checks.push({ name: 'pin and hide actions update the real desktop navigation immediately', pass: true })
 

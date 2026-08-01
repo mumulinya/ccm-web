@@ -60,7 +60,7 @@ const results = {
 };
 
 for (const [name, result] of Object.entries(results)) {
-  assert.equal(result?.pass, true, `${name} self-test failed${name === "projectToolUi" ? `: ${JSON.stringify(result?.checks || {})}` : ""}`);
+  assert.equal(result?.pass, true, `${name} self-test failed: ${JSON.stringify(result?.checks || result || {})}`);
 }
 
 console.log(JSON.stringify({

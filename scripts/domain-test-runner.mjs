@@ -103,6 +103,7 @@ for (const file of tests) {
     } : {},
   })
   report.tests.push({ file, ...result })
+  console.log(`[domain-test-result] ${file} ok=${result.ok} status=${result.status ?? 'none'} duration_ms=${result.duration_ms}${result.error ? ` error=${result.error}` : ''}`)
   if (result.ok) report.passed++
   else report.failed++
 }

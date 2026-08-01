@@ -34,7 +34,7 @@ if (process.platform === 'win32') {
   fs.writeFileSync(fakeCodexEntry, '#!/usr/bin/env node\nif (process.argv.includes("--version")) console.log("codex-selftest 1.0.0"); else { let p=""; process.stdin.on("data",c=>p+=c); process.stdin.on("end",()=>{ const c=p.match(/CCM_AGENT_OK:([a-f0-9]+)/)?.[1]||""; console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"CCM_AGENT_OK:"+c}})); }); }\n')
 } else {
   const command = path.join(binDir, 'codex')
-  fs.writeFileSync(command, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-selftest 1.0.0"; exit 0; fi\nprompt="$(cat)"\nchallenge="$(printf "%s" "$prompt" | sed -n "s/.*CCM_AGENT_OK:\\([a-f0-9]*\\).*/\\1/p")"\nprintf "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"CCM_AGENT_OK:%s\"}}\\n" "$challenge"\n')
+  fs.writeFileSync(command, `#!${process.execPath}\nif (process.argv.includes('--version')) { console.log('codex-selftest 1.0.0'); process.exit(0); }\nlet prompt = '';\nprocess.stdin.setEncoding('utf8');\nprocess.stdin.on('data', chunk => { prompt += chunk; });\nprocess.stdin.on('end', () => {\n  const challenge = prompt.match(/CCM_AGENT_OK:([a-f0-9]+)/)?.[1] || '';\n  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'CCM_AGENT_OK:' + challenge } }));\n});\n`)
   fs.chmodSync(command, 0o755)
   const cursorCommand = path.join(binDir, 'cursor-agent')
   fs.writeFileSync(cursorCommand, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "cursor-selftest 1.0.0"; exit 0; fi\nif [ "$1" = "models" ]; then echo "cursor-model - Cursor Model"; exit 0; fi\nexit 0\n')
@@ -113,7 +113,7 @@ try {
     assert.equal(cursorUpdate.shell, true)
   } else {
     assert.equal(cursorCommand, 'cursor-agent')
-    assert.equal(cursorUpdate.shell, undefined)
+    assert.equal(cursorUpdate.shell, false)
   }
   assert.deepEqual(cursorUpdate.args, ['update'])
   checks.push({ name: 'Cursor update resolves the real platform command and launches Windows command wrappers through a shell', pass: true })

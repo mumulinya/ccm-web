@@ -1509,6 +1509,7 @@ function localMarketplaceItems() {
     ].find(candidate => fs.existsSync(candidate))
         || path.resolve(__dirname, "../../../mcp-feishu/dist/index.js");
     const filesystemRoot = path.join(exports.CCM_DIR, "shared");
+    fs.mkdirSync(filesystemRoot, { recursive: true });
     return [
         normalizeMarketplaceItem({
             name: "mcp-feishu",

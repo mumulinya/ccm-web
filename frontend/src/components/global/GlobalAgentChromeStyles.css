@@ -115,7 +115,7 @@
   box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.12);
 }
 :global([data-theme="dark"] .input-wrapper:focus-within){
-  background: rgba(20, 20, 30, 0.88);
+  background: var(--control-bg);
 }
 
 .attach-btn {

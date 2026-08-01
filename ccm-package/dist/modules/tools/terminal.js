@@ -743,7 +743,11 @@ async function runPersistentTerminalSelfTest() {
     const session = spawnPersistentSession({ sessionId: id, name: "PTY self-test", cwd: process.cwd(), cols: 100, rows: 28 });
     try {
         const marker = `CCM_PTY_${Math.random().toString(36).slice(2, 10)}`;
-        const command = session.shell.id === "cmd" ? `echo ${marker}` : `Write-Output '${marker}'`;
+        const command = session.shell.id === "cmd"
+            ? `echo ${marker}`
+            : ["pwsh", "powershell"].includes(session.shell.id)
+                ? `Write-Output '${marker}'`
+                : `printf '%s\\n' '${marker}'`;
         writePtyInput(session, `${command}\r`);
         const deadline = Date.now() + 8_000;
         while (!session.scrollback.includes(marker) && Date.now() < deadline)

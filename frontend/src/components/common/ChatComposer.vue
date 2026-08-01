@@ -113,8 +113,8 @@ const onInput = (event) => {
   gap: 8px;
   width: 100%;
   padding: 12px 14px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
-  background: color-mix(in srgb, var(--surface, #fff) 86%, transparent);
+  border-top: 1px solid var(--border-color);
+  background: var(--surface-translucent);
 }
 
 .hidden-file-input {
@@ -127,7 +127,7 @@ const onInput = (event) => {
   align-items: center;
   justify-content: center;
   height: 44px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border-color);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -137,13 +137,15 @@ const onInput = (event) => {
   width: 44px;
   min-width: 44px;
   padding: 0;
-  background: var(--surface-translucent);
+  background: var(--control-bg);
+  color: var(--text-secondary);
   font-size: 16px;
 }
 
 .composer-button:hover {
-  border-color: rgba(59, 130, 246, 0.2);
-  background: rgba(59, 130, 246, 0.06);
+  border-color: color-mix(in srgb, var(--accent-blue) 32%, var(--border-color));
+  background: var(--accent-soft);
+  color: var(--accent-blue);
 }
 
 .send-button {
@@ -178,7 +180,7 @@ textarea {
   max-height: 160px;
   padding: 11px 14px;
   resize: none;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   outline: none;
   background: var(--control-bg);
@@ -199,19 +201,19 @@ textarea {
 }
 
 textarea:focus {
-  border-color: rgba(59, 130, 246, 0.32);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+  border-color: color-mix(in srgb, var(--accent-blue) 52%, var(--border-color));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 12%, transparent);
 }
 
 :global([data-theme="dark"] .chat-composer){
-  border-top-color: rgba(255, 255, 255, 0.08);
-  background: rgba(15, 23, 42, 0.78);
+  border-top-color: var(--border-color);
+  background: var(--surface-translucent);
 }
 
 :global([data-theme="dark"] .composer-button),
 :global([data-theme="dark"] textarea){
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(15, 23, 42, 0.82);
+  border-color: var(--border-color);
+  background: var(--control-bg);
 }
 
 @media (max-width: 720px) {

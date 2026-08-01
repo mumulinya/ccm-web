@@ -26,13 +26,23 @@ assert.equal(timedOut.stopReceipt?.exited, true)
 
 const stubbornScript = process.platform === 'win32'
   ? "setInterval(() => {}, 1000)"
-  : "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
+  : "process.on('SIGTERM', () => {}); process.stdout.write('READY\\n'); setInterval(() => {}, 1000)"
 const stubborn = spawn(process.execPath, ['-e', stubbornScript], {
   detached: process.platform !== 'win32',
   windowsHide: true,
-  stdio: 'ignore',
+  stdio: process.platform === 'win32' ? 'ignore' : ['ignore', 'pipe', 'ignore'],
 })
 assert.ok(stubborn.pid > 0)
+if (process.platform !== 'win32') {
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('stubborn process did not become ready')), 2_000)
+    stubborn.stdout.once('data', chunk => {
+      clearTimeout(timer)
+      assert.match(String(chunk), /READY/)
+      resolve()
+    })
+  })
+}
 const stopReceipt = await processTree.terminateManagedProcessTree(stubborn, { gracefulTimeoutMs: 250, forceTimeoutMs: 2_000 })
 assert.equal(stopReceipt.exited, true)
 if (process.platform !== 'win32') assert.equal(stopReceipt.forced, true)
@@ -64,4 +74,3 @@ console.log(JSON.stringify({
   },
   paidProviderCalls: 0,
 }, null, 2))
-

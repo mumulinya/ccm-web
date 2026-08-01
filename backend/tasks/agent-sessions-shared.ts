@@ -36,6 +36,9 @@ import {
   CCM_DIR,
 } from "../core/utils";
 import {
+  withFileLock as withAtomicFileLock,
+} from "../core/atomic-json-file";
+import {
   extractGroupPostTurnSummaryDeliveryCapsule,
   validateGroupPostTurnSummaryDeliveryCapsule,
 } from "../modules/collaboration/group-post-turn-summary";
@@ -258,9 +261,14 @@ export function loadStore() {
 
 export function saveStore(store: any) {
   fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
-  const sessions = (store.sessions || [])
-    .sort((a: any, b: any) => String(a.lastUsedAt || a.createdAt).localeCompare(String(b.lastUsedAt || b.createdAt)))
-    .slice(-MAX_SESSION_RECORDS);
+  const ordered = [...(store.sessions || [])]
+    .sort((a: any, b: any) => String(a.lastUsedAt || a.createdAt).localeCompare(String(b.lastUsedAt || b.createdAt)));
+  const active = ordered.filter((item: any) => item.status === "open");
+  const terminal = ordered.filter((item: any) => item.status !== "open");
+  // Active sessions are execution state, not history. Never evict them merely
+  // because the bounded historical store reached its retention limit.
+  const sessions = [...terminal.slice(-Math.max(0, MAX_SESSION_RECORDS - active.length)), ...active]
+    .sort((a: any, b: any) => String(a.lastUsedAt || a.createdAt).localeCompare(String(b.lastUsedAt || b.createdAt)));
   const tmp = `${STORE_FILE}.${process.pid}.tmp`;
   if (fs.existsSync(STORE_FILE)) {
     try {
@@ -420,12 +428,11 @@ export function releaseTaskAgentSessionStoreLock(lock: TaskAgentSessionStoreLock
 
 
 export function withTaskAgentSessionStoreLock<T>(operation: () => T): T {
-  const lock = acquireTaskAgentSessionStoreLock();
-  try {
-    return operation();
-  } finally {
-    releaseTaskAgentSessionStoreLock(lock);
-  }
+  return withAtomicFileLock(STORE_FILE, operation, {
+    timeoutMs: STORE_LOCK_TIMEOUT_MS,
+    retryMs: STORE_LOCK_RETRY_MS,
+    staleMs: STORE_LOCK_STALE_MS,
+  });
 }
 
 

@@ -14,6 +14,9 @@ import { getObservabilityDatabase, withImmediateObservabilityTransaction } from 
 import { MUSIC_DIR } from "./library";
 
 const execFileAsync = promisify(execFile);
+const { parseFile: parseMusicMetadataFile } = require("music-metadata") as {
+  parseFile: (filePath: string, options?: any) => Promise<any>;
+};
 const AUDIO_EXTENSION = /\.(mp3|wav|ogg|m4a|flac|aac)$/i;
 const MAX_PROBE_OUTPUT = 512 * 1024;
 const PROBE_TIMEOUT_MS = 12_000;
@@ -77,27 +80,42 @@ async function fileChecksum(file: string) {
 
 export async function probeMusicFile(filePath: string) {
   refreshEnvPath();
-  const { stdout } = await execFileAsync("ffprobe", [
-    "-v", "error",
-    "-show_entries", "format=duration,format_name,bit_rate:stream=codec_type,sample_rate,channels,bit_rate",
-    "-of", "json",
-    filePath,
-  ], {
-    timeout: PROBE_TIMEOUT_MS,
-    windowsHide: true,
-    maxBuffer: MAX_PROBE_OUTPUT,
-  });
-  const value: any = JSON.parse(String(stdout || "{}"));
-  const audio = (value.streams || []).find((item: any) => item.codec_type === "audio") || {};
-  const durationSeconds = Number(value.format?.duration || 0);
-  const bitrate = Number(audio.bit_rate || value.format?.bit_rate || 0);
-  return {
-    durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
-    bitrate: Number.isFinite(bitrate) ? bitrate : 0,
-    sampleRate: Number(audio.sample_rate || 0) || 0,
-    channels: Number(audio.channels || 0) || 0,
-    format: String(value.format?.format_name || path.extname(filePath).slice(1)).split(",")[0],
-  };
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration,format_name,bit_rate:stream=codec_type,sample_rate,channels,bit_rate",
+      "-of", "json",
+      filePath,
+    ], {
+      timeout: PROBE_TIMEOUT_MS,
+      windowsHide: true,
+      maxBuffer: MAX_PROBE_OUTPUT,
+    });
+    const value: any = JSON.parse(String(stdout || "{}"));
+    const audio = (value.streams || []).find((item: any) => item.codec_type === "audio") || {};
+    const durationSeconds = Number(value.format?.duration || 0);
+    const bitrate = Number(audio.bit_rate || value.format?.bit_rate || 0);
+    return {
+      durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+      bitrate: Number.isFinite(bitrate) ? bitrate : 0,
+      sampleRate: Number(audio.sample_rate || 0) || 0,
+      channels: Number(audio.channels || 0) || 0,
+      format: String(value.format?.format_name || path.extname(filePath).slice(1)).split(",")[0],
+    };
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+    const metadata: any = await parseMusicMetadataFile(filePath, { duration: true, skipCovers: true });
+    if (!metadata?.format?.container && !metadata?.format?.codec) throw new Error("无法识别音频编码");
+    const durationSeconds = Number(metadata.format.duration || 0);
+    const bitrate = Number(metadata.format.bitrate || 0);
+    return {
+      durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+      bitrate: Number.isFinite(bitrate) ? bitrate : 0,
+      sampleRate: Number(metadata.format.sampleRate || 0) || 0,
+      channels: Number(metadata.format.numberOfChannels || 0) || 0,
+      format: String(metadata.format.container || metadata.format.codec || path.extname(filePath).slice(1)).toLowerCase(),
+    };
+  }
 }
 
 function rowToTrack(row: any) {

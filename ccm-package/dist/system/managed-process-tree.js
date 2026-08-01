@@ -56,8 +56,7 @@ function waitForExit(pid, timeoutMs) {
                 return resolve(true);
             if (Date.now() >= deadline)
                 return resolve(false);
-            const timer = setTimeout(poll, 50);
-            timer.unref?.();
+            setTimeout(poll, 50);
         };
         poll();
     });
@@ -80,7 +79,6 @@ function runHidden(executable, args, timeoutMs) {
             catch { }
             finish(false, `${executable} timed out`);
         }, Math.max(1_000, timeoutMs));
-        timer.unref?.();
         child.once("error", error => finish(false, error.message));
         child.once("close", code => finish(code === 0, code === 0 ? undefined : `${executable} exited with ${code}`));
     });

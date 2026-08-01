@@ -41,6 +41,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm --prefix frontend ci
+      - name: Install Chromium for render regressions
+        run: npx playwright install --with-deps chromium
       - run: npm run release:artifact
       - run: node scripts/cli-service-lifecycle-v2-selftest.mjs
       - run: node scripts/package-update-transaction-selftest.mjs

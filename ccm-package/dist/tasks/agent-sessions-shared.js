@@ -94,6 +94,7 @@ const trusted_memory_prompt_envelope_1 = require("../agents/trusted-memory-promp
 const memory_context_consumption_receipt_1 = require("../integrations/memory-context-consumption-receipt");
 const memory_context_consumption_recovery_1 = require("../integrations/memory-context-consumption-recovery");
 const utils_1 = require("../core/utils");
+const atomic_json_file_1 = require("../core/atomic-json-file");
 const group_memory_compaction_1 = require("../modules/collaboration/group-memory-compaction");
 const group_compact_head_1 = require("../modules/collaboration/group-compact-head");
 const group_session_lifecycle_head_1 = require("../modules/collaboration/group-session-lifecycle-head");
@@ -147,9 +148,14 @@ function loadStore() {
 }
 function saveStore(store) {
     fs.mkdirSync(path.dirname(exports.STORE_FILE), { recursive: true });
-    const sessions = (store.sessions || [])
-        .sort((a, b) => String(a.lastUsedAt || a.createdAt).localeCompare(String(b.lastUsedAt || b.createdAt)))
-        .slice(-exports.MAX_SESSION_RECORDS);
+    const ordered = [...(store.sessions || [])]
+        .sort((a, b) => String(a.lastUsedAt || a.createdAt).localeCompare(String(b.lastUsedAt || b.createdAt)));
+    const active = ordered.filter((item) => item.status === "open");
+    const terminal = ordered.filter((item) => item.status !== "open");
+    // Active sessions are execution state, not history. Never evict them merely
+    // because the bounded historical store reached its retention limit.
+    const sessions = [...terminal.slice(-Math.max(0, exports.MAX_SESSION_RECORDS - active.length)), ...active]
+        .sort((a, b) => String(a.lastUsedAt || a.createdAt).localeCompare(String(b.lastUsedAt || b.createdAt)));
     const tmp = `${exports.STORE_FILE}.${process.pid}.tmp`;
     if (fs.existsSync(exports.STORE_FILE)) {
         try {
@@ -293,13 +299,11 @@ function releaseTaskAgentSessionStoreLock(lock) {
     }
 }
 function withTaskAgentSessionStoreLock(operation) {
-    const lock = acquireTaskAgentSessionStoreLock();
-    try {
-        return operation();
-    }
-    finally {
-        releaseTaskAgentSessionStoreLock(lock);
-    }
+    return (0, atomic_json_file_1.withFileLock)(exports.STORE_FILE, operation, {
+        timeoutMs: exports.STORE_LOCK_TIMEOUT_MS,
+        retryMs: exports.STORE_LOCK_RETRY_MS,
+        staleMs: exports.STORE_LOCK_STALE_MS,
+    });
 }
 function safeFileSegment(value, fallback = "unknown") {
     const text = String(value || "").trim().replace(/[^a-zA-Z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");

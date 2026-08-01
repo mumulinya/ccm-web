@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -7,6 +8,9 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-group-memory-fencing-"));
+process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
 const extraction = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-session-memory-extraction.js"));
 const memory = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "memory.js"));
 const sessions = require(path.join(root, "ccm-package", "dist", "tasks", "agent-sessions.js"));
@@ -215,4 +219,5 @@ try {
     try { sessions.purgeTaskAgentSessions(concurrentTaskId); } catch {}
   }
   try { memory.deleteGroupSessionMemoryArtifacts(groupId, groupSessionId); } catch {}
+  try { fs.rmSync(testHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
 }

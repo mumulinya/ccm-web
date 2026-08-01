@@ -19,6 +19,7 @@ const responsiveContracts = [
   ['frontend/src/components/pets/PetCreateModal.vue', /width:\s*min\(380px, calc\(100vw - 32px\)\)/],
   ['frontend/src/components/pets/PetSkinCreateModal.vue', /width:\s*min\(380px, calc\(100vw - 32px\)\)/],
   ['frontend/src/components/music/MusicAgentSettingsModal.vue', /@media \(max-width: 600px\)[\s\S]+\.settings-modal[\s\S]+width:\s*100%/],
+  ['frontend/src/components/settings/SettingsSecurityPanel.vue', /@media \(max-width:\s*760px\)[\s\S]+\.security-modal[\s\S]+width:\s*100%/],
 ]
 for (const [file, pattern] of responsiveContracts) assert.match(read(file), pattern, `${file} responsive contract missing`)
 checks.push({ name: 'complex project, pet, and music modals own their responsive inner-layout rules', pass: true })
@@ -45,6 +46,7 @@ const expectedModalFiles = [
   'projects/ProjectAgentSwitchModal.vue',
   'projects/ProjectSharedFilesModal.vue',
   'settings/ControlBotQrModal.vue',
+  'settings/SettingsSecurityPanel.vue',
   'tasks/AutomatedTaskIntakeModal.vue',
   'tasks/DailyDevTaskModal.vue',
   'tasks/TaskBacklogModal.vue',

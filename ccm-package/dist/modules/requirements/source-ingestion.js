@@ -435,9 +435,9 @@ function isPrivateIpv4(ip) {
         || parts[0] >= 224;
 }
 function isPrivateIp(ip) {
-    if (net.isIPv4(ip))
-        return isPrivateIpv4(ip);
-    const value = ip.toLowerCase().split("%")[0];
+    const value = String(ip || "").toLowerCase().split("%")[0].replace(/^\[|\]$/g, "");
+    if (net.isIPv4(value))
+        return isPrivateIpv4(value);
     if (value.startsWith("::ffff:")) {
         const tail = value.slice(7);
         if (net.isIPv4(tail))
@@ -462,7 +462,7 @@ async function assertPublicUrl(value) {
     const url = new URL(value);
     if (url.protocol !== "https:" && url.protocol !== "http:")
         throw new Error("只支持 http/https 在线文档");
-    const host = url.hostname.toLowerCase();
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
     if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local"))
         throw new Error("不允许读取本机或局域网地址");
     if (url.username || url.password)

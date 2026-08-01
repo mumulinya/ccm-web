@@ -563,8 +563,8 @@ html[data-theme="dark"] .modal textarea,
 [data-theme="dark"] .form-group input,
 [data-theme="dark"] .form-group select,
 [data-theme="dark"] .form-group textarea {
-  background: rgba(17, 24, 39, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border: 1px solid var(--border-color);
   color: var(--text-primary);
 }
 
@@ -578,8 +578,8 @@ html[data-theme="dark"] .modal textarea:focus,
 [data-theme="dark"] .modal select:focus,
 [data-theme="dark"] .modal textarea:focus {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
-  background: rgba(17, 24, 39, 0.85);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: var(--control-bg);
 }
 
 html[data-theme="dark"] body .modal .btn-cancel,
@@ -630,8 +630,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 [data-theme="dark"] .task-manager .status-select {
-  background: rgba(17, 24, 39, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 [data-theme="dark"] .task-manager .modal {
@@ -640,8 +640,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
 }
 [data-theme="dark"] .task-manager .form-group input,
 [data-theme="dark"] .task-manager .form-group select {
-  background: rgba(17, 24, 39, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 [data-theme="dark"] .task-manager div[style*="background:rgba(255,255,255,0.85)"],
@@ -749,11 +749,11 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: rgba(56, 189, 248, 0.12);
 }
 [data-theme="dark"] .input-wrap {
-  background: rgba(17, 24, 39, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border-color: var(--border-color);
 }
 [data-theme="dark"] .chat-bar textarea {
-  background: rgba(17, 24, 39, 0.7);
+  background: var(--control-bg);
   color: var(--text-primary);
 }
 [data-theme="dark"] .diff-modal {
@@ -770,8 +770,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
 }
 [data-theme="dark"] textarea[style*="background:rgba(255,255,255,0.85)"],
 [data-theme="dark"] textarea[style*="background: rgba(255, 255, 255, 0.85)"] {
-  background: rgba(17, 24, 39, 0.85);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 
@@ -862,22 +862,22 @@ html[data-theme="dark"] .modal .modal-close:hover,
 /* 琛ラ仐锛氳В鍐宠仛鐒︺€佸唴鑱旀垨鐗规畩鎮诞鍙戠櫧闂 */
 /* 椤圭洰绠＄悊 (ProjectManager.vue) 鑱氱劍鍙樼櫧 */
 [data-theme="dark"] .project-manager .select:focus {
-  background: rgba(17, 24, 39, 0.85);
+  background: var(--control-bg);
 }
 [data-theme="dark"] .project-manager .chat-bar textarea:focus {
-  background: rgba(17, 24, 39, 0.8);
+  background: var(--control-bg);
 }
 
 /* 宸ュ叿閰嶇疆 (ToolsConfig.vue) 鐨勫唴鑱旂櫧鑹茶緭鍏ユ銆佷笅鎷夋涓庨€変腑鎸夐挳瑕嗙洊 */
 [data-theme="dark"] .marketplace-source-selector select {
-  background: rgba(17, 24, 39, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 [data-theme="dark"] .marketplace-source-selector input,
 [data-theme="dark"] .smithery-activation-card input {
-  background: rgba(17, 24, 39, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 [data-theme="dark"] .marketplace-source-selector button[style*="background: rgb(255, 255, 255)"],
@@ -920,8 +920,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
 [data-theme="dark"] .code-changes .select,
 [data-theme="dark"] .code-changes-container .select,
 [data-theme="dark"] .commit-input {
-  background: rgba(17, 24, 39, 0.7);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--control-bg);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 [data-theme="dark"] .code-changes .sidebar,
@@ -1931,7 +1931,7 @@ label,
 [data-theme="dark"] .select,
 [data-theme="dark"] .commit-input,
 [data-theme="dark"] .search-input {
-  background: #1a1f1a;
+  background: var(--control-bg);
 }
 
 @media (max-width: 768px) {

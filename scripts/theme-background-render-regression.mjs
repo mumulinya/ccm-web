@@ -115,7 +115,37 @@ try {
   assert.equal(groupTheme.optionColor, 'rgb(224, 242, 254)')
   assert.equal(groupTheme.siblingOptionBackground, 'rgb(12, 26, 58)')
   report.checks.push({ name: 'desktop group selector and native options use the deep-ocean palette', pass: true, details: groupTheme })
+  const groupComposerTheme = await desktop.evaluate(() => {
+    const root = getComputedStyle(document.documentElement)
+    const textarea = document.querySelector('.group-chat .chat-composer textarea')
+    return {
+      control: root.getPropertyValue('--control-bg').trim(),
+      surface: root.getPropertyValue('--surface').trim(),
+      textarea: textarea ? getComputedStyle(textarea).backgroundColor : '',
+    }
+  })
+  assert.equal(groupComposerTheme.control, groupComposerTheme.surface)
+  assert.equal(groupComposerTheme.textarea, 'rgb(12, 26, 58)')
+  report.checks.push({ name: 'shared group composer follows the selected control surface', pass: true, details: groupComposerTheme })
   await capture(desktop, 'desktop-deep-ocean-group-chat')
+
+  await openTab(desktop, 'global-agent', '.global-assistant-panel')
+  const globalComposerTheme = await desktop.evaluate(() => {
+    const root = getComputedStyle(document.documentElement)
+    const wrapper = document.querySelector('.global-assistant-panel .input-wrapper')
+    const input = document.querySelector('#globalChatInput')
+    return {
+      control: root.getPropertyValue('--control-bg').trim(),
+      surface: root.getPropertyValue('--surface').trim(),
+      wrapper: wrapper ? getComputedStyle(wrapper).backgroundColor : '',
+      input: input ? getComputedStyle(input).backgroundColor : '',
+    }
+  })
+  assert.equal(globalComposerTheme.control, globalComposerTheme.surface)
+  assert.equal(globalComposerTheme.wrapper, 'rgb(12, 26, 58)')
+  assert.equal(globalComposerTheme.input, globalComposerTheme.wrapper)
+  report.checks.push({ name: 'global Agent input surface does not retain the legacy green control color', pass: true, details: globalComposerTheme })
+  await capture(desktop, 'desktop-deep-ocean-global-agent')
 
   await openTab(desktop, 'memory-center', '.memory-center')
   const memoryTheme = await desktop.evaluate(() => {

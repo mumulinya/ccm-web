@@ -867,7 +867,32 @@ async function main() {
   return delegateLegacy(args);
 }
 
-main().then(code => { process.exitCode = Number(code || 0); }).catch(error => {
+function exitAfterOutputFlush(code) {
+  const exitCode = Number(code || 0);
+  process.exitCode = exitCode;
+  const streams = [process.stdout, process.stderr].filter(stream => stream?.writable && !stream.destroyed);
+  let pending = streams.length;
+  let exited = false;
+  const finish = () => {
+    if (exited) return;
+    exited = true;
+    process.exit(exitCode);
+  };
+  const timeout = setTimeout(finish, 1_000);
+  timeout.unref?.();
+  if (!pending) return setImmediate(finish);
+  for (const stream of streams) {
+    stream.write("", () => {
+      pending -= 1;
+      if (pending === 0) {
+        clearTimeout(timeout);
+        finish();
+      }
+    });
+  }
+}
+
+main().then(exitAfterOutputFlush).catch(error => {
   console.error(style.danger(error?.message || String(error)));
-  process.exitCode = 1;
+  exitAfterOutputFlush(1);
 });

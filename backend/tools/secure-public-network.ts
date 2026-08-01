@@ -21,9 +21,13 @@ function ipv4In(address: string, network: string, prefix: number) {
 }
 
 export function normalizeIpAddress(address: string) {
-  const raw = String(address || "").trim().toLowerCase().split("%")[0];
+  const raw = String(address || "").trim().toLowerCase().split("%")[0].replace(/^\[|\]$/g, "");
   const mapped = raw.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  return mapped ? mapped[1] : raw;
+  if (mapped) return mapped[1];
+  const mappedHex = raw.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!mappedHex) return raw;
+  const numeric = (parseInt(mappedHex[1], 16) * 0x10000) + parseInt(mappedHex[2], 16);
+  return `${numeric >>> 24}.${numeric >>> 16 & 255}.${numeric >>> 8 & 255}.${numeric & 255}`;
 }
 
 export function isBlockedNetworkAddress(input: string) {
@@ -111,6 +115,8 @@ export async function securePublicFetch(input: string | URL | Request, init: Req
   if (redirects > MAX_REDIRECTS) throw new Error("外部来源重定向次数过多");
   const resolved = await resolveSafePublicHttpsUrl(sourceUrl);
   const pinned = resolved.addresses[0];
+  if (!pinned?.address || !net.isIP(pinned.address)) throw new Error("外部来源 DNS 解析结果无效");
+  const pinnedFamily = net.isIPv6(pinned.address) ? 6 : 4;
 
   return new Promise<Response>((resolve, reject) => {
     const req = https.request({
@@ -121,7 +127,15 @@ export async function securePublicFetch(input: string | URL | Request, init: Req
       method,
       headers,
       servername: resolved.url.hostname,
-      lookup: (_hostname, _opts, callback: any) => callback(null, pinned.address, pinned.family),
+      lookup: (_hostname, lookupOptions: any, callback?: any) => {
+        if (typeof lookupOptions === "function") {
+          callback = lookupOptions;
+          lookupOptions = {};
+        }
+        const record = { address: pinned.address, family: pinnedFamily };
+        if (lookupOptions?.all) callback(null, [record]);
+        else callback(null, record.address, record.family);
+      },
       timeout: timeoutMs,
     }, response => {
       const status = Number(response.statusCode || 0);

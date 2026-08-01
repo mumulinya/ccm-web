@@ -1376,6 +1376,7 @@ export async function runTerminalCommand(command: string, cwd: string, options: 
     let timedOut = false;
     let cancelled = false;
     let stopReceipt: any = null;
+    let stopPromise: Promise<void> | null = null;
     let settled = false;
     let spawnError: any = null;
     const append = (target: "stdout" | "stderr", chunk: any) => {
@@ -1397,14 +1398,19 @@ export async function runTerminalCommand(command: string, cwd: string, options: 
       else cancelled = true;
       stopReceipt = await terminateManagedProcessTree(child, { gracefulTimeoutMs: 1_500, forceTimeoutMs: 2_000 });
     };
-    const timeout = setTimeout(() => { void stop("timeout"); }, Math.max(1_000, Math.min(10 * 60_000, Number(options.timeoutMs || 30_000))));
+    const requestStop = (reason: "timeout" | "cancel") => {
+      if (!stopPromise) stopPromise = stop(reason);
+      return stopPromise;
+    };
+    const timeout = setTimeout(() => { void requestStop("timeout"); }, Math.max(1_000, Math.min(10 * 60_000, Number(options.timeoutMs || 30_000))));
     timeout.unref?.();
-    const abort = () => { void stop("cancel"); };
+    const abort = () => { void requestStop("cancel"); };
     options.signal?.addEventListener("abort", abort, { once: true });
-    child.once("close", code => {
+    child.once("close", async code => {
       settled = true;
       clearTimeout(timeout);
       options.signal?.removeEventListener("abort", abort);
+      if (stopPromise) await stopPromise;
       const parsed = splitTerminalCwd(stdout, marker);
       const exitCode = Number.isInteger(code) ? Number(code) : 1;
       const stderrText = String(stderr || "").trim();

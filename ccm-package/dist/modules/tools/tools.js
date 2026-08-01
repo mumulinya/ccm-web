@@ -1307,6 +1307,7 @@ async function runTerminalCommand(command, cwd, options = {}) {
         let timedOut = false;
         let cancelled = false;
         let stopReceipt = null;
+        let stopPromise = null;
         let settled = false;
         let spawnError = null;
         const append = (target, chunk) => {
@@ -1337,14 +1338,21 @@ async function runTerminalCommand(command, cwd, options = {}) {
                 cancelled = true;
             stopReceipt = await (0, managed_process_tree_1.terminateManagedProcessTree)(child, { gracefulTimeoutMs: 1_500, forceTimeoutMs: 2_000 });
         };
-        const timeout = setTimeout(() => { void stop("timeout"); }, Math.max(1_000, Math.min(10 * 60_000, Number(options.timeoutMs || 30_000))));
+        const requestStop = (reason) => {
+            if (!stopPromise)
+                stopPromise = stop(reason);
+            return stopPromise;
+        };
+        const timeout = setTimeout(() => { void requestStop("timeout"); }, Math.max(1_000, Math.min(10 * 60_000, Number(options.timeoutMs || 30_000))));
         timeout.unref?.();
-        const abort = () => { void stop("cancel"); };
+        const abort = () => { void requestStop("cancel"); };
         options.signal?.addEventListener("abort", abort, { once: true });
-        child.once("close", code => {
+        child.once("close", async (code) => {
             settled = true;
             clearTimeout(timeout);
             options.signal?.removeEventListener("abort", abort);
+            if (stopPromise)
+                await stopPromise;
             const parsed = splitTerminalCwd(stdout, marker);
             const exitCode = Number.isInteger(code) ? Number(code) : 1;
             const stderrText = String(stderr || "").trim();

@@ -10,6 +10,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const adapterFile = path.join(root, "ccm-package", "dist", "integrations", "control-bot-acp.js");
 
 function findCcConnect() {
+  const localCandidates = [
+    path.join(root, "node_modules", ".bin", process.platform === "win32" ? "cc-connect.cmd" : "cc-connect"),
+    path.join(root, "ccm-package", "node_modules", ".bin", process.platform === "win32" ? "cc-connect.cmd" : "cc-connect"),
+  ];
+  for (const candidate of localCandidates) if (fs.existsSync(candidate)) return candidate;
   if (process.platform === "win32") {
     for (const entry of String(process.env.PATH || "").split(path.delimiter)) {
       const base = entry.replace(/^"|"$/g, "").trim();
@@ -128,7 +133,8 @@ const ccConnect = spawn(findCcConnect(), ["--config", configPath, "--force"], {
   env: { ...process.env },
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
-  shell: process.platform !== "win32",
+  detached: process.platform !== "win32",
+  shell: process.platform === "win32" && /\.cmd$/i.test(findCcConnect()),
 });
 ccConnect.stdout.on("data", chunk => { ccConnectOutput += chunk.toString(); });
 ccConnect.stderr.on("data", chunk => { ccConnectOutput += chunk.toString(); });
@@ -182,13 +188,22 @@ try {
     if (process.platform === "win32") {
       spawnSync("taskkill", ["/T", "/F", "/PID", String(ccConnect.pid)], { windowsHide: true, stdio: "ignore" });
     } else {
-      ccConnect.kill();
+      try { process.kill(-ccConnect.pid, "SIGTERM"); } catch { try { ccConnect.kill("SIGTERM"); } catch {} }
     }
     await Promise.race([
       new Promise(resolve => ccConnect.once("exit", resolve)),
       new Promise(resolve => setTimeout(resolve, 3_000)),
     ]);
+    if (ccConnect.exitCode === null && process.platform !== "win32") {
+      try { process.kill(-ccConnect.pid, "SIGKILL"); } catch { try { ccConnect.kill("SIGKILL"); } catch {} }
+      await Promise.race([
+        new Promise(resolve => ccConnect.once("exit", resolve)),
+        new Promise(resolve => setTimeout(resolve, 2_000)),
+      ]);
+    }
   }
+  backend.closeAllConnections?.();
+  gateway.closeAllConnections?.();
   await Promise.all([
     new Promise(resolve => backend.close(resolve)),
     new Promise(resolve => gateway.close(resolve)),

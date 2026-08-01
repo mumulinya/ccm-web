@@ -348,8 +348,8 @@ const unifiedLines = computed(() => {
 }
 
 [data-theme="dark"] .diff-search-input {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--control-bg);
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 

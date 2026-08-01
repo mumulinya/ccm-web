@@ -133,6 +133,7 @@ const runDesktop = async () => {
   const revealButton = page.getByRole('button', { name: '显示 API Key' })
   assert.equal(await revealButton.count(), 1)
   await revealButton.click()
+  await page.waitForFunction(() => document.querySelector('#model-key')?.getAttribute('type') === 'text')
   assert.equal(await apiKeyInput.getAttribute('type'), 'text')
   assert.equal(await apiKeyInput.inputValue(), 'sk-settings-render-secret')
   await page.getByRole('button', { name: '隐藏 API Key' }).click()
