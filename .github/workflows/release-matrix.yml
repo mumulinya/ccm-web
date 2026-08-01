@@ -78,10 +78,12 @@ jobs:
       - name: Install and run the exact attested tarball
         shell: pwsh
         run: |
-          $manifestPath = Get-ChildItem release-artifacts -Recurse -Filter release-artifact-manifest.json | Select-Object -First 1
-          if (-not $manifestPath) { throw "Release artifact manifest not found" }
-          $data = Get-Content $manifestPath.FullName -Raw | ConvertFrom-Json
-          $tarball = Join-Path $manifestPath.DirectoryName $data.tarball
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $manifestPath = Join-Path $PWD "release-artifacts/$version/release-artifact-manifest.json"
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Release artifact manifest not found for version $version" }
+          $data = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ($data.version -ne $version) { throw "Release artifact version mismatch: expected $version, received $($data.version)" }
+          $tarball = Join-Path (Split-Path -Parent $manifestPath) $data.tarball
           $evidence = Join-Path $PWD "release-evidence/evidence-${{ matrix.os }}-node${{ matrix.node }}.json"
           $env:CCM_RELEASE_EVIDENCE_FILE = $evidence
           node scripts/npm-package-install-release-selftest.mjs $tarball
@@ -111,9 +113,10 @@ jobs:
       - name: Attach the complete platform evidence
         shell: pwsh
         run: |
-          $manifestPath = Get-ChildItem release-artifacts -Recurse -Filter release-artifact-manifest.json | Select-Object -First 1
-          if (-not $manifestPath) { throw "Release artifact manifest not found" }
-          node scripts/attest-release-matrix.mjs $manifestPath.FullName release-evidence
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $manifestPath = Join-Path $PWD "release-artifacts/$version/release-artifact-manifest.json"
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Release artifact manifest not found for version $version" }
+          node scripts/attest-release-matrix.mjs $manifestPath release-evidence
       - uses: actions/upload-artifact@v4
         with:
           name: ccm-release-tested
