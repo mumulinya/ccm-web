@@ -72,7 +72,7 @@
     "@huggingface/transformers": "4.2.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@modelcontextprotocol/server-filesystem": "2026.7.10",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "11.10.0",
     "busboy": "1.6.0",
     "cc-connect": "^1.4.1",
     "js-tiktoken": "1.0.21",

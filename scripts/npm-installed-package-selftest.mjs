@@ -57,7 +57,16 @@ try {
   assert.equal(doctor.success, true)
   assert.equal(doctor.checks.find(check => check.id === 'pty')?.ok, true)
 
-  const started = run(['start', '--background', '--port', String(port)])
+  let started = ''
+  try {
+    started = run(['start', '--background', '--port', String(port)], 90_000)
+  } catch (error) {
+    const serverLogFile = path.join(dataDir, 'logs', 'ccm-server.log')
+    const serverLog = fs.existsSync(serverLogFile)
+      ? fs.readFileSync(serverLogFile, 'utf8').slice(-16_000)
+      : '服务日志不存在'
+    throw new Error(`${String(error?.message || error)}\n--- ccm-server.log ---\n${serverLog}`)
+  }
   assert.match(started, /STARTED/)
   const rootResponse = await fetch(`http://127.0.0.1:${port}/`)
   assert.equal(rootResponse.status, 200)

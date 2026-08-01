@@ -51,9 +51,8 @@ function executableIdentity(pid: number) {
   try {
     if (process.platform === "win32") {
       const script = [
-        `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
-        "if($null -eq $p){exit 3}",
-        "$v=[ordered]@{created=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;command=$p.CommandLine}|ConvertTo-Json -Compress",
+        `$p=Get-Process -Id ${pid} -ErrorAction Stop`,
+        "$v=[ordered]@{created=$p.StartTime.ToUniversalTime().ToString('o');executable=$p.Path}|ConvertTo-Json -Compress",
         "Write-Output $v",
       ].join(";");
       return String(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
@@ -71,9 +70,30 @@ function executableIdentity(pid: number) {
   }
 }
 
+let currentProcessFingerprint = "";
+
+function createCurrentProcessFallbackFingerprint() {
+  const approximateStartedAt = Date.now() - Math.floor(process.uptime() * 1_000);
+  return sha256([
+    "ccm-process-instance-v2",
+    process.pid,
+    process.execPath,
+    path.resolve(process.argv[1] || ""),
+    approximateStartedAt,
+    crypto.randomBytes(32).toString("hex"),
+  ].join("\0"));
+}
+
 export function getProcessIdentityFingerprint(pid = process.pid) {
+  if (pid === process.pid && currentProcessFingerprint) return currentProcessFingerprint;
   const identity = executableIdentity(pid);
-  return identity ? sha256(identity) : "";
+  const fingerprint = identity
+    ? sha256(identity)
+    : pid === process.pid
+      ? createCurrentProcessFallbackFingerprint()
+      : "";
+  if (pid === process.pid) currentProcessFingerprint = fingerprint;
+  return fingerprint;
 }
 
 function entryIdentity() {

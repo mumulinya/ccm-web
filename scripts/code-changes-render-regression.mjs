@@ -215,7 +215,7 @@ try {
   await desktop.getByLabel('选择 backend/modules/tools/git.ts').check()
   await desktop.locator('.commit-button').click()
   await desktop.getByText('只提交你明确选择的文件', { exact: true }).waitFor()
-  assert.equal(await desktop.getByText('暂存区另有 1 个未选文件，本次不会带入', { exact: true }).isVisible(), true)
+  await desktop.getByText('暂存区另有 1 个未选文件，本次不会带入', { exact: true }).waitFor()
   const commitPanel = desktop.locator('.commit-panel')
   assert.equal(await commitPanel.getByRole('button', { name: '提交代码' }).isDisabled(), true)
   assert.equal(await commitPanel.getByRole('button', { name: '提交并推送' }).isDisabled(), true)

@@ -160,30 +160,20 @@ async function securePublicFetch(input, init = {}, options = {}) {
     if (redirects > MAX_REDIRECTS)
         throw new Error("外部来源重定向次数过多");
     const resolved = await resolveSafePublicHttpsUrl(sourceUrl);
-    const pinned = resolved.addresses[0];
+    const pinned = resolved.addresses.find(item => net.isIPv4(item.address)) || resolved.addresses[0];
     if (!pinned?.address || !net.isIP(pinned.address))
         throw new Error("外部来源 DNS 解析结果无效");
     const pinnedFamily = net.isIPv6(pinned.address) ? 6 : 4;
     return new Promise((resolve, reject) => {
         const req = https.request({
             protocol: "https:",
-            hostname: resolved.url.hostname,
+            hostname: pinned.address,
+            family: pinnedFamily,
             port: resolved.url.port || 443,
             path: `${resolved.url.pathname}${resolved.url.search}`,
             method,
-            headers,
+            headers: { Host: resolved.url.host, ...headers },
             servername: resolved.url.hostname,
-            lookup: (_hostname, lookupOptions, callback) => {
-                if (typeof lookupOptions === "function") {
-                    callback = lookupOptions;
-                    lookupOptions = {};
-                }
-                const record = { address: pinned.address, family: pinnedFamily };
-                if (lookupOptions?.all)
-                    callback(null, [record]);
-                else
-                    callback(null, record.address, record.family);
-            },
             timeout: timeoutMs,
         }, response => {
             const status = Number(response.statusCode || 0);

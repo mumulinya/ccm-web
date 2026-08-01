@@ -21,9 +21,8 @@ function processIdentityFingerprint(pid) {
     let identity = "";
     if (process.platform === "win32") {
       const script = [
-        `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
-        "if($null -eq $p){exit 3}",
-        "$v=[ordered]@{created=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;command=$p.CommandLine}|ConvertTo-Json -Compress",
+        `$p=Get-Process -Id ${pid} -ErrorAction Stop`,
+        "$v=[ordered]@{created=$p.StartTime.ToUniversalTime().ToString('o');executable=$p.Path}|ConvertTo-Json -Compress",
         "Write-Output $v",
       ].join(";");
       identity = String(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
@@ -126,15 +125,18 @@ async function inspectService(lockFile, internalApiHeaders, options = {}) {
       stale: local,
     };
   }
+  const lifecycle = await queryLifecycle(owner, "/api/internal/lifecycle/identity", internalApiHeaders, Number(options.timeoutMs || 1_500));
+  const remoteIdentity = lifecycle.body?.identity;
+  const remoteIdentityVerified = lifecycle.ok
+    && lifecycle.body?.identity_verified === true
+    && strictIdentityMatch(owner, remoteIdentity);
   const fingerprint = processIdentityFingerprint(pid);
-  const localIdentityVerified = owner.schema === "ccm-service-instance-v2"
-    && !!owner.process_fingerprint
-    && !!fingerprint
-    && fingerprint === owner.process_fingerprint;
-  if (!localIdentityVerified) {
+  if (!remoteIdentityVerified) {
     return {
       active: false,
       verified: false,
+      remoteIdentityVerified,
+      osFingerprintObserved: !!fingerprint,
       ownershipState: "ownership_unproven",
       pid,
       port: Number(owner.port || 3080),
@@ -144,12 +146,12 @@ async function inspectService(lockFile, internalApiHeaders, options = {}) {
       stale: false,
     };
   }
-  const lifecycle = await queryLifecycle(owner, "/api/internal/lifecycle/identity", internalApiHeaders, Number(options.timeoutMs || 1_500));
-  const remoteIdentity = lifecycle.body?.identity;
-  const verified = lifecycle.ok && lifecycle.body?.identity_verified === true && strictIdentityMatch(owner, remoteIdentity);
+  const verified = true;
   return {
     active: verified,
     verified,
+    remoteIdentityVerified,
+    osFingerprintObserved: !!fingerprint,
     ownershipState: verified ? "verified" : "ownership_unproven",
     lifecycleState: String(lifecycle.body?.lifecycle_state || ""),
     pid,
@@ -174,15 +176,27 @@ async function waitForVerifiedReady(lockFile, expected, internalApiHeaders, chil
   try {
     while (Date.now() < deadline) {
       if (childExit) return { ready: false, code: "process_exited", childExit };
-      const state = await inspectService(lockFile, internalApiHeaders, { timeoutMs: 800, defaultPort: expected.port, defaultHost: expected.host });
-      lastState = state;
-      if (
-        state.verified
-        && state.lifecycleState === "ready"
-        && state.port === expected.port
-        && state.host === expected.host
-        && (!expected.packageVersion || state.packageVersion === expected.packageVersion)
-      ) return { ready: true, state };
+      const owner = readJson(lockFile, null);
+      if (owner && processAlive(Number(owner.pid || 0))) {
+        const remote = await queryLifecycle(owner, "/api/internal/lifecycle/ready", internalApiHeaders, 800);
+        const remoteIdentity = remote.body?.identity;
+        if (
+          remote.ok
+          && remote.body?.ready === true
+          && remote.body?.identity_verified === true
+          && strictIdentityMatch(owner, remoteIdentity)
+        ) {
+          const state = await inspectService(lockFile, internalApiHeaders, { timeoutMs: 1_500, defaultPort: expected.port, defaultHost: expected.host });
+          lastState = state;
+          if (
+            state.verified
+            && state.lifecycleState === "ready"
+            && state.port === expected.port
+            && state.host === expected.host
+            && (!expected.packageVersion || state.packageVersion === expected.packageVersion)
+          ) return { ready: true, state };
+        }
+      }
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     return { ready: false, code: "startup_timeout", state: lastState };
@@ -205,8 +219,7 @@ function portAcceptsConnections(host, port, timeoutMs = 600) {
 
 function canTerminateVerifiedProcess(state) {
   if (!state?.verified || !state?.owner || !processAlive(Number(state.pid || 0))) return false;
-  const current = processIdentityFingerprint(Number(state.pid || 0));
-  return !!current && current === state.owner.process_fingerprint;
+  return state.remoteIdentityVerified === true;
 }
 
 function rotateLogFiles(file, maxBytes = 10 * 1024 * 1024, keep = 5) {

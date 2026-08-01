@@ -343,7 +343,7 @@ try {
   await desktop.getByRole('button', { name: '浏览', exact: true }).click()
   await desktop.locator('.folder-browser').waitFor()
   assert.equal(await desktop.getByText('用户目录', { exact: true }).isVisible(), true)
-  assert.equal(await desktop.getByText('existing-project', { exact: true }).isVisible(), true)
+  await desktop.getByText('existing-project', { exact: true }).waitFor({ state: 'visible' })
   await desktop.getByRole('button', { name: '新建文件夹', exact: true }).click()
   await desktop.getByPlaceholder('输入文件夹名称').fill('client-workspace')
   await desktop.getByRole('button', { name: '创建', exact: true }).click()
