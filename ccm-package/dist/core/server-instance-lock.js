@@ -80,9 +80,15 @@ function executableIdentity(pid) {
         return "";
     }
 }
+let currentProcessFingerprint = "";
 function getProcessIdentityFingerprint(pid = process.pid) {
+    if (pid === process.pid && currentProcessFingerprint)
+        return currentProcessFingerprint;
     const identity = executableIdentity(pid);
-    return identity ? sha256(identity) : "";
+    const fingerprint = identity ? sha256(identity) : "";
+    if (pid === process.pid && fingerprint)
+        currentProcessFingerprint = fingerprint;
+    return fingerprint;
 }
 function entryIdentity() {
     const entryPath = path.resolve(process.argv[1] || "");

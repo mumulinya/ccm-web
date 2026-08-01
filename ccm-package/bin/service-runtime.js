@@ -174,15 +174,27 @@ async function waitForVerifiedReady(lockFile, expected, internalApiHeaders, chil
   try {
     while (Date.now() < deadline) {
       if (childExit) return { ready: false, code: "process_exited", childExit };
-      const state = await inspectService(lockFile, internalApiHeaders, { timeoutMs: 800, defaultPort: expected.port, defaultHost: expected.host });
-      lastState = state;
-      if (
-        state.verified
-        && state.lifecycleState === "ready"
-        && state.port === expected.port
-        && state.host === expected.host
-        && (!expected.packageVersion || state.packageVersion === expected.packageVersion)
-      ) return { ready: true, state };
+      const owner = readJson(lockFile, null);
+      if (owner && processAlive(Number(owner.pid || 0))) {
+        const remote = await queryLifecycle(owner, "/api/internal/lifecycle/ready", internalApiHeaders, 800);
+        const remoteIdentity = remote.body?.identity;
+        if (
+          remote.ok
+          && remote.body?.ready === true
+          && remote.body?.identity_verified === true
+          && strictIdentityMatch(owner, remoteIdentity)
+        ) {
+          const state = await inspectService(lockFile, internalApiHeaders, { timeoutMs: 1_500, defaultPort: expected.port, defaultHost: expected.host });
+          lastState = state;
+          if (
+            state.verified
+            && state.lifecycleState === "ready"
+            && state.port === expected.port
+            && state.host === expected.host
+            && (!expected.packageVersion || state.packageVersion === expected.packageVersion)
+          ) return { ready: true, state };
+        }
+      }
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     return { ready: false, code: "startup_timeout", state: lastState };
