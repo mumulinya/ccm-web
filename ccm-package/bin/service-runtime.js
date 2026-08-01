@@ -125,15 +125,18 @@ async function inspectService(lockFile, internalApiHeaders, options = {}) {
       stale: local,
     };
   }
+  const lifecycle = await queryLifecycle(owner, "/api/internal/lifecycle/identity", internalApiHeaders, Number(options.timeoutMs || 1_500));
+  const remoteIdentity = lifecycle.body?.identity;
+  const remoteIdentityVerified = lifecycle.ok
+    && lifecycle.body?.identity_verified === true
+    && strictIdentityMatch(owner, remoteIdentity);
   const fingerprint = processIdentityFingerprint(pid);
-  const localIdentityVerified = owner.schema === "ccm-service-instance-v2"
-    && !!owner.process_fingerprint
-    && !!fingerprint
-    && fingerprint === owner.process_fingerprint;
-  if (!localIdentityVerified) {
+  const localFingerprintVerified = !fingerprint || fingerprint === owner.process_fingerprint;
+  if (!remoteIdentityVerified || !localFingerprintVerified) {
     return {
       active: false,
       verified: false,
+      remoteIdentityVerified,
       ownershipState: "ownership_unproven",
       pid,
       port: Number(owner.port || 3080),
@@ -143,12 +146,11 @@ async function inspectService(lockFile, internalApiHeaders, options = {}) {
       stale: false,
     };
   }
-  const lifecycle = await queryLifecycle(owner, "/api/internal/lifecycle/identity", internalApiHeaders, Number(options.timeoutMs || 1_500));
-  const remoteIdentity = lifecycle.body?.identity;
-  const verified = lifecycle.ok && lifecycle.body?.identity_verified === true && strictIdentityMatch(owner, remoteIdentity);
+  const verified = true;
   return {
     active: verified,
     verified,
+    remoteIdentityVerified,
     ownershipState: verified ? "verified" : "ownership_unproven",
     lifecycleState: String(lifecycle.body?.lifecycle_state || ""),
     pid,
@@ -217,7 +219,9 @@ function portAcceptsConnections(host, port, timeoutMs = 600) {
 function canTerminateVerifiedProcess(state) {
   if (!state?.verified || !state?.owner || !processAlive(Number(state.pid || 0))) return false;
   const current = processIdentityFingerprint(Number(state.pid || 0));
-  return !!current && current === state.owner.process_fingerprint;
+  return current
+    ? current === state.owner.process_fingerprint
+    : state.remoteIdentityVerified === true;
 }
 
 function rotateLogFiles(file, maxBytes = 10 * 1024 * 1024, keep = 5) {

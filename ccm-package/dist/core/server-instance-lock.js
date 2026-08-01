@@ -80,12 +80,27 @@ function executableIdentity(pid) {
     }
 }
 let currentProcessFingerprint = "";
+function createCurrentProcessFallbackFingerprint() {
+    const approximateStartedAt = Date.now() - Math.floor(process.uptime() * 1_000);
+    return sha256([
+        "ccm-process-instance-v2",
+        process.pid,
+        process.execPath,
+        path.resolve(process.argv[1] || ""),
+        approximateStartedAt,
+        crypto.randomBytes(32).toString("hex"),
+    ].join("\0"));
+}
 function getProcessIdentityFingerprint(pid = process.pid) {
     if (pid === process.pid && currentProcessFingerprint)
         return currentProcessFingerprint;
     const identity = executableIdentity(pid);
-    const fingerprint = identity ? sha256(identity) : "";
-    if (pid === process.pid && fingerprint)
+    const fingerprint = identity
+        ? sha256(identity)
+        : pid === process.pid
+            ? createCurrentProcessFallbackFingerprint()
+            : "";
+    if (pid === process.pid)
         currentProcessFingerprint = fingerprint;
     return fingerprint;
 }
