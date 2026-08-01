@@ -131,12 +131,12 @@ async function inspectService(lockFile, internalApiHeaders, options = {}) {
     && lifecycle.body?.identity_verified === true
     && strictIdentityMatch(owner, remoteIdentity);
   const fingerprint = processIdentityFingerprint(pid);
-  const localFingerprintVerified = !fingerprint || fingerprint === owner.process_fingerprint;
-  if (!remoteIdentityVerified || !localFingerprintVerified) {
+  if (!remoteIdentityVerified) {
     return {
       active: false,
       verified: false,
       remoteIdentityVerified,
+      osFingerprintObserved: !!fingerprint,
       ownershipState: "ownership_unproven",
       pid,
       port: Number(owner.port || 3080),
@@ -151,6 +151,7 @@ async function inspectService(lockFile, internalApiHeaders, options = {}) {
     active: verified,
     verified,
     remoteIdentityVerified,
+    osFingerprintObserved: !!fingerprint,
     ownershipState: verified ? "verified" : "ownership_unproven",
     lifecycleState: String(lifecycle.body?.lifecycle_state || ""),
     pid,
@@ -218,10 +219,7 @@ function portAcceptsConnections(host, port, timeoutMs = 600) {
 
 function canTerminateVerifiedProcess(state) {
   if (!state?.verified || !state?.owner || !processAlive(Number(state.pid || 0))) return false;
-  const current = processIdentityFingerprint(Number(state.pid || 0));
-  return current
-    ? current === state.owner.process_fingerprint
-    : state.remoteIdentityVerified === true;
+  return state.remoteIdentityVerified === true;
 }
 
 function rotateLogFiles(file, maxBytes = 10 * 1024 * 1024, keep = 5) {
