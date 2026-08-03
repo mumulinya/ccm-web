@@ -15,7 +15,7 @@ export declare function findGroupChatSessionContainingMessage(groupId: string, m
     session: any;
     messages: any[];
 };
-export declare function createGroupChatSession(groupId: string, title?: string): {
+export declare function createGroupChatSession(groupId: string, title?: string, options?: any): {
     id: string;
     title: string;
     titleOrigin: string;
@@ -23,6 +23,7 @@ export declare function createGroupChatSession(groupId: string, title?: string):
     updatedAt: string;
     messageCount: number;
     legacy: boolean;
+    session_kind: string;
 };
 export declare function selectGroupChatSession(groupId: string, sessionId: string): any;
 export declare function renameGroupChatSession(groupId: string, sessionId: string, title: string): any;
@@ -126,6 +127,7 @@ export declare function purgeLegacyDefaultGroupChatSession(groupId: string, opti
         updatedAt: string;
         messageCount: number;
         legacy: boolean;
+        session_kind: string;
     };
     activeSessionId: any;
     purgedAt: string;
@@ -241,6 +243,7 @@ export declare function runGroupChatSessionsSelfTest(): {
         updatedAt: string;
         messageCount: number;
         legacy: boolean;
+        session_kind: string;
     };
     second: {
         id: string;
@@ -250,6 +253,7 @@ export declare function runGroupChatSessionsSelfTest(): {
         updatedAt: string;
         messageCount: number;
         legacy: boolean;
+        session_kind: string;
     };
     manifest: {
         sessions: any[];

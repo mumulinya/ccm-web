@@ -66,7 +66,20 @@ const runtime_events_1 = require("../../system/runtime-events");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
+const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 exports.WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
+function clearProjectMainDynamicContext(project, sessionId) {
+    try {
+        (0, main_agent_post_compact_continuity_1.clearMainAgentPostCompactContinuity)({
+            agentKind: "project",
+            scope: "project",
+            scopeId: (0, project_validation_1.validateProjectName)(project),
+            exactSessionId: (0, project_validation_1.validateSessionId)(sessionId),
+            generation: 0,
+        });
+    }
+    catch { }
+}
 function getProjectSessionDir(projectName) {
     return (0, project_validation_1.resolveContainedPath)(exports.WEB_SESSIONS_DIR, (0, project_validation_1.validateProjectName)(projectName));
 }
@@ -313,6 +326,10 @@ function getSessions(projectName) {
     const dir = getProjectSessionDir(projectName);
     if (!fs.existsSync(dir))
         return [];
+    const automatedSessionIds = new Set((0, db_1.loadTasks)()
+        .filter((task) => String(task?.target_project || "") === String(projectName || ""))
+        .map((task) => String(task?.project_session_id || task?.exact_session_id || ""))
+        .filter(Boolean));
     return fs.readdirSync(dir)
         .filter(f => f.endsWith(".json"))
         .map(f => {
@@ -329,6 +346,9 @@ function getSessions(projectName) {
                 created_at: data.created_at,
                 updated_at: data.updated_at,
                 source,
+                session_kind: String(data.session_kind || data.sessionKind || "").toLowerCase() === "automation" || automatedSessionIds.has(String(id))
+                    ? "automation"
+                    : "conversation",
                 feishu_bindings: targets.filter((target) => target.active_session_id === id),
             };
         }
@@ -440,7 +460,7 @@ function getNextSessionId(projectName) {
     return `s${nums.length > 0 ? Math.max(...nums) + 1 : 1}`;
 }
 const projectSessionTitleJobs = new Map();
-function createProjectSessionRecord(projectName, name = "", source = "web") {
+function createProjectSessionRecord(projectName, name = "", source = "web", options = {}) {
     const safeProject = requireActiveProject(projectName).project;
     ensureWebSessionDir(safeProject);
     const sessionId = getNextSessionId(safeProject);
@@ -457,11 +477,16 @@ function createProjectSessionRecord(projectName, name = "", source = "web") {
         created_at: now,
         updated_at: now,
         source: normalizedSource,
+        session_kind: normalizedSource === "feishu"
+            ? "conversation"
+            : String(options.sessionKind || options.session_kind || "").toLowerCase() === "automation"
+                ? "automation"
+                : "conversation",
     };
     fs.writeFileSync(getSessionFilePath(safeProject, sessionId), JSON.stringify(sessionData, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${sessionId}`);
     syncToFilesystemToCc(safeProject);
-    return { project: safeProject, sessionId, name: sessionName, created: true };
+    return { project: safeProject, sessionId, name: sessionName, source: normalizedSource, session_kind: sessionData.session_kind, created: true };
 }
 function bindProjectFeishuSession(projectName, sessionId, targetId, action = "bind") {
     const project = requireActiveProject(projectName).project;
@@ -514,7 +539,7 @@ function ensureProjectAutomationSession(projectName, requestedSessionId = "", ti
     const safeProject = requireActiveProject(projectName).project;
     const sessionId = String(requestedSessionId || "").trim();
     if (!sessionId)
-        return createProjectSessionRecord(safeProject, title);
+        return createProjectSessionRecord(safeProject, title, "web", { sessionKind: "automation" });
     const safeSessionId = (0, project_validation_1.validateSessionId)(sessionId);
     const existing = getSessionDetail(safeProject, safeSessionId);
     if (!existing)
@@ -692,7 +717,7 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 const binding = binding_id
                     ? bindProjectFeishuSession(project, created.sessionId, binding_id, "bind")
                     : null;
-                (0, utils_1.sendJson)(res, { success: true, sessionId: created.sessionId, name: created.name, source: String(source || "web") === "feishu" ? "feishu" : "web", binding });
+                (0, utils_1.sendJson)(res, { success: true, sessionId: created.sessionId, name: created.name, source: String(source || "web") === "feishu" ? "feishu" : "web", session_kind: created.session_kind || "conversation", binding });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -759,6 +784,7 @@ function handleSessionsApi(pathname, req, res, parsed) {
                     (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, "项目会话消息被删除，取消未完成的项目主 Agent 任务");
                 const rotation = deleted > 0 ? (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, "项目会话消息删除，压缩边界失效") : null;
                 if (deleted > 0) {
+                    clearProjectMainDynamicContext(project, sessionId);
                     delete data.compaction;
                     data.execution_history = (Array.isArray(data.execution_history) ? data.execution_history : [])
                         .filter((event) => !removedIds.has(String(event?.anchorMessageId || event?.anchor_message_id || "")));
@@ -793,6 +819,7 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, "项目会话消息被替换，取消未完成的项目主 Agent 任务");
                 data.history = payload.messages.map(normalizeWebSessionMessage);
                 data.execution_history = [];
+                clearProjectMainDynamicContext(project, sessionId);
                 const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, "项目会话消息替换，压缩边界失效");
                 delete data.compaction;
                 data.updated_at = new Date().toISOString();
@@ -823,6 +850,7 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, "用户清空项目会话");
                 data.history = [];
                 data.execution_history = [];
+                clearProjectMainDynamicContext(project, sessionId);
                 delete data.compaction;
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
@@ -869,6 +897,7 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 const bindingCleanup = (0, project_session_agent_binding_1.purgeProjectSessionAgentBinding)(project, sessionId);
                 const runCleanup = (0, chat_runs_1.purgeProjectChatRunsForSession)(project, sessionId);
                 fs.unlinkSync(filePath);
+                clearProjectMainDynamicContext(project, sessionId);
                 let contextCacheCleanup = null;
                 try {
                     contextCacheCleanup = (0, provider_neutral_context_cache_1.invalidateProviderNeutralContextCacheState)({

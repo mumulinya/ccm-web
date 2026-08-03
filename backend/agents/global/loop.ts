@@ -99,6 +99,8 @@ export interface GlobalAgentRun {
   resume_count: number;
   model_calls: number;
   tool_calls: number;
+  loaded_tool_names?: string[];
+  loadedToolNames?: string[];
   consecutive_failures: number;
   client_effects: any[];
   /** 用户可见结果档位：reply=轻量气泡，plan=计划书/步骤，delivery=完整任务卡 */

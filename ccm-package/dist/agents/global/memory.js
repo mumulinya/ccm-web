@@ -80,6 +80,9 @@ const session_model_context_1 = require("../../system/session-model-context");
 const session_summary_quality_gate_1 = require("../../system/session-summary-quality-gate");
 const session_summary_secondary_review_1 = require("../../system/session-summary-secondary-review");
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
+const global_agent_tool_authorization_1 = require("../../modules/global/global-agent-tool-authorization");
+const tool_manager_1 = require("../../tools/tool-manager");
+const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 const MEMORY_DIR = process.env.CCM_GLOBAL_AGENT_MEMORY_DIR || path.join(utils_1.CCM_DIR, "global-agent-memory");
 exports.GLOBAL_AGENT_MEMORY_FILE = path.join(MEMORY_DIR, "memory.json");
 const TRANSCRIPT_DIR = path.join(MEMORY_DIR, "transcripts");
@@ -1145,7 +1148,33 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
         const keptExecution = globalExecutionForMessages(transcript, keptMessages);
         const keptModelTimeline = (0, session_execution_ledger_1.mergeConversationWithExecution)(keptMessages, keptExecution);
         const recentTokenCount = keptModelTimeline.reduce((sum, item) => sum + estimateTokens(item.content), 0);
-        const postCompactPayload = options.modelVisiblePayload || (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+        const nextBoundaryGeneration = state.boundaryGeneration + 1;
+        const globalToolAuthorization = (0, global_agent_tool_authorization_1.getGlobalAgentToolAuthorizationPayload)();
+        const dynamicToolIdentity = {
+            agentKind: "global",
+            scope: "global",
+            scopeId: "global-agent",
+            exactSessionId: sessionId,
+            generation: nextBoundaryGeneration,
+        };
+        const dynamicToolScope = {
+            ...globalToolAuthorization.tools,
+            auditContext: { runtime: "global-agent", sessionId, source: "post-compact-restore" },
+        };
+        const dynamicContextRestoreManifest = (0, main_agent_post_compact_continuity_1.buildMainAgentPostCompactRestoreManifest)({
+            identity: dynamicToolIdentity,
+            boundaryGeneration: nextBoundaryGeneration,
+            scope: dynamicToolScope,
+        });
+        const dynamicContextRestore = (0, main_agent_post_compact_continuity_1.restoreMainAgentPostCompactContext)({
+            identity: dynamicToolIdentity,
+            scope: dynamicToolScope,
+            manifest: dynamicContextRestoreManifest,
+        });
+        const restoredMcpCatalog = tool_manager_1.toolManager.getScopedToolCatalog(dynamicToolScope).tools
+            .filter((tool) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));
+        const hasDynamicRestorePayload = dynamicContextRestore.skillAttachments.length > 0 || restoredMcpCatalog.length > 0;
+        const postCompactPayload = (!hasDynamicRestorePayload && options.modelVisiblePayload) || (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
             scope: "global",
             sessionId,
             system: globalFixedContext(memory, config, options),
@@ -1155,7 +1184,11 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
             currentRequest: options.currentRequest || null,
             recoveryContext: options.recoveryContext || null,
             hookResults: options.modelMetadata?.hookResults?.sessionStart || [],
-            contextComponents: options.contextComponents,
+            contextComponents: {
+                ...(options.contextComponents || {}),
+                messageSkills: dynamicContextRestore.skillAttachments,
+                messageMcpTools: restoredMcpCatalog,
+            },
         });
         const postCompactTokenCount = postCompactPayload.totalTokens;
         const postCompactGate = {
@@ -1183,14 +1216,17 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
             missionIds: (summary.missionIds || []).slice(-8),
             sourceMessageIds: (summary.sourceMessageIds || []).slice(-12),
             recentMessageIds: keptModelTimeline.slice(-12).map((item) => item.id),
+            dynamicContextRestoreManifest,
+            dynamicContextRestoreReceipt: dynamicContextRestore.receipt,
         };
         const boundaryMarker = (0, session_compaction_core_1.buildSessionCompactionBoundaryMarker)({
             scope: "global",
             sessionId,
-            generation: state.boundaryGeneration + 1,
+            generation: nextBoundaryGeneration,
             summarizedThroughMessageId: segment.at(-1)?.id || "",
             previousSummaryChecksum: state.activeSummaryChecksum || (canonicalSummary ? sha(canonicalSummary, 40) : ""),
             preservedMessageIds: keptModelTimeline.map((item) => String(item.id || "")),
+            dynamicContextRestoreManifest,
         });
         const archive = {
             id: `gma_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
@@ -1242,7 +1278,7 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
             postCompactGate,
             latestProviderUsage: null,
             lastCompactedAt: now(),
-            boundaryGeneration: state.boundaryGeneration + 1,
+            boundaryGeneration: nextBoundaryGeneration,
             modelVisiblePayloadChecksum: postCompactPayload.payloadChecksum,
             fixedContextChecksum: postCompactPayload.fixedContextChecksum,
             pendingRequestChecksum: postCompactPayload.pendingRequestChecksum,
@@ -1252,6 +1288,8 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
             hookResultTokens: postCompactPayload.tokenBreakdown.hookResults,
             ptlRecoveryAttempts: Number(options.modelMetadata?.promptTooLongRetries || 0),
             formalRecompaction: options.modelMetadata?.formalRecompaction || null,
+            dynamicContextRestoreManifest,
+            dynamicContextRestoreReceipt: dynamicContextRestore.receipt,
         });
         const nextSession = {
             ...session,
@@ -1299,6 +1337,7 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
         };
         memory.privacy = { ...(memory.privacy || {}), rejectedCandidates: Number(memory.privacy?.rejectedCandidates || 0) + extracted.rejected, encryptedTranscripts: true, lastScanAt: now() };
         saveMemory(memory);
+        (0, main_agent_post_compact_continuity_1.persistMainAgentPostCompactRestoreManifest)(dynamicContextRestoreManifest);
         (0, memory_control_center_1.recordMemoryOperation)({ action: "compact", scope: "global", scopeId: "global-agent", sessionId, archiveId: archive.id, reason: options.reason || "auto", beforeTokens: nextSession.preCompactTokenCount, afterTokens: nextSession.postCompactTokenCount, rejectedCandidates: extracted.rejected });
         return { compacted: true, archive, session: nextSession, memory };
     }
@@ -1711,8 +1750,12 @@ async function compactGlobalAgentSessionWithModel(sessionId, options = {}) {
             trigger: options.force ? "manual" : "auto",
             result: compacted,
         });
-        if (Array.isArray(builtPostCompactPayload?.messages))
+        const dynamicRestoreReceipt = compacted?.session?.compaction?.dynamicContextRestoreReceipt;
+        const dynamicRestoreActive = Number(dynamicRestoreReceipt?.restoredSkillTokens || 0) > 0
+            || Number(dynamicRestoreReceipt?.restoredMcpSchemaTokens || 0) > 0;
+        if (Array.isArray(builtPostCompactPayload?.messages) && !dynamicRestoreActive) {
             compacted.preparedModelMessages = builtPostCompactPayload.messages;
+        }
         return compacted;
     })().catch(error => {
         const memory = loadGlobalAgentMemory();

@@ -7,6 +7,7 @@ import EmptyState from './EmptyState.vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import { useUsabilityWorkbenchLive } from '../../composables/useUsabilityWorkbenchLive.js'
 import { useWorkbenchPreferences } from '../../composables/useWorkbenchPreferences.js'
+import { groupsApi, sessionsApi } from '../../api/index.js'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Bot, CalendarClock, CheckCircle2, ChevronRight, Clock3,
   FolderKanban, ListTodo, LoaderCircle, MessageSquare, Paperclip, Play, RefreshCw, RotateCcw, Search,
@@ -20,6 +21,10 @@ const {
 } = useUsabilityWorkbenchLive()
 const requirement = ref('')
 const target = ref('')
+const targetSessionId = ref('')
+const targetSessions = ref([])
+const targetSessionsLoading = ref(false)
+let targetSessionRequestGeneration = 0
 const intakeBusy = ref(false)
 const confirmation = ref(null)
 const confirmationCoverage = computed(() => confirmation.value?.source_ingestion?.coverage_receipt
@@ -59,9 +64,30 @@ const projectTargetOptions = computed(() => resources.value.projects.map(item =>
   label: item.display_name || item.displayName || item.name,
 })))
 const targetOptions = computed(() => [...groupTargetOptions.value, ...projectTargetOptions.value])
+const ordinaryTargetSessions = computed(() => targetSessions.value.filter(item => String(item.session_kind || item.sessionKind || 'conversation') !== 'automation'))
+const automationTargetSessions = computed(() => targetSessions.value.filter(item => String(item.session_kind || item.sessionKind || '') === 'automation'))
 watch(targetOptions, options => {
   if (!target.value && options.length) target.value = options[0].value
 }, { immediate: true })
+const loadTargetSessions = async () => {
+  const generation = ++targetSessionRequestGeneration
+  targetSessions.value = []
+  targetSessionId.value = ''
+  if (!target.value) return
+  targetSessionsLoading.value = true
+  try {
+    const [kind, id] = target.value.split(':')
+    const data = kind === 'group' ? await groupsApi.sessions(id) : await sessionsApi.list(id)
+    if (generation !== targetSessionRequestGeneration) return
+    targetSessions.value = (data.sessions || [])
+      .filter(item => !item.archived && String(item.source || 'web') !== 'feishu')
+  } catch (error) {
+    if (generation === targetSessionRequestGeneration) toast.warning(error?.message || '会话列表暂时无法读取，将新建自动化任务会话')
+  } finally {
+    if (generation === targetSessionRequestGeneration) targetSessionsLoading.value = false
+  }
+}
+watch(target, loadTargetSessions, { immediate: true })
 const quickActions = [
   { label: '全局助手', detail: '直接讨论与分派', tab: 'global-agent', icon: Bot },
   { label: '任务中心', detail: '查看执行与阻塞', tab: 'tasks', icon: ListTodo },
@@ -128,9 +154,19 @@ const createPreview = async () => {
     form.append('target_id', id)
     form.append('group_id', kind === 'group' ? id : '')
     form.append('target_project', kind === 'project' ? id : '')
+    form.append('exact_session_id', targetSessionId.value)
+    form.append('group_session_id', kind === 'group' ? targetSessionId.value : '')
+    form.append('project_session_id', kind === 'project' ? targetSessionId.value : '')
     intakeFiles.value.forEach(file => form.append('files', file))
     const result = await api('/api/usability/intake/preview', form)
     confirmation.value = { ...result.task, intake: result.confirmation || result.task?.intake_draft || null }
+    const actualSessionId = result.task?.group_session_id || result.task?.project_session_id || result.task?.exact_session_id || ''
+    if (actualSessionId) {
+      targetSessionId.value = actualSessionId
+      if (!targetSessions.value.some(item => String(item.id || item.sessionId || '') === String(actualSessionId))) {
+        targetSessions.value.push({ id: actualSessionId, name: result.task?.title || '自动开发任务', session_kind: 'automation' })
+      }
+    }
     toast.success('执行计划已整理好，确认前不会开始')
     await load(true)
   } catch (error) { toast.error(error.message) }
@@ -142,7 +178,14 @@ const confirmIntake = async () => {
   if (!confirmationSourcesComplete.value) return toast.warning('必需资料尚未完整读取，不能开始执行')
   intakeBusy.value = true
   try {
-    const result = await api('/api/usability/intake/confirm', { task_id: confirmation.value.id })
+    const [kind, id] = target.value.split(':')
+    const result = await api('/api/usability/intake/confirm', {
+      task_id: confirmation.value.id,
+      target_scope: kind === 'group' ? 'group_session' : 'project_session',
+      target_id: id,
+      exact_session_id: targetSessionId.value,
+      ...(kind === 'group' ? { group_session_id: targetSessionId.value } : { project_session_id: targetSessionId.value }),
+    })
     toast.success(result.queued ? '已确认，任务开始推进' : (result.queue_result?.message || '已确认执行'))
     requirement.value = ''
     intakeFiles.value = []
@@ -431,6 +474,15 @@ onUnmounted(() => {
               <option v-for="item in projectTargetOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
             </optgroup>
           </select></label>
+          <label class="target-select session-target-select"><span>目标会话</span><select v-model="targetSessionId" :disabled="targetSessionsLoading">
+            <option value="">新建自动化任务会话</option>
+            <optgroup v-if="ordinaryTargetSessions.length" label="普通会话">
+              <option v-for="session in ordinaryTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option>
+            </optgroup>
+            <optgroup v-if="automationTargetSessions.length" label="自动化任务会话">
+              <option v-for="session in automationTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option>
+            </optgroup>
+          </select></label>
         </div>
         <button class="primary intake-submit" :disabled="intakeBusy || (!requirement.trim() && intakeFiles.length === 0)" @click="createPreview"><Sparkles :size="16" />{{ intakeBusy ? '正在整理' : '整理执行计划' }}</button>
       </div>
@@ -449,6 +501,10 @@ onUnmounted(() => {
       </div>
       <div class="confirm-grid">
         <div><label>目标项目</label><strong>{{ confirmation.intake?.group_name || confirmation.intake?.project }}</strong></div>
+        <div><label>目标会话</label><select v-model="targetSessionId" class="confirmation-session-select">
+          <optgroup v-if="ordinaryTargetSessions.length" label="普通会话"><option v-for="session in ordinaryTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option></optgroup>
+          <optgroup v-if="automationTargetSessions.length" label="自动化任务会话"><option v-for="session in automationTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option></optgroup>
+        </select></div>
         <div><label>分派任务</label><strong>{{ confirmation.intake?.decomposition_plan?.items?.length || 1 }} 个 · 会话内顺序执行</strong></div>
         <div><label>影响范围</label><strong>{{ (confirmation.intake?.scope || confirmation.intake?.impact_scope?.areas || []).join('、') }}</strong></div>
         <div class="wide"><label>验收标准</label><p>{{ Array.isArray(confirmation.intake?.acceptance) ? confirmation.intake.acceptance.join('；') : confirmation.intake?.acceptance }}</p></div>
@@ -627,7 +683,7 @@ onUnmounted(() => {
 .sync-state.stale{color:var(--accent-yellow)}.sync-state.stale i{background:var(--accent-yellow)}.attention-counter{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:5px 9px;border:1px solid color-mix(in srgb,var(--accent-yellow) 40%,var(--border-color));border-radius:7px;background:var(--warning-soft);color:var(--accent-yellow);font-size:11px;font-weight:800}.layout-menu{position:relative}.layout-menu>summary{list-style:none;cursor:pointer}.layout-menu>summary::-webkit-details-marker{display:none}.layout-popover{position:absolute;z-index:20;top:43px;right:0;width:250px;padding:12px;border:1px solid var(--border-color,#dfe4ec);border-radius:8px;background:var(--surface-raised);box-shadow:var(--shadow-lg)}.layout-popover-head,.layout-order-row{display:flex;align-items:center}.layout-popover-head{justify-content:space-between;margin-bottom:8px}.layout-popover-head button,.layout-order-row button{display:grid;place-items:center;width:26px;height:26px;padding:0;border:1px solid var(--border-color,#dfe4ec);border-radius:6px;background:transparent;color:inherit}.layout-popover label{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:12px}.layout-order-title{margin:9px 0 5px;padding-top:9px;border-top:1px solid var(--border-color,#edf0f5);color:var(--text-muted);font-size:10px;font-weight:800}.layout-order-row{gap:5px;padding:3px 0}.layout-order-row span{min-width:0;flex:1;font-size:11px}.layout-order-row button:disabled{opacity:.35;cursor:not-allowed}.stale-banner{display:flex;align-items:center;gap:10px;margin:-6px 0 14px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent-yellow) 40%,var(--border-color));border-radius:7px;background:var(--warning-soft);color:var(--accent-yellow)}.stale-banner span{min-width:0;display:grid;gap:1px}.stale-banner strong{font-size:12px}.stale-banner small{font-size:10px}.stale-banner button{margin-left:auto;padding:5px 8px;border:1px solid var(--accent-yellow);border-radius:6px;background:var(--surface-raised);color:var(--accent-yellow);font-size:11px;font-weight:700}
 button{font:inherit;cursor:pointer}.primary,.ghost{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:7px;padding:9px 14px;font-weight:700}.primary{border:1px solid var(--accent-blue,#2563eb);background:var(--accent-blue,#2563eb);color:white}.primary:disabled,.ghost:disabled,.icon-command:disabled{opacity:.5;cursor:not-allowed}.ghost{border:1px solid var(--border-color,#dfe4ec);background:var(--surface,#fff);color:inherit}.small{padding:6px 10px;font-size:12px}.danger-text{color:#b42318}
 .pulse-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--border-color,#e5e9f2);border-radius:8px;background:var(--surface,var(--bg-card,#fff));overflow:hidden}.pulse-item{min-width:0;display:grid;grid-template-columns:1fr auto;gap:3px 12px;padding:14px 16px;border:0;border-right:1px solid var(--border-color,#e5e9f2);background:transparent;color:inherit;text-align:left}.pulse-item:last-child{border-right:0}.pulse-item span{gap:7px;min-width:0;color:#667085;font-size:12px;font-weight:700}.pulse-item strong{grid-row:1/3;grid-column:2;font-size:25px;line-height:1}.pulse-item small{color:#98a2b3;font-size:11px}.attention-pulse strong{color:#b54708}.active-pulse strong{color:#3157c8}.success-pulse strong{color:#067647}.resource-pulse strong{color:#0e7490}
-.command-surface{margin-top:16px;padding:16px;border:1px solid #b8c7e8;border-radius:8px;background:var(--surface,var(--bg-card,#fff));box-shadow:0 8px 24px rgba(32,55,92,.07)}.command-heading{justify-content:space-between;gap:12px;padding-bottom:10px;border-bottom:1px solid var(--border-color,#edf0f5)}.command-heading>div{gap:9px;color:#3157c8}.command-heading span span{display:grid;gap:2px}.command-heading strong{color:var(--text-primary,#172033);font-size:13px}.command-heading small{color:#7a8496;font-size:11px;font-weight:500}.keyboard-hint{color:#98a2b3;font-size:11px}.command-surface textarea{width:100%;min-height:92px;box-sizing:border-box;padding:14px 4px 10px;border:0;resize:vertical;background:transparent;color:inherit;font:500 16px/1.6 inherit;outline:0}.command-surface :deep(.attachment-row){margin:6px 0 10px}.hidden-file-input{display:none}.intake-footer{justify-content:space-between;gap:12px;padding-top:11px;border-top:1px solid var(--border-color,#edf0f5)}.intake-tools{min-width:0;gap:9px}.attach-action{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:7px 10px;border:1px solid var(--border-color,#dfe4ec);border-radius:7px;background:var(--surface,#fff);color:inherit;font-weight:700}.target-select{display:flex;align-items:center;gap:8px;min-width:0;padding-left:10px;border-left:1px solid var(--border-color,#e5e9f2);color:#7a8496;font-size:11px}.target-select select{width:min(330px,32vw);min-height:38px;border:0;border-radius:7px;background:var(--bg-secondary,#f5f7fb);color:var(--text-primary,#172033);padding:7px 10px}.intake-submit{flex:0 0 auto;min-height:40px}
+.command-surface{margin-top:16px;padding:16px;border:1px solid #b8c7e8;border-radius:8px;background:var(--surface,var(--bg-card,#fff));box-shadow:0 8px 24px rgba(32,55,92,.07)}.command-heading{justify-content:space-between;gap:12px;padding-bottom:10px;border-bottom:1px solid var(--border-color,#edf0f5)}.command-heading>div{gap:9px;color:#3157c8}.command-heading span span{display:grid;gap:2px}.command-heading strong{color:var(--text-primary,#172033);font-size:13px}.command-heading small{color:#7a8496;font-size:11px;font-weight:500}.keyboard-hint{color:#98a2b3;font-size:11px}.command-surface textarea{width:100%;min-height:92px;box-sizing:border-box;padding:14px 4px 10px;border:0;resize:vertical;background:transparent;color:inherit;font:500 16px/1.6 inherit;outline:0}.command-surface :deep(.attachment-row){margin:6px 0 10px}.hidden-file-input{display:none}.intake-footer{justify-content:space-between;gap:12px;padding-top:11px;border-top:1px solid var(--border-color,#edf0f5)}.intake-tools{min-width:0;gap:9px;flex-wrap:wrap}.attach-action{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:7px 10px;border:1px solid var(--border-color,#dfe4ec);border-radius:7px;background:var(--surface,#fff);color:inherit;font-weight:700}.target-select{display:flex;align-items:center;gap:8px;min-width:0;padding-left:10px;border-left:1px solid var(--border-color,#e5e9f2);color:#7a8496;font-size:11px}.target-select select{width:min(270px,27vw);min-height:38px;border:0;border-radius:7px;background:var(--bg-secondary,#f5f7fb);color:var(--text-primary,#172033);padding:7px 10px}.session-target-select select{width:min(260px,26vw)}.confirmation-session-select{width:100%;min-height:34px;padding:6px 8px;border:1px solid var(--border-color,#dfe4ec);border-radius:6px;background:var(--bg-secondary,#f5f7fb);color:var(--text-primary,#172033)}.intake-submit{flex:0 0 auto;min-height:40px}
 .quick-actions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:12px}.quick-actions button{min-width:0;gap:9px;padding:10px 11px;border:1px solid var(--border-color,#e5e9f2);border-radius:7px;background:var(--surface,#fff);color:inherit;text-align:left}.quick-actions button>svg:first-child{flex:0 0 auto;color:#52657d}.quick-actions button>svg:last-child{margin-left:auto;color:#98a2b3}.quick-actions span{min-width:0;display:grid;gap:2px}.quick-actions strong,.quick-actions small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quick-actions strong{font-size:12px}.quick-actions small{color:#98a2b3;font-size:10px}
 .confirm-card,.task-card{background:var(--surface,var(--bg-card,#fff));border:1px solid var(--border-color,#e5e9f2);border-radius:8px}.confirm-card{margin-top:18px;padding:20px;border-color:#9fb3e2}.confirm-head{justify-content:space-between;gap:16px}.confirm-head h2{margin:7px 0 0;font-size:19px}.safe-note{font-size:12px;color:#067647}.confirm-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}.confirm-grid>div{padding:12px;border:1px solid var(--border-color,#e5e9f2);border-radius:7px;background:var(--bg-secondary,#f7f8fb)}.confirm-grid .wide{grid-column:1/-1}.confirm-grid label{display:block;margin-bottom:5px;color:#7a8496;font-size:11px}.confirm-grid p{margin:0;line-height:1.55}.confirm-card details{font-size:12px;color:#7a8496}.confirm-card details:not([open])>:not(summary){display:none}.confirm-actions{justify-content:flex-end;gap:8px;margin-top:15px}.source-summary{border-left:3px solid #12b76a!important}.source-fallback-notice{margin:8px 0 0;color:#b54708}.confirm-card details>code{display:block;margin-top:7px;overflow-wrap:anywhere}.source-technical-list{display:grid;gap:7px;margin:10px 0 0;padding:0;list-style:none}.source-technical-list li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:7px 8px;border:1px solid var(--border-color,#e5e9f2);border-radius:7px}.source-technical-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source-technical-list span{color:#667085}.source-technical-list small{grid-column:1/-1;color:#b54708;overflow-wrap:anywhere}
 .workspace-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,25%);gap:clamp(22px,2vw,36px);margin-top:28px}.workstream{min-width:0}.workspace-rail{min-width:0;padding-left:clamp(20px,1.8vw,32px);border-left:1px solid var(--border-color,#e5e9f2)}.section-block{margin-bottom:30px}.section-title{justify-content:space-between;gap:16px;margin-bottom:12px}.section-title h2,.rail-heading h2{margin:3px 0 2px;font-size:19px;letter-spacing:0}.section-title p{font-size:12px}.text-btn{gap:3px;padding:4px;border:0;background:transparent;color:var(--accent-blue,#2563eb);font-size:12px;font-weight:700}.task-list{display:grid;gap:9px}.task-card{padding:14px 15px}.task-list .task-card{display:flex;justify-content:space-between;gap:18px}.task-card.needs_user{border-left:3px solid #f79009}.task-card.failed{border-left:3px solid #f04438}.task-main{min-width:0}.task-meta{justify-content:space-between;gap:9px}.task-main h3,.task-card.compact h3{margin:8px 0 5px;font-size:15px;line-height:1.4;letter-spacing:0}.task-main p,.task-card.compact p{display:-webkit-box;overflow:hidden;margin:0;color:var(--text-secondary,#667085);font-size:12px;line-height:1.5;-webkit-line-clamp:2;-webkit-box-orient:vertical}.task-meta small,.task-card small{color:#98a2b3;font-size:10px}.task-actions{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}.status{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800}.status.decision{background:#fff3e0;color:#b54708}.status.danger{background:#fee4e2;color:#b42318}.status.active{background:#e8edff;color:#3157c8}.status.queued{background:#f2f4f7;color:#475467}.status.success{background:#dcfae6;color:#067647}.task-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.task-card.compact{min-height:128px;display:flex;flex-direction:column}.task-card.compact p{margin-bottom:12px}.task-bottom{justify-content:space-between;gap:8px;margin-top:auto;padding-top:9px;border-top:1px solid var(--border-color,#edf0f5)}.compact-empty{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 15px;border:1px dashed var(--border-color,#cfd6e1);border-radius:8px}.compact-empty :deep(.ccm-empty-state){min-height:0;padding:0;text-align:left}.compact-empty :deep(.ccm-empty-state__icon){display:none}.compact-empty :deep(.ccm-empty-state__title),.compact-empty :deep(.ccm-empty-state__hint){margin:2px 0}.completed-list{overflow:hidden;border:1px solid var(--border-color,#e5e9f2);border-radius:8px}.completed-list button{width:100%;display:grid;grid-template-columns:22px minmax(0,1fr) auto 16px;align-items:center;gap:9px;padding:11px 13px;border:0;border-bottom:1px solid var(--border-color,#edf0f5);background:var(--surface,#fff);color:inherit;text-align:left}.completed-list button:last-child{border-bottom:0}.completed-list button>svg:first-child{color:#12b76a}.completed-list strong,.completed-list small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.completed-list strong{font-size:12px}.completed-list small,.completed-list time{margin-top:2px;color:#98a2b3;font-size:10px}.completed-list button>svg:last-child{color:#98a2b3}.inline-empty{gap:10px;padding:13px;border:1px dashed var(--border-color,#cfd6e1);border-radius:8px;color:#7a8496}.inline-empty span{display:grid;gap:2px}.inline-empty strong{font-size:12px}.inline-empty small{font-size:10px}

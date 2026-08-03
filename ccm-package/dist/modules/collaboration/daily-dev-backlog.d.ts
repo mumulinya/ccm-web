@@ -19,6 +19,9 @@ export declare function persistDailyDevBacklogFile(_groups: any[], group: any, p
     status: string;
     entry_id: any;
     revision: any;
+    target_scope: any;
+    target_id: any;
+    target_session_id: any;
     duplicate: boolean;
 };
 export declare function readDailyDevBacklogStatus(file: any): string;
@@ -45,6 +48,9 @@ export declare function claimReadyDailyDevBacklog(groupId: string, claim?: any):
     priority: string;
     requires_code_changes: boolean;
     backlog_file: any;
+    target_scope: any;
+    target_id: any;
+    target_session_id: any;
 };
 export declare function markDailyDevBacklogStatus(groupId: string, fileName: string, status: string, meta?: any): any;
 export declare function listDailyDevBacklogs(groupId?: string): any[];
@@ -79,18 +85,35 @@ export declare function dispatchDailyDevBacklog(groupId: string, fileName: strin
     success: boolean;
     status: number;
     error: any;
+    code?: undefined;
     task?: undefined;
+    target_session?: undefined;
+    queued?: undefined;
+    queue_result?: undefined;
+    queue_status?: undefined;
+} | {
+    success: boolean;
+    status: number;
+    code: string;
+    error: string;
+    task?: undefined;
+    target_session?: undefined;
     queued?: undefined;
     queue_result?: undefined;
     queue_status?: undefined;
 } | {
     success: boolean;
     task: any;
+    target_session: {
+        id: any;
+        title: any;
+    };
     queued: boolean;
     queue_result: any;
     queue_status: any;
     status?: undefined;
     error?: undefined;
+    code?: undefined;
 };
 export declare function dispatchReadyDailyDevBacklogs(ctx: any, options?: any): {
     success: boolean;
@@ -104,7 +127,24 @@ export declare function dispatchReadyDailyDevBacklogs(ctx: any, options?: any): 
         success: boolean;
         status: number;
         error: any;
+        code?: undefined;
         task?: undefined;
+        target_session?: undefined;
+        queued?: undefined;
+        queue_result?: undefined;
+        queue_status?: undefined;
+        group_id: any;
+        group_name: any;
+        name: any;
+        title: any;
+        priority: any;
+    } | {
+        success: boolean;
+        status: number;
+        code: string;
+        error: string;
+        task?: undefined;
+        target_session?: undefined;
         queued?: undefined;
         queue_result?: undefined;
         queue_status?: undefined;
@@ -116,11 +156,16 @@ export declare function dispatchReadyDailyDevBacklogs(ctx: any, options?: any): 
     } | {
         success: boolean;
         task: any;
+        target_session: {
+            id: any;
+            title: any;
+        };
         queued: boolean;
         queue_result: any;
         queue_status: any;
         status?: undefined;
         error?: undefined;
+        code?: undefined;
         group_id: any;
         group_name: any;
         name: any;
@@ -166,7 +211,24 @@ export declare function runDailyDevAutopilotOnce(ctx: any, options?: any): {
             success: boolean;
             status: number;
             error: any;
+            code?: undefined;
             task?: undefined;
+            target_session?: undefined;
+            queued?: undefined;
+            queue_result?: undefined;
+            queue_status?: undefined;
+            group_id: any;
+            group_name: any;
+            name: any;
+            title: any;
+            priority: any;
+        } | {
+            success: boolean;
+            status: number;
+            code: string;
+            error: string;
+            task?: undefined;
+            target_session?: undefined;
             queued?: undefined;
             queue_result?: undefined;
             queue_status?: undefined;
@@ -178,11 +240,16 @@ export declare function runDailyDevAutopilotOnce(ctx: any, options?: any): {
         } | {
             success: boolean;
             task: any;
+            target_session: {
+                id: any;
+                title: any;
+            };
             queued: boolean;
             queue_result: any;
             queue_status: any;
             status?: undefined;
             error?: undefined;
+            code?: undefined;
             group_id: any;
             group_name: any;
             name: any;

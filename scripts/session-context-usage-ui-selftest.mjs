@@ -88,6 +88,13 @@ const checks = {
     && /buildMainAgentLoadedContextItems/.test(mainAgentToolRuntime)
     && /itemName/.test(mainAgentToolRuntime)
     && /resultChecksum/.test(mainAgentToolRuntime),
+  postCompactToolRestoreIsVisible: /压缩边界恢复/.test(component)
+    && /同 Run 加载/.test(component)
+    && /固定加载/.test(component)
+    && /dropReasons/.test(component)
+    && /postCompactRestore/.test(memoryCenterApi)
+    && /restoredSkillTokens/.test(memoryCenterApi)
+    && /restoredMcpSchemaTokens/.test(memoryCenterApi),
   toolStateDoesNotGuessFromCategoryTokens: !/loadedThisTurn:\s*mcpLoadedTokens\s*>\s*0/.test(memoryCenterApi)
     && !/loadedThisTurn:\s*skillLoadedTokens\s*>\s*0/.test(memoryCenterApi)
     && /evidenceStatus:\s*evidenceAvailable\s*\?\s*"exact"\s*:\s*"unproven"/.test(memoryCenterApi),

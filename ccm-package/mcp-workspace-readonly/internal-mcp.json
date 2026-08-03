@@ -1,0 +1,25 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "ccm__workspace_readonly",
+  "display_name": "主 Agent 工作区只读工具",
+  "description": "为全局、群聊和项目主 Agent提供受精确作用域约束的目录、源码、Git和运行诊断读取能力。",
+  "version": "2.0.0",
+  "entry": "../dist/integrations/workspace-readonly-mcp.js",
+  "lifecycle": "session_scoped",
+  "lifecycle_label": "按精确会话签名注入",
+  "scopes": ["全局 Agent", "群聊主 Agent", "项目主 Agent"],
+  "tools": [
+    { "name": "list_directory", "label": "列出目录" },
+    { "name": "glob_files", "label": "匹配文件" },
+    { "name": "grep_text", "label": "检索文本" },
+    { "name": "read_file", "label": "分段读取文件" },
+    { "name": "find_definition", "label": "查找定义" },
+    { "name": "find_references", "label": "查找引用" },
+    { "name": "read_project_config", "label": "读取项目配置" },
+    { "name": "read_git_status", "label": "读取Git状态" },
+    { "name": "read_git_diff", "label": "读取Git差异" },
+    { "name": "read_git_history", "label": "读取Git历史" },
+    { "name": "read_runtime_status", "label": "读取运行状态" },
+    { "name": "read_runtime_logs", "label": "读取运行日志" }
+  ]
+}

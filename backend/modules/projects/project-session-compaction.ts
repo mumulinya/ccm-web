@@ -48,6 +48,13 @@ import {
 import { buildUnifiedSessionModelContextProjection, resolveSessionModelMicroCompactPolicy } from "../../system/session-model-context";
 import { evaluateSessionSummaryQuality } from "../../system/session-summary-quality-gate";
 import { reviewSessionSummaryIfSelected } from "../../system/session-summary-secondary-review";
+import { loadProjectConfigs } from "../../core/db";
+import { toolManager } from "../../tools/tool-manager";
+import {
+  buildMainAgentPostCompactRestoreManifest,
+  persistMainAgentPostCompactRestoreManifest,
+  restoreMainAgentPostCompactContext,
+} from "../../system/main-agent-post-compact-continuity";
 
 const MODEL_MAX_OUTPUT_TOKENS = 20_000;
 const compactions = new Map<string, { promise: Promise<any>; reason: string; startedAt: string }>();
@@ -737,13 +744,38 @@ export async function compactProjectSessionWithModel(project: string, projectSes
       unresolved: summary.unresolved || [],
       verifiedAttachments: verifiedRecoveryAttachments,
     };
+    const nextBoundaryGeneration = state.boundaryGeneration + 1;
+    const projectToolScope = {
+      ...(loadProjectConfigs()?.[safeProject]?.tools || {}),
+      auditContext: { runtime: "project-main-agent", project: safeProject, sessionId: safeSessionId, source: "post-compact-restore" },
+    };
+    const dynamicToolIdentity = {
+      agentKind: "project" as const,
+      scope: "project" as const,
+      scopeId: safeProject,
+      exactSessionId: safeSessionId,
+      generation: nextBoundaryGeneration,
+    };
+    const dynamicContextRestoreManifest = buildMainAgentPostCompactRestoreManifest({
+      identity: dynamicToolIdentity,
+      boundaryGeneration: nextBoundaryGeneration,
+      scope: projectToolScope,
+    });
+    const dynamicContextRestore = restoreMainAgentPostCompactContext({
+      identity: dynamicToolIdentity,
+      scope: projectToolScope,
+      manifest: dynamicContextRestoreManifest,
+    });
+    const restoredMcpCatalog = toolManager.getScopedToolCatalog(projectToolScope).tools
+      .filter((tool: any) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));
     const boundaryMarker = buildSessionCompactionBoundaryMarker({
       scope: "project",
       sessionId: `${safeProject}:${safeSessionId}`,
-      generation: state.boundaryGeneration + 1,
+      generation: nextBoundaryGeneration,
       summarizedThroughMessageId: segmentModelTimeline.at(-1)?.id || segment.at(-1)?.id || "",
       previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
       preservedMessageIds: preservedMessages.map((message: any) => String(message.id || "")),
+      dynamicContextRestoreManifest,
     });
     const buildPostCompactPayload = (activeSummary: any) => buildModelVisiblePayloadSnapshot({
       scope: "project",
@@ -755,7 +787,11 @@ export async function compactProjectSessionWithModel(project: string, projectSes
       currentRequest,
       recoveryContext: { boundaryMarker, ...recoveryContext },
       hookResults: sessionStartHookResults,
-      contextComponents: options.contextComponents || options.context_components || undefined,
+      contextComponents: {
+        ...(options.contextComponents || options.context_components || {}),
+        messageSkills: dynamicContextRestore.skillAttachments,
+        messageMcpTools: restoredMcpCatalog,
+      },
     });
     let postCompactPayload = buildPostCompactPayload(summary);
     let afterTokens = postCompactPayload.totalTokens;
@@ -821,7 +857,7 @@ export async function compactProjectSessionWithModel(project: string, projectSes
       scope: "project",
       scopeId: safeProject,
       sessionId: safeSessionId,
-      boundaryGeneration: state.boundaryGeneration + 1,
+      boundaryGeneration: nextBoundaryGeneration,
       summary,
       reference,
       sourceMessageIds,
@@ -878,6 +914,8 @@ export async function compactProjectSessionWithModel(project: string, projectSes
         formalRecompaction,
         summaryQuality: validation.quality || null,
         secondaryReview,
+        dynamicContextRestoreManifest,
+        dynamicContextRestoreReceipt: dynamicContextRestore.receipt,
       });
       data.compaction = {
         schema: "ccm-project-session-model-compaction-v2",
@@ -917,11 +955,14 @@ export async function compactProjectSessionWithModel(project: string, projectSes
         hook_result_tokens: postCompactPayload.tokenBreakdown.hookResults,
         ptl_recovery_attempts: ptlRecoveryAttempts,
         formal_recompaction: formalRecompaction,
+        dynamic_context_restore_manifest: dynamicContextRestoreManifest,
+        dynamic_context_restore_receipt: dynamicContextRestore.receipt,
         v2: nextState,
         hook_results: { pre: preHookResults, session_start: sessionStartHookResults },
       };
       data.updated_at = new Date().toISOString();
       persistSession(safeProject, safeSessionId, data);
+      persistMainAgentPostCompactRestoreManifest(dynamicContextRestoreManifest);
     } catch (error) {
       reopenProjectSessionAgentBinding(safeProject, safeSessionId, "项目会话压缩提交失败，恢复旧世代");
       throw error;
@@ -947,6 +988,8 @@ export async function compactProjectSessionWithModel(project: string, projectSes
       ptl_recovery_attempts: ptlRecoveryAttempts,
       summary_quality: validation.quality || null,
       secondary_review: secondaryReview,
+      dynamic_context_restore_manifest: dynamicContextRestoreManifest,
+      dynamic_context_restore_receipt: dynamicContextRestore.receipt,
     };
     await runSessionCompactionHooks("post_compact", {
       scope: "project",

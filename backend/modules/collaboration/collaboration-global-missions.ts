@@ -1144,6 +1144,8 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       try {
         groupSession = resolveWritableGroupChatSession(group.id, String(target.group_session_id || target.groupSessionId || ""), {
           title: compactFormText(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
+          createDedicated: !String(target.group_session_id || target.groupSessionId || "").trim(),
+          sessionKind: "automation",
         });
       } catch (error: any) {
         rejected.push({ target, reason: `群聊会话绑定失败：${error?.message || error}` });
@@ -1202,6 +1204,8 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
     try {
       selectedGroupSession = resolveWritableGroupChatSession(selectedGroup.id, requestedSession, {
         title: compactFormText(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
+        createDedicated: !requestedSession,
+        sessionKind: "automation",
       });
     } catch (error: any) {
       rejected.push({ target, reason: `群聊会话绑定失败：${error?.message || error}` });

@@ -417,7 +417,7 @@ try {
   assert.notEqual(closedTransform, 'none')
   await mobile.getByTitle('打开会话列表').click()
   await mobile.locator('.session-sidebar.open').waitFor()
-  const webSessionGroup = mobile.locator('.session-section-title').filter({ hasText: '网页会话' })
+  const webSessionGroup = mobile.locator('.session-section-title').filter({ hasText: '普通会话' })
   assert.equal(await webSessionGroup.count(), 1)
   assert.equal(await webSessionGroup.getAttribute('aria-expanded'), 'false')
   assert.equal(await mobile.getByText('普通问答与任务验证', { exact: true }).isVisible(), false)

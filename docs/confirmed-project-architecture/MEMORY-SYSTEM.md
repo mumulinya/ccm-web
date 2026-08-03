@@ -32,6 +32,8 @@ CCM 将记忆分为两层：
 
 工具结果的 MicroCompact 是正式压缩之外的选择性优化，不是“结果过长就裁剪”。仅已完成配对且不属于最近工作集的旧工具结果，才可在主会话缓存过期或接近 Token 门限但尚未越界时清理模型投影内容；原始隐藏执行账本永远保留。当前实现审计见 [未压缩上下文统一投影](../group-memory-cc-parity/unified-uncompressed-context-projection-2026-07-28/README.md)。
 
+全局、群聊和项目主Agent的正式压缩边界同时保存`MainAgentPostCompactRestoreManifestV1`。它只记录已经实际调用的Skill和已经通过ToolSearch加载的MCP Schema身份、checksum、Token及证据ID，不保存正文。新Run恢复前重新验证精确Agent、scope、session、generation、授权、目录revision、连接状态和当前内容；恢复内容随后参与完整payload Token门禁。未使用的延迟工具不恢复，`alwaysLoad`由当前目录自然加载，任何漂移都失败关闭并退回重新调用或重新搜索。原始transcript和隐藏执行账本不被修改。
+
 压缩请求遇到 Prompt Too Long 时按 assistant response ID 划分的 API 回合从最旧处恢复，不拆分工具调用与结果；压缩成功后必须对业务模型真实可见 payload 再做一次 Token 门禁，仍超限则不提交摘要和 boundary。Anthropic 原生缓存编辑仅在 Provider 确认支持 `cache_edits/cache_reference` 时使用；其他 Provider 使用带真实回执的 CCM 内容投影，不能把内容清理伪装成原生缓存编辑。
 
 用户可见 transcript 只显示用户消息和主 Agent正式回复。全局与项目主 Agent实际执行过的 `tool_use/tool_result` 按精确会话另存为隐藏执行消息链，并参与模型上下文、正式压缩和恢复；开发子 Agent与 TestAgent的原始过程继续留在任务时间线，只有主 Agent采用的派发结果和验收结论进入父会话隐藏执行链。
@@ -322,6 +324,7 @@ MCP 不创建第二套记忆系统：
 22. 记忆中心展示真实压缩、缓存、质量和失败趋势，告警事件只保存计量与原因代码。
 23. Provider原生缓存不可用时，CCM自建缓存仍提供热物化、并发合流、稳定前缀、成本建议和受控清理；多实例只共享锁定后的元数据与能力证据，不共享Prompt正文或模型回答。
 24. Skill与MCP按CC风格区分逐项`available | loaded | invoked`：授权可用不等于进入本轮模型载荷；只有真实载入的目录、正文、Schema和结果计入Token，真实调用必须有精确名称与checksum回执。历史会话缺少逐项证据时显示“未证明”，不得按分类Token猜测。
+25. 正式压缩只恢复有证据的Skill正文和已加载MCP Schema；恢复项必须重新通过授权、checksum、连接、目录revision和完整payload Token门禁，禁止跨会话继承或使用旧Schema。
 
 五项收口与测试证据见 [CC 记忆链五项收口](../group-memory-cc-parity/cc-memory-five-improvements-2026-07-28/README.md)。
 

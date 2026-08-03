@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ChevronRight, Link2, MessageSquare, Monitor, Pencil, Plus, RefreshCw, Send, Trash2, X } from '@lucide/vue'
+import { ChevronRight, Link2, ListTodo, MessageSquare, Pencil, Plus, RefreshCw, Send, Trash2, X } from '@lucide/vue'
 import EmptyState from '../common/EmptyState.vue'
 const props = defineProps({
   project: { type: String, default: '' },
@@ -11,15 +11,21 @@ const props = defineProps({
 })
 const emit = defineEmits(['select', 'create', 'create-feishu', 'bind-feishu', 'refresh', 'rename', 'delete', 'close'])
 const sourceOf = (session) => String(session?.source || 'web') === 'feishu' ? 'feishu' : 'web'
-const webSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'web'))
+const kindOf = (session) => String(session?.session_kind || session?.sessionKind || 'conversation') === 'automation' ? 'automation' : 'conversation'
+const conversationSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'web' && kindOf(session) === 'conversation'))
+const automationSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'web' && kindOf(session) === 'automation'))
 const feishuSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'feishu'))
 const groupStorageKey = 'ccm:project-session-groups:v1'
 const readGroupState = () => {
   try {
     const saved = JSON.parse(localStorage.getItem(groupStorageKey) || '{}')
-    return { web: saved.web === true, feishu: saved.feishu === true }
+    return {
+      conversation: saved.conversation === true || saved.web === true,
+      automation: saved.automation === true,
+      feishu: saved.feishu === true,
+    }
   } catch {
-    return { web: false, feishu: false }
+    return { conversation: false, automation: false, feishu: false }
   }
 }
 const expandedGroups = ref(readGroupState())
@@ -62,12 +68,12 @@ const bindingText = (session) => {
       <EmptyState v-else-if="sessions.length === 0" icon="💬" title="暂无会话" hint="新建一个开始工作" />
       <template v-else>
         <section class="session-section">
-          <button class="session-section-title" type="button" :aria-expanded="expandedGroups.web" @click="toggleGroup('web')">
-            <span><ChevronRight class="section-chevron" :class="{ expanded: expandedGroups.web }" :size="14" /><Monitor :size="12" />网页会话</span><strong>{{ webSessions.length }}</strong>
+          <button class="session-section-title" type="button" :aria-expanded="expandedGroups.conversation" @click="toggleGroup('conversation')">
+            <span><ChevronRight class="section-chevron" :class="{ expanded: expandedGroups.conversation }" :size="14" /><MessageSquare :size="12" />普通会话</span><strong>{{ conversationSessions.length }}</strong>
           </button>
-          <div v-show="expandedGroups.web" class="session-section-content">
+          <div v-show="expandedGroups.conversation" class="session-section-content">
             <div
-              v-for="session in webSessions"
+              v-for="session in conversationSessions"
               :key="session.id"
               :class="['session-item', { active: currentSession === session.id }]"
               role="button"
@@ -76,7 +82,30 @@ const bindingText = (session) => {
               @keydown.enter="emit('select', session.id)"
             >
               <MessageSquare class="session-source-icon" :size="14" />
-              <span class="session-copy"><strong>{{ session.name || '未命名会话' }}</strong><small>{{ session.message_count }} 条消息 · 仅网页</small></span>
+              <span class="session-copy"><strong>{{ session.name || '未命名会话' }}</strong><small>{{ session.message_count }} 条消息</small></span>
+              <span class="session-actions">
+                <button title="重命名会话" @click.stop="emit('rename', session.id)"><Pencil :size="14" /></button>
+                <button title="删除会话" @click.stop="emit('delete', session.id)"><Trash2 :size="14" /></button>
+              </span>
+            </div>
+          </div>
+        </section>
+        <section class="session-section automation-section">
+          <button class="session-section-title" type="button" :aria-expanded="expandedGroups.automation" @click="toggleGroup('automation')">
+            <span><ChevronRight class="section-chevron" :class="{ expanded: expandedGroups.automation }" :size="14" /><ListTodo :size="12" />自动化任务会话</span><strong>{{ automationSessions.length }}</strong>
+          </button>
+          <div v-show="expandedGroups.automation" class="session-section-content">
+            <div
+              v-for="session in automationSessions"
+              :key="session.id"
+              :class="['session-item', 'automation-session', { active: currentSession === session.id }]"
+              role="button"
+              tabindex="0"
+              @click="emit('select', session.id)"
+              @keydown.enter="emit('select', session.id)"
+            >
+              <ListTodo class="session-source-icon" :size="14" />
+              <span class="session-copy"><strong>{{ session.name || '自动开发任务' }}</strong><small>{{ session.message_count }} 条消息 · 任务过程与交付</small></span>
               <span class="session-actions">
                 <button title="重命名会话" @click.stop="emit('rename', session.id)"><Pencil :size="14" /></button>
                 <button title="删除会话" @click.stop="emit('delete', session.id)"><Trash2 :size="14" /></button>
@@ -131,6 +160,7 @@ header button:hover,.session-actions button:hover { background:var(--control-hov
 .mobile-close { display:none; }
 .session-list { min-height:0; flex:1; overflow:auto; padding:8px 7px; }
 .session-section { display:flex; flex-direction:column; }
+.session-section.automation-section { margin-top:5px; }
 .session-section.feishu-section { margin-top:8px; padding-top:6px; border-top:1px solid var(--border-color); }
 .session-section-title { width:100%; height:28px; display:flex; align-items:center; justify-content:space-between; padding:0 7px; border:0; border-radius:5px; background:transparent; color:var(--text-muted); font:inherit; font-size:10px; font-weight:700; text-align:left; cursor:pointer; transition:background .15s ease,color .15s ease; }
 .session-section-title:hover { background:var(--control-hover); color:var(--text-primary); }
@@ -149,6 +179,7 @@ header button:hover,.session-actions button:hover { background:var(--control-hov
 .session-copy small.bound { color:#00a870; }
 .session-source-icon { flex:0 0 auto; color:var(--text-muted); }
 .feishu-session.bound:not(.active) { border-color:color-mix(in srgb,#00a870 18%,transparent); }
+.automation-session:not(.active) .session-source-icon { color:var(--accent-blue); }
 .session-actions { display:none; flex-shrink:0; }
 .session-item:hover .session-actions,.session-item.active .session-actions { display:flex; }
 .sidebar-backdrop { display:none; }

@@ -1,6 +1,11 @@
 import * as crypto from "crypto";
 import { getConfigs, loadCronJobs, loadTasks, saveCronJobs } from "../../core/db";
-import { loadGroups, saveGroups } from "./storage";
+import {
+  listGroupChatSessions,
+  loadGroups,
+  resolveWritableGroupChatSession,
+  saveGroups,
+} from "./storage";
 import { runSemanticDecision } from "../../system/semantic-decision-runtime";
 import { withFileLock } from "../../core/atomic-json-file";
 import { GROUPS_FILE } from "../../core/utils";
@@ -101,11 +106,36 @@ function persistDailyDevBacklogFileUnlocked(groups: any[], group: any, payload: 
   const existing = idempotencyKey
     ? group.shared_files.find((item: any) => isDailyDevBacklogFile(item) && String(item.idempotency_key || "") === idempotencyKey)
     : null;
-  if (existing) return { name: existing.name, content: existing.content, status: readDailyDevBacklogStatus(existing), entry_id: existing.entry_id, revision: existing.revision, duplicate: true };
+  if (existing) return {
+    name: existing.name,
+    content: existing.content,
+    status: readDailyDevBacklogStatus(existing),
+    entry_id: existing.entry_id,
+    revision: existing.revision,
+    target_scope: existing.target_scope || "group_session",
+    target_id: existing.target_id || group.id,
+    target_session_id: existing.target_session_id || existing.group_session_id || "",
+    duplicate: true,
+  };
   const name = makeDailyDevBacklogFileName(title || goal);
   const quality = normalizeDailyDevQualityDecision(payload?.quality_decision || payload?.qualityDecision);
   const initialState = quality.pass ? "ready" : "needs_user";
   const content = buildDailyDevBacklogDocument(payload, title, goal);
+  const requestedSessionId = String(
+    payload.target_session_id
+    || payload.targetSessionId
+    || payload.exact_session_id
+    || payload.exactSessionId
+    || payload.group_session_id
+    || payload.groupSessionId
+    || "",
+  ).trim();
+  const targetSession = resolveWritableGroupChatSession(group.id, requestedSessionId, {
+    title: compactFormText(title || goal, "需求池任务").slice(0, 80),
+    createDedicated: !requestedSessionId,
+    sessionKind: "automation",
+  });
+  const boundAt = new Date().toISOString();
   const record = {
     name,
     type: "text",
@@ -119,17 +149,33 @@ function persistDailyDevBacklogFileUnlocked(groups: any[], group: any, payload: 
     content_checksum: crypto.createHash("sha256").update(content).digest("hex"),
     quality_decision: quality,
     idempotency_key: idempotencyKey,
+    target_scope: "group_session",
+    target_id: group.id,
+    target_session_id: targetSession.id,
+    target_session_title: targetSession.title || targetSession.id,
+    target_session_bound_at: boundAt,
+    target_session_binding_source: requestedSessionId ? "explicit_at_creation" : "creation_default",
     status: initialState,
     needs_user_question: initialState === "needs_user" ? buildDailyDevBacklogUserQuestion(quality) : "",
     state_history: [{
       state: initialState,
       reason: initialState === "ready" ? "需求信息足够，等待主 Agent 认领" : "需求信息不足，等待用户补充",
       actor: "system",
-      at: new Date().toISOString(),
+      at: boundAt,
     }],
   };
   group.shared_files.push(record);
-  return { name, content, status: initialState, entry_id: record.entry_id, revision: record.revision, duplicate: false };
+  return {
+    name,
+    content,
+    status: initialState,
+    entry_id: record.entry_id,
+    revision: record.revision,
+    target_scope: record.target_scope,
+    target_id: record.target_id,
+    target_session_id: record.target_session_id,
+    duplicate: false,
+  };
 }
 
 export function persistDailyDevBacklogFile(_groups: any[], group: any, payload: any, title: string, goal: string) {
@@ -330,6 +376,9 @@ function extractDailyDevBacklogPayload(file: any) {
     priority: readDailyDevBacklogPriority(file),
     requires_code_changes: !/代码变更\s*:\s*允许无代码变更/i.test(content),
     backlog_file: file.name,
+    target_scope: file.target_scope || "group_session",
+    target_id: file.target_id || "",
+    target_session_id: file.target_session_id || file.group_session_id || "",
   };
 }
 
@@ -369,6 +418,9 @@ function buildDailyDevPayloadFromSharedFile(file: any, group: any, options: any 
     constraints: extractMarkdownSection(content, "约束/注意事项") || extractMarkdownSection(content, "约束") || "",
     priority: options.priority || readDailyDevBacklogPriority(file) || "normal",
     requires_code_changes: options.requires_code_changes !== false && options.requiresCodeChanges !== false,
+    target_scope: "group_session",
+    target_id: group?.id || "",
+    target_session_id: options.group_session_id || options.groupSessionId || options.exact_session_id || options.exactSessionId || "",
   };
 }
 
@@ -461,7 +513,36 @@ function claimReadyDailyDevBacklogUnlocked(groupId: string, claim: any = {}) {
   if (!selected) return null;
 
   const file = files[selected.index];
+  const storedSessionId = String(file.target_session_id || file.group_session_id || "").trim();
+  let targetSession: any;
+  try {
+    targetSession = resolveWritableGroupChatSession(groupId, storedSessionId, {
+      title: compactFormText(file.name || "需求池任务", "需求池任务").slice(0, 80),
+      createDedicated: !storedSessionId,
+      sessionKind: "automation",
+    });
+  } catch (error: any) {
+    const now = new Date().toISOString();
+    file.status = "blocked";
+    file.blocked_at = now;
+    file.updated_at = now;
+    file.revision = Math.max(0, Number(file.revision || 0)) + 1;
+    file.last_result = `目标群聊会话不可用：${error?.message || error}。请改选会话后重新派发。`;
+    appendDailyDevBacklogHistory(file, "blocked", file.last_result, claim.source || "daily_dev_cron");
+    file.content = replaceBacklogStatusLine(String(file.content || ""), "blocked");
+    saveGroups(groups);
+    return null;
+  }
   const now = new Date().toISOString();
+  if (!storedSessionId) {
+    file.target_scope = "group_session";
+    file.target_id = groupId;
+    file.target_session_id = targetSession.id;
+    file.target_session_title = targetSession.title || targetSession.id;
+    file.target_session_bound_at = now;
+    file.target_session_binding_source = "legacy_first_claim";
+    appendDailyDevBacklogHistory(file, "ready", `历史需求已固定到“${file.target_session_title}”`, claim.source || "daily_dev_cron");
+  }
   file.status = "planned";
   file.claimed_at = now;
   file.claimed_by = claim.source || "daily_dev_cron";
@@ -476,7 +557,7 @@ function claimReadyDailyDevBacklogUnlocked(groupId: string, claim: any = {}) {
     fencing_token: file.revision,
   };
   file.updated_at = now;
-  appendDailyDevBacklogHistory(file, "planned", "定时任务已认领，准备创建主 Agent 任务", claim.source || "daily_dev_cron");
+  appendDailyDevBacklogHistory(file, "planned", `定时任务已认领，将派发到“${file.target_session_title || targetSession.title || targetSession.id}”`, claim.source || "daily_dev_cron");
   file.content = replaceBacklogStatusLine(String(file.content || ""), "planned");
   saveGroups(groups);
   return extractDailyDevBacklogPayload(file);
@@ -520,6 +601,13 @@ export function listDailyDevBacklogs(groupId = "") {
     .filter((group: any) => !groupId || group.id === groupId)
     .flatMap((group: any) => {
       const files = Array.isArray(group.shared_files) ? group.shared_files : [];
+      const sessions = listGroupChatSessions(group.id).sessions
+        .filter((session: any) => session.archived !== true && String(session.id || "").startsWith("gcs_"))
+        .map((session: any) => ({
+          id: String(session.id || ""),
+          title: String(session.title || session.name || session.id || ""),
+          session_kind: String(session.session_kind || session.sessionKind || "conversation"),
+        }));
       return files
         .filter((file: any) => isDailyDevBacklogFile(file))
         .map((file: any) => {
@@ -556,6 +644,14 @@ export function listDailyDevBacklogs(groupId = "") {
             blocked_at: file.blocked_at || "",
             last_result: file.last_result || "",
             business_goal: extractMarkdownSection(content, "业务目标") || title,
+            target_scope: file.target_scope || "group_session",
+            target_id: file.target_id || group.id,
+            target_session_id: file.target_session_id || file.group_session_id || "",
+            target_session_title: file.target_session_title || sessions.find((session: any) => session.id === (file.target_session_id || file.group_session_id))?.title || "",
+            target_session_bound_at: file.target_session_bound_at || "",
+            target_session_binding_source: file.target_session_binding_source || "legacy_unbound",
+            target_session_valid: !!sessions.some((session: any) => session.id === (file.target_session_id || file.group_session_id)),
+            session_options: sessions,
           };
         });
     })
@@ -693,8 +789,36 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
     return { success: false, status: 409, error: "需求已经关联执行任务，如需重派请先恢复为 ready" };
   }
 
-  const payload = extractDailyDevBacklogPayload(file);
+  const requestedSessionId = String(options.group_session_id || options.groupSessionId || options.exact_session_id || options.exactSessionId || "").trim();
+  const storedSessionId = String(file.target_session_id || file.group_session_id || "").trim();
+  let targetSession: any;
+  try {
+    targetSession = resolveWritableGroupChatSession(groupId, requestedSessionId || storedSessionId, {
+      title: compactFormText(file.name || "需求池任务", "需求池任务").slice(0, 80),
+      createDedicated: !requestedSessionId && !storedSessionId,
+      sessionKind: "automation",
+    });
+  } catch (error: any) {
+    return {
+      success: false,
+      status: 409,
+      code: "backlog_target_session_unavailable",
+      error: `目标群聊会话不可用：${error?.message || error}。请明确改选一个可写会话后再派发。`,
+    };
+  }
+  const targetChanged = targetSession.id !== storedSessionId;
+  const payload = extractDailyDevBacklogPayload({ ...file, target_session_id: targetSession.id });
   const now = new Date().toISOString();
+  file.target_scope = "group_session";
+  file.target_id = groupId;
+  file.target_session_id = targetSession.id;
+  file.target_session_title = targetSession.title || targetSession.id;
+  file.target_session_bound_at = now;
+  file.target_session_binding_source = requestedSessionId
+    ? "explicit_at_dispatch"
+    : storedSessionId
+      ? (file.target_session_binding_source || "creation_snapshot")
+      : "legacy_first_dispatch";
   file.status = "planned";
   file.entry_id = file.entry_id || `backlog_${crypto.randomUUID()}`;
   file.revision = Math.max(0, Number(file.revision || 0)) + 1;
@@ -703,7 +827,10 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
   file.claimed_at = now;
   file.claimed_by = options.source || "manual_backlog_dispatch";
   file.updated_at = now;
-  appendDailyDevBacklogHistory(file, "planned", "需求已被认领，正在创建主 Agent 任务", options.source || "manual_backlog_dispatch");
+  if (targetChanged) {
+    appendDailyDevBacklogHistory(file, "ready", `目标会话已固定为“${file.target_session_title}”`, options.source || "manual_backlog_dispatch");
+  }
+  appendDailyDevBacklogHistory(file, "planned", `需求已被认领，将派发到“${file.target_session_title}”`, options.source || "manual_backlog_dispatch");
   file.content = replaceBacklogStatusLine(String(file.content || ""), "planned");
   saveGroups(groups);
 
@@ -714,6 +841,7 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
       description: buildDailyDevTaskDescription(taskPayload),
       target_project: groupReadiness.coordinator.project,
       group_id: groupId,
+      group_session_id: targetSession.id,
       assign_type: "group",
       priority: payload.priority || "normal",
       auto_execute: options.auto_execute !== false && options.autoExecute !== false,
@@ -729,13 +857,16 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
           backlog_file: payload.backlog_file,
           source: "manual-backlog-dispatch",
           dispatched_at: now,
+          target_scope: "group_session",
+          target_id: groupId,
+          target_session_id: targetSession.id,
         },
       },
       client_message_id: file.entry_id,
       source_channel: options.source || "manual-backlog-dispatch",
       target_scope: "group_session",
       target_id: groupId,
-      exact_session_id: options.group_session_id || options.groupSessionId || groupId,
+      exact_session_id: targetSession.id,
       idempotency_key: file.idempotency_key || `daily-dev-backlog:${groupId}:${file.entry_id}:${file.content_checksum || crypto.createHash("sha256").update(String(file.content || "")).digest("hex")}`,
     });
     file.task_id = task.id;
@@ -758,7 +889,14 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
         });
       }
     }
-    return { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: dep("getQueueStatus")() };
+    return {
+      success: true,
+      task,
+      target_session: { id: targetSession.id, title: targetSession.title || targetSession.id },
+      queued: !!queueResult?.queued,
+      queue_result: queueResult,
+      queue_status: dep("getQueueStatus")(),
+    };
   } catch (e: any) {
     markDailyDevBacklogStatusUnlocked(groupId, fileName, "ready", {
       result: `立即派发失败，已恢复为 ready：${e.message}`,

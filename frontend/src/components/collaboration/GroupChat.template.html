@@ -30,6 +30,7 @@
     <div class="main-content">
       <GroupChatSessionSidebar
         v-if="currentGroup"
+        :group-id="currentGroup.id"
         :group-name="currentGroup.name"
         :sessions="groupSessions"
         :current-session-id="currentGroupSessionId"

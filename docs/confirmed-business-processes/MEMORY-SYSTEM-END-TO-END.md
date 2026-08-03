@@ -102,6 +102,17 @@ Skill/MCP的处理规则：
 - 正式压缩可以总结工具执行形成的决定和证据；
 - Skill/MCP定义本身不会被复制进长期记忆或反复写进会话摘要。
 
+正式压缩提交时会同时生成动态工具恢复清单，但清单与长期记忆、摘要正文彼此独立：
+
+- 已实际调用的Skill保存调用证据和内容checksum，压缩后新Run重新读取当前正文并校验后恢复；
+- 通过`tool_search`实际加载的MCP保存Schema checksum，压缩后在授权、连接和目录revision仍一致时恢复到`loadedToolNames`；
+- 未调用Skill、未加载的延迟MCP不进入恢复内容；可信`alwaysLoad`由当前目录自然加载；
+- 恢复项加入完整Provider payload后重新执行Token门禁，超限项退回延迟加载，不做字符截断；
+- Skill内容变化、MCP Schema变化、授权撤销、连接断开或作用域不匹配均失败关闭，不使用旧内容；
+- 清单只保存身份、checksum、Token和证据ID，正文继续来自当前Skill/MCP目录，原始调用结果继续来自隐藏执行账本。
+
+因此，压缩后的同一精确会话可以继续使用此前已经实际选择的Skill和MCP状态，但新会话、兄弟会话、清空或归档会话不会继承。群聊旧`ccm-post-compact-reinjection-v1`保持只读兼容，新压缩统一写入共享清单。
+
 ### 6. 缓存和审计元数据
 
 Context Engine状态只保存块ID、类型、Token、checksum、不可变地址、编辑计划、能力证据、usage和耗时。磁盘状态不保存Prompt正文、API Key、完整工具结果或模型最终回答。

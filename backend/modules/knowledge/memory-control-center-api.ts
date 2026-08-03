@@ -139,6 +139,14 @@ function buildAvailableContextCatalog(scope: MemoryScope, scopeId: string, memor
   const loadedSkills = Array.isArray(loadedEvidence?.skills) ? loadedEvidence.skills : [];
   const invocations = Array.isArray(loadedEvidence?.invocations) ? loadedEvidence.invocations : [];
   const evidenceAvailable = loadedEvidence?.schema === "ccm-loaded-context-items-v1";
+  const compaction = memory?.compaction?.v2 || memory?.compaction || {};
+  const boundary = memory?.boundary || memory?.compactBoundary || memory?.compact_boundary || {};
+  const restoreReceipt = compaction?.dynamicContextRestoreReceipt
+    || compaction?.dynamic_context_restore_receipt
+    || boundary?.dynamicContextRestoreReceipt
+    || boundary?.post_compact_restore?.dynamicContextRestoreReceipt
+    || boundary?.post_compact_restore?.dynamic_context_restore_receipt
+    || null;
   const normalizedAliases = (item: any) => Array.from(new Set([
     String(item?.name || ""),
     ...(Array.isArray(item?.aliases) ? item.aliases.map((value: any) => String(value || "")) : []),
@@ -158,6 +166,9 @@ function buildAvailableContextCatalog(scope: MemoryScope, scopeId: string, memor
       configured,
       evidenceStatus: evidenceAvailable ? "exact" : "unproven",
       loadLevels: Array.from(new Set(loaded.map((item: any) => String(item?.loadLevel || "")).filter(Boolean))),
+      loadSources: Array.from(new Set(loaded.map((item: any) => String(item?.loadSource || item?.load_source || "")).filter(Boolean))),
+      loadedTokens: loaded.reduce((sum: number, item: any) => sum + Math.max(0, Number(item?.tokens || item?.tokenCount || item?.token_count || 0)), 0),
+      dropReasons: Array.from(new Set(loaded.map((item: any) => String(item?.dropReason || item?.drop_reason || "")).filter(Boolean))),
       invocationCount: invoked.length,
       invocationSucceeded: invoked.some((item: any) => item?.ok === true),
       loadedChecksum: String(loadedEvidence?.checksum || modelVisiblePayload?.loadedContextItemsChecksum || modelVisiblePayload?.loaded_context_items_checksum || ""),
@@ -209,6 +220,15 @@ function buildAvailableContextCatalog(scope: MemoryScope, scopeId: string, memor
   return {
     schema: "ccm-context-available-catalog-v2",
     accounting: "per_item_model_payload_evidence",
+    postCompactRestore: restoreReceipt ? {
+      status: String(restoreReceipt.status || ""),
+      restoredSkillTokens: Math.max(0, Number(restoreReceipt.restoredSkillTokens || 0)),
+      restoredMcpSchemaTokens: Math.max(0, Number(restoreReceipt.restoredMcpSchemaTokens || 0)),
+      restoredSkillNames: Array.isArray(restoreReceipt.restoredSkillNames) ? restoreReceipt.restoredSkillNames : [],
+      loadedToolNames: Array.isArray(restoreReceipt.loadedToolNames) ? restoreReceipt.loadedToolNames : [],
+      dropped: Array.isArray(restoreReceipt.dropped) ? restoreReceipt.dropped : [],
+      checksum: String(restoreReceipt.checksum || ""),
+    } : null,
     mcp: {
       configured: mcp.filter((item: any) => item.configured !== false).length,
       available: mcp.filter((item: any) => item.state !== "unavailable").length,

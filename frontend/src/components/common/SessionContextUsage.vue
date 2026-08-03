@@ -143,6 +143,9 @@ const deferredCatalogRows = computed(() => [
       configured: item?.configured !== false,
       evidenceStatus: String(item?.evidenceStatus || ''),
       loadLevels: Array.isArray(item?.loadLevels) ? item.loadLevels : [],
+      loadSources: Array.isArray(item?.loadSources) ? item.loadSources : [],
+      loadedTokens: Math.max(0, Number(item?.loadedTokens || 0)),
+      dropReasons: Array.isArray(item?.dropReasons) ? item.dropReasons : [],
       invocationCount: Math.max(0, Number(item?.invocationCount || 0)),
     }))
     .filter(item => item.name),
@@ -153,6 +156,13 @@ const contextItemStateLabel = item => ({
   unavailable: '当前不可用',
   available: item.evidenceStatus === 'unproven' ? '可用 · 本轮状态未证明' : '可用 · 本轮未加载',
 })[item.state] || '可用'
+const contextItemSourceLabel = item => {
+  if (item.loadSources.includes('post_compact_restored')) return '压缩边界恢复'
+  if (item.loadSources.includes('always_load')) return '固定加载'
+  if (item.loadSources.includes('same_run')) return '同 Run 加载'
+  if (item.loadSources.includes('catalog')) return '目录可见'
+  return ''
+}
 const compactStateLabel = computed(() => {
   if (isCompacting.value) return '正在压缩'
   if (circuitBlocked.value) return circuitWaitingRetry.value ? '压缩熔断（待重试）' : '压缩熔断（待重置）'
@@ -257,7 +267,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
           </div>
           <div v-if="row.items.length" class="context-available-items">
             <span v-for="item in row.items" :key="`${row.key}-${item.name}`" :class="`state-${item.state}`" :title="contextItemStateLabel(item)">
-              <b>{{ item.name }}</b><small>{{ contextItemStateLabel(item) }}</small>
+              <b>{{ item.name }}</b><small>{{ contextItemStateLabel(item) }}<template v-if="contextItemSourceLabel(item)"> · {{ contextItemSourceLabel(item) }}</template><template v-if="item.loadedTokens"> · {{ formatTokens(item.loadedTokens) }}</template></small>
             </span>
           </div>
         </div>

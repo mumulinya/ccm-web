@@ -40,8 +40,9 @@ const prepare = async page => {
   page.on('pageerror', error => report.errors.push(`page: ${error.message}`))
   page.on('console', message => { if (message.type() === 'error') report.errors.push(`console: ${message.text()}`) })
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
-  await page.route('**/api/**', route => {
+  await page.route('**/*', route => {
     const pathname = new URL(route.request().url()).pathname
+    if (!pathname.startsWith('/api/')) return route.continue()
     const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
     if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
     if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'workbench-selftest' } }))

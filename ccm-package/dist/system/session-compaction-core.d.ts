@@ -52,6 +52,9 @@ export type LoadedContextItemV1 = {
     aliases: string[];
     loadLevel: "catalog" | "body" | "schema" | "result";
     checksum: string;
+    loadSource?: "same_run" | "post_compact_restored" | "always_load" | "catalog";
+    tokens?: number;
+    dropReason?: string;
 };
 export type InvokedContextItemV1 = {
     kind: "skill" | "mcp";
@@ -96,6 +99,8 @@ export type SessionCompactionStateV2 = {
     recoveryContextTokens: number;
     hookResultTokens: number;
     ptlRecoveryAttempts: number;
+    dynamicContextRestoreManifest: any;
+    dynamicContextRestoreReceipt: any;
 };
 type SessionCompactionHook = (input: any) => any | Promise<any>;
 export declare function sessionCompactionChecksum(value: any): string;
@@ -287,6 +292,7 @@ export declare function buildSessionCompactionBoundaryMarker(input: {
     summarizedThroughMessageId?: string;
     previousSummaryChecksum?: string;
     preservedMessageIds?: string[];
+    dynamicContextRestoreManifest?: any;
 }): {
     checksum: string;
     schema: string;
@@ -297,6 +303,8 @@ export declare function buildSessionCompactionBoundaryMarker(input: {
     summarizedThroughMessageId: string;
     previousSummaryChecksum: string;
     preservedMessageIds: string[];
+    dynamicContextRestoreManifest: any;
+    dynamicContextRestoreChecksum: string;
 };
 export declare function normalizeSessionCompactionState(value: any, input: {
     scope: SessionCompactionScope;

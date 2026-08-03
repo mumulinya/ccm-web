@@ -708,6 +708,8 @@ function createGlobalDevelopmentMission(payload, ctx) {
             try {
                 groupSession = (0, storage_1.resolveWritableGroupChatSession)(group.id, String(target.group_session_id || target.groupSessionId || ""), {
                     title: (0, collaboration_1.compactFormText)(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
+                    createDedicated: !String(target.group_session_id || target.groupSessionId || "").trim(),
+                    sessionKind: "automation",
                 });
             }
             catch (error) {
@@ -767,6 +769,8 @@ function createGlobalDevelopmentMission(payload, ctx) {
         try {
             selectedGroupSession = (0, storage_1.resolveWritableGroupChatSession)(selectedGroup.id, requestedSession, {
                 title: (0, collaboration_1.compactFormText)(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
+                createDedicated: !requestedSession,
+                sessionKind: "automation",
             });
         }
         catch (error) {

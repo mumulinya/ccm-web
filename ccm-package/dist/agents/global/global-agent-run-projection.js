@@ -19,6 +19,7 @@ const runtime_1 = require("./runtime");
 const role_skills_1 = require("../../skills/role-skills");
 const reasoning_loop_1 = require("../reasoning-loop");
 const workflow_decision_1 = require("../workflow-decision");
+const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 function compactObservation(value) {
     let text = "";
     try {
@@ -232,8 +233,13 @@ function normalizeDecision(value, fallbackWorkflowDecision = null) {
         } : undefined,
     };
 }
-function buildToolPrompt() {
+function buildToolPrompt(loadedToolNames = []) {
+    const loaded = new Set((loadedToolNames || []).map(value => String(value || "")));
+    const deferredWorkspaceNames = new Set(workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2
+        .filter(tool => tool.loadPolicy === "search" && !loaded.has(tool.name) && !loaded.has(tool.canonicalName))
+        .map(tool => tool.name));
     return (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS)
+        .filter(spec => !deferredWorkspaceNames.has(spec.name))
         .map(spec => `- ${spec.name}${spec.required?.length ? `（必填：${spec.required.join("、")}）` : ""}：${spec.description}；schema=${JSON.stringify(spec.inputSchema)}；risk=${spec.risk}`)
         .join("\n");
 }
@@ -255,7 +261,6 @@ async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
     const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("global-agent", run.reasoning_loop.effective_goal || run.user_message, {
         source: run.source || "",
         phase: "planning",
-        forceWork: true,
         selectedSkillNames: (run.workflow_decision || run.workflowDecision)?.selectedSkills || [],
         modelDecision: run.workflow_decision || run.workflowDecision || null,
     });
@@ -286,7 +291,7 @@ ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
 - 目标没有在用户当前消息或读取工具结果中出现时，不得猜测；confidence 不足时使用 needs_confirmation 并提出一个具体澄清问题。
 
 可用工具：
-${buildToolPrompt()}
+${buildToolPrompt(run.loaded_tool_names || run.loadedToolNames || [])}
 
 ${(0, role_skills_1.buildModelSelectableSkillCatalog)()}
 

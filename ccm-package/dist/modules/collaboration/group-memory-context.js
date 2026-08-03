@@ -66,6 +66,7 @@ const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const context_budget_1 = require("../../system/context-budget");
 const tool_manager_1 = require("../../tools/tool-manager");
+const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 const runtime_1 = require("../../agents/runtime");
 const group_runtime_memory_admission_1 = require("./group-runtime-memory-admission");
 const group_memory_compaction_1 = require("./group-memory-compaction");
@@ -836,8 +837,51 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
         const messages = (0, storage_1.getGroupMessages)(id, sessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
         const memory = (0, group_memory_storage_1.loadGroupMemory)(id, sessionId);
         const loadedConfig = (0, group_memory_shared_1.loadGroupMemoryCompactionConfig)(options.config || {});
+        const groupRecord = options.group || (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === id) || null;
+        const groupToolScope = {
+            ...normalizeDynamicContextToolScope(groupRecord?.tools || {}),
+            auditContext: { runtime: "group-main-agent", groupId: id, sessionId, source: "post-compact-restore" },
+        };
+        const nextBoundaryGeneration = Math.max(0, Number(memory?.compactBoundary?.boundaryGeneration
+            || memory?.compactBoundary?.generation
+            || memory?.compaction?.boundaryGeneration
+            || memory?.compaction?.boundary_generation
+            || 0)) + 1;
+        const dynamicToolIdentity = {
+            agentKind: "group",
+            scope: "group",
+            scopeId: id,
+            exactSessionId: sessionId,
+            generation: nextBoundaryGeneration,
+        };
+        const dynamicContextRestoreManifest = (0, main_agent_post_compact_continuity_1.buildMainAgentPostCompactRestoreManifest)({
+            identity: dynamicToolIdentity,
+            boundaryGeneration: nextBoundaryGeneration,
+            scope: groupToolScope,
+        });
+        const dynamicContextRestore = (0, main_agent_post_compact_continuity_1.restoreMainAgentPostCompactContext)({
+            identity: dynamicToolIdentity,
+            scope: groupToolScope,
+            manifest: dynamicContextRestoreManifest,
+        });
+        const restoredMcpCatalog = tool_manager_1.toolManager.getScopedToolCatalog(groupToolScope).tools
+            .filter((tool) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));
         const config = {
             ...loadedConfig,
+            recoveryContext: {
+                ...(loadedConfig?.recoveryContext || loadedConfig?.recovery_context || {}),
+                dynamicContextRestoreManifest,
+                dynamicContextRestoreReceipt: dynamicContextRestore.receipt,
+            },
+            contextComponents: {
+                ...(loadedConfig?.contextComponents || loadedConfig?.context_components || {}),
+                skills: loadedConfig?.contextComponents?.skills || loadedConfig?.context_components?.skills || loadedConfig?.modelVisibleSkills || loadedConfig?.model_visible_skills || null,
+                mcpTools: loadedConfig?.contextComponents?.mcpTools || loadedConfig?.context_components?.mcpTools || loadedConfig?.modelVisibleMcpTools || loadedConfig?.model_visible_mcp_tools || null,
+                rules: loadedConfig?.contextComponents?.rules || loadedConfig?.context_components?.rules || loadedConfig?.modelVisibleRules || loadedConfig?.model_visible_rules || null,
+                subagentDefinitions: loadedConfig?.contextComponents?.subagentDefinitions || loadedConfig?.context_components?.subagentDefinitions || loadedConfig?.modelVisibleSubagentDefinitions || loadedConfig?.model_visible_subagent_definitions || null,
+                messageSkills: dynamicContextRestore.skillAttachments,
+                messageMcpTools: restoredMcpCatalog,
+            },
             compactionLifecycleFence,
             compactionActivityOperationId: autoCompactAttemptId,
             compactionAbortSignal: compactionAbortController.signal,
@@ -1046,11 +1090,23 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                         },
                         post_compact_restore: {
                             ...(result.boundary?.post_compact_restore || {}),
+                            dynamicContextRestoreManifest,
+                            dynamicContextRestoreReceipt: dynamicContextRestore.receipt,
                             postCompactSessionStateReset,
                             promptCacheCompactionNotification
                         }
                     }
                     : result.boundary || memoryBeforePostCompactState.compactBoundary || null;
+                if (result.compacted === true && boundaryWithPostCompactState) {
+                    boundaryWithPostCompactState.dynamicContextRestoreManifest = dynamicContextRestoreManifest;
+                    boundaryWithPostCompactState.dynamicContextRestoreReceipt = dynamicContextRestore.receipt;
+                    boundaryWithPostCompactState.boundaryGeneration = nextBoundaryGeneration;
+                    boundaryWithPostCompactState.post_compact_restore = {
+                        ...(boundaryWithPostCompactState.post_compact_restore || {}),
+                        dynamicContextRestoreManifest,
+                        dynamicContextRestoreReceipt: dynamicContextRestore.receipt,
+                    };
+                }
                 const memoryWithPostCompactState = {
                     ...memoryBeforePostCompactState,
                     compactBoundary: boundaryWithPostCompactState,
@@ -1070,7 +1126,9 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                             ledgerChecksum: circuitBreaker.ledger_checksum || ""
                         },
                         postCompactSessionStateReset,
-                        promptCacheCompactionNotification
+                        promptCacheCompactionNotification,
+                        dynamicContextRestoreManifest: result.compacted === true ? dynamicContextRestoreManifest : memoryBeforePostCompactState?.compaction?.dynamicContextRestoreManifest || null,
+                        dynamicContextRestoreReceipt: result.compacted === true ? dynamicContextRestore.receipt : memoryBeforePostCompactState?.compaction?.dynamicContextRestoreReceipt || null
                     },
                     messageCompression: {
                         ...(memoryBeforePostCompactState?.messageCompression || {}),
@@ -1079,6 +1137,8 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                     }
                 };
                 const saved = (0, group_memory_storage_1.saveGroupMemory)(id, memoryWithPostCompactState, sessionId);
+                if (result.compacted === true)
+                    (0, main_agent_post_compact_continuity_1.persistMainAgentPostCompactRestoreManifest)(dynamicContextRestoreManifest);
                 return { success: true, compacted: !!result.compacted, boundary: boundaryWithPostCompactState, keepIndex: result.keepIndex, background, memory: saved, compactHead, typedMemoryScopeId, logDistillation, providerNativeCompactSessionCapacityReset, postCompactSessionStateReset, promptCacheCompactionNotification, circuitBreaker, lifecycleValidation: commitLifecycleValidation, lifecycleCommitProof };
             });
         });

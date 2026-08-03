@@ -60,6 +60,9 @@ export type LoadedContextItemV1 = {
   aliases: string[];
   loadLevel: "catalog" | "body" | "schema" | "result";
   checksum: string;
+  loadSource?: "same_run" | "post_compact_restored" | "always_load" | "catalog";
+  tokens?: number;
+  dropReason?: string;
 };
 
 export type InvokedContextItemV1 = {
@@ -118,6 +121,8 @@ export type SessionCompactionStateV2 = {
   recoveryContextTokens: number;
   hookResultTokens: number;
   ptlRecoveryAttempts: number;
+  dynamicContextRestoreManifest: any;
+  dynamicContextRestoreReceipt: any;
 };
 
 type SessionCompactionHook = (input: any) => any | Promise<any>;
@@ -201,6 +206,11 @@ function normalizeLoadedContextItems(value: any): LoadedContextItemsV1 {
         aliases: normalizeContextAliases(row?.aliases, name),
         loadLevel,
         checksum: normalizedContextItemName(row?.checksum || row?.contentHash || row?.content_hash),
+        loadSource: (["same_run", "post_compact_restored", "always_load", "catalog"].includes(String(row?.loadSource || row?.load_source))
+          ? String(row?.loadSource || row?.load_source)
+          : undefined) as LoadedContextItemV1["loadSource"],
+        tokens: Math.max(0, Math.floor(Number(row?.tokens || row?.tokenCount || row?.token_count || 0))),
+        dropReason: normalizedContextItemName(row?.dropReason || row?.drop_reason),
       } as LoadedContextItemV1;
     })
     .filter(Boolean)
@@ -661,6 +671,7 @@ export function buildSessionCompactionBoundaryMarker(input: {
   summarizedThroughMessageId?: string;
   previousSummaryChecksum?: string;
   preservedMessageIds?: string[];
+  dynamicContextRestoreManifest?: any;
 }) {
   const core = {
     schema: "ccm-session-compact-boundary-v2",
@@ -671,6 +682,8 @@ export function buildSessionCompactionBoundaryMarker(input: {
     summarizedThroughMessageId: String(input.summarizedThroughMessageId || ""),
     previousSummaryChecksum: String(input.previousSummaryChecksum || ""),
     preservedMessageIds: Array.isArray(input.preservedMessageIds) ? input.preservedMessageIds.map(String) : [],
+    dynamicContextRestoreManifest: input.dynamicContextRestoreManifest || null,
+    dynamicContextRestoreChecksum: String(input.dynamicContextRestoreManifest?.checksum || ""),
   };
   return { ...core, checksum: checksum(core) };
 }
@@ -712,6 +725,8 @@ export function normalizeSessionCompactionState(value: any, input: {
     recoveryContextTokens: Math.max(0, Math.floor(Number(source.recoveryContextTokens ?? source.recovery_context_tokens ?? 0))),
     hookResultTokens: Math.max(0, Math.floor(Number(source.hookResultTokens ?? source.hook_result_tokens ?? 0))),
     ptlRecoveryAttempts: Math.max(0, Math.floor(Number(source.ptlRecoveryAttempts ?? source.ptl_recovery_attempts ?? 0))),
+    dynamicContextRestoreManifest: source.dynamicContextRestoreManifest || source.dynamic_context_restore_manifest || source.boundaryMarker?.dynamicContextRestoreManifest || source.boundary_marker?.dynamicContextRestoreManifest || null,
+    dynamicContextRestoreReceipt: source.dynamicContextRestoreReceipt || source.dynamic_context_restore_receipt || null,
   };
 }
 

@@ -29,6 +29,11 @@
 - 面向 Agent的资料上下文标明读取成功或失败；未读取内容不得由文件名推断。
 - 子Agent只接收计划引用的完整分片，再由Context Engine执行最终Token门禁，不使用50K字符截断。
 - 附件引用注册表按任务重新核验；清理中心只删除超过24小时且引用数为0的安全上传文件，执行前再次扫描避免误删。
+- 需求池条目和摄取草稿创建时保存`target_scope + target_id + exact_session_id`。活动会话只是创建时的默认候选，创建完成后不再参与目标解析。
+- 确认和派发默认使用保存的精确会话；用户可明确改选同一目标下的可写会话。会话不存在、已归档或归属不匹配时失败关闭，不回退到后来切换的活动会话。
+- 拆分计划的每个工作项保存目标专属`target_session_id`；跨群聊或跨项目工作项不能继承父任务中其他目标的会话ID。
+- 任务派发、需求池和工作台未明确选择现有会话时，服务端创建`session_kind=automation`的专属自动化任务会话；显式选择的普通会话继续保持普通会话类型。
+- 群聊会话列表投影为普通会话和自动化任务会话；项目会话列表另有独立飞书会话分组。飞书会话不进入Web来源的工作台会话选择器。
 
 ## 实现入口
 
@@ -38,4 +43,4 @@
 - `backend/system/task-attachments.ts`
 - `backend/system/attachment-reference-registry.ts`
 - `frontend/src/components/common/TaskAttachmentPicker.vue`
-- 回归：`requirement-ingestion-v2-production-selftest.mjs`、`task-attachments-production-selftest.mjs`、`online-document-workflow-selftest.mjs`、`clipboard-attachments-selftest.mjs`。
+- 回归：`requirement-ingestion-v2-production-selftest.mjs`、`requirement-target-session-binding-selftest.mjs`、`task-attachments-production-selftest.mjs`、`online-document-workflow-selftest.mjs`、`clipboard-attachments-selftest.mjs`。

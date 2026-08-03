@@ -20,6 +20,8 @@ const groupId = ref(props.groups[0]?.id || '')
 const projectId = ref(props.projects[0]?.name || '')
 const sessionId = ref('')
 const sessions = ref([])
+const ordinarySessions = computed(() => sessions.value.filter(item => String(item.session_kind || item.sessionKind || 'conversation') !== 'automation'))
+const automationSessions = computed(() => sessions.value.filter(item => String(item.session_kind || item.sessionKind || '') === 'automation'))
 const sessionsLoading = ref(false)
 const title = ref('')
 const requirement = ref('')
@@ -84,7 +86,7 @@ const loadSessions = async () => {
     const data = targetType.value === 'group'
       ? await groupsApi.sessions(targetId.value)
       : await sessionsApi.list(targetId.value)
-    sessions.value = (data.sessions || []).filter(item => !item.archived)
+    sessions.value = (data.sessions || []).filter(item => !item.archived && String(item.source || 'web') !== 'feishu')
   } catch (error) {
     toast.warning(error?.message || '会话列表暂时无法读取，将创建专属自动开发会话')
   } finally {
@@ -128,6 +130,7 @@ const setItemTarget = (item, value) => {
   const separator = value.indexOf(':')
   item.target_type = separator >= 0 ? value.slice(0, separator) : 'auto'
   item.target_id = separator >= 0 ? value.slice(separator + 1) : ''
+  item.target_session_id = ''
 }
 const itemTargetLabel = item => planTargetOptions.value.find(option => option.value === itemTargetValue(item))?.label || '由主 Agent 自动选择'
 const toggleDependency = (item, dependencyKey, checked) => {
@@ -232,6 +235,13 @@ const createPreview = async () => {
     files.value.forEach(file => form.append('files', file, file.name))
     const data = await request('/api/usability/intake/preview', form)
     preview.value = { ...data.task, intake: data.confirmation || data.task?.intake_draft || null, decomposition_plan: data.confirmation?.decomposition_plan }
+    const actualSessionId = data.task?.group_session_id || data.task?.project_session_id || ''
+    if (actualSessionId) {
+      sessionId.value = actualSessionId
+      if (!sessions.value.some(item => item.id === actualSessionId || item.sessionId === actualSessionId)) {
+        sessions.value.push({ id: actualSessionId, title: data.task?.title || '专属自动开发会话', session_kind: 'automation' })
+      }
+    }
     toast.success(`模型已整理执行计划${planItems.value.length ? `，拆分为 ${planItems.value.length} 个任务` : ''}`)
   } catch (error) {
     toast.error(error.message)
@@ -249,6 +259,10 @@ const confirmAndQueue = async () => {
     const data = await request('/api/usability/intake/confirm', {
       task_id: preview.value.id,
       decomposition_plan: decompositionPlan.value,
+      target_scope: targetType.value === 'group' ? 'group_session' : 'project_session',
+      target_id: targetId.value,
+      exact_session_id: sessionId.value,
+      ...(targetType.value === 'group' ? { group_session_id: sessionId.value } : { project_session_id: sessionId.value }),
     })
     emit('created', data)
     toast.success(`已创建 ${data.children?.length || 1} 个分派任务，并按会话顺序进入自动执行队列`)
@@ -275,7 +289,11 @@ const confirmAndQueue = async () => {
           <label><span>执行范围</span><select v-model="targetType"><option value="group">群聊会话</option><option value="project">项目会话</option></select></label>
           <label v-if="targetType === 'group'"><span>群聊</span><select v-model="groupId"><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label>
           <label v-else><span>项目</span><select v-model="projectId"><option v-for="project in projects" :key="project.name" :value="project.name">{{ project.display_name || project.name }}</option></select></label>
-          <label><span>会话</span><select v-model="sessionId" :disabled="sessionsLoading"><option value="">新建专属自动开发会话</option><option v-for="session in sessions" :key="session.id" :value="session.id">{{ session.name || session.title || session.id }}</option></select></label>
+          <label><span>会话</span><select v-model="sessionId" :disabled="sessionsLoading">
+            <option value="">新建专属自动开发会话</option>
+            <optgroup v-if="ordinarySessions.length" label="普通会话"><option v-for="session in ordinarySessions" :key="session.id" :value="session.id">{{ session.name || session.title || session.id }}</option></optgroup>
+            <optgroup v-if="automationSessions.length" label="自动化任务会话"><option v-for="session in automationSessions" :key="session.id" :value="session.id">{{ session.name || session.title || session.id }}</option></optgroup>
+          </select></label>
           <label><span>队列优先级</span><select v-model="priority"><option value="high">高，插入当前队列前部</option><option value="normal">普通，按创建顺序</option><option value="low">低，等待普通任务</option></select></label>
         </div>
         <label class="field"><span>任务标题 <small>可选</small></span><input v-model="title" placeholder="模型会根据需求自动生成标题"></label>
@@ -291,7 +309,15 @@ const confirmAndQueue = async () => {
 
       <div v-else class="plan-preview">
         <div class="plan-summary"><span><Layers3 :size="18" /></span><div><strong>{{ preview.title }}</strong><p>{{ preview.intake?.business_goal || preview.business_goal || preview.description }}</p></div></div>
-        <div class="plan-facts"><span>执行位置 <strong>{{ targetLabel }}</strong></span><span>精确会话 <strong>{{ preview.project_session_id || preview.group_session_id || '已自动创建' }}</strong></span><span>任务数量 <strong>{{ planItems.length || 1 }}</strong></span><span>执行策略 <strong>会话内串行</strong></span></div>
+        <div class="plan-facts">
+          <span>执行位置 <strong>{{ targetLabel }}</strong></span>
+          <label class="plan-session-picker"><span>精确会话</span><select v-model="sessionId" :disabled="sessionsLoading">
+            <optgroup v-if="ordinarySessions.length" label="普通会话"><option v-for="session in ordinarySessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.name || session.title || session.id || session.sessionId }}</option></optgroup>
+            <optgroup v-if="automationSessions.length" label="自动化任务会话"><option v-for="session in automationSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.name || session.title || session.id || session.sessionId }}</option></optgroup>
+          </select></label>
+          <span>任务数量 <strong>{{ planItems.length || 1 }}</strong></span>
+          <span>执行策略 <strong>会话内串行</strong></span>
+        </div>
         <div v-if="sourceCoverage" :class="['source-coverage-gate', sourceGatePass ? 'ok' : 'blocked']"><strong>{{ sourceGatePass ? '资料已完整覆盖' : '资料覆盖未完成' }}</strong><span>{{ sourceCoverage.covered_source_count || 0 }}/{{ sourceCoverage.required_source_count || 0 }} 份必需资料 · {{ sourceCoverage.total_tokens || 0 }} Tokens</span></div>
         <div :class="['plan-validation', planValidation.pass ? 'ok' : 'warn']">{{ planValidation.message }}</div>
         <div class="plan-items">
@@ -354,12 +380,12 @@ const confirmAndQueue = async () => {
 header{display:flex;align-items:center;gap:12px;padding:17px 19px;border-bottom:1px solid var(--border-color)}header>div{min-width:0;flex:1}header h3{margin:0;color:var(--text-primary);font-size:16px;letter-spacing:0}header p{margin:4px 0 0;color:var(--text-muted);font-size:11px}.modal-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:7px;background:color-mix(in srgb,var(--accent-blue) 10%,var(--surface));color:var(--accent-blue)}.icon-close{width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--border-color);border-radius:7px;background:var(--surface);color:var(--text-muted);cursor:pointer}
 .intake-form,.plan-preview{min-height:0;overflow:auto;padding:18px 20px}.target-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.target-grid label,.field{display:grid;gap:6px}.target-grid span,.field>span{color:var(--text-secondary);font-size:11px;font-weight:750}.field{margin-top:13px}.field small{color:var(--text-muted);font-weight:500}.target-grid select,.field input,.field textarea{width:100%;min-width:0;border:1px solid var(--border-color);border-radius:7px;background:var(--surface);color:var(--text-primary);font:inherit;outline:none}.target-grid select,.field input{height:38px;padding:0 10px}.field textarea{padding:10px 11px;line-height:1.6;resize:vertical}.target-grid select:focus,.field input:focus,.field textarea:focus{border-color:var(--accent-blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent-blue) 12%,transparent)}
 .attachment-row{display:flex;align-items:center;gap:10px;margin-top:10px}.attachment-row span{color:var(--text-muted);font-size:10px}.primary,.secondary{min-height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 13px;border-radius:7px;font-size:12px;font-weight:750;cursor:pointer}.primary{border:1px solid var(--accent-blue);background:var(--accent-blue);color:#fff}.secondary{border:1px solid var(--border-color);background:var(--surface);color:var(--text-secondary)}button:disabled{cursor:not-allowed;opacity:.55}
-.plan-summary{display:flex;gap:11px;padding:14px;border:1px solid var(--border-color);border-radius:8px;background:var(--panel-muted)}.plan-summary>span{color:var(--accent-blue)}.plan-summary strong{color:var(--text-primary);font-size:14px}.plan-summary p{margin:5px 0 0;color:var(--text-secondary);font-size:11px;line-height:1.55}.plan-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:13px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}.plan-facts span{display:grid;gap:4px;padding:10px;border-right:1px solid var(--border-color);color:var(--text-muted);font-size:9.5px}.plan-facts span:last-child{border-right:0}.plan-facts strong{overflow:hidden;color:var(--text-primary);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
+.plan-summary{display:flex;gap:11px;padding:14px;border:1px solid var(--border-color);border-radius:8px;background:var(--panel-muted)}.plan-summary>span{color:var(--accent-blue)}.plan-summary strong{color:var(--text-primary);font-size:14px}.plan-summary p{margin:5px 0 0;color:var(--text-secondary);font-size:11px;line-height:1.55}.plan-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:13px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}.plan-facts>span,.plan-session-picker{display:grid;gap:4px;padding:10px;border-right:1px solid var(--border-color);color:var(--text-muted);font-size:9.5px}.plan-facts>span:last-child{border-right:0}.plan-facts strong{overflow:hidden;color:var(--text-primary);font-size:11px;text-overflow:ellipsis;white-space:nowrap}.plan-session-picker>span{padding:0;border:0;color:var(--text-muted);font-size:9.5px}.plan-session-picker select{min-width:0;height:28px;padding:0 24px 0 7px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-primary);font-size:10.5px}
 .plan-validation{margin-bottom:8px;padding:7px 9px;border-radius:6px;font-size:10.5px}.plan-validation.ok{background:color-mix(in srgb,var(--accent-green) 8%,var(--surface));color:var(--accent-green)}.plan-validation.warn{background:rgba(245,158,11,.09);color:#b54708}
 .source-coverage-gate{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;padding:8px 10px;border-radius:6px;font-size:10.5px}.source-coverage-gate.ok{background:color-mix(in srgb,var(--accent-green) 8%,var(--surface));color:var(--accent-green)}.source-coverage-gate.blocked{background:color-mix(in srgb,var(--accent-yellow) 10%,var(--surface));color:var(--accent-yellow)}.source-coverage-gate span{font-size:9.5px}
 .plan-items{display:grid;gap:7px}.plan-items article{display:flex;gap:10px;padding:11px;border:1px solid var(--border-color);border-radius:7px}.plan-items article.editing{border-color:color-mix(in srgb,var(--accent-blue) 42%,var(--border-color));background:color-mix(in srgb,var(--accent-blue) 3%,var(--surface))}.plan-items article>span{flex:0 0 auto;width:24px;height:24px;display:grid;place-items:center;border-radius:6px;background:var(--panel-muted);color:var(--accent-blue);font-size:10px;font-weight:800}.plan-item-body{min-width:0;flex:1}.plan-item-title{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.plan-item-title>div:first-child{min-width:0;display:grid;gap:2px}.plan-item-title>div:first-child strong{display:flex;align-items:center;flex-wrap:wrap;gap:5px;overflow-wrap:anywhere}.plan-item-title>div:first-child small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.plan-item-actions{display:flex;gap:3px;flex:0 0 auto}.plan-item-actions button{width:27px;height:27px;display:grid;place-items:center;padding:0;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-muted);cursor:pointer}.plan-item-actions button:hover:not(:disabled){border-color:var(--accent-blue);color:var(--accent-blue)}.plan-item-actions button.danger:hover:not(:disabled){border-color:#ef4444;color:#b42318}.plan-item-actions button:disabled{opacity:.35;cursor:not-allowed}.plan-items strong{color:var(--text-primary);font-size:12px}.required-gate{display:inline-flex;padding:1px 5px;border-radius:4px;background:color-mix(in srgb,var(--accent-green) 10%,var(--surface));color:var(--accent-green);font-size:8.5px;font-style:normal;white-space:nowrap}.plan-items p{margin:4px 0;color:var(--text-secondary);font-size:10.5px;line-height:1.5}.plan-items small{color:var(--text-muted);font-size:9.5px}
 .source-evidence{display:flex;align-items:flex-start;gap:5px;margin-top:6px;color:var(--text-muted);font-size:9.5px;line-height:1.45}.source-evidence svg{flex:0 0 auto;margin-top:1px}.source-evidence span{overflow-wrap:anywhere}
 .plan-item-editor{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-color)}.plan-item-editor label{min-width:0;display:grid;gap:4px}.plan-item-editor label:nth-child(2),.plan-item-editor label:nth-child(4),.plan-item-editor label:nth-child(5),.plan-item-editor fieldset{grid-column:1/-1}.plan-item-editor label>span,.plan-item-editor legend{color:var(--text-secondary);font-size:10px;font-weight:750}.plan-item-editor input,.plan-item-editor textarea,.plan-item-editor select{width:100%;min-width:0;box-sizing:border-box;padding:7px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-primary);font:inherit;font-size:11px;outline:none}.plan-item-editor textarea{resize:vertical;line-height:1.5}.plan-item-editor fieldset{display:flex;flex-wrap:wrap;gap:6px 12px;margin:0;padding:8px;border:1px solid var(--border-color);border-radius:6px}.dependency-option{display:flex!important;grid-column:auto!important;align-items:center;grid-template-columns:auto 1fr!important;gap:5px!important;max-width:100%}.dependency-option input{width:auto}.dependency-option span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.add-plan-item{min-height:34px;display:inline-flex;align-items:center;justify-content:center;gap:6px;margin-top:8px;padding:0 10px;border:1px dashed var(--border-color);border-radius:7px;background:transparent;color:var(--accent-blue);font-size:11px;font-weight:750;cursor:pointer}.add-plan-item:hover{border-color:var(--accent-blue);background:color-mix(in srgb,var(--accent-blue) 5%,var(--surface))}.replay-note{display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px;border-left:3px solid var(--accent-green);background:color-mix(in srgb,var(--accent-green) 7%,var(--surface));color:var(--text-secondary);font-size:10.5px}
 footer{display:flex;justify-content:flex-end;gap:8px;padding:13px 19px;border-top:1px solid var(--border-color);background:var(--panel-muted)}
-@media(max-width:680px){.automated-intake-modal{width:100vw;height:100vh;max-height:none;border:0;border-radius:0}.target-grid,.plan-facts,.plan-item-editor{grid-template-columns:1fr}.plan-facts span{border-right:0;border-bottom:1px solid var(--border-color)}.plan-facts span:last-child{border-bottom:0}.attachment-row{align-items:flex-start;flex-direction:column}.plan-item-title{align-items:stretch;flex-direction:column}.plan-item-actions{overflow-x:auto}.plan-item-editor label,.plan-item-editor fieldset{grid-column:1!important}footer .primary{flex:1}}
+@media(max-width:680px){.automated-intake-modal{width:100vw;height:100vh;max-height:none;border:0;border-radius:0}.target-grid,.plan-facts,.plan-item-editor{grid-template-columns:1fr}.plan-facts>span,.plan-session-picker{border-right:0;border-bottom:1px solid var(--border-color)}.plan-facts>span:last-child{border-bottom:0}.attachment-row{align-items:flex-start;flex-direction:column}.plan-item-title{align-items:stretch;flex-direction:column}.plan-item-actions{overflow-x:auto}.plan-item-editor label,.plan-item-editor fieldset{grid-column:1!important}footer .primary{flex:1}}
 </style>

@@ -161,18 +161,35 @@ function defaultGroupSessionRecord(groupId: string) {
     updatedAt: updatedAt || new Date().toISOString(),
     messageCount,
     legacy: true,
+    session_kind: "conversation",
   };
+}
+
+function normalizeGroupSessionKind(groupId: string, session: any, automatedSessionIds: Set<string>) {
+  const explicit = String(session?.session_kind || session?.sessionKind || session?.purpose || "").trim().toLowerCase();
+  if (["automation", "automated_task", "task"].includes(explicit)) return "automation";
+  if (automatedSessionIds.has(String(session?.id || ""))) return "automation";
+  return "conversation";
 }
 
 export function listGroupChatSessions(groupId: string) {
   const manifest = readGroupSessionManifest(groupId);
   const legacyExists = fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID));
+  const automatedSessionIds = new Set(loadTasks()
+    .filter((task: any) => String(task?.group_id || "") === String(groupId || ""))
+    .map((task: any) => String(task?.group_session_id || task?.exact_session_id || ""))
+    .filter(Boolean));
   const sessions = (manifest.sessions.length ? [...manifest.sessions] : [defaultGroupSessionRecord(groupId)])
     .filter((item: any) => item.id !== GROUP_DEFAULT_SESSION_ID || legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID);
   if ((legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID) && !sessions.some((item: any) => item.id === GROUP_DEFAULT_SESSION_ID)) {
     sessions.unshift(defaultGroupSessionRecord(groupId));
   }
-  return { ...manifest, sessions: sessions.sort((a: any, b: any) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))) };
+  return {
+    ...manifest,
+    sessions: sessions
+      .map((session: any) => ({ ...session, session_kind: normalizeGroupSessionKind(groupId, session, automatedSessionIds) }))
+      .sort((a: any, b: any) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))),
+  };
 }
 
 export function getActiveGroupChatSessionId(groupId: string) {
@@ -183,6 +200,11 @@ export function resolveWritableGroupChatSession(groupId: string, requestedSessio
   const id = String(groupId || "").trim();
   if (!id) throw new Error("群聊 ID 不能为空");
   const requested = String(requestedSessionId || "").trim();
+  if (!requested && options.createDedicated === true) {
+    return createGroupChatSession(id, String(options.title || "自动开发任务"), {
+      sessionKind: options.sessionKind || options.session_kind || "automation",
+    });
+  }
   const manifest = listGroupChatSessions(id);
   const candidateId = requested || String(manifest.activeSessionId || "").trim();
   const candidate = manifest.sessions.find((item: any) => item.id === candidateId) || null;
@@ -196,7 +218,9 @@ export function resolveWritableGroupChatSession(groupId: string, requestedSessio
     if (candidate?.archived === true) throw new Error("归档会话为只读状态，请恢复或新建会话后继续");
     throw new Error("当前群聊没有可写会话，请新建会话");
   }
-  return createGroupChatSession(id, String(options.title || "新会话"));
+  return createGroupChatSession(id, String(options.title || "新会话"), {
+    sessionKind: options.sessionKind || options.session_kind || "conversation",
+  });
 }
 
 export function findGroupChatSessionContainingMessage(groupId: string, messageId: string) {
@@ -209,12 +233,15 @@ export function findGroupChatSessionContainingMessage(groupId: string, messageId
   return null;
 }
 
-export function createGroupChatSession(groupId: string, title = "") {
+export function createGroupChatSession(groupId: string, title = "", options: any = {}) {
   const manifest = listGroupChatSessions(groupId);
   const now = new Date().toISOString();
   const id = `gcs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const cleanTitle = String(title || "新会话").trim().slice(0, 80) || "新会话";
-  const session = { id, title: cleanTitle, titleOrigin: isSessionTitlePlaceholder(cleanTitle) ? "placeholder" : "manual", createdAt: now, updatedAt: now, messageCount: 0, legacy: false };
+  const sessionKind = ["automation", "automated_task", "task"].includes(String(options.sessionKind || options.session_kind || "").toLowerCase())
+    ? "automation"
+    : "conversation";
+  const session = { id, title: cleanTitle, titleOrigin: isSessionTitlePlaceholder(cleanTitle) ? "placeholder" : "manual", createdAt: now, updatedAt: now, messageCount: 0, legacy: false, session_kind: sessionKind };
   const existingSessions = manifest.sessions.filter((item: any) => item.id !== GROUP_DEFAULT_SESSION_ID || fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID)));
   ensureGroupSessionLifecycleHead(groupId, id, { createdAt: now, reason: "group_chat_session_created" });
   try {

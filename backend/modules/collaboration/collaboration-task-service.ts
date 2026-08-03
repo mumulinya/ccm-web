@@ -543,6 +543,8 @@ function createTaskWithScopedIdentity(task: any) {
   const taskGroupSession = taskGroupId
     ? resolveWritableGroupChatSession(taskGroupId, task.group_session_id || task.groupSessionId || "", {
       title: compactMemoryText(task.title || "任务会话", 80),
+      createDedicated: !String(task.group_session_id || task.groupSessionId || "").trim(),
+      sessionKind: "automation",
     })
     : null;
   const taskGroupSessionId = String(taskGroupSession?.id || "");
@@ -719,9 +721,30 @@ function resolveRequirementEpicTarget(item: any, input: any, groups: any[], conf
       ? null
       : groups.find((group: any) => group.id === defaultGroupId)
         || groups.find((group: any) => (group.members || []).some((member: any) => String(member?.project || "") === directProject.name));
+    const requestedSessionId = String(item.target_session_id || item.targetSessionId || "").trim();
+    const groupSession = containingGroup
+      ? resolveWritableGroupChatSession(
+          containingGroup.id,
+          requestedSessionId || (containingGroup.id === defaultGroupId ? String(input.group_session_id || input.groupSessionId || "") : ""),
+          {
+            title: compactMemoryText(item.title || "需求子任务", 80),
+            createDedicated: !requestedSessionId && containingGroup.id !== defaultGroupId,
+            sessionKind: "automation",
+          },
+        )
+      : null;
+    const projectSession = !containingGroup
+      ? ensureProjectAutomationSession(
+          directProject.name,
+          requestedSessionId || (directProject.name === defaultProject ? exactProjectSession : ""),
+          compactMemoryText(item.title || "需求子任务", 80),
+        )
+      : null;
     return {
       assign_type: containingGroup ? "group" : "project",
       group_id: containingGroup?.id || null,
+      group_session_id: groupSession?.id || null,
+      project_session_id: projectSession?.sessionId || null,
       target_project: directProject.name,
       target: {
         type: "project",
@@ -740,9 +763,25 @@ function resolveRequirementEpicTarget(item: any, input: any, groups: any[], conf
   if (!group) throw new Error(`子任务 ${item.item_key} 未找到可执行项目或群聊`);
   const coordinator = getCoordinatorMember(group);
   if (!coordinator?.project) throw new Error(`群聊 ${group.name || group.id} 没有可执行的主 Agent`);
+  const requestedGroupSessionId = String(
+    item.target_session_id
+      || item.targetSessionId
+      || (group.id === defaultGroupId ? input.group_session_id || input.groupSessionId || "" : ""),
+  ).trim();
+  const groupSession = resolveWritableGroupChatSession(
+    group.id,
+    requestedGroupSessionId,
+    {
+      title: compactMemoryText(item.title || "需求子任务", 80),
+      createDedicated: !requestedGroupSessionId,
+      sessionKind: "automation",
+    },
+  );
   return {
     assign_type: "group",
     group_id: group.id,
+    group_session_id: groupSession.id,
+    project_session_id: null,
     target_project: coordinator.project,
     target: {
       type: "group",
@@ -759,6 +798,8 @@ function buildRequirementEpicTaskRecord(input: any, id: string, traceId: string,
   const groupSession = groupId
     ? resolveWritableGroupChatSession(groupId, input.group_session_id || input.groupSessionId || "", {
       title: compactMemoryText(input.title || "需求 Epic", 80),
+      createDedicated: !String(input.group_session_id || input.groupSessionId || "").trim(),
+      sessionKind: "automation",
     })
     : null;
   const record: any = {
@@ -966,11 +1007,8 @@ export function createRequirementEpicWithChildren(payload: any) {
       acceptance_criteria: requirementEpicTextList(item.acceptance_criteria),
       target_project: target.target_project,
       group_id: target.group_id,
-      // 请求的会话只属于 payload 指定的群；跨群子任务留空，由记录构建器按各自群解析可写会话。
-      group_session_id: target.group_id && String(target.group_id) === String(payload.group_id || payload.groupId || "")
-        ? (payload.group_session_id || payload.groupSessionId || null)
-        : null,
-      project_session_id: payload.project_session_id || payload.projectSessionId || null,
+      group_session_id: target.group_session_id || null,
+      project_session_id: target.project_session_id || null,
       queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
       assign_type: target.assign_type,
       workflow_type: "daily_dev",

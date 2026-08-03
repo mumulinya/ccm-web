@@ -13,6 +13,7 @@ import { createGlobalAgentHistoryRuntime } from "./global-agent-history";
 import { createGlobalAgentStatusRuntime } from "./global-agent-status";
 import { generateSessionTitleWithModel, isMeaningfulSessionTitleInput, isSessionTitlePlaceholder } from "../../system/session-title";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import { clearMainAgentPostCompactContinuity } from "../../system/main-agent-post-compact-continuity";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -235,7 +236,19 @@ function createGlobalAgentConversationSession(payload: any) {
 }
 
 function deleteGlobalAgentConversationSession(sessionId: string, expectedSource = "") {
-  return globalAgentHistoryRuntime.deleteGlobalAgentConversationSession(sessionId, expectedSource)
+  const result = globalAgentHistoryRuntime.deleteGlobalAgentConversationSession(sessionId, expectedSource)
+  if ((result as any)?.deleted === true) {
+    try {
+      clearMainAgentPostCompactContinuity({
+        agentKind: "global",
+        scope: "global",
+        scopeId: "global-agent",
+        exactSessionId: sessionId,
+        generation: 0,
+      })
+    } catch {}
+  }
+  return result
 }
 
 function getGlobalAgentConversationMessages(sessionId: string) {

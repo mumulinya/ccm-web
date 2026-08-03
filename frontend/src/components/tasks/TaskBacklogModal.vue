@@ -1,5 +1,6 @@
 <script setup>
 import { ChevronRight, FileStack, Sparkles } from '@lucide/vue'
+import { reactive } from 'vue'
 
 defineProps({
   backlogs: { type: Array, default: () => [] },
@@ -39,6 +40,16 @@ const collectionProgress = item => {
   if (!total) return item?.state === 'done' ? 100 : 0
   return Math.max(0, Math.min(100, Math.round((Number(item?.progress?.done || 0) / total) * 100)))
 }
+
+const selectedSessions = reactive({})
+const backlogKey = item => `${item.group_id}:${item.entry_id || item.name}`
+const selectedSession = item => selectedSessions[backlogKey(item)] ?? item.target_session_id ?? ''
+const selectSession = (item, value) => {
+  selectedSessions[backlogKey(item)] = value
+}
+const sessionOptions = (item, kind) => (item.session_options || []).filter(session => (
+  String(session.session_kind || session.sessionKind || 'conversation') === (kind === 'automation' ? 'automation' : 'conversation')
+))
 </script>
 
 <template>
@@ -145,6 +156,19 @@ const collectionProgress = item => {
               <div><span>下一步</span><strong>{{ item.next_action || '等待系统推进' }}</strong></div>
               <div><span>负责人</span><strong>{{ item.owner || '主 Agent' }}</strong></div>
               <div><span>所属群聊</span><strong>{{ item.group_name }}</strong></div>
+              <div class="backlog-session-field">
+                <span>目标会话</span>
+                <select
+                  :value="selectedSession(item)"
+                  :class="{ invalid: !item.target_session_valid && selectedSession(item) === item.target_session_id }"
+                  aria-label="需求派发目标会话"
+                  @change="selectSession(item, $event.target.value)"
+                >
+                  <option v-if="!item.target_session_valid && item.target_session_id" :value="item.target_session_id" disabled>原会话不可用，请改选</option>
+                  <optgroup v-if="sessionOptions(item, 'conversation').length" label="普通会话"><option v-for="session in sessionOptions(item, 'conversation')" :key="session.id" :value="session.id">{{ session.title || session.id }}</option></optgroup>
+                  <optgroup v-if="sessionOptions(item, 'automation').length" label="自动化任务会话"><option v-for="session in sessionOptions(item, 'automation')" :key="session.id" :value="session.id">{{ session.title || session.id }}</option></optgroup>
+                </select>
+              </div>
               <div><span>更新时间</span><strong>{{ formatBacklogTime(item.updated_at || item.created_at) }}</strong></div>
             </div>
             <div v-if="backlogQualityText(item)" :class="['backlog-readiness', item.quality?.pass ? 'ok' : 'warn']">
@@ -171,7 +195,7 @@ const collectionProgress = item => {
             </div>
           </div>
           <div class="backlog-actions">
-            <button v-if="backlogCanDispatch(item)" class="btn btn-primary btn-sm" :disabled="!dailyDevGroupCanExecute(item.group_id)" @click="emit('dispatch', item)">立即派发</button>
+            <button v-if="backlogCanDispatch(item)" class="btn btn-primary btn-sm" :disabled="!dailyDevGroupCanExecute(item.group_id) || !selectedSession(item)" @click="emit('dispatch', item, selectedSession(item))">立即派发</button>
             <button v-if="backlogCanRestoreReady(item)" class="btn btn-outline btn-sm" @click="emit('restore-ready', item)">恢复可接活</button>
             <button v-if="backlogState(item) === 'ready'" class="btn btn-outline btn-sm" @click="emit('mark-blocked', item)">标记阻塞</button>
           </div>
@@ -215,10 +239,11 @@ const collectionProgress = item => {
 .priority-normal { background: rgba(59,130,246,0.1); color: #3b82f6; }
 .priority-low { background: rgba(100,116,139,0.1); color: #64748b; }
 .backlog-goal { color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.backlog-state-grid { display: grid; grid-template-columns: 1.4fr 0.8fr 0.9fr 1fr; gap: 8px; margin-top: 10px; }
+.backlog-state-grid { display: grid; grid-template-columns: 1.25fr 0.72fr 0.85fr 1.1fr 0.9fr; gap: 8px; margin-top: 10px; }
 .backlog-state-grid > div { min-width: 0; padding: 8px; border-radius: 7px; background: rgba(15, 23, 42, 0.04); }
 .backlog-state-grid span { display: block; margin-bottom: 3px; color: var(--text-muted); font-size: 10.5px; font-weight: 700; }
 .backlog-state-grid strong { display: block; color: var(--text-primary); font-size: 11.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.backlog-session-field select{width:100%;min-width:0;height:28px;padding:0 24px 0 7px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-primary);font-size:11px}.backlog-session-field select.invalid{border-color:#f59e0b;color:#b45309}
 .backlog-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 7px; color: var(--text-muted); font-size: 11px; }
 .backlog-readiness { display: inline-flex; max-width: 100%; margin-top: 8px; margin-right: 6px; padding: 5px 8px; border-radius: 6px; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .backlog-readiness.ok { border: 1px solid rgba(34, 197, 94, 0.16); background: rgba(34, 197, 94, 0.08); color: var(--accent-green); }

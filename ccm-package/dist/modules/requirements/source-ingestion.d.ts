@@ -56,6 +56,7 @@ export type RequirementDecompositionItem = {
     scope: string[];
     target_type: "group" | "project" | "auto";
     target_id: string;
+    target_session_id?: string;
     acceptance_criteria: string[];
     depends_on: string[];
     risks: string[];

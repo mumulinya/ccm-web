@@ -117,6 +117,15 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
     availableContextCatalog: {
         schema: string;
         accounting: string;
+        postCompactRestore: {
+            status: string;
+            restoredSkillTokens: number;
+            restoredMcpSchemaTokens: number;
+            restoredSkillNames: any;
+            loadedToolNames: any;
+            dropped: any;
+            checksum: string;
+        };
         mcp: {
             configured: number;
             available: number;
@@ -131,6 +140,9 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
                 configured: boolean;
                 evidenceStatus: string;
                 loadLevels: unknown[];
+                loadSources: unknown[];
+                loadedTokens: any;
+                dropReasons: unknown[];
                 invocationCount: any;
                 invocationSucceeded: any;
                 loadedChecksum: string;
@@ -151,6 +163,9 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
                 configured: boolean;
                 evidenceStatus: string;
                 loadLevels: unknown[];
+                loadSources: unknown[];
+                loadedTokens: any;
+                dropReasons: unknown[];
                 invocationCount: any;
                 invocationSucceeded: any;
                 loadedChecksum: string;
@@ -364,6 +379,15 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         availableContextCatalog: {
             schema: string;
             accounting: string;
+            postCompactRestore: {
+                status: string;
+                restoredSkillTokens: number;
+                restoredMcpSchemaTokens: number;
+                restoredSkillNames: any;
+                loadedToolNames: any;
+                dropped: any;
+                checksum: string;
+            };
             mcp: {
                 configured: number;
                 available: number;
@@ -378,6 +402,9 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
                     configured: boolean;
                     evidenceStatus: string;
                     loadLevels: unknown[];
+                    loadSources: unknown[];
+                    loadedTokens: any;
+                    dropReasons: unknown[];
                     invocationCount: any;
                     invocationSucceeded: any;
                     loadedChecksum: string;
@@ -398,6 +425,9 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
                     configured: boolean;
                     evidenceStatus: string;
                     loadLevels: unknown[];
+                    loadSources: unknown[];
+                    loadedTokens: any;
+                    dropReasons: unknown[];
                     invocationCount: any;
                     invocationSucceeded: any;
                     loadedChecksum: string;

@@ -15,6 +15,7 @@ import { buildContextBudget, estimateTextTokens } from "../../system/context-bud
 import { buildToolAuthorizationPayload, normalizeToolAuthorization } from "../../tools/tool-authorization";
 
 import { toolManager } from "../../tools/tool-manager";
+import { clearMainAgentPostCompactContinuity } from "../../system/main-agent-post-compact-continuity";
 
 import { getPublicAgentRuntimes, normalizeAgentRuntimeId } from "../../agents/runtime";
 
@@ -710,6 +711,15 @@ export function deleteGroupSessionMemoryArtifacts(groupId: string, sessionId: st
   const cleanSessionId = String(sessionId || "").trim();
   if (!cleanSessionId) throw new Error("缺少群聊会话 ID");
   const scopeId = cleanSessionId === "default" ? groupId : `${groupId}--${cleanSessionId}`;
+  try {
+    clearMainAgentPostCompactContinuity({
+      agentKind: "group",
+      scope: "group",
+      scopeId: String(groupId || ""),
+      exactSessionId: cleanSessionId,
+      generation: 0,
+    });
+  } catch {}
   const files = [
     getGroupMemoryFile(groupId, cleanSessionId),
     `${getGroupMemoryFile(groupId, cleanSessionId)}.bak`,

@@ -35,13 +35,16 @@ export declare function getSessions(projectName: string): {
     created_at: any;
     updated_at: any;
     source: string;
+    session_kind: string;
     feishu_bindings: any[];
 }[];
 export declare function getSessionDetail(projectName: string, sessionId: string): any;
-export declare function createProjectSessionRecord(projectName: string, name?: string, source?: string): {
+export declare function createProjectSessionRecord(projectName: string, name?: string, source?: string, options?: any): {
     project: string;
     sessionId: string;
     name: string;
+    source: string;
+    session_kind: string;
     created: boolean;
 };
 export declare function bindProjectFeishuSession(projectName: string, sessionId: string, targetId: string, action?: "bind" | "unbind"): {
@@ -51,6 +54,13 @@ export declare function bindProjectFeishuSession(projectName: string, sessionId:
     target: any;
 };
 export declare function ensureProjectAutomationSession(projectName: string, requestedSessionId?: string, title?: string): {
+    project: string;
+    sessionId: string;
+    name: string;
+    source: string;
+    session_kind: string;
+    created: boolean;
+} | {
     project: string;
     sessionId: string;
     name: any;

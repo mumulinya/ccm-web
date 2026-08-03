@@ -65,6 +65,7 @@ const global_agent_history_1 = require("./global-agent-history");
 const global_agent_status_1 = require("./global-agent-status");
 const session_title_1 = require("../../system/session-title");
 const runtime_events_1 = require("../../system/runtime-events");
+const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -153,7 +154,20 @@ function createGlobalAgentConversationSession(payload) {
     return globalAgentHistoryRuntime.createGlobalAgentConversationSession(payload);
 }
 function deleteGlobalAgentConversationSession(sessionId, expectedSource = "") {
-    return globalAgentHistoryRuntime.deleteGlobalAgentConversationSession(sessionId, expectedSource);
+    const result = globalAgentHistoryRuntime.deleteGlobalAgentConversationSession(sessionId, expectedSource);
+    if (result?.deleted === true) {
+        try {
+            (0, main_agent_post_compact_continuity_1.clearMainAgentPostCompactContinuity)({
+                agentKind: "global",
+                scope: "global",
+                scopeId: "global-agent",
+                exactSessionId: sessionId,
+                generation: 0,
+            });
+        }
+        catch { }
+    }
+    return result;
 }
 function getGlobalAgentConversationMessages(sessionId) {
     return globalAgentHistoryRuntime.getGlobalAgentConversationMessages(sessionId);

@@ -1201,6 +1201,52 @@ export function handleCollaborationApiIntakeRoutes(
 
 // Extracted functional module. The original entry remains a compatibility facade.
 
+function bindRequirementPlanTargetSessions(plan: any, input: {
+  groups: any[];
+  configs: any[];
+  defaultGroup?: any;
+  defaultGroupSessionId?: string;
+  defaultProject?: string;
+  defaultProjectSessionId?: string;
+}) {
+  if (!plan || !Array.isArray(plan.items)) return plan;
+  const defaultGroupId = String(input.defaultGroup?.id || "");
+  const defaultProject = String(input.defaultProject || "");
+  const items = plan.items.map((item: any) => {
+    const targetType = String(item.target_type || "auto");
+    const targetId = String(item.target_id || "").trim();
+    if (targetType === "group" || (targetType === "auto" && defaultGroupId)) {
+      const group = targetType === "group"
+        ? input.groups.find((candidate: any) => candidate.id === targetId || candidate.name === targetId)
+        : input.defaultGroup;
+      if (!group) return item;
+      const requested = String(item.target_session_id || (group.id === defaultGroupId ? input.defaultGroupSessionId : "") || "");
+      const session = resolveWritableGroupChatSession(group.id, requested, {
+        title: compactFormText(item.title || plan.epic_title, "需求子任务").slice(0, 80),
+        createDedicated: !requested,
+        sessionKind: "automation",
+      });
+      return { ...item, target_session_id: session.id };
+    }
+    const projectName = targetType === "project" ? targetId : defaultProject;
+    if (!projectName || !input.configs.some((config: any) => config.name === projectName)) return item;
+    const containingGroup = input.groups.find((group: any) => (group.members || []).some((member: any) => String(member?.project || "") === projectName));
+    if (containingGroup && defaultGroupId) {
+      const requested = String(item.target_session_id || (containingGroup.id === defaultGroupId ? input.defaultGroupSessionId : "") || "");
+      const session = resolveWritableGroupChatSession(containingGroup.id, requested, {
+        title: compactFormText(item.title || plan.epic_title, "需求子任务").slice(0, 80),
+        createDedicated: !requested,
+        sessionKind: "automation",
+      });
+      return { ...item, target_session_id: session.id };
+    }
+    const requested = String(item.target_session_id || (projectName === defaultProject ? input.defaultProjectSessionId : "") || "");
+    const session = ensureProjectAutomationSession(projectName, requested, compactFormText(item.title || plan.epic_title, "需求子任务").slice(0, 80));
+    return { ...item, target_session_id: session.sessionId };
+  });
+  return { ...plan, items };
+}
+
 
 export function handleCollaborationApiIntakeRoutesPartA(
   pathname: string,
@@ -1256,11 +1302,26 @@ export function handleCollaborationApiIntakeRoutesPartA(
         const coordinator = group?.members?.find((member: any) => member.role === "coordinator")?.project || group?.members?.[0]?.project || "";
         const targetProject = requestedProject || coordinator || configs[0]?.name || "";
         if (!targetProject && !group) return sendJson(res, { error: "还没有可执行项目，请先添加项目或开发群聊" }, 409);
+        const requestedGroupSessionId = compactFormText(payload.group_session_id || payload.groupSessionId, "");
+        const groupSession = group
+          ? resolveWritableGroupChatSession(group.id, requestedGroupSessionId, {
+              title: compactFormText(payload.title || requirement, "自动开发任务").slice(0, 80),
+              createDedicated: !requestedGroupSessionId,
+              sessionKind: "automation",
+            })
+          : null;
         const requestedProjectSessionId = compactFormText(payload.project_session_id || payload.projectSessionId, "");
         const projectSession = !group
           ? ensureProjectAutomationSession(targetProject, requestedProjectSessionId, compactFormText(payload.title || requirement, "自动开发任务").slice(0, 80))
           : null;
-        const requestedGroupSessionId = compactFormText(payload.group_session_id || payload.groupSessionId, "");
+        sourceIngestion.decomposition = bindRequirementPlanTargetSessions(sourceIngestion.decomposition, {
+          groups,
+          configs,
+          defaultGroup: group,
+          defaultGroupSessionId: groupSession?.id || "",
+          defaultProject: targetProject,
+          defaultProjectSessionId: projectSession?.sessionId || "",
+        });
         const clientMessageId = compactFormText(payload.client_message_id || payload.clientMessageId, "")
           || `intake_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
         const requestOrigin = compactFormText(payload.source || payload.request_origin || payload.requestOrigin, "usability-intake");
@@ -1302,7 +1363,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
           group_id: group?.id || "",
           group_name: group?.name || "",
           project_session_id: projectSession?.sessionId || "",
-          group_session_id: requestedGroupSessionId,
+          group_session_id: groupSession?.id || "",
           source_summary: sourceIngestion.user_summary,
           source_ingestion: sourceIngestion.technical,
           decomposition_plan: sourceIngestion.decomposition,
@@ -1329,7 +1390,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
           target_project: targetProject,
           priority: payload.priority || "normal",
           group_id: group?.id || null,
-          group_session_id: requestedGroupSessionId || null,
+          group_session_id: groupSession?.id || null,
           project_session_id: projectSession?.sessionId || null,
           assign_type: group ? "group" : "project",
           orchestration_scope: group ? "group_session" : "project_session",
@@ -1338,7 +1399,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
           source_channel: payload.source_channel || payload.sourceChannel || requestOrigin,
           target_scope: group ? "group_session" : "project_session",
           target_id: group?.id || targetProject,
-          exact_session_id: requestedGroupSessionId || projectSession?.sessionId || "",
+          exact_session_id: groupSession?.id || projectSession?.sessionId || "",
           client_message_id: clientMessageId,
           workflow_type: "requirement_epic",
           requires_code_changes: typeof payload.requires_code_changes === "boolean" ? payload.requires_code_changes : workflowDecision.requiresCodeChanges,
@@ -1352,7 +1413,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
               source: requestOrigin,
               channel: payload.channel || "web",
               project_session_id: projectSession?.sessionId || "",
-              group_session_id: requestedGroupSessionId,
+              group_session_id: groupSession?.id || "",
               client_message_id: clientMessageId,
               source_ingestion: sourceIngestion.technical,
             },
@@ -1508,15 +1569,100 @@ export function handleCollaborationApiIntakeRoutesPartA(
         if (!current) return sendJson(res, { error: "确认卡对应的任务不存在" }, 404);
         if (current.intake_state === "confirmed") return sendJson(res, { success: true, duplicate: true, task: current, trace_id: current.trace_id });
         if (current.intake_state !== "awaiting_confirmation") return sendJson(res, { error: "这张确认卡已经失效" }, 409);
+        const previousTargetSessionId = String(current.exact_session_id || current.group_session_id || current.project_session_id || "");
+        const requestedTargetScope = String(payload.target_scope || payload.targetScope || "").trim();
+        const requestedTargetId = String(payload.target_id || payload.targetId || "").trim();
+        const requestedExactSessionId = String(
+          payload.exact_session_id
+          || payload.exactSessionId
+          || payload.group_session_id
+          || payload.groupSessionId
+          || payload.project_session_id
+          || payload.projectSessionId
+          || "",
+        ).trim();
+        if (requestedExactSessionId) {
+          const currentScope = current.group_id ? "group_session" : "project_session";
+          const currentTargetId = String(current.group_id || current.target_project || "");
+          if (requestedTargetScope && requestedTargetScope !== currentScope) {
+            return sendJson(res, { error: "确认阶段只能改选同一目标下的会话；如需切换群聊或项目，请重新生成计划" }, 409);
+          }
+          if (requestedTargetId && requestedTargetId !== currentTargetId) {
+            return sendJson(res, { error: "确认阶段不能把计划移动到其他群聊或项目，请重新生成计划" }, 409);
+          }
+          const sessionPatch: any = current.group_id
+            ? (() => {
+                const session = resolveWritableGroupChatSession(current.group_id, requestedExactSessionId, { createIfMissing: false });
+                return {
+                  group_session_id: session.id,
+                  exact_session_id: session.id,
+                  origin_session_id: session.id,
+                };
+              })()
+            : (() => {
+                const session = ensureProjectAutomationSession(current.target_project, requestedExactSessionId, current.title || "自动开发任务");
+                return {
+                  project_session_id: session.sessionId,
+                  exact_session_id: session.sessionId,
+                  origin_session_id: session.sessionId,
+                };
+              })();
+          if (sessionPatch.exact_session_id !== String(current.exact_session_id || current.group_session_id || current.project_session_id || "")) {
+            const updatedTarget = updateTask(current.id, {
+              ...sessionPatch,
+              intake_draft: {
+                ...(current.intake_draft || {}),
+                group_session_id: sessionPatch.group_session_id || "",
+                project_session_id: sessionPatch.project_session_id || "",
+              },
+              workflow_meta: {
+                ...(current.workflow_meta || {}),
+                intake: {
+                  ...((current.workflow_meta || {}).intake || {}),
+                  group_session_id: sessionPatch.group_session_id || "",
+                  project_session_id: sessionPatch.project_session_id || "",
+                  target_session_changed_at: new Date().toISOString(),
+                  target_session_change_source: "explicit_at_confirmation",
+                },
+              },
+            });
+            if (updatedTarget) Object.assign(current, updatedTarget);
+            appendTaskTimelineEvent(current.id, {
+              type: "requirement_target_session_changed",
+              title: "执行会话已调整",
+              detail: `用户在确认前明确改选会话 ${sessionPatch.exact_session_id}`,
+              status: "completed",
+              phase: "planning",
+              agent: "user",
+              data: { target_scope: currentScope, target_id: currentTargetId, exact_session_id: sessionPatch.exact_session_id },
+            });
+          }
+        }
         const confirmedAt = new Date().toISOString();
         const submittedPlan = payload.decomposition_plan || payload.decompositionPlan || null;
-        const confirmedPlan = submittedPlan
+        let confirmedPlan = submittedPlan
           ? validateRequirementDecomposition(submittedPlan, {
               contentHash: current.requirement_content_hash || submittedPlan.content_hash,
               requirement: current.requirement_extraction,
               extractionMethod: submittedPlan.extraction_method,
             })
           : (current.decomposition_plan || current.requirement_decomposition);
+        const effectiveTargetSessionId = String(current.exact_session_id || current.group_session_id || current.project_session_id || "");
+        if (confirmedPlan && effectiveTargetSessionId && effectiveTargetSessionId !== previousTargetSessionId) {
+          const defaultTargetType = current.group_id ? "group" : "project";
+          const defaultTargetId = String(current.group_id || current.target_project || "");
+          confirmedPlan = {
+            ...confirmedPlan,
+            items: (confirmedPlan.items || []).map((item: any) => {
+              const itemType = String(item.target_type || "auto");
+              const itemTargetId = String(item.target_id || "");
+              const followsDefault = itemType === "auto"
+                || (itemType === defaultTargetType && (!itemTargetId || itemTargetId === defaultTargetId));
+              const followedPrevious = String(item.target_session_id || "") === previousTargetSessionId;
+              return followsDefault || followedPrevious ? { ...item, target_session_id: effectiveTargetSessionId } : item;
+            }),
+          };
+        }
         const sourceIngestion = current.source_ingestion || current.workflow_meta?.intake?.source_ingestion || {};
         assertRequirementPlanEvidence(confirmedPlan || {}, sourceIngestion.manifest || [], sourceIngestion.coverage_receipt || {
           complete: !(sourceIngestion.blocking_sources || []).length,
@@ -2024,7 +2170,7 @@ export function handleCollaborationApiIntakeRoutesPartB(
           description: buildDailyDevTaskDescription(taskPayload),
           target_project: groupReadiness.coordinator.project,
           group_id: groupId,
-          group_session_id: payload.group_session_id || payload.groupSessionId || null,
+          group_session_id: backlogFile?.target_session_id || payload.group_session_id || payload.groupSessionId || null,
           assign_type: "group",
           orchestration_scope: "group_session",
           queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
@@ -2032,7 +2178,7 @@ export function handleCollaborationApiIntakeRoutesPartB(
           source_channel: payload.source_channel || payload.sourceChannel || "task-dispatch-daily-dev",
           target_scope: "group_session",
           target_id: groupId,
-          exact_session_id: payload.group_session_id || payload.groupSessionId || "",
+          exact_session_id: backlogFile?.target_session_id || payload.group_session_id || payload.groupSessionId || "",
           client_message_id: clientMessageId,
           priority: payload.priority || "normal",
           auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
@@ -2054,6 +2200,9 @@ export function handleCollaborationApiIntakeRoutesPartB(
               ...(backlogFile ? {
                 backlog_file: backlogFile.name,
                 persisted_at: new Date().toISOString(),
+                target_scope: "group_session",
+                target_id: groupId,
+                target_session_id: backlogFile.target_session_id,
               } : {}),
               source: "create-daily-dev",
               attachment_count: attachmentBundle.attachments.length,
@@ -2164,6 +2313,7 @@ export function handleCollaborationApiIntakeRoutesPartB(
         const payload = body ? JSON.parse(body) : {};
         const result = importSharedDocsToDailyDevBacklog({
           group_id: payload.group_id || payload.groupId || "",
+          group_session_id: payload.group_session_id || payload.groupSessionId || payload.exact_session_id || payload.exactSessionId || "",
           limit: payload.limit || 20,
           force: !!payload.force,
           priority: payload.priority || "normal",
@@ -2189,6 +2339,8 @@ export function handleCollaborationApiIntakeRoutesPartB(
         const result = dispatchDailyDevBacklog(groupId, name, ctx, {
           auto_execute: payload.auto_execute !== false && payload.autoExecute !== false,
           force: !!payload.force,
+          group_session_id: payload.group_session_id || payload.groupSessionId || payload.exact_session_id || payload.exactSessionId || "",
+          source: payload.source || "manual-backlog-dispatch",
         });
         if (!result.success) return sendJson(res, { error: result.error }, result.status || 400);
         sendJson(res, result);

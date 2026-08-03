@@ -89,6 +89,7 @@ export type RequirementDecompositionItem = {
   scope: string[];
   target_type: "group" | "project" | "auto";
   target_id: string;
+  target_session_id?: string;
   acceptance_criteria: string[];
   depends_on: string[];
   risks: string[];
@@ -195,6 +196,7 @@ export function validateRequirementDecomposition(value: any, options: {
       scope: normalizeStringList(item?.scope, 16, 600),
       target_type: targetType,
       target_id: compact(item?.target_id || item?.targetId || item?.target_project || item?.targetProject || item?.group_id || item?.groupId || "", 120),
+      target_session_id: compact(item?.target_session_id || item?.targetSessionId || item?.exact_session_id || item?.exactSessionId || "", 160),
       acceptance_criteria: normalizeStringList(item?.acceptance_criteria || item?.acceptanceCriteria || item?.acceptance, 16, 700),
       depends_on: normalizeStringList(item?.depends_on || item?.dependsOn || item?.dependencies, 20, 80),
       risks: normalizeStringList(item?.risks, 12, 500),
@@ -215,6 +217,7 @@ export function validateRequirementDecomposition(value: any, options: {
       scope: ["跨子任务集成验证", "原始需求验收标准证据矩阵"],
       target_type: verificationTarget.target_type,
       target_id: verificationTarget.target_id,
+      target_session_id: verificationTarget.target_session_id || "",
       acceptance_criteria: normalizeStringList(
         value?.global_acceptance_criteria || value?.globalAcceptanceCriteria || requirement?.acceptance_criteria || ["跨模块主流程验证通过", "形成需求验收证据矩阵"],
         20,

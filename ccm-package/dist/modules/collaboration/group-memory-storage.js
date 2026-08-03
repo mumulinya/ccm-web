@@ -57,6 +57,7 @@ exports.hashGroupMemoryFileWindow = hashGroupMemoryFileWindow;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
+const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 const group_memory_compaction_1 = require("./group-memory-compaction");
 const group_memory_index_1 = require("./group-memory-index");
 const storage_1 = require("./storage");
@@ -579,6 +580,16 @@ function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
     if (!cleanSessionId)
         throw new Error("缺少群聊会话 ID");
     const scopeId = cleanSessionId === "default" ? groupId : `${groupId}--${cleanSessionId}`;
+    try {
+        (0, main_agent_post_compact_continuity_1.clearMainAgentPostCompactContinuity)({
+            agentKind: "group",
+            scope: "group",
+            scopeId: String(groupId || ""),
+            exactSessionId: cleanSessionId,
+            generation: 0,
+        });
+    }
+    catch { }
     const files = [
         getGroupMemoryFile(groupId, cleanSessionId),
         `${getGroupMemoryFile(groupId, cleanSessionId)}.bak`,

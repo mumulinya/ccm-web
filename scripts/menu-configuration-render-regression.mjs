@@ -26,7 +26,9 @@ const routeAppApis = async page => {
   })
   // Keep the render fixture isolated from unrelated authenticated page boot APIs.
   // More specific routes registered below take precedence over this fallback.
-  await page.route('**/api/**', route => {
+  await page.route('**/*', route => {
+    const pathname = new URL(route.request().url()).pathname
+    if (!pathname.startsWith('/api/')) return route.continue()
     const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
     return route.fulfill(acceptsEvents
       ? { status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"success":true}\n\n' }

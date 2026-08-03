@@ -1,7 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   Archive,
+  ChevronRight,
+  ListTodo,
   MessageSquare,
   MoreHorizontal,
   PanelLeftClose,
@@ -12,6 +14,7 @@ import {
 } from '@lucide/vue'
 
 const props = defineProps({
+  groupId: { type: String, default: '' },
   groupName: { type: String, default: '' },
   sessions: { type: Array, default: () => [] },
   currentSessionId: { type: String, default: '' },
@@ -28,8 +31,26 @@ const emit = defineEmits([
   'delete',
 ])
 
-const activeSessions = computed(() => props.sessions.filter(session => !session.archived))
+const sessionKind = session => String(session?.session_kind || session?.sessionKind || 'conversation') === 'automation' ? 'automation' : 'conversation'
+const conversationSessions = computed(() => props.sessions.filter(session => !session.archived && sessionKind(session) === 'conversation'))
+const automationSessions = computed(() => props.sessions.filter(session => !session.archived && sessionKind(session) === 'automation'))
 const archivedSessions = computed(() => props.sessions.filter(session => session.archived))
+
+const groupStateKey = () => `ccm:group-session-sections:v2:${props.groupId || 'default'}`
+const readExpandedGroups = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(groupStateKey()) || '{}')
+    return { conversation: saved.conversation === true, automation: saved.automation === true }
+  } catch {
+    return { conversation: false, automation: false }
+  }
+}
+const expandedGroups = ref(readExpandedGroups())
+const toggleGroup = kind => { expandedGroups.value = { ...expandedGroups.value, [kind]: !expandedGroups.value[kind] } }
+watch(() => props.groupId, () => { expandedGroups.value = readExpandedGroups() })
+watch(expandedGroups, value => {
+  try { localStorage.setItem(groupStateKey(), JSON.stringify(value)) } catch {}
+}, { deep: true })
 
 const sessionTitle = session => session?.title || session?.name || '新会话'
 </script>
@@ -62,28 +83,65 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
     </button>
 
     <div class="group-session-list">
-      <div v-if="!activeSessions.length" class="session-list-empty">暂无进行中的会话</div>
-      <div
-        v-for="session in activeSessions"
-        :key="session.id"
-        class="group-session-item"
-        :class="{ active: currentSessionId === session.id }"
-        @click="emit('select', session.id)"
-      >
-        <MessageSquare :size="15" class="session-item-icon" />
-        <div class="session-item-copy">
-          <strong :title="sessionTitle(session)">{{ sessionTitle(session) }}</strong>
-          <small>{{ Number(session.messageCount || 0) }} 条消息</small>
-        </div>
-        <details class="session-item-menu" @click.stop>
-          <summary title="会话操作" aria-label="会话操作"><MoreHorizontal :size="16" /></summary>
-          <div class="session-item-menu-popover">
-            <button type="button" @click="emit('rename', session.id)"><Pencil :size="14" />重命名</button>
-            <button type="button" @click="emit('archive', session.id)"><Archive :size="14" />归档</button>
-            <button type="button" class="danger" @click="emit('delete', session.id)"><Trash2 :size="14" />删除</button>
+      <div v-if="!conversationSessions.length && !automationSessions.length" class="session-list-empty">暂无进行中的会话</div>
+
+      <section class="live-session-section">
+        <button class="live-session-label" type="button" :aria-expanded="expandedGroups.conversation" @click="toggleGroup('conversation')">
+          <span><ChevronRight :class="{ expanded: expandedGroups.conversation }" :size="13" /><MessageSquare :size="13" />普通会话</span><strong>{{ conversationSessions.length }}</strong>
+        </button>
+        <div v-show="expandedGroups.conversation" class="live-session-content">
+          <div
+            v-for="session in conversationSessions"
+            :key="session.id"
+            class="group-session-item"
+            :class="{ active: currentSessionId === session.id }"
+            @click="emit('select', session.id)"
+          >
+            <MessageSquare :size="15" class="session-item-icon" />
+            <div class="session-item-copy">
+              <strong :title="sessionTitle(session)">{{ sessionTitle(session) }}</strong>
+              <small>{{ Number(session.messageCount || 0) }} 条消息</small>
+            </div>
+            <details class="session-item-menu" @click.stop>
+              <summary title="会话操作" aria-label="会话操作"><MoreHorizontal :size="16" /></summary>
+              <div class="session-item-menu-popover">
+                <button type="button" @click="emit('rename', session.id)"><Pencil :size="14" />重命名</button>
+                <button type="button" @click="emit('archive', session.id)"><Archive :size="14" />归档</button>
+                <button type="button" class="danger" @click="emit('delete', session.id)"><Trash2 :size="14" />删除</button>
+              </div>
+            </details>
           </div>
-        </details>
-      </div>
+        </div>
+      </section>
+
+      <section class="live-session-section automation-section">
+        <button class="live-session-label" type="button" :aria-expanded="expandedGroups.automation" @click="toggleGroup('automation')">
+          <span><ChevronRight :class="{ expanded: expandedGroups.automation }" :size="13" /><ListTodo :size="13" />自动化任务会话</span><strong>{{ automationSessions.length }}</strong>
+        </button>
+        <div v-show="expandedGroups.automation" class="live-session-content">
+          <div
+            v-for="session in automationSessions"
+            :key="session.id"
+            class="group-session-item automation"
+            :class="{ active: currentSessionId === session.id }"
+            @click="emit('select', session.id)"
+          >
+            <ListTodo :size="15" class="session-item-icon" />
+            <div class="session-item-copy">
+              <strong :title="sessionTitle(session)">{{ sessionTitle(session) }}</strong>
+              <small>{{ Number(session.messageCount || 0) }} 条消息 · 任务过程与交付</small>
+            </div>
+            <details class="session-item-menu" @click.stop>
+              <summary title="会话操作" aria-label="会话操作"><MoreHorizontal :size="16" /></summary>
+              <div class="session-item-menu-popover">
+                <button type="button" @click="emit('rename', session.id)"><Pencil :size="14" />重命名</button>
+                <button type="button" @click="emit('archive', session.id)"><Archive :size="14" />归档</button>
+                <button type="button" class="danger" @click="emit('delete', session.id)"><Trash2 :size="14" />删除</button>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
 
       <section v-if="archivedSessions.length" class="archived-session-section">
         <div class="archived-session-label">已归档 {{ archivedSessions.length }}</div>
@@ -225,6 +283,16 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
   scrollbar-width: thin;
 }
 
+.live-session-section { display:flex; flex-direction:column; }
+.live-session-section.automation-section { margin-top:4px; }
+.live-session-label { display:flex; width:100%; height:28px; align-items:center; justify-content:space-between; padding:0 7px; border:0; border-radius:5px; background:transparent; color:var(--text-muted); font:inherit; font-size:10px; font-weight:700; cursor:pointer; }
+.live-session-label:hover { background:var(--control-hover); color:var(--text-primary); }
+.live-session-label span { display:inline-flex; align-items:center; gap:5px; }
+.live-session-label strong { font-size:9px; }
+.live-session-label svg:first-child { transition:transform .16s ease; }
+.live-session-label svg:first-child.expanded { transform:rotate(90deg); }
+.live-session-content { display:flex; flex-direction:column; gap:2px; }
+
 .group-session-item {
   position: relative;
   display: flex;
@@ -241,6 +309,7 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
 .group-session-item:hover { background: var(--control-hover); color: var(--text-primary); }
 .group-session-item.active { border-color: color-mix(in srgb, var(--accent-blue) 24%, var(--border-color)); background: var(--accent-soft); color: var(--accent-blue); }
 .group-session-item.archived { opacity: .76; }
+.group-session-item.automation:not(.active) .session-item-icon { color:var(--accent-blue); }
 .group-session-item.archived.active { opacity: 1; }
 .session-item-icon { flex: 0 0 auto; }
 

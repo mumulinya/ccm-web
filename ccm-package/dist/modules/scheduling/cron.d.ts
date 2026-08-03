@@ -22,7 +22,13 @@ export declare function buildTaskFromCronJob(job: any, trigger: "manual" | "sche
         description: string;
         target_project: string;
         group_id: any;
+        group_session_id: any;
         assign_type: string;
+        orchestration_scope: string;
+        queue_scope: string;
+        target_scope: string;
+        target_id: any;
+        exact_session_id: any;
         priority: any;
         auto_execute: boolean;
         workflow_type: string;
@@ -41,6 +47,9 @@ export declare function buildTaskFromCronJob(job: any, trigger: "manual" | "sche
                 claimed_by_cron_job_id: any;
                 cron_trigger: "resume" | "recovery" | "manual" | "retry" | "schedule";
                 claimed_at: string;
+                target_scope: string;
+                target_id: any;
+                target_session_id: any;
             };
             batch: {
                 index: number;

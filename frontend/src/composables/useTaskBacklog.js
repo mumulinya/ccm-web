@@ -86,7 +86,7 @@ export function useTaskBacklog(options = {}) {
     }
   }
 
-  const dispatchBacklog = async (item) => {
+  const dispatchBacklog = async (item, targetSessionId = '') => {
     try {
       const res = await fetch('/api/tasks/daily-dev-backlog/dispatch', {
         method: 'POST',
@@ -94,13 +94,15 @@ export function useTaskBacklog(options = {}) {
         body: JSON.stringify({
           group_id: item.group_id,
           name: item.name,
+          group_session_id: targetSessionId || item.target_session_id || '',
+          exact_session_id: targetSessionId || item.target_session_id || '',
           auto_execute: true
         })
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error || '派发需求失败')
       await Promise.all([loadDailyDevBacklogs(), refreshTaskWork()])
-      if (data.queued) toast.success('需求已立即派发给主 Agent')
+      if (data.queued) toast.success(`需求已派发到“${data.target_session?.title || item.target_session_title || '目标会话'}”`)
       else toast.warning(data.queue_result?.message || '需求任务已创建，等待执行通道')
     } catch (error) {
       toast.error(error.message || '派发需求失败')

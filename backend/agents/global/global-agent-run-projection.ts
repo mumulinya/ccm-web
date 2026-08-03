@@ -4,6 +4,7 @@ import { buildModelSelectableSkillCatalog, buildRoleSkillPrompt } from "../../sk
 import { captureReasoningFacts, type AgentReasoningState } from "../reasoning-loop";
 import { WORKFLOW_DECISION_GUIDANCE, normalizeWorkflowDecision } from "../workflow-decision";
 import type { GlobalAgentDecision, GlobalAgentDecisionState, GlobalAgentLoopRuntime, GlobalAgentRun } from "./loop";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
 
 export function compactObservation(value: any) {
   let text = "";
@@ -204,8 +205,13 @@ export function normalizeDecision(value: any, fallbackWorkflowDecision: any = nu
   };
 }
 
-export function buildToolPrompt() {
+export function buildToolPrompt(loadedToolNames: string[] = []) {
+  const loaded = new Set((loadedToolNames || []).map(value => String(value || "")));
+  const deferredWorkspaceNames = new Set(WORKSPACE_READONLY_TOOL_DEFINITIONS_V2
+    .filter(tool => tool.loadPolicy === "search" && !loaded.has(tool.name) && !loaded.has(tool.canonicalName))
+    .map(tool => tool.name));
   return buildGlobalAgentToolDefinitions(GLOBAL_AGENT_TOOL_SPECS)
+    .filter(spec => !deferredWorkspaceNames.has(spec.name))
     .map(spec => `- ${spec.name}${spec.required?.length ? `（必填：${spec.required.join("、")}）` : ""}：${spec.description}；schema=${JSON.stringify(spec.inputSchema)}；risk=${spec.risk}`)
     .join("\n");
 }
@@ -231,7 +237,6 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
     {
       source: (run as any).source || "",
       phase: "planning",
-      forceWork: true,
       selectedSkillNames: (run.workflow_decision || run.workflowDecision)?.selectedSkills || [],
       modelDecision: run.workflow_decision || run.workflowDecision || null,
     },
@@ -263,7 +268,7 @@ ${WORKFLOW_DECISION_GUIDANCE}
 - 目标没有在用户当前消息或读取工具结果中出现时，不得猜测；confidence 不足时使用 needs_confirmation 并提出一个具体澄清问题。
 
 可用工具：
-${buildToolPrompt()}
+${buildToolPrompt(run.loaded_tool_names || run.loadedToolNames || [])}
 
 ${buildModelSelectableSkillCatalog()}
 
