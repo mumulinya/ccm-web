@@ -12,7 +12,11 @@ const installRoot = path.join(temporaryRoot, 'install')
 fs.mkdirSync(installRoot, { recursive: true })
 fs.writeFileSync(path.join(installRoot, 'package.json'), JSON.stringify({ private: true }, null, 2))
 
-const npmCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+const npmCliCandidates = [
+  String(process.env.npm_execpath || '').trim(),
+  path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+]
+const npmCli = npmCliCandidates.find(candidate => candidate && fs.existsSync(candidate)) || ''
 const npm = fs.existsSync(npmCli) ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm')
 const npmPrefix = fs.existsSync(npmCli) ? [npmCli] : []
 const run = (args, options = {}) => {
